@@ -193,6 +193,9 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 	if reference != "" && id != reference {
 		return SaleEvidence{}, false, receiptMismatch("named transaction does not match order's successful sale")
 	}
+	if partialBalance(sale.PartialPaymentBalance) {
+		return SaleEvidence{}, false, receiptMismatch("sale %s was approved for part of its amount", id)
+	}
 	txn, err := c.approvedTransaction(ctx, id)
 	if err != nil {
 		return SaleEvidence{}, false, err

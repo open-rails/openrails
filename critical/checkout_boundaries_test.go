@@ -276,6 +276,69 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.Empty(t, unresolved(waiting))
 		journal.money(t, 2, 140) // neither sale is ever resent
 	})
+	t.Run("OR-J09-S06/partial-approval-never-pays-the-order", func(t *testing.T) {
+		// An issuer approving part of a sale is no payment: NMI is asked to
+		// settle it only in full, the order stays unpaid, an operator finding
+		// stands, and the sale is never resent.
+		nmi, journal := newNMIWorld(t)
+		fleet := hostFleet(t, nmi.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, nmi.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		product, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-partial", DisplayName: "NMI partial", Entitlements: []string{"partial:owned"}})
+		require.NoError(t, err)
+		price, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-partial", UnitAmount: 700_000, Currency: "USD"})
+		require.NoError(t, err)
+		customer := billing.CustomerID(uuid.MustParse(nmi.alice.ID))
+		journal.core.ApprovePartially("4242", "0.30")
+		status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"})}, ExpectedTotal: 700_000, Reusable: ptr(false)}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": "nmi-partial-approval"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		unpaid := func() {
+			t.Helper()
+			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.OrderProcessing, current.Status, "a partial approval is neither a payment nor a decline")
+			payments, err := nmi.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+			require.NoError(t, err)
+			for _, payment := range payments.Items {
+				require.NotEqual(t, billing.PaymentSucceeded, payment.Status)
+			}
+			access, err := nmi.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"partial:owned"}})
+			require.NoError(t, err)
+			require.False(t, access.Entitlements["partial:owned"])
+		}
+		unpaid()
+		attempts := journal.core.Attempts()
+		require.Len(t, attempts, 1)
+		require.Equal(t, "payment_in_full", attempts[0].Get("partial_payments"), "a partial approval must never settle by itself")
+		require.Equal(t, "0.40", journal.core.LastSale().PartialBalance, "the issuer approved part of the sale")
+		nmi.clock.Advance(6 * time.Minute)
+		var raised []billing.Finding
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			findings, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.sale.unresolved"})
+			if err != nil {
+				return false
+			}
+			raised = raised[:0]
+			for _, f := range findings.Items {
+				if f.Evidence["order_id"] == order.ID.String() {
+					raised = append(raised, f)
+				}
+			}
+			return len(raised) == 1
+		}, 20*time.Second, 50*time.Millisecond)
+		require.Equal(t, "high", raised[0].Severity)
+		require.Contains(t, raised[0].Evidence["reason"], "approved for part of its amount")
+		unpaid()
+		require.Len(t, journal.core.Attempts(), 1, "the partial sale is never resent")
+		journal.money(t, 0, 0) // a sale held for payment in full moves no money
+	})
 	t.Run("OR-J10-S02/lost-client-response-replays-original-committed-result", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)

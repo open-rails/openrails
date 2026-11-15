@@ -135,7 +135,11 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Billi
 	if rejection == nil {
 		return errors.New("initial decline requires a provider rejection")
 	}
-	_, err := nmi.ParseSaleResponse(rejection.RawResponse)
+	terms, err := decodeCollectedTerms(in)
+	if err != nil {
+		return err
+	}
+	_, err = nmi.ParseSaleResponse(rejection.RawResponse, terms.AmountMinor, terms.Currency)
 	var parsed *nmi.CustomerVaultError
 	if !errors.As(err, &parsed) || nmi.RequiresVerification(err) || parsed.ResponseCode != rejection.ResponseCode {
 		return errors.New("initial rejection is not a qualified provider decline")

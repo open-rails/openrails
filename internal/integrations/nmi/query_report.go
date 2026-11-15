@@ -38,12 +38,14 @@ type QueryTransaction struct {
 	Condition             string                 `xml:"condition"`
 	Currency              string                 `xml:"currency"`
 	// CCNumber is masked (first six and last four digits).
-	CCNumber    string        `xml:"cc_number"`
-	CCBin       string        `xml:"cc_bin"`
-	CCType      string        `xml:"cc_type"`
-	AVSResponse string        `xml:"avs_response"`
-	CSCResponse string        `xml:"csc_response"`
-	Actions     []QueryAction `xml:"action"`
+	CCNumber    string `xml:"cc_number"`
+	CCBin       string `xml:"cc_bin"`
+	CCType      string `xml:"cc_type"`
+	AVSResponse string `xml:"avs_response"`
+	CSCResponse string `xml:"csc_response"`
+	// PartialPaymentBalance is what a partially approved sale left unpaid.
+	PartialPaymentBalance string        `xml:"partial_payment_balance"`
+	Actions               []QueryAction `xml:"action"`
 }
 
 // MerchantDefinedField is one merchant-defined field of a query report.

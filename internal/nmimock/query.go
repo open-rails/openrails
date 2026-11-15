@@ -59,6 +59,7 @@ type xmlTransaction struct {
 	CCType                string   `xml:"cc_type"`
 	AVSResponse           string   `xml:"avs_response"`
 	CSCResponse           string   `xml:"csc_response"`
+	PartialPaymentBalance string   `xml:"partial_payment_balance"`
 	CustomerVaultID       string   `xml:"customer_vault_id"`
 	// CustomerID is the vault as live reports name it.
 	CustomerID string `xml:"customerid"`
@@ -167,6 +168,7 @@ func (m *Mock) search(form url.Values) string {
 		txn := cardTransaction(s.TransactionID, condition, s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: s.Amount, ActionType: "sale", Date: s.At.UTC().Format(queryTime),
 			Success: success, Source: source, ResponseText: text, ResponseCode: code})
 		txn.OrderDescription = s.OrderDescription
+		txn.PartialPaymentBalance = s.PartialBalance
 		txn.MDF = bookField(s.Book)
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email

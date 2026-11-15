@@ -39,7 +39,7 @@ func (c *Charger) VerifyRecurring(ctx context.Context, order string) (string, er
 	if err != nil {
 		return "", err
 	}
-	verified, err := nmi.ParseSaleResponse(string(res.Body))
+	verified, err := nmi.ParseSaleResponse(string(res.Body), req.AmountMinor, req.Currency)
 	if err != nil {
 		return "", err
 	}
