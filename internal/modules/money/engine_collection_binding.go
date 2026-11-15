@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -29,7 +30,7 @@ func engineHyperSwitchPointer(custodian string, binding charge.HyperSwitchBindin
 
 // engineCollectionBinding checks psp, the account the charge goes through,
 // against the card and freezes a custodian card's binding.
-func engineCollectionBinding(ctx context.Context, q *gen.Queries, custody charge.Custody, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
+func engineCollectionBinding(ctx context.Context, q *gen.Queries, custody *merchants.Service, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
 	var binding charge.HyperSwitchBinding
 	if !charge.ChargeableOn(method, psp) {
 		return binding, errors.New("engine account does not hold the card")

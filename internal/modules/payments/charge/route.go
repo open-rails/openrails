@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 // ErrNoRoute: no single live PSP of the card's rail reaches the custodian
@@ -18,7 +19,7 @@ var ErrNoRoute = errors.New("no single PSP can charge this card")
 // RoutePSP picks the PSP a charge on method goes through when no obligation
 // names one: the PSP holding a PSP-held card, else the one live PSP of its
 // rail that reaches its custodian.
-func RoutePSP(ctx context.Context, custody Custody, method gen.BillingPaymentMethod) (uuid.UUID, error) {
+func RoutePSP(ctx context.Context, custody *merchants.Service, method gen.BillingPaymentMethod) (uuid.UUID, error) {
 	if method.Custodian == models.CustodianPSP {
 		if method.PspID == nil {
 			return uuid.Nil, ErrNoRoute

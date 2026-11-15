@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -66,7 +67,7 @@ type Admitter struct {
 
 	// delinquency is the optional or#878 arrears delinquency gate; nil disables
 	// it (the amount cap still applies — the two axes are independent).
-	delinquency DelinquencyGate
+	delinquency *delinquency.Service
 
 	// failedCutoff is the optional delegated-invoker failed-usage cutoff (#497);
 	// nil disables it.
@@ -93,15 +94,8 @@ func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *Spe
 	return &Admitter{money: moneySvc, gate: gate, loader: loader}
 }
 
-// DelinquencyGate answers whether a payer's arrears debt has outlived the
-// merchant's grace window. An interface so admission depends on the QUESTION,
-// not on the delinquency module's storage.
-type DelinquencyGate interface {
-	IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error)
-}
-
 // WithDelinquency enables the or#878 arrears delinquency admit gate.
-func (a *Admitter) WithDelinquency(g DelinquencyGate) *Admitter {
+func (a *Admitter) WithDelinquency(g *delinquency.Service) *Admitter {
 	a.delinquency = g
 	return a
 }

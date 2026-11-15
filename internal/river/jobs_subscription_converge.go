@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
@@ -105,7 +106,7 @@ type SubscriptionConvergeWorker struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhooks.OrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	// Objects records the provider prices parked subscriptions bill.
 	Objects func() *providerobjects.Observer
 	// Importer adopts live NMI subscriptions OpenRails does not hold.

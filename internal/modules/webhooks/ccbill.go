@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/modules/payment"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -51,7 +52,7 @@ type CCBillWebhookService struct {
 	ProfileRepo                  identitydir.UsernameResolver
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	MoneyService                 *money.MoneyService
 }
 

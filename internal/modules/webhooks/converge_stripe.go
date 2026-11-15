@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/parking"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -51,7 +52,7 @@ type StripeConvergeService struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          webhookOrderAttemptStore
+	OrderAttemptService          *payment.OrderAttemptService
 	// Objects records the Stripe price a parked subscription bills.
 	Objects *providerobjects.Observer
 	// Findings notifies an operator of the finding a park raises.

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -17,28 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
-
-// OrderAttemptStore is the exported alias of the order-attempt surface
-// the webhook/converge paths use, so the River converge worker can inject it
-// without importing the purchase package.
-type OrderAttemptStore = webhookOrderAttemptStore
-
-type webhookOrderAttemptStore interface {
-	// SettleOrderHosted completes the order a paid Stripe Checkout Session
-	// pays; CloseOrderHosted returns it to requires_payment_method when the
-	// session expired or its delayed payment failed.
-	SettleOrderHosted(ctx context.Context, attemptID uuid.UUID, sessionID, paymentIntent, currency string, amountMinor int64) error
-	CloseOrderHosted(ctx context.Context, attemptID uuid.UUID, failed bool) error
-	// SettleOrderCCBill completes the order a CCBill sale of its FlexForm
-	// pays; DeclineOrderCCBill returns it to requires_payment_method,
-	// answering the attempt's customer.
-	SettleOrderCCBill(ctx context.Context, attemptID uuid.UUID, sale payments.CCBillSale) error
-	DeclineOrderCCBill(ctx context.Context, attemptID uuid.UUID, code, text string) (uuid.UUID, error)
-}
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.
 // It is intentionally minimal and decoupled from any database persistence.
@@ -83,7 +65,7 @@ type WebhookDispatcher struct {
 	// NMIResolver arms an NMI account's client for the reads a notice needs.
 	NMIResolver         railresolve.NMIClientResolver
 	PurchaseRegistrar   stripePurchaseRegistrar
-	OrderAttemptService webhookOrderAttemptStore
+	OrderAttemptService *payment.OrderAttemptService
 	MoneyService        *money.MoneyService
 	// ConvergeEnqueuer schedules the coalesced fetch-and-converge job the
 	// Stripe/NMI subscription-state handlers enqueue.

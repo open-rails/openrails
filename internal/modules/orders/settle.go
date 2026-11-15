@@ -28,13 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Memberships creates a paid recurring line's subscription in the caller's
-// transaction.
-type Memberships interface {
-	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *subscriptions.CreateMembershipParams) (*models.Subscription, []*models.NotificationEvent, error)
-	EnsureRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription) error
-}
-
 // Charge is money a provider took for an order, as its qualified receipt
 // reports it, or (Manual) money the merchant received outside OpenRails.
 type Charge struct {

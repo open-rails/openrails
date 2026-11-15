@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -331,7 +332,7 @@ func (s *Service) stripeAccount(ctx context.Context, method gen.BillingPaymentMe
 
 // reusePSP is the account a card's reuse consent belongs to: the PSP holding
 // it, or the one PSP routing reaches a custodian's card through.
-func reusePSP(ctx context.Context, custody charge.Custody, method gen.BillingPaymentMethod) (uuid.UUID, error) {
+func reusePSP(ctx context.Context, custody *merchants.Service, method gen.BillingPaymentMethod) (uuid.UUID, error) {
 	if method.PspID != nil {
 		return *method.PspID, nil
 	}

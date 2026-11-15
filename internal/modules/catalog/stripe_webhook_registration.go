@@ -17,15 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
-// StripeWebhookPublisher owns atomic credential references for one provider account.
-type StripeWebhookPublisher interface {
-	Load(context.Context) (merchants.StripeWebhookCredentialState, error)
-	Publish(context.Context, string, string) error
-	RetireOverlap(context.Context) error
-}
-
 type ManagedStripeWebhookParams struct {
-	Publication StripeWebhookPublisher
+	Publication *merchants.StripeWebhookPublication
 
 	StripeClients       *stripeapi.Factory
 	Config              *config.Config

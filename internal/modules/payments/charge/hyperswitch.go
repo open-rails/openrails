@@ -47,18 +47,11 @@ func (b HyperSwitchBinding) Validate() error {
 	return nil
 }
 
-// Custody is the merchant configuration a charge reads: its custodians and
-// the PSPs that reach them.
-type Custody interface {
-	CustodianScopeByID(ctx context.Context, id billing.MerchantID, custodianID uuid.UUID) (merchants.CustodianScope, bool, error)
-	CustodianRoutePSPs(ctx context.Context, id billing.MerchantID, rail string, custodianID uuid.UUID) ([]uuid.UUID, error)
-}
-
 // FreezeHyperSwitchBinding reads the PSP and custodian identities under
 // admission locks for invoices, recurring obligations and initial
 // memberships, and the custodian's settings from its configuration; psp is the
 // PSP the charge goes through.
-func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, custody Custody, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (HyperSwitchBinding, error) {
+func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, custody *merchants.Service, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (HyperSwitchBinding, error) {
 	if deployment == "" || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || custody == nil {
 		return HyperSwitchBinding{}, fmt.Errorf("%w: HyperSwitch custody is not configured", ErrInstrumentChanged)
 	}
@@ -100,7 +93,7 @@ func HyperSwitchBindingFromAccount(custodian merchants.CustodianScope, deploymen
 
 // CustodyOf is the custody configuration bound to d (db.MerchantConfig); nil
 // when none is.
-func CustodyOf(d *db.DB) Custody {
-	custody, _ := d.MerchantConfig().(Custody)
+func CustodyOf(d *db.DB) *merchants.Service {
+	custody, _ := d.MerchantConfig().(*merchants.Service)
 	return custody
 }
