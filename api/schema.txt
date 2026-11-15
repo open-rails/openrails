@@ -146,6 +146,8 @@ migration 0203_solana_pay_wake.up.sql sha256:a499ec3a2454bd5c967a3d9b123dc8afb88
 migration 0204_eventlog_notify.up.sql sha256:91a6970712b5bbe33cfd17780178d384b2a62cd41e67f12e8d4757c2094ee311
 migration 0205_balance_looks.up.sql sha256:5f841bea6334f020e8f6a6d5e56fcf6ebc831afc9bc449923f907ee583e6145e
 migration 0206_order_sale_index.up.sql sha256:aa5ea99e956bf8731d05bc640faf50e719dbde3a9beffe8df928ce73d10d2e5b
+migration 0207_drop_custody_migrations.up.sql sha256:b4243ae52680bbafc4a3bb77693e16c834895c06083e644d088ed00d38f2b90b
+migration 0208_drop_unread_schema.up.sql sha256:c611957f6d337d4b40b6559cc5fb5e92a7d9ae3bc2e02cb3640206af630f813b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -386,41 +388,6 @@ table billing.custodians
   index CREATE UNIQUE INDEX custodians_kind_environment_account_id_key ON billing.custodians USING btree (kind, environment, account_id)
   index CREATE UNIQUE INDEX custodians_pkey ON billing.custodians USING btree (merchant_id, id)
 
-table billing.custody_migrations
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column batch_id uuid NOT NULL
-  column payment_method_id uuid NOT NULL
-  column rail text NOT NULL
-  column from_custodian text NOT NULL
-  column from_custodian_id uuid
-  column from_rail_customer_ref text
-  column from_rail_method_ref text
-  column from_psp_id uuid
-  column to_custodian text NOT NULL
-  column to_custodian_id uuid NOT NULL
-  column to_rail_method_ref text NOT NULL
-  column to_psp_id uuid
-  column exported_at timestamp with time zone
-  column outcome text NOT NULL
-  column reason text
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint custody_migrations_from_custodian_id_fkey FOREIGN KEY (merchant_id, from_custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
-  constraint custody_migrations_from_psp_id_fkey FOREIGN KEY (merchant_id, from_psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  constraint custody_migrations_from_rail_customer_ref_check CHECK ((from_rail_customer_ref <> ''::text))
-  constraint custody_migrations_from_rail_method_ref_check CHECK ((from_rail_method_ref <> ''::text))
-  constraint custody_migrations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint custody_migrations_outcome_check CHECK ((outcome = ANY (ARRAY['remapped'::text, 'created'::text])))
-  constraint custody_migrations_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE
-  constraint custody_migrations_pkey PRIMARY KEY (merchant_id, id)
-  constraint custody_migrations_reason_check CHECK ((reason <> ''::text))
-  constraint custody_migrations_target_check CHECK (((btrim(to_rail_method_ref) <> ''::text) AND (btrim(to_custodian) <> ''::text)))
-  constraint custody_migrations_to_custodian_id_fkey FOREIGN KEY (merchant_id, to_custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
-  constraint custody_migrations_to_psp_id_fkey FOREIGN KEY (merchant_id, to_psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX custody_migrations_batch_id_created_at_idx ON billing.custody_migrations USING btree (merchant_id, batch_id, created_at)
-  index CREATE UNIQUE INDEX custody_migrations_payment_method_id_to_rail_method_ref_key ON billing.custody_migrations USING btree (merchant_id, payment_method_id, to_rail_method_ref)
-  index CREATE UNIQUE INDEX custody_migrations_pkey ON billing.custody_migrations USING btree (merchant_id, id)
-
 table billing.customer_contacts
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
@@ -651,7 +618,6 @@ table billing.destructive_holds
   constraint destructive_holds_target_check CHECK ((btrim(target) <> ''::text))
   constraint destructive_holds_window_name_check CHECK ((window_name = ANY (ARRAY['hour'::text, 'day'::text])))
   index CREATE INDEX destructive_holds_epoch_idx ON billing.destructive_holds USING btree (scope_key, cleared_at DESC) WHERE (cleared_at IS NOT NULL)
-  index CREATE INDEX destructive_holds_merchant_idx ON billing.destructive_holds USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX destructive_holds_open_scope_key ON billing.destructive_holds USING btree (scope_key) WHERE (cleared_at IS NULL)
   index CREATE UNIQUE INDEX destructive_holds_pkey ON billing.destructive_holds USING btree (merchant_id, id)
   trigger CREATE TRIGGER destructive_holds_clear BEFORE UPDATE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.guard_destructive_hold_clear()
@@ -832,8 +798,7 @@ table billing.grants
   index CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL)
   index CREATE UNIQUE INDEX grants_purchased_credit_payment_key ON billing.grants USING btree (merchant_id, payment_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (payment_id IS NOT NULL) AND (((spec_snapshot -> 'deposit'::text) -> 'paid_amount'::text) IS NOT NULL))
   index CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id IS NOT NULL)
-  index CREATE INDEX grants_supersedes_id_idx ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL)
-  index CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants USING btree (merchant_id, supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])))
+  index CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL)
   trigger CREATE TRIGGER immutable_grants BEFORE DELETE OR UPDATE ON billing.grants FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_grants_truncate BEFORE TRUNCATE ON billing.grants FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
@@ -961,14 +926,9 @@ table billing.maintenance_runs
   column kind text NOT NULL
   column actor text
   column psp_id uuid
-  column mode text
-  column rails text[] NOT NULL DEFAULT '{}'::text[]
-  column window_starts_at timestamp with time zone
-  column window_ends_at timestamp with time zone
   column started_at timestamp with time zone NOT NULL DEFAULT now()
   column finished_at timestamp with time zone
   column status text NOT NULL DEFAULT 'running'::text
-  column dry_run boolean NOT NULL DEFAULT false
   column coverage jsonb
   column expected_rows bigint
   column affected jsonb
@@ -976,14 +936,13 @@ table billing.maintenance_runs
   column reversed_by text
   column note text
   column summary jsonb
-  column error text
   column inventory_manifest jsonb
   column inventory_total_rows bigint
-  column run_class text NOT NULL GENERATED ALWAYS AS ( CASE WHEN (kind = 'reconciliation'::text) THEN 'observation'::text WHEN (kind = 'purge_inventory'::text) THEN 'inventory'::text WHEN (kind = 'billing_restore'::text) THEN 'restore'::text ELSE 'destructive'::text END) STORED
+  column run_class text NOT NULL GENERATED ALWAYS AS ( CASE WHEN (kind = 'purge_inventory'::text) THEN 'inventory'::text WHEN (kind = 'billing_restore'::text) THEN 'restore'::text ELSE 'destructive'::text END) STORED
   constraint maintenance_runs_actor_check CHECK ((actor <> ''::text))
   constraint maintenance_runs_expected_rows_check CHECK (((expected_rows IS NULL) OR (expected_rows >= 0)))
   constraint maintenance_runs_id_run_class_key UNIQUE (merchant_id, id, run_class)
-  constraint maintenance_runs_kind_check CHECK (((((kind = 'reconciliation'::text) AND (mode = ANY (ARRAY['advisory'::text, 'enforce'::text])) AND (status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])) AND (psp_id IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = ANY (ARRAY['prune'::text, 'approval'::text, 'merchant_purge'::text])) AND (btrim(actor) <> ''::text) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (NOT dry_run) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (error IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (mode IS NULL) AND (cardinality(rails) = 0) AND (psp_id IS NULL) AND (window_starts_at IS NULL) AND (window_ends_at IS NULL) AND (NOT dry_run) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (error IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
+  constraint maintenance_runs_kind_check CHECK (((((kind = ANY (ARRAY['prune'::text, 'approval'::text, 'merchant_purge'::text])) AND (btrim(actor) <> ''::text) AND (summary IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
   constraint maintenance_runs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint maintenance_runs_pkey PRIMARY KEY (merchant_id, id)
   constraint maintenance_runs_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
@@ -994,11 +953,10 @@ table billing.maintenance_runs
   index CREATE UNIQUE INDEX maintenance_runs_merchant_id_key ON billing.maintenance_runs USING btree (merchant_id) WHERE (kind = 'billing_restore'::text)
   index CREATE UNIQUE INDEX maintenance_runs_pkey ON billing.maintenance_runs USING btree (merchant_id, id)
   trigger CREATE TRIGGER guard_billing_restore_receipt BEFORE INSERT OR DELETE OR UPDATE ON billing.maintenance_runs FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_restore_receipt()
-  trigger CREATE TRIGGER immutable_maintenance_run_facts BEFORE UPDATE ON billing.maintenance_runs FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('finished_at', 'status', 'summary', 'error', 'affected', 'reversed_at', 'reversed_by', 'note', 'run_class')
-  trigger CREATE TRIGGER immutable_maintenance_runs_delete BEFORE DELETE ON billing.maintenance_runs FOR EACH ROW WHEN ((old.kind <> 'reconciliation'::text)) EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_maintenance_run_facts BEFORE UPDATE ON billing.maintenance_runs FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('finished_at', 'status', 'summary', 'affected', 'reversed_at', 'reversed_by', 'note', 'run_class')
+  trigger CREATE TRIGGER immutable_maintenance_runs_delete BEFORE DELETE ON billing.maintenance_runs FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_maintenance_runs_truncate BEFORE TRUNCATE ON billing.maintenance_runs FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE CONSTRAINT TRIGGER require_finished_billing_restore AFTER INSERT OR UPDATE ON billing.maintenance_runs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_finished_billing_restore()
-  trigger CREATE TRIGGER retained_reconciliation_runs BEFORE DELETE ON billing.maintenance_runs FOR EACH ROW WHEN ((old.kind = 'reconciliation'::text)) EXECUTE FUNCTION billing.guard_retention_delete('started_at', '366 days')
 
 table billing.mandates
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1234,34 +1192,6 @@ table billing.notification_issue_revisions
   constraint notification_issue_revisions_revision_check CHECK ((revision > 0))
   index CREATE UNIQUE INDEX notification_issue_revisions_pkey ON billing.notification_issue_revisions USING btree (merchant_id, customer_id, issue_key)
 
-table billing.notifications
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column event_type text NOT NULL
-  column data jsonb NOT NULL
-  column recipient_kind text NOT NULL DEFAULT 'customer'::text
-  column read_at timestamp with time zone
-  column severity text
-  column title text
-  column body text
-  column link text
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column merchant_id uuid NOT NULL
-  column customer_id uuid
-  constraint notifications_body_check CHECK ((body <> ''::text))
-  constraint notifications_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint notifications_link_check CHECK ((link <> ''::text))
-  constraint notifications_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint notifications_operator_only CHECK ((recipient_kind = 'merchant'::text))
-  constraint notifications_pkey PRIMARY KEY (merchant_id, id)
-  constraint notifications_recipient_check CHECK ((((recipient_kind = 'customer'::text) AND (customer_id IS NOT NULL) AND (severity IS NULL) AND (title IS NULL) AND (body IS NULL) AND (link IS NULL)) OR ((recipient_kind = 'merchant'::text) AND (customer_id IS NULL) AND (event_type = 'operator.alert'::text) AND (severity IS NOT NULL) AND (title IS NOT NULL) AND (body IS NOT NULL))))
-  constraint notifications_severity_check CHECK ((severity <> ''::text))
-  constraint notifications_title_check CHECK ((title <> ''::text))
-  index CREATE INDEX notifications_created_at_idx ON billing.notifications USING btree (merchant_id, created_at)
-  index CREATE INDEX notifications_customer_id_idx ON billing.notifications USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL)
-  index CREATE INDEX notifications_event_type_idx ON billing.notifications USING btree (event_type)
-  index CREATE UNIQUE INDEX notifications_pkey ON billing.notifications USING btree (merchant_id, id)
-  index CREATE INDEX notifications_recipient_kind_customer_id_read_at_created_at_idx ON billing.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC)
-
 table billing.order_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
   column rail text NOT NULL
@@ -1284,7 +1214,6 @@ table billing.order_attempts
   column deleted_at timestamp with time zone
   column destructive_run_id uuid
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
-  column routing_reason jsonb
   column order_id uuid
   constraint order_attempts_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
   constraint order_attempts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -1447,7 +1376,6 @@ table billing.orders
   index CREATE INDEX orders_customer_id_created_at_id_idx ON billing.orders USING btree (merchant_id, customer_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX orders_customer_id_id_key ON billing.orders USING btree (merchant_id, customer_id, id)
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
-  index CREATE INDEX orders_embedded_idx ON billing.orders USING btree (id) WHERE embedded
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
   index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
@@ -1698,7 +1626,6 @@ table billing.payment_methods
   column contact_cardholder_at timestamp with time zone
   column setup_ref text
   column capture jsonb
-  column wallet_card_id uuid
   constraint payment_methods_capture_check CHECK (((capture IS NULL) OR ((custodian = 'hyperswitch'::text) AND (jsonb_typeof(capture) = 'object'::text) AND (octet_length((capture)::text) <= 16384))))
   constraint payment_methods_card_exp_month_check CHECK (((card_exp_month >= 1) AND (card_exp_month <= 12)))
   constraint payment_methods_card_exp_year_check CHECK (((card_exp_year >= 2000) AND (card_exp_year <= 2199)))
@@ -1968,7 +1895,6 @@ table billing.prices
   index CREATE INDEX prices_archived_created_at_id_idx ON billing.prices USING btree (merchant_id, archived, created_at DESC, id DESC)
   index CREATE INDEX prices_created_at_id_idx ON billing.prices USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX prices_id_product_id_key ON billing.prices USING btree (merchant_id, id, product_id)
-  index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default) NULLS NOT DISTINCT
@@ -2547,7 +2473,6 @@ table billing.reconciliation_findings
   column resolved_by text
   column notified_at timestamp with time zone
   column notified_severity text
-  column seen_run_class text GENERATED ALWAYS AS ( CASE WHEN ((first_seen_run IS NOT NULL) OR (last_seen_run IS NOT NULL)) THEN 'observation'::text ELSE NULL::text END) STORED
   column change jsonb
   column source text
   column evidence_digest text
@@ -2558,8 +2483,6 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_approval_run_id_fkey FOREIGN KEY (merchant_id, approval_run_id) REFERENCES billing.maintenance_runs(merchant_id, id) ON DELETE RESTRICT
   constraint reconciliation_findings_change_check CHECK (((change IS NULL) OR ((finding_type ~~ 'pull.%'::text) AND (jsonb_typeof(change) = 'object'::text) AND ((change ->> 'kind'::text) = ANY (ARRAY['create_subscription'::text, 'record_charge'::text, 'record_refund'::text, 'adopt_subscription'::text, 'cancel_subscription'::text, 'update_card'::text, 'revoke_access'::text, 'refund_charge_after_cancel'::text, 'cancel_provider_schedule'::text, 'collect_skipped_renewal'::text, 'correct_subscription'::text])))))
   constraint reconciliation_findings_evidence_digest_check CHECK ((((change IS NULL) = (evidence_digest IS NULL)) AND ((evidence_digest IS NULL) OR (evidence_digest ~ '^[0-9a-f]{64}$'::text))))
-  constraint reconciliation_findings_first_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
-  constraint reconciliation_findings_last_seen_run_seen_run_class_fkey FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint reconciliation_findings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint reconciliation_findings_pkey PRIMARY KEY (merchant_id, id)
   constraint reconciliation_findings_proposal_resolution_check CHECK (((resolution IS NULL) OR (resolution <> ALL (ARRAY['approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text])) OR (finding_type ~~ 'pull.%'::text)))
@@ -2576,8 +2499,6 @@ table billing.reconciliation_findings
   index CREATE INDEX reconciliation_findings_approval_run_id_idx ON billing.reconciliation_findings USING btree (merchant_id, approval_run_id) WHERE (approval_run_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_finding_type_idx ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]))
   index CREATE UNIQUE INDEX reconciliation_findings_finding_type_psp_id_subject_key_key ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT
-  index CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, first_seen_run) WHERE (first_seen_run IS NOT NULL)
-  index CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, last_seen_run) WHERE (last_seen_run IS NOT NULL)
   index CREATE UNIQUE INDEX reconciliation_findings_pkey ON billing.reconciliation_findings USING btree (merchant_id, id)
   index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
   index CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings USING btree (merchant_id, pull_id) WHERE (pull_id IS NOT NULL)
@@ -2954,15 +2875,6 @@ table billing.subscriptions
   trigger CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group()
   trigger CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status, current_period_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_status_transition()
   trigger CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_unverified()
-
-table billing.usage_collection_cadence
-  column merchant_id uuid NOT NULL
-  column monthly_period_started_at timestamp with time zone NOT NULL
-  column completed_at timestamp with time zone NOT NULL
-  constraint invoice_collection_cadence_check CHECK ((completed_at >= monthly_period_started_at))
-  constraint invoice_collection_cadence_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
-  constraint invoice_collection_cadence_pkey PRIMARY KEY (merchant_id)
-  index CREATE UNIQUE INDEX invoice_collection_cadence_pkey ON billing.usage_collection_cadence USING btree (merchant_id)
 
 table billing.usage_events PARTITION BY RANGE (occurred_at)
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3815,7 +3727,6 @@ function billing.guard_billing_restore_receipt()
                     'catalog_rate_cards',
                     'catalog_restore_receipts',
                     'custodians',
-                    'custody_migrations',
                     'customer_delinquency',
                     'customer_entitlement_cache',
                     'customer_entitlement_cache_stamps',
@@ -3842,7 +3753,6 @@ function billing.guard_billing_restore_receipt()
                     'nmi_history_months',
                     'nmi_history_reads',
                     'notification_events',
-                    'notifications',
                     'order_attempts',
                     'order_lines',
                     'orders',
@@ -3882,7 +3792,6 @@ function billing.guard_billing_restore_receipt()
                     'subscription_billing_changes',
                     'subscription_verifications',
                     'subscriptions',
-                    'usage_collection_cadence',
                     'usage_events',
                     'webhook_events',
                     'webhook_health',
@@ -3955,20 +3864,6 @@ function billing.guard_destructive_hold_clear()
    END IF;
    RETURN NEW;
   END; $function$
-
-function billing.guard_event_log_fact()
-  CREATE OR REPLACE FUNCTION billing.guard_event_log_fact()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  BEGIN
-      IF to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW) THEN
-          RAISE EXCEPTION 'event log facts are immutable' USING ERRCODE='23514';
-      END IF;
-      RETURN NEW;
-  END;
-  $function$
 
 function billing.guard_ledger_account_facts()
   CREATE OR REPLACE FUNCTION billing.guard_ledger_account_facts()
