@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 291,
+  "scenario_count": 292,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1442,6 +1442,11 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J04-S37",
+      "journey": "J04",
+      "name": "An order expiry backlog past one batch is expired by one billing pass"
     },
     {
       "id": "OR-J04-S38",

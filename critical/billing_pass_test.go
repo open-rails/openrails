@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -225,6 +226,22 @@ func TestBillingPass(t *testing.T) {
 		expired, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderExpired, expired.Status)
+		require.Empty(t, p.effects(t))
+	})
+	t.Run("OR-J04-S37/an-order-expiry-backlog-past-one-batch-drains-in-one-pass", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		fleet := quietFleet(t, a.world)
+		_, price := publicSale(t, a, "backlog-order", 9_990_000, nil)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		expires := a.clock.Now().Add(time.Hour)
+		// More than one batch of the expiry's reads.
+		for i := range 201 {
+			_, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: fmt.Sprintf("backlog-%d", i)})
+			require.NoError(t, err)
+		}
+		advanceTo(a.world, nextHour(expires))
+		require.False(t, runPass(t, fleet))
+		require.Zero(t, openOrders(t, a.world), "one pass expires the whole backlog")
 		require.Empty(t, p.effects(t))
 	})
 	t.Run("OR-J04-S38/a-pass-that-starts-while-one-runs-exits", func(t *testing.T) {

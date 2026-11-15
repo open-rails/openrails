@@ -310,7 +310,10 @@ UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, capture
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz);
 
 -- name: ListStaleSetupMerchants :many
--- The sweep's work queue: merchants with a card save waiting past the cutoff.
+-- The sweep's work queue: merchants with a card save waiting past the cutoff,
+-- in id order after a cursor.
 SELECT DISTINCT merchant_id FROM billing.payment_methods
 WHERE status = 'requires_action' AND (created_at < sqlc.arg(before)::timestamptz OR (capture->>'expires_at')::timestamptz <= sqlc.arg(now)::timestamptz)
+  AND merchant_id > sqlc.arg(after_merchant_id)::uuid
+ORDER BY merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;

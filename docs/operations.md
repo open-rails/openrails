@@ -1294,10 +1294,10 @@ Job health is a read of River's own tables (`openrails workers`, the server's
 jobs running past their timeout, waiting to retry and discarded, a periodic
 kind's last completion and the newest error. Each billing pass records, as its
 River output, the critical scans (renewals and retries, balance watches,
-delinquency, usage billing) still holding a row due since before the start of
-yesterday (UTC); `openrails_job_progress` fails while the last one named any,
-or when none ran to its end within a day and its timeout. OpenRails stores none
-of it.
+delinquency, order expiry, usage billing) still holding a row due since before
+the start of yesterday (UTC); `openrails_job_progress` fails while the last one
+named any, or when none ran to its end within a day and its timeout. OpenRails
+stores none of it.
 
 A pass bounded per job (retention cleanup's 200 merchants, a merchant's 200
 due usage accounts) continues in a new job after the last one it handled, so
