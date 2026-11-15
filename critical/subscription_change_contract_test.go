@@ -336,6 +336,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, sample.allowed, access.Entitlements[sample.key], "%s at %s", sample.key, sample.at)
 		}
+	})
 	t.Run("OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats", func(t *testing.T) {
 		s := stripeSeatMembership(t)
 		changed, err := s.alpha.ChangeSubscription(t.Context(), s.sub.ID, billing.ChangeSubscriptionParams{PriceID: &s.silver.ID, Reason: "Customer asked for the smaller plan", IdempotencyKey: "three-seat-downgrade"})

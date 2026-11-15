@@ -318,6 +318,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.NotNil(t, current.ScheduledChange)
 		require.Equal(t, cheaperDay, current.ScheduledChange.PriceID)
 		require.Len(t, p.effects(t), 1, "a migration charges nothing")
+	})
 	t.Run("OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create", func(t *testing.T) {
 		s := stripeSeatMembership(t)
 		s.stripe.AddPrice(stripemock.Price{ID: "price_gold_v2", Product: "prod_gold", Amount: 2500, Interval: "month"})
