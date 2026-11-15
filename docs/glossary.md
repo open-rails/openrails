@@ -61,8 +61,8 @@ to concrete code (enum, table, or manifest key).
 | Finding planes | The four diagnostic planes of the truth model: **pull** (provider is authoritative — pull observed truth in), **derive** (grant effect vs source ledger), **life** (record vs clock + state machine), **consistency** (duplicates, amount mismatches, dangling references). Finding types are `<plane>.<subject>.<shape>`, e.g. `pull.charge.missing`. |
 | Shapes | `missing` / `excess` / `mismatch` — exhaustive; repaired by materialize / retract / adjust. Unevaluable cases are the INDETERMINATE state, not a shape. |
 
-See [operations.md](operations.md#the-convergence-engine) for the full reconciliation model and
-`docs/merchant-guide.md` for catalog vocabulary.
+See [operations.md](operations.md#convergence) for the full reconciliation model and
+[catalog](catalog.md) for catalog vocabulary.
 
 ## Usage billing
 

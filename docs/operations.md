@@ -519,8 +519,8 @@ new job.
   orchestrator's grace period.
 - `GET /metrics` on the private listener (`private_port`, or mount
   `PrivateHandler`): `openrails_dependency_up{dependency,class}` and, per job
-  kind, `openrails_job_overrunning`, `_retryable`, `_discarded` and
-  `_last_completed_timestamp_seconds`. `/v1/metrics` is merchant business
+  kind, `openrails_job_overrunning`, `openrails_job_retryable`,
+  `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. `/v1/metrics` is merchant business
   analytics ([metrics](metrics-for-llms.md)).
 - `openrails workers` and the `openrails_job_progress` probe read River's tables:
   the probe fails with no leader, an overrunning job, or a billing pass that has

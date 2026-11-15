@@ -76,8 +76,8 @@ changes nothing.
   customer gets `subscription_changed`. Staff cannot upgrade a provider-billed
   subscription or change a CCBill or Solana one (`403 customer_action_required`).
 - **Refusals:** `409 subscription_change_renewal_due` (period ended or renewal
-  unresolved), `422 subscription_change_cycle_unknown` /
-  `_period_unknown`, `409 subscription_change_credit_exceeds_price`.
+  unresolved), `422 subscription_change_cycle_unknown`,
+  `422 subscription_change_period_unknown`, `409 subscription_change_credit_exceeds_price`.
 - **NMI schedules** keep their billing date, so only a price of the same cycle
   qualifies (`409 subscription_change_cadence_unsupported`), and a schedule on a
   named NMI plan needs a linked plan on the target

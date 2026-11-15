@@ -326,9 +326,9 @@ once, under the reference's row lock, into `billing.solana_pay_receipts`.
 - The first transfer of at least the quoted amount by quote expiry + 30 min is
   credited; an excess is credited and flagged `overpaid`.
 - Anything else is recorded `disposition = 'review'` with a critical
-  `consistency.ledger.unbooked` finding (`solana_pay_already_paid`, `_late`,
-  `_underpaid`, `_session_closed`, `_wrong_asset`, `_unreadable`,
-  `_settle_failed`); a transfer that settled another purchase is `duplicate`.
+  `consistency.ledger.unbooked` finding whose operation is `solana_pay_` plus the
+  reason: `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
+  `unreadable` or `settle_failed`; a transfer that settled another purchase is `duplicate`.
   Nothing is refunded automatically. After refunding, close a review with
   `openrails solana-pay resolve --merchant … --signature … --resolution …`.
   Open reviews and pending references refuse the billing archive.

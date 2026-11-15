@@ -68,7 +68,7 @@ with `card_entry=new`; also by `reason`, `category`, `response_code`, `card_bin`
 `card_brand`, AVS and CVV), `purchase_failure_rate` (per buyer),
 `rebill_first_failure_rate`, `rebill_missed_rate`, and `dunning_recovered` by
 `recovery_attempt` or `days_to_recover`. `nmi_history_authorizations`,
-`_approved`, `_refused` and `_refusal_rate` come from NMI's own history, read daily
+`nmi_history_approved`, `nmi_history_refused` and `nmi_history_refusal_rate` come from NMI's own history, read daily
 and kept 25 months, by month, `nmi_kind` (`verification`, `one_off_sale`,
 `scheduled_rebill`), PSP, `category` and `reason`; `one_off_sale` cannot separate
 first sales from retried rebills.

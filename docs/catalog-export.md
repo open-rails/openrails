@@ -25,7 +25,7 @@ Every row and stored column from these nine catalog tables is included:
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
 | `catalog_meters` | Current meter definitions and revisions |
 | `catalog_rate_cards` | All current rate cards, with IDs |
-| `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog-ownership.md)) |
+| `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog.md#applying)) |
 | `catalog_applications` | Original application receipts, canonical hashes and revision coordinates |
 
 The merchant's catalog revision is retained too. Price-key revisions

@@ -36,6 +36,24 @@ storing anything, and `UpdatePSP` changes settings, rotates or archives against
 `expected_revision` ([operations](operations.md#psps-and-credentials)). Archiving
 the last active PSP on a rail is `409 psp_last_active` unless `allow_last`.
 
+### Other manifest fields
+
+- `remote_application` (standalone): the app's issuer (`issuer` with `jwks_uri`,
+  inline `jwks` or `public_keys`), a trusted issuer in the merchant's group holding
+  its owner role ([trusted issuers](auth.md#trusted-issuers)).
+- `custodians.<key>`: a card custodian a PSP references with `custodian: <key>`
+  (`kind: basis_theory`, `environment` `live` or `test`, `account_id`,
+  `public_api_key`, `network_tokens`, `secrets`); several PSPs may share one
+  ([payment-method custody](payment-method-custody.md)).
+- `secrets.scim_token`: a provisioning token (32+ characters) an embedded engine's
+  SCIM routes accept; OpenRails keeps its SHA-256 ([customer contacts](customer-contacts.md)).
+- Settings sit flat on the merchant (below); omitted fields keep stored values and
+  a declared list replaces the stored one.
+
+Internally a credential is named
+`psps/<rail>/<environment>/<account>/<secret_key>` (`psps/nmi/live/100001/security_key`);
+unknown secret keys are refused. See [`config/merchants_config.example.yaml`](../config/merchants_config.example.yaml).
+
 ## Reading and editing
 
 `GetMerchantConfiguration` (`GET /v1/merchant/configuration`) returns the display

@@ -48,4 +48,4 @@ open `usage_order`.
 - The consuming application owns required customer communications, including
   cancellation confirmation and any receipt links to manage charge agreements.
   Source acknowledgment records durable app processing, not email delivery or
-  customer read state. See [notification events](customer-notifications.md).
+  customer read state. See [notification events](events.md).
