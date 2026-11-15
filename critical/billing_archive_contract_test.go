@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
@@ -41,6 +42,47 @@ func archiveBytes(t *testing.T, client *openrails.Client) []byte {
 	var out bytes.Buffer
 	require.NoError(t, client.ExportBillingArchive(t.Context(), &out))
 	require.NotEmpty(t, out.Bytes())
+	return out.Bytes()
+}
+
+// withCustodyMigrationRecord rewrites an archive into the shape exports had
+// before migration 208: the custody migration record, here with one row,
+// ahead of the meter period quantities.
+func withCustodyMigrationRecord(t *testing.T, archive []byte) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	var w *archivewire.Writer
+	var merchant string
+	inserted := false
+	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
+		var err error
+		merchant = h.MerchantID
+		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
+		return err
+	}, func(r archivewire.Record) error {
+		if r.Kind != "table" {
+			return w.Row(r.Values)
+		}
+		if r.Table == "meter_period_quantities" {
+			if err := w.Table("custody_migrations"); err != nil {
+				return err
+			}
+			id, batch, method, custodian := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			// merchant_id, id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id,
+			// from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id,
+			// to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at
+			if err := w.Row([]*string{&merchant, &id, &batch, &method, ptr("nmi"), ptr("psp"), nil,
+				ptr("1001"), nil, nil, ptr("basis_theory"), &custodian,
+				ptr("tok_critical"), nil, nil, ptr("remapped"), nil, ptr("2026-01-01 00:00:00+00")}); err != nil {
+				return err
+			}
+			inserted = true
+		}
+		return w.Table(r.Table)
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, w.Close())
 	return out.Bytes()
 }
 func TestBillingArchive(t *testing.T) {
@@ -266,5 +308,17 @@ func TestBillingArchive(t *testing.T) {
 		payment, err := client.GetPayment(t.Context(), *paid.Payment.PaymentID)
 		require.NoError(t, err)
 		require.Equal(t, "5454", *payment.Card.Last4)
+	})
+	t.Run("OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores", func(t *testing.T) {
+		source := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 2500, Source: "critical", SourceID: "custody-record"}})
+		require.NoError(t, err)
+		archive := withCustodyMigrationRecord(t, archiveBytes(t, source.alpha))
+		_, client := archiveTarget(t, source)
+		receipt, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err, "the record and its row are skipped")
+		require.False(t, receipt.AlreadyImported)
+		balance(t, client, customer, 2500, 0, 2500)
 	})
 }

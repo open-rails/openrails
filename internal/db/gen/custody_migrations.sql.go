@@ -7,7 +7,6 @@ package gen
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -27,7 +26,7 @@ type CountInFlightChargeIntentsForPaymentMethodParams struct {
 }
 
 // In-flight or unknown_needs_verify intents of subscriptions charging this
-// method: no charge may straddle the custody flip. Both states clear on their
+// method: no charge may straddle a custody change. Both states clear on their
 // own, so a non-zero count means retry later, not failure.
 func (q *Queries) CountInFlightChargeIntentsForPaymentMethod(ctx context.Context, arg CountInFlightChargeIntentsForPaymentMethodParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countInFlightChargeIntentsForPaymentMethod, arg.MerchantID, arg.PaymentMethodID)
@@ -52,7 +51,7 @@ type CountUnresolvedOperationsNamingPaymentMethodParams struct {
 
 // Unresolved intents whose frozen payload names this method, with or without a
 // subscription (an invoice collection has none). They are judged against the
-// custody they froze, so the flip waits for them.
+// custody they froze, so a custody change waits for them.
 func (q *Queries) CountUnresolvedOperationsNamingPaymentMethod(ctx context.Context, arg CountUnresolvedOperationsNamingPaymentMethodParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnresolvedOperationsNamingPaymentMethod, arg.MerchantID, arg.PaymentMethodID)
 	var column_1 int64
@@ -76,8 +75,7 @@ type GetPaymentMethodForCustodianTokenParams struct {
 	RailMethodRef string
 }
 
-// A custodian token addresses exactly one instrument: a second mapping onto it
-// is refused rather than pointing two instruments at one card.
+// The instrument a custodian token addresses.
 func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg GetPaymentMethodForCustodianTokenParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodForCustodianToken,
 		arg.MerchantID,
@@ -134,10 +132,10 @@ type LockPaymentMethodForCustodyRemapParams struct {
 	ID         uuid.UUID
 }
 
-// billing.custody_migrations and the payment_methods writes that move an
-// instrument between custodians.
-// The flip is atomic per instrument: take the row lock first so a concurrent
-// charge site reading the same instrument cannot straddle the custody change.
+// The row lock and the reads that guard a change to a saved card's
+// custody.
+// Take the row lock first so a concurrent charge site reading the same
+// instrument cannot straddle a change to its custody.
 func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg LockPaymentMethodForCustodyRemapParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, lockPaymentMethodForCustodyRemap, arg.MerchantID, arg.ID)
 	var i BillingPaymentMethod
@@ -174,153 +172,4 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 		&i.WalletCardID,
 	)
 	return i, err
-}
-
-const recordCustodyMigration = `-- name: RecordCustodyMigration :one
-INSERT INTO billing.custody_migrations (
-    merchant_id, batch_id, payment_method_id, rail,
-    from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id,
-    to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id,
-    exported_at, outcome, reason
-) VALUES (
-    $1::uuid, $2::uuid, $3::uuid, $4::text,
-    $5::text, $6::uuid,
-    NULLIF($7::text, ''), NULLIF($8::text, ''), $9::uuid,
-    $10::text, $11::uuid, $12::text,
-    $13::uuid,
-    $14::timestamptz, $15::text, NULLIF($16::text, '')
-)
-RETURNING id, merchant_id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at
-`
-
-type RecordCustodyMigrationParams struct {
-	MerchantID          uuid.UUID
-	BatchID             uuid.UUID
-	PaymentMethodID     uuid.UUID
-	Rail                string
-	FromCustodian       string
-	FromCustodianID     *uuid.UUID
-	FromRailCustomerRef string
-	FromRailMethodRef   string
-	FromPspID           *uuid.UUID
-	ToCustodian         string
-	ToCustodianID       uuid.UUID
-	ToRailMethodRef     string
-	ToPspID             *uuid.UUID
-	ExportedAt          *time.Time
-	Outcome             string
-	Reason              string
-}
-
-func (q *Queries) RecordCustodyMigration(ctx context.Context, arg RecordCustodyMigrationParams) (BillingCustodyMigration, error) {
-	row := q.db.QueryRow(ctx, recordCustodyMigration,
-		arg.MerchantID,
-		arg.BatchID,
-		arg.PaymentMethodID,
-		arg.Rail,
-		arg.FromCustodian,
-		arg.FromCustodianID,
-		arg.FromRailCustomerRef,
-		arg.FromRailMethodRef,
-		arg.FromPspID,
-		arg.ToCustodian,
-		arg.ToCustodianID,
-		arg.ToRailMethodRef,
-		arg.ToPspID,
-		arg.ExportedAt,
-		arg.Outcome,
-		arg.Reason,
-	)
-	var i BillingCustodyMigration
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.BatchID,
-		&i.PaymentMethodID,
-		&i.Rail,
-		&i.FromCustodian,
-		&i.FromCustodianID,
-		&i.FromRailCustomerRef,
-		&i.FromRailMethodRef,
-		&i.FromPspID,
-		&i.ToCustodian,
-		&i.ToCustodianID,
-		&i.ToRailMethodRef,
-		&i.ToPspID,
-		&i.ExportedAt,
-		&i.Outcome,
-		&i.Reason,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const remapPaymentMethodCustody = `-- name: RemapPaymentMethodCustody :execrows
-UPDATE billing.payment_methods SET
-    custodian = $1::text,
-    custodian_id = $2::uuid,
-    rail_customer_ref = NULL,
-    rail_method_ref = $3::text,
-    fingerprint = COALESCE(NULLIF($4::text, ''), fingerprint),
-    charge_via = COALESCE(NULLIF($5::text, ''), 'pan_proxy'),
-    network_token_id = NULLIF($6::text, ''),
-    network_token_status = NULLIF($7::text, ''),
-    network_token_par = NULLIF($8::text, ''),
-    psp_id = NULL,
-    card_brand = COALESCE($9::text, card_brand),
-    card_last4 = COALESCE($10::text, card_last4),
-    card_exp_month = COALESCE($11::smallint, card_exp_month),
-    card_exp_year = COALESCE($12::smallint, card_exp_year),
-    updated_at = now()
-WHERE merchant_id = $13::uuid
-  AND id = $14::uuid
-  AND custodian = $15::text
-`
-
-type RemapPaymentMethodCustodyParams struct {
-	ToCustodian        string
-	ToCustodianID      uuid.UUID
-	ToRailMethodRef    string
-	Fingerprint        string
-	ChargeVia          string
-	NetworkTokenID     string
-	NetworkTokenStatus string
-	NetworkTokenPar    string
-	CardBrand          *string
-	CardLast4          *string
-	CardExpMonth       *int16
-	CardExpYear        *int16
-	MerchantID         uuid.UUID
-	ID                 uuid.UUID
-	FromCustodian      string
-}
-
-// The custody flip: moves the custodian, its handle (rail_method_ref),
-// fingerprint, charge transport and network token, and clears psp_id (routing
-// picks the PSP per charge) and the old vault handle, which
-// custody_migrations.from_rail_customer_ref keeps. id, rail and the card's
-// mandates stay. The WHERE on the current custody is the compare-and-swap
-// against a concurrent second flip.
-func (q *Queries) RemapPaymentMethodCustody(ctx context.Context, arg RemapPaymentMethodCustodyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, remapPaymentMethodCustody,
-		arg.ToCustodian,
-		arg.ToCustodianID,
-		arg.ToRailMethodRef,
-		arg.Fingerprint,
-		arg.ChargeVia,
-		arg.NetworkTokenID,
-		arg.NetworkTokenStatus,
-		arg.NetworkTokenPar,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.MerchantID,
-		arg.ID,
-		arg.FromCustodian,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

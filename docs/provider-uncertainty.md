@@ -62,8 +62,7 @@ read under a shared lock on the method row — and is judged against those
 frozen facts forever after: it refuses to submit while the method no longer
 matches them, and every receipt read (verifier, `--receipt`, `--not-executed`)
 uses the frozen account and the frozen custody's rule, never the method's
-current row. An unresolved operation therefore blocks a custody remap
-of the instrument it names (`operation_unresolved`) until it resolves.
+current row.
 Automatic NMI collection runs only under the currency's active unscheduled
 mandate. Naming a card the collection method creates that mandate from the
 card's own lineage on the charging account (its save, or an earlier

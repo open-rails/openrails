@@ -20,6 +20,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before rating at ingest (migration 66) carries the
 	// period sweep's watermarks in place of the meter quantities: skipped.
 	watermarks := false
+	// One from before migration 208 carries the custody migration record,
+	// which nothing reads: skipped.
+	custody := false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			if invoices = r.Table == "invoices"; invoices {
@@ -28,6 +31,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				if table+1 < len(Profiles) && Profiles[table+1].Name == "usage_collection_cadence" {
 					table++
 				}
+				return nil
+			}
+			if custody = r.Table == "custody_migrations"; custody {
 				return nil
 			}
 			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
@@ -48,7 +54,7 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
-		if watermarks {
+		if watermarks || custody {
 			return nil
 		}
 		p := Profiles[table]

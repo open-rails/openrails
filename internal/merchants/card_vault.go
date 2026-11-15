@@ -193,7 +193,7 @@ func (s *Service) platformIdentityRefusal(ctx context.Context, q *gen.Queries, i
 		return err
 	}
 	if row.Kind != models.CustodianPlatform || row.Environment != class || row.AccountID != config.PlatformCustodianAccountID(s.platformVault, id.UUID()) {
-		return fmt.Errorf("the merchant's platform identity is %s; its cards move by custody migration: %w", row.AccountID, ErrPlatformVaultUnavailable)
+		return fmt.Errorf("the merchant's platform identity is %s; its cards stay in that vault: %w", row.AccountID, ErrPlatformVaultUnavailable)
 	}
 	return nil
 }
