@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -214,5 +215,55 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, sub.PriceID, current.PriceID)
 		require.Nil(t, current.ScheduledChange)
+	})
+	t.Run("OR-J18-S05/late-in-place-upgrade-holds-the-new-tier-only-to-the-paid-boundary", func(t *testing.T) {
+		a, p, sub := nmiMembershipWithAccess(t, catalog.Value(168), func(s *nmimock.Schedule) { s.Plan, s.Custom = "", true })
+		_, err := a.alpha.UpdateProduct(t.Context(), sub.ProductID, billing.UpdateProductParams{TierGroup: catalog.Value("nmi-level"), TierRank: catalog.Value(1)})
+		require.NoError(t, err)
+		higher, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-higher", DisplayName: "Higher NMI membership", TierGroup: ptr("nmi-level"), TierRank: 2, Entitlements: []string{"nmi:higher"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: higher.ID, Key: "nmi-higher-weekly", UnitAmount: 20_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
+		require.NoError(t, err)
+		due := *sub.CurrentPeriodEndsAt
+		a.clock.Advance(6 * 24 * time.Hour)
+		upgradedAt := a.clock.Now()
+		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", a.aliceToken, map[string]any{"price_id": price.ID}, map[string]string{"Idempotency-Key": "late-nmi-upgrade"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var changed billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &changed))
+		require.Equal(t, "succeeded", changed.Status, string(raw))
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, price.ID, current.PriceID)
+		require.Equal(t, due, *current.CurrentPeriodEndsAt, "the schedule keeps its billing date")
+		require.Equal(t, "20.00", p.core.Schedule(*sub.RailSubscriptionID).Amount)
+		// The proration pays the higher tier's last day: 20.00/7 down less 10.00/7 up.
+		p.money(t, 2, 1000+142)
+		windows, err := a.alpha.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{sub.CustomerID}, ProductIDs: []billing.ProductID{higher.ID}})
+		require.NoError(t, err)
+		paid, grace := 0, 0
+		for _, window := range windows.Items {
+			switch window.SourceType {
+			case billing.ProductAccessSourceSubscription:
+				paid++
+				require.Equal(t, upgradedAt, window.StartsAt)
+				require.NotNil(t, window.EndsAt)
+				require.Equal(t, due, *window.EndsAt, "the higher tier's paid access ends where the proration's period does")
+			case billing.ProductAccessSourceGrace:
+				grace++
+				require.Equal(t, due, window.StartsAt, "renewal grace continues from the paid boundary")
+			}
+		}
+		require.Equal(t, 1, paid)
+		require.Equal(t, 1, grace)
+		for _, sample := range []struct {
+			key     string
+			at      time.Time
+			allowed bool
+		}{{"nmi:higher", upgradedAt, true}, {"nmi:member", upgradedAt, false}, {"nmi:higher", due.Add(-time.Microsecond), true}} {
+			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{sample.key}, At: sample.at})
+			require.NoError(t, err)
+			require.Equal(t, sample.allowed, access.Entitlements[sample.key], "%s at %s", sample.key, sample.at)
+		}
 	})
 }

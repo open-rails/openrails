@@ -154,16 +154,19 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 }
 
 // switchTierAccess ends the subscription's access sources at `at` and opens
-// the current product for [at, end).
+// the current product from at, never past the paid period's end, with its
+// renewal grace.
 func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at time.Time, acceptedEnd *time.Time) error {
 	ent := s.newLifecycleEntitlementService(txDB)
 	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, at, models.AccessRevokeSuperseded, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
 		return err
 	}
-	grant := subscriptionAccess(sub, at)
+	grant := paidPeriodAccess(sub, at, *sub.CurrentPeriodEndsAt)
 	if acceptedEnd != nil {
 		grant.EndsAt, grant.Indefinite = acceptedEnd, false
 	}
-	_, err := ent.PushAccess(ctx, grant)
-	return err
+	if _, err := ent.PushAccess(ctx, grant); err != nil {
+		return err
+	}
+	return s.EnsureRenewalGrace(ctx, txDB, sub)
 }
