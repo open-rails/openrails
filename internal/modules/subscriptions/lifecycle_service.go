@@ -269,7 +269,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 			}
 			if sub.Status != models.StatusPending {
 				if terms.Amount > 0 {
-					payment, err := payments.NewPaymentRepo(txDB).GetByID(ctx, terms.PaymentID)
+					payment, err := payments.NewPaymentService(txDB).GetByID(ctx, terms.PaymentID)
 					if err != nil {
 						return nil, nil, err
 					}
