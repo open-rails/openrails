@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -57,7 +58,6 @@ type Mock struct {
 	server *httptest.Server
 
 	mu              sync.Mutex
-	seq             int
 	now             func() time.Time
 	customers       map[string]Object
 	setups          map[string]Object
@@ -133,9 +133,12 @@ func (m *Mock) Close() {
 	}
 }
 
+// idSeq is process-wide: Stripe ids are unique across accounts, so mocks
+// standing in for two accounts never mint the same id.
+var idSeq atomic.Int64
+
 func (m *Mock) id(prefix string) string {
-	m.seq++
-	return fmt.Sprintf("%s_gf%06d", prefix, m.seq)
+	return fmt.Sprintf("%s_gf%09d", prefix, idSeq.Add(1))
 }
 
 // ServeHTTP serves the API on a listener. A lost request aborts the

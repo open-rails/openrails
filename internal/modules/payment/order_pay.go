@@ -782,7 +782,7 @@ func (s *OrderAttemptService) prepareNewCard(ctx context.Context, purchase *Purc
 	if method == nil || method.Card == nil {
 		return nil, fmt.Errorf("%w: Stripe has no card %s", ErrPaymentMethodStale, token)
 	}
-	customerRef, err := resolveStripeCustomerWith(db.WithPSPID(ctx, psp), purchase.customerStore(), service, in.User)
+	customerRef, err := resolveStripeCustomerWith(ctx, purchase.customerStore(), service, in.User)
 	if err != nil {
 		return nil, err
 	}
