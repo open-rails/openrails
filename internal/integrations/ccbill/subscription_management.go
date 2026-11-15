@@ -47,7 +47,7 @@ var ErrDataLinkIndeterminate = errors.New("ccbill datalink: indeterminate provid
 var ErrCancelRejected = errors.New("ccbill datalink: cancelSubscription rejected")
 
 // ErrRefundUnsupported prevents an unqualified subscription-level operation from
-// being presented as an exact payment refund. See docs/rails/ccbill-refund-qualification.md.
+// being presented as an exact payment refund. See docs/rails/ccbill.md.
 var ErrRefundUnsupported = errors.New("automatic CCBill refunds are unavailable; use the CCBill admin portal and verify the transaction, amount, and subscription state")
 
 // maxSubscriptionManagementResponseBytes bounds one SMS response (tiny XML).

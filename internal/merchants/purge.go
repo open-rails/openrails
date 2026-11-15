@@ -177,7 +177,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 			"NMI / Stripe / CCBill / Solana are untouched by a purge and unreachable afterwards: "+
 			"the local rows naming them are gone, so nothing remains to reconcile against.",
 		"THE RESTORE PATH. There is exactly one — Postgres point-in-time recovery, with the "+
-			"merchant's Vault documents restored alongside it (docs/backup-and-recovery.md). "+
+			"merchant's Vault documents restored alongside it (docs/operations.md#backup-and-recovery). "+
 			"If you do not have PITR configured and tested, a purge is final.")
 	return out
 }
@@ -228,7 +228,7 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID)
 		"secret_names":  inv.Documents,
 		"not_captured":  inv.NotCaptured,
 		"restore_path": "Postgres point-in-time recovery + the merchant's configuration from its file or Vault " +
-			"(docs/backup-and-recovery.md). This inventory restores nothing.",
+			"(docs/operations.md#backup-and-recovery). This inventory restores nothing.",
 	})
 	if err != nil {
 		return billing.MerchantPurgeInventory{}, fmt.Errorf("merchants: marshal purge inventory: %w", err)
