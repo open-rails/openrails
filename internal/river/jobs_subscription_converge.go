@@ -97,8 +97,6 @@ type SubscriptionConvergeWorker struct {
 
 	// NMIResolver arms the args merchant's NMI client from the armed rail state.
 	NMIResolver railresolve.NMIClientResolver
-	// StripeProber overrides the config-built prober (tests). Nil = build from Rails.
-	StripeProber subscriptions.StripeLivenessProber
 
 	PriceService                 *catalog.PriceService
 	ProductService               *catalog.ProductService
@@ -165,15 +163,11 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 	}
 	switch {
 	case args.Rail == string(models.RailStripe):
-		prober := w.StripeProber
-		if prober == nil {
-			p, err := subscriptions.NewStripeLivenessProber(ctx, w.Rails)
-			if err != nil {
-				return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
-			}
-			p.HTTPClient = w.StripeClients.ReadOnlyClient(0)
-			prober = p
+		prober, err := subscriptions.NewStripeLivenessProber(ctx, w.Rails)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
 		}
+		prober.HTTPClient = w.StripeClients.ReadOnlyClient(0)
 		svc := &webhooks.StripeConvergeService{
 			DB:                           w.DB,
 			Clock:                        w.Clock,

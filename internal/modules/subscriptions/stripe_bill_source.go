@@ -45,13 +45,6 @@ type StripeBillPayment struct {
 	PaidAt                                                time.Time
 }
 
-// StripeBillReader reads provider invoice truth without initiating collection.
-// The visitor bounds memory and commits each bill independently during recovery.
-type StripeBillReader interface {
-	VisitSubscriptionBills(context.Context, string, func(StripeBill) error) error
-	ReadBill(context.Context, string) (StripeBill, error)
-}
-
 type stripeBillList struct {
 	Data    []json.RawMessage `json:"data"`
 	HasMore bool              `json:"has_more"`

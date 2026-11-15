@@ -198,7 +198,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe webhook signature was not verified before processing"))
 	}
-	var paymentState payments.StripePaymentStateReader
+	var paymentState *payments.HTTPStripePaymentStateReader
 	if stripeEventNeedsPaymentState(event.EventType) {
 		if d.RailConfigs == nil {
 			return fmt.Errorf("stripe webhook rejected: rail resolution is not configured")

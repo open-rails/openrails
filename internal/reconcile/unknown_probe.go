@@ -192,7 +192,7 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]Remot
 // StripeSubscriptionProber wraps the per-subscription Stripe read
 // (GET /v1/subscriptions/{id}?expand[]=latest_invoice) as a snapshot source.
 type StripeSubscriptionProber struct {
-	Prober subscriptions.StripeLivenessProber
+	Prober *subscriptions.HTTPStripeLivenessProber
 }
 
 func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (*RemoteSnapshot, error) {

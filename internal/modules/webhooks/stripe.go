@@ -57,7 +57,7 @@ type StripeWebhookService struct {
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 	// StripePaymentState reads the exact routed Stripe account. Payment-method
 	// events are wake-up signals; fetched provider truth owns the local link.
-	StripePaymentState payments.StripePaymentStateReader
+	StripePaymentState *payments.HTTPStripePaymentStateReader
 	// ObserveEnqueuer queues the coalesced read of a catalog object a
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer

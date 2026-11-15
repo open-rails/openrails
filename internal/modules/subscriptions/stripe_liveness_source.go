@@ -64,12 +64,6 @@ type StripeLivenessRecord struct {
 	LatestInvoicePriceIDs []string
 }
 
-// StripeLivenessProber probes one remote Stripe subscription. Interface so
-// the liveness worker can be tested without the live Stripe API.
-type StripeLivenessProber interface {
-	ProbeSubscription(ctx context.Context, railSubscriptionID string) (StripeLivenessRecord, error)
-}
-
 // HTTPStripeLivenessProber is the production prober over the Stripe REST API.
 type HTTPStripeLivenessProber struct {
 	SecretKey  string

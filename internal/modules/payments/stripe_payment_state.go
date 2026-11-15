@@ -44,12 +44,6 @@ type StripeCustomerPaymentState struct {
 	Subscriptions []StripeSubscriptionPaymentState
 }
 
-// StripePaymentStateReader fetches current state from one exact Stripe account.
-type StripePaymentStateReader interface {
-	PaymentMethod(ctx context.Context, paymentMethodID string) (*StripePaymentMethodState, error)
-	CustomerPaymentState(ctx context.Context, customerID string) (*StripeCustomerPaymentState, error)
-}
-
 // HTTPStripePaymentStateReader reads Stripe state through the read-only Stripe
 // transport.
 type HTTPStripePaymentStateReader struct {

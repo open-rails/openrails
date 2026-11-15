@@ -50,15 +50,11 @@ func EngineRenewalGrace(period time.Duration) (time.Duration, error) {
 // renewal's period, the same bound as its access.
 const EngineAuthenticationWindow = time.Hour
 
-type graceWriter interface {
-	PushAccess(context.Context, entitlements.PushAccessParams) (*models.ProductAccess, error)
-}
-
 // pushRenewalGrace appends explicit grace of the subscription's product after
 // matched paid access and billing boundaries: open-ended by default, bounded
 // when the merchant suspends held renewals. Paid grants remain finite for both
 // engine and provider schedules.
-func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, periodStart, periodEnd time.Time) error {
+func pushRenewalGrace(ctx context.Context, d *db.DB, ent *entitlements.EntitlementService, sub *models.Subscription, periodStart, periodEnd time.Time) error {
 	if ent == nil || sub == nil || sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || !accessMatchesBillingPeriod(sub, periodStart, periodEnd) {
 		return nil
 	}
