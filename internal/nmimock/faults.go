@@ -28,6 +28,14 @@ func (m *Mock) SetDecline(last4, code string) {
 	}
 }
 
+// ApprovePartially makes the issuer approve at most amount ("0.30") of any
+// sale on a card ending in last4; "" restores full approval.
+func (m *Mock) ApprovePartially(last4, amount string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.partials[last4] = amount
+}
+
 // LoseSales makes the next n Direct Post requests (other than validate)
 // fail in transit before the gateway sees them.
 func (m *Mock) LoseSales(n int) {

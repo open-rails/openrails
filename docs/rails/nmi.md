@@ -365,6 +365,18 @@ otherwise it raises `life.submission.unresolved`, naming the vault's matching
 charges under other orders. A recovery waits for the operator
 (`openrails intents resolve`).
 
+### Partial approvals
+
+On an account with partial approvals enabled, an issuer may approve less than a
+sale's amount. Every sale OpenRails sends carries
+`partial_payments=payment_in_full`, so NMI settles a partial approval only once
+it is collected in full, which OpenRails never does. An answer whose
+`amount_authorized` differs from the sale's amount, or with a nonzero
+`partial_payment_balance`, is not a payment: the operation stays unknown for
+the operator (a one-off sale raises `life.sale.unresolved`) and nothing is
+re-sent. A receipt whose order search shows a `partial_payment_balance` never
+qualifies.
+
 ### Exactly-once renewals
 
 Every attempt to pay one period (subscription + period) shares one NMI order

@@ -143,6 +143,7 @@ func saleForm(req charge.Request, key provider.Secret) (map[string]provider.Secr
 		fields.Set("order_description", req.Description)
 	}
 	sc.ApplyToForm(fields)
+	nmi.SettleOnlyInFull(fields)
 	form := make(map[string]provider.Secret, len(fields))
 	for key, values := range fields {
 		form[key] = provider.Secret(values[0])

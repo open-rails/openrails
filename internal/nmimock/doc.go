@@ -18,6 +18,12 @@
 //     refused when stored; type=validate approves funds declines 202 and 203.
 //     A card stored by number must pass Luhn and carry an MMYY expiry; its
 //     brand comes from its first digits and its cvv is not checked.
+//   - Partial approvals: ApprovePartially approves at most an amount of a
+//     sale and answers amount_authorized and partial_payment_balance. NMI
+//     does not document which amount its reports give such a sale; here they
+//     keep the requested amount and carry the balance. Sent
+//     partial_payments=payment_in_full, it never settles; otherwise the
+//     approved amount does.
 //   - Duplicate checks: Options.DuplicateWindow matches brand, last four and
 //     amount gateway-wide; dup_seconds the same within one vault.
 //   - Query API filters: order_id, transaction_id, customer_vault_id,

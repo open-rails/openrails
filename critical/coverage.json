@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 300,
+  "scenario_count": 301,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -222,6 +222,11 @@
       "id": "OR-J09-S05",
       "journey": "J09",
       "name": "A sale whose answer was lost settles from NMI: its decline reopens the order, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
+    },
+    {
+      "id": "OR-J09-S06",
+      "journey": "J09",
+      "name": "An NMI sale the issuer approves for part of its amount asks NMI to settle only in full, never pays the order, raises a high finding, and is never resent"
     },
     {
       "id": "OR-J10-S01",

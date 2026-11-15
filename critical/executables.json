@@ -134,6 +134,9 @@
     "OR-J09-S05": [
       "TestCheckoutBoundaries/OR-J09-S05/lost-sale-answer-settles-from-the-provider"
     ],
+    "OR-J09-S06": [
+      "TestCheckoutBoundaries/OR-J09-S06/partial-approval-never-pays-the-order"
+    ],
     "OR-J10-S01": [
       "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
     ],

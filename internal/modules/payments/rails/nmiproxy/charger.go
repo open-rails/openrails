@@ -175,7 +175,7 @@ func (c *Charger) proxySale(ctx context.Context, req charge.Request, src Source,
 	}
 
 	// Destination answered: same parser + decline taxonomy as the direct rail.
-	sale, err := nmi.ParseSaleResponse(string(proxyRes.Body))
+	sale, err := nmi.ParseSaleResponse(string(proxyRes.Body), req.AmountMinor, req.Currency)
 	if err != nil {
 		var vaultErr *nmi.CustomerVaultError
 		if errors.As(err, &vaultErr) && nmidirect.IsHardDecline(vaultErr.ResponseCode) {
