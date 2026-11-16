@@ -269,6 +269,18 @@
     "OR-J16-S43": [
       "TestDoNotRetry/OR-J16-S43/a-decline-the-cardholder-can-clear-is-retried-on-the-card-up-to-the-cap"
     ],
+    "OR-J16-S50": [
+      "TestDunningSchedule/OR-J16-S50/a-monthly-renewal-is-retried-on-days-3-5-7-and-10-then-canceled"
+    ],
+    "OR-J16-S51": [
+      "TestDunningSchedule/OR-J16-S51/a-merchants-customer-retry-cap-is-honoured",
+      "TestDunningSchedule/OR-J16-S51/a-merchants-customer-retry-cap-is-honoured/none",
+      "TestDunningSchedule/OR-J16-S51/a-merchants-customer-retry-cap-is-honoured/default",
+      "TestDunningSchedule/OR-J16-S51/a-merchants-customer-retry-cap-is-honoured/raised"
+    ],
+    "OR-J16-S52": [
+      "TestDunningSchedule/OR-J16-S52/a-dunning-policy-past-the-networks-reattempt-limits-is-refused"
+    ],
     "OR-J17-S01": [
       "TestSubscriptions/OR-J17-S01/cancel-resume-keeps-the-purchased-window"
     ],
