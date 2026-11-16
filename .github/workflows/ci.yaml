@@ -450,7 +450,7 @@ jobs:
           from urllib.parse import quote
           result = json.loads(os.environ['RESULTS'])
           if result['source']['result'] == 'failure':
-              raise SystemExit('master takes pull requests only from rc/<name> and chore/release-vX.Y.Z; see the Source branch job')
+              raise SystemExit('master takes pull requests only from rc/X.Y.Z and chore/release-vX.Y.Z; see the Source branch job')
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']

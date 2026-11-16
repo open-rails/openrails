@@ -2,7 +2,7 @@
 # Releases the root, server and optional AuthKit adapter in lockstep. Master only
 # accepts commits whose checks passed, so a release is two steps:
 #
-#   scripts/release prepare vX.Y.Z [rc/<name>]  # opens the release PR
+#   scripts/release prepare vX.Y.Z [rc/X.Y.Z]   # opens the release PR
 #   scripts/release publish vX.Y.Z ["note"]     # once that PR is green
 #
 # prepare pins the server, AuthKit adapter and standalone test fixture to vX.Y.Z
@@ -18,12 +18,12 @@ die() {
   echo "release: $*" >&2
   exit 1
 }
-usage="usage: scripts/release prepare vX.Y.Z [rc/<name>] | publish vX.Y.Z [note]"
+usage="usage: scripts/release prepare vX.Y.Z [rc/X.Y.Z] | publish vX.Y.Z [note]"
 step="${1:-}"
 version="${2:-}"
 note="${3:-}"
 [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "$usage"
-# master takes this head and rc/* only (scripts/ci-source-branch.sh).
+# master takes this head and rc/X.Y.Z only (scripts/ci-source-branch.sh).
 branch="chore/release-$version"
 cd "$(git rev-parse --show-toplevel)"
 export GOWORK=off
@@ -37,7 +37,8 @@ done
 case "$step" in
 prepare)
   base="${3:-master}"
-  [[ "$base" =~ ^(master|rc/[^/]+)$ ]] || die "$usage"
+  # A candidate is named for the version it becomes.
+  [[ "$base" == master || "$base" == "rc/${version#v}" ]] || die "the base is master or rc/${version#v}; $usage"
   git fetch --quiet origin "$base"
   git merge-base --is-ancestor origin/master "origin/$base" || die "$base is behind origin/master; update it first"
   work="$HOME/cozy/.worktrees/openrails/release-$version"

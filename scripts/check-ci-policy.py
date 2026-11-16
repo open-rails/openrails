@@ -66,10 +66,11 @@ assert invalid.returncode != 0
 source = Path(__file__).with_name("ci-source-branch.sh")
 repo = "open-rails/openrails"
 for head_repo, ref, admitted in [
-    (repo, "rc/v1.2.0", True), (repo, "rc/audit-2026-11", True), (repo, "chore/release-v1.2.3", True),
-    (repo, "chore/release-v1.2.3-rc.1", True), ("fork/openrails", "rc/v1.2.0", False),
+    (repo, "rc/1.2.0", True), (repo, "rc/0.280.0", True), (repo, "chore/release-v1.2.3", True),
+    (repo, "chore/release-v1.2.3-rc.1", True), ("fork/openrails", "rc/1.2.0", False),
     (repo, "feat/thing", False), (repo, "release/v1.2.3", False), (repo, "chore/release-notes", False),
-    (repo, "rc/", False), (repo, "rc/a/b", False), (repo, "xrc/v1", False),
+    (repo, "rc/", False), (repo, "rc/a/b", False), (repo, "xrc/1.2.0", False),
+    (repo, "rc/audit-2026-11", False), (repo, "rc/v1.2.0", False), (repo, "rc/1.2", False),
 ]:
     ran = subprocess.run(["bash", str(source), repo, head_repo, ref], capture_output=True, text=True)
     assert (ran.returncode == 0) == admitted, (head_repo, ref, ran.stderr)
