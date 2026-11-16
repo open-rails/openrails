@@ -29,6 +29,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
   version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
 - A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
+- No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one. Details: `docs/ci.md`.
 
@@ -164,10 +165,17 @@ through `host-four`; these are placeholders, not customer or repository names.
   other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
   schema references only.
 - One hand-written baseline, `internal/migrate/postgres/0001_schema.up.sql`: tables in
-  foreign-key order, each followed by its constraints, indexes and triggers. A schema change
-  is a new numbered migration, and `api/schema.txt` shows it. Before v1.0.0 a merged
-  migration is folded into the baseline by hand and CI's `scripts/schemaproof` step proves
-  the result builds the same database; after v1.0.0 the baseline is immutable.
+  foreign-key order, each followed by its constraints, indexes and triggers. A release has
+  shipped it, so a schema change is a new numbered migration (`0002_…`, added to `sqlc.yaml`)
+  and `api/schema.txt` shows it; a schema change never edits the baseline. Rewriting the
+  baseline is a deliberate re-squash proven by CI's `scripts/schemaproof` step, because every
+  deployed database must then be settled against it; after v1.0.0 it is immutable.
+- `Migrate`/`New` settle a database that recorded a migration with other content: a schema
+  equal to a fresh build, whichever monthly partitions exist, is re-stamped; any other is
+  refused with the difference. A `SkipMigrations` start (`migrate.Validate`) only checks, and
+  refuses a missing migration or one recorded with other content (`ErrMigrationsRequired`)
+  until `Migrate` has run. Only OpenRails' objects live in its schema: the comparison covers
+  all of it.
 - `New` applies the migrations; the pool it runs with owns every object (another owner is
   the operator's `SET ROLE`). No grants, no runtime role.
 - There is NO row-level security: tenant isolation is the explicit `merchant_id` (or
