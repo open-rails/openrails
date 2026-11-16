@@ -19,7 +19,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/migratekit v1.11.3
+	github.com/open-rails/migratekit v1.11.4
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/riverqueue/river v0.49.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.49.0
