@@ -183,13 +183,13 @@ func settleJobs(ctx context.Context, fleet *river.Client[pgx.Tx], kinds ...strin
 		}
 		idle := true
 		for _, j := range res.Jobs {
-			switch j.State {
-			case rivertype.JobStateScheduled, rivertype.JobStateRetryable:
+			switch {
+			case jobWaits(j):
 				if _, err := fleet.JobRetry(ctx, j.ID); err != nil {
 					return err
 				}
 				idle = false
-			case rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStatePending:
+			case j.State == rivertype.JobStateAvailable || j.State == rivertype.JobStateRunning || j.State == rivertype.JobStatePending:
 				idle = false
 			}
 		}

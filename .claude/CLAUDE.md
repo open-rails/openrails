@@ -26,10 +26,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   master to it and pushes the `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags with it.
 
 ## Branches
-- Feature branch → open RC → master → tag. `OPEN.md` names the one open `rc/<name>` (cut from master,
-  deleted once merged); branch from it and target it, never master.
+- Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
+  version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
 - A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
-- Master takes PRs only from `rc/*` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
+- Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one. Details: `docs/ci.md`.
 
 ## v1 is frozen
@@ -124,8 +124,10 @@ through `host-four`; these are placeholders, not customer or repository names.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
 
 ## PSP identity
-- `billing.psps` is an OPERATOR-DECLARED catalog. There is NO runtime "whoami" and NO
-  account-mismatch guard. `account_id` is an opaque, operator-declared label.
+- `billing.psps` is an OPERATOR-DECLARED catalog: `account_id` is the operator's label.
+  Before a PSP is armed its credentials are probed (`internal/providerposture`): the
+  rail's live/test environment, and on Stripe that the key belongs to the declared
+  account (`Mismatched` otherwise). NMI has no such read: nothing ties a Gateway ID to its key.
 - A merchant declares a PSP as `psps.<key>: {rail: nmi, environment: live|test|sandbox, account_id: …, settings: …}`
   (`openrails.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
   credentials under `psps.<key>.secrets`. Merchant configuration is that file (read-only)
@@ -136,8 +138,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   account its id and webhook path use):
   - **NMI** — `gateway_id`, the dashboard **"Gateway ID"**, which IS the merchant account
     id. It is NOT the reseller/ISO, and is NOT fetchable from the `security_key`.
-  - **Stripe** — `account_id`, `acct_…`, operator-declared like every other rail (there
-    is no `GET /v1/account` call in the tree; see docs/rails/stripe.md).
+  - **Stripe** — `account_id`, `acct_…`, declared by the operator and checked against the
+    key's own account (`GET /v1/account`, `internal/integrations/stripeapi/posture.go`).
   - **CCBill** — `client_accnum` and `client_subacc`, CCBill's own numbers.
   - **Solana** — `treasury`, where every payment lands. Plans are owned by the
     deployment's `solana.crankers`, never by a PSP.
@@ -161,8 +163,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 - SQL is authored in `billing` (`config.DefaultSchema`) and runs there verbatim; any
   other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
   schema references only.
-- One baseline, `internal/migrate/postgres/0001_schema.up.sql`, immutable after v1.0.0;
-  a schema change is a new numbered migration, and `api/schema.txt` shows it.
+- One hand-written baseline, `internal/migrate/postgres/0001_schema.up.sql`: tables in
+  foreign-key order, each followed by its constraints, indexes and triggers. A schema change
+  is a new numbered migration, and `api/schema.txt` shows it. Before v1.0.0 a merged
+  migration is folded into the baseline by hand and CI's `scripts/schemaproof` step proves
+  the result builds the same database; after v1.0.0 the baseline is immutable.
 - `New` applies the migrations; the pool it runs with owns every object (another owner is
   the operator's `SET ROLE`). No grants, no runtime role.
 - There is NO row-level security: tenant isolation is the explicit `merchant_id` (or

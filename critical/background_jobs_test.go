@@ -571,9 +571,12 @@ func attributionJobs(t *testing.T, fleet *river.Client[pgx.Tx], states ...rivert
 // each still checks its own due time.
 func wakeJobs(t *testing.T, fleet *river.Client[pgx.Tx], kind string) {
 	t.Helper()
-	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kind).States(rivertype.JobStateScheduled, rivertype.JobStateRetryable))
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(kind).States(rivertype.JobStateScheduled, rivertype.JobStateRetryable, rivertype.JobStateAvailable).First(200))
 	require.NoError(t, err)
 	for _, job := range jobs.Jobs {
+		if !jobWaits(job) {
+			continue
+		}
 		_, err = fleet.JobRetry(t.Context(), job.ID)
 		require.NoError(t, err)
 	}

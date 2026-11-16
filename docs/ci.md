@@ -4,8 +4,8 @@
 
 Feature branch → release candidate → `master` → tag.
 
-- `master` is the release mainline. It takes pull requests only from the open release candidate (`rc/<name>`) and from `scripts/release` (`chore/release-vX.Y.Z`); the required `Source branch` check refuses any other head, documentation included.
-- One release candidate is open at a time: `rc/<name>` (`rc/v0.280.0`, `rc/audit-2026-11`), cut from master and deleted once it merges. [OPEN.md](../OPEN.md) names it, or says none is open. Feature branches are cut from it and their pull requests target it.
+- `master` is the release mainline. It takes pull requests only from the open release candidate (`rc/X.Y.Z`) and from `scripts/release` (`chore/release-vX.Y.Z`); the required `Source branch` check refuses any other head, documentation included.
+- One release candidate is open at a time, named for the version it becomes (`rc/0.280.0`), cut from master and deleted once it merges. [OPEN.md](../OPEN.md) names it, or says none is open. Feature branches are cut from it and their pull requests target it.
 - A release is a tag on master (`scripts/release`); not every master commit is one.
 
 ## Qualification

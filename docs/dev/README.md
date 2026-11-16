@@ -91,13 +91,13 @@ and `error-codes.md`. Without `-write` it checks them. Never hand-merge them.
 ## Branches
 
 Cut a feature branch from the open release candidate named in [OPEN.md](../../OPEN.md) and open its
-pull request against that `rc/<name>` branch, as a draft until its last commit. Master takes only the
+pull request against that `rc/X.Y.Z` branch, as a draft until its last commit. Master takes only the
 release candidate and the release PR below. [docs/ci.md](../ci.md) has the rules and what each runs.
 
 ## Releases
 
 ```sh
-scripts/release prepare vX.Y.Z [rc/<name>]  # opens chore/release-vX.Y.Z from master, or from the open RC, pinning server and adapter to the root
+scripts/release prepare vX.Y.Z [rc/X.Y.Z]   # opens chore/release-vX.Y.Z from master, or from the open RC, pinning server and adapter to the root
 scripts/release publish vX.Y.Z ["note"]     # once that PR's checks pass
 ```
 

@@ -43,7 +43,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 			require.NoError(t, err)
 			require.Eventually(t, func() bool {
 				row, err := queue.JobGet(t.Context(), job.Job.ID)
-				return err == nil && (row.State == rivertype.JobStateScheduled || row.State == rivertype.JobStateCompleted)
+				return err == nil && (jobWaits(row) || row.State == rivertype.JobStateCompleted)
 			}, 15*time.Second, 20*time.Millisecond)
 		}
 		second.kill(t)

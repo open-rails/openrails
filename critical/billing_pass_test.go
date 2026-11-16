@@ -59,7 +59,7 @@ func runPass(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
 			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 			require.NoError(t, err)
 			for _, op := range jobs.Jobs {
-				if op.State == rivertype.JobStateScheduled || op.State == rivertype.JobStateRetryable {
+				if jobWaits(op) {
 					_, err = fleet.JobRetry(t.Context(), op.ID)
 					require.NoError(t, err)
 				}
