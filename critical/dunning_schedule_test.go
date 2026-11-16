@@ -152,7 +152,7 @@ func TestDunningSchedule(t *testing.T) {
 			// 10 scheduled + 3 transient + 3 customer retries: 16 reattempts.
 			{"thirty-days", "in 30 days", billing.DunningPolicy{Tiers: tiers(daily...), TransientRetryMinutes: ptr([]int{5, 30, 60}), CustomerRetries: ptr(3)}},
 			// The first failure and 5 hourly retries, then 5 by the customer: 11 attempts in a day.
-			{"one-day", "within 24 hours", billing.DunningPolicy{Tiers: tiers(1, 2, 3, 4, 5), CustomerRetries: ptr(5)}},
+			{"one-day", "within 24 hours", billing.DunningPolicy{Tiers: tiers(1, 2, 3, 4, 5), TransientRetryMinutes: ptr([]int{}), CustomerRetries: ptr(5)}},
 			{"cap", "customer_retries must be between 0 and 9", billing.DunningPolicy{CustomerRetries: ptr(10)}},
 			{"negative", "customer_retries must be between 0 and 9", billing.DunningPolicy{CustomerRetries: ptr(-1)}},
 		} {
