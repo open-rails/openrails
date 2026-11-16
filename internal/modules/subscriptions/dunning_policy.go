@@ -30,7 +30,7 @@ func CasePolicy(ctx context.Context, d *db.DB, sub *models.Subscription) (collec
 		if err := json.Unmarshal(sub.DunningPolicy, &declared); err != nil {
 			return collection.Policy{}, fmt.Errorf("subscription %s dunning policy: %w", sub.ID, err)
 		}
-		return collection.PolicyOf(&declared)
+		return collection.RecordedPolicyOf(declared)
 	}
 	return DunningPolicy(ctx, d)
 }

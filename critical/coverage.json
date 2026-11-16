@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 334,
+  "scenario_count": 338,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1297,6 +1297,26 @@
       "id": "OR-J16-S43",
       "journey": "J16",
       "name": "A decline the cardholder can clear is retried by the customer on the same card up to the cap"
+    },
+    {
+      "id": "OR-J16-S50",
+      "journey": "J16",
+      "name": "A softly declined monthly renewal is retried on days 3, 5, 7 and 10 and canceled at its fifth failure"
+    },
+    {
+      "id": "OR-J16-S51",
+      "journey": "J16",
+      "name": "A merchant's customer retry cap is honoured at none, the default and a raised value, and another card is always admitted"
+    },
+    {
+      "id": "OR-J16-S52",
+      "journey": "J16",
+      "name": "A dunning policy whose retries could pass the card networks' reattempt limits is refused"
+    },
+    {
+      "id": "OR-J16-S53",
+      "journey": "J16",
+      "name": "A dunning policy that omits the transient ladder keeps the built-in one, and an empty list has none"
     },
     {
       "id": "OR-J15-S30",

@@ -170,7 +170,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			return err
 		}
 		if payer != uuid.Nil {
-			if err := intents.AdmitCustomerRetry(ctx, q, sub, method.ID); err != nil {
+			if err := intents.AdmitCustomerRetry(ctx, d, sub, method.ID); err != nil {
 				return err
 			}
 		}
