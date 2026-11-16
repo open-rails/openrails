@@ -55,24 +55,32 @@ schema matches the migrations: `SQLC_DATABASE_URL`, or `task sqlc` creates a
 throwaway `openrails_sqlc_vet` database on the local stack
 (`SQLC_ADMIN_DATABASE_URL`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB` override it).
 
-`internal/migrate/postgres/0001_schema.up.sql` is the whole schema, written by
+`internal/migrate/postgres/0001_schema.up.sql` is the baseline, written by
 hand: tables in foreign-key order, each followed by its comments, indexes,
-triggers and the trigger functions only it uses. After v1.0.0 it does not
-change: a schema change is a new numbered migration (`0002_…`) with its
-`api/schema.txt` diff.
+triggers and the trigger functions only it uses. A release has shipped it and
+deployed databases record its content, so a schema change is a new numbered
+migration (`0002_…`) beside it, added to `sqlc.yaml`, with its
+`api/schema.txt` diff. A schema change never edits the baseline.
 
-Before v1 a merged migration is folded into the baseline: apply its effect where
-the objects it touches are defined, delete the numbered file and take it out of
-`sqlc.yaml`. CI's "SQL bindings and query audit" job proves the fold: when a
-pull request into a release candidate changes or removes a migration of its base, `go run
-./scripts/schemaproof` applies the base's chain and the tree's to empty
-databases and fails unless they dump identically (`pg_dump` 18), in `billing`
-and in another schema.
+Rewriting the baseline (a re-squash: numbered migrations merged into it, or its
+statements edited) is a deliberate step of its own, because every deployed
+database must then be settled against the new file. `go run
+./scripts/schemaproof` proves a rewrite: it applies the base's chain and the
+tree's to empty databases and fails unless they dump identically (`pg_dump`
+18), in `billing` and in another schema. CI's "SQL bindings and query audit"
+job runs it when a pull request into a release candidate changes or removes a
+migration of its base. After v1.0.0 the baseline never changes.
 
-A database the current chain does not match is refused at boot, one built by
-the numbered migrations the baseline replaced included: recreate it
-(`task docker-reset`; `DROP DATABASE` elsewhere; for an embedded host, drop the
-schema and delete its rows from `public.migrations` where `app = 'openrails'`).
+The migration step (`New`, `openrails.Migrate`, `openrails migrate up`) settles
+a database that recorded a migration with other content: it compares the
+schema with a fresh build of the migrations the database records, whichever
+monthly partitions exist, re-stamps the record when they are equal and
+otherwise refuses with the difference ([operations](../operations.md)). A start
+with `Config.Database.SkipMigrations` settles nothing: it is refused with
+`ErrMigrationsRequired` until the step has run. Recreate a development database
+that is refused (`task docker-reset`; `DROP DATABASE` elsewhere; for an
+embedded host, drop the schema and delete its rows from `public.migrations`
+where `app = 'openrails'`).
 
 ## Contracts
 

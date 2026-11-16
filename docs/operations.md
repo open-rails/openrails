@@ -111,10 +111,22 @@ processes. There is no instance count, primary or sticky session.
   serving: one instance migrates, the rest wait. Migrations are additive, so the
   previous build runs on the migrated schema. `openrails migrate up` can run
   first as a deploy step; `openrails migrate status` compares the applied ledger
-  with the binary's. The schema is one baseline migration: a database built by
-  an earlier release's numbered migrations is not upgraded, recreate it. From v1
-  every release upgrades any earlier v1 database in place
-  ([compatibility](compatibility.md)).
+  with the binary's. A host that skips migrations at start
+  (`Config.Database.SkipMigrations`) only checks the ledger: it is refused with
+  `ErrMigrationsRequired` until the migration step (`openrails.Migrate`) has run
+  for its build. From v1 every release upgrades any earlier v1 database in
+  place ([compatibility](compatibility.md)).
+- **Older databases:** the schema is one baseline migration and the numbered
+  migrations after it. Where a database recorded the baseline with other
+  content (an earlier release's chain, or a baseline rewritten since), the
+  migration step compares its schema with a fresh build of the migrations it
+  records, whichever monthly partitions exist. Equal: the database is accepted
+  and its record re-stamped. Different: it is refused with the difference and
+  nothing changes; bring it level with the build that carried its migrations,
+  or recreate it. The records of the numbered migrations a baseline replaced
+  stay in `public.migrations` (`app = 'openrails'`): delete every `sequence`
+  but 1 for the schema before the next upgrade, or its first numbered migration
+  is refused as applied by another file.
 
 ## Safety levers
 

@@ -347,7 +347,9 @@ func LLMModel(c *LLMConfig) string {
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {
 	// SkipMigrations makes New validate existing schemas without applying
-	// migrations or preparing startup partitions. Call openrails.Migrate first.
+	// migrations or preparing startup partitions: a migration that is missing,
+	// or was applied with other content, is ErrMigrationsRequired. Call
+	// openrails.Migrate first.
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool `yaml:"skip_migrations" json:"skip_migrations"`
 	// Schema holds OpenRails' tables. Empty is "billing".

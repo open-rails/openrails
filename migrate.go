@@ -8,8 +8,9 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
-// ErrMigrationsRequired means New found an unprepared database while startup
-// migrations were disabled. The underlying validation failure is preserved.
+// ErrMigrationsRequired means New, with startup migrations disabled, found a
+// database Migrate has not prepared for this build: a migration is missing, or
+// was applied with other content. The validation failure is preserved.
 var ErrMigrationsRequired = migrate.ErrMigrationsRequired
 
 // Migrate explicitly prepares OpenRails' schema, initial partitions and River

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 338,
+  "scenario_count": 340,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -787,6 +787,16 @@
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
+    },
+    {
+      "id": "OR-J31-S12",
+      "journey": "J31",
+      "name": "A database whose months differ from a fresh build and whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
+    },
+    {
+      "id": "OR-J31-S13",
+      "journey": "J31",
+      "name": "A start that skips migrations is refused on a baseline record of other content until the migration step has run"
     },
     {
       "id": "OR-J32-S01",
