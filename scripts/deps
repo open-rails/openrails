@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Open advisory alerts of this repository, one line per manifest and package.
+
+Exit 0: nothing fixable is open. 1: a fix is published. 2: the feed could not be read.
+"""
+import json
+import re
+import subprocess
+import sys
+
+SEVERITIES = ("low", "medium", "high", "critical")
+
+
+def fail(message):
+    print("deps: " + message, file=sys.stderr)
+    sys.exit(2)
+
+
+def run(*command):
+    try:
+        done = subprocess.run(command, capture_output=True, text=True)
+    except FileNotFoundError:
+        fail(command[0] + " is not installed")
+    if done.returncode:
+        fail(done.stderr.strip() or " ".join(command) + " failed")
+    return done.stdout
+
+
+def order(version):
+    core, _, pre = version.lstrip("v").partition("-")
+    return [int(part) for part in re.findall(r"\d+", core)], not pre, pre
+
+
+def main():
+    origin = run("git", "remote", "get-url", "origin").strip()
+    repo = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", origin)
+    if not repo:
+        fail("origin is not a GitHub repository: " + origin)
+    out = run("gh", "api", "--paginate", "--jq", ".[]",
+              f"repos/{repo.group(1)}/dependabot/alerts?state=open&per_page=100")
+    packages = {}
+    for line in out.splitlines():
+        alert = json.loads(line)
+        package, found = alert["dependency"]["package"], alert["security_vulnerability"]
+        entry = packages.setdefault((alert["dependency"]["manifest_path"], package["name"]),
+                                    {"ecosystem": package["ecosystem"], "severity": 0, "fixes": [], "unfixed": 0})
+        entry["severity"] = max(entry["severity"], SEVERITIES.index(found["severity"]))
+        fix = (found.get("first_patched_version") or {}).get("identifier")
+        if fix:
+            entry["fixes"].append(fix)
+        else:
+            entry["unfixed"] += 1
+    if not packages:
+        print("no open alerts")
+        return 0
+    rows = [("ECOSYSTEM", "MANIFEST", "PACKAGE", "SEVERITY", "FIX")]
+    for (manifest, name), entry in sorted(packages.items()):
+        fix = max(entry["fixes"], key=order) if entry["fixes"] else "no fix published"
+        if entry["fixes"] and entry["unfixed"]:
+            fix += f" ({entry['unfixed']} without a fix)"
+        rows.append((entry["ecosystem"], manifest, name, SEVERITIES[entry["severity"]], fix))
+    widths = [max(len(row[column]) for row in rows) for column in range(4)]
+    for row in rows:
+        print("  ".join(cell.ljust(width) for cell, width in zip(row, widths)) + "  " + row[4])
+    return 1 if any(entry["fixes"] for entry in packages.values()) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
