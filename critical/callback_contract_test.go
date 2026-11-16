@@ -85,7 +85,7 @@ func recoverSale(t *testing.T, a *authorityWorld, p *providerLedger, fleet *rive
 	require.NoError(t, err)
 	require.NotEmpty(t, jobs.Jobs)
 	for _, row := range jobs.Jobs {
-		if row.State == rivertype.JobStateScheduled || row.State == rivertype.JobStateRetryable {
+		if jobWaits(row) {
 			_, err := fleet.JobRetry(t.Context(), row.ID)
 			require.NoError(t, err)
 		}

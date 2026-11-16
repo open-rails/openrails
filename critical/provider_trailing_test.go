@@ -69,11 +69,11 @@ func settle(t *testing.T, fleet *river.Client[pgx.Tx], kinds ...string) []*river
 		}
 		jobs = res.Jobs
 		for _, j := range jobs {
-			switch j.State {
-			case rivertype.JobStateScheduled, rivertype.JobStateRetryable:
+			switch {
+			case jobWaits(j):
 				_, _ = fleet.JobRetry(t.Context(), j.ID)
 				return false
-			case rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStatePending:
+			case j.State == rivertype.JobStateAvailable || j.State == rivertype.JobStateRunning || j.State == rivertype.JobStatePending:
 				return false
 			}
 		}

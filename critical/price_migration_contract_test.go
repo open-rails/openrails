@@ -385,9 +385,12 @@ func manualFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 // available now; each still checks its own due time.
 func wakeOperations(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
-	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable))
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable, rivertype.JobStateAvailable).First(200))
 	require.NoError(t, err)
 	for _, job := range jobs.Jobs {
+		if !jobWaits(job) {
+			continue
+		}
 		_, err = fleet.JobRetry(t.Context(), job.ID)
 		require.NoError(t, err)
 	}

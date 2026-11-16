@@ -211,22 +211,30 @@ func startVaultFleet(t *testing.T, v *vaultCards) *river.Client[pgx.Tx] {
 	return fleet
 }
 
-// operationsIdle reports no provider operation running or about to run: each
-// woken attempt has recorded its outcome.
+// operationsIdle reports no provider operation running or queued to run: each
+// woken attempt has recorded its outcome. One snoozing is waiting, not working.
 func operationsIdle(t *testing.T, fleet *river.Client[pgx.Tx]) bool {
 	t.Helper()
-	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateAvailable, rivertype.JobStateRunning).First(1))
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateAvailable, rivertype.JobStateRunning).First(200))
 	require.NoError(t, err)
-	return len(jobs.Jobs) == 0
+	for _, job := range jobs.Jobs {
+		if !jobAsleep(job) {
+			return false
+		}
+	}
+	return true
 }
 
 // driveOperations runs provider operations waiting on their backoff; the
 // caller has advanced the business clock past it.
 func driveOperations(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
-	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable).First(100))
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable, rivertype.JobStateAvailable).First(200))
 	require.NoError(t, err)
 	for _, job := range jobs.Jobs {
+		if !jobWaits(job) {
+			continue
+		}
 		_, err := fleet.JobRetry(t.Context(), job.ID)
 		require.NoError(t, err)
 	}

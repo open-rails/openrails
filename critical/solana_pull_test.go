@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,10 +33,17 @@ func operationJobs(t *testing.T, fleet *river.Client[pgx.Tx], states ...rivertyp
 	return jobs.Jobs
 }
 
-// settleOperations waits until no provider operation is being worked.
+// settleOperations waits until no provider operation is being worked; on
+// failure it shows what each operation's job was doing.
 func settleOperations(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
-	require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 20*time.Millisecond)
+	if assert.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 20*time.Millisecond) {
+		return
+	}
+	for _, job := range operationJobs(t, fleet) {
+		t.Logf("provider operation job %d: %s, attempt %d, scheduled %s from now, %s", job.ID, job.State, job.Attempt, time.Until(job.ScheduledAt).Round(time.Millisecond), job.EncodedArgs)
+	}
+	t.FailNow()
 }
 
 func TestSolanaPulls(t *testing.T) {

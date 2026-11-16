@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -149,7 +148,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, jobs.Jobs)
 		for _, row := range jobs.Jobs {
-			if row.State == rivertype.JobStateScheduled || row.State == rivertype.JobStateRetryable {
+			if jobWaits(row) {
 				_, err = queue.JobRetry(t.Context(), row.ID)
 				require.NoError(t, err)
 			}

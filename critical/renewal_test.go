@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,7 +81,7 @@ func runRegisteredFailing(t *testing.T, fleet *river.Client[pgx.Tx], kind string
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		for _, job := range jobs.Jobs {
-			if job.State == rivertype.JobStateScheduled || job.State == rivertype.JobStateRetryable {
+			if jobWaits(job) {
 				_, err = fleet.JobRetry(t.Context(), job.ID)
 				require.NoError(t, err)
 			}

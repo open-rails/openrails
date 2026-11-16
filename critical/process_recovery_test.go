@@ -429,7 +429,7 @@ func TestProcessRecovery(t *testing.T) {
 				require.Eventually(t, func() bool {
 					for _, id := range recoveredJobs {
 						job, err := queue.JobGet(t.Context(), id)
-						if err != nil || (job.State != rivertype.JobStateScheduled && job.State != rivertype.JobStateCompleted) {
+						if err != nil || (!jobWaits(job) && job.State != rivertype.JobStateCompleted) {
 							return false
 						}
 					}
@@ -443,7 +443,7 @@ func TestProcessRecovery(t *testing.T) {
 				for _, job := range pending.Jobs {
 					var args map[string]string
 					require.NoError(t, json.Unmarshal(job.EncodedArgs, &args))
-					if intents[args["intent_id"]] && (job.State == rivertype.JobStateScheduled || job.State == rivertype.JobStateRetryable) {
+					if intents[args["intent_id"]] && jobWaits(job) {
 						_, err = queue.JobRetry(t.Context(), job.ID)
 						require.NoError(t, err)
 					}
@@ -455,7 +455,7 @@ func TestProcessRecovery(t *testing.T) {
 				// held the claim snoozes; drive it now, as its scheduled time would.
 				require.Eventually(t, func() bool {
 					job, err := queue.JobGet(t.Context(), id)
-					if err == nil && job.State == rivertype.JobStateScheduled {
+					if err == nil && jobWaits(job) {
 						_, _ = queue.JobRetry(t.Context(), id)
 					}
 					return err == nil && job.State == rivertype.JobStateCompleted
