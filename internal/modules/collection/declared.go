@@ -14,7 +14,10 @@ func PolicyOf(declared *billing.DunningPolicy) (Policy, error) {
 	if declared == nil {
 		return DefaultPolicy, nil
 	}
-	p := Policy{}
+	p := Policy{CustomerRetries: DefaultCustomerRetries}
+	if declared.CustomerRetries != nil {
+		p.CustomerRetries = *declared.CustomerRetries
+	}
 	for _, t := range declared.Tiers {
 		if t.MaxCycleHours < 0 || t.MaxCycleHours > catalog.MaxDurationHours {
 			return Policy{}, fmt.Errorf("dunning_policy: max_cycle_hours must be between 0 and %d", catalog.MaxDurationHours)
@@ -60,7 +63,8 @@ func PolicyOf(declared *billing.DunningPolicy) (Policy, error) {
 // DeclaredOf is the declared form of a resolved policy: what a dunning case
 // records, so it reads back exactly as it was (#1102).
 func DeclaredOf(p Policy) billing.DunningPolicy {
-	out := billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessKeep, AccessWhileRenewalHeld: billing.DunningAccessKeep}
+	retries := p.CustomerRetries
+	out := billing.DunningPolicy{CustomerRetries: &retries, AccessDuringDunning: billing.DunningAccessKeep, AccessWhileRenewalHeld: billing.DunningAccessKeep}
 	for _, t := range p.Tiers {
 		tier := billing.DunningTier{MaxCycleHours: int(t.MaxCycle / time.Hour)}
 		for _, o := range t.Offsets {

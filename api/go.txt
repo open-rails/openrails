@@ -2147,6 +2147,7 @@ pkg openrails/billing, type DunningEvidence struct, ScheduleLive bool `json:"sch
 pkg openrails/billing, type DunningPolicy struct
 pkg openrails/billing, type DunningPolicy struct, AccessDuringDunning string `json:"access_during_dunning,omitempty"`
 pkg openrails/billing, type DunningPolicy struct, AccessWhileRenewalHeld string `json:"access_while_renewal_held,omitempty"`
+pkg openrails/billing, type DunningPolicy struct, CustomerRetries *int `json:"customer_retries,omitempty"`
 pkg openrails/billing, type DunningPolicy struct, Tiers []DunningTier `json:"tiers"`
 pkg openrails/billing, type DunningPolicy struct, TransientRetryMinutes []int `json:"transient_retry_minutes,omitempty"`
 pkg openrails/billing, type DunningTier struct

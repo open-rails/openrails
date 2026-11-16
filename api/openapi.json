@@ -16466,6 +16466,9 @@
               "type": "integer"
             }
           },
+          "customer_retries": {
+            "type": "integer"
+          },
           "access_during_dunning": {
             "type": "string"
           },

@@ -163,7 +163,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			return ErrRebillUnsupported
 		}
 		if customer {
-			if err := AdmitCustomerRetry(ctx, d.Gen(ctx), sub, method.ID); err != nil {
+			if err := AdmitCustomerRetry(ctx, d, sub, method.ID); err != nil {
 				return err
 			}
 		}

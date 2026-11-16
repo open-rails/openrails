@@ -62,8 +62,9 @@ func boundaryAdvanced(next time.Time, start, end *time.Time) bool {
 }
 
 // DefaultDunningWindow bounds how far past the period end a FAILED renewal is
-// still recoverable (past_due) vs terminal.
-const DefaultDunningWindow = 14 * 24 * time.Hour
+// still recoverable (past_due) vs terminal: the built-in schedule's longest
+// window.
+var DefaultDunningWindow = collection.DefaultPolicy.LongestWindow()
 
 // SubscriptionState is the decider's view of the local row.
 type SubscriptionState struct {

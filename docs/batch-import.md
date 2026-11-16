@@ -267,7 +267,7 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 
 - **Stale `past_due` is canceled, never charged.** Anything past the
   [dunning staleness window](dunning.md) (derived from the
-  billing cycle; 14 days for monthly) gets the local no-charge cancel +
+  billing cycle; 10 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
 - **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
   projecting standing access; Provider Refresh and probes resolve them with

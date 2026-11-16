@@ -27,7 +27,7 @@ import (
 // UnknownReconcileOptions bounds one reconcile pass over the `unknown` cohort.
 type UnknownReconcileOptions struct {
 	MaxPerRail    int           // cap subscriptions pulled per rail per run (0 -> 500)
-	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> 14d)
+	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> DefaultDunningWindow)
 	LookbackCap   time.Duration // never pull a window wider than this (0 -> 3y)
 	WindowSlack   time.Duration // pull from (oldest period end - slack) (0 -> 48h)
 	// Breaker refuses to read absence from an implausibly small roster. Zero

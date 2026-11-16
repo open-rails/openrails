@@ -381,6 +381,13 @@ type BillingPolicyBinding struct {
 type DunningPolicy struct {
 	Tiers                 []DunningTier `json:"tiers"`
 	TransientRetryMinutes []int         `json:"transient_retry_minutes,omitempty"`
+	// CustomerRetries is how many declined attempts of the customer's own
+	// (retry-now, or paying the renewal order) one renewal takes on one card
+	// before only another card is charged. Nil is 3; 0 refuses any retry of a
+	// card the renewal declined; at most 9. A policy whose scheduled,
+	// transient and customer retries together could pass the card networks'
+	// reattempt limits is refused.
+	CustomerRetries *int `json:"customer_retries,omitempty"`
 	// AccessDuringDunning is DunningAccessKeep (default: members keep access
 	// until a confirmed outcome ends it) or DunningAccessSuspend (access ends
 	// with the paid period while a declined renewal is retried).

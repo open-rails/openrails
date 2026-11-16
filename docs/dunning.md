@@ -15,13 +15,26 @@ first failure:
 |---|---|---|---|
 | under 4 days | none | 1 | min(24 h, cycle/2) |
 | 4–27 days | +1 d, +2 d | 3 | 3 days |
-| 28 days and longer | +2 d, +5 d, +9 d, +13 d | 5 | 14 days |
+| 28 days and longer | +2 d, +4 d, +6 d, +9 d | 5 | 10 days |
+
+Counting the first failure as day 1, a monthly renewal is retried on days 3, 5,
+7 and 10; the fifth failure ends the case and cancels the subscription.
 
 A failure older than its staleness window (last offset plus min(24 h, cycle/2))
 is never charged: it parks `unverified` with access kept. An unknown cycle (a
 one-time price behind a membership) gets no schedule and raises
 `life.cadence.unknown`. Each NMI decline costs a fee, which is why this is sparser
 than Stripe's eight retries.
+
+`dunning_policy.customer_retries` is how many declined attempts of the customer's
+own a renewal takes on one card: 3 unless set, at most 9, and 0 refuses any retry
+of a card the renewal declined. A policy is refused (`invalid_param`) when one
+renewal's attempts on a card could pass the card networks' limits. For each tier,
+its scheduled retries, the transient retries and the customer retries total at
+most 15 (Visa allows 15 reattempts in 30 days), and the scheduled attempts inside
+any 24 hours, the first failure included, plus the transient and customer retries
+at most 10 (Mastercard's limit for 24 hours). The built-in monthly tier uses 9 of
+the 15 and 6 of the 10.
 
 What a decline does:
 
@@ -50,10 +63,10 @@ the subscription's card) is refused with no provider call while the subscription
 waits for a new card, unless the latest decline is one the cardholder can clear
 on that card: `authentication_required`, `incorrect_zip` or `incorrect_address`.
 In any state it is refused after a terminal decline held by the destructive
-switch, after an issuer code above, and after 3 declined customer attempts on the
-card for the same renewal ([frontend](frontend.md#orders) has the refusals).
-Another card is always admitted. Customer declines count toward the card-testing
-blocks.
+switch, after an issuer code above, and once the customer's declined attempts on
+the card for the same renewal reach the case's `customer_retries`
+([frontend](frontend.md#orders) has the refusals). Another card is always
+admitted. Customer declines count toward the card-testing blocks.
 
 Terminal failure cancels, revokes access and queues the provider delete. While the
 kill switch is off a terminal outcome leaves the membership `past_due`.
