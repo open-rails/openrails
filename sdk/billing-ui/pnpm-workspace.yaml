@@ -1,6 +1,11 @@
 packages:
   - "."
 
+# Transitive security bump; drop it once eslint and typescript-eslint ask for
+# the fixed range themselves.
+overrides:
+  minimatch: ^11.0.1 # GHSA-g3hv-75wg-m249
+
 ignoreScripts: true
 ignorePnpmfile: true
 strictDepBuilds: true

@@ -28,3 +28,11 @@ Static checks retain source clock/migration/injection guards, compilation and li
 Artifact snapshots run when their build inputs require them. Published releases build/package the tested source and verify the artifacts; they do not repeat the source suite. Deployment uses immutable artifacts and remains distinct from a passing source gate.
 
 The new candidate must complete its entire selected manifest before entering ready CI. A partial implementation is not a passing reduced suite. Full-run timeout is a ceiling; calibrate it from the combined qualified run, not an estimate from test counts.
+
+## Dependencies
+
+No bot opens dependency pull requests. GitHub's advisory feed lists what is vulnerable; `scripts/deps` prints its open alerts by manifest and package, each with the version that fixes it, and exits 1 while a fix is published.
+
+- `Required Security` refuses a pull request while a shipped dependency has a fixable vulnerability. Development-only dependencies are outside that scan; the feed covers them.
+- Updates are one batch per release candidate: run `scripts/deps` when the candidate is cut and bump what it lists in one pull request into it.
+- A Go bump moves every module in step (root, `server`, `examples`, `adapters/authkit`, `critical/server-fixture`); a JavaScript bump moves every lockfile that carries the package.
