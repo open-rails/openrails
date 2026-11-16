@@ -11,7 +11,7 @@ import (
 func dunningPolicyJSON(v any) bool {
 	if !object(map[string]jsonRule{
 		"tiers":                   array(object(map[string]jsonRule{"max_cycle_hours": integerValue, "retry_after_hours": array(integerValue)})),
-		"transient_retry_minutes": array(integerValue), "access_during_dunning": textValue, "access_while_renewal_held": textValue,
+		"transient_retry_minutes": array(integerValue), "customer_retries": integerValue, "access_during_dunning": textValue, "access_while_renewal_held": textValue,
 	})(v) {
 		return false
 	}
@@ -23,6 +23,6 @@ func dunningPolicyJSON(v any) bool {
 	if json.Unmarshal(raw, &declared) != nil {
 		return false
 	}
-	_, err = collection.PolicyOf(&declared)
+	_, err = collection.RecordedPolicyOf(declared)
 	return err == nil
 }

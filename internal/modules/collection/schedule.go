@@ -20,7 +20,7 @@ import (
 //
 //	cycle < 4 days        -> no retries (the first failure is terminal)
 //	4 days <= cycle < 28  -> +1d, +2d                  (3 failures total)
-//	cycle >= 28 days      -> +2d, +5d, +9d, +13d       (5 failures total)
+//	cycle >= 28 days      -> +2d, +4d, +6d, +9d        (5 failures total)
 //	unknown (<= 0)        -> ErrUnknownCycle: nothing is scheduled or charged
 //
 // The staleness window (last offset + slack) fits inside one cycle, so a
@@ -69,12 +69,13 @@ func RecordUnknownCycle(ctx context.Context, q *gen.Queries, merchantID uuid.UUI
 var (
 	// offsetsWeekly: 2 retries, one day apart.
 	offsetsWeekly = []time.Duration{24 * time.Hour, 48 * time.Hour}
-	// offsetsMonthly: progressive +2d, +5d, +9d, +13d (gaps 2,3,4,4).
+	// offsetsMonthly: the first failure is day 1; retries on days 3, 5, 7
+	// and 10.
 	offsetsMonthly = []time.Duration{
 		2 * 24 * time.Hour,
-		5 * 24 * time.Hour,
+		4 * 24 * time.Hour,
+		6 * 24 * time.Hour,
 		9 * 24 * time.Hour,
-		13 * 24 * time.Hour,
 	}
 )
 

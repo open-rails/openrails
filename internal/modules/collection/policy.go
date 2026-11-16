@@ -13,6 +13,9 @@ import (
 type Policy struct {
 	Tiers     []Tier
 	Transient []time.Duration
+	// CustomerRetries is how many declined attempts of the customer's own one
+	// renewal takes on one card; then only another card is charged.
+	CustomerRetries int
 	// SuspendAccess ends access with the paid period while a declined renewal
 	// is retried. By default access lasts until a confirmed outcome.
 	SuspendAccess bool
@@ -28,20 +31,41 @@ type Tier struct {
 	Offsets  []time.Duration
 }
 
+// The card networks' limits on charging a card again after a decline: Visa
+// allows 15 reattempts of a declined transaction in 30 days; Mastercard's
+// excessive-attempt limits are 10 attempts in 24 hours and 35 in 30 days.
+// Visa's is the tighter 30-day limit.
+const (
+	networkReattempts30d = 15
+	networkAttempts24h   = 10
+)
+
+const (
+	// DefaultCustomerRetries applies when a policy names none.
+	DefaultCustomerRetries = 3
+	// MaxCustomerRetries is the most any policy may allow: what the 24-hour
+	// limit leaves beside the renewal's first attempt.
+	MaxCustomerRetries = networkAttempts24h - 1
+)
+
 // DefaultPolicy is the built-in schedule: no retries below 4 days, +1d/+2d
-// below 28 days, +2d/+5d/+9d/+13d from 28 days.
+// below 28 days, +2d/+4d/+6d/+9d from 28 days.
 var DefaultPolicy = Policy{
 	Tiers: []Tier{
 		{MaxCycle: MinRetryCycleHours * time.Hour},
 		{MaxCycle: MonthlyCycleHours * time.Hour, Offsets: offsetsWeekly},
 		{Offsets: offsetsMonthly},
 	},
-	Transient: TransientLadder,
+	Transient:       TransientLadder,
+	CustomerRetries: DefaultCustomerRetries,
 }
 
 // Validate refuses a policy that could dun a period into the next one: every
 // tier's window (last offset + slack) must end inside the shortest cycle it
-// covers, offsets must increase, and the ladder stays short and bounded.
+// covers, offsets must increase, and the ladder stays short and bounded. It
+// also refuses one whose attempts on a card for one renewal (the first, every
+// scheduled and transient retry, and the customer's own) could pass the card
+// networks' limits.
 func (p Policy) Validate() error {
 	if len(p.Tiers) == 0 {
 		return errors.New("dunning policy needs at least one tier")
@@ -80,7 +104,38 @@ func (p Policy) Validate() error {
 			return errors.New("transient retries run between 1 minute and 2 hours after the attempt")
 		}
 	}
+	if p.CustomerRetries < 0 || p.CustomerRetries > MaxCustomerRetries {
+		return fmt.Errorf("customer_retries must be between 0 and %d", MaxCustomerRetries)
+	}
+	// Transient and customer retries can land at any time, so they count in
+	// every window; a case's scheduled retries all count toward the 30 days.
+	anytime := len(p.Transient) + p.CustomerRetries
+	for i, t := range p.Tiers {
+		if n := len(t.Offsets) + anytime; n > networkReattempts30d {
+			return fmt.Errorf("dunning tier %d: %d retries of one renewal on a card (scheduled, transient and the customer's) pass the card networks' %d in 30 days", i+1, n, networkReattempts30d)
+		}
+		if n := busiestDay(t.Offsets) + anytime; n > networkAttempts24h {
+			return fmt.Errorf("dunning tier %d: %d attempts of one renewal on a card within 24 hours (scheduled, transient and the customer's) pass the card networks' %d", i+1, n, networkAttempts24h)
+		}
+	}
 	return nil
+}
+
+// busiestDay is the most scheduled attempts, the first failure included, that
+// fall within any 24 hours.
+func busiestDay(offsets []time.Duration) int {
+	at := append([]time.Duration{0}, offsets...)
+	most := 0
+	for i, from := range at {
+		n := 0
+		for _, o := range at[i:] {
+			if o-from <= 24*time.Hour {
+				n++
+			}
+		}
+		most = max(most, n)
+	}
+	return most
 }
 
 // RetryOffsets is the schedule for a billing cycle in hours.
@@ -146,6 +201,17 @@ func (p Policy) Outlook(cycleHours, failures int, next time.Time) (left int, fin
 		final = at
 	}
 	return left, final, nil
+}
+
+// LongestWindow is the longest window any cycle gets.
+func (p Policy) LongestWindow() time.Duration {
+	last := time.Duration(0)
+	for _, t := range p.Tiers {
+		if n := len(t.Offsets); n > 0 {
+			last = max(last, t.Offsets[n-1])
+		}
+	}
+	return last + maxWindowSlack
 }
 
 // Window is how long past the missed charge collection may still attempt it.

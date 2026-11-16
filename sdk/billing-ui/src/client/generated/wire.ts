@@ -1021,6 +1021,7 @@ export type DunningEvidence = {
 export type DunningPolicy = {
   tiers: DunningTier[]
   transient_retry_minutes?: number[]
+  customer_retries?: number
   access_during_dunning?: string
   access_while_renewal_held?: string
 }

@@ -111,7 +111,7 @@ func lotExpired(t *testing.T, client *openrails.Client, id billing.CreditGrantID
 func suspendHeld(w *world) {
 	m := w.cfg.Merchants["alpha"]
 	m.MerchantSettings.DunningPolicy = &billing.DunningPolicy{Tiers: []billing.DunningTier{
-		{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 120, 216, 312}},
+		{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 96, 144, 216}},
 	}, AccessWhileRenewalHeld: billing.DunningAccessSuspend}
 	w.cfg.Merchants["alpha"] = m
 }
