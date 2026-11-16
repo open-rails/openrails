@@ -42,12 +42,15 @@ func TestDunningSchedule(t *testing.T) {
 		for i, offset := range retries {
 			failures := i + 1
 			runRegistered(t, fleet, "openrails.billing_pass", 2)
+			// A decline is recorded before the case advances: wait for the
+			// retry it scheduled, not for the attempt count alone.
 			var declined *billing.Subscription
 			require.Eventually(t, func() bool {
 				var err error
 				declined, err = a.alpha.GetSubscription(t.Context(), sub.ID)
-				return err == nil && declined.Dunning != nil && declined.Dunning.Attempts == failures
-			}, 20*time.Second, 20*time.Millisecond, "failure %d must be counted", failures)
+				return err == nil && declined.Dunning != nil && declined.Dunning.Attempts == failures &&
+					declined.Dunning.NextRetryAt != nil && declined.Dunning.NextRetryAt.Equal(due.Add(offset))
+			}, 20*time.Second, 20*time.Millisecond, "failure %d must be counted and its retry scheduled", failures)
 			require.Equal(t, billing.SubscriptionStatus("past_due"), declined.Status)
 			require.Equal(t, len(retries)-i, *declined.Dunning.RetriesLeft)
 			require.Equal(t, due.Add(offset), *declined.Dunning.NextRetryAt)
