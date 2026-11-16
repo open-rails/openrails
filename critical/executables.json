@@ -514,6 +514,12 @@
     "OR-J31-S40": [
       "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
     ],
+    "OR-J31-S12": [
+      "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
+    ],
+    "OR-J31-S13": [
+      "TestBaselineAdoption/OR-J31-S13/a-start-that-skips-migrations-is-refused-on-an-edited-baseline-until-the-migration-step-runs"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],
