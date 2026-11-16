@@ -23,6 +23,6 @@ func dunningPolicyJSON(v any) bool {
 	if json.Unmarshal(raw, &declared) != nil {
 		return false
 	}
-	_, err = collection.PolicyOf(&declared)
+	_, err = collection.RecordedPolicyOf(declared)
 	return err == nil
 }

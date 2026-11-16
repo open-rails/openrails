@@ -14,12 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// customerRetries declares alpha's dunning policy on the built-in schedule
-// with n customer retries; nil leaves the setting out.
-func customerRetries(n *int) func(*world) {
+// dunningPolicy declares alpha's dunning policy.
+func dunningPolicy(policy billing.DunningPolicy) func(*world) {
 	return func(w *world) {
 		m := w.cfg.Merchants["alpha"]
-		m.MerchantSettings.DunningPolicy = &billing.DunningPolicy{CustomerRetries: n}
+		m.MerchantSettings.DunningPolicy = &policy
 		w.cfg.Merchants["alpha"] = m
 	}
 }
@@ -92,7 +91,7 @@ func TestDunningSchedule(t *testing.T) {
 			{"raised", ptr(4), 4},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				a, p, sub := purchasedMembershipWith(t, 7*24, customerRetries(tc.setting))
+				a, p, sub := purchasedMembershipWith(t, 7*24, dunningPolicy(billing.DunningPolicy{CustomerRetries: tc.setting}))
 				require.NotNil(t, sub.PaymentMethodID)
 				p.core.SetDecline("4242", "incorrect_zip")
 				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
@@ -151,7 +150,7 @@ func TestDunningSchedule(t *testing.T) {
 			policy        billing.DunningPolicy
 		}{
 			// 10 scheduled + 3 transient + 3 customer retries: 16 reattempts.
-			{"thirty-days", "in 30 days", billing.DunningPolicy{Tiers: tiers(daily...), TransientRetryMinutes: []int{5, 30, 60}, CustomerRetries: ptr(3)}},
+			{"thirty-days", "in 30 days", billing.DunningPolicy{Tiers: tiers(daily...), TransientRetryMinutes: ptr([]int{5, 30, 60}), CustomerRetries: ptr(3)}},
 			// The first failure and 5 hourly retries, then 5 by the customer: 11 attempts in a day.
 			{"one-day", "within 24 hours", billing.DunningPolicy{Tiers: tiers(1, 2, 3, 4, 5), CustomerRetries: ptr(5)}},
 			{"cap", "customer_retries must be between 0 and 9", billing.DunningPolicy{CustomerRetries: ptr(10)}},
@@ -168,7 +167,7 @@ func TestDunningSchedule(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &state))
 		require.Nil(t, state.DunningPolicy, "a refused policy is not stored")
 		// 10 scheduled + 2 transient + 3 customer retries: 15 reattempts, the limit.
-		status, raw = patch(&billing.DunningPolicy{Tiers: tiers(daily...), TransientRetryMinutes: []int{5, 30}, CustomerRetries: ptr(3)})
+		status, raw = patch(&billing.DunningPolicy{Tiers: tiers(daily...), TransientRetryMinutes: ptr([]int{5, 30}), CustomerRetries: ptr(3)})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		state = billing.MerchantConfigurationState{}
 		require.NoError(t, json.Unmarshal(raw, &state))
@@ -177,5 +176,39 @@ func TestDunningSchedule(t *testing.T) {
 		require.Equal(t, 3, *state.DunningPolicy.CustomerRetries)
 		require.Len(t, state.DunningPolicy.Tiers, 3)
 		require.Equal(t, daily, state.DunningPolicy.Tiers[2].RetryAfterHours)
+	})
+	t.Run("OR-J16-S53/an-omitted-transient-ladder-is-the-built-in-one-and-an-empty-list-is-none", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			policy   billing.DunningPolicy
+			recorded string
+			next     time.Duration
+			left     int
+		}{
+			// A try-again answer is retried five minutes on and spends no retry.
+			{"omitted", billing.DunningPolicy{CustomerRetries: ptr(2)}, "[5, 30]", 5 * time.Minute, 3},
+			// With no ladder it is an ordinary failure on the weekly schedule.
+			{"empty", billing.DunningPolicy{CustomerRetries: ptr(2), TransientRetryMinutes: ptr([]int{})}, "[]", 24 * time.Hour, 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a, p, sub := purchasedMembershipWith(t, 7*24, dunningPolicy(tc.policy))
+				due := *sub.CurrentPeriodEndsAt
+				p.core.SetDecline("4242", "try_again_later")
+				a.clock.Advance(due.Sub(a.clock.Now()))
+				fleet := startFleet(t, a.world)
+				runRegistered(t, fleet, "openrails.billing_pass", 2)
+				declined := subscriptionState(t, a, sub.ID, "past_due")
+				require.NotNil(t, declined.Dunning)
+				require.Equal(t, 1, declined.Dunning.Attempts)
+				require.Equal(t, due.Add(tc.next), *declined.Dunning.NextRetryAt)
+				require.Equal(t, tc.left, *declined.Dunning.RetriesLeft)
+				// The case records the ladder it runs under, the default written out.
+				var recorded string
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT (dunning_policy->'transient_retry_minutes')::text FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1",
+					sub.ID.UUID()).Scan(&recorded))
+				require.Equal(t, tc.recorded, recorded)
+				require.Len(t, p.effects(t), 1)
+			})
+		}
 	})
 }

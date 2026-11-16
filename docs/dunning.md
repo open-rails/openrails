@@ -26,15 +26,25 @@ one-time price behind a membership) gets no schedule and raises
 `life.cadence.unknown`. Each NMI decline costs a fee, which is why this is sparser
 than Stripe's eight retries.
 
-`dunning_policy.customer_retries` is how many declined attempts of the customer's
-own a renewal takes on one card: 3 unless set, at most 9, and 0 refuses any retry
-of a card the renewal declined. A policy is refused (`invalid_param`) when one
-renewal's attempts on a card could pass the card networks' limits. For each tier,
-its scheduled retries, the transient retries and the customer retries total at
-most 15 (Visa allows 15 reattempts in 30 days), and the scheduled attempts inside
-any 24 hours, the first failure included, plus the transient and customer retries
-at most 10 (Mastercard's limit for 24 hours). The built-in monthly tier uses 9 of
-the 15 and 6 of the 10.
+An answer that says to try again (`try_again_later`, `processing_error`,
+`communication_error`, `issuer_unavailable`) is first retried 5 and 30 minutes
+after the attempt. These transient retries are not failures on the schedule; once
+they are spent the answer counts as one.
+
+A `dunning_policy` keeps the built-in value of every field it leaves out: `tiers`
+(the table above), `transient_retry_minutes` (5 and 30; an empty list means no
+transient retries) and `customer_retries` (3).
+
+`customer_retries` is how many declined attempts of the customer's own a renewal
+takes on one card: at most 9, and 0 refuses any retry of a card the renewal
+declined. A policy is refused (`invalid_param`) when one renewal's attempts on a
+card could pass the card networks' limits. For each tier, its scheduled retries,
+the transient retries and the customer retries total at most 15 (Visa allows 15
+reattempts in 30 days), and the scheduled attempts inside any 24 hours, the first
+failure included, plus the transient and customer retries at most 10
+(Mastercard's limit for 24 hours). The built-in monthly tier uses 9 of the 15 and
+6 of the 10; with the built-in tiers and transient retries `customer_retries` can
+be at most 6.
 
 What a decline does:
 

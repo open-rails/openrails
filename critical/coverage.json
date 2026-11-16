@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 337,
+  "scenario_count": 338,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1312,6 +1312,11 @@
       "id": "OR-J16-S52",
       "journey": "J16",
       "name": "A dunning policy whose retries could pass the card networks' reattempt limits is refused"
+    },
+    {
+      "id": "OR-J16-S53",
+      "journey": "J16",
+      "name": "A dunning policy that omits the transient ladder keeps the built-in one, and an empty list has none"
     },
     {
       "id": "OR-J15-S30",

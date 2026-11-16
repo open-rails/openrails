@@ -376,11 +376,12 @@ type BillingPolicyBinding struct {
 // ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
 // subscription's cycle applies, and the last tier (MaxCycleHours 0) takes
 // every longer cycle. RetryAfterHours are measured from the first decline.
-// TransientRetryMinutes is the quick ladder for processor try-again answers,
+// TransientRetryMinutes (default: the built-in ladder, 5 and 30 minutes; an
+// empty list is none) is the quick ladder for processor try-again answers,
 // which does not count as dunning failures.
 type DunningPolicy struct {
 	Tiers                 []DunningTier `json:"tiers"`
-	TransientRetryMinutes []int         `json:"transient_retry_minutes,omitempty"`
+	TransientRetryMinutes *[]int        `json:"transient_retry_minutes,omitempty"`
 	// CustomerRetries is how many declined attempts of the customer's own
 	// (retry-now, or paying the renewal order) one renewal takes on one card
 	// before only another card is charged. Nil is 3; 0 refuses any retry of a
