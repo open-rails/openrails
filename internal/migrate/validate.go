@@ -18,9 +18,12 @@ import (
 
 var ErrMigrationsRequired = errors.New("openrails: database migrations are required")
 
-// Validate checks existing OpenRails and River ledgers without any DDL.
-// Startup does not prepare partitions here; normal runtime maintenance keeps
-// its existing behavior, and explicit Apply prepares initial partitions.
+// Validate checks existing OpenRails and River ledgers and writes nothing:
+// every migration of the chain is recorded, by the same file and with the
+// content this build carries. Apply settles a difference; Validate only
+// refuses it. Startup does not prepare partitions here; normal runtime
+// maintenance keeps its existing behavior, and explicit Apply prepares
+// initial partitions.
 func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return errors.New("openrails: validating migrations needs a Postgres pool")
@@ -55,6 +58,10 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		if record.Filename != "" && record.Filename != migration.Name {
 			return validationError(fmt.Errorf("schema %q has migration %q where %q is required", schema, record.Filename, migration.Name))
 		}
+		if edited(record, migration) {
+			return validationError(fmt.Errorf("schema %q applied %s with content %.12s where this build carries %.12s",
+				schema, migration.Name, record.Digest, migratekit.ContentDigest(migration.Content)))
+		}
 	}
 	if opts.RiverSchema != "" {
 		if err := riverhelpers.ValidateMigrations(ctx, pool, opts.RiverSchema); err != nil {
@@ -62,6 +69,14 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		}
 	}
 	return nil
+}
+
+// edited reports a record whose content is not the migration's, by the rule
+// migratekit's strict integrity settles: an edit that leaves the SQL tokens
+// alone is not one, and a record without a digest cannot be compared.
+func edited(record migratekit.AppliedRecord, migration migratekit.Migration) bool {
+	return record.Digest != "" && record.Digest != migratekit.ContentDigest(migration.Content) &&
+		(record.SemanticDigest == "" || record.SemanticDigest != migratekit.SemanticContentDigest(migration.Content))
 }
 
 func validationError(err error) error {
