@@ -119,10 +119,23 @@ func readablePrice(price yaml.MapSlice) yaml.MapSlice {
 	code, _ := yamlValue(price, "currency").(string)
 	amount, err := strconv.ParseInt(units, 10, 64)
 	_, known := moneyutil.LookupCurrency(code)
+	months, calendar := yamlInt(yamlValue(price, "billing_interval_months"))
+	calendar = calendar && months > 0
 	out := make(yaml.MapSlice, 0, len(price))
 	for _, item := range price {
 		key, _ := item.Key.(string)
 		switch {
+		case calendar && key == "billing_interval_hours":
+			continue
+		case calendar && key == "billing_interval_months":
+			value := fmt.Sprintf("%d months", months)
+			if months == 1 {
+				value = "1 month"
+			}
+			item = yaml.MapItem{Key: "billing_interval", Value: value}
+		case calendar && key == "access_duration_hours" && item.Value == nil:
+			// Omission means the actual calendar period; "forever" does not.
+			continue
 		case err == nil && known && key == "unit_amount":
 			continue
 		case err == nil && known && key == "currency":
@@ -282,6 +295,9 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		var price catalog.ApplyPrice
 		price.UnitAmount = catalog.Value(row.Amount)
 		price.Currency = catalog.Value(row.Currency)
+		if row.BillingIntervalMonths != nil {
+			price.BillingIntervalMonths = catalog.Value(int(*row.BillingIntervalMonths))
+		}
 		price.BillingIntervalHours = catalog.Null[int]()
 		if row.BillingIntervalHours != nil {
 			price.BillingIntervalHours = catalog.Value(int(*row.BillingIntervalHours))

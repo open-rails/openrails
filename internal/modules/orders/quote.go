@@ -61,7 +61,7 @@ func (q *Quote) Preview(options []billing.OrderPaymentOption) billing.OrderPrevi
 	for _, l := range q.Lines {
 		line := billing.OrderPreviewLine{Quantity: l.Quantity, UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: l.Ownership, Refusal: l.Refusal}
 		if l.Price != nil {
-			line.PriceID, line.BillingIntervalHours, line.AccessDurationHours = l.Price.PublicID, l.Price.BillingIntervalHours, l.Price.AccessDurationHours
+			line.PriceID, line.BillingIntervalHours, line.BillingIntervalMonths, line.AccessDurationHours = l.Price.PublicID, l.Price.BillingIntervalHours, l.Price.BillingIntervalMonths, l.Price.AccessDurationHours
 		}
 		if l.Product != nil {
 			line.ProductID, line.Description = billing.ProductID(l.Product.ID), l.Product.DisplayName
@@ -159,7 +159,7 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	}
 	sold := map[uuid.UUID][]catalog.OwnershipPrice{}
 	for _, p := range current {
-		sold[p.ProductID] = append(sold[p.ProductID], catalog.OwnershipPrice{Recurring: p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0, AccessDuration: p.AccessDurationHours != nil})
+		sold[p.ProductID] = append(sold[p.ProductID], catalog.OwnershipPrice{Recurring: p.BillingIntervalHours != nil || p.BillingIntervalMonths != nil, AccessDuration: p.AccessDurationHours != nil})
 	}
 
 	out := &Quote{Lines: make([]QuotedLine, len(lines))}

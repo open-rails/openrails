@@ -392,6 +392,8 @@ func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPla
 			skip(ErrChangeAlreadyScheduled.Error())
 		case !sameCurrency(c.from, plan.target):
 			skip(ErrPriceCurrencyMismatch.Error())
+		case c.capability == capabilityEngine && (c.from.BillingIntervalMonths != nil || plan.target.BillingIntervalMonths != nil):
+			block("calendar subscription plan changes are not supported")
 		case c.capability == capabilityUserAction:
 			block(migrationBlockedRailUserAction)
 		case c.capability == capabilityAutoNMI && !nmiCyclesCompatible(c.from, plan.target):

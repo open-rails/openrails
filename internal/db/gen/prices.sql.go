@@ -341,24 +341,26 @@ WHERE merchant_id=$1::uuid AND product_id=$2::uuid AND key=$3::text
   AND amount=$4::bigint AND currency=$5::text
   AND access_duration_hours IS NOT DISTINCT FROM $6::int
   AND billing_interval_hours IS NOT DISTINCT FROM $7::int
-  AND trial_unit_amount IS NOT DISTINCT FROM $8::bigint
-  AND trial_duration_hours IS NOT DISTINCT FROM $9::int
-  AND customer_amount IS NOT DISTINCT FROM $10::jsonb
-  AND quantity IS NOT DISTINCT FROM $11::jsonb
+  AND billing_interval_months IS NOT DISTINCT FROM $8::int
+  AND trial_unit_amount IS NOT DISTINCT FROM $9::bigint
+  AND trial_duration_hours IS NOT DISTINCT FROM $10::int
+  AND customer_amount IS NOT DISTINCT FROM $11::jsonb
+  AND quantity IS NOT DISTINCT FROM $12::jsonb
 `
 
 type GetPriceByTermsParams struct {
-	MerchantID           uuid.UUID
-	ProductID            uuid.UUID
-	Key                  string
-	Amount               int64
-	Currency             string
-	AccessDurationHours  *int32
-	BillingIntervalHours *int32
-	TrialUnitAmount      *int64
-	TrialDurationHours   *int32
-	CustomerAmount       []byte
-	Quantity             []byte
+	MerchantID            uuid.UUID
+	ProductID             uuid.UUID
+	Key                   string
+	Amount                int64
+	Currency              string
+	AccessDurationHours   *int32
+	BillingIntervalHours  *int32
+	BillingIntervalMonths *int32
+	TrialUnitAmount       *int64
+	TrialDurationHours    *int32
+	CustomerAmount        []byte
+	Quantity              []byte
 }
 
 func (q *Queries) GetPriceByTerms(ctx context.Context, arg GetPriceByTermsParams) (BillingPrice, error) {
@@ -370,6 +372,7 @@ func (q *Queries) GetPriceByTerms(ctx context.Context, arg GetPriceByTermsParams
 		arg.Currency,
 		arg.AccessDurationHours,
 		arg.BillingIntervalHours,
+		arg.BillingIntervalMonths,
 		arg.TrialUnitAmount,
 		arg.TrialDurationHours,
 		arg.CustomerAmount,

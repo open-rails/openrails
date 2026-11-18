@@ -68,6 +68,9 @@ func ScheduleChange(ctx context.Context, d *db.DB, sub *models.Subscription, c N
 		if err != nil {
 			return nil, err
 		}
+		if sub.CollectionPolicy == models.CollectionPolicyEngine && price.BillingIntervalMonths != nil {
+			return nil, apperr.Invalidf("calendar subscription plan changes are not supported")
+		}
 		product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: sub.MerchantID, ID: price.ProductID})
 		if err != nil {
 			return nil, err

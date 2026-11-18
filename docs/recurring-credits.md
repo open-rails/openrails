@@ -43,6 +43,5 @@ recurring prices cannot switch between access and credit delivery: create anothe
 product, preserving its existing subscribers' accepted terms. Ordinary updates to
 the credit amount/expiry affect new purchases, not an existing recurring agreement.
 
-A 30-day period is 720 hours; it is not a calendar month. Calendar-month support is
-independent. Apply the catalog explicitly; deploying a new binary does not itself
-change the catalog or charge a customer.
+A 30-day period is 720 hours. See [billing intervals](billing-intervals.md) for
+calendar-month cadence. Apply the catalog explicitly to change prices.

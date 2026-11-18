@@ -112,6 +112,7 @@ export function PriceChangeWizard({
             currency: price.currency,
             access_duration_hours: price.access_duration_hours ?? undefined,
             billing_interval_hours: price.billing_interval_hours ?? undefined,
+            billing_interval_months: price.billing_interval_months ?? undefined,
             trial_unit_amount: price.trial_unit_amount ?? undefined,
             trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,

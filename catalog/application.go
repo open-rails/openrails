@@ -182,16 +182,17 @@ type ApplyProduct struct {
 // declaration to one existing price. Currency is fiat or SOL, never a
 // stablecoin.
 type ApplyPrice struct {
-	ID                   string                `json:"id,omitempty"`
-	Currency             Field[string]         `json:"currency,omitzero"`
-	UnitAmount           Field[int64]          `json:"unit_amount,omitzero"`
-	AccessDurationHours  Field[int]            `json:"access_duration_hours,omitzero"`
-	BillingIntervalHours Field[int]            `json:"billing_interval_hours,omitzero"`
-	Archived             Field[bool]           `json:"archived,omitzero"`
-	TrialUnitAmount      Field[int64]          `json:"trial_unit_amount,omitzero"`
-	TrialDurationHours   Field[int]            `json:"trial_duration_hours,omitzero"`
-	CustomerAmount       Field[CustomerAmount] `json:"customer_amount,omitzero"`
-	Quantity             Field[Quantity]       `json:"quantity,omitzero"`
+	ID                    string                `json:"id,omitempty"`
+	Currency              Field[string]         `json:"currency,omitzero"`
+	UnitAmount            Field[int64]          `json:"unit_amount,omitzero"`
+	AccessDurationHours   Field[int]            `json:"access_duration_hours,omitzero"`
+	BillingIntervalHours  Field[int]            `json:"billing_interval_hours,omitzero"`
+	BillingIntervalMonths Field[int]            `json:"billing_interval_months,omitzero"`
+	Archived              Field[bool]           `json:"archived,omitzero"`
+	TrialUnitAmount       Field[int64]          `json:"trial_unit_amount,omitzero"`
+	TrialDurationHours    Field[int]            `json:"trial_duration_hours,omitzero"`
+	CustomerAmount        Field[CustomerAmount] `json:"customer_amount,omitzero"`
+	Quantity              Field[Quantity]       `json:"quantity,omitzero"`
 	// SellVia restricts the methods the price sells through: card (the
 	// merchant's card vault and charge PSPs) and solana. Null or omitted on a
 	// new price: every method the merchant has. It is not a term.
@@ -274,6 +275,11 @@ func (a Application) Validate() error {
 			if price.Quantity.Set && !price.Quantity.Null {
 				if err := price.Quantity.Value.Validate(); err != nil {
 					return fmt.Errorf("price %q: %w", priceKey, err)
+				}
+			}
+			if price.BillingIntervalMonths.Set && !price.BillingIntervalMonths.Null {
+				if price.BillingIntervalMonths.Value < 1 || price.BillingIntervalMonths.Value > 1200 || price.BillingIntervalHours.Set && !price.BillingIntervalHours.Null {
+					return fmt.Errorf("price %q: billing_interval_months must be 1 to 1200 and excludes billing_interval_hours", priceKey)
 				}
 			}
 			for _, duration := range []Field[int]{price.BillingIntervalHours, price.AccessDurationHours, price.TrialDurationHours} {

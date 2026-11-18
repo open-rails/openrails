@@ -71,6 +71,7 @@ export const en = {
       hour: { one: "every hour", other: "every {count} hours" },
       day: { one: "every day", other: "every {count} days" },
       week: { one: "every week", other: "every {count} weeks" },
+      month: { one: "monthly", other: "every {count} months" },
     },
     per: {
       hour: { one: "/ hour", other: "/ {count} hours" },

@@ -36,14 +36,15 @@ type Renewal struct {
 	Description    string
 	// Quantity is the seats of a per-seat price; Amount is the period's
 	// total.
-	Quantity             *int
-	Amount               int64
-	Currency             string
-	PeriodStart          time.Time
-	PeriodEnd            time.Time
-	BillingIntervalHours *int
-	AccessDurationHours  *int
-	CreditGrant          *models.CreditGrantSnapshot
+	Quantity              *int
+	Amount                int64
+	Currency              string
+	PeriodStart           time.Time
+	PeriodEnd             time.Time
+	BillingIntervalHours  *int
+	BillingIntervalMonths *int
+	AccessDurationHours   *int
+	CreditGrant           *models.CreditGrantSnapshot
 }
 
 // OpenRenewal is the order of r's period, created the first time.
@@ -77,6 +78,10 @@ func OpenRenewal(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, r Re
 		if err != nil {
 			return gen.BillingOrder{}, err
 		}
+		months, err := int32Ptr(r.BillingIntervalMonths)
+		if err != nil {
+			return gen.BillingOrder{}, err
+		}
 		access, err := int32Ptr(r.AccessDurationHours)
 		if err != nil {
 			return gen.BillingOrder{}, err
@@ -95,7 +100,7 @@ func OpenRenewal(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, r Re
 		line := uuidutil.NewV7()
 		if err := q.CreateOrderLine(ctx, gen.CreateOrderLineParams{MerchantID: merchantID, ID: line, OrderID: id, CustomerID: r.CustomerID, Position: 0,
 			PriceID: r.PriceID, ProductID: r.ProductID, Description: r.Description, Quantity: quantity, UnitAmount: unit, Amount: r.Amount,
-			Ownership: string(catalog.OwnershipUnique), ClaimKey: &claim, BillingIntervalHours: interval, AccessDurationHours: access, CreditGrant: credit, Now: now}); err != nil {
+			Ownership: string(catalog.OwnershipUnique), ClaimKey: &claim, BillingIntervalHours: interval, BillingIntervalMonths: months, AccessDurationHours: access, CreditGrant: credit, Now: now}); err != nil {
 			return gen.BillingOrder{}, err
 		}
 		if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: merchantID, ID: line, SubscriptionID: &r.SubscriptionID}); err != nil {

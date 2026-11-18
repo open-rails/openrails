@@ -140,7 +140,13 @@ export function SubscriptionsPanel({
             locale
           )
           const scheduled = isEnding(s)
-          const renews = live && !scheduled && !!s.price?.billing_interval_hours
+          const renews =
+            live &&
+            !scheduled &&
+            !!(
+              s.price?.billing_interval_hours ||
+              s.price?.billing_interval_months
+            )
           const when = !live
             ? s.status === "canceled"
               ? t("subscriptions.noMorePayments")

@@ -205,6 +205,9 @@
     "OR-J14-S06": [
       "TestRenewalAgreements/OR-J14-S06/each-paid-agreement-renews-once-and-two-refuse"
     ],
+    "OR-J14-S07": [
+      "TestCalendarSubscription/OR-J14-S07/calendar-anchor-survives-short-month-restart-and-archive"
+    ],
     "OR-J15-S01": [
       "TestNMIRecovery/OR-J15-S01/missing-callback-is-repaired-from-provider-query"
     ],

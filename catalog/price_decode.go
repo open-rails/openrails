@@ -36,12 +36,28 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 		decoded.UnitAmount = Value(amount)
 		decoded.Currency = Value(currency)
 	}
+	if decoded.BillingInterval.Set {
+		if decoded.BillingIntervalHours.Set || decoded.BillingIntervalMonths.Set {
+			return fmt.Errorf("billing_interval cannot be combined with billing_interval_hours or billing_interval_months")
+		}
+		decoded.BillingIntervalHours = Null[int]()
+		if !decoded.BillingInterval.Null {
+			hours, months, err := ParseBillingInterval(decoded.BillingInterval.Value)
+			if err != nil {
+				return err
+			}
+			if months > 0 {
+				decoded.BillingIntervalMonths = Value(months)
+			} else {
+				decoded.BillingIntervalHours = Value(hours)
+			}
+		}
+	}
 	for _, field := range []struct {
 		name  string
 		text  Field[string]
 		hours *Field[int]
 	}{
-		{"billing_interval", decoded.BillingInterval, &decoded.BillingIntervalHours},
 		{"trial_duration", decoded.TrialDuration, &decoded.TrialDurationHours},
 	} {
 		if !field.text.Set {
@@ -69,6 +85,9 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 			return err
 		}
 		decoded.AccessDurationHours = hours
+		if decoded.BillingIntervalMonths.Set && !decoded.BillingIntervalMonths.Null && hours.Null {
+			return fmt.Errorf("a calendar price cannot grant access forever; omit access_duration to follow its billing period")
+		}
 	}
 	*p = ApplyPrice(decoded.price)
 	return nil

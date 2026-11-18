@@ -56,6 +56,9 @@ var (
 // share it.
 func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, target *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	var terms subscriptions.InitialMembershipTerms
+	if current.BillingIntervalMonths != nil || target.BillingIntervalMonths != nil {
+		return terms, &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "calendar subscription plan changes are not supported"}
+	}
 	if sub.Status != models.StatusActive || (sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.After(now)) {
 		return terms, errTierChangeRenewalDue
 	}
@@ -90,6 +93,9 @@ func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, t
 // them free.
 func seatIncreaseQuote(sub *models.Subscription, charged *uuid.UUID, current *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	var terms subscriptions.InitialMembershipTerms
+	if current.BillingIntervalMonths != nil {
+		return terms, &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "calendar subscription plan changes are not supported"}
+	}
 	if sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(now) {
 		return terms, errTierChangeRenewalDue
 	}
@@ -362,6 +368,9 @@ func scheduleRefusal(err error) error {
 // migration is canceled only by staff, and a pending tier change by changing
 // back.
 func (s *PurchaseService) engineScheduleAdmissible(c *changeTarget) error {
+	if c.currentPrice.BillingIntervalMonths != nil || c.price.BillingIntervalMonths != nil {
+		return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "calendar subscription plan changes are not supported"}
+	}
 	sub := c.sub
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return ErrTierChangePeriodUnknown

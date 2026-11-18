@@ -76,7 +76,7 @@ func (s *Service) validateProductCreditUpdate(ctx context.Context, id billing.Pr
 		return err
 	}
 	for _, price := range prices {
-		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, BillingIntervalHours: price.BillingIntervalHours, CustomerAmount: price.CustomerAmount,
+		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, BillingIntervalHours: price.BillingIntervalHours, BillingIntervalMonths: price.BillingIntervalMonths, CustomerAmount: price.CustomerAmount,
 			TrialUnitAmount: price.TrialUnitAmount, TrialDurationHours: price.TrialDurationHours, Quantity: price.Quantity}); err != nil {
 			return err
 		}

@@ -162,6 +162,10 @@ func ValidateValues(p Profile, values []*string) error {
 				if x <= 0 || x > int64(catalog.MaxDurationHours) {
 					return bad()
 				}
+			case "prices.billing_interval_months", "order_lines.billing_interval_months":
+				if x < 1 || x > 1200 {
+					return bad()
+				}
 			case "subscriptions.quantity", "payments.quantity", "grants.quantity", "product_access.quantity":
 				if x < 1 {
 					return bad()

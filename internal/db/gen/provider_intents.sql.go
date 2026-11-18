@@ -1578,7 +1578,9 @@ WHERE merchant_id=$1::uuid AND id IN (
     JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
     JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
     WHERE l.merchant_id=$1::uuid AND l.subscription_id=$2::uuid
-      AND o.status='complete' AND o.completed_at + make_interval(hours => l.billing_interval_hours)=$3::timestamptz
+      AND o.status='complete'
+      AND (o.completed_at + make_interval(hours => l.billing_interval_hours)=$3::timestamptz
+        OR ((o.completed_at AT TIME ZONE 'UTC') + make_interval(months => l.billing_interval_months)) AT TIME ZONE 'UTC'=$3::timestamptz)
       AND i.status='succeeded' AND i.intent_type='nmi_sale' AND i.payload ? 'order_id')
 ORDER BY id LIMIT 2
 `

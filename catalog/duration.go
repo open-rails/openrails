@@ -57,3 +57,25 @@ func ParseDurationHours(input string) (int, error) {
 	}
 	return count * multiplier, nil
 }
+
+// ParseBillingInterval keeps calendar months separate from fixed durations.
+// Exactly one result is nonzero. Access and trial durations remain fixed.
+func ParseBillingInterval(input string) (hours, months int, err error) {
+	parts := strings.Fields(input)
+	if len(parts) == 2 {
+		unit := strings.ToLower(parts[1])
+		if unit == "month" || unit == "months" || unit == "year" || unit == "years" {
+			count, parseErr := strconv.Atoi(parts[0])
+			multiplier := 1
+			if unit == "year" || unit == "years" {
+				multiplier = 12
+			}
+			if parseErr != nil || count < 1 || count > 1200/multiplier {
+				return 0, 0, fmt.Errorf("billing interval must be 1 to 1200 calendar months")
+			}
+			return 0, count * multiplier, nil
+		}
+	}
+	hours, err = ParseDurationHours(input)
+	return hours, 0, err
+}

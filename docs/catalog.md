@@ -69,7 +69,7 @@ Price fields:
 |---|---|
 | `amount` | `9.99 USD` or `1 SOL`; sets amount and currency. Must convert exactly; stablecoins are refused (they are what a buyer pays a fiat price with) |
 | `unit_amount`, `currency` | the numeric form (native units; a decimal string in JSON); never with `amount` |
-| `billing_interval` | time between payments (`30 days`); null for one-time. `billing_interval_hours` is the numeric form |
+| `billing_interval` | time between payments (`30 days` or `1 month`), null for one-time. See [billing intervals](billing-intervals.md) for `billing_interval_hours` and `billing_interval_months` |
 | `access_duration` | how long each payment grants; default the billing interval, or `forever` for a one-off (`forever` is one-off only). `access_duration_hours` |
 | `trial_unit_amount`, `trial_duration` | a first phase; refused by every rail's new-subscription purchase today |
 | `quantity: {min, max}` | sold per seat; the amount is one seat's |
@@ -78,9 +78,10 @@ Price fields:
 | `archived` | `true` retires, `false` reactivates |
 
 Durations take `3 days`, `24 hours` or the `_hours` numbers; zero is invalid, null
-clears, omission preserves. A recurring price of ours sells by card (OpenRails
-charges and renews) and on Solana, where apply publishes its on-chain plan (USDC,
-owned by the first listed `solana.crankers`, paying the merchant's treasury).
+clears, omission preserves. OpenRails charges and renews our recurring card
+prices. Fixed intervals also support Solana, where apply publishes the on-chain
+plan (USDC, owned by the first listed `solana.crankers`, paying the merchant's
+treasury).
 
 **Meters and rate cards.** `meters` declare `event_type`, `value_property`,
 `aggregation`, `unit` and `group_by`; a product's `rate_cards` bind a meter to a

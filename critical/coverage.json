@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 340,
+  "scenario_count": 341,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -337,6 +337,11 @@
       "id": "OR-J14-S06",
       "journey": "J14",
       "name": "An order's sale, a renewal's collection and an upgrade's membership each authorize one renewal; two agreements at one boundary refuse"
+    },
+    {
+      "id": "OR-J14-S07",
+      "journey": "J14",
+      "name": "Calendar-month renewal retains its original anchor through short months, restart and archive restore while fixed periods retain their duration"
     },
     {
       "id": "OR-J15-S01",

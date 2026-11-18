@@ -37,6 +37,9 @@ type priceWrite struct {
 // Nested calls reuse the existing transaction through a savepoint.
 func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.Price, error) {
 	req, product, priceID := w.req, w.product, w.id
+	if !w.providerOwned {
+		w.providerMonths = req.BillingIntervalMonths
+	}
 	var price *models.Price
 	err := s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		prices := catalog.NewPriceService(s.catalogDatabase().NewWithPgxTx(tx))
