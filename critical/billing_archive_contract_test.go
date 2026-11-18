@@ -435,20 +435,30 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, s.engine.Close(context.Background()))
 		fleet := quietFleet(t, target)
 		require.NotEmpty(t, operationJobs(t, fleet), "the restore queues the pull's wake")
-		settleOperations(t, fleet)
+		// Pause the workers at each clock advance. River's JobRetry leaves a
+		// running wake alone, so it could otherwise snooze against the old clock.
+		require.NoError(t, fleet.Stop(t.Context()))
 		sends := s.wire.sends()
-		advanceTo(target, due.Add(pullMargin))
+		pullAt := due.Add(pullMargin)
+		advanceTo(target, pullAt)
 		wakeOperations(t, fleet)
-		settleOperations(t, fleet)
+		require.NoError(t, fleet.Start(t.Context()))
+		retryAt := pullAt.Add(5 * time.Minute)
+		intents := pgx.Identifier{target.schema, "provider_intents"}.Sanitize()
+		require.Eventually(t, func() bool {
+			var reason string
+			err := target.pool.QueryRow(t.Context(), "SELECT last_failure_reason FROM "+intents+" WHERE intent_type = 'solana_pull' AND status = 'pending' AND next_attempt_at = $1", retryAt).Scan(&reason)
+			return err == nil && strings.Contains(reason, "readonly (restored)")
+		}, 20*time.Second, 20*time.Millisecond, "the due pull is parked while the restored merchant is read-only")
+		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
 		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
-		// The held pull is looked at again after its park interval.
-		target.clock.Advance(5 * time.Minute)
-		landedAt := target.clock.Now()
+		advanceTo(target, retryAt)
 		wakeOperations(t, fleet)
+		require.NoError(t, fleet.Start(t.Context()))
 		require.Eventually(t, func() bool {
 			current, err := client.GetSubscription(t.Context(), sub.ID)
-			return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.Equal(landedAt.Add(168*time.Hour))
+			return err == nil && current.CurrentPeriodEndsAt != nil && current.CurrentPeriodEndsAt.Equal(retryAt.Add(168*time.Hour))
 		}, 20*time.Second, 20*time.Millisecond, "the restored pull renews the period at its due time")
 		require.Equal(t, sends+1, s.wire.sends())
 		payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
