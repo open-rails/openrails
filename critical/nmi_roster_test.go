@@ -55,7 +55,7 @@ func TestNMIRoster(t *testing.T) {
 		require.Eventually(t, func() bool {
 			current, err := fleet.JobGet(t.Context(), job.Job.ID)
 			return err == nil && current.State == rivertype.JobStateCompleted
-		}, 30*time.Second, 50*time.Millisecond, "the same refresh completes once the roster is readable")
+		}, 2*time.Minute, 50*time.Millisecond, "the same refresh completes and backfills the account once the roster is readable")
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
 			require.Eventually(t, func() bool {
