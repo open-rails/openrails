@@ -586,7 +586,7 @@ type refreshMerchantJob struct {
 	MerchantID uuid.UUID `json:"merchant_id"`
 }
 
-func (refreshMerchantJob) Kind() string { return "openrails.provider_refresh_merchant" }
+func (refreshMerchantJob) Kind() string { return "openrails.provider_refresh_requested" }
 
 // refreshMerchant runs the merchant's provider refresh through every window
 // it has to read.
@@ -594,7 +594,7 @@ func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UU
 	t.Helper()
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
-	job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: merchant}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: merchant}, &river.InsertOpts{Queue: "provider_refresh"})
 	require.NoError(t, err)
 	deadline := time.NewTimer(3 * time.Minute)
 	defer deadline.Stop()

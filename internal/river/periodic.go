@@ -5,8 +5,6 @@ import (
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-
-	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // Gate is when a periodic pass is declared.
@@ -48,8 +46,6 @@ var Periodics = []Periodic{
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
 	// Each fleet flushes the closed hours of its own Redis's denial counters.
 	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, Gate: WithRedis, PerFleet: true},
-	// Fans out one refresh job per merchant with a PSP.
-	{Args: ProviderRefreshArgs{}, Every: providerrecovery.RefreshInterval},
 }
 
 // topOfHour is the cron schedule 0 * * * * in UTC.

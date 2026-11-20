@@ -176,7 +176,7 @@ func (iw *importWorld) hostBook(t *testing.T, asOf time.Time, subs ...billing.De
 
 func TestPSPReconcile(t *testing.T) {
 	t.Run("OR-J38-S20/manual-reconcile-proposes-and-writes-nothing", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := openPeriod(iw)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.nmi.AddPlan(nmimock.Plan{ID: "silver", Name: "Silver", Amount: "10.00", Days: 30})
@@ -299,7 +299,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S21/legacy-book-then-pull-provider-wins", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30})
 		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
@@ -374,7 +374,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S22/pull-then-legacy-book-is-skipped", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
 		prices := iw.premium(t, "current19")
@@ -415,7 +415,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S23/legacy-row-landed-between-pull-and-apply-is-corrected-at-apply", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30})
 		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
@@ -439,7 +439,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S24/reconcile-skips-rows-moved-since-the-pull", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := openPeriod(iw)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.nmi.AddPlan(nmimock.Plan{ID: "silver", Name: "Silver", Amount: "10.00", Days: 30})
@@ -488,7 +488,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S25/product-change-waits-for-a-person", func(t *testing.T) {
-		iw := reconcileWorld(t, "stripe")
+		iw := newImportWorld(t, "stripe")
 		iw.stripe.AddProduct("prod_basic", "Basic")
 		iw.stripe.AddProduct("prod_pro", "Pro")
 		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
@@ -537,7 +537,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S26/reconcile-refuses-an-implausible-roster", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.premium(t, "gold")
@@ -571,7 +571,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S27/proposal-routes-admit-a-person", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := openPeriod(iw)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.premium(t, "gold")
@@ -711,7 +711,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S28/a-dismissed-correction-is-never-applied", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := openPeriod(iw)
 		for _, p := range []nmimock.Plan{{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30}, {ID: "current19", Name: "Current", Amount: "19.00", Days: 30},
 			{ID: "current17", Name: "Promo", Amount: "17.00", Days: 30}} {
@@ -754,7 +754,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S29/provider-refresh-leaves-a-pulls-proposals", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30})
 		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
@@ -803,7 +803,7 @@ func TestPSPReconcile(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts", func(t *testing.T) {
-		iw := reconcileWorld(t, "stripe")
+		iw := newImportWorld(t, "stripe")
 		iw.stripe.AddProduct("prod_basic", "Basic")
 		iw.stripe.AddPrice(stripemock.Price{ID: "price_basic", Product: "prod_basic", Amount: 999, Interval: "month"})
 		product, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "basic", DisplayName: "Basic", Entitlements: []string{"member:basic"}})
@@ -926,28 +926,6 @@ func (iw *importWorld) proposalsAll(t *testing.T, pull billing.PSPImportID) []bi
 		out = append(out, page.Items...)
 	}
 	return out
-}
-
-// reconcileWorld is an import world without the legacy provider refresh,
-// which reads the PSP on its own clock and would record what a scenario
-// leaves to the reconcile.
-func reconcileWorld(t *testing.T, psps ...string) *importWorld {
-	t.Helper()
-	iw := newImportWorld(t, psps...)
-	// The fleet's scheduler queues the merchant's refresh shortly after it
-	// starts; it runs before any scenario data exists or is cancelled.
-	require.Eventually(t, func() bool {
-		jobs, err := iw.fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_refresh"))
-		require.NoError(t, err)
-		for _, job := range jobs.Jobs {
-			if job.FinalizedAt == nil {
-				_, err := iw.fleet.JobCancel(t.Context(), job.ID)
-				require.NoError(t, err)
-			}
-		}
-		return len(jobs.Jobs) > 0
-	}, 30*time.Second, 50*time.Millisecond, "the scheduler queues the merchant's refresh")
-	return iw
 }
 
 // openPeriod is a 30-day member's start whose period ends tomorrow: the

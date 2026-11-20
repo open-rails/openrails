@@ -378,17 +378,6 @@ func (q *Queries) MarkPSPCredentialDuplicate(ctx context.Context, arg MarkPSPCre
 	return err
 }
 
-const merchantHasPSPs = `-- name: MerchantHasPSPs :one
-SELECT EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = $1::uuid)
-`
-
-func (q *Queries) MerchantHasPSPs(ctx context.Context, merchantID uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, merchantHasPSPs, merchantID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const pSPHeldBilling = `-- name: PSPHeldBilling :one
 SELECT
     (SELECT count(*) FROM billing.payment_methods m

@@ -59,14 +59,13 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if cfg.RescueStuckJobsAfter == 0 {
 			cfg.RescueStuckJobsAfter = max(riverjobs.RescueAfter, cfg.JobTimeout)
 		}
-		// The PSP import queue is added to every fleet, the host's too: a job
-		// on a queue no fleet serves never runs.
-		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers, riverjobs.QueuePSPImport: riverPSPImportQueueMaxWorkers}
-		refreshQueue := riverjobs.QueueBilling
+		queues := map[string]int{
+			riverjobs.QueueBilling:         standaloneRiverBillingQueueMaxWorkers,
+			riverjobs.QueuePSPImport:       riverPSPImportQueueMaxWorkers,
+			riverjobs.QueueProviderRefresh: riverProviderRefreshQueueMaxWorkers,
+		}
 		if !host {
 			queues[river.QueueDefault] = standaloneRiverDefaultQueueMaxWorkers
-			queues[riverjobs.QueueProviderRefresh] = standaloneRiverProviderRefreshQueueMaxWorkers
-			refreshQueue = riverjobs.QueueProviderRefresh
 		}
 		for name, count := range queues {
 			if _, present := cfg.Queues[name]; !present {
@@ -76,7 +75,7 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 				return fmt.Errorf("required River queue %q is disabled", name)
 			}
 		}
-		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
+		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers); err != nil {
 			return err
 		}
 		cfg.PeriodicJobs = append(cfg.PeriodicJobs, r.buildRiverPeriodicJobs(cfg)...)

@@ -26,14 +26,12 @@ const DefaultTimeout = 10 * time.Minute
 // a long pass is never rescued while it runs inside its budget.
 const RescueAfter = 10 * time.Minute
 
-// kinds are OpenRails' job kinds and their timeouts: an hour for the passes
-// that read every merchant's providers; two for a PSP import; every scan's for
-// the billing pass.
+// kinds are OpenRails' job kinds and their timeouts. Provider refresh gets an
+// hour, PSP import gets two hours, and the billing pass uses its scan budgets.
 var kinds = map[string]time.Duration{
 	balancelook.Kind:                     DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
 	KindAdmissionDenialFlush:             DefaultTimeout,
-	KindProviderRefresh:                  DefaultTimeout,
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,
@@ -42,7 +40,7 @@ var kinds = map[string]time.Duration{
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
-	KindProviderRefreshMerchant:          time.Hour,
+	KindProviderRefreshRequested:         time.Hour,
 	KindMerchantHealth:                   time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,

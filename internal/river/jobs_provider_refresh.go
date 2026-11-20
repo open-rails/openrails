@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"sort"
 	"time"
 
@@ -27,187 +26,61 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 const (
-	KindProviderRefresh         = "openrails.provider_refresh"
-	KindProviderRefreshMerchant = "openrails.provider_refresh_merchant"
+	KindProviderRefreshRequested = "openrails.provider_refresh_requested"
 
-	// QueueProviderRefresh bounds refresh concurrency in standalone: a small
-	// MaxWorkers cap keeps many merchants from stampeding a provider's API
-	// budget. Embedded hosts run the kind on QueueBilling.
+	// QueueProviderRefresh bounds provider reads independently of billing work.
 	QueueProviderRefresh = "provider_refresh"
 
-	providerRefreshDomainEvents = "events"
-	defaultRefreshOverlap       = 24 * time.Hour
-	defaultRefreshSafetyLag     = 5 * time.Minute
-	defaultRefreshBatch         = 8 * 24 * time.Hour
-	// defaultRefreshStagger spreads the scheduler's fan-out so merchant pull
-	// windows don't align on the tick instant.
-	defaultRefreshStagger = 30 * time.Minute
+	defaultRefreshOverlap   = 24 * time.Hour
+	defaultRefreshSafetyLag = 5 * time.Minute
+	defaultRefreshBatch     = 8 * 24 * time.Hour
 )
 
-// ProviderRefreshArgs is the periodic scheduler kind: it fans out one
-// ProviderRefreshMerchantArgs job per merchant.
-type ProviderRefreshArgs struct{}
-
-func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
-
-func (ProviderRefreshArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: QueueBilling, MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByPeriod: providerrecovery.RefreshInterval, ByState: outstanding}}
-}
-
-// ProviderRefreshMerchantArgs is one merchant's refresh job.
-type ProviderRefreshMerchantArgs struct {
+// ProviderRefreshRequestArgs is an operator's request to refresh one merchant.
+type ProviderRefreshRequestArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
 }
 
-func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
+func (ProviderRefreshRequestArgs) Kind() string { return KindProviderRefreshRequested }
 
-// providerRefreshUniqueStates is the default unique set minus completed: one
-// in-flight job per merchant, re-enqueueable next tick, so overlapping
-// scheduler passes never double-refresh a merchant.
-var providerRefreshUniqueStates = []rivertype.JobState{
-	rivertype.JobStateAvailable,
-	rivertype.JobStatePending,
-	rivertype.JobStateRetryable,
-	rivertype.JobStateRunning,
-	rivertype.JobStateScheduled,
-}
-
-// ProviderRefreshSchedulerWorker is the periodic umbrella: it enqueues one
-// refresh job per active merchant that has a PSP, spread evenly over Stagger.
-// River supplies per-merchant error isolation; the next pass resumes a
-// merchant's incomplete refresh. The bounded queue caps refresh concurrency.
-type ProviderRefreshSchedulerWorker struct {
-	WorkerDefaults[ProviderRefreshArgs]
-	DB     *db.DB
-	Config *config.Config
-	Clock  clockwork.Clock
-
-	// MerchantQueue is where per-merchant jobs land ("" = QueueProviderRefresh).
-	MerchantQueue string
-	// Stagger is the fan-out spread window (0 = defaultRefreshStagger). Slot 0
-	// is immediate, so a single-merchant (embedded) boot refreshes right away.
-	Stagger time.Duration
-}
-
-func (ProviderRefreshSchedulerWorker) Kind() string { return KindProviderRefresh }
-
-func (w *ProviderRefreshSchedulerWorker) now() time.Time {
-	if w.Clock != nil {
-		return w.Clock.Now().UTC()
+func (ProviderRefreshRequestArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       QueueProviderRefresh,
+		MaxAttempts: 5,
+		UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: outstanding},
 	}
-	return time.Now().UTC()
 }
 
-func (w *ProviderRefreshSchedulerWorker) stagger() time.Duration {
-	if w.Stagger > 0 {
-		return w.Stagger
+// RequestProviderRefresh queues one merchant's refresh, coalescing requests
+// while work for that merchant is already outstanding.
+func RequestProviderRefresh(ctx context.Context, database *db.DB, id billing.MerchantID) (*rivertype.JobInsertResult, error) {
+	if id.IsZero() {
+		return nil, fmt.Errorf("provider refresh requires a merchant")
 	}
-	return defaultRefreshStagger
-}
-
-func (w *ProviderRefreshSchedulerWorker) merchantQueue() string {
-	if w.MerchantQueue != "" {
-		return w.MerchantQueue
-	}
-	return QueueProviderRefresh
-}
-
-// merchantHasRailAccounts reports whether the merchant declares any PSP.
-// Archived PSPs count (drain pulls still arm). Environment is not filtered: a
-// wrong-environment PSP enqueues a job that arms nothing (fail open, cheap).
-func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
-	var exists bool
-	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
-	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
-		// The explicit merchant_id predicate is the scope.
+	var requested *rivertype.JobInsertResult
+	err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		exists, err = gen.New(tx).MerchantHasPSPs(tctx, mid)
+		requested, err = database.InsertRiverJobTx(ctx, tx, ProviderRefreshRequestArgs{MerchantID: id.UUID()}, nil)
 		return err
 	})
-	return exists, err
+	if err != nil {
+		return nil, err
+	}
+	return requested, nil
 }
 
-func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
-	inserter, err := river.ClientFromContextSafely[pgx.Tx](ctx)
-	if err != nil {
-		return fmt.Errorf("provider refresh scheduler: river client: %w", err)
-	}
-	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("provider refresh scheduler: list merchants: %w", err)
-	}
-	// Shuffle kills the ListActiveMerchantIDs order bias: no merchant is
-	// systematically last in every window.
-	// #nosec G404 -- this is scheduling fairness, not a security-sensitive random choice.
-	rand.Shuffle(len(merchantIDs), func(i, j int) { merchantIDs[i], merchantIDs[j] = merchantIDs[j], merchantIDs[i] })
-
-	now := w.now()
-	var spacing time.Duration
-	if n := len(merchantIDs); n > 0 {
-		spacing = w.stagger() / time.Duration(n)
-	}
-	// A merchant with no PSP has nothing to refresh: skip it before enqueue.
-	var enqueued, deduped, skipped, failed, slot int
-	for _, mid := range merchantIDs {
-		ok, err := w.merchantHasRailAccounts(ctx, mid)
-		if err != nil {
-			// Fail open: a broken predicate must not starve refresh.
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: accounts predicate failed; enqueueing anyway")
-		} else if !ok {
-			skipped++
-			continue
-		}
-		res, err := inserter.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: mid}, &river.InsertOpts{
-			Queue:       w.merchantQueue(),
-			ScheduledAt: now.Add(time.Duration(slot) * spacing),
-			UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
-		})
-		slot++
-		if err != nil {
-			failed++
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: enqueue merchant refresh failed")
-			continue
-		}
-		if res != nil && res.UniqueSkippedAsDuplicate {
-			deduped++
-		} else {
-			enqueued++
-		}
-	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"merchants":           len(merchantIDs),
-		"enqueued":            enqueued,
-		"deduped":             deduped,
-		"skipped_no_accounts": skipped,
-		"enqueue_errors":      failed,
-		"queue":               w.merchantQueue(),
-		"stagger":             cadence.FormatDuration(w.stagger()),
-	}).Info("Provider Refresh: scheduled merchant refresh jobs")
-	if failed > 0 {
-		// The next pass retries; per-merchant unique keys make it idempotent.
-		return fmt.Errorf("provider refresh scheduler: %d/%d enqueues failed", failed, len(merchantIDs))
-	}
-	return nil
-}
-
-// ProviderRefreshWorker is one merchant's provider-read refresh. It keeps
-// provider truth fresh without remote mutations: bounded event pulls with
-// durable watermarks and the unknown-cohort reconcile (the one
-// per-subscription verification path). Provider outages leave
-// watermarks in place for the next pass. Fetchers and probers arm per
-// merchant, inside its scope, from its PSPs; nothing credentialed is cached
-// across merchants.
+// ProviderRefreshWorker processes an operator request for one merchant. It
+// reads provider events in bounded windows with durable watermarks. Fetchers
+// and probers use the merchant's own configured PSP accounts.
 type ProviderRefreshWorker struct {
 	StripeClients *stripeapi.Factory
-	WorkerDefaults[ProviderRefreshMerchantArgs]
+	WorkerDefaults[ProviderRefreshRequestArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
@@ -228,14 +101,14 @@ type ProviderRefreshWorker struct {
 	// Positive usage-order recovery does not authorize provider or lifecycle writes.
 	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
 
-	// Overlap is re-read for late provider indexing; Batch bounds the span
-	// of one read, the rest continuing in the next job.
+	// Overlap is re-read for late provider indexing; Batch bounds one window
+	// before the same request continues with the next window.
 	Overlap   time.Duration
 	SafetyLag time.Duration
 	Batch     time.Duration
 }
 
-func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshMerchant }
+func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshRequested }
 
 func (w *ProviderRefreshWorker) now() time.Time {
 	if w.Clock != nil {
@@ -244,7 +117,7 @@ func (w *ProviderRefreshWorker) now() time.Time {
 	return time.Now().UTC()
 }
 
-func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshMerchantArgs]) error {
+func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshRequestArgs]) error {
 	if w.DB == nil {
 		return fmt.Errorf("provider refresh: db not configured")
 	}
@@ -253,7 +126,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return fmt.Errorf("provider refresh: merchant_id required")
 	}
 
-	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshMerchant).WithField("merchant_id", mid)
+	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshRequested).WithField("merchant_id", mid)
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
@@ -295,8 +168,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"unarmed":          stats.Unarmed,
 	}).Info("Provider Refresh: pass completed")
 	if err != nil {
-		// Merchant connection failed — nothing ran; river retries with backoff.
-		// Lane failures stay best-effort (watermarks resume them next tick).
 		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
 	}
 	if stats.More {
@@ -309,10 +180,8 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return river.JobSnooze(time.Second)
 	}
 	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
-		// The next scheduled pass is the retry: watermarks resume the work, and
-		// a retrying job would hold the merchant's unique slot from it.
-		logger.Warn("Provider Refresh: pass incomplete; the next scheduled pass resumes it")
-		return nil
+		return fmt.Errorf("provider refresh for %s incomplete: provider errors %d, watermark errors %d, verification errors %d, convergence errors %d",
+			mid, stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
 	}
 	if stats.Held > 0 {
 		// Every read completed. Unresolved financial observations remain in
@@ -435,6 +304,9 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	}
 	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, builder, billing.MerchantID(mid), w.now(), opts)
 	err = errors.Join(verifyErr, err)
+	if len(res.RailErrors) > 0 {
+		err = errors.Join(err, fmt.Errorf("verification incomplete for %d provider rails", len(res.RailErrors)))
+	}
 	if res.Held > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
 			Warn("Provider Refresh: unknown-cohort cancellations held by the cancel gate (kill switch, arming or budget); the rows stay unverified")

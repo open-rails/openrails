@@ -820,6 +820,9 @@
     "OR-J38-S71": [
       "TestPSPReconcile/OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target"
     ],
+    "OR-J38-S72": [
+      "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
+    ],
     "OR-J38-S35": [
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
     ],

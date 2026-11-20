@@ -68,7 +68,7 @@ const (
 	// #719: the global cap on concurrent per-merchant provider refresh jobs —
 	// the simple, honest per-provider rate limit (thousands of merchants share
 	// each provider's API budget; a small worker cap is the brake).
-	standaloneRiverProviderRefreshQueueMaxWorkers = 4
+	riverProviderRefreshQueueMaxWorkers = 4
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2

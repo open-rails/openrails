@@ -26,10 +26,7 @@ import (
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // OpenRails' own River and the host fleet's RiverJobs use this registry.
-// merchantRefreshQueue routes the per-merchant refresh jobs: the bounded
-// QueueProviderRefresh in standalone, QueueBilling for embedded hosts (whose
-// river clients only configure that queue).
-func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers, merchantRefreshQueue string) error {
+func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
 	if err := r.validateBillingWorkerRuntime(); err != nil {
 		return err
 	}
@@ -50,16 +47,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add operator alert worker: %w", err)
 	}
 	intentRegistry := r.buildIntentRegistry(clock)
-	// Provider refresh: the periodic kind is a scheduler that fans out one
-	// staggered, per-merchant-unique refresh job, skipping merchants with no PSPs.
-	if err := addWorker(workers, &riverjobs.ProviderRefreshSchedulerWorker{
-		DB:            r.DB,
-		Config:        r.Config,
-		Clock:         clock,
-		MerchantQueue: merchantRefreshQueue,
-	}); err != nil {
-		return fmt.Errorf("add provider refresh scheduler worker: %w", err)
-	}
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
@@ -67,9 +54,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		}
 		r.Verifier.Start()
 	}
-	// The per-merchant body: bounded provider event pulls, the unknown-cohort
-	// reconcile (the one per-subscription verification path), CCBill DataLink,
-	// and scoped convergence after refresh writes.
+	// An operator request runs bounded window pulls, CCBill DataLink and
+	// reconciliation for the merchant.
 	if err := addWorker(workers, &riverjobs.ProviderRefreshWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,

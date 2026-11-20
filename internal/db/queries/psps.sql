@@ -94,9 +94,6 @@ WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
 RETURNING *;
 
--- name: MerchantHasPSPs :one
-SELECT EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
-
 -- name: CountPSPOpenObligations :many
 SELECT psp.id AS psp_id,
        ((SELECT count(*) FROM billing.subscriptions sub
