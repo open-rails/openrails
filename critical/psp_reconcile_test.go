@@ -664,6 +664,52 @@ func TestPSPReconcile(t *testing.T) {
 		require.Positive(t, held, "what OpenRails holds stays held")
 	})
 
+	t.Run("OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target", func(t *testing.T) {
+		iw := bootImportWorldDeclaring(t, true, func(w *world) {
+			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 1}
+		}, "nmi")
+		iw.fleet.PeriodicJobs().Clear()
+		iw.start(t)
+		start := openPeriod(iw)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
+		iw.premium(t, "gold")
+		alice := iw.nmiMember(t, iw.alice.Email, "gold", "20.00", start)
+		bob := iw.nmiMember(t, iw.bob.Email, "gold", "20.00", start)
+		iw.nmiMember(t, "unlinked-roster@example.com", "gold", "20.00", start)
+		first := iw.manual(t, "nmi")
+		iw.apply(t, first.ID)
+		aliceSub := subscriptionOf(t, iw, customerOf(iw.alice), alice)
+		bobSub := subscriptionOf(t, iw, customerOf(iw.bob), bob)
+		iw.nmi.DeleteSchedule(alice)
+		iw.nmi.DeleteSchedule(bob)
+		latest := iw.manual(t, "nmi")
+		findings := iw.proposals(t, latest.ID)
+		one := proposalOf(t, findings, billing.ChangeCancelSubscription, aliceSub.ID.String())
+		two := proposalOf(t, findings, billing.ChangeCancelSubscription, bobSub.ID.String())
+		enableLifecycleMaintenance(t, iw.authorityWorld)
+		approve := func(key string, ids ...billing.FindingID) billing.ProposalResults {
+			status, raw := iw.request(t, http.MethodPost, "/v1/merchant/proposals/approve", iw.aliceToken,
+				billing.ApproveProposalsParams{IDs: ids}, map[string]string{"Idempotency-Key": key})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var results billing.ProposalResults
+			require.NoError(t, json.Unmarshal(raw, &results))
+			require.Len(t, results.Data, len(ids))
+			return results
+		}
+		got := approve("approve-two-targets", one.ID, two.ID)
+		require.Equal(t, billing.ProposalApproved, got.Data[0].Outcome, "%+v", got.Data[0].Error)
+		require.Equal(t, billing.ProposalHeld, got.Data[1].Outcome, "%+v", got.Data[1].Error)
+		require.Equal(t, billing.CodeDestructiveActionsHeld, got.Data[1].Error.Code)
+		require.Equal(t, "canceled", iw.held(t, alice).Status)
+		require.Equal(t, "active", iw.held(t, bob).Status)
+		// A fresh HTTP key bypasses response replay and reaches proposal resolution.
+		replay := approve("approve-first-again", one.ID)
+		require.Equal(t, billing.ProposalAlreadyResolved, replay.Data[0].Outcome)
+		var count int
+		require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT count(*) FROM %s WHERE merchant_id = $1 AND kind = 'cancel_subscription'`, iw.table("destructive_actions")), iw.alpha.MerchantID().UUID()).Scan(&count))
+		require.Equal(t, 1, count, "only the applied cancellation spends the allowance")
+	})
+
 	t.Run("OR-J38-S28/a-dismissed-correction-is-never-applied", func(t *testing.T) {
 		iw := reconcileWorld(t, "nmi")
 		start := openPeriod(iw)

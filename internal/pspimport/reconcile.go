@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -390,7 +391,7 @@ func (im *Importer) noteMoved(ctx context.Context, row gen.BillingPspImport, ref
 // run in the name of the person who asked to apply it, then hands the held
 // rows a host book landed, unchanged since the pull read them, to the
 // provider's evidence.
-func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspImport) error {
+func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspImport, approvalActor *destructive.Actor) error {
 	q := im.DB.Gen(ctx)
 	if im.Proposals != nil && row.ApplyRequestedBy != nil {
 		ids, err := q.ListPullCorrections(ctx, gen.ListPullCorrectionsParams{MerchantID: row.MerchantID, PullID: row.ID})
@@ -398,7 +399,7 @@ func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspIm
 			return err
 		}
 		if len(ids) > 0 {
-			if _, err := im.Proposals.ApproveSet(ctx, ids, *row.ApplyRequestedBy, "applied with "+billing.PSPImportID(row.ID).String()); err != nil {
+			if _, err := im.Proposals.ApproveSet(ctx, ids, *row.ApplyRequestedBy, "applied with "+billing.PSPImportID(row.ID).String(), approvalActor); err != nil {
 				return err
 			}
 		}

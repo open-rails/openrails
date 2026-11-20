@@ -68,12 +68,12 @@ const deadRPC = "http://127.0.0.1:1"
 // until start.
 func bootImportWorld(t *testing.T, psps ...string) *importWorld {
 	t.Helper()
-	return bootImportWorldDeclaring(t, true, psps...)
+	return bootImportWorldDeclaring(t, true, nil, psps...)
 }
 
 // bootImportWorldDeclaring is bootImportWorld whose engine declares the PSPs
 // (in declared either way) only when declare is set.
-func bootImportWorldDeclaring(t *testing.T, declare bool, psps ...string) *importWorld {
+func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world), psps ...string) *importWorld {
 	t.Helper()
 	iw := &importWorld{}
 	serve := func(handler http.Handler) loopbackWire {
@@ -123,6 +123,9 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, psps ...string) *impor
 			merchant := w.cfg.Merchants["alpha"]
 			merchant.PSPs = declared
 			w.cfg.Merchants["alpha"] = merchant
+		}
+		if configure != nil {
+			configure(w)
 		}
 	})
 	iw.api = iw.alphaRemote

@@ -36,13 +36,14 @@ type Executor struct {
 	DB *db.DB
 	// Config is the process's: its provider_write_mode bounds the write
 	// posture. Nil reads as readonly.
-	Config *config.Config
-	Clock  clockwork.Clock
+	Config     *config.Config
+	Clock      clockwork.Clock
+	Admissions *destructive.Admissions
 }
 
 // New builds an executor.
-func New(database *db.DB, cfg *config.Config, clock clockwork.Clock) *Executor {
-	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock)}
+func New(database *db.DB, cfg *config.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
+	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock), Admissions: admissions}
 }
 
 // Request is one approve or dismiss call. Actor is who decided: the staff
@@ -51,6 +52,9 @@ type Request struct {
 	IDs   []billing.FindingID
 	Notes string
 	Actor string
+	// AdmissionActor is set only by trusted internal entry points that do
+	// not carry a verified HTTP principal, such as the local operator CLI.
+	AdmissionActor *destructive.Actor
 }
 
 func (e *Executor) now() time.Time { return timeutil.FirstClock(e.Clock).Now().UTC() }
@@ -63,7 +67,7 @@ func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalRe
 	if err != nil {
 		return billing.ProposalResults{}, err
 	}
-	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs)}
+	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs), admissionActor: req.AdmissionActor}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(req.IDs))}
 	for _, id := range req.IDs {
 		out.Data = append(out.Data, call.one(ctx, id.UUID()))
@@ -82,7 +86,7 @@ func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalRe
 // transaction, under one approval run in actor's name: a PSP import's
 // corrections, approved when a person applies it. ids must name pull.*
 // findings of the merchant in ctx.
-func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes string) (billing.ProposalResults, error) {
+func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes string, admissionActor *destructive.Actor) (billing.ProposalResults, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.ProposalResults{}, err
@@ -90,7 +94,7 @@ func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes
 	if strings.TrimSpace(actor) == "" {
 		return billing.ProposalResults{}, errors.New("proposals: an approval names who decided")
 	}
-	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids)}
+	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids), admissionActor: admissionActor}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(ids))}
 	for _, id := range ids {
 		out.Data = append(out.Data, call.one(ctx, id))

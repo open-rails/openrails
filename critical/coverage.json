@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 342,
+  "scenario_count": 343,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1212,6 +1212,11 @@
       "id": "OR-J38-S29",
       "journey": "J38",
       "name": "The legacy provider refresh between a pull and its Apply leaves the pull's proposals untouched"
+    },
+    {
+      "id": "OR-J38-S71",
+      "journey": "J38",
+      "name": "Proposal cancellations spend the actor allowance per affected subscription and a replay spends nothing"
     },
     {
       "id": "OR-J38-S35",

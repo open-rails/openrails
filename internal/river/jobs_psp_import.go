@@ -40,7 +40,7 @@ func (w *PSPImportWorker) Work(ctx context.Context, job *river.Job[pspimport.Job
 		return errors.New("psp import: importer not wired")
 	}
 	mid, id := billing.MerchantID(job.Args.MerchantID), billing.PSPImportID(job.Args.ImportID)
-	err := im.Run(ctx, mid, id, job.Args.Step)
+	err := im.Run(ctx, mid, id, job.Args.Step, job.Args.ApprovalActor)
 	var permanent pspimport.PermanentError
 	if err == nil || !errors.As(err, &permanent) && job.Attempt < job.MaxAttempts && (pspimport.Transient(err) || job.Attempt < pspimport.RetryBudget) {
 		return err
