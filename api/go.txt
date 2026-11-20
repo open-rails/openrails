@@ -415,6 +415,7 @@ pkg openrails, type DBConfig = config.DBConfig
 pkg openrails, type DBConfig struct
 pkg openrails, type DBConfig struct, Database string `yaml:"database" json:"database"`
 pkg openrails, type DBConfig struct, Host string `yaml:"host" json:"host"`
+pkg openrails, type DBConfig struct, LeaseConns int `yaml:"lease_conns" json:"lease_conns"`
 pkg openrails, type DBConfig struct, Password string `yaml:"password" json:"password"`
 pkg openrails, type DBConfig struct, Port string `yaml:"port" json:"port"`
 pkg openrails, type DBConfig struct, SQLTrace bool `yaml:"sql_trace" json:"sql_trace"`

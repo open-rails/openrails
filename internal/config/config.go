@@ -376,8 +376,8 @@ type DBConfig struct {
 
 	// SQLTrace logs every query at debug level on pools OpenRails opens.
 	SQLTrace bool `yaml:"sql_trace" json:"sql_trace"`
-	// LeaseConns sizes the pool idempotency leases renew on, beside the main one; 0 keeps 4. A host that budgets its
-	// connections to PostgreSQL across its pools sets it (Tensorhub th-382).
+	// LeaseConns caps the separate pool for idempotency lease renewals. Zero
+	// uses four connections.
 	LeaseConns int `yaml:"lease_conns" json:"lease_conns"`
 }
 
