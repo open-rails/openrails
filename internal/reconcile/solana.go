@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"math/big"
 	"sort"
@@ -21,7 +20,6 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // Solana on-chain subscription lifecycle events (no money movement): the
@@ -104,8 +102,8 @@ type SolanaLocalRecordResolver func(ctx context.Context, localID uuid.UUID) (*So
 //  2. Per-plan enumeration (Plans): `subscribe` is permissionless, so
 //     subscriptions under our plans are enumerated via getProgramAccounts;
 //     discovered-not-local ones are marked in Raw and never auto-create
-//     billing state. Its cost scales with subscribers, so it runs on a slow
-//     per-plan cadence (planDiscoveryDue).
+//     billing state. A bulk refresh enumerates all plans on its final
+//     window because the scan reads present account state.
 //  3. Merchant-wallet scan: the wallet's signature history within
 //     Since/Until. Only transactions carrying an `openrails:` memo count, and
 //     the memo is a discovery hint, never money truth: money comes from the
@@ -131,16 +129,14 @@ type SolanaLocalRecordResolver func(ctx context.Context, localID uuid.UUID) (*So
 type SolanaFetcher struct {
 	RPC    *solanaint.RPCClient
 	Source SolanaSubscriptionSource
-	// Plans feeds the per-plan subscription enumeration, which runs on a slow
-	// cadence (planDiscoveryDue). Nil disables it.
+	// Plans feeds the per-plan subscription enumeration. Nil disables it.
 	Plans SolanaPlanSource
 	// Due feeds the due-window filter for the routine bulk fetch. Nil reads
 	// every locally-known ref every tick; narrowed probes always bypass it.
 	Due SolanaDueSubscriptionSource
 	// DueWindowLead extends the due window this far before a subscription's
-	// local next_pull_at, so reconcile sees it in the cycle it could next be
-	// pulled (default 4h, above the provider refresh interval). Past-due refs
-	// stay in-window every tick.
+	// local next_pull_at, so a bulk read includes subscriptions that could be
+	// pulled soon (default 4h). Past-due refs stay in-window.
 	DueWindowLead time.Duration
 	// Resolve resolves memo local-ids against local records for the wallet
 	// scan. Nil parks every memo-recognized discovery (unverifiable).
@@ -285,7 +281,7 @@ func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	// Discovery scans are bulk lanes; a narrowed fetch (per-subscription or
 	// per-customer probe) skips them.
 	if !narrowed {
-		if f.Plans != nil {
+		if f.Plans != nil && !params.SkipSolanaPlanDiscovery {
 			discovered, err := f.enumeratePlanSubscriptions(ctx, known, planCache, now)
 			if err != nil {
 				return nil, err
@@ -469,35 +465,10 @@ func (f *SolanaFetcher) planFor(ctx context.Context, planPDA string, cache map[s
 	return plan, nil
 }
 
-// solanaDiscoveryCadence bounds how often the permissionless-subscriber
-// enumeration (getProgramAccounts per plan) runs for one plan. Its response
-// scales with subscriber count, so it is never a per-tick lane.
-const solanaDiscoveryCadence = 24 * time.Hour
-
-// solanaDiscoverySlotWidth buckets solanaDiscoveryCadence into per-plan
-// windows, so each plan's turn comes once a day. A hash-of-plan-id slot needs
-// no stored state (MerchantFetcherBuilder builds a fresh fetcher every tick)
-// and spreads plans across the day instead of one getProgramAccounts spike.
-// A slot spans two refresh cycles, so a refresh lands in it however the
-// scheduler staggers the merchant: a plan is enumerated once or twice a day.
-const solanaDiscoverySlotWidth = 2 * providerrecovery.RefreshInterval
-
-// planDiscoveryDue reports whether `now` falls in planPDA's slot of the
-// day. hash(planPDA) assigns the slot permanently, so the same plan recurs on
-// the same slot every cadence period with no stored state.
-func planDiscoveryDue(planPDA string, now time.Time) bool {
-	slots := int64(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
-	slot := now.UTC().UnixNano() / int64(solanaDiscoverySlotWidth)
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(planPDA))
-	return slot%slots == int64(h.Sum32()%uint32(slots))
-}
-
 // enumeratePlanSubscriptions lists (getProgramAccounts) every subscription
 // account under our plans and normalizes the ones the local mirror does not
 // know, marked discovered_not_local in Raw. They surface as PS-1 findings for
-// operator triage and are never auto-materialized (makePS1 blocks them). Runs
-// on a slow cadence (planDiscoveryDue).
+// operator triage and are never auto-materialized (makePS1 blocks them).
 func (f *SolanaFetcher) enumeratePlanSubscriptions(ctx context.Context, known map[string]struct{}, planCache map[string]*subscriptions.PlanAccount, now time.Time) ([]RemoteSubscription, error) {
 	plans, err := f.Plans(ctx)
 	if err != nil {
@@ -520,9 +491,6 @@ func (f *SolanaFetcher) enumeratePlanSubscriptions(ctx context.Context, known ma
 
 	var out []RemoteSubscription
 	for _, planPDA := range planPDAs {
-		if !planDiscoveryDue(planPDA, now) {
-			continue // full enumeration is a slow lane; not this plan's turn this tick
-		}
 		pk, err := solanago.PublicKeyFromBase58(planPDA)
 		if err != nil {
 			// A corrupt catalog link must not kill the scan; the other plans

@@ -150,7 +150,10 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 			since = floor
 		}
 		var err error
-		snap, err = fetcher.Fetch(ctx, FetchParams{Since: since, Until: now, ObservedAt: now})
+		snap, err = fetcher.Fetch(ctx, FetchParams{
+			Since: since, Until: now, ObservedAt: now,
+			SkipSolanaPlanDiscovery: true, // the cohort compares only known subscription ids
+		})
 		if err != nil {
 			// Provider unreachable: rows stay unknown, caller backs off.
 			res.RailErrors[provider] = err.Error()

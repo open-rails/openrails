@@ -273,6 +273,9 @@ type FetchParams struct {
 	// roster, vault, charges or bills. A fetcher that cannot narrow may read
 	// more; the engine keeps only the reversals.
 	Reversals bool
+	// SkipSolanaPlanDiscovery skips per-plan subscription enumeration when a
+	// read is catching up transaction windows or comparing known subscriptions.
+	SkipSolanaPlanDiscovery bool
 }
 
 // isReversal is a refund, void or dispute: money going back, which no

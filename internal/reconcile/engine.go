@@ -108,6 +108,9 @@ type RunParams struct {
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
 	Until time.Time
+	// SkipSolanaPlanDiscovery leaves enumeration for the final window of a
+	// multi-window Solana refresh.
+	SkipSolanaPlanDiscovery bool
 	// Reversals runs the reversals lane: only the window's refunds, voids and
 	// disputes are diffed. It proves no coverage and resolves only reversal
 	// findings it read again.
@@ -424,13 +427,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	rep.LocalSubscriptions = len(local.Subscriptions)
 	snap, err := fetcher.Fetch(ctx, FetchParams{
-		Since:      params.Since,
-		Until:      params.Until,
-		ObservedAt: e.now(),
-		PspID:      binding.ID.String(),
-		Rail:       binding.Rail,
-		AccountID:  binding.AccountID,
-		Reversals:  params.Reversals,
+		Since:                   params.Since,
+		Until:                   params.Until,
+		ObservedAt:              e.now(),
+		PspID:                   binding.ID.String(),
+		Rail:                    binding.Rail,
+		AccountID:               binding.AccountID,
+		Reversals:               params.Reversals,
+		SkipSolanaPlanDiscovery: params.SkipSolanaPlanDiscovery,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
