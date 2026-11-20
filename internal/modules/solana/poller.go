@@ -156,10 +156,9 @@ func (p *SolanaPayPoller) untilNext(ctx context.Context) (time.Duration, bool) {
 }
 
 // listen rings wake for each wakeChannel notification, and once on every (re)connect
-// for any it missed, until ctx ends. It holds one pool connection.
+// for any it missed, until ctx ends. It uses a dedicated session.
 func (p *SolanaPayPoller) listen(ctx context.Context, wake chan<- struct{}) {
-	pool := p.db.Pool()
-	if pool == nil {
+	if p.db.Pool() == nil {
 		return
 	}
 	channel := pgx.Identifier{wakeChannel + p.db.DataPool().Schema()}.Sanitize()
@@ -171,21 +170,17 @@ func (p *SolanaPayPoller) listen(ctx context.Context, wake chan<- struct{}) {
 	}
 	for ctx.Err() == nil {
 		err := func() error {
-			conn, err := pool.Acquire(ctx)
+			conn, err := p.db.ConnectSession(ctx)
 			if err != nil {
 				return err
 			}
-			defer func() {
-				// A LISTENing session is never handed back to the pool.
-				_ = conn.Conn().Close(context.WithoutCancel(ctx))
-				conn.Release()
-			}()
+			defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 			if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
 				return err
 			}
 			ring()
 			for {
-				if _, err := conn.Conn().WaitForNotification(ctx); err != nil {
+				if _, err := conn.WaitForNotification(ctx); err != nil {
 					return err
 				}
 				ring()

@@ -19,15 +19,15 @@ func (d *DB) TryLockPass(ctx context.Context, kind string) (release func(), lock
 	}
 	acquire, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cfg := d.pool.Config().ConnConfig.Copy()
-	// Server probes free the lock within minutes of its host vanishing unclosed.
-	if cfg.RuntimeParams == nil {
-		cfg.RuntimeParams = map[string]string{}
-	}
-	cfg.RuntimeParams["tcp_keepalives_idle"] = "60"
-	cfg.RuntimeParams["tcp_keepalives_interval"] = "10"
-	cfg.RuntimeParams["tcp_keepalives_count"] = "6"
-	conn, err := pgx.ConnectConfig(acquire, cfg)
+	conn, err := d.connectSession(acquire, func(cfg *pgx.ConnConfig) {
+		// Server probes free the lock within minutes of a host vanishing.
+		if cfg.RuntimeParams == nil {
+			cfg.RuntimeParams = map[string]string{}
+		}
+		cfg.RuntimeParams["tcp_keepalives_idle"] = "60"
+		cfg.RuntimeParams["tcp_keepalives_interval"] = "10"
+		cfg.RuntimeParams["tcp_keepalives_count"] = "6"
+	})
 	if err != nil {
 		return nil, false, fmt.Errorf("connect pass lock: %w", err)
 	}

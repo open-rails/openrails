@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -20,7 +19,7 @@ func (d *DB) LockUsagePolicy(ctx context.Context, merchant billing.MerchantID) (
 	}
 	acquire, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(acquire, d.pool.Config().ConnConfig.Copy())
+	conn, err := d.ConnectSession(acquire)
 	if err != nil {
 		return nil, fmt.Errorf("connect usage policy lock: %w", err)
 	}

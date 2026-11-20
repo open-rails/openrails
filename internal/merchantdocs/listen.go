@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // Channel is the Postgres notification channel an edit to a merchant's
@@ -30,15 +30,14 @@ func Channel(schema string) string {
 }
 
 // Listen reloads each merchant another replica announces until ctx ends,
-// reconnecting after a failure. It listens on a connection of its own, dialed
-// as pool dials, so it never holds one of pool's.
-func (c *Cache) Listen(ctx context.Context, pool *pgxpool.Pool, schema string) {
-	if pool == nil {
+// reconnecting after a failure on a dedicated session.
+func (c *Cache) Listen(ctx context.Context, database *db.DB, schema string) {
+	if database.Pool() == nil {
 		return
 	}
 	channel := pgx.Identifier{Channel(schema)}.Sanitize()
 	for ctx.Err() == nil {
-		if err := c.listenOnce(ctx, pool, channel); err != nil && ctx.Err() == nil {
+		if err := c.listenOnce(ctx, database, channel); err != nil && ctx.Err() == nil {
 			log.WithError(err).Warn("merchant config: edit notifications interrupted; reconnecting")
 			select {
 			case <-ctx.Done():
@@ -48,8 +47,8 @@ func (c *Cache) Listen(ctx context.Context, pool *pgxpool.Pool, schema string) {
 	}
 }
 
-func (c *Cache) listenOnce(ctx context.Context, pool *pgxpool.Pool, channel string) error {
-	conn, err := dial(ctx, pool.Config())
+func (c *Cache) listenOnce(ctx context.Context, database *db.DB, channel string) error {
+	conn, err := database.ConnectSession(ctx)
 	if err != nil {
 		return err
 	}
@@ -66,25 +65,4 @@ func (c *Cache) listenOnce(ctx context.Context, pool *pgxpool.Pool, channel stri
 			c.Invalidate(billing.MerchantID(id))
 		}
 	}
-}
-
-// dial opens a connection as the pool's hooks open one.
-func dial(ctx context.Context, cfg *pgxpool.Config) (*pgx.Conn, error) {
-	connConfig := cfg.ConnConfig.Copy()
-	if cfg.BeforeConnect != nil {
-		if err := cfg.BeforeConnect(ctx, connConfig); err != nil {
-			return nil, err
-		}
-	}
-	conn, err := pgx.ConnectConfig(ctx, connConfig)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.AfterConnect != nil {
-		if err := cfg.AfterConnect(ctx, conn); err != nil {
-			_ = conn.Close(context.WithoutCancel(ctx))
-			return nil, err
-		}
-	}
-	return conn, nil
 }

@@ -11,15 +11,14 @@ import (
 // merchantPgxConnKey is the context key of the request's lazy merchant connection.
 type merchantPgxConnKey struct{}
 
-// WithMerchantConn puts a lazy connection pinned to the context's merchant
-// (the openrails.merchant_id session GUC, set on first use) in the context;
-// Qx/Gen on the returned context use it. The GUC filters nothing by itself:
-// tenant queries still carry their merchant predicate.
+// WithMerchantConn scopes Qx and Gen to the context's merchant. Queries still
+// carry their merchant predicate. With a direct query pool it sets the merchant
+// GUC on a lazily pinned session. With transaction pooling it sets the GUC
+// locally inside each statement or explicit transaction.
 //
-// It pins a connection, not a transaction, so slow work between queries holds
-// no locks. The caller MUST call release, which resets the GUC so a pooled
-// connection never carries one merchant into another's request. A tx-scoped DB,
-// or an already compatible pin, returns a no-op release.
+// Slow work between queries holds no transaction open. The caller must call
+// release to return any pinned connection with its merchant setting reset. A
+// tx-scoped DB or an existing compatible scope returns a no-op release.
 func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), error) {
 	if d == nil || (d.pool == nil && d.pgtx == nil) {
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn on nil DB")
@@ -41,7 +40,7 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn requires a merchant in context")
 	}
 
-	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema()}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil}
 	newCtx := context.WithValue(ctx, merchantPgxConnKey{}, lazy)
 	return newCtx, lazy.release, nil
 }
@@ -62,7 +61,7 @@ func (d *DB) WithIndependentMerchantConn(ctx context.Context) (context.Context, 
 		(inherited.pool != d.pool || inherited.tenantID != id.String() || inherited.schema != d.rw.schema()) {
 		return ctx, func() {}, fmt.Errorf("db: inherited merchant connection does not match database, schema or merchant")
 	}
-	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema()}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil}
 	return context.WithValue(ctx, merchantPgxConnKey{}, lazy), lazy.release, nil
 }
 

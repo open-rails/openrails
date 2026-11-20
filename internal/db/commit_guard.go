@@ -53,7 +53,7 @@ func (d *DB) SeparatePool(ctx context.Context, maxConns int32) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{river: d.river, pool: pool, rw: d.rw, ownsPool: true, partitions: d.partitions}, nil
+	return &DB{river: d.river, pool: pool, rw: d.rw, ownsPool: true, partitions: d.partitions, direct: d.direct}, nil
 }
 
 // ReadSnapshot runs fn in a read-only REPEATABLE READ transaction: every read
@@ -75,6 +75,9 @@ func (d *DB) snapshot(ctx context.Context, mode string, fn func(ctx context.Cont
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	if _, err := tx.Exec(ctx, mode); err != nil {
+		return err
+	}
+	if err := d.bindTransactionPoolMerchant(ctx, tx); err != nil {
 		return err
 	}
 	if err := fn(transactionContext(ctx), tx); err != nil {

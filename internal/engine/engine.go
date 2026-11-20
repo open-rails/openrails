@@ -94,6 +94,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
+	if deps.PostgresSession != nil && deps.Postgres == nil {
+		return nil, fmt.Errorf("openrails: Deps.PostgresSession requires Deps.Postgres")
+	}
 	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
 		url := deps.Postgres.Config().ConnString()
 		if url == "" {
@@ -108,6 +111,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	bootstrap := &app.BootstrapOptions{
 		PGXPool:              deps.Postgres,
+		PostgresSession:      deps.PostgresSession,
 		Redis:                deps.Redis,
 		StripeTransport:      deps.StripeTransport,
 		BasisTheoryTransport: deps.BasisTheoryTransport,

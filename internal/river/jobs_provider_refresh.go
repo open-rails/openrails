@@ -257,7 +257,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
-	release, held, err := reconcile.LockMerchantPull(ctx, w.DB.Pool(), mid)
+	release, held, err := reconcile.LockMerchantPull(ctx, w.DB, mid)
 	if err != nil {
 		return err
 	}

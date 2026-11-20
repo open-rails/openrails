@@ -276,8 +276,7 @@ func (v *Verifier) Drain(ctx context.Context, mid billing.MerchantID) error {
 // ends, reconnecting on failure. It holds one pool connection.
 func (v *Verifier) Listen(ctx context.Context) {
 	v.init()
-	pool := v.DB.Pool()
-	if pool == nil {
+	if v.DB.Pool() == nil {
 		return
 	}
 	channel := pgx.Identifier{unverifiedChannel + v.DB.DataPool().Schema()}.Sanitize()
@@ -293,20 +292,16 @@ func (v *Verifier) Listen(ctx context.Context) {
 }
 
 func (v *Verifier) listenOnce(ctx context.Context, channel string) error {
-	conn, err := v.DB.Pool().Acquire(ctx)
+	conn, err := v.DB.ConnectSession(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		// A LISTENing session is never handed back to the pool.
-		_ = conn.Conn().Close(context.WithoutCancel(ctx))
-		conn.Release()
-	}()
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
 		return err
 	}
 	for {
-		n, err := conn.Conn().WaitForNotification(ctx)
+		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			return err
 		}

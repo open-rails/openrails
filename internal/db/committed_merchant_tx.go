@@ -40,12 +40,15 @@ func (p *Pool) CommittedMerchantTx(ctx context.Context, id billing.MerchantID, f
 		if pin.pool != p.raw || pin.tenantID != id.String() || pin.schema != p.rw.schema() {
 			return fmt.Errorf("db: committed merchant transaction has an incompatible pin")
 		}
-		var err error
-		conn, err = pin.get(ctx)
-		if err != nil {
-			return err
+		if !pin.transactionLocal {
+			var err error
+			conn, err = pin.get(ctx)
+			if err != nil {
+				return err
+			}
 		}
-	} else {
+	}
+	if conn == nil {
 		acquired, err := acquire(ctx, p.raw)
 		if err != nil {
 			return err

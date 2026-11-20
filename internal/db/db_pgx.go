@@ -37,7 +37,7 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	}
 	if lc, err := d.merchantConn(ctx); err != nil {
 		return errDBTX{err}
-	} else if lc != nil {
+	} else if lc != nil && !lc.transactionLocal {
 		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
@@ -83,7 +83,7 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	if lc != nil {
+	if lc != nil && !lc.transactionLocal {
 		// Begin on the pinned merchant connection (acquiring it now if this is
 		// the request's first sqlc touch) so the tx inherits the session GUC.
 		// Never a second BEGIN inside a transaction already open on it.
@@ -103,15 +103,18 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	return nil, fmt.Errorf("db: no pgx handle available to begin transaction")
 }
 
-// RunInTx runs fn in a transaction without setting the merchant GUC, for work
-// that uses explicit merchant_id predicates. It begins on the pinned merchant
-// connection when one is in flight.
+// RunInTx runs fn in a transaction for work that uses explicit merchant_id
+// predicates. It inherits an active merchant scope from the pinned connection
+// or sets it locally when using transaction pooling.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := d.pgxBegin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := d.bindTransactionPoolMerchant(ctx, tx); err != nil {
+		return err
+	}
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
@@ -150,6 +153,20 @@ func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id billing.MerchantI
 		return fmt.Errorf("db: set %s GUC: %w", MerchantGUC, err)
 	}
 	return nil
+}
+
+// Bind the scope that a direct pool's pinned connection would have supplied.
+// Snapshot callers must set their transaction mode before this first query.
+func (d *DB) bindTransactionPoolMerchant(ctx context.Context, tx pgx.Tx) error {
+	pin, err := d.merchantConn(ctx)
+	if err != nil || pin == nil || !pin.transactionLocal {
+		return err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return setMerchantLocalGUCPgx(ctx, tx, mid)
 }
 
 // BindMerchantTx scopes a caller-owned transaction to one merchant without
@@ -195,6 +212,8 @@ type lazyMerchantPgxConn struct {
 	pool     *pgxpool.Pool
 	tenantID string
 	schema   string
+	// In transaction pooling the scope is lazy without retaining a session.
+	transactionLocal bool
 
 	mu   sync.Mutex
 	conn *pgxpool.Conn

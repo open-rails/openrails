@@ -91,7 +91,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 	defer cleanup()
 	merchantID := opts.MerchantID
 	ctx = merchant.WithID(ctx, merchantID)
-	release, err := waitForMerchantPullLock(ctx, rt.DB.Pool(), merchantID)
+	release, err := waitForMerchantPullLock(ctx, rt.DB, merchantID)
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -50,7 +51,7 @@ func acquire(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {
 // connection, whose wait is bounded.
 func requestConn(ctx context.Context, pool *pgxpool.Pool, schema string) (*lazyMerchantPgxConn, *pgx.Conn) {
 	lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
-	if !ok || lc.pool != pool || lc.schema != schema {
+	if !ok || lc.pool != pool || lc.schema != schema || lc.transactionLocal {
 		return nil, nil
 	}
 	if mid, ok := merchant.FromContext(ctx); !ok || mid.String() != lc.tenantID {
@@ -84,7 +85,22 @@ func (p pooledDBTX) pinned(ctx context.Context) *pgx.Conn {
 	return conn
 }
 
+func (p pooledDBTX) merchantStatement(ctx context.Context) (merchantStatement, bool) {
+	scope, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
+	if p.directory || !ok || !scope.transactionLocal || scope.pool != p.pool || scope.schema != p.schema {
+		return merchantStatement{}, false
+	}
+	mid, ok := merchant.FromContext(ctx)
+	if !ok || mid.String() != scope.tenantID {
+		return merchantStatement{}, false
+	}
+	return merchantStatement{pool: p.pool, merchantID: mid}, true
+}
+
 func (p pooledDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if statement, ok := p.merchantStatement(ctx); ok {
+		return statement.Exec(ctx, sql, args...)
+	}
 	if conn := p.pinned(ctx); conn != nil {
 		return conn.Exec(ctx, sql, args...)
 	}
@@ -97,6 +113,9 @@ func (p pooledDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.C
 }
 
 func (p pooledDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if statement, ok := p.merchantStatement(ctx); ok {
+		return statement.Query(ctx, sql, args...)
+	}
 	if conn := p.pinned(ctx); conn != nil {
 		return conn.Query(ctx, sql, args...)
 	}
@@ -113,6 +132,9 @@ func (p pooledDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Row
 }
 
 func (p pooledDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if statement, ok := p.merchantStatement(ctx); ok {
+		return statement.QueryRow(ctx, sql, args...)
+	}
 	if conn := p.pinned(ctx); conn != nil {
 		return conn.QueryRow(ctx, sql, args...)
 	}
@@ -223,3 +245,103 @@ func (t *releasingTx) Rollback(ctx context.Context) error {
 }
 
 func (t *releasingTx) release() { t.once.Do(t.conn.Release) }
+
+// merchantStatement keeps a standalone statement and its local merchant GUC
+// on one PostgreSQL session through completion. Calls inside a real domain
+// transaction use that transaction instead.
+type merchantStatement struct {
+	pool       *pgxpool.Pool
+	merchantID billing.MerchantID
+}
+
+func (s merchantStatement) begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := (pooledDBTX{pool: s.pool, directory: true}).Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := setMerchantLocalGUCPgx(ctx, tx, s.merchantID); err != nil {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (s merchantStatement) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx, err := s.begin(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
+	return tag, finishMerchantStatement(ctx, tx, err)
+}
+
+func (s merchantStatement) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	tx, err := s.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, finishMerchantStatement(ctx, tx, err)
+	}
+	return &merchantStatementRows{Rows: rows, tx: tx, ctx: ctx}, nil
+}
+
+func (s merchantStatement) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx, err := s.begin(ctx)
+	if err != nil {
+		return errRow{err}
+	}
+	return merchantStatementRow{Row: tx.QueryRow(ctx, sql, args...), tx: tx, ctx: ctx}
+}
+
+func finishMerchantStatement(ctx context.Context, tx pgx.Tx, statementErr error) error {
+	if statementErr != nil && !errors.Is(statementErr, pgx.ErrNoRows) {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+		return statementErr
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	return statementErr
+}
+
+type merchantStatementRow struct {
+	pgx.Row
+	tx  pgx.Tx
+	ctx context.Context
+}
+
+func (r merchantStatementRow) Scan(dest ...any) error {
+	return finishMerchantStatement(r.ctx, r.tx, r.Row.Scan(dest...))
+}
+
+type merchantStatementRows struct {
+	pgx.Rows
+	tx   pgx.Tx
+	ctx  context.Context
+	once sync.Once
+	err  error
+}
+
+func (r *merchantStatementRows) Next() bool {
+	if r.Rows.Next() {
+		return true
+	}
+	r.Close()
+	return false
+}
+
+func (r *merchantStatementRows) Close() {
+	r.once.Do(func() {
+		r.Rows.Close()
+		r.err = finishMerchantStatement(r.ctx, r.tx, r.Rows.Err())
+	})
+}
+
+func (r *merchantStatementRows) Err() error {
+	if r.err != nil {
+		return r.err
+	}
+	return r.Rows.Err()
+}

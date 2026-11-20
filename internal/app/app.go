@@ -41,10 +41,11 @@ type BootstrapOptions struct {
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
 	// FXTransport replaces the FX sources' wire (test seam).
-	FXTransport http.RoundTripper
-	PGXPool     *pgxpool.Pool
-	Redis       redis.UniversalClient
-	Clock       clockwork.Clock
+	FXTransport     http.RoundTripper
+	PGXPool         *pgxpool.Pool
+	PostgresSession *pgxpool.Config
+	Redis           redis.UniversalClient
+	Clock           clockwork.Clock
 	// EmailSender replaces the sender Config.SMTP selects.
 	EmailSender config.EmailSender
 	// UserInfo is the host's directory (Deps.UserInfo); nil keeps a copy.
@@ -102,7 +103,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	var dbOverride *db.DB
 	if opts != nil && opts.PGXPool != nil {
-		dbo, err := db.NewWithPGXPool(opts.PGXPool, config.SchemaName(cfg))
+		dbo, err := db.NewWithPGXPoolAndSessions(opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
 		if err != nil {
 			return nil, fmt.Errorf("use pgx pool: %w", err)
 		}

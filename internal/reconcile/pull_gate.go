@@ -2,11 +2,9 @@ package reconcile
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -36,25 +34,20 @@ func OverwriteHeld(ctx context.Context, database *db.DB, cfg *config.Config, mer
 // merchant at a time, across every replica and the operator's CLI. held is
 // false while another pull has it. The lock lives on its own connection until
 // release.
-func LockMerchantPull(ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID) (release func(), held bool, err error) {
-	if pool == nil {
-		return nil, false, errors.New("pull lock: pool not configured")
-	}
-	conn, err := pool.Acquire(ctx)
+func LockMerchantPull(ctx context.Context, database *db.DB, merchantID uuid.UUID) (release func(), held bool, err error) {
+	conn, err := database.ConnectSession(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	q := gen.New(conn)
 	if held, err = q.TryLockProviderRefresh(ctx, merchantID); err != nil || !held {
-		conn.Release()
+		_ = conn.Close(context.WithoutCancel(ctx))
 		return nil, false, err
 	}
 	return func() {
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := q.UnlockProviderRefresh(unlockCtx, merchantID); err != nil {
-			_ = conn.Conn().Close(unlockCtx)
-		}
-		conn.Release()
+		_ = q.UnlockProviderRefresh(unlockCtx, merchantID)
+		_ = conn.Close(unlockCtx)
 	}, true, nil
 }

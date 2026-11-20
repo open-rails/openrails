@@ -176,9 +176,14 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if cfg.Database.SkipMigrations {
 		prepare = migrate.Validate
 	}
-	if err := prepare(ctx, database.Pool(), migrate.Options{
-		Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
-	}); err != nil {
+	migrationPool, releaseMigrationPool, err := database.MigrationPool(ctx)
+	if err == nil {
+		err = prepare(ctx, migrationPool, migrate.Options{
+			Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
+		})
+		releaseMigrationPool()
+	}
+	if err != nil {
 		if overrides == nil || database != overrides.DB {
 			_ = database.Close()
 		}

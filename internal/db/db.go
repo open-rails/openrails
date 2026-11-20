@@ -21,6 +21,8 @@ type DB struct {
 	pool  *pgxpool.Pool
 	pgtx  pgx.Tx
 	river *runtimeBinding
+	// direct is set only for transaction pooling and copied from the host.
+	direct *pgxpool.Config
 
 	// ownsPool: NewDB created the pool and Close() must close it; pools
 	// injected by embedded hosts (NewWithPGXPool) stay open.
@@ -159,10 +161,22 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 // the default, runtime queries are rewritten to it (#471) — essential here
 // because OpenRails shares the host's pool and cannot repoint its search_path.
 func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
+	return NewWithPGXPoolAndSessions(pool, schema, nil)
+}
+
+// NewWithPGXPoolAndSessions uses direct for session work when pool is
+// transaction-pooled. The host still owns pool.
+func NewWithPGXPoolAndSessions(pool *pgxpool.Pool, schema string, direct *pgxpool.Config) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}}, nil
+	if direct != nil {
+		if direct.ConnConfig == nil {
+			return nil, fmt.Errorf("direct Postgres session configuration has no connection settings")
+		}
+		direct = direct.Copy()
+	}
+	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}, direct: direct}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare

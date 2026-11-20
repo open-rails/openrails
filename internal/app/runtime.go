@@ -431,7 +431,10 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	if r.DB == nil || r.DB.Pool() == nil {
 		return fmt.Errorf("River requires the runtime PostgreSQL pool")
 	}
-	_, err := riverhelpers.New(ctx, r.DB.Pool(), &river.Config{Schema: r.riverSchemaOrDefault()}, r.riverJobs(false))
+	_, err := riverhelpers.New(ctx, r.DB.Pool(), &river.Config{
+		Schema:   r.riverSchemaOrDefault(),
+		PollOnly: r.DB.UsesTransactionPooler(),
+	}, r.riverJobs(false))
 	return err
 }
 

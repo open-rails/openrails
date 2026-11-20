@@ -182,9 +182,9 @@ func (r *Runtime) readyMerchantConfig(ctx context.Context) error {
 		return err
 	}
 	r.Merchants.WithCredentialFingerprinter(fingerprints)
-	if pool := r.DB.Pool(); pool != nil {
+	if r.DB.Pool() != nil {
 		r.Go("merchant config notifications", func(ctx context.Context) {
-			r.MerchantConfig.Listen(ctx, pool, r.DB.DataPool().Schema())
+			r.MerchantConfig.Listen(ctx, r.DB, r.DB.DataPool().Schema())
 		})
 	}
 	return nil

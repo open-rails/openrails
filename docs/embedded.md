@@ -48,6 +48,7 @@ own file into it); `openrails.Deps` is everything outside the process.
 | Deps | Meaning |
 |---|---|
 | `Postgres` | Your pool. A nil value opens a pool from `Config.DB`. Idempotency lease renewals use a separate pool with the main pool's connection settings and a cap of `Config.DB.LeaseConns` (default 4). Include this cap in the host's connection budget. |
+| `PostgresSession` | Optional direct PostgreSQL configuration when `Postgres` goes through a transaction pooler. |
 | `Redis` | abuse state shared across instances; without it, one instance only |
 | `Vault` | a borrowed Vault client instead of `Config.Vault` |
 | `Email` | your own sender, replacing `Config.SMTP` |
@@ -56,6 +57,15 @@ own file into it); `openrails.Deps` is everything outside the process.
 | `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | test seams, refused beside a live PSP |
 
 `Deps` holds no auth: your auth guards the routes you mount.
+
+For PgBouncer transaction pooling, give `Postgres` the PgBouncer pool and set
+`PostgresSession` to a `pgxpool.ParseConfig` result for the same database and
+role through PostgreSQL's direct endpoint. On the PgBouncer pool, use
+`pgx.QueryExecModeExec` unless the pooler is configured to track protocol-level
+prepared statements. OpenRails scopes merchant identity to each transaction and
+uses direct sessions for migrations, notification listeners, and session locks.
+OpenRails' own River workers poll for jobs in this mode. For a host fleet on the
+PgBouncer pool, set `river.Config.PollOnly` to `true` as well.
 
 ## Boot and River
 
@@ -68,8 +78,8 @@ if err != nil { return err }
 if err := bill.Start(ctx); err != nil { return err } // River workers: renewals, dunning, provider operations
 ```
 
-`New` applies OpenRails' migrations through your pool first (one replica at a
-time, under an advisory lock; a failed migration fails `New`), creates the River
+`New` applies OpenRails' migrations first (one replica at a time, under an
+advisory lock; a failed migration fails `New`), creates the River
 schema and this month's partitions, starts no workers and never changes the
 catalog. The pool's role owns every object; for another owner, `SET ROLE` on its
 connections. An older build boots on a schema a newer one migrated. `New` fails
