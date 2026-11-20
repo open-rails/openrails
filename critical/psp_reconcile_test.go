@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -768,14 +769,22 @@ func TestPSPReconcile(t *testing.T) {
 		before := iw.pulled(t, imp.ID)
 		require.Contains(t, before, string(billing.ChangeCorrectSubscription))
 
-		// A refresh the provider cuts short completes without retrying: the
-		// next scheduled pass resumes it, and a retrying job would hold the
-		// merchant's slot from that pass.
+		// A provider outage leaves the requested refresh retryable. The same
+		// job resumes between the pull and Apply when NMI comes back.
 		iw.nmi.QueryUnavailable(true)
-		refreshMerchant(t, iw.fleet, iw.alpha.MerchantID().UUID())
+		job, err := iw.fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: iw.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: "provider_refresh", MaxAttempts: 5})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			row, err := iw.fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && row.State == rivertype.JobStateRetryable
+		}, 20*time.Second, 25*time.Millisecond)
 		iw.nmi.QueryUnavailable(false)
-		// The legacy refresh reads the same PSP between the pull and Apply.
-		refreshMerchant(t, iw.fleet, iw.alpha.MerchantID().UUID())
+		_, err = iw.fleet.JobRetry(t.Context(), job.Job.ID)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			row, err := iw.fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && row.State == rivertype.JobStateCompleted
+		}, 30*time.Second, 25*time.Millisecond)
 		require.Equal(t, before, iw.pulled(t, imp.ID), "the refresh leaves the pull's proposals")
 		var engine int
 		require.NoError(t, iw.pool.QueryRow(t.Context(), fmt.Sprintf(`SELECT count(*) FROM %s WHERE merchant_id = $1 AND finding_type = 'pull.subscription.facts' AND pull_id IS NULL`,
