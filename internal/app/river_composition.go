@@ -8,6 +8,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
 )
 
 func (r *Runtime) riverConfigurableLocked() error {
@@ -84,6 +85,13 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		client := binding.Client
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
 			return err
+		}
+		retired, err := riverjobs.RetireLegacyProviderRefresh(ctx, client)
+		if err != nil {
+			return err
+		}
+		if retired > 0 {
+			log.WithContext(ctx).WithFields(log.Fields{"river_schema": client.Schema(), "jobs": retired}).Info("retiring scheduled provider refresh jobs")
 		}
 		r.riverCompositionMu.Lock()
 		if r.riverClosed.Load() || r.riverCompositionFailed {
