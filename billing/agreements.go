@@ -27,11 +27,12 @@ type Agreement struct {
 // subscription's amount every billing interval, next on NextChargeAt (null
 // once the subscription is canceled).
 type AgreementSubscription struct {
-	ID                   SubscriptionID `json:"id"`
-	Product              string         `json:"product"`
-	Amount               int64          `json:"amount,string"`
-	BillingIntervalHours *int           `json:"billing_interval_hours"`
-	NextChargeAt         *time.Time     `json:"next_charge_at"`
+	ID                    SubscriptionID `json:"id"`
+	Product               string         `json:"product"`
+	Amount                int64          `json:"amount,string"`
+	BillingIntervalHours  *int           `json:"billing_interval_hours"`
+	BillingIntervalMonths *int           `json:"billing_interval_months"`
+	NextChargeAt          *time.Time     `json:"next_charge_at"`
 }
 
 // AgreementRevocation answers a revoke: the agreement, now revoked; for a

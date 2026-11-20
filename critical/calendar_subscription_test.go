@@ -78,6 +78,18 @@ products:
 		require.NoError(t, err)
 		require.Equal(t, time.Date(2025, 2, 28, 12, 34, 56, 0, time.UTC), *sub.CurrentPeriodEndsAt)
 
+		status, raw = a.request(t, http.MethodGet, "/v1/me/agreements", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var agreements billing.ListPage[billing.Agreement]
+		require.NoError(t, json.Unmarshal(raw, &agreements))
+		require.Len(t, agreements.Items, 1)
+		terms := agreements.Items[0].Subscription
+		require.NotNil(t, terms)
+		require.Equal(t, subID, terms.ID)
+		require.Nil(t, terms.BillingIntervalHours)
+		require.Equal(t, ptr(1), terms.BillingIntervalMonths)
+		require.Equal(t, sub.CurrentPeriodEndsAt, terms.NextChargeAt)
+
 		fixed, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "fixed", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(720)})
 		require.NoError(t, err)
 		preview, err := a.alpha.PreviewPriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: price.ID, ToPriceID: fixed.ID})

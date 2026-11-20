@@ -1451,6 +1451,7 @@ pkg openrails/billing, type AgreementRevocation struct, UsageOrder *Order `json:
 pkg openrails/billing, type AgreementSubscription struct
 pkg openrails/billing, type AgreementSubscription struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type AgreementSubscription struct, BillingIntervalHours *int `json:"billing_interval_hours"`
+pkg openrails/billing, type AgreementSubscription struct, BillingIntervalMonths *int `json:"billing_interval_months"`
 pkg openrails/billing, type AgreementSubscription struct, ID SubscriptionID `json:"id"`
 pkg openrails/billing, type AgreementSubscription struct, NextChargeAt *time.Time `json:"next_charge_at"`
 pkg openrails/billing, type AgreementSubscription struct, Product string `json:"product"`

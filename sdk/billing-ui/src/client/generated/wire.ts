@@ -105,6 +105,7 @@ export type AgreementSubscription = {
   product: string
   amount: string
   billing_interval_hours: number | null
+  billing_interval_months: number | null
   next_charge_at: string | null
 }
 

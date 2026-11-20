@@ -12671,6 +12671,16 @@
               }
             ]
           },
+          "billing_interval_months": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "next_charge_at": {
             "oneOf": [
               {
@@ -12688,6 +12698,7 @@
           "product",
           "amount",
           "billing_interval_hours",
+          "billing_interval_months",
           "next_charge_at"
         ]
       },

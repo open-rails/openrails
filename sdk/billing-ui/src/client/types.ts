@@ -89,8 +89,8 @@ export const priceProviderSchema = z.object({
 
 /**
  * A catalog price, embedded in a product (`GET /products`): `unit_amount` of
- * `currency` for `access_duration_hours` of access (null: for good),
- * charging every `billing_interval_hours` (null: one-time).
+ * `currency` for the specified access duration. A recurring price charges
+ * every `billing_interval_hours` or `billing_interval_months`.
  */
 export const priceSchema = z.object({
   id: z.string(),

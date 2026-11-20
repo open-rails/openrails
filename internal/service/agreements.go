@@ -156,6 +156,7 @@ func agreementTerms(sub billing.Subscription, terms *billing.AgreementSubscripti
 		}
 		terms.Amount = sub.Price.UnitAmount * quantity
 		terms.BillingIntervalHours = sub.Price.BillingIntervalHours
+		terms.BillingIntervalMonths = sub.Price.BillingIntervalMonths
 	}
 	if sub.CancelScheduled || sub.Status == billing.SubscriptionCanceled || sub.CurrentPeriodEndsAt == nil {
 		return product, nil
