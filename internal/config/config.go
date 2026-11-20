@@ -376,6 +376,9 @@ type DBConfig struct {
 
 	// SQLTrace logs every query at debug level on pools OpenRails opens.
 	SQLTrace bool `yaml:"sql_trace" json:"sql_trace"`
+	// LeaseConns caps the separate pool for idempotency lease renewals. Zero
+	// uses four connections.
+	LeaseConns int `yaml:"lease_conns" json:"lease_conns"`
 }
 
 // DBConnectionString returns the database connection string.
@@ -1190,6 +1193,9 @@ func ValidateDatabase(cfg *Config) error {
 	}
 	if cfg.DB.URL == "" {
 		return fmt.Errorf("database URL could not be determined")
+	}
+	if cfg.DB.LeaseConns < 0 {
+		return fmt.Errorf("db.lease_conns %d is negative", cfg.DB.LeaseConns)
 	}
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
 	return validateSchema(cfg.Database.Schema)

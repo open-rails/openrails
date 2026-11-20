@@ -20,6 +20,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
+	"github.com/ccoveille/go-safecast/v2"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
@@ -71,9 +72,8 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
-	// held claim every quarter lease.
-	idempotencyLeaseConns = 4
+	// idempotencyLeaseConns is the default cap for the lease renewal pool.
+	idempotencyLeaseConns int32 = 4
 )
 
 type runtimeOverrides struct {
@@ -155,6 +155,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisClient redis.UniversalClient
 		err         error
 	)
+	leaseConns := idempotencyLeaseConns
+	if cfg.DB != nil && cfg.DB.LeaseConns > 0 {
+		leaseConns, err = safecast.Convert[int32](cfg.DB.LeaseConns)
+		if err != nil {
+			return nil, fmt.Errorf("db.lease_conns %d exceeds the pool connection range: %w", cfg.DB.LeaseConns, err)
+		}
+	}
 	var chain fs.FS
 	if overrides != nil {
 		database, chain = overrides.DB, overrides.Migrations
@@ -252,7 +259,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	customers := &identity.Customers{Directory: directory}
 	// #1099: idempotency leases renew on their own connections, so a pool
 	// saturated by the requests holding them can never starve a renewal.
-	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
+	leaseDB, err := database.SeparatePool(ctx, leaseConns)
 	if err != nil {
 		return nil, fmt.Errorf("idempotency lease pool: %w", err)
 	}

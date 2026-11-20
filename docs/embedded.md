@@ -47,7 +47,7 @@ own file into it); `openrails.Deps` is everything outside the process.
 
 | Deps | Meaning |
 |---|---|
-| `Postgres` | your pool; nil opens one from `Config.DB` |
+| `Postgres` | Your pool. A nil value opens a pool from `Config.DB`. Idempotency lease renewals use a separate pool with the main pool's connection settings and a cap of `Config.DB.LeaseConns` (default 4). Include this cap in the host's connection budget. |
 | `Redis` | abuse state shared across instances; without it, one instance only |
 | `Vault` | a borrowed Vault client instead of `Config.Vault` |
 | `Email` | your own sender, replacing `Config.SMTP` |
