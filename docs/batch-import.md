@@ -14,10 +14,10 @@ history, vault *references* — while the **provider stays the source of truth
 for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
-mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh)
-converge the mirror against provider truth, and a PSP import re-reads a
-PSP on demand, its differences becoming proposals.
+mirror up to date as of a declared horizon. Webhooks converge the mirror as
+provider events arrive. An [operator refresh](operations.md#provider-refresh)
+can catch up on missed events, and a PSP import re-reads a specific PSP to
+produce proposals from its differences.
 
 You hand over **facts, not classifications**: who, which price, which rail,
 the provider's subscription id, paid-through evidence, explicit cancel
@@ -300,8 +300,8 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 - A manual PSP import of each PSP raises no unexplained proposals.
 - `openrails intents` shows only the drains you expect before raising the
   mode; nothing fires at `full` that the forecast didn't show.
-- The `unverified` cohort shrinks over subsequent Provider Refresh cycles as
-  provider evidence arrives.
+- The `unverified` cohort shrinks as targeted checks or an operator refresh
+  obtain provider evidence.
 
 ### Runbook: migrating a legacy NMI book
 
@@ -320,10 +320,10 @@ OpenRails.
    not recorded as charges; unlinked ones surface as `pull.reversal.unlinked`.
    Re-post the same book: everything must report `skipped`. Imported members
    are entitled when the call returns.
-2. **Review findings.** Boot, let one provider refresh pull run (advisory until
-   armed; it accepts each unproven schedule NMI's record confirms, see
-   [Accepted bills and provider schedules](#accepted-bills-and-provider-schedules)),
-   then triage every open finding: `pull.subscription.missing` (NMI
+2. **Review findings.** Start the workers and request one [provider refresh](operations.md#provider-refresh).
+   It accepts unproven schedules confirmed by NMI's record under the configured
+   write posture. See [Accepted bills and provider schedules](#accepted-bills-and-provider-schedules).
+   Triage every open finding: `pull.subscription.missing` (NMI
    schedules absent from the book), `pull.subscription.dead`,
    `pull.subscription.mismatch`, `pull.subscription.drift` (amount, plan,
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
@@ -340,10 +340,10 @@ OpenRails.
    go to NMI; a refund with `revoke_access` ends the refunded payment's
    access, and the NMI schedule keeps billing until the membership is canceled,
    which deletes it (refused with `provider_cancel_held` while disarmed).
-   The provider refresh runs every two hours, and NMI's own subscription
-   webhooks converge the schedule they name at once. To re-read
-   a PSP now, create a PSP import (`Client.CreatePSPImport`,
-   `POST /v1/merchant/psp-imports`); its differences become proposals.
+   NMI's subscription webhooks converge the schedule they name. Request a
+   [provider refresh](operations.md#provider-refresh) to catch up on missed
+   events for the merchant. A PSP import (`Client.CreatePSPImport`,
+   `POST /v1/merchant/psp-imports`) re-reads one PSP and produces proposals.
    Tier changes (same tier group,
    same billing cycle) modify the member's existing NMI schedule in place
    (Direct Post `update_subscription`; its next billing date E is kept; no

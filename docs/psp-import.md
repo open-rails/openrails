@@ -149,8 +149,8 @@ schedule.
   PSP's live book fails the import with `pull_roster_implausible` before it
   records anything. `PSPImport.proposals` counts them; `ListProposals` with
   `pull_id` lists them. A later pull resolves the proposals it no longer
-  raises; a relink resolves none. The legacy provider refresh leaves a
-  pull's proposals alone.
+  raises; a relink resolves none. An operator-triggered provider refresh leaves
+  the import's proposals open for review.
 - **Corrections.** Apply approves, in its requester's name and under one
   approval run, the import's open `record_charge`, `update_card`, renewal
   and period-end `adopt_subscription` proposals, and `correct_subscription`

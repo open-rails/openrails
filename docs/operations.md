@@ -192,7 +192,8 @@ deployment makes no cancellation, revocation, provider delete or pull overwrite
 until enabled. Detection, findings, additive repairs and notices run either way.
 A held retraction stays `reconcile_required` with `held_by: kill_switch`; a
 provider-confirmed cancel it holds parks the subscription `unverified` with access
-kept, and the first Provider Refresh after enabling applies it.
+kept. A targeted verification or operator refresh can apply the cancellation
+after the switch is enabled.
 
 ```sql
 -- stop everything now; parked intents resume when it is enabled again
@@ -311,8 +312,8 @@ receipt, or from provider-supported non-execution (an empty NMI search is never
 enough); it never resends.
 
 Inbound durability is the provider's: webhooks are at-least-once and handlers
-idempotent. There is no local inbound queue; Provider Refresh backfills what a
-long outage loses.
+idempotent. Run a [provider refresh](#provider-refresh) to backfill missing
+events after a long outage.
 
 ### PSPs and credentials
 
@@ -529,9 +530,9 @@ catches up at start when its last retained run is older than its interval.
 
 | Job | When |
 |---|---|
-| `openrails.billing_pass`: due renewals and retries, failed balance looks, arrears delinquency, order expiry (abandoned card saves included), automatic usage billing (opt-in), rebill watch, the daily NMI history read, undeclared-account re-alerts, stored-card refresh before renewal, provider operations an hour past due whose wake was lost; each scan in turn | top of each UTC hour, and on start |
+| `openrails.billing_pass` runs the [billing scans](river-jobs.md#hourly-billing-scans), including targeted subscription verification retries. | Top of each UTC hour and on startup. |
 | retention cleanup; merchant health; admission-denial flush (with Redis) | hourly |
-| provider refresh (one job per merchant) | 2 h |
+| provider refresh (`openrails.provider_refresh_requested`) | An operator requests a refresh for one merchant. |
 | Stripe webhook endpoint backstop | 24 h |
 | a provider operation (`openrails.provider_operation`) | queued with its intent, sleeping to each attempt |
 | a customer's convergence (`openrails.customer_converge`) | committed with the change |
