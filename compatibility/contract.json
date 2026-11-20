@@ -1851,7 +1851,7 @@
       "type position struct {\n\tRank int32     `json:\"r\"`\n\tAt   time.Time `json:\"t\"`\n\tID   uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/pspimport": [
-      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n}",
+      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n\n\tApprovalActor *destructive.Actor `json:\"approval_actor,omitempty\"`\n}",
       "type cardData struct {\n\tMethodRef string `json:\"method_ref\"`\n\tPrimary   bool   `json:\"primary,omitempty\"`\n\tBrand     string `json:\"brand,omitempty\"`\n\tLast4     string `json:\"last4,omitempty\"`\n\tExpMonth  int    `json:\"exp_month,omitempty\"`\n\tExpYear   int    `json:\"exp_year,omitempty\"`\n}",
       "type customerData struct {\n\tCards  []cardData                      `json:\"cards\"`\n\tRemote []reconcile.RemotePaymentMethod `json:\"remote,omitempty\"`\n}",
       "type recordPosition struct {\n\tID uuid.UUID `json:\"i\"`\n}",
@@ -4413,6 +4413,7 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
