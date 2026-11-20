@@ -57,7 +57,7 @@ func newRootCmd() *cobra.Command {
 			if isDatabaseOnlyBillingCommand(cmd) {
 				load = hostconfig.LoadDatabaseForCommand
 			}
-			if cmd.Name() == "workers" || cmd.Name() == "list" && cmd.Parent() != nil && cmd.Parent().Name() == "destructive-holds" {
+			if cmd.Name() == "workers" || cmd.Name() == "provider-refresh" || cmd.Name() == "list" && cmd.Parent() != nil && cmd.Parent().Name() == "destructive-holds" {
 				load = hostconfig.LoadDatabaseForCommand
 			}
 			if cmd.Parent() != nil && (cmd.Parent().Name() == "merchants" && (cmd.Name() == "list" || cmd.Name() == "get") || cmd.Parent().Name() == "merchant" && cmd.Name() == "purge") {
@@ -133,7 +133,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newAccessCutoverCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newAccessCutoverCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
