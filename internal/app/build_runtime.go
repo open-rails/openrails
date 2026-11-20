@@ -71,7 +71,7 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
+	// idempotencyLeaseConns sizes the lease-renewal pool unless DB.LeaseConns does: one short UPDATE per
 	// held claim every quarter lease.
 	idempotencyLeaseConns = 4
 )
@@ -252,7 +252,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	customers := &identity.Customers{Directory: directory}
 	// #1099: idempotency leases renew on their own connections, so a pool
 	// saturated by the requests holding them can never starve a renewal.
-	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
+	leaseConns := int32(idempotencyLeaseConns)
+	if cfg.DB != nil && cfg.DB.LeaseConns > 0 {
+		leaseConns = int32(cfg.DB.LeaseConns)
+	}
+	leaseDB, err := database.SeparatePool(ctx, leaseConns)
 	if err != nil {
 		return nil, fmt.Errorf("idempotency lease pool: %w", err)
 	}
