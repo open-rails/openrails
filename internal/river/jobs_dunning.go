@@ -460,9 +460,9 @@ func (w *DunningWorker) processSubscription(
 	// Charges are attempted only within the window derived from the price's
 	// billing cycle: an older rebill (e.g. a months-stale legacy import) is
 	// never surprise-charged by a catch-up run. Expiry skips the charge and
-	// parks the row as `unknown` (access intact, out of the dunning queue) for
-	// the unknown-cohort provider probe: NMI rebills forever, so a lapsed date
-	// is evidence of nothing.
+	// parks the row as `unverified` (access intact, out of the dunning queue)
+	// for a targeted provider read. A lapsed date alone gives no evidence of
+	// whether NMI renewed or ended the subscription.
 	cycleHours := collection.BillingCycleHoursOf(sub.Price)
 	if cycleHours <= 0 && priceSvc != nil {
 		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
@@ -535,10 +535,9 @@ func (w *DunningWorker) processSubscription(
 }
 
 // parkStaleSubscription skips the charge of a past_due subscription whose
-// missed rebill is older than the dunning window and parks it as `unknown`:
-// access intact, out of the dunning queue, no provider delete. It never
-// terminates; the unknown-cohort probe (ProviderRefreshWorker) resolves it
-// against the provider.
+// missed rebill is older than the dunning window. The unverified transition
+// queues a read of the subscription, keeping the customer's access while the
+// provider result is unknown.
 func (w *DunningWorker) parkStaleSubscription(
 	ctx context.Context,
 	logEntry *log.Entry,

@@ -371,7 +371,7 @@
     {
       "id": "OR-J15-S07",
       "journey": "J15",
-      "name": "Bulk verification reads each NMI PSP's unverified rows with that PSP's own credentials"
+      "name": "A burst of automatic verification reads only flagged NMI subscriptions with their own PSP's credentials"
     },
     {
       "id": "OR-J16-S01",
@@ -851,7 +851,7 @@
     {
       "id": "OR-J34-S05",
       "journey": "J34",
-      "name": "Provider-confirmed convergence cancel waits for the destructive switch on every rail"
+      "name": "Targeted verification recovers a missed flag and holds a provider-confirmed cancel until the switch allows it"
     },
     {
       "id": "OR-J34-S06",

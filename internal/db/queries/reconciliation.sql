@@ -949,6 +949,21 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
   AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL;
 
+-- CROSS-MERCHANT: route due verification ids. The workers read the owning PSP
+-- and apply decisions inside each merchant's scope.
+-- name: ListDueSubscriptionVerifications :many
+SELECT v.merchant_id, v.subscription_id
+FROM billing.subscription_verifications v
+JOIN billing.subscriptions s ON s.merchant_id = v.merchant_id AND s.id = v.subscription_id
+JOIN billing.merchants m ON m.id = v.merchant_id
+WHERE COALESCE(v.last_read_at, v.unverified_at) <= sqlc.arg(read_before)::timestamptz
+  AND m.status = 'active' AND m.deleted_at IS NULL
+  AND s.status = 'unverified' AND s.deleted_at IS NULL
+  AND s.collection_policy <> 'engine' AND s.rail_subscription_id IS NOT NULL
+  AND s.rail IN ('nmi', 'stripe', 'ccbill')
+ORDER BY COALESCE(v.last_read_at, v.unverified_at), v.merchant_id, v.subscription_id
+LIMIT sqlc.arg(row_limit)::int;
+
 -- How many unverified NMI rows each of the merchant's NMI PSPs holds: each PSP
 -- is read in bulk or row by row on its own count.
 -- name: CountUnverifiedNMISubscriptionsByPSP :many

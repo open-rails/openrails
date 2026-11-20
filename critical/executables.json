@@ -228,7 +228,7 @@
       "TestVerificationBinding/OR-J15-S06/draining-account-is-read-with-its-own-credentials"
     ],
     "OR-J15-S07": [
-      "TestVerificationBinding/OR-J15-S07/bulk-read-binds-each-nmi-psp"
+      "TestVerificationBinding/OR-J15-S07/verification-burst-reads-only-flagged-subscriptions"
     ],
     "OR-J15-S30": [
       "TestBackgroundJobs/OR-J15-S30/rebill-watch-backs-off-a-failing-probe"

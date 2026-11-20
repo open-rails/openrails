@@ -98,8 +98,8 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 		if rec, ok := records[sub.RailSubscriptionID]; ok {
 			snap.Subscriptions = []RemoteSubscription{nmiRosterEntry(sub.RailSubscriptionID, rec.NextChargeDate, now)}
 		} else {
-			// Absent from the report: the v5 read is authoritative (404 or a
-			// deletion tombstone means NMI ended the schedule).
+			// Verify report absence with the v5 read. Only E_NOT_FOUND or a
+			// deletion tombstone proves NMI ended the schedule.
 			live, err := client.GetRecurringLiveness(ctx, sub.RailSubscriptionID)
 			if err != nil {
 				errs = errors.Join(errs, err)
@@ -270,7 +270,7 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 	return out, nil
 }
 
-// Bulk reads, with its own credentials, each NMI PSP of the merchant holding
+// Bulk is the manual refresh read of each NMI PSP of the merchant holding
 // more than BulkThreshold unverified rows: one paged roster read and one paged
 // transaction read by date range. Each transaction page's charges are
 // recorded as payments and checkpointed, so a crashed pass resumes at the next

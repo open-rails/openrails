@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	KindBillingPass = "openrails.billing_pass"
+	KindBillingPass                   = "openrails.billing_pass"
+	KindSubscriptionVerificationRetry = "openrails.subscription_verification_retry"
 	// BillingPassInterval is the pass's cadence: what falls due waits at most
 	// this long, and a renewal's access grace covers two of them.
 	BillingPassInterval = time.Hour
@@ -142,16 +143,17 @@ func BillingPassTimeout() time.Duration {
 
 // billingScanBudgets are the scans' budgets.
 var billingScanBudgets = map[string]time.Duration{
-	KindDunning:              DefaultTimeout,
-	KindBalanceWatch:         DefaultTimeout,
-	KindDelinquency:          DefaultTimeout,
-	KindOrderExpiry:          DefaultTimeout,
-	money.KindUsageOrders:    DefaultTimeout,
-	KindRebillWatch:          time.Hour,
-	KindNMIHistory:           time.Hour,
-	KindConfigRealerts:       DefaultTimeout,
-	KindStoredCardRefreshDue: time.Hour,
-	KindOperationWakes:       DefaultTimeout,
+	KindDunning:                       DefaultTimeout,
+	KindSubscriptionVerificationRetry: DefaultTimeout,
+	KindBalanceWatch:                  DefaultTimeout,
+	KindDelinquency:                   DefaultTimeout,
+	KindOrderExpiry:                   DefaultTimeout,
+	money.KindUsageOrders:             DefaultTimeout,
+	KindRebillWatch:                   time.Hour,
+	KindNMIHistory:                    time.Hour,
+	KindConfigRealerts:                DefaultTimeout,
+	KindStoredCardRefreshDue:          time.Hour,
+	KindOperationWakes:                DefaultTimeout,
 }
 
 // ScanBudget is a scan's budget inside the pass.

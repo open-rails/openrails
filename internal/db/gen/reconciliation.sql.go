@@ -985,6 +985,52 @@ func (q *Queries) ListDeadSubsWithLiveAccess(ctx context.Context, arg ListDeadSu
 	return items, nil
 }
 
+const listDueSubscriptionVerifications = `-- name: ListDueSubscriptionVerifications :many
+SELECT v.merchant_id, v.subscription_id
+FROM billing.subscription_verifications v
+JOIN billing.subscriptions s ON s.merchant_id = v.merchant_id AND s.id = v.subscription_id
+JOIN billing.merchants m ON m.id = v.merchant_id
+WHERE COALESCE(v.last_read_at, v.unverified_at) <= $1::timestamptz
+  AND m.status = 'active' AND m.deleted_at IS NULL
+  AND s.status = 'unverified' AND s.deleted_at IS NULL
+  AND s.collection_policy <> 'engine' AND s.rail_subscription_id IS NOT NULL
+  AND s.rail IN ('nmi', 'stripe', 'ccbill')
+ORDER BY COALESCE(v.last_read_at, v.unverified_at), v.merchant_id, v.subscription_id
+LIMIT $2::int
+`
+
+type ListDueSubscriptionVerificationsParams struct {
+	ReadBefore time.Time
+	RowLimit   int32
+}
+
+type ListDueSubscriptionVerificationsRow struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// CROSS-MERCHANT: route due verification ids. The workers read the owning PSP
+// and apply decisions inside each merchant's scope.
+func (q *Queries) ListDueSubscriptionVerifications(ctx context.Context, arg ListDueSubscriptionVerificationsParams) ([]ListDueSubscriptionVerificationsRow, error) {
+	rows, err := q.db.Query(ctx, listDueSubscriptionVerifications, arg.ReadBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueSubscriptionVerificationsRow
+	for rows.Next() {
+		var i ListDueSubscriptionVerificationsRow
+		if err := rows.Scan(&i.MerchantID, &i.SubscriptionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHealthMerchants = `-- name: ListHealthMerchants :many
 SELECT m.id FROM billing.merchants m
 WHERE m.status = 'active' AND m.deleted_at IS NULL AND m.id > $1::uuid

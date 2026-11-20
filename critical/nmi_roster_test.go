@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -24,16 +24,23 @@ func TestNMIRoster(t *testing.T) {
 	const members = 201 // one past the bulk threshold
 	unverified := billing.SubscriptionStatus("unverified")
 	t.Run("OR-J15-S71/a-truncated-roster-page-resolves-nothing", func(t *testing.T) {
-		a, old, fleet, book, now := lapsedNMIBook(t, members)
-		// Every roster read is cut short until the test lifts the fault, so
-		// the pull lane and the bulk read both meet it whichever runs first.
+		a, old, book, now := lapsedNMIBook(t, members)
+		// Import before the listener starts. With periodic work paused in the
+		// fixture, only the operator's job can read the outstanding rows.
 		const truncated = 1 << 20
 		old.TruncateRoster(truncated)
 		imported, err := a.alpha.ImportBilling(t.Context(), book)
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
 		require.Len(t, imported.Imported, members)
-		require.Eventually(t, func() bool { return old.RosterTruncations() < truncated }, 30*time.Second, 50*time.Millisecond, "a roster read meets the cut-short page")
+		fleet := quietFleet(t, a.world)
+		job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: a.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: "provider_refresh", MaxAttempts: 5})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			current, err := fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && current.State == rivertype.JobStateRetryable
+		}, 30*time.Second, 20*time.Millisecond, "the truncated roster leaves the manual refresh retryable")
+		require.Less(t, old.RosterTruncations(), truncated, "a roster read meets the cut-short page")
 		paid := *book.Subscriptions[0].PaidThrough
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
@@ -43,7 +50,12 @@ func TestNMIRoster(t *testing.T) {
 			}, 3*time.Second, 100*time.Millisecond, "a cut-short roster is no evidence: nothing is adopted or cancelled")
 		}
 		old.TruncateRoster(0)
-		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		_, err = fleet.JobRetry(t.Context(), job.Job.ID)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			current, err := fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && current.State == rivertype.JobStateCompleted
+		}, 30*time.Second, 50*time.Millisecond, "the same refresh completes once the roster is readable")
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
 			require.Eventually(t, func() bool {
@@ -54,11 +66,10 @@ func TestNMIRoster(t *testing.T) {
 	})
 }
 
-// lapsedNMIBook boots the archived-account world of OR-J15-S07 and declares a
-// lapsed book of members schedules the archived account has since charged,
-// so every imported row is unverified and only the verifier's bulk read
-// resolves it.
-func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, *river.Client[pgx.Tx], billing.DeclaredBilling, time.Time) {
+// lapsedNMIBook prepares the archived account and a book whose members need
+// verification. It leaves the fleet and listener off until the caller starts
+// them, so the test controls what reads the book.
+func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, billing.DeclaredBilling, time.Time) {
 	t.Helper()
 	a, accounts := nmiAccountsWorld(t)
 	old := accounts.cores["nmi-old-key"]
@@ -79,9 +90,6 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, *
 	a.alpha, err = a.engine.MerchantBySlug("alpha")
 	require.NoError(t, err)
 	armDestructive(t, a, true)
-	fleet := hostFleet(t, a.world, 2)
-	require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-	require.NoError(t, fleet.Start(t.Context()))
 
 	now := a.clock.Now()
 	started, paid := now.Add(-10*24*time.Hour), now.Add(-3*24*time.Hour)
@@ -98,5 +106,5 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, *
 			StartedAt: started, PaidThrough: &paid, PaymentMethod: &ref,
 			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: id, Amount: 10_000_000, Currency: "USD", IntervalHours: 168, FirstDueAt: paid}})
 	}
-	return a, old, fleet, book, now
+	return a, old, book, now
 }

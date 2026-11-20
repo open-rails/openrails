@@ -181,7 +181,14 @@ func TestVerificationBinding(t *testing.T) {
 		// has not enabled destructive convergence.
 		old.CancelSubscription(remote)
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()) + 49*time.Hour)
-		fleet := startFleet(t, a.world)
+		// The flag commits while the fleet and its listener are stopped. The
+		// next billing pass recovers the durable row even though it missed NOTIFY.
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+
+			" SET status='unverified', updated_at=$3, lifecycle_rev=lifecycle_rev+1 WHERE merchant_id=$1 AND id=$2",
+			a.alpha.MerchantID().UUID(), sub.ID.UUID(), a.clock.Now())
+		require.NoError(t, err)
+		a.clock.Advance(time.Hour + time.Minute)
+		fleet := quietFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool { return accounts.read("sk_test_old", "/v1/subscriptions/"+remote) }, 20*time.Second, 20*time.Millisecond)
 		require.Never(t, func() bool {
@@ -195,11 +202,12 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["stripe:member"], "a held cancel keeps access")
 		armDestructive(t, a, true)
-		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		a.clock.Advance(time.Hour + time.Minute)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool {
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			return err == nil && current.Status == billing.SubscriptionCanceled
-		}, 20*time.Second, 50*time.Millisecond, "once enabled, the owning account's cancel converges")
+		}, 20*time.Second, 50*time.Millisecond, "once enabled, the same subscription converges on targeted retry")
 	})
 	t.Run("OR-J34-S06/held-webhook-cancel-keeps-access-until-the-switch-allows-it", func(t *testing.T) {
 		a, accounts, sub := stripeMembership(t)
@@ -224,8 +232,8 @@ func TestVerificationBinding(t *testing.T) {
 			return err == nil && current.Status == billing.SubscriptionCanceled
 		}, 30*time.Second, 50*time.Millisecond, "once allowed, the held cancel converges without another webhook")
 	})
-	t.Run("OR-J15-S07/bulk-read-binds-each-nmi-psp", func(t *testing.T) {
-		const members = 201 // one past the bulk threshold
+	t.Run("OR-J15-S07/verification-burst-reads-only-flagged-subscriptions", func(t *testing.T) {
+		const members = 201 // enough unverified rows to use the manual bulk path
 		a, accounts := nmiAccountsWorld(t)
 		old := accounts.cores["nmi-old-key"]
 		old.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
@@ -241,9 +249,9 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		a.alpha, err = a.engine.MerchantBySlug("alpha")
 		require.NoError(t, err)
-		fleet := hostFleet(t, a.world, 2)
-		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
-		require.NoError(t, fleet.Start(t.Context()))
+		quietFleet(t, a.world)
+		old.TruncateRoster(1)
+		accounts.cores["nmi-new-key"].TruncateRoster(1)
 
 		// A lapsed book on the archived account: every row is imported with no
 		// evidence of the renewal the account has since charged, so all of
@@ -267,15 +275,17 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
 		require.Len(t, imported.Imported, members)
-		// The archived account still bills every schedule: its roster resolves
-		// the rows. No refresh is armed, so only the verifier can.
+		// The archived account still bills each flagged schedule. Its individual
+		// records suffice even when the flag arrives in a large import burst.
 		for _, i := range []int{0, members - 1} {
 			customer := book.Customers[i].Customer
 			require.Eventually(t, func() bool {
 				subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
 				return err == nil && len(subs.Items) == 1 && subs.Items[0].Status == billing.SubscriptionActive && subs.Items[0].CurrentPeriodEndsAt.After(now)
-			}, 30*time.Second, 50*time.Millisecond, "the archived account's renewals are read in bulk with its own credentials")
+			}, 30*time.Second, 50*time.Millisecond, "the archived account's flagged renewals are read with its own credentials")
 		}
+		require.Equal(t, 1, old.RosterTruncations(), "the automatic verifier never reads the owning account's roster")
+		require.Equal(t, 1, accounts.cores["nmi-new-key"].RosterTruncations(), "the automatic verifier never reads a sibling account's roster")
 	})
 	t.Run("OR-J34-S30/switch-turned-off-during-a-pull-holds-the-pulls-retractions", func(t *testing.T) {
 		a, p, sub := nmiMembership(t)
@@ -294,7 +304,7 @@ func TestVerificationBinding(t *testing.T) {
 		hold := p.core.Hold(func(*http.Request) bool { return true }, nmimock.HoldRequest)
 		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 		defer unsubscribe()
-		job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: a.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: a.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: "provider_refresh"})
 		require.NoError(t, err)
 		select {
 		case <-hold.Arrived():
