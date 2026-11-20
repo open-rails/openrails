@@ -8,8 +8,8 @@ contain AuthKit or host application jobs. [Worker registrations](../internal/app
 
 ## Recurring jobs
 
-River attempts startup catch-up for all six declarations. Shared database
-leases coordinate the five database-wide passes. Each fleet with Redis runs
+River attempts startup catch-up for all five declarations. Shared database
+leases coordinate the four database-wide passes. Each fleet with Redis runs
 its own admission denial flush. [Periodic declarations](../internal/river/periodic.go) ·
 [Startup and leases](../internal/app/river_periodic.go)
 
@@ -19,7 +19,6 @@ its own admission denial flush. [Periodic declarations](../internal/river/period
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
-| `openrails.provider_refresh` | `billing` | Every two hours | Schedules staggered refresh jobs for active merchants with PSPs. [Scheduler](../internal/river/jobs_provider_refresh.go) · [Interval](../internal/providerrecovery/gate.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
 ## Jobs queued as work arrives
@@ -33,7 +32,7 @@ its own admission denial flush. [Periodic declarations](../internal/river/period
 | `openrails.operator_alert` | `billing` | A destructive-action hold or a finding notification queues the initial job, which queues one delivery job per applicable channel | Delivers email or webhook alerts to operators, with independent retries per channel. [Worker](../internal/river/jobs_operator_alert.go) · [Delivery](../internal/modules/alerting/delivery.go) |
 | `openrails.provider_object_observe` | `billing` | Stripe product or price webhooks | Reads the current catalog object from Stripe and records its observed state or retirement. [Worker](../internal/river/jobs_provider_object_observe.go) · [Webhook trigger](../internal/modules/webhooks/stripe_catalog.go) |
 | `openrails.provider_operation` | `billing` | An accepted provider intent commits and schedules a wake for its next attempt, or the hourly scan restores an overdue wake | Executes or verifies one authorized provider operation until it reaches a terminal state. [Worker](../internal/river/jobs_provider_intents.go) · [Wake](../internal/intents/wake/wake.go) |
-| `openrails.provider_refresh_merchant` | `provider_refresh` in OpenRails' own fleet, `billing` in a host fleet | The two-hour provider refresh schedules one job per active merchant with a PSP | Pulls provider events and history, reconciles unknown subscriptions, and advances provider-specific watermarks. [Worker](../internal/river/jobs_provider_refresh.go) · [Queue routing](../internal/app/river_composition.go) |
+| `openrails.provider_refresh_requested` | `provider_refresh` | An operator runs `openrails provider-refresh --merchant <merchant>` | Pulls provider events and history for one merchant and resumes from its watermarks. [Operator command and upgrade](operations.md#provider-refresh) · [Worker](../internal/river/jobs_provider_refresh.go) |
 | `openrails.psp_import` | `psp_import` | An operator starts an import, changes matching links, or applies an approved import | Pulls PSP data into staging, re-evaluates proposed matches, or applies approved observations locally. [Worker](../internal/river/jobs_psp_import.go) · [Import steps](../internal/pspimport/importer.go) · [Relink](../internal/pspimport/link.go) |
 | `openrails.stored_card_refresh` | `billing` | The hourly scan finds a card due for an updater check, or a charge declines because the card expired or was reissued | Asks the vault's account updater for one card's latest details and applies replacement or closure effects. [Worker](../internal/river/jobs_stored_card_refresh.go) · [Decline trigger](../internal/modules/subscriptions/lifecycle_service.go) |
 | `openrails.subscription_converge` | `billing` | Stripe or NMI subscription-state webhooks, or release of a parked subscription | Coalesces wakes, fetches current provider state, and updates the local subscription and its effects. [Worker](../internal/river/jobs_subscription_converge.go) · [Coalescing](../internal/wakejobs/wakejobs.go) · [Park release](../internal/modules/parking/parking.go) |
@@ -55,6 +54,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.order_expiry` | Expired orders and attempts, including abandoned card saves. [Source](../internal/river/jobs_order_expiry.go) |
 | `openrails.usage_orders` | Due usage bills and collections when usage billing is enabled. [Source](../internal/river/jobs_usage_orders.go) |
 | `openrails.rebill_watch` | Overdue provider-billed renewals that need an evidence check. [Source](../internal/river/jobs_rebill_watch.go) |
+| `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
 | `openrails.nmi_history` | NMI PSPs due for a roughly daily history read to update monthly aggregates. [Source](../internal/river/jobs_nmi_history.go) |
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
@@ -84,4 +84,13 @@ SELECT id, kind, queue, state, scheduled_at, attempt
 FROM billing_river.river_job
 ORDER BY id DESC
 LIMIT 100;
+```
+
+For a provider refresh, use the `river_schema` and `job_id` from the command's
+response. This example checks job 12345 and shows its recorded errors.
+
+```sql
+SELECT id, state, attempt, max_attempts, errors
+FROM billing_river.river_job
+WHERE id = 12345;
 ```

@@ -36,7 +36,7 @@ diverge:
 | Divergence | Mechanism |
 |---|---|
 | Catalog wrong at the provider | none needed: `catalog apply` only reads existing provider bindings (and may publish a recurring Solana price's on-chain plan). Nothing watches provider catalogs. |
-| Money state wrong locally | webhooks; [Provider Refresh](#provider-refresh) every 2 h; a manual PSP import (`POST /v1/merchant/psp-imports`) whose differences become proposals |
+| Money state wrong locally | Webhooks, an [operator-triggered provider refresh](#provider-refresh), or a PSP import (`POST /v1/merchant/psp-imports`) whose differences become proposals. |
 | Outbound action never executed | the [provider intent ledger](#provider-intents) |
 | Access inconsistent | the [Convergence Engine](#convergence) re-derives it |
 
@@ -417,18 +417,40 @@ Findings raise console notifications and alerts ([events](events.md)).
 
 ## Provider Refresh
 
-Every 2 hours (and on start) one refresh job per merchant with PSPs reads each
-PSP in bounded windows from its watermark (`billing.psp_refresh_watermarks`) to
-five minutes ago; NMI and Stripe start 24 hours early for late indexing. A
-watermark advances only after a complete read. Before each Stripe window, a
-reversals read takes the PSP's refunds and disputes alone, from the window start
-or eight days ago, whichever is later, to five minutes ago: it reads no
-subscriptions, cards or invoices, records only refunds that match a recorded
-payment, moves no watermark and proves nothing about absence, so a book too
-large for the full read still has its refunds recorded. Refresh records qualified
-payments, refunds and provider-owned records, never writes to a provider and
-never charges. Its unknown-cohort lane resolves `unverified` subscriptions with
-the PSP that owns them:
+Run a refresh for one merchant after missed webhooks or when investigating drift.
+Use the deployment's billing database and River schema in the CLI config.
+
+```sh
+openrails --config /etc/openrails/config.yaml provider-refresh --merchant my-store
+```
+
+The response includes `job_id`, `merchant_id`, `river_schema`, and `queue`.
+`already_queued` is true when a refresh for that merchant is already outstanding.
+Track that ID in the [River inventory](river-jobs.md#inspect-a-running-deployment).
+The same job continues through bounded windows and retries incomplete reads
+up to five attempts. If all attempts fail, a new request resumes from the
+merchant's saved watermarks.
+
+The worker reads each PSP from its watermark (`billing.psp_refresh_watermarks`)
+to five minutes ago. NMI and Stripe read a 24-hour overlap for late indexing.
+A watermark advances only after a complete read. Before each Stripe window, a
+separate read records refunds and disputes that match existing payments. It
+covers up to eight days and can succeed even when the full provider read fails.
+Qualified provider evidence can repair the local ledger and subscription records.
+
+**Upgrade from a release with scheduled refresh.** Stop the old workers sharing
+the River schema before starting the new fleet. When the new fleet binds, it
+cancels outstanding `openrails.provider_refresh` and
+`openrails.provider_refresh_merchant` jobs in that schema and keeps their history.
+Submit any needed replacement refreshes through the command after the new fleet starts.
+
+### Unverified subscriptions
+
+When dunning or another lifecycle transition flags a subscription as `unverified`,
+the verifier queues that subscription for a check against its own PSP. The hourly
+billing pass recovers missed notifications and retries unresolved checks in bounded
+batches of subscription IDs. An operator refresh can also reconcile the unresolved
+subscriptions using its provider reads.
 
 | Provider evidence | Resolution |
 |---|---|
@@ -439,13 +461,12 @@ the PSP that owns them:
 | remote absent or terminal | canceled locally, access revoked |
 | inconclusive or unreachable | stays `unverified` |
 
-Reads run in every mode; overwrites, convergence and the cohort lane need the
-merchant armed, the switch on and a posture above `readonly`. An auto-renewing
-subscription's access is open-ended from creation and closes only on evidence; an
-`unverified` one keeps access. Findings and refresh age report; they never gate
-an operation, which still proves its own authority. NMI merchant-defined field 20
-and Stripe `openrails_book` mark this book's objects: an unknown object without
-the mark is a quiet, low finding (`evidence.quiet_foreign`).
+Refresh reads run in every write mode. Overwrites and lifecycle repairs require an
+armed merchant, the destructive-action switch, and a posture above `readonly`.
+An `unverified` subscription keeps access until provider evidence supports a
+change. NMI merchant-defined field 20 and Stripe `openrails_book` mark this
+book's objects. An unknown object without the mark produces a low-priority
+finding (`evidence.quiet_foreign`).
 
 ## Drift
 
@@ -528,7 +549,7 @@ provider operation more than an hour past its due time, whose wake may be lost
 operation gains at most one extra wake. An expired order is expired for every
 read at once; the pass writes it, paging through each merchant's backlog, so
 `order.expired` may follow up to an hour later. Jobs time out after 10 minutes,
-an hour for `cleanup_expired_data`, `provider_refresh_merchant`,
+an hour for `cleanup_expired_data`, `provider_refresh_requested`,
 `merchant_health` and an import's charge attribution, two for `psp_import`. The
 billing pass runs each scan under its own budget, 10 minutes or an hour for the
 rebill watch, the NMI history read and stored-card refresh (which stops opening

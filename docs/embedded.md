@@ -114,8 +114,11 @@ defer fleet.StopAndCancel(context.WithoutCancel(ctx))
 if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil { return err }
 ```
 
-`RiverJobs` adds `openrails.QueueBilling` and `QueuePSPImport` (2 workers) if
-missing and sets `RescueStuckJobsAfter` to 10 minutes when unset; each OpenRails
+`RiverJobs` adds `openrails.QueueBilling`, `QueuePSPImport` (2 workers), and
+`provider_refresh` (4 workers) if missing. Set their concurrency in the host
+fleet config. See the [provider refresh upgrade](operations.md#provider-refresh)
+before replacing a fleet that scheduled refresh jobs. `RiverJobs` sets
+`RescueStuckJobsAfter` to 10 minutes when unset. Each OpenRails
 worker declares its own timeout. OpenRails never starts or stops your fleet. A
 fleet in another schema, `Start` without `WithRiverClient` after `RiverJobs` went
 to a fleet, and a second `Start` are refused. `Close` stops what `Start` started;
