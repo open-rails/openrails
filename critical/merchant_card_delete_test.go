@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -85,5 +88,79 @@ func TestMerchantCardRemoval(t *testing.T) {
 		require.Empty(t, after.Items, "removed cards are no longer offered for charging")
 		require.Empty(t, journal.core.Vaults(), "the external holder confirmed removal")
 		journal.money(t, 0, 0)
+	})
+
+	t.Run("OR-J12-S71/nmi-erasure-requires-confirmed-absence", func(t *testing.T) {
+		a, journal := newNMIWorld(t)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+
+		for _, failReadBeforeDelete := range []bool{true, false} {
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{
+				PSPID: psps.Items[0].ID,
+				Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}),
+			})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var method billing.PaymentMethod
+			require.NoError(t, json.Unmarshal(raw, &method))
+			vaults := journal.core.Vaults()
+			require.Len(t, vaults, 1)
+			recordPath := "/v5/customers/" + vaults[0].ID
+			matchesVault := func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, recordPath) }
+			var deletes atomic.Int32
+			journal.core.Intercept(matchesVault, func(r *http.Request, next func() *http.Response) (*http.Response, error) {
+				if r.Method == http.MethodDelete && !failReadBeforeDelete {
+					deletes.Add(1)
+					response := next()
+					_ = response.Body.Close()
+					return answer(r, http.StatusNotFound, "route not found"), nil
+				}
+				if r.Method == http.MethodGet && (failReadBeforeDelete || deletes.Load() > 0) {
+					return answer(r, http.StatusNotFound, "route not found"), nil
+				}
+				return next(), nil
+			})
+
+			path := "/v1/admin/customers/" + method.CustomerID.String() + "/payment-methods/" + method.ID.String()
+			status, raw = a.request(t, http.MethodDelete, path, a.alphaKey.Secret, nil)
+			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+			var operationStatus, parkReason string
+			intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+			methods := pgx.Identifier{a.schema, "payment_methods"}.Sanitize()
+			err = a.pool.QueryRow(t.Context(), `SELECT i.status, m.park_reason FROM `+intents+` i JOIN `+methods+` m ON m.id::text = i.payload->>'payment_method_id' AND m.merchant_id = i.merchant_id WHERE i.intent_type = 'nmi_vault_delete' AND m.id = $1`, method.ID.UUID()).Scan(&operationStatus, &parkReason)
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(parkReason, "delete:"), "an unresolved erasure retains its fence")
+			if failReadBeforeDelete {
+				require.Equal(t, "failed_retryable", operationStatus)
+				require.Len(t, journal.core.Vaults(), 1, "an inconclusive preflight sends no delete")
+			} else {
+				require.Equal(t, "unknown_needs_verify", operationStatus)
+				require.Empty(t, journal.core.Vaults(), "the ambiguous response followed an actual provider deletion")
+				require.EqualValues(t, 1, deletes.Load())
+			}
+
+			journal.core.ClearIntercepts()
+			if !failReadBeforeDelete {
+				journal.core.Intercept(matchesVault, func(r *http.Request, next func() *http.Response) (*http.Response, error) {
+					if r.Method == http.MethodGet {
+						return answer(r, http.StatusNotFound, `{"error_code":"E_NOT_FOUND"}`), nil
+					}
+					deletes.Add(1)
+					return next(), nil
+				})
+			}
+			a.clock.Advance(time.Hour)
+			status, raw = a.request(t, http.MethodDelete, path, a.alphaKey.Secret, nil)
+			require.Equal(t, http.StatusNoContent, status, string(raw))
+			journal.core.ClearIntercepts()
+			err = a.pool.QueryRow(t.Context(), `SELECT status FROM `+intents+` WHERE intent_type = 'nmi_vault_delete' AND payload->>'payment_method_id' = $1`, method.ID.UUID().String()).Scan(&operationStatus)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", operationStatus)
+			require.Empty(t, journal.core.Vaults())
+			if !failReadBeforeDelete {
+				require.EqualValues(t, 1, deletes.Load(), "verified absence completes without sending another delete")
+			}
+		}
 	})
 }

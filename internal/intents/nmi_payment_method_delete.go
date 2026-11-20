@@ -164,10 +164,10 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
 			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
-		case errors.Is(err, nmi.ErrV5NotFound):
-			// Already gone (raced delete): absent is success.
+		case errors.Is(err, nmi.ErrV5Missing):
+			// NMI confirmed the target was already gone.
 			return h.complete(ctx, intent, p, map[string]any{"already_absent": true, "vault_id": vaultID})
-		case nmi.IsTransportAmbiguous(err):
+		case errors.Is(err, nmi.ErrV5NotFound), nmi.IsTransportAmbiguous(err):
 			// The delete MAY have landed; the verifier resolves via reads.
 			return Ambiguous("vault delete outcome unknown: " + err.Error())
 		default:
@@ -256,10 +256,9 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 	return pm, err
 }
 
-// vaultCustomer reads the id-filtered v5 customer roster: absent means the
-// vault customer is gone at NMI.
+// vaultCustomer reads the exact vault customer with strict absence evidence.
 func (h *NMIPaymentMethodDeleteHandler) vaultCustomer(ctx context.Context, client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
-	customer, found, err := client.GetCustomer(ctx, vaultID)
+	customer, found, err := client.GetCustomerForErasure(ctx, vaultID)
 	if err != nil || !found {
 		return nil, false, err
 	}

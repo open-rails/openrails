@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 341,
+  "scenario_count": 342,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1657,6 +1657,11 @@
       "id": "OR-J12-S70",
       "journey": "J12",
       "name": "A card save confirmed or saved again past its 24-hour cutoff, before any pass, is removed"
+    },
+    {
+      "id": "OR-J12-S71",
+      "journey": "J12",
+      "name": "NMI card erasure completes only after provider confirmation"
     },
     {
       "id": "OR-J04-S37",

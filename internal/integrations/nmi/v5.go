@@ -30,7 +30,7 @@ const (
 	SandboxV5BaseURL = "https://sandbox.nmi.com/api/v5"
 )
 
-// ErrV5NotFound marks a v5 404 — the resource does not exist at NMI.
+// ErrV5NotFound marks any v5 HTTP 404.
 var ErrV5NotFound = errors.New("nmi: resource not found")
 
 // ErrV5Missing marks a 404 whose body is NMI's own answer that the resource
@@ -409,6 +409,15 @@ func (c *NMIClient) ListCustomersPage(ctx context.Context, cursor string, perPag
 // list endpoint's id parameter is not an exact filter at NMI, so every
 // per-vault lookup uses this read; found=false means NMI has no such vault.
 func (c *NMIClient) GetCustomer(ctx context.Context, id string) (V5Customer, bool, error) {
+	return c.getCustomer(ctx, id, ErrV5NotFound)
+}
+
+// GetCustomerForErasure reports absence only when NMI confirms it explicitly.
+func (c *NMIClient) GetCustomerForErasure(ctx context.Context, id string) (V5Customer, bool, error) {
+	return c.getCustomer(ctx, id, ErrV5Missing)
+}
+
+func (c *NMIClient) getCustomer(ctx context.Context, id string, absent error) (V5Customer, bool, error) {
 	var customer V5Customer
 	if err := c.checkConfiguration(); err != nil {
 		return customer, false, err
@@ -418,7 +427,7 @@ func (c *NMIClient) GetCustomer(ctx context.Context, id string) (V5Customer, boo
 		return customer, false, errors.New("customer vault ID is required")
 	}
 	err := c.sendV5Request(ctx, http.MethodGet, "/customers/"+url.PathEscape(id), nil, &customer)
-	if errors.Is(err, ErrV5NotFound) {
+	if errors.Is(err, absent) {
 		return customer, false, nil
 	}
 	if err != nil {
