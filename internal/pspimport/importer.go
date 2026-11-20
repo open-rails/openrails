@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -117,6 +118,8 @@ type JobArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id"`
 	ImportID   uuid.UUID `json:"import_id"`
 	Step       Step      `json:"step"`
+	// ApprovalActor is the verified caller of Apply, retained for its worker.
+	ApprovalActor *destructive.Actor `json:"approval_actor,omitempty"`
 }
 
 func (JobArgs) Kind() string { return JobKind }
@@ -445,8 +448,12 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 	if strings.TrimSpace(requestedBy) == "" {
 		return nil, errors.New("pspimport: an apply names the person who asked")
 	}
+	actor, err := destructive.ActorFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var out gen.BillingPspImport
-	err := im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := im.DB.NewWithPgxTx(tx)
 		q := d.Gen(ctx)
 		mid, err := merchant.Require(ctx)
@@ -469,7 +476,7 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		if out, err = q.RequestPSPImportApply(ctx, gen.RequestPSPImportApplyParams{MerchantID: row.MerchantID, ID: row.ID, RequestedBy: requestedBy}); err != nil {
 			return inFlight(err)
 		}
-		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply}, nil)
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply, ApprovalActor: &actor}, nil)
 		return err
 	})
 	if err != nil {

@@ -817,6 +817,9 @@
     "OR-J38-S29": [
       "TestPSPReconcile/OR-J38-S29/provider-refresh-leaves-a-pulls-proposals"
     ],
+    "OR-J38-S71": [
+      "TestPSPReconcile/OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target"
+    ],
     "OR-J38-S35": [
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
     ],

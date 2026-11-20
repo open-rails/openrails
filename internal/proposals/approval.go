@@ -14,20 +14,22 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // approval is one approve call: its notes, who approved, and the approval run
 // it opens before its first change applies.
 type approval struct {
-	e        *Executor
-	mid      uuid.UUID
-	notes    string
-	actor    string
-	ids      int
-	run      uuid.UUID
-	approved int
-	affected map[string]int
+	e              *Executor
+	mid            uuid.UUID
+	notes          string
+	actor          string
+	admissionActor *destructive.Actor
+	ids            int
+	run            uuid.UUID
+	approved       int
+	affected       map[string]int
 	// moved is each subscription this call's approvals changed: the row
 	// version they found and the one they left. A proposal computed on the
 	// same basis still holds after them.
@@ -51,16 +53,32 @@ func touchedSubscription(c *reconcile.Change) (uuid.UUID, bool) {
 // the run commits on its own, so a failed id never takes it down.
 var errNeedRun = errors.New("approval run not open")
 
+// cancellationAdmission carries a validated command out of the domain
+// transaction so the reservation can commit before any cancellation applies.
+type cancellationAdmission struct{ command destructive.Command }
+
+func (c cancellationAdmission) Error() string { return "proposal cancellation requires admission" }
+
 // superseded is a basis or evidence check that failed.
 type superseded struct{ reason string }
 
 func (s superseded) Error() string { return s.reason }
 
 func (a *approval) one(ctx context.Context, id uuid.UUID) billing.ProposalResult {
-	result, err := a.try(ctx, id)
+	result, err := a.try(ctx, id, nil)
 	if errors.Is(err, errNeedRun) {
 		if err = a.open(ctx); err == nil {
-			result, err = a.try(ctx, id)
+			result, err = a.try(ctx, id, nil)
+		}
+	}
+	var need cancellationAdmission
+	if errors.As(err, &need) {
+		result, err = a.try(ctx, id, &need.command)
+		var held *destructive.HeldError
+		if errors.As(err, &held) {
+			result.Outcome = billing.ProposalHeld
+			result.Error = &billing.ProposalError{Code: billing.CodeDestructiveActionsHeld, Message: held.Error()}
+			err = nil
 		}
 	}
 	if err != nil {
@@ -79,10 +97,9 @@ func (a *approval) one(ctx context.Context, id uuid.UUID) billing.ProposalResult
 }
 
 // try runs one id in its own transaction.
-func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResult, error) {
+func (a *approval) try(ctx context.Context, id uuid.UUID, admitted *destructive.Command) (billing.ProposalResult, error) {
 	result := billing.ProposalResult{ID: billing.FindingID(id)}
-	err := a.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := a.e.DB.NewWithPgxTx(tx)
+	apply := func(ctx context.Context, tx pgx.Tx, txdb *db.DB) error {
 		q := gen.New(tx)
 		row, err := q.LockProposal(ctx, gen.LockProposalParams{MerchantID: a.mid, ID: id})
 		if err != nil {
@@ -117,6 +134,22 @@ func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResul
 		}
 		if a.run == uuid.Nil {
 			return errNeedRun
+		}
+		if d := rec.Change.Apply.Decide; d != nil && d.Decision.Kind == reconcile.TransitionCancel {
+			command, err := a.cancellationCommand(ctx, id, d.SubscriptionID, rec.Change.Basis.RowVersion)
+			if err != nil {
+				result.Outcome = billing.ProposalHeld
+				result.Error = &billing.ProposalError{Code: billing.CodeDestructiveActionsHeld, Message: err.Error()}
+				return nil
+			}
+			if admitted == nil {
+				return cancellationAdmission{command: command}
+			}
+			if *admitted != command {
+				return destructive.ErrConflict
+			}
+		} else if admitted != nil {
+			return destructive.ErrConflict
 		}
 		x.run = a.run
 		// The row the change touches, as it stood before: this call's later
@@ -184,8 +217,41 @@ func (a *approval) try(ctx context.Context, id uuid.UUID) (billing.ProposalResul
 		}
 		a.approved++
 		return nil
+	}
+	if admitted != nil {
+		err := destructive.RunLocal(ctx, a.e.DB, a.e.Admissions, *admitted, func(ctx context.Context, tx pgx.Tx, txdb *db.DB) (bool, error) {
+			err := apply(ctx, tx, txdb)
+			return result.Outcome == billing.ProposalApproved, err
+		})
+		return result, err
+	}
+	err := a.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return apply(ctx, tx, a.e.DB.NewWithPgxTx(tx))
 	})
 	return result, err
+}
+
+func (a *approval) cancellationCommand(ctx context.Context, proposal, subscription uuid.UUID, version *int64) (destructive.Command, error) {
+	if a.e.Admissions == nil {
+		return destructive.Command{}, errors.New("proposal cancellation admission is unavailable")
+	}
+	if version == nil || subscription == uuid.Nil {
+		return destructive.Command{}, errors.New("proposal cancellation has no subscription version")
+	}
+	var actor destructive.Actor
+	if a.admissionActor != nil {
+		actor = *a.admissionActor
+	} else {
+		var err error
+		actor, err = destructive.ActorFromContext(ctx)
+		if err != nil {
+			return destructive.Command{}, err
+		}
+	}
+	target := billing.SubscriptionID(subscription).String()
+	digest := destructive.Digest([]any{proposal, target, *version})
+	key := "proposal:cancel:" + digest + ":actor:" + destructive.Digest([]string{actor.Issuer, actor.ID})
+	return destructive.Command{MerchantID: a.mid, Kind: destructive.CancelSubscription, Target: target, Key: key, Digest: digest, Units: 1, Actor: actor}, nil
 }
 
 // open records the call's approval run before its first change applies.

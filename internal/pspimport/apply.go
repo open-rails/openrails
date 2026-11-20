@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -30,7 +31,7 @@ const applyCustomers = 50
 // who asked and hands the held rows it read to the provider's evidence. A
 // book the import refuses is retried one customer at a time, so one
 // customer's refusal blocks only its own records.
-func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
+func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalActor *destructive.Actor) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportApplying) {
 		return err
@@ -102,7 +103,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID) error {
 		}
 		after = customers[len(customers)-1]
 	}
-	if err := im.approveCorrections(ctx, row); err != nil {
+	if err := im.approveCorrections(ctx, row, approvalActor); err != nil {
 		return err
 	}
 	return im.DB.Gen(ctx).SetPSPImportApplied(ctx, gen.SetPSPImportAppliedParams{MerchantID: row.MerchantID, ID: row.ID, AppliedAt: im.now()})

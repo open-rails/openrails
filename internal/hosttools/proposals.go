@@ -17,10 +17,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -74,7 +76,12 @@ func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx conte
 		return err
 	}
 	ctx = merchant.WithID(ctx, opts.MerchantID)
-	x := proposals.New(database, opts.Config, opts.Clock)
+	cfg := opts.Config
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	runtime := &app.Runtime{DB: database, Config: cfg}
+	x := proposals.New(database, opts.Config, opts.Clock, runtime.NewDestructiveAdmissions(opts.Clock))
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error { return fn(ctx, database, x) })
 }
 
@@ -168,7 +175,8 @@ func resolveProposals(ctx context.Context, opts ProposalsOptions, set ProposalSe
 		if err != nil {
 			return err
 		}
-		res, err := do(x, ctx, proposals.Request{IDs: ids, Notes: notes, Actor: "cli:" + opts.Actor})
+		actor := &destructive.Actor{Issuer: "openrails:cli", ID: opts.Actor}
+		res, err := do(x, ctx, proposals.Request{IDs: ids, Notes: notes, Actor: "cli:" + opts.Actor, AdmissionActor: actor})
 		if err != nil {
 			return err
 		}

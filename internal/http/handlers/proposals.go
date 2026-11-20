@@ -30,7 +30,7 @@ func proposalExecutor(r *httprequest.Request) (*proposals.Executor, bool) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "proposals unavailable")
 		return nil, false
 	}
-	return proposals.New(r.State.DB, r.State.Config, r.State.Clock), true
+	return proposals.New(r.State.DB, r.State.Config, r.State.Clock, r.State.DestructiveAdmissions), true
 }
 
 // personActor names the person deciding: the staff member, or the person the
