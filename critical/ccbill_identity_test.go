@@ -303,7 +303,7 @@ func TestCCBillIdentity(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S38/datalink-import-matches-a-zero-dropped-legacy-id", func(t *testing.T) {
-		iw := reconcileWorld(t, "ccbill")
+		iw := newImportWorld(t, "ccbill")
 		price := ccbillMemberPrice(t, iw.alphaRemote)
 		alice, bob := customerOf(iw.alice), customerOf(iw.bob)
 		now := iw.clock.Now().UTC()

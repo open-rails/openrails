@@ -349,7 +349,7 @@ func TestMerchantConsole(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S32/console-proposals-group-approve-held-dismiss", func(t *testing.T) {
-		iw := reconcileWorld(t, "nmi")
+		iw := newImportWorld(t, "nmi")
 		start := openPeriod(iw)
 		iw.nmi.AddPlan(nmimock.Plan{ID: "gold", Name: "Gold", Amount: "20.00", Days: 30})
 		iw.premium(t, "gold")
