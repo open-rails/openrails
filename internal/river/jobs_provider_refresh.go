@@ -170,6 +170,10 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if err != nil {
 		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
 	}
+	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
+		return fmt.Errorf("provider refresh for %s incomplete: provider errors %d, watermark errors %d, verification errors %d, convergence errors %d",
+			mid, stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
+	}
 	if stats.More {
 		return river.JobSnooze(time.Second)
 	}
@@ -178,10 +182,6 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		// webhook can record the receipt after the read. One more pass tells
 		// them from findings that stand (it raises none new).
 		return river.JobSnooze(time.Second)
-	}
-	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
-		return fmt.Errorf("provider refresh for %s incomplete: provider errors %d, watermark errors %d, verification errors %d, convergence errors %d",
-			mid, stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
 	}
 	if stats.Held > 0 {
 		// Every read completed. Unresolved financial observations remain in

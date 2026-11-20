@@ -1911,7 +1911,7 @@
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
-      "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
+      "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
       "type StripeWebhookReconcileArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n\tAccountID  string    `json:\"account_id,omitempty\"`\n}",
       "type accountUpdaterPayload struct {\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailMethodRef   string    `json:\"rail_method_ref\"`\n}"
     ],
@@ -1939,7 +1939,8 @@
       "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\n\tAfter        int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType    string `json:\"event_type,omitempty\"`\n\tEventCreated int64  `json:\"event_created,omitempty\"`\n}"
     ],
     "server/cmd/openrails": [
-      "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
+      "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}",
+      "type providerRefreshReceipt struct {\n\tJobID         int64              `json:\"job_id\"`\n\tMerchantID    billing.MerchantID `json:\"merchant_id\"`\n\tRiverSchema   string             `json:\"river_schema\"`\n\tQueue         string             `json:\"queue\"`\n\tAlreadyQueued bool               `json:\"already_queued\"`\n}"
     ],
     "server/internal/adminconsole": [
       "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tLocalSignIn bool     `json:\"local_sign_in\"`\n\tIssuers     []Issuer `json:\"issuers\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
@@ -4635,10 +4636,8 @@
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "fmt": "fmt",
-      "fnv": "hash/fnv",
       "log": "github.com/sirupsen/logrus",
       "math": "math",
-      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "solanago": "github.com/gagliardetto/solana-go",
       "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
       "solanatokens": "github.com/open-rails/openrails/internal/modules/solana/tokens",
@@ -4720,7 +4719,6 @@
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
       "billing": "github.com/open-rails/openrails/billing",
-      "cadence": "github.com/open-rails/openrails/internal/shared/cadence",
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
@@ -4734,7 +4732,6 @@
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
@@ -4744,7 +4741,6 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "uuid": "github.com/google/uuid",
-      "v2": "math/rand/v2",
       "v5": "github.com/jackc/pgx/v5",
       "webhookhealth": "github.com/open-rails/openrails/internal/modules/webhookhealth"
     },
@@ -5196,6 +5192,14 @@
       "strings": "strings",
       "tabwriter": "text/tabwriter",
       "uuid": "github.com/google/uuid"
+    },
+    "server/cmd/openrails/provider_refresh.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "cobra": "github.com/spf13/cobra",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "riverjobs": "github.com/open-rails/openrails/internal/river"
     },
     "server/control_plane.go": {
       "auth": "github.com/open-rails/authkit/auth",
