@@ -420,13 +420,14 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		until = horizon
 	}
 	params := reconcile.RunParams{
-		Mode:        mode,
-		Mutations:   mutations,
-		Providers:   []reconcile.Provider{provider},
-		PSPs:        map[reconcile.Provider]reconcile.PSPBinding{provider: binding},
-		PSPCoverage: coverage,
-		Since:       since,
-		Until:       until,
+		Mode:                    mode,
+		Mutations:               mutations,
+		Providers:               []reconcile.Provider{provider},
+		PSPs:                    map[reconcile.Provider]reconcile.PSPBinding{provider: binding},
+		PSPCoverage:             coverage,
+		Since:                   since,
+		Until:                   until,
+		SkipSolanaPlanDiscovery: provider == reconcile.ProviderSolana && until.Before(horizon),
 	}
 	if provider == reconcile.ProviderStripe {
 		w.runReversals(ctx, engine, params, provider, pspID, horizon, now, &out)
