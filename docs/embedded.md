@@ -60,9 +60,10 @@ own file into it); `openrails.Deps` is everything outside the process.
 
 For PgBouncer transaction pooling, give `Postgres` the PgBouncer pool and set
 `PostgresSession` to a `pgxpool.ParseConfig` result for the same database and
-role through PostgreSQL's direct endpoint. On the PgBouncer pool, use
-`pgx.QueryExecModeExec` unless the pooler is configured to track protocol-level
-prepared statements. OpenRails scopes merchant identity to each transaction and
+role through PostgreSQL's direct endpoint. On the PgBouncer pool, set
+`poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe`
+to retain PostgreSQL's parameter types without server-side prepared statements.
+OpenRails scopes merchant identity to each transaction and
 uses direct sessions for migrations, notification listeners, and session locks.
 OpenRails' own River workers poll for jobs in this mode. For a host fleet on the
 PgBouncer pool, set `river.Config.PollOnly` to `true` as well.
@@ -81,8 +82,9 @@ if err := bill.Start(ctx); err != nil { return err } // River workers: renewals,
 `New` applies OpenRails' migrations first (one replica at a time, under an
 advisory lock; a failed migration fails `New`), creates the River
 schema and this month's partitions, starts no workers and never changes the
-catalog. The pool's role owns every object; for another owner, `SET ROLE` on its
-connections. An older build boots on a schema a newer one migrated. `New` fails
+catalog. The migration sessions' role owns every object. To use another owner,
+set the role on those sessions. An older build boots on a schema a newer one
+migrated. `New` fails
 only on what it cannot serve without: Postgres and migrations, an unset write
 mode, an invalid River schema, a test seam beside a live PSP. Anything else that
 cannot be served is refused alone and the rest serves: an optional setting is

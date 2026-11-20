@@ -32,7 +32,7 @@ func TestTransactionPooler(t *testing.T) {
 
 	query, err := pgxpool.ParseConfig(queryURL)
 	require.NoError(t, err)
-	query.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	query.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
 	query.MaxConns = 6
 	pool, err := pgxpool.NewWithConfig(ctx, query)
 	require.NoError(t, err)
@@ -186,11 +186,13 @@ func TestTransactionPooler(t *testing.T) {
 		require.NoError(t, bill.Start(ctx))
 		require.NoError(t, bill.Ready(ctx))
 		table := pgx.Identifier{schema, "river_job"}.Sanitize()
-		require.EventuallyWithT(t, func(c *assert.CollectT) {
-			var state string
-			err := baselinePool.QueryRow(ctx, "SELECT state FROM "+table+" WHERE kind = $1 ORDER BY id LIMIT 1", riverjobs.KindCleanupExpiredData).Scan(&state)
-			assert.NoError(c, err)
-			assert.Equal(c, "completed", state)
-		}, 15*time.Second, 200*time.Millisecond)
+		for _, kind := range []string{riverjobs.KindCleanupExpiredData, riverjobs.KindBillingPass} {
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				var state, jobErrors string
+				err := baselinePool.QueryRow(ctx, "SELECT state, coalesce(errors::text, '') FROM "+table+" WHERE kind = $1 ORDER BY id LIMIT 1", kind).Scan(&state, &jobErrors)
+				assert.NoError(c, err, kind)
+				assert.Equal(c, "completed", state, "%s errors: %s", kind, jobErrors)
+			}, 15*time.Second, 200*time.Millisecond)
+		}
 	})
 }
