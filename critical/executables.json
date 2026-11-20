@@ -1047,6 +1047,9 @@
     "OR-J12-S70": [
       "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
     ],
+    "OR-J12-S71": [
+      "TestMerchantCardRemoval/OR-J12-S71/nmi-erasure-requires-confirmed-absence"
+    ],
     "OR-J22-S07": [
       "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
     ],
