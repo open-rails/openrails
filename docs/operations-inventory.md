@@ -117,6 +117,44 @@ Application code can also write through archive import, event stream adapters, a
 
 A long read can run as a River job, as the PSP import pull does. An overdue subscription can be rediscovered from its due date and current state while write access is held. An accepted refund or a possibly submitted charge carries concrete terms and identity that recovery must preserve across retries. [River jobs](river-jobs.md) · [Provider intent lifecycle](operations.md#provider-intents)
 
+## Prepare a legacy billing rehearsal
+
+Give the rehearsal an ID and note the observation window. It can cover the
+import and several days of workers. Link the import, job, and intent IDs to
+that rehearsal in the report.
+
+1. **Choose the source and target.** Record the exact legacy snapshot, merchant,
+   PSP account, snapshot horizon, host version and OpenRails commit. Prepare an
+   isolated database, a dedicated River schema and a separate configuration.
+   Use a database backup for the source. `openrails billing export` sets a hold
+   on the source merchant. [Archive and restore](merchant-portability.md)
+2. **Check the fences.** Configure `provider_write_mode: readonly`. Exclude live
+   provider credentials from the first phase. Block provider, email and host
+   callback egress. Confirm the target database and `openrails book status`
+   before importing. [Safety levers](operations.md#safety-levers)
+3. **Prepare the evidence.** Take an access and billing baseline and install a
+   committed-row capture on the rehearsal copy before any import. Preserve
+   customer and provider references inside restricted evidence storage. Share
+   redacted summaries. Checkpoint after import, after a chosen billing pass and
+   at the end of the observation window. Capture actual database changes and
+   effective access at the same clock instant in before-and-after comparisons.
+4. **Collect provider observations.** Save `openrails intents --merchant …
+   --status all --format json` and `openrails intents-log --rail nmi`. The
+   intent records cover accepted operations. To capture direct writes that
+   would have been sent, the rehearsal also needs decision logging before
+   write holds. Record a blocked required read with the missing evidence and
+   reason. Keep the redacted egress record as the independent send check.
+   [Provider intents](operations.md#provider-intents)
+5. **Review a later NMI pull.** With separate approval, attach scoped live NMI
+   reading credentials to the isolated environment and allow only the required
+   reporting and read requests. Keep provider writes held. Stage a PSP import
+   and review the identity matches, proposed access effects and receipt
+   differences before applying anything. [Staged import](psp-import.md#pulling)
+
+The target, source snapshot, and observation cutoff belong in the same report
+as the access diff, queued intent export, would-send decisions, blocked reads,
+and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
+
 ## PostgreSQL write index
 
 <details>
