@@ -29,6 +29,8 @@ PostgreSQL, Redis and the server on `:3053` (`task docker-down`,
 
 ## Who owns what
 
+See the [operations inventory](operations-inventory.md) for provider reads, provider writes, local state changes, and the logs available for a rehearsal.
+
 OpenRails owns the catalog; the provider owns money state (is a subscription
 alive, what was charged); access is derived from both. So there are four ways to
 diverge:

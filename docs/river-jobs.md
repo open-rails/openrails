@@ -6,6 +6,8 @@ a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
 [Kind and timeout map](../internal/river/timeouts.go) · [Shared fleets](embedded.md#boot-and-river)
 
+The [operations inventory](operations-inventory.md) lists the provider calls and local changes behind these jobs.
+
 ## Recurring jobs
 
 River attempts startup catch-up for all five declarations. Shared database
