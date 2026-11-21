@@ -379,7 +379,7 @@ func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID strin
 		return StripeCollectionReceipt{}, false, errors.New("Stripe receipt reader has no resolved account")
 	}
 	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	scoped.Rails = railresolve.FixedSet{"stripe": {ID: s.accountPSPID, Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	s = &scoped
 
 	invoiceID = strings.TrimSpace(invoiceID)

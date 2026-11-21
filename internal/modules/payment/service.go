@@ -256,7 +256,7 @@ func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomer
 	if psp == uuid.Nil {
 		return "", errors.New("Stripe customer resolution needs an account-bound client")
 	}
-	ctx = db.WithPSPID(ctx, psp)
+	ctx = writeposture.WithOrigin(db.WithPSPID(ctx, psp), writeposture.OriginUser)
 	customer, err := db.ResolveCustomerID(user.ID)
 	if err != nil {
 		return "", err

@@ -313,6 +313,7 @@ func TestPSPControls(t *testing.T) {
 		a, p := newPSPWorld(t)
 		initial, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		allowFixturePSPWrites(t, a.world, initial.ID)
 		replica, err := openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, replica.Close(context.Background())) })
@@ -445,10 +446,14 @@ func TestPSPControls(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
-		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		require.Eventually(t, func() bool { return len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 }, 20*time.Second, 20*time.Millisecond)
+		require.Empty(t, p.provider.core.WebhookEndpoints("acct_e2e"), "the default account holds scheduled endpoint changes")
+		allowFixturePSPWrites(t, a.world, psp.ID)
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
 		require.Eventually(t, func() bool { return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 }, 20*time.Second, 20*time.Millisecond,
-			"a new Stripe PSP's endpoint is registered when it is declared, not at the next hourly pass")
+			"the enabled account gets its managed endpoint from the backstop")
 		require.Eventually(t, func() bool {
 			return len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
 				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable)) == 0
@@ -521,8 +526,10 @@ func TestStripeWebhookDueWork(t *testing.T) {
 	t.Run("OR-J06-S60/a-boot-reconciles-a-stripe-endpoint-only-when-its-configuration-changed", func(t *testing.T) {
 		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
 		fleet := engineFleet(t, a.world, a.engine)
-		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		allowFixturePSPWrites(t, a.world, psp.ID)
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
 		require.Eventually(t, func() bool {
 			return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 && len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
 				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled)) == 0
@@ -559,6 +566,8 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		fleet := engineFleet(t, a.world, a.engine)
 		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		allowFixturePSPWrites(t, a.world, psp.ID)
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
 		superseded := func() bool {
 			for _, endpoint := range p.provider.core.WebhookEndpoints("acct_e2e") {
 				if endpoint["id"] == old {
@@ -601,6 +610,8 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		fleet := engineFleet(t, a.world, a.engine)
 		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		allowFixturePSPWrites(t, a.world, psp.ID)
+		runRegistered(t, fleet, "openrails.stripe_webhook_reconcile", 1)
 		require.Eventually(t, func() bool {
 			return len(p.provider.core.WebhookEndpoints("acct_e2e")) == 1 && len(stripeWebhookPasses(t, fleet, rivertype.JobStateCompleted)) > 0 &&
 				len(stripeWebhookPasses(t, fleet, rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable)) == 0

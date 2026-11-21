@@ -531,7 +531,7 @@ func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID s
 // Receipt reads use the captured credentials, even if the general Rails view is
 // changed by a host after construction.
 func NewAccountStripeService(cfg *config.Config, merchantID, pspID uuid.UUID, accountID, secretKey string) *StripeService {
-	return &StripeService{Config: cfg, accountMerchantID: merchantID, accountPSPID: pspID, accountID: accountID, accountSecret: secretKey, Rails: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}}
+	return &StripeService{Config: cfg, accountMerchantID: merchantID, accountPSPID: pspID, accountID: accountID, accountSecret: secretKey, Rails: railresolve.FixedSet{"stripe": {ID: pspID, Rail: models.RailStripe, AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}}
 }
 func (s *StripeService) AccountIdentity() (uuid.UUID, uuid.UUID) {
 	return s.accountMerchantID, s.accountPSPID

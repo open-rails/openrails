@@ -46,7 +46,7 @@ func (s *StripeService) ReadEngineSetup(ctx context.Context, p StripeEngineSetup
 		return StripeEngineSetup{}, false, err
 	}
 	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	scoped.Rails = railresolve.FixedSet{"stripe": {ID: s.accountPSPID, Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	s = &scoped
 	if reference == "" {
 		count := 0
@@ -166,7 +166,7 @@ func (s *StripeService) ConfirmEngineSetup(ctx context.Context, p StripeEngineSe
 		return StripeEngineSetup{}, errors.New("invalid Stripe payment method identity")
 	}
 	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	scoped.Rails = railresolve.FixedSet{"stripe": {ID: s.accountPSPID, Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	s = &scoped
 	v := url.Values{"customer": {p.CustomerRef}, "usage": {"off_session"}, "payment_method_types[]": {"card"}, "payment_method": {methodRef}, "confirm": {"true"}}
 	for k, value := range p.metadata() {
