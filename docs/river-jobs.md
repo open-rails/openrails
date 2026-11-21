@@ -1,10 +1,12 @@
 # OpenRails River jobs
 
-OpenRails v0.281.0 (`5345d2be6`) registers 18 core River job kinds. Six
+OpenRails v0.282.0 (`107a44d48`) registers 18 core River job kinds. Six
 have recurring schedules. A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
 [Kind and timeout map](../internal/river/timeouts.go) · [Shared fleets](embedded.md#boot-and-river)
+
+The [operations inventory](operations-inventory.md) lists the provider calls and local changes behind these jobs.
 
 ## Recurring jobs
 
