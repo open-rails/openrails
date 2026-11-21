@@ -11,7 +11,7 @@ Stripe, CCBill, and Solana handle payment according to the chosen rail.
 | --- | --- | --- |
 | **Embedded** in your Go process | Start the engine with a PostgreSQL pool. Call its Go client and mount HTTP routes for browser or external callers. | [Embedded guide](docs/embedded.md) · [Running Go example](examples/embedded) |
 | **Self-hosted standalone** on a server you run | Deploy the OpenRails server and connect over HTTP. Go backends can use the remote SDK. Your app supplies a trusted identity issuer. | [Standalone guide](docs/standalone.md) · [Compose sample](examples/standalone) · [Kubernetes](docs/kubernetes.md) |
-| **OpenRails SaaS** at [openrails.dev](https://openrails.dev) | Set up a merchant on the hosted platform. Connect your backend and choose how your customers reach billing. | [SaaS developer guide](docs/saas.md) · [Hosted example](examples/hosted) |
+| **OpenRails SaaS** at [openrails.dev](https://openrails.dev) | Set up a merchant on the hosted platform. Connect your backend and choose how your customers reach billing. | [SaaS developer guide](docs/saas.md) |
 
 ## Build the first billing flow
 
@@ -48,8 +48,8 @@ if check.Entitlements["course:101"] {
 }
 ```
 
-The [examples](examples/README.md) show a complete checkout and access check in a
-sample application for each integration. The [own-auth example](examples/own-auth)
+The [examples](examples/README.md) include two course stores you run yourself
+and an older hosted SDK sample. The [own-auth example](examples/own-auth)
 shows how an embedded host integrates its existing application identity.
 
 ## Developer reference
