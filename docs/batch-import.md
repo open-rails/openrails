@@ -1,45 +1,25 @@
 # Batch import: migrating legacy billing data into OpenRails
 
-How to move an existing site's subscribers, payment history, and provider-side
-subscription/vault records from a legacy billing system onto OpenRails
-(embedded or standalone). When the PSP holds the book, prefer the
-[PSP import](psp-import.md), which reads it from the provider. The import surface is `Client.ImportBilling` with a
-`billing.DeclaredBilling` document; the cutover doctrine it feeds into lives in
-[operations.md](operations.md).
+Use batch import to bring an existing site's subscribers, payment history and
+vault references into OpenRails. If the PSP holds the book, use
+[PSP import](psp-import.md) to read it from the provider.
 
-### The mental model
+### Provider ownership
 
-Import **seeds OpenRails' local truth** — customers, subscriptions, payment
-history, vault *references* — while the **provider stays the source of truth
-for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
-provider owns the card vault and the recurring billing schedule: it keeps
-charging on its own clock after your cutover. Importing brings OpenRails'
-mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh)
-converge the mirror against provider truth, and a PSP import re-reads a
-PSP on demand, its differences becoming proposals.
+Supply subscription, payment, cancellation and vault facts as of a fixed
+`as_of` time. OpenRails classifies subscription standing at that time and
+derives access. Provider-managed schedules keep collecting at the PSP.
+Webhooks and [Provider Refresh](operations.md#provider-refresh) keep the local
+mirror current after import.
 
-You hand over **facts, not classifications**: who, which price, which rail,
-the provider's subscription id, paid-through evidence, explicit cancel
-evidence, dunning state, and the raw charge history. OpenRails classifies
-every row through the same decider pipeline its webhook/pull planes use,
-evaluated at the declared `as_of` horizon — so the same book classifies
-identically whenever the import runs.
+Vault references (`rail_customer_ref` and `rail_method_ref`) stay scoped to the
+PSP account that created them. When moving accounts, collect cards again at
+the new PSP. [PSP binding and credential rotation](operations.md#psps-and-credentials)
 
-What import does **not** do:
-
-- **No provider I/O.** The import never calls a provider. The one
-  provider-affecting output: a declared cancel whose legacy schedule was not
-  confirmed dead (`schedule_live`) enqueues a durable rail-delete intent,
-  executed later by the intent executor under the
-  [mode gate](operations.md#safety-levers).
-- **No card-data movement.** OpenRails never holds card data. Declared
-  payment methods are *references* into the provider's vault
-  (`rail_customer_ref` / `rail_method_ref`), meaningful only within the PSP
-  account that created them. You cannot import your way onto a different
-  PSP — see
-  [PSP binding and credential rotation](operations.md#psps-and-credentials);
-  between accounts, cards can only be re-captured when customers next pay.
+The import itself writes local state. Workers can later read charge evidence
+or process a rail-delete intent queued by a cancellation with
+`schedule_live: true`, subject to the deployment's
+[write mode](operations.md#safety-levers).
 
 ### The import surface
 
@@ -49,19 +29,22 @@ merchant's handle, in every deployment (an `openrails.New` engine's
 name once and keep the merchant's UUID. **HTTP**: `POST /v1/merchant/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
 mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
-other configuration. The HTTP body cap (1 MiB) forces large books to
-batch.
+other configuration. Split large HTTP imports to fit the default 1 MiB
+request limit.
 
-The book (`DeclaredBilling`) carries six record kinds, plus admin grants:
+See [`billing.DeclaredBilling`](../billing/billing_import.go) for the Go types and
+JSON field names.
 
-| Kind | Idempotency key | Notes |
+| Kind | Identity within the merchant | What to declare |
 |---|---|---|
-| `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id`; an optional `email` |
-| `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + the `card` (`brand`, `last4`, `exp_month`, `exp_year`); `psp` attributes the vault entry |
-| `psp_customers` | (psp, remote_customer_ref) | a customer's customer object at a PSP whose rail has one (Stripe `cus_`), so later provider events on it attribute; insert if absent: a customer already linked keeps its link (`reasons[source_id]` says so), a ref another customer holds refuses the book |
-| `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
-| `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount` is a decimal string in the currency's native units (micros for USD) |
-| `purchases` | `source_id` and (psp, transaction_id) | settled one-off sales: frozen lines, the rail payment, the access bought |
+| `customers` | Customer UUID | The host's stable subject ID in `customer`. |
+| `payment_methods` | PSP and vault references | Vault references and optional `card` display details. |
+| `psp_customers` | PSP and `remote_customer_ref` | The provider's customer object, such as Stripe's `cus_` reference. Existing customer links are kept. A reference held by another customer refuses the book. |
+| `subscriptions` | PSP and `rail_subscription_id` | Stable `source_id`, price, payment method if known, and paid-through, cancellation or dunning evidence. Raw `evidence` is retained in `gateway_response`. |
+| `transactions` | PSP and `transaction_id` | Subscription charge attempts, including declines, and supported linked refunds. |
+| `purchases` | `source_id` and PSP transaction | [Settled one-off sales](#declared-purchases), including the sold lines and the payment. |
+| `historical_payments` | PSP and `transaction_id` | [Verified NMI payments and refunds](#historical-payments) whose original purchase or subscription is unavailable. |
+| `admin_grants` | `source_id` | [Comped access windows](#imported-admin-grant-changes). |
 
 **Attribution is required.** Every provider-bound row an import writes
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
@@ -82,20 +65,20 @@ the row and listing the merchant's known PSPs. There is no unattributed lane.
 }
 ```
 
-`as_of` (RFC3339) is required: the instant the legacy data was true. All
-classification evaluates against it, never wall-clock.
-`subscriptions_exhaustive: true` is an absence proof valid only when one call
-covers the merchant's entire book — it MUST be false for batched imports.
+Set `as_of` to the RFC 3339 timestamp the legacy data represents. OpenRails
+evaluates subscription standing at that time. Send `subscriptions_exhaustive:
+true` only when a single call covers the entire merchant subscription book and
+can serve as evidence of absence. Set `expected_subscriptions` to the nonzero
+number of subscription rows in that request. Keep the flag false for batches.
+[Coverage validation](../internal/reconcile/declared_import.go)
 
-Every live NMI schedule is dunned by OpenRails (NMI never retries a declined
-renewal). Its recurring
-stored-card anchor is the method's `recurring_transaction_id` when declared,
-otherwise the schedule's first approved sale in the book's transactions: the
-customer's recurring signup. A schedule with neither stays provider-collected
-and raises `life.import.no_recurring_anchor`. Import stores the anchor once;
-replaying it is allowed, while a different reference for the same
-merchant/account/vault method is a conflict. Importing this fact performs
-no provider request and does not transfer ownership of NMI's billing schedule.
+OpenRails can retry declines from live NMI schedules when it has a recurring
+stored-card anchor. It takes that anchor from the method's
+`recurring_transaction_id` or the schedule's first approved sale in the book,
+which must be the customer's recurring signup. Without an anchor, NMI continues
+collecting and OpenRails reports `life.import.no_recurring_anchor`. Replaying
+the same anchor is allowed. A different reference for the same PSP and vault
+method conflicts.
 
 Each subscription fact takes one of two lanes:
 
@@ -117,14 +100,9 @@ history is never rewritten. Per-`source_id` results come back as
 rail id owned by another customer, lifecycle-slot conflict) never fails the
 batch — it stays parked and is reported loudly.
 
-**Entitlements are derived, not imported.** The book has no entitlement
-record kind. Subscription access follows from subscription standing: each
-import runs the derive pass for the book's customers before it returns, so
-imported members are entitled immediately (a replay re-derives). Operator/manual
-comps — access with no payment behind it — ride the same book as
-`admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
-derives the windows. `Client.ImportBilling` posts the same book over
-`POST /v1/merchant/billing-import`.
+The import derives access for the book's customers before it returns. To
+declare access independent of payment or subscription standing, use
+`admin_grants`.
 
 ### Imported admin grant changes
 
@@ -180,19 +158,34 @@ finding. Re-importing a recorded purchase reports it `skipped`.
  "settlement": {"asset": "…", "quantity": "23000000", "payer": "…", "recipient": "…"}}
 ```
 
+### Historical payments
+
+Use `historical_payments` for a confirmed NMI sale when the original
+subscription or catalog purchase is unavailable. Supply `source_id`,
+`customer`, `rail: nmi`, the PSP reference or `default_psp`, the provider's
+`transaction_id`, `amount`, `currency` and `paid_at`. Use a positive amount
+in native fiat units that converts exactly to the rail's minor units. The
+payment date must be at or before `as_of`.
+
+An optional `refunds` array records verified refunds of that sale. Supply each
+refund's distinct NMI `transaction_id`, positive `amount` and `refunded_at`
+between the sale date and `as_of`. The cumulative refund amount cannot exceed
+the sale. The import records a settled order and its payments for financial
+history without creating access or a subscription. Each receipt and its
+refunds commit together. Replays match the PSP transaction, and conflicting
+facts are reported as blocked.
+[Historical payment import](../internal/billingimport/historical_payments.go)
+
 ### Charges before the accepted schedule
 
-A recurring charge pays the cycle it starts. An approved NMI or CCBill
-charge made before the subscription's first accepted schedule cycle, and any
-approved charge of a canceled subscription that has no accepted schedule, is
-settled history: a complete provider-owned order whose line, on the
-subscription's price, carries the provider's amount, covering one cadence
-from the charge, with the charge as its payment. It grants no access,
-renews nothing and infers no schedule. A decline there moves no money and is
-not recorded. These orders record in one short transaction per subscription
-after the book commits. A live subscription with no accepted schedule keeps
-its receipts unresolved until one is accepted (see
-[Accepted bills and provider schedules](#accepted-bills-and-provider-schedules)).
+Approved NMI and CCBill charges that predate the accepted schedule, or whose
+subscription was canceled without an accepted schedule, import as
+[settled history](provider-managed-orders.md#charges-before-the-schedule).
+A decline in that history is excluded. A live subscription with no accepted
+schedule keeps its receipts unresolved until one is accepted.
+[Declared history recording](../internal/reconcile/declared_import.go)
+
+### Charge evidence and refunds
 
 A declared NMI or CCBill charge names the provider's own transaction id,
 which is digits only. Any other id (a host's synthetic id) is evidence: a
@@ -208,12 +201,18 @@ finding. OpenRails reads only NMI by id. A CCBill attribution waits for the
 DataLink pull, which records the charge when it reads it; one the pull read
 past without recording, or one on a PSP without DataLink credentials, becomes
 that finding, and a pull that records the charge later closes it.
-Every path records a provider transaction once, by (psp, transaction_id).
+Every path records a provider transaction once per PSP.
+
+For a confirmed subscription refund on NMI, include the original successful
+sale in the same subscription group and declare the refund with
+`type: refund`, `success: true`, its own provider `transaction_id`, and
+`original_transaction_id` pointing to that sale. Supply `amount`, `currency`
+and `occurred_at` for both. A transaction's optional `source_id` reports a
+separate per-receipt outcome and must be unique across the book's source IDs.
+[Receipt validation](../internal/billingimport/receipt_sources.go) ·
+[Refund recording](../internal/reconcile/declared_refunds.go)
 
 ### The migration playbook
-
-The ordered phases, from a production host that migrated many years of legacy
-billing data over this seam:
 
 1. **Apply migrations.** Build the engine with `openrails.New` on the pool it
    will use; it creates its billing baseline and its River tables first.
@@ -235,22 +234,10 @@ billing data over this seam:
    subscriptions + their transactions. Keep the host's stable ids as
    `source_id` so re-runs are exact and results are auditable per row. Declare
    admin/manual comps as `admin_grants` in the same book.
-5. **Access is derived by the import itself** for the book's customers; no
-   merchant-wide convergence pass is required.
-6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**
-   Imported stale `past_due` rows are immediately "due"; a full-behavior boot
-   would start charging them within hours.
-7. **Let the first dunning cycle materialize the backlog**, then review
-   `openrails intents` — the
-   [drain forecast](operations.md#provider-intents) is the dry-run view
-   of your cutover ("N execute under limited, M require full").
-8. **Verify against the provider** with a PSP import
-   (`POST /v1/merchant/psp-imports`) and its proposals, then raise to
-   `PROVIDER_WRITE_MODE=full` — it drains exactly what the forecast showed.
-
-Steps 6–8 in depth:
-[Cutover: booting against production credentials](operations.md#booting-against-production-credentials)
-and [Materialized backlog under mode=limited](operations.md#booting-against-production-credentials).
+5. **Review provider differences and pending writes.** Follow the
+   [production cutover procedure](operations.md#booting-against-production-credentials).
+   Run a [PSP import](psp-import.md) to review proposals before enabling full
+   provider writes.
 
 ### Provider facts outrank the book
 
@@ -292,14 +279,14 @@ import](psp-import.md#provider-facts-outrank-a-hosts-book)).
 
 - The final import pass reports zero `blocked` (or every blocked reason is
   triaged), and an immediate re-post of the same book is all `skipped`.
-- Payment counts and amounts match the legacy ledger; declines are present
-  (they are attempt history, not noise).
+- Payment counts and amounts match verified receipts in the legacy ledger.
+  Review decline attempts separately from settled payments.
 - Status distribution is sane at `as_of`: runway → `active`, mid-dunning →
   `past_due`, explicit cancels carry their true `cancel_type`, the rest
   `unverified`.
 - A manual PSP import of each PSP raises no unexplained proposals.
-- `openrails intents` shows only the drains you expect before raising the
-  mode; nothing fires at `full` that the forecast didn't show.
+- Review the `openrails intents` forecast before raising the provider write
+  mode. Resolve any unexpected pending operations.
 - The `unverified` cohort shrinks over subsequent Provider Refresh cycles as
   provider evidence arrives.
 
@@ -315,11 +302,11 @@ OpenRails.
    `as_of`. Declare `recurring_transaction_id` on a card
    only when legacy evidence proves the recurring stored-card agreement. A paused NMI schedule is declared as
    `cancel: {kind: user_canceled, at: <pause time>}`: access runs to the paid
-   date and OpenRails never deletes the paused schedule. A card reference the
-   book does not declare blocks its row. Declared refunds and chargebacks are
-   not recorded as charges; unlinked ones surface as `pull.reversal.unlinked`.
-   Re-post the same book: everything must report `skipped`. Imported members
-   are entitled when the call returns.
+   date and OpenRails leaves the paused schedule in place. A card reference
+   must resolve to a payment method in the book or one already stored for that
+   customer and PSP. Supply the original sale when declaring a verified refund.
+   Unlinked reversals can surface as `pull.reversal.unlinked` during
+   reconciliation.
 2. **Review findings.** Boot, let one provider refresh pull run (advisory until
    armed; it accepts each unproven schedule NMI's record confirms, see
    [Accepted bills and provider schedules](#accepted-bills-and-provider-schedules)),
@@ -340,40 +327,23 @@ OpenRails.
    go to NMI; a refund with `revoke_access` ends the refunded payment's
    access, and the NMI schedule keeps billing until the membership is canceled,
    which deletes it (refused with `provider_cancel_held` while disarmed).
-   The provider refresh runs every two hours, and NMI's own subscription
-   webhooks converge the schedule they name at once. To re-read
-   a PSP now, create a PSP import (`Client.CreatePSPImport`,
-   `POST /v1/merchant/psp-imports`); its differences become proposals.
-   Tier changes (same tier group,
-   same billing cycle) modify the member's existing NMI schedule in place
-   (Direct Post `update_subscription`; its next billing date E is kept; no
-   second schedule is ever created). A custom-amount schedule takes the new
-   `plan_amount`. NMI ignores `plan_amount` on a schedule attached to a named
-   plan, so such a schedule switches `plan_id` to the target price's linked NMI
-   plan, which must exist on the account with the target's exact amount and
-   cycle; otherwise the change is refused before any charge with
-   `409 subscription_change_requires_linked_plan`. Link each tier price of a named-plan
-   book to its NMI plan (a `provider_prices` entry with `psp` and `plan_id`) before offering tier
-   changes. An upgrade charges now the
-   new price's share of the time left to E less the old price's unused credit,
-   as a customer-initiated sale on the vault card, then updates the schedule,
-   then switches access; if NMI refuses the update the operation retries and
-   raises `life.tier_change.provider_update_stuck` until it lands (never a
-   second charge). A downgrade charges nothing, updates the schedule amount
-   now (NMI applies it from the next charge) and the mirrored renewal at E
-   opens the lower tier. Another billing cycle answers
-   `409 subscription_change_cadence_unsupported`; drift checks expect these amounts.
-   A stuck update (`life.tier_change.provider_update_stuck`, e.g. an upgrade
-   admitted by v0.178.0 on a named-plan schedule) re-reads the schedule on
-   every retry: link the target price to an NMI plan of its amount and cycle
-   and the operation switches the plan and completes without charging again.
+   NMI subscription webhooks converge the named schedule. Use
+   [PSP import](psp-import.md) for an on-demand read and review its proposals.
+
+   [Tier changes](merchant-operations.md#subscription-changes) update the
+   existing NMI schedule in place. Link each target price of a named-plan book
+   to a plan of the exact amount and cadence on the same PSP before offering
+   changes. Use a `provider_prices` entry with `psp` and `plan_id`. If a
+   charged upgrade stalls on the schedule update
+   (`life.tier_change.provider_update_stuck`), add or correct that link and
+   allow the operation to retry. The retry completes the schedule change
+   without a second charge.
 
 ### Accepted bills and provider schedules
 
-Imports now require the accepted obligation behind each provider receipt. They
-never construct historical orders from a transaction amount and today's price.
-This is a forward import contract; old prelaunch data needs an explicit reset or
-a book that carries these verified facts.
+Supply evidence of the accepted bill behind each recurring provider receipt.
+Use the provider's accepted schedule or finalized invoice to preserve the
+amount and service period that applied at the time of the charge.
 
 For live NMI and CCBill subscriptions, `accepted_schedule` states the accepted
 terms: a stable `source_reference`, recurring `amount` in native currency units,
