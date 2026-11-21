@@ -1,21 +1,22 @@
 # Frontend
 
-Billing UI in the browser, the same for embedded (routes under your prefix, e.g.
-`/billing/v1/*`), standalone and hosted. [`@openrails/billing-ui`](../sdk/billing-ui/README.md)
-implements everything here; use it unless you need your own components. Amounts
-are decimal strings of native units: parse with `BigInt`, never `Number`
-([conventions](api/conventions.md#money-ids-and-times)).
+Use [the Billing UI SDK](../sdk/billing-ui/README.md) for a browser checkout or
+customer billing screen. The [API conventions](api/conventions.md#money-ids-and-times)
+explain how to handle amounts as decimal strings in native units.
 
 ## Authentication
 
-Every call acts on the merchant its token is bound to; the browser names none
-([merchant binding](auth.md#merchant-binding)). Embedded, send your normal user
-credential in a header (the mount strips ambient cookies). Standalone and hosted,
-send an access token with scope `openrails:self` from an issuer the merchant
-trusts: an authorization-code flow or a token exchange of the session token
-(auth-ui does both), or an RFC 7523 assertion your backend signs and the browser
-redeems. Clear it on sign-out; never repeat a financial mutation without its
-idempotency key.
+The customer credential identifies the merchant and the customer. Send the
+credential in a header and keep backend credentials on the server.
+
+| Integration | Browser credential and endpoint |
+| --- | --- |
+| [Embedded](embedded.md) | Send the application's user credential to the OpenRails routes mounted by your Go server, such as `/billing/v1`. |
+| [Self-hosted standalone](standalone.md) | Send an `openrails:self` access token to the billing service. Your trusted issuer supplies it through authorization code or token exchange. |
+| [OpenRails SaaS](saas.md) | Follow the SaaS guide for hosted checkout or customer tokens issued by the platform. |
+
+For deployments that use a backend-signed RFC 7523 assertion, the browser can
+redeem the assertion and keep the resulting access token in memory.
 
 ```ts
 import { createBillingClient, redeemAssertion, tokenSource } from "@openrails/billing-ui"
@@ -40,35 +41,15 @@ binds the token to the browser's key. CORS allows any origin with
 
 ## Self-service routes
 
-Every `/v1/me` route acts on the token's own customer; no path names a user.
+The authenticated customer selects their own orders, payments, cards, balance,
+usage, subscriptions and entitlements through `/v1/me`. Find the current paths
+and methods in the [HTTP route list](api/routes.md).
 
-```
-GET  /v1/me                                    balances, default cards, low-balance lines
-GET  /v1/me/balance/transactions?currency=USD  newest first
-GET  /v1/me/usage?currency=USD                 usage by event_type, resource or invoker, largest first
-GET  /v1/me/orders[/{id}]                      purchases, renewals, usage orders
-GET  /v1/me/payments                           payments and refunds
-GET  /v1/me/entitlements, /v1/me/access-tenure
-GET  /v1/me/subscriptions[/{id}]               with price, product, scheduled change, card, access, recovery
-POST /v1/me/subscriptions/{id}/cancel|resume|change|change/preview|confirm|retry-now
-GET  /v1/me/subscriptions/{id}/change/options
-PUT  /v1/me/subscriptions/{id}/payment-method  its own card, or null to follow the default
-GET|POST /v1/me/payment-methods                list / save a card
-PATCH|DELETE /v1/me/payment-methods/{id}
-PUT  /v1/me/default-payment-methods/{currency}
-POST /v1/me/orders[/preview], /v1/me/orders/{id}/pay|confirm|cancel
-PUT  /v1/me/low-balance-lines/{currency}
-GET  /v1/me/agreements; POST /v1/me/agreements/{id}/revoke
-GET  /v1/me/cart; PUT /v1/me/cart/lines/{price_id}; DELETE /v1/me/cart
-POST /v1/me/stripe/billing-portal-sessions     Stripe's portal
-GET  /v1/me/config                             the merchant's name and payment setup
-```
-
-Every route is in [routes](api/routes.md). `GET /v1/me/usage` covers `from`..`to` (default the last month), `limit` 1–1,000
-groups; a cursor is valid only for its own currency, grouping and window. The
-browser never reads the catalog: your server picks products with
-`Client.ListProducts` and puts them in its page with `billing.BuyerPrices`, and
-`<ProductList products>` / `<BuyButton price>` sell them.
+`GET /v1/me/usage` accepts `from`, `to`, and a limit of 1 to 1,000 groups. It
+uses the last month by default. Keep the currency, grouping, and time window
+fixed while paging. For a storefront you render, fetch the products on the
+server with `Client.ListProducts` and `billing.BuyerPrices`. Pass them to
+`ProductList` or `BuyButton` in the browser.
 
 ## Configuration
 

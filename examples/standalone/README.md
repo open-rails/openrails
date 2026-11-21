@@ -1,11 +1,9 @@
 # Standalone example
 
-The [embedded example](../embedded)'s course site with OpenRails run as its
-own server: the `openrails` server from its release image, with PostgreSQL 18,
-Redis and an SMTP server. The app keeps its AuthKit, which is now also the
-OAuth issuer the server trusts. The walkthrough is the root README's
-"Running in Standalone mode"; the app code they share is
-[Sell Your Content](../../README.md#sell-your-content).
+The course store with OpenRails running as a separate HTTP service. The sample
+runs the app, PostgreSQL, Redis, Mailpit and a pinned OpenRails image with Compose.
+Start with the [standalone integration guide](../../docs/standalone.md) for the
+current release and the application-to-billing trust setup.
 
 | File | What it is |
 |---|---|
@@ -28,7 +26,7 @@ The store is http://localhost:8080, the server http://localhost:3053 and the
 inbox (verification codes, receipts) http://localhost:8025.
 `docker compose down -v` removes it all.
 
-The server image is the release `compose.yaml` pins; to run this checkout
+The Compose sample pins v0.259.0; to run this checkout
 instead, build it: `docker build -t docker.io/openrails/openrails:dev ../..` and
 point `compose.yaml` at that tag.
 

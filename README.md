@@ -10,7 +10,7 @@ Stripe, CCBill, and Solana handle payment according to the chosen rail.
 | Where billing runs | How your app connects | Start here |
 | --- | --- | --- |
 | **Embedded** in your Go process | Start the engine with a PostgreSQL pool. Call its Go client and mount HTTP routes for browser or external callers. | [Embedded guide](docs/embedded.md) · [Running Go example](examples/embedded) |
-| **Self-hosted standalone** on a server you run | Deploy the OpenRails server and connect over HTTP. Go backends can use the remote SDK. Your app supplies a trusted identity issuer. | [Standalone guide](docs/standalone.md) · [Compose example](examples/standalone) · [Kubernetes](docs/kubernetes.md) |
+| **Self-hosted standalone** on a server you run | Deploy the OpenRails server and connect over HTTP. Go backends can use the remote SDK. Your app supplies a trusted identity issuer. | [Standalone guide](docs/standalone.md) · [Compose sample](examples/standalone) · [Kubernetes](docs/kubernetes.md) |
 | **OpenRails SaaS** at [openrails.dev](https://openrails.dev) | Set up a merchant on the hosted platform. Connect your backend and choose how your customers reach billing. | [SaaS developer guide](docs/saas.md) · [Hosted example](examples/hosted) |
 
 ## Build the first billing flow
