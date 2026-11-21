@@ -255,6 +255,10 @@ func TestBillingArchive(t *testing.T) {
 		require.Len(t, psps.Items, 1)
 		require.Equal(t, "acct_e2e", psps.Items[0].AccountID)
 		require.False(t, psps.Items[0].Credentials["secret_key"].Configured, "credentials are never copied with the billing archive")
+		psp := psps.Items[0]
+		var writeMode string
+		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT write_mode FROM "+pgx.Identifier{target.schema, "psps"}.Sanitize()+" WHERE id = $1", psp.ID.UUID()).Scan(&writeMode))
+		require.Equal(t, "readonly", writeMode, "provider write authority belongs to the destination")
 		// File-owned deployments change credentials through their declaration.
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
@@ -281,7 +285,12 @@ func TestBillingArchive(t *testing.T) {
 		address, err := url.Parse(*order.PayURL)
 		require.NoError(t, err)
 		payment := billing.PayOrderParams{ExpectedTotal: 30_000_000, Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, _, raw = hostPageRequest(t, page, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", address.Fragment, payment, map[string]string{"Idempotency-Key": "after-arm"})
+		payPath := "/v1/me/orders/" + order.ID.String() + "/pay"
+		status, _, raw = hostPageRequest(t, page, "POST", payPath, address.Fragment, payment, map[string]string{"Idempotency-Key": "before-account-opt-in"})
+		require.GreaterOrEqual(t, status, 400, string(raw))
+		require.Len(t, provider.effects(t), 1)
+		hostCLI(t, target, "psp-write-mode", "--merchant", "id:"+client.MerchantID().String(), "--psp", psp.ID.String(), "--mode", "full")
+		status, _, raw = hostPageRequest(t, page, "POST", payPath, address.Fragment, payment, map[string]string{"Idempotency-Key": "after-account-opt-in"})
 		require.Equal(t, 200, status, string(raw))
 		var completed billing.Order
 		require.NoError(t, json.Unmarshal(raw, &completed))
@@ -453,6 +462,10 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
 		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		psps, err := client.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		hostCLI(t, target, "psp-write-mode", "--merchant", "id:"+client.MerchantID().String(), "--psp", psps.Items[0].ID.String(), "--mode", "full")
 		advanceTo(target, retryAt)
 		wakeOperations(t, fleet)
 		require.NoError(t, fleet.Start(t.Context()))

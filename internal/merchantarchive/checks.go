@@ -129,9 +129,9 @@ var omittedColumns = map[string]string{
 	// Canonical price IDs are reconstructed from immutable keys and revision.
 	"prices": "public_id",
 	// Credential evidence belongs to the source deployment's configuration;
-	// the destination validates and fingerprints its own.
-	// live is generated from environment.
-	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
+	// the destination validates and fingerprints its own. The destination also
+	// authorizes its own provider writes. PostgreSQL derives live from environment.
+	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live write_mode",
 	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
 	"customers":        "access_version",
 	"payments":         "destructive_run_class",
