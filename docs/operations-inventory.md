@@ -1,8 +1,8 @@
-# OpenRails payment-provider operations
+# OpenRails operations inventory
 
-This source inventory covers the payment paths in OpenRails `rc/0.283.0` at `bc408d3c2c003884726a701dd8be6216b37bc249`. It records what the code can do, with the initiating path and the external effect. Account configuration, credentials, routing, permissions, and worker deployment determine which paths a running installation uses. The audit used repository source and configuration documentation. It did not sample live traffic or exercise provider credentials.
+This source inventory covers provider calls and local state changes in OpenRails `rc/0.283.0` at `bc408d3c2c003884726a701dd8be6216b37bc249`. It records what the code can do, with the initiating path and the external effect. Account configuration, credentials, routing, permissions, and worker deployment determine which paths a running installation uses. The evidence is repository source and configuration documentation.
 
-A **read** retrieves facts or simulates a transaction without submitting it. A **write** creates, changes, cancels, deletes, authorizes, or submits something on the provider side, including writes that move no funds. That distinction is independent of HTTP method. A read can still produce local records, findings, or settlement. A provider intent is an OpenRails ledger entry in `billing.provider_intents`. Some direct calls have other durable records, such as a checkout attempt or capture session. An externally completed action can settle after the initiating OpenRails request returns. [Intent runner](../internal/intents/runner.go) · [Checkout attempts](../internal/modules/payment/order_hosted.go) · [Capture sessions](../internal/modules/payment/custodian_capture.go)
+A **read** retrieves facts or simulates a transaction without submitting it. A **write** creates, changes, cancels, deletes, authorizes, or submits something on the provider side, including writes that move no funds. That distinction is independent of HTTP method. A read can still produce local records and findings, or record a settlement already confirmed by the provider. A provider intent is an OpenRails ledger entry in `billing.provider_intents`. Some direct calls have other durable records, such as a checkout attempt or capture session. An externally completed action can settle after the initiating OpenRails request returns. [Intent runner](../internal/intents/runner.go) · [Checkout attempts](../internal/modules/payment/order_hosted.go) · [Capture sessions](../internal/modules/payment/custodian_capture.go)
 
 ## Provider operations
 
@@ -78,4 +78,161 @@ These custodians hold a card or token. A proxied NMI sale has a custodian call a
 ### Account, credential and write controls
 
 - A PSP account belongs to a merchant and has a rail, its provider account ID and an environment. The selected PSP and any custodian identity are carried into attempts, intents, and provider routing. Rotating credentials within that scope preserves the account. Archived accounts can still service existing obligations. Stripe verifies account and test/live identity, NMI qualifies the specific gateway credentials, CCBill uses the account/subaccount and DataLink access, and Solana checks RPC genesis and resolves merchant-specific treasury/signer configuration. A credential check or receipt read may still run when writes are unavailable. [Account operations](operations.md#psps-and-credentials) · [Environment checks](psp-environments.md) · [Rail resolution](../internal/railresolve/railresolve.go) · [Solana RPC resolution](../internal/modules/solana/merchant_rpc.go)
-- At the audited baseline, the documented deployment/book/merchant modes are `full`, `limited`, and `readonly`. `limited` holds system-initiated writes, and explicit account/environment and operation checks apply before writes. Use the current release's operation-specific paths as evidence for any particular hold. The subsequent per-PSP write-mode change in PR #1440 adds a persisted account default of `readonly` and combines the account, merchant, deployment and billing-book modes. The effective mode governs eligible new OpenRails dispatch. Provider-side work already handed off and existing provider-owned schedules may still complete. [Baseline mode documentation](operations.md#safety-levers) · [Intent gate](../internal/intents/gate.go) · [Intent registration](../internal/app/river_register.go#L258)
+- At the audited baseline, the documented deployment/book/merchant modes are `full`, `limited`, and `readonly`. `limited` holds system-initiated writes, and explicit account/environment and operation checks apply before writes. Use the current release's operation-specific paths as evidence for any particular hold. The per-PSP write-mode change in [PR #1440](https://github.com/open-rails/openrails/pull/1440) adds a persisted account default of `readonly` and combines the account, merchant, deployment and billing-book modes. The effective mode governs eligible new OpenRails dispatch. Provider-side work already handed off and existing provider-owned schedules may still complete. [Baseline mode documentation](operations.md#safety-levers) · [Intent gate](../internal/intents/gate.go) · [Intent registration](../internal/app/river_register.go#L258)
+
+## Supporting services
+
+The payment and card-custody calls above are one part of deployment egress. OpenRails also reads FX and token prices for quotes, trusted issuer keys for token validation, and challenge results for configured CAPTCHA. It can call a configured language model for catalog assistance. It reads or writes Vault configuration according to the deployment, uses Redis for ephemeral state, and sends configured notices and webhook deliveries. The rehearsal can isolate or stub these dependencies and record any resulting egress with the same run ID. [Network egress](operations.md#network-egress) · [Auth](auth.md) · [Vault](vault.md) · [Deliveries](events.md)
+
+## Local state changes
+
+The PostgreSQL examples use the default `billing` and `billing_river` schemas. An embedded deployment can give both different names. A provider read or webhook can write local state after OpenRails accepts the evidence. A single action can update related rows and enqueue a job in one transaction. [Database ownership and schemas](operations.md#one-billing-database) · [Worker and enqueue inventory](river-jobs.md)
+
+| Surface | What OpenRails changes locally | Sources |
+| --- | --- | --- |
+| Merchants and customers | Creates and binds merchants, changes display names and slugs, records aliases, retires or restores merchants, and creates customer identities and contacts. Sets invoice profiles, low-balance lines, account tiers and collection preferences. Provisions and revokes service tokens. | [Merchants](../internal/db/queries/merchants.sql) · [Merchant binding](../internal/db/queries/merchant_binding.sql) · [Customers](../internal/db/queries/customers.sql) · [Contacts](../internal/db/queries/customer_contacts.sql) · [Money settings](../internal/db/queries/money_accounts.sql) · [Provisioning tokens](../internal/db/queries/provisioning_tokens.sql) |
+| Catalog and checkout setup | Creates, revises, archives, or revives products and prices. Records price keys, PSP bindings, entitlement definitions, meters, rate cards, catalog versions and field ownership, import receipts, and scheduled price moves. Creates carts, checkout links and order ownership claims. | [Catalog contract](catalog.md) · [Products](../internal/db/queries/products.sql) · [Prices](../internal/db/queries/prices.sql) · [Catalog applications](../internal/db/queries/catalog_applications.sql) · [Ownership](../internal/db/queries/catalog_ownership.sql) · [Carts](../internal/db/queries/carts.sql) · [Order pay URLs](../internal/db/queries/order_pay_url.sql) |
+| Subscriptions and renewals | Creates or imports subscriptions, records their collector and accepted terms, updates cycle boundaries and stored instruments, schedules or resolves price changes, defers retries, parks unresolved subscriptions as `unverified`, and applies verified renewals, cancellations and resumptions. Tracks status transitions, billing changes, provider cycle receipts, scheduled changes and verification attempts. | [Dunning](dunning.md) · [Provider-managed orders](provider-managed-orders.md) · [Subscriptions](../internal/db/queries/subscriptions.sql) · [Subscription history](../internal/db/queries/subscription_history.sql) · [Provider schedules and receipts](../internal/db/queries/provider_schedules.sql) · [Rebill cycles](../internal/db/queries/rebill_cycles.sql) |
+| Access and entitlements | Appends grants and derives customer access windows. Materializes new or future access, bounds imported access, ends or revokes existing windows and removes invalid future windows. Updates the entitlement cache and its invalidation stamps. Purchases, verified renewals, refunds, operator grants, cancellations and reconciliation can all affect access. Effective access comes from the entitlement timeline at a specific time. | [Access model](entitlements_timeline.md) · [Grants](../internal/db/queries/grants.sql) · [Access changes](../internal/db/queries/product_access.sql) · [Refund access](../internal/db/queries/refund_access.sql) · [Entitlement cache](../internal/db/queries/entitlement_cache.sql) |
+| Orders, attempts and payments | Opens checkout, renewal and usage orders, creates lines and attempts, and records accepted, declined, pending, expired, voided, uncollectible and completed outcomes. Records provider receipts and observational bills, links payments to the relevant order or subscription, reserves refundable amounts, records confirmed refunds and applies the selected access effect. | [Orders](../internal/db/queries/orders.sql) · [Order attempts](../internal/db/queries/order_attempts.sql) · [Payment attempts](../internal/db/queries/payment_attempts.sql) · [Payments and refunds](../internal/db/queries/payments.sql) · [Provider bills](../internal/db/queries/provider_bills.sql) · [Usage orders](../internal/db/queries/usage_orders.sql) |
+| Stored instruments and agreements | Creates or completes a card setup, records scoped vault references and card metadata, and links a customer to its PSP. Versions a card when it changes, adjusts default methods, records agreement lineage, ends or requires re-consent for mandates, queues account updater checks and fences card removal while awaiting evidence. Records removal or abandonment when the workflow settles. | [Custody](payment-method-custody.md) · [Payment methods](../internal/db/queries/payment_methods.sql) · [Method versions](../internal/db/queries/payment_method_versions.sql) · [Mandates](../internal/db/queries/mandates.sql) · [Custodial removal](../internal/db/queries/custodian_method_delete.sql) · [Stored card checks](../internal/db/queries/stored_card_refresh.sql) |
+| Money, credits and metering | Creates ledger accounts and appends transfers. Issues, allocates, consumes, reverses or expires credits as covered by the book. Records and rates usage, changes running charge checkpoints, reserves or releases admissions, creates usage debt and collection orders, updates delinquency, and maintains balance and credit-expiry watches. | [Prepaid credits](prepaid-credits.md) · [Running charges](running-charges.md) · [Usage billing and admissions](usage-billing.md) · [Transfers](../internal/db/queries/ledger.sql) · [Usage events](../internal/db/queries/usage_events.sql) · [Running charges](../internal/db/queries/running_charges.sql) · [Balance watches](../internal/db/queries/balance_watches.sql) |
+| Payment provider configuration | Registers, archives or supersedes PSP and custodian identities. Records credential validation and fingerprints, PSP customer links, provider catalog observations, webhook endpoint identity and rollout digests, Solana references and receipts, and provider refresh watermarks. Merchant configuration documents and provider secrets can be written to Vault when they are managed there. | [Merchant configuration](merchant-configuration.md) · [Vault](vault.md) · [PSPs](../internal/db/queries/psps.sql) · [Custodians](../internal/db/queries/custodians.sql) · [Observed provider catalog](../internal/db/queries/provider_catalog_objects.sql) · [Solana references](../internal/db/queries/solana_pay.sql) |
+| Imports and reconciliation | Stores the starting local basis, staged provider facts, links, unmatched rows, checkpoints and proposals. An explicit apply can land linked rows and approve eligible corrections. Operator refresh can recover confirmed receipts and update the local mirror within its gates. Findings can open, resolve, be held for review or be ignored. An unresolved provider subscription can be parked pending attribution or catalog work. | [Batch import](batch-import.md) · [Staged import and apply](psp-import.md) · [Refresh and convergence](operations.md#provider-refresh) · [Imports](../internal/db/queries/psp_imports.sql) · [Reconciliation](../internal/db/queries/reconciliation.sql) · [Parking](../internal/db/queries/parking.sql) |
+| Provider operations and holds | Records accepted intent identity, origin, address, prerequisites, expiry, execution claims, evidence, and retry state. Appends attempt, hold and outcome records. Can schedule a verification, park an operation, supersede it, expire it or complete it. Records destructive admissions, budgets, policy switches and before-images for supported destructive runs. | [Provider intents](operations.md#provider-intents) · [Destructive admission](destructive-actions.md) · [Intent transitions](../internal/db/queries/provider_intents.sql) · [Provider mutation logs](../internal/db/queries/provider_mutation_logs.sql) · [Before-images](../internal/db/queries/destructive_before_images.sql) |
+| Jobs, events and delivery | Inserts and updates River jobs, job claims and retry schedules. Takes periodic leases, records webhook deduplication and freshness, advances durable event streams, queues host deliveries, writes customer notices and records per-request idempotency receipts. Downstream delivery can be email, webhook or an account inbox. | [River inventory](river-jobs.md) · [Event log and delivery](events.md) · [Outbox](../internal/db/queries/host_lifecycle_events.sql) · [Webhook events](../internal/db/queries/webhook_events.sql) · [Leases](../internal/db/queries/periodic_leases.sql) · [Idempotency records](../internal/db/queries/idempotency_keys.sql) |
+| Maintenance and portability | Applies versioned PostgreSQL and River migrations, maintains rolling partitions, and prunes older operational records. Records migration and archive receipts, changes write posture when exporting or restoring a merchant, and supports scoped purge and undo where before-images exist. Merchant purge can also queue deletion of that merchant's Vault documents. | [Backups and retention](operations.md#data-retention) · [Archive and restore](merchant-portability.md) · [Migrations](../internal/migrate/migrator.go) · [Retention SQL](../internal/db/queries/retention.sql) · [Prune and restore](../internal/db/queries/rail_pull_prune.sql) · [Vault cleanup worker](../internal/river/jobs_merchant_secret_cleanup.go) |
+
+Application code can also write through archive import, event stream adapters, and partition maintenance. PostgreSQL triggers record status and billing history, create or clear verification rows, update related catalog and entitlement revisions, and keep ledger and access invariants across different callers. Redis holds temporary coordination and abuse-control state. AuthKit tables, host application databases, and inboxes reached through a host adapter have their own storage and audit policies. [PostgreSQL table and trigger source](../internal/migrate/postgres/0001_schema.up.sql) · [Archive writes](../internal/merchantarchive/archive.go) · [Embedding dependencies](embedded.md#config-and-deps)
+
+## What a rehearsal can capture
+
+| Evidence | What it proves | How to collect it |
+| --- | --- | --- |
+| Before-and-after effective access | Who can actually use each entitlement at the chosen time, including paid-through, grant expiry, future windows and removals. | Take a consistent baseline and compare after import, after the worker pass and after the staged provider read. Compare effective entitlement responses and `product_access` and `grants` rows by stable identifiers. [Access timeline](entitlements_timeline.md#reading-access) |
+| Local domain history | Which subscription or billing decisions, grants, customer events and selected destructive changes OpenRails recorded. | Inspect subscription history, the event log, approved proposals and destructive before-images. Proposal effects include `ends_access`. These are domain records. For an exhaustive committed-row trail, collect before-and-after row changes in the isolated PostgreSQL copy. [Events](events.md#reading-the-event-log) · [Proposal effects](../billing/proposals.go) · [Before-images](../internal/db/queries/destructive_before_images.sql) |
+| Accepted remote work | Which provider operations the engine accepted, the account each targets, its current hold or next attempt, and the result it recorded. | Export `openrails intents --merchant … --status all --format json` and `openrails intents-log --rail nmi`. Correlate by intent ID and PSP ID. A parked row can become obsolete before it runs, so compare status and relevance at the same observation time. [Provider intents](operations.md#provider-intents) |
+| Due work and provider reads | What the scheduler saw, and what a provider read staged or verified. | Capture the billing pass report, staged PSP import records, findings, and refresh job ID. `readonly` dunning reports overdue subscriptions without creating rebill intents. Eligible rebills can be materialized under `limited`. Keep the resulting evidence with the rehearsal run and leave remote access physically disabled for this phase. [Dunning posture check](../internal/river/jobs_dunning.go) · [Staged PSP import](psp-import.md#pulling) · [Job inspection](river-jobs.md#inspect-a-running-deployment) |
+| Requests and provider results | Which calls reached the wire and which results the provider independently confirms. | Capture redacted egress metadata with request class, account, method, route and status. Keep credentials and bodies out of shared logs. Use provider receipts or read-back when access is approved. An `attempting` intent log records the local attempt boundary. Egress evidence confirms transmission. [Mutation ledger](../internal/intents/runner.go) · [Uncertain provider outcomes](provider-uncertainty.md) |
+
+A long read can run as a River job, like manual provider refresh. An overdue subscription can be rediscovered from its due date and current state while write access is held. An accepted refund or a possibly submitted charge carries concrete terms and identity that recovery must preserve across retries. [River jobs](river-jobs.md) · [Provider intent lifecycle](operations.md#provider-intents)
+
+## PostgreSQL write index
+
+<details>
+<summary>Named SQL writes and owned billing tables</summary>
+
+The source scan found 459 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+
+| Query source | Statements with explicit writes | Targets |
+| --- | ---: | --- |
+| [access_cutover.sql](../internal/db/queries/access_cutover.sql) | 1 | `access_cutover_approvals` |
+| [admission_denials.sql](../internal/db/queries/admission_denials.sql) | 1 | `admission_denials_hourly` |
+| [admission_operations.sql](../internal/db/queries/admission_operations.sql) | 4 | `admission_operations` |
+| [admission_support.sql](../internal/db/queries/admission_support.sql) | 1 | `customers` |
+| [balance_watches.sql](../internal/db/queries/balance_watches.sql) | 9 | `balance_watches` |
+| [carts.sql](../internal/db/queries/carts.sql) | 3 | `carts` |
+| [catalog_applications.sql](../internal/db/queries/catalog_applications.sql) | 2 | `catalog_applications`, `merchants` |
+| [catalog_definitions.sql](../internal/db/queries/catalog_definitions.sql) | 4 | `catalog_meters`, `catalog_rate_cards` |
+| [catalog_ownership.sql](../internal/db/queries/catalog_ownership.sql) | 4 | `catalog_field_owners`, `catalog_meters` |
+| [custodian_capture.sql](../internal/db/queries/custodian_capture.sql) | 3 | `payment_method_versions`, `payment_methods` |
+| [custodian_method_delete.sql](../internal/db/queries/custodian_method_delete.sql) | 4 | `payment_methods`, `provider_intents` |
+| [custodians.sql](../internal/db/queries/custodians.sql) | 1 | `custodians` |
+| [customer_contacts.sql](../internal/db/queries/customer_contacts.sql) | 2 | `customer_contacts` |
+| [customer_invoice_profiles.sql](../internal/db/queries/customer_invoice_profiles.sql) | 2 | `customer_invoice_profiles` |
+| [customer_low_balance_lines.sql](../internal/db/queries/customer_low_balance_lines.sql) | 2 | `customer_low_balance_lines` |
+| [customers.sql](../internal/db/queries/customers.sql) | 3 | `customers` |
+| [dashboard_configs.sql](../internal/db/queries/dashboard_configs.sql) | 1 | `dashboard_configs` |
+| [delinquency.sql](../internal/db/queries/delinquency.sql) | 5 | `customer_delinquency`, `notification_events` |
+| [destructive_actions.sql](../internal/db/queries/destructive_actions.sql) | 7 | `destructive_actions`, `destructive_holds`, `host_outbox`, `reconciliation_findings` |
+| [destructive_before_images.sql](../internal/db/queries/destructive_before_images.sql) | 9 | `destructive_run_before_images`, `merchant_destructive_policy`, `product_access`, `provider_intents`, `reconciliation_state`, `subscriptions` |
+| [destructive_policy.sql](../internal/db/queries/destructive_policy.sql) | 3 | `destructive_action_switch`, `merchant_destructive_policy` |
+| [entitlement_cache.sql](../internal/db/queries/entitlement_cache.sql) | 4 | `customer_entitlement_cache`, `customer_entitlement_cache_stamps` |
+| [event_log.sql](../internal/db/queries/event_log.sql) | 2 | `event_log`, `event_log_streams` |
+| [failed_usage.sql](../internal/db/queries/failed_usage.sql) | 1 | `failed_usage_windows` |
+| [grants.sql](../internal/db/queries/grants.sql) | 3 | `grants` |
+| [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |
+| [idempotency_keys.sql](../internal/db/queries/idempotency_keys.sql) | 6 | `idempotency_keys` |
+| [ledger.sql](../internal/db/queries/ledger.sql) | 2 | `ledger_accounts`, `ledger_transfers` |
+| [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
+| [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
+| [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
+| [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
+| [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 18 | `customer_entitlement_cache`, `customer_entitlement_cache_stamps`, `mandates`, `money_settings`, `nmi_history_months`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provider_mutation_logs`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `subscriptions` |
+| [merchant_retirement.sql](../internal/db/queries/merchant_retirement.sql) | 2 | `merchants` |
+| [merchant_secret_cleanup.sql](../internal/db/queries/merchant_secret_cleanup.sql) | 2 | `maintenance_runs` |
+| [merchants.sql](../internal/db/queries/merchants.sql) | 5 | `maintenance_runs`, `merchant_slug_aliases`, `merchants` |
+| [merchants_platform.sql](../internal/db/queries/merchants_platform.sql) | 2 | `merchants` |
+| [metering_catalog.sql](../internal/db/queries/metering_catalog.sql) | 4 | `catalog_meters`, `catalog_rate_cards` |
+| [money_accounts.sql](../internal/db/queries/money_accounts.sql) | 7 | `money_settings` |
+| [nmi_history.sql](../internal/db/queries/nmi_history.sql) | 4 | `nmi_history_months`, `nmi_history_reads` |
+| [notification_events.sql](../internal/db/queries/notification_events.sql) | 3 | `notification_events` |
+| [notifications.sql](../internal/db/queries/notifications.sql) | 2 | `notification_events` |
+| [order_attempts.sql](../internal/db/queries/order_attempts.sql) | 4 | `order_attempts` |
+| [order_pay_url.sql](../internal/db/queries/order_pay_url.sql) | 3 | `idempotency_keys`, `orders` |
+| [orders.sql](../internal/db/queries/orders.sql) | 20 | `host_outbox`, `order_attempts`, `order_lines`, `orders`, `ownership_claims`, `payments` |
+| [parking.sql](../internal/db/queries/parking.sql) | 3 | `parked_provider_subscriptions`, `reconciliation_findings` |
+| [payment_attempts.sql](../internal/db/queries/payment_attempts.sql) | 2 | `payment_attempts` |
+| [payment_method_versions.sql](../internal/db/queries/payment_method_versions.sql) | 3 | `payment_method_versions`, `payment_methods` |
+| [payment_methods.sql](../internal/db/queries/payment_methods.sql) | 9 | `payment_method_versions`, `payment_methods` |
+| [payments.sql](../internal/db/queries/payments.sql) | 11 | `payments` |
+| [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 1 | `periodic_leases` |
+| [price_key_movements.sql](../internal/db/queries/price_key_movements.sql) | 1 | `price_key_movements` |
+| [price_migrations.sql](../internal/db/queries/price_migrations.sql) | 3 | `price_migrations` |
+| [price_psp_bindings.sql](../internal/db/queries/price_psp_bindings.sql) | 2 | `price_psp_bindings` |
+| [prices.sql](../internal/db/queries/prices.sql) | 6 | `prices` |
+| [product_access.sql](../internal/db/queries/product_access.sql) | 11 | `grants`, `product_access` |
+| [product_entitlements.sql](../internal/db/queries/product_entitlements.sql) | 4 | `product_entitlements`, `products` |
+| [products.sql](../internal/db/queries/products.sql) | 4 | `products` |
+| [profiles.sql](../internal/db/queries/profiles.sql) | 1 | `merchants` |
+| [provider_bills.sql](../internal/db/queries/provider_bills.sql) | 6 | `order_lines`, `orders`, `payments`, `provider_bills` |
+| [provider_catalog_objects.sql](../internal/db/queries/provider_catalog_objects.sql) | 3 | `provider_catalog_objects` |
+| [provider_charge_attributions.sql](../internal/db/queries/provider_charge_attributions.sql) | 4 | `provider_charge_attributions` |
+| [provider_intents.sql](../internal/db/queries/provider_intents.sql) | 34 | `provider_intents` |
+| [provider_mutation_logs.sql](../internal/db/queries/provider_mutation_logs.sql) | 2 | `provider_mutation_logs` |
+| [provider_recovery.sql](../internal/db/queries/provider_recovery.sql) | 1 | `psp_refresh_watermarks` |
+| [provider_schedules.sql](../internal/db/queries/provider_schedules.sql) | 2 | `provider_cycle_receipts`, `provider_schedules` |
+| [provisioning_tokens.sql](../internal/db/queries/provisioning_tokens.sql) | 5 | `provisioning_tokens` |
+| [psp_customers.sql](../internal/db/queries/psp_customers.sql) | 2 | `psp_customers` |
+| [psp_imports.sql](../internal/db/queries/psp_imports.sql) | 19 | `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `subscriptions` |
+| [psps.sql](../internal/db/queries/psps.sql) | 10 | `psps` |
+| [rail_pull_prune.sql](../internal/db/queries/rail_pull_prune.sql) | 11 | `maintenance_runs`, `order_attempts`, `payments`, `product_access`, `subscriptions` |
+| [rating.sql](../internal/db/queries/rating.sql) | 1 | `meter_period_quantities` |
+| [rebill_cycles.sql](../internal/db/queries/rebill_cycles.sql) | 4 | `rebill_cycles` |
+| [reconciliation.sql](../internal/db/queries/reconciliation.sql) | 26 | `nmi_bulk_checkpoints`, `payment_methods`, `reconciliation_findings`, `reconciliation_state`, `subscription_verifications`, `subscriptions` |
+| [refund_access.sql](../internal/db/queries/refund_access.sql) | 1 | `payments` |
+| [retention.sql](../internal/db/queries/retention.sql) | 13 | `admission_denials_hourly`, `failed_usage_windows`, `host_outbox`, `meter_period_quantities`, `order_attempts`, `parked_provider_subscriptions`, `periodic_leases`, `provider_intents`, `provider_mutation_logs`, `reconciliation_findings`, `subscription_billing_changes`, `subscription_status_transitions`, `webhook_health_daily` |
+| [running_charges.sql](../internal/db/queries/running_charges.sql) | 2 | `running_charges` |
+| [scheduled_changes.sql](../internal/db/queries/scheduled_changes.sql) | 8 | `destructive_actions`, `provider_intents`, `scheduled_changes` |
+| [solana_crankers.sql](../internal/db/queries/solana_crankers.sql) | 1 | `solana_crankers` |
+| [solana_pay.sql](../internal/db/queries/solana_pay.sql) | 10 | `solana_pay_receipts`, `solana_pay_references` |
+| [solana_subscriptions.sql](../internal/db/queries/solana_subscriptions.sql) | 4 | `solana_subscriptions` |
+| [stored_card_refresh.sql](../internal/db/queries/stored_card_refresh.sql) | 4 | `payment_methods`, `reconciliation_findings`, `stored_card_checks` |
+| [subscriptions.sql](../internal/db/queries/subscriptions.sql) | 11 | `subscriptions` |
+| [usage_billing.sql](../internal/db/queries/usage_billing.sql) | 7 | `money_settings` |
+| [usage_events.sql](../internal/db/queries/usage_events.sql) | 1 | `usage_events` |
+| [usage_orders.sql](../internal/db/queries/usage_orders.sql) | 15 | `order_lines`, `orders`, `owed_items`, `payments` |
+| [user_destructive.sql](../internal/db/queries/user_destructive.sql) | 3 | `user_destructive_reservations` |
+| [webhook_events.sql](../internal/db/queries/webhook_events.sql) | 2 | `webhook_events` |
+| [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
+| [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
+
+The base migrations declare these 101 billing tables. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+
+- `access_cutover_approvals`, `admission_denials_hourly`, `admission_operations`, `balance_watches`, `book_identity`, `carts`, `catalog_applications`
+- `catalog_field_owners`, `catalog_meters`, `catalog_rate_cards`, `catalog_restore_receipts`, `custodians`, `customer_contacts`, `customer_delinquency`
+- `customer_entitlement_cache`, `customer_entitlement_cache_stamps`, `customer_invoice_profiles`, `customer_low_balance_lines`, `customers`, `dashboard_configs`, `destructive_action_switch`
+- `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`
+- `failed_usage_windows`, `grants`, `host_outbox`, `idempotency_keys`, `ledger_accounts`, `ledger_transfers`, `maintenance_runs`
+- `mandates`, `merchant_destructive_policy`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`, `meter_period_quantities`, `money_settings`
+- `nmi_bulk_checkpoints`, `nmi_history_months`, `nmi_history_reads`, `notification_channel_state`, `notification_events`, `notification_issue_revisions`, `order_attempts`
+- `order_lines`, `orders`, `owed_items`, `ownership_claims`, `parked_provider_subscriptions`, `payment_attempts`, `payment_method_versions`
+- `payment_methods`, `payments`, `periodic_leases`, `price_key_movements`, `price_keys`, `price_migrations`, `price_psp_bindings`
+- `prices`, `product_access`, `product_entitlements`, `products`, `provider_bills`, `provider_catalog_objects`, `provider_charge_attributions`
+- `provider_cycle_receipts`, `provider_intents`, `provider_mutation_logs`, `provider_schedules`, `provisioning_tokens`, `psp_customers`, `psp_import_basis`
+- `psp_import_mappings`, `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`, `rebill_cycles`, `reconciliation_findings`
+- `reconciliation_state`, `running_charges`, `scheduled_changes`, `solana_crankers`, `solana_pay_receipts`, `solana_pay_references`, `solana_subscriptions`
+- `stored_card_checks`, `subscription_billing_changes`, `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_events`, `user_destructive_reservations`
+- `webhook_events`, `webhook_health`, `webhook_health_daily`
+
+</details>
