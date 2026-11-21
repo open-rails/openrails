@@ -133,6 +133,11 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		if err := c.requireArmed(ctx, req.URL.String()); err != nil {
 			return err
 		}
+		if c.GuardWrite != nil {
+			if err := c.GuardWrite(req.Context()); err != nil {
+				return errors.Join(ErrNotDispatched, ErrProviderReadOnly, err)
+			}
+		}
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {

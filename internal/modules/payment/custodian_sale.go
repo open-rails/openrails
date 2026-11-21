@@ -84,7 +84,7 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config}
+	return &railresolve.NMIFactory{Config: s.Config, DB: s.DB}
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -67,7 +68,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	if s == nil {
 		return nil, fmt.Errorf("stripe refund service is not initialized")
 	}
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +106,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	// dedupes the WRITE, the metadata makes the refund re-findable via reads.
 	values.Set("metadata["+stripeRefundMetadataKey+"]", idempotencyKey)
 
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err

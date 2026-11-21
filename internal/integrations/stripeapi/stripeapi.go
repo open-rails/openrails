@@ -15,8 +15,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/providerposture"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // ErrProviderReadOnly is returned for every mutating Stripe request in
@@ -42,6 +44,7 @@ const APIVersion = "2026-06-24.dahlia"
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
+	posture  writeposture.View
 	// fixture marks an injected fake transport.
 	fixture bool
 }
@@ -52,6 +55,9 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, ErrProviderReadOnly
 	}
 	if mutating {
+		if err := t.posture.GuardCurrentProvider(req.Context()); err != nil {
+			return nil, errors.Join(ErrProviderReadOnly, err)
+		}
 		live := liveSecretKey(requestSecret(req))
 		switch {
 		case live && (t.fixture || loopbackDestination(req)):
@@ -110,16 +116,21 @@ func SetIdempotencyKey(req *http.Request, key string) {
 // Factory owns the immutable HTTP dependency for one runtime. The injected
 // transport is borrowed: closing a runtime never closes a host-owned transport.
 // A nil factory uses the ordinary default transport.
-type Factory struct{ base http.RoundTripper }
+type Factory struct {
+	base http.RoundTripper
+	db   *db.DB
+}
 
-func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
+func NewFactory(base http.RoundTripper, database *db.DB) *Factory {
+	return &Factory{base: base, db: database}
+}
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), timeout)
+	return f.newClient(cfg, timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {
-	return f.newClient(true, timeout)
+	return f.newClient(nil, timeout)
 }
 
 // HostRewriteTransport sends every request to target regardless of the
@@ -142,17 +153,19 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
+func (f *Factory) newClient(cfg *config.Config, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
+	posture := writeposture.View{Config: cfg}
 	if f != nil {
 		base = f.base
+		posture.DB = f.db
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, fixture: base != nil, base: base},
+		Transport: &guardTransport{readOnly: config.IsProviderReadOnly(cfg), posture: posture, fixture: base != nil, base: base},
 	}
 }
 

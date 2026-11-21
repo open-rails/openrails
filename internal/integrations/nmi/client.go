@@ -51,6 +51,8 @@ type NMIClient struct {
 	// ReadOnly blocks every mutation, classic and v5 non-GET, with
 	// ErrProviderReadOnly; reads stay available.
 	ReadOnly bool
+	// GuardWrite rechecks the bound account immediately before dispatch.
+	GuardWrite func(context.Context) error
 	// LoopbackFixture marks an explicitly declared loopback fake gateway:
 	// mutations skip posture verification but only reach literal loopback IPs.
 	LoopbackFixture bool
@@ -341,6 +343,11 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 
 	if err := c.requireArmed(ctx, c.DirectPostURL); err != nil {
 		return "", errors.Join(ErrNotDispatched, err)
+	}
+	if c.GuardWrite != nil {
+		if err := c.GuardWrite(req.Context()); err != nil {
+			return "", errors.Join(ErrNotDispatched, ErrProviderReadOnly, err)
+		}
 	}
 	if err := req.Context().Err(); err != nil {
 		return "", errors.Join(ErrNotDispatched, err)

@@ -1535,6 +1535,7 @@ type BillingPsp struct {
 	Live bool
 	// SHA-256 of the pinned Stripe API version, the handled event types and the webhook URL the PSP's managed endpoint was last settled at; NULL until one is.
 	WebhookDigest *string
+	WriteMode     string
 }
 
 // A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.

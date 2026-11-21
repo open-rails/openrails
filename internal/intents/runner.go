@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -589,6 +590,7 @@ func mutationLogEvidence(intent gen.BillingProviderIntent, evidence map[string]a
 // guarantees at least one.
 func pinIntentAddress(ctx context.Context, intent gen.BillingProviderIntent) context.Context {
 	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
+	ctx = writeposture.WithOrigin(ctx, Origin(intent.Origin))
 	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))
 }
 

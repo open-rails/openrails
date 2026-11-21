@@ -178,6 +178,7 @@ func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReade
 // vault is created IN that PSP's account, and the row's rail comes from the
 // resolved scope.
 func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, userID string, req *CreatePaymentMethodRequest) (*models.PaymentMethod, error) {
+	ctx = writeposture.WithOrigin(ctx, writeposture.OriginUser)
 	defer req.Card.Zero()
 	startedAt := time.Now()
 	var providerDuration time.Duration
@@ -573,7 +574,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 	}
 	factory := s.NMIClients
 	if factory == nil {
-		factory = &railresolve.NMIFactory{Config: s.Config}
+		factory = &railresolve.NMIFactory{Config: s.Config, DB: s.DB}
 	}
 	return factory.Client(ctx, s.MerchantSecrets, mid, scope)
 }

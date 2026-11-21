@@ -6,6 +6,7 @@ package writeposture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,7 +15,31 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 )
+
+// Origin identifies who requested a provider mutation.
+type Origin string
+
+const (
+	OriginUser     Origin = "user"
+	OriginAdmin    Origin = "admin"
+	OriginProvider Origin = "provider"
+	OriginSystem   Origin = "system"
+)
+
+type originKey struct{}
+
+func WithOrigin(ctx context.Context, origin Origin) context.Context {
+	return context.WithValue(ctx, originKey{}, origin)
+}
+
+func originFromContext(ctx context.Context) Origin {
+	if origin, ok := ctx.Value(originKey{}).(Origin); ok {
+		return origin
+	}
+	return OriginSystem
+}
 
 // Mode is ordered: ReadOnly < Limited < Full.
 type Mode int8
@@ -71,6 +96,22 @@ func (p Posture) ReadOnly() bool { return p.Mode == ReadOnly }
 // Limited: proactive (system-origin) provider writes wait.
 func (p Posture) Limited() bool { return p.Mode < Full }
 
+// HoldReason returns the reason an operation must wait, or empty if allowed.
+func (p Posture) HoldReason(origin Origin) string {
+	switch origin {
+	case OriginUser, OriginAdmin, OriginProvider, OriginSystem:
+	default:
+		return fmt.Sprintf("unknown intent origin %q", origin)
+	}
+	if p.ReadOnly() || p.Limited() && origin == OriginSystem {
+		if p.Reason != "" {
+			return p.Reason
+		}
+		return "provider writes held by " + p.Mode.String()
+	}
+	return ""
+}
+
 // View reads merchants' postures. It fails closed: without a Config or a
 // database, or when the posture cannot be read, the posture is readonly.
 type View struct {
@@ -95,6 +136,47 @@ func (v View) Posture(ctx context.Context, merchantID uuid.UUID) Posture {
 		return Posture{ReadOnly, fmt.Sprintf("write posture unreadable (%v)", err)}
 	}
 	return effective(process, row)
+}
+
+// Provider is the exact account's effective write posture. An absent account,
+// a missing declaration of write authority, and failed reads all deny writes.
+func (v View) Provider(ctx context.Context, merchantID, pspID uuid.UUID) Posture {
+	if merchantID == uuid.Nil || pspID == uuid.Nil {
+		return Posture{ReadOnly, "provider write requires an exact merchant and PSP"}
+	}
+	bound := v.Posture(ctx, merchantID)
+	if bound.ReadOnly() {
+		return bound
+	}
+	mode, err := v.DB.Gen(ctx).GetPSPWriteMode(ctx, gen.GetPSPWriteModeParams{MerchantID: merchantID, PspID: pspID})
+	if err != nil {
+		return Posture{ReadOnly, fmt.Sprintf("PSP write posture unreadable (%v)", err)}
+	}
+	account, _ := ParseMode(mode)
+	if account < bound.Mode {
+		return Posture{account, "the payment provider account's write mode is " + account.String()}
+	}
+	return bound
+}
+
+// ProviderGuard rechecks the selected account at the send boundary.
+func (v View) ProviderGuard(merchantID, pspID uuid.UUID) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if reason := v.Provider(ctx, merchantID, pspID).HoldReason(originFromContext(ctx)); reason != "" {
+			return errors.New(reason)
+		}
+		return nil
+	}
+}
+
+// GuardCurrentProvider checks a provider selected by the operation's trusted
+// account resolution.
+func (v View) GuardCurrentProvider(ctx context.Context) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return v.ProviderGuard(mid.UUID(), db.PSPIDFromContext(ctx))(ctx)
 }
 
 func effective(process Mode, row gen.GetWritePostureRow) Posture {

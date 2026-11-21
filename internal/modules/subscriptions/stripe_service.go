@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
@@ -66,7 +67,7 @@ type StripeService struct {
 // idempotent on the app user id, so retries (or two parallel purchases) cannot
 // mint duplicate customers.
 func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -80,6 +81,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 	}
 	values.Set("metadata[app_user_id]", appUserID)
 
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/customers", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err
@@ -310,7 +312,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 // and invoice.paid resolves the price from it first: stale metadata would fail
 // the amount check and drop those invoices.
 func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return err
 	}
@@ -333,6 +335,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 		values.Set("billing_cycle_anchor", billingAnchor)
 	}
 
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
@@ -405,7 +408,7 @@ func (s *StripeService) ScheduleSubscriptionPriceChange(ctx context.Context, key
 }
 
 func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return err
 	}
@@ -416,6 +419,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 	values := url.Values{}
 	values.Set("cancel_at_period_end", "true")
 
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
@@ -447,7 +451,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 // retry of its open invoice. A subscription Stripe no longer has is already
 // ended.
 func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return err
 	}
@@ -455,6 +459,7 @@ func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID stri
 	if subscriptionID == "" {
 		return errors.New("subscription_id is required")
 	}
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(subscriptionID), nil)
 	if err != nil {
 		return err
@@ -483,7 +488,7 @@ func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID stri
 }
 
 func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return err
 	}
@@ -494,6 +499,7 @@ func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID s
 	values := url.Values{}
 	values.Set("cancel_at_period_end", "false")
 
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
 	if err != nil {
 		return err

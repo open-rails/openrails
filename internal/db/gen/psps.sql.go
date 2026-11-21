@@ -97,7 +97,7 @@ VALUES ($1::uuid, $2::uuid, $3::text,
 ON CONFLICT (rail, live, account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
-RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest, write_mode
 `
 
 type DeclarePSPIdentityParams struct {
@@ -137,12 +137,13 @@ func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentity
 		&i.SupersededAt,
 		&i.Live,
 		&i.WebhookDigest,
+		&i.WriteMode,
 	)
 	return i, err
 }
 
 const getPSP = `-- name: GetPSP :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest, write_mode FROM billing.psps
 WHERE psps.merchant_id = $2::uuid AND id = $1
 `
 
@@ -170,12 +171,13 @@ func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (BillingPsp, err
 		&i.SupersededAt,
 		&i.Live,
 		&i.WebhookDigest,
+		&i.WriteMode,
 	)
 	return i, err
 }
 
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest, write_mode FROM billing.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
 FOR SHARE
 `
@@ -204,6 +206,7 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 		&i.SupersededAt,
 		&i.Live,
 		&i.WebhookDigest,
+		&i.WriteMode,
 	)
 	return i, err
 }
@@ -246,7 +249,7 @@ func (q *Queries) ListPSPWebhookDigests(ctx context.Context, arg ListPSPWebhookD
 }
 
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
-SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest, write_mode FROM billing.psps
 WHERE merchant_id = $1::uuid
 ORDER BY created_at, id
 `
@@ -278,6 +281,7 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, merchantID uuid.UUID)
 			&i.SupersededAt,
 			&i.Live,
 			&i.WebhookDigest,
+			&i.WriteMode,
 		); err != nil {
 			return nil, err
 		}
@@ -423,7 +427,7 @@ ON CONFLICT (rail, live, account_id) DO UPDATE SET
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
   AND (billing.psps.rail <> 'solana' OR billing.psps.environment = EXCLUDED.environment)
-RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest, write_mode
 `
 
 type RegisterPSPParams struct {
@@ -470,6 +474,7 @@ func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (Billi
 		&i.SupersededAt,
 		&i.Live,
 		&i.WebhookDigest,
+		&i.WriteMode,
 	)
 	return i, err
 }

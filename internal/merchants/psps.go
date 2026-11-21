@@ -811,6 +811,11 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	if p.Rail != string(models.RailNMI) {
 		return nil
 	}
+	// A sandbox proves simulation with an authorization and void. Leave
+	// that proof to the account-bound, guarded client after provisioning.
+	if p.Environment == config.EnvironmentSandbox {
+		return nil
+	}
 	securityKey := strings.TrimSpace(p.Secrets["security_key"])
 	if securityKey == "" {
 		return nil

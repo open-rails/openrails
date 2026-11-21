@@ -301,7 +301,7 @@ func (s *OrderAttemptService) stripeCheckoutSession(ctx context.Context, id stri
 	if purchase == nil || purchase.StripeClients == nil {
 		return stripeCheckoutSession{}, errors.New("stripe is unavailable")
 	}
-	_, secret, err := subscriptions.RequireStripeSecretKey(ctx, purchase.Rails)
+	account, secret, err := subscriptions.RequireStripeSecretKey(ctx, purchase.Rails)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}
@@ -309,7 +309,7 @@ func (s *OrderAttemptService) stripeCheckoutSession(ctx context.Context, id stri
 	if expire {
 		method, path = http.MethodPost, path+"/expire"
 	}
-	req, err := http.NewRequestWithContext(ctx, method, path, nil)
+	req, err := http.NewRequestWithContext(db.WithPSPID(ctx, account.ID), method, path, nil)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}

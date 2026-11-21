@@ -51,9 +51,9 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	// Mapping a provider price wakes the subscriptions parked on it.
 	bindParkWakes(ctx, cfg, database)
 	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
-	rt.StripeClients = stripeapi.NewFactory(nil)
+	rt.StripeClients = stripeapi.NewFactory(nil, database)
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
+		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api), database)
 	}
 	cleanup := func() {
 		cancel()
@@ -79,7 +79,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	rt.Merchants, rt.MerchantConfig = opened.Service, opened.Service.Config()
 	rt.Merchants.StripeClients = rt.StripeClients
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
-	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg)}
+	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, DB: database, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg)}
 	// Catalog application publishes recurring plans with the deployment's
 	// first cranker only when catalog provider writes are allowed; otherwise
 	// it can resolve the crankers but never sign. It never builds a

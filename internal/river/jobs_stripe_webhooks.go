@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
@@ -190,6 +191,12 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 		}
 		psp := psps[i]
 		pass.psp = psp.ID
+		mode := (writeposture.View{Config: w.Config, DB: w.DB}).Provider(ctx, mid.UUID(), psp.ID)
+		if reason := mode.HoldReason(writeposture.OriginSystem); reason != "" {
+			log.WithContext(ctx).WithFields(fields).WithField("reason", reason).Info("StripeWebhookReconcile: provider writes held")
+			return nil
+		}
+		ctx = writeposture.WithOrigin(db.WithPSPID(ctx, psp.ID), writeposture.OriginSystem)
 		publication := w.Merchants.StripeWebhookPublication(mid, psp.AccountID)
 		verdict := gate.CheckMerchant(ctx, mid.UUID())
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{

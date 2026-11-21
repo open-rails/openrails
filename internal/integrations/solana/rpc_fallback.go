@@ -39,7 +39,8 @@ type RPCClient struct {
 	failures map[int]time.Time // endpoint index -> next retry time
 	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
 	// chain mutations) with ErrProviderReadOnly; reads always pass.
-	readOnly bool
+	readOnly   bool
+	guardWrite func(context.Context) error
 }
 
 // RPCClientConfig is a Solana PSP's RPC chain.
@@ -53,7 +54,8 @@ type RPCClientConfig struct {
 	// loopback node.
 	PublicURL string
 	// ReadOnly blocks transaction submission at the wire (mode=readonly).
-	ReadOnly bool
+	ReadOnly   bool
+	GuardWrite func(context.Context) error
 }
 
 // PublicEndpoint is the free public RPC endpoint of network.
@@ -93,11 +95,12 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	log.WithFields(log.Fields{"chain": strings.Join(names, " → "), "network": network}).Debug("Solana RPC chain")
 
 	return &RPCClient{
-		readOnly:  cfg.ReadOnly,
-		endpoints: endpoints,
-		clients:   clients,
-		network:   network,
-		failures:  make(map[int]time.Time),
+		readOnly:   cfg.ReadOnly,
+		guardWrite: cfg.GuardWrite,
+		endpoints:  endpoints,
+		clients:    clients,
+		network:    network,
+		failures:   make(map[int]time.Time),
 	}
 }
 
@@ -258,6 +261,11 @@ func (c *RPCClient) sendTransactionSkipPreflight(ctx context.Context, tx *solana
 	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransactionSkipPreflight", func(client *rpc.Client) error {
+		if c.guardWrite != nil {
+			if err := c.guardWrite(ctx); err != nil {
+				return errors.Join(ErrProviderReadOnly, err)
+			}
+		}
 		resp, err := client.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{
 			SkipPreflight:       true,
 			PreflightCommitment: rpc.CommitmentConfirmed,
@@ -557,6 +565,11 @@ func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transactio
 	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransaction", func(client *rpc.Client) error {
+		if c.guardWrite != nil {
+			if err := c.guardWrite(ctx); err != nil {
+				return errors.Join(ErrProviderReadOnly, err)
+			}
+		}
 		resp, err := client.SendTransaction(ctx, tx)
 		if err != nil {
 			return err

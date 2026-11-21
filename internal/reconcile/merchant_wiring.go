@@ -259,7 +259,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config}
+	factory := &railresolve.NMIFactory{Config: b.Config, DB: b.DB}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}

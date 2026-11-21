@@ -103,7 +103,7 @@ func (a *NMIArmer) factory() *NMIFactory {
 	if a.Factory != nil {
 		return a.Factory
 	}
-	return &NMIFactory{Config: a.Config}
+	return &NMIFactory{Config: a.Config, DB: a.DB}
 }
 
 // Secret loads one scoped secret honouring the PSP row's rotation floor.

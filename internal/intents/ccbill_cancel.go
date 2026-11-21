@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Only explicit HTTP/authentication refusals permit bounded clean retries.
@@ -126,6 +127,9 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	ctx, err = startProtectedEffect(ctx, h.DB, intent, h.Clock)
 	if err != nil {
 		return parkedBeforeEffect(err.Error())
+	}
+	if blocked, reason := GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, intent.MerchantID, Origin(intent.Origin)); blocked {
+		return parkedBeforeEffect(reason)
 	}
 	res, err := client.CancelSubscription(ctx, psid)
 	if err != nil {

@@ -65,9 +65,9 @@ func newProviderRuntime(ctx context.Context, opts providerRuntimeOptions) (*prov
 		return nil, nil, fmt.Errorf("merchant configuration unavailable, so no rail can be armed: %w", err)
 	}
 	cleanup = func() { opened.Close(); _ = database.Close() }
-	stripeClients := stripeapi.NewFactory(nil)
+	stripeClients := stripeapi.NewFactory(nil, database)
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		stripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
+		stripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api), database)
 	}
 	if opened.Service != nil {
 		opened.Service.StripeClients = stripeClients

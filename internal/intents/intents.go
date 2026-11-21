@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Intent statuses (billing.provider_intents.status).
@@ -27,14 +28,14 @@ const (
 // operating modes: user/admin-origin intents are reactive completions and
 // execute under mode=limited, system-origin intents require mode=full, and
 // NOTHING executes under mode=readonly.
-type Origin string
+type Origin = writeposture.Origin
 
 const (
-	OriginUser   Origin = "user"
-	OriginAdmin  Origin = "admin"
-	OriginSystem Origin = "system"
+	OriginUser   = writeposture.OriginUser
+	OriginAdmin  = writeposture.OriginAdmin
+	OriginSystem = writeposture.OriginSystem
 	// OriginProvider is a verified incoming provider fact and its required consequence.
-	OriginProvider Origin = "provider"
+	OriginProvider = writeposture.OriginProvider
 )
 
 // OutcomeClass classifies one execution (or verification) attempt.

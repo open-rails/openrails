@@ -10,8 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // StripeEngineSetupParams binds a nonfinancial card setup to an owned purchase
@@ -170,6 +172,7 @@ func (s *StripeService) ConfirmEngineSetup(ctx context.Context, p StripeEngineSe
 	for k, value := range p.metadata() {
 		v.Set("metadata["+k+"]", value)
 	}
+	ctx = writeposture.WithOrigin(db.WithPSPID(ctx, p.PSPID), writeposture.OriginUser)
 	body, err := s.stripePostForm(ctx, "/v1/setup_intents", v, "engine-setup:"+p.SessionID.String())
 	var refused *StripeAPIError
 	if errors.As(err, &refused) && refused.StatusCode == http.StatusPaymentRequired {

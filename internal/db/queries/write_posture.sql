@@ -10,6 +10,15 @@ SELECT
 FROM (SELECT 1) AS one
 LEFT JOIN billing.merchant_write_posture p ON p.merchant_id = sqlc.arg(merchant_id)::uuid;
 
+-- name: GetPSPWriteMode :one
+SELECT write_mode FROM billing.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(psp_id)::uuid;
+
+-- name: SetPSPWriteMode :execrows
+UPDATE billing.psps
+SET write_mode = sqlc.arg(write_mode)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(psp_id)::uuid;
+
 -- name: GetBookArmed :one
 SELECT billing.book_armed()::boolean AS book_armed;
 
