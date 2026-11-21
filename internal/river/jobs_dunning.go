@@ -192,13 +192,13 @@ func (w *DunningWorker) due(ctx context.Context) error {
 					Warn("Readonly: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
 				return nil
 			}
-			materialize := posture.Limited()
-			if materialize {
+			if posture.Limited() {
 				log.WithContext(mctx).WithField("reason", posture.Reason).
 					Warn("Limited: dunning materializes decisions — stale subscriptions park as unknown, charge intents enqueue parked")
 			}
 
 			var merchantErr error
+			accounts := map[uuid.UUID]writeposture.Posture{}
 			// Page by (due instant, id): a row this pass leaves due is behind
 			// the cursor, so it never hides later due work.
 			for len(dueSubscriptions) > 0 {
@@ -207,7 +207,15 @@ func (w *DunningWorker) due(ctx context.Context) error {
 					"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
 				}).Info("Dunning: processing due subscriptions")
 				for _, sub := range dueSubscriptions {
-					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
+					account, found := accounts[sub.PspID]
+					if !found {
+						account = postures.Provider(mctx, mid, sub.PspID)
+						accounts[sub.PspID] = account
+					}
+					if account.ReadOnly() {
+						continue
+					}
+					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, account.Limited())
 					// One subscription's refusal never fails the pass: it becomes a
 					// standing operator finding, and the row waits for its recheck.
 					if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // ResolveBasisTheoryNMICharge arms a saved vendor card on its accepted account.
@@ -49,7 +50,8 @@ func (b *MerchantCollectionAdapterBuilder) ResolveBasisTheoryNMICharge(ctx conte
 	if custody.Custodian != method.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
 		return nil, charge.ErrInstrumentChanged
 	}
-	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, Transport: b.BasisTheoryTransport})
+	guard := (writeposture.View{Config: b.Config, DB: b.DB}).ProviderGuard(mid.UUID(), scope.ID)
+	bt, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, GuardWrite: guard, Transport: b.BasisTheoryTransport})
 	if err != nil {
 		return nil, err
 	}

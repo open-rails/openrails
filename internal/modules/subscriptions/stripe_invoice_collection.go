@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/railresolve"
 
@@ -216,10 +217,11 @@ func addStripeCollectionMetadata(values url.Values, p StripeInvoiceCollectionPar
 }
 
 func (s *StripeService) stripePostForm(ctx context.Context, path string, values url.Values, idempotencyKey string) ([]byte, error) {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
 	}
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+path, strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, err
@@ -377,7 +379,7 @@ func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID strin
 		return StripeCollectionReceipt{}, false, errors.New("Stripe receipt reader has no resolved account")
 	}
 	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	scoped.Rails = railresolve.FixedSet{"stripe": {ID: s.accountPSPID, Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	s = &scoped
 
 	invoiceID = strings.TrimSpace(invoiceID)
@@ -613,10 +615,11 @@ func rawField(raw json.RawMessage, field string) []byte {
 }
 
 func (s *StripeService) stripeDelete(ctx context.Context, path string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return err
 	}
+	ctx = db.WithPSPID(ctx, account.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, stripeapi.APIBase+path, nil)
 	if err != nil {
 		return err

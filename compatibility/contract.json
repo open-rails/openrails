@@ -2864,7 +2864,8 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "utf8": "unicode/utf8",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/http/handlers/webhook.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3044,7 +3045,8 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/collection_payload.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3126,7 +3128,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
@@ -3298,7 +3301,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/price_migration_push.go": {
       "context": "context",
@@ -3835,7 +3839,8 @@
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "slices": "slices",
       "strings": "strings",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/modules/payment/service.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3869,7 +3874,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "url": "net/url",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/modules/payment/stripe_tier_change_intent.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4167,6 +4173,7 @@
     "internal/modules/subscriptions/stripe_engine_setup.go": {
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "http": "net/http",
       "json": "encoding/json",
@@ -4174,11 +4181,13 @@
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strings": "strings",
       "url": "net/url",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/modules/subscriptions/stripe_invoice_collection.go": {
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
@@ -4210,6 +4219,7 @@
     "internal/modules/subscriptions/stripe_refunds.go": {
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
@@ -4796,7 +4806,8 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
-      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/scim/bulk.go": {
       "billing": "github.com/open-rails/openrails/billing",

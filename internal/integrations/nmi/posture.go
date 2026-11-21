@@ -232,11 +232,19 @@ func (c *NMIClient) RequireArmedFor(ctx context.Context, destination, securityKe
 	if c == nil {
 		return fmt.Errorf("%w: NMI proxy has no posture identity", providerposture.ErrDisarmed)
 	}
-	if !c.Live() && (destination != c.DirectPostURL || securityKey != c.SecurityKey) {
+	if destination != c.DirectPostURL || securityKey != c.SecurityKey {
 		return fmt.Errorf("%w: proxy credential or destination is not the verified NMI account", providerposture.ErrDisarmed)
 	}
-	if c.proxyFixture {
-		return nil
+	if !c.proxyFixture {
+		if err := c.requireArmed(ctx, destination); err != nil {
+			return err
+		}
 	}
-	return c.requireArmed(ctx, destination)
+	if c.ReadOnly {
+		return ErrProviderReadOnly
+	}
+	if c.GuardWrite != nil {
+		return c.GuardWrite(ctx)
+	}
+	return nil
 }

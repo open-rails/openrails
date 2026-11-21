@@ -335,8 +335,9 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				_, err := a.alphaRemote.PutCustodian(t.Context(), "owned", billing.PutCustodianParams{ExpectedRevision: 0, Kind: "basis_theory", Environment: "test", AccountID: merchantBTTenant, Settings: map[string]any{"public_api_key": "public-merchant"}, Credentials: map[string]string{"api_key": "private-merchant"}})
 				require.NoError(t, err)
 			}
-			_, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "test", Custodian: custody, PSPAccount: billing.PSPAccount{GatewayID: "critical-gateway"}, TokenizationKey: "critical-collect-key", Credentials: map[string]string{"security_key": "critical-nmi-key", "webhook_signing_secret": "critical-nmi-webhook"}})
+			psp, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "test", Custodian: custody, PSPAccount: billing.PSPAccount{GatewayID: "critical-gateway"}, TokenizationKey: "critical-collect-key", Credentials: map[string]string{"security_key": "critical-nmi-key", "webhook_signing_secret": "critical-nmi-webhook"}})
 			require.NoError(t, err)
+			allowFixturePSPWrites(t, a.world, psp.ID)
 			_, err = a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{CardVault: newVault}})
 			require.NoError(t, err)
 			psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})

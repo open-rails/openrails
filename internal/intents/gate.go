@@ -2,10 +2,10 @@ package intents
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -14,6 +14,7 @@ import (
 // a copy of the billing book. writeposture.View satisfies it.
 type ModeView interface {
 	Posture(ctx context.Context, merchantID uuid.UUID) writeposture.Posture
+	Provider(ctx context.Context, merchantID, pspID uuid.UUID) writeposture.Posture
 }
 
 // GateExecution decides whether an intent of the given origin may attempt a
@@ -36,18 +37,12 @@ func GateExecution(ctx context.Context, mode ModeView, merchantID uuid.UUID, ori
 	if mode == nil {
 		return true, "operating mode is unknown (no mode view wired); refusing to attempt a provider write"
 	}
-	switch origin {
-	case OriginUser, OriginAdmin, OriginSystem, OriginProvider:
-	default:
-		// An unknown origin cannot be gated correctly; park rather than guess.
-		return true, fmt.Sprintf("unknown intent origin %q", origin)
+	var p writeposture.Posture
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		p = mode.Provider(ctx, merchantID, pspID)
+	} else {
+		p = mode.Posture(ctx, merchantID)
 	}
-	p := mode.Posture(ctx, merchantID)
-	if p.ReadOnly() {
-		return true, p.Reason
-	}
-	if p.Limited() && origin == OriginSystem {
-		return true, p.Reason
-	}
-	return false, ""
+	reason = p.HoldReason(origin)
+	return reason != "", reason
 }

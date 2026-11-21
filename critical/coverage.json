@@ -1371,7 +1371,7 @@
     {
       "id": "OR-J06-S30",
       "journey": "J06",
-      "name": "A declared or changed Stripe PSP registers its webhook endpoint at once"
+      "name": "A default-readonly Stripe PSP holds endpoint writes and a write-enabled PSP gets its managed endpoint"
     },
     {
       "id": "OR-J06-S31",

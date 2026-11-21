@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/redact"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A customer's cancel carries their reason: 4 to 500 characters.
@@ -63,7 +64,7 @@ func CancelSubscription(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ctx := db.WithPSPID(r.Request.Context(), sub.PspID)
+	ctx := writeposture.WithOrigin(db.WithPSPID(r.Request.Context(), sub.PspID), writeposture.OriginUser)
 	signature := strings.TrimSpace(req.Signature)
 	if sub.Rail != models.RailSolana && (signature != "" || req.RevokeOnChain) {
 		param := "signature"

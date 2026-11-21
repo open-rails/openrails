@@ -2,6 +2,7 @@ package hyperswitch
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 )
@@ -31,6 +32,9 @@ func (c *Client) DeleteMethod(ctx context.Context, id string) error {
 		ID string `json:"id"`
 	}
 	if err := c.call(ctx, http.MethodDelete, "/v2/payment-methods/"+url.PathEscape(id), nil, &deleted); err != nil {
+		if errors.Is(err, ErrReadOnly) {
+			return err
+		}
 		// In particular, a missing logical record or a refusal says nothing
 		// about physical erasure. Only the exact successful receipt completes.
 		return ErrUnknown

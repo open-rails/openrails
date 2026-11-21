@@ -12,8 +12,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 type StripePortalService struct {
@@ -23,7 +25,7 @@ type StripePortalService struct {
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	account, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err
 	}
@@ -37,6 +39,8 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 	values.Set("customer", customerID)
 	values.Set("return_url", returnURL)
 
+	ctx = db.WithPSPID(ctx, account.ID)
+	ctx = writeposture.WithOrigin(ctx, writeposture.OriginUser)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/billing_portal/sessions", strings.NewReader(values.Encode()))
 	if err != nil {
 		return "", err

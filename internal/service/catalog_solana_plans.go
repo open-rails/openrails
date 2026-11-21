@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -22,6 +23,7 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A recurring price of ours sells on Solana through an on-chain Plan of the
@@ -172,8 +174,14 @@ func (s *Service) solanaPlanLink(ctx context.Context, account solanaAccount, req
 	if req.Archived {
 		return nil, apperr.Invalidf("an archived price publishes no Solana plan")
 	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = writeposture.WithOrigin(db.WithPSPID(ctx, account.id), writeposture.OriginSystem)
+	mode := (writeposture.View{Config: s.rt.Config, DB: s.rt.DB}).Provider(ctx, mid.UUID(), account.id)
 	ref, err := s.publishSolanaPlan(ctx, solanaPlanContext{PriceID: priceID, UnitAmount: req.UnitAmount, Currency: req.Currency,
-		BillingIntervalHours: req.BillingIntervalHours, RemoteWritesDisabled: s.catalogRemoteWritesDisabled()})
+		BillingIntervalHours: req.BillingIntervalHours, RemoteWritesDisabled: mode.Limited()})
 	if err != nil {
 		return nil, err
 	}

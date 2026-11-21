@@ -3,6 +3,7 @@
 # not edit. Monthly partitions are left out: their names follow the calendar.
 migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352cab53af9e6dd57fde0f661
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
+migration 0003_psp_write_mode.up.sql sha256:ca6f5c93621474d5e049e82d1d99f36d76fb781648dbd78c8c06316e2098d7e8
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2258,6 +2259,7 @@ table billing.psps
   column superseded_at timestamp with time zone
   column live boolean NOT NULL GENERATED ALWAYS AS ((environment = ANY (ARRAY['live'::text, 'mainnet'::text]))) STORED
   column webhook_digest text
+  column write_mode text NOT NULL DEFAULT 'readonly'::text
   constraint psps_credential_fingerprint_check CHECK ((credential_fingerprint ~ '^[0-9a-f]{64}$'::text))
   constraint psps_environment_check CHECK ( CASE WHEN (rail = 'solana'::text) THEN (environment = ANY (ARRAY['mainnet'::text, 'devnet'::text, 'testnet'::text])) ELSE (environment = ANY (ARRAY['live'::text, 'test'::text, 'sandbox'::text])) END)
   constraint psps_id_rail_key UNIQUE (merchant_id, id, rail)
@@ -2266,6 +2268,7 @@ table billing.psps
   constraint psps_pkey PRIMARY KEY (merchant_id, id)
   constraint psps_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text])))
   constraint psps_webhook_digest_check CHECK ((webhook_digest ~ '^[0-9a-f]{64}$'::text))
+  constraint psps_write_mode_check CHECK ((write_mode = ANY (ARRAY['readonly'::text, 'limited'::text, 'full'::text])))
   index CREATE INDEX psps_environment_rail_created_at_id_idx ON billing.psps USING btree (merchant_id, environment, rail, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX psps_id_rail_key ON billing.psps USING btree (merchant_id, id, rail)
   index CREATE UNIQUE INDEX psps_key_key ON billing.psps USING btree (merchant_id, lower(key)) WHERE (superseded_at IS NULL)

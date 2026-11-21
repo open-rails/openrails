@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var ErrCardCaptureUnavailable = errors.New("custodian capture is unavailable")
@@ -115,7 +116,7 @@ func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUI
 	if err != nil {
 		return state, nil, nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian)
+	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian, (writeposture.View{Config: s.config, DB: s.db}).ProviderGuard(owner.UUID(), pspID))
 	return state, client, sealer, err
 }
 func sameCaptureAccount(a, b models.CardCapture) bool {
@@ -170,6 +171,7 @@ func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (
 // payment method. Only the first accepted vendor session is exposed. Competing
 // vendor preparations may expire unused; none can charge a card.
 func (s *OrderAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
+	ctx = writeposture.WithOrigin(ctx, writeposture.OriginUser)
 	if strings.TrimSpace(key) == "" || cardguard.ContainsPAN(key) || req.Token != "" || req.Card != nil || req.PSPID.IsZero() {
 		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrOrderAttemptValidation)
 	}

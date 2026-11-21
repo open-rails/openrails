@@ -180,7 +180,7 @@ func (s *StripeService) engineScoped(p StripeEnginePaymentParams) (*StripeServic
 		return nil, errors.New("Stripe engine account does not match accepted operation")
 	}
 	scoped := *s
-	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	scoped.Rails = railresolve.FixedSet{"stripe": {ID: s.accountPSPID, Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	return &scoped, nil
 }
 

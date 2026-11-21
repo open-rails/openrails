@@ -36,12 +36,14 @@ type Config struct {
 	BaseURL, MerchantID, ProfileID string
 	APIKey                         Secret
 	ReadOnly                       bool
+	GuardWrite                     func(context.Context) error
 }
 type Client struct {
 	base                  string
 	merchantID, profileID string
 	key                   Secret
 	readOnly              bool
+	guardWrite            func(context.Context) error
 	http                  *http.Client
 }
 
@@ -52,7 +54,7 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || cfg.MerchantID == "" || cfg.ProfileID == "" || cfg.APIKey == "" {
 		return nil, ErrBinding
 	}
-	return &Client{base: strings.TrimRight(cfg.BaseURL, "/"), merchantID: cfg.MerchantID, profileID: cfg.ProfileID, key: cfg.APIKey, readOnly: cfg.ReadOnly, http: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{base: strings.TrimRight(cfg.BaseURL, "/"), merchantID: cfg.MerchantID, profileID: cfg.ProfileID, key: cfg.APIKey, readOnly: cfg.ReadOnly, guardWrite: cfg.GuardWrite, http: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func (c *Client) call(ctx context.Context, method, path string, input, output any) error {
@@ -74,6 +76,11 @@ func (c *Client) call(ctx context.Context, method, path string, input, output an
 	request.Header.Set("Authorization", "api-key="+string(c.key))
 	request.Header.Set("x-profile-id", c.profileID)
 	request.Header.Set("Content-Type", "application/json")
+	if method != http.MethodGet && c.guardWrite != nil {
+		if err := c.guardWrite(ctx); err != nil {
+			return errors.Join(ErrReadOnly, err)
+		}
+	}
 	response, err := c.http.Do(request)
 	if err != nil {
 		if method != http.MethodGet {

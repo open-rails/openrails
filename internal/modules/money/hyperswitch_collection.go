@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type hyperSwitchCollectionAdapter struct {
@@ -93,7 +94,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian)
+	client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian, (writeposture.View{Config: b.Config, DB: b.DB}).ProviderGuard(mid.UUID(), scope.ID))
 	if err != nil {
 		return nil, err
 	}

@@ -44,6 +44,7 @@ type Config struct {
 	BaseURL       string // "" = DefaultBaseURL
 	WebhookKeyURL string // "" = ProdWebhookKeyURL; tests inject a local URL
 	ReadOnly      bool
+	GuardWrite    func(context.Context) error
 	Timeout       time.Duration     // <= 0 = DefaultTimeout
 	Transport     http.RoundTripper // test seam under the guard; nil = default
 }
@@ -81,7 +82,7 @@ func New(cfg Config) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout:       timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-			Transport:     &guardTransport{readOnly: cfg.ReadOnly, base: cfg.Transport},
+			Transport:     &guardTransport{readOnly: cfg.ReadOnly, guardWrite: cfg.GuardWrite, base: cfg.Transport},
 		},
 		verifier: NewWebhookVerifier(keyURL),
 	}, nil
@@ -91,16 +92,20 @@ func (c *Client) ReadOnly() bool { return c != nil && c.readOnly }
 
 // guardTransport rejects mutating methods before the network when readOnly.
 type guardTransport struct {
-	base     http.RoundTripper
-	readOnly bool
+	base       http.RoundTripper
+	readOnly   bool
+	guardWrite func(context.Context) error
 }
 
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.readOnly {
-		switch req.Method {
-		case http.MethodGet, http.MethodHead:
-		default:
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		if t.readOnly {
 			return nil, ErrProviderReadOnly
+		}
+		if t.guardWrite != nil {
+			if err := t.guardWrite(req.Context()); err != nil {
+				return nil, errors.Join(ErrProviderReadOnly, err)
+			}
 		}
 	}
 	base := t.base

@@ -1,6 +1,7 @@
 package railresolve
 
 import (
+	"context"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -15,7 +16,7 @@ import (
 // operation/archive policy, and qualifies the concrete deployment contract
 // before granting SDK or PSP access. An archive does not itself revoke an
 // existing obligation's custody.
-func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian merchants.CustodianScope) (*hyperswitch.Client, error) {
+func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian merchants.CustodianScope, guardWrite func(context.Context) error) (*hyperswitch.Client, error) {
 	if cfg == nil || cfg.HyperSwitch == nil || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
 		return nil, hyperswitch.ErrBinding
 	}
@@ -27,5 +28,5 @@ func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian m
 	if apiKey == "" {
 		return nil, hyperswitch.ErrUnavailable
 	}
-	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: custodian.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(apiKey), ReadOnly: config.IsProviderReadOnly(cfg)})
+	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: custodian.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(apiKey), ReadOnly: config.IsProviderReadOnly(cfg), GuardWrite: guardWrite})
 }

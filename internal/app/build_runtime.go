@@ -225,9 +225,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil && overrides.StripeTransport != nil {
 		stripeTransport = overrides.StripeTransport
 	}
-	stripeClients := stripeapi.NewFactory(stripeTransport)
+	stripeClients := stripeapi.NewFactory(stripeTransport, database)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg}
+	nmiClients := &railresolve.NMIFactory{Config: cfg, DB: database}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -246,6 +246,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
 	// request-plane transaction builds).
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
+		DB:          database,
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),

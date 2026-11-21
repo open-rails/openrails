@@ -27,10 +27,11 @@ and subscriptions, its stored environment is corrected, and its posture is
 verified again before it is used. Real money and non-live are different PSPs;
 a key cannot move between them.
 
-Each PSP picks its own environment, and a merchant mixes them freely: a
-Solana PSP on mainnet beside an NMI PSP in test mode is one merchant. To stop a
-merchant writing to its providers, lower its write posture (`readonly` or
-`limited`); `provider_write_mode` caps the deployment. Fake providers
+Each PSP picks its own environment. A merchant can have a mainnet Solana PSP
+and an NMI test account. Each account starts in `readonly`, and the operator can
+explicitly select `limited` or `full` with `openrails psp-write-mode`. The
+merchant's posture and the deployment's `provider_write_mode` still cap that
+setting. See [safety levers](operations.md#safety-levers). Fake providers
 (`provider_sandbox` gateways, an http HyperSwitch fixture, the `Deps` test
 seams) are refused beside a real-money PSP.
 

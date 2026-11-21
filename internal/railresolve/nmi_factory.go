@@ -9,8 +9,10 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // NMIFactory is the only way OpenRails builds an NMI client for a PSP. The
@@ -19,6 +21,7 @@ import (
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
 	Config *config.Config
+	DB     *db.DB
 	// Transport replaces the wire at the real endpoints (test seam). Unlike
 	// the sandbox gateway it exempts nothing: posture is verified through it.
 	Transport http.RoundTripper
@@ -86,7 +89,12 @@ func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope,
 	if err != nil {
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
 	}
-	client.ReadOnly = f != nil && f.Config != nil && config.IsProviderReadOnly(f.Config)
+	view := writeposture.View{}
+	if f != nil {
+		view = writeposture.View{Config: f.Config, DB: f.DB}
+	}
+	client.ReadOnly = config.IsProviderReadOnly(view.Config)
+	client.GuardWrite = view.ProviderGuard(mid.UUID(), scope.ID)
 	f.Wire(client)
 	return client, nil
 }
@@ -111,5 +119,14 @@ func (f *NMIFactory) Wire(client *nmi.NMIClient) {
 // ProxyPosture is the posture identity of scope's credential forwarded by a
 // custodian proxy: the same identity, environment and destination rules.
 func (f *NMIFactory) ProxyPosture(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	return nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.gateway())
+	client, err := nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.gateway())
+	if err != nil {
+		return nil, err
+	}
+	view := writeposture.View{}
+	if f != nil {
+		view = writeposture.View{Config: f.Config, DB: f.DB}
+	}
+	client.GuardWrite = view.ProviderGuard(mid.UUID(), scope.ID)
+	return client, nil
 }

@@ -62,6 +62,42 @@ func (q *Queries) GetBookTag(ctx context.Context) (GetBookTagRow, error) {
 	return i, err
 }
 
+const getPSPWritePosture = `-- name: GetPSPWritePosture :one
+SELECT
+    COALESCE((SELECT r.write_mode FROM billing.psps r
+        WHERE r.merchant_id = $1::uuid AND r.id = $2::uuid), 'readonly')::text AS account_mode,
+    COALESCE(p.mode, 'full')::text AS mode,
+    p.reason,
+    billing.book_armed()::boolean AS book_armed
+FROM (SELECT 1) AS one
+LEFT JOIN billing.merchant_write_posture p ON p.merchant_id = $1::uuid
+`
+
+type GetPSPWritePostureParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+type GetPSPWritePostureRow struct {
+	AccountMode string
+	Mode        string
+	Reason      *string
+	BookArmed   bool
+}
+
+// Read the account, merchant hold and book identity in one snapshot.
+func (q *Queries) GetPSPWritePosture(ctx context.Context, arg GetPSPWritePostureParams) (GetPSPWritePostureRow, error) {
+	row := q.db.QueryRow(ctx, getPSPWritePosture, arg.MerchantID, arg.PspID)
+	var i GetPSPWritePostureRow
+	err := row.Scan(
+		&i.AccountMode,
+		&i.Mode,
+		&i.Reason,
+		&i.BookArmed,
+	)
+	return i, err
+}
+
 const getWritePosture = `-- name: GetWritePosture :one
 SELECT
     COALESCE(p.mode, 'full')::text AS mode,
@@ -118,6 +154,26 @@ func (q *Queries) LockWritePosture(ctx context.Context, merchantID uuid.UUID) (L
 		&i.SetAt,
 	)
 	return i, err
+}
+
+const setPSPWriteMode = `-- name: SetPSPWriteMode :execrows
+UPDATE billing.psps
+SET write_mode = $1::text
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+`
+
+type SetPSPWriteModeParams struct {
+	WriteMode  string
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) SetPSPWriteMode(ctx context.Context, arg SetPSPWriteModeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPSPWriteMode, arg.WriteMode, arg.MerchantID, arg.PspID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setWritePosture = `-- name: SetWritePosture :exec

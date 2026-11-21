@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Deterministic processor routing: one function decides which PSP a purchase
@@ -341,6 +342,13 @@ func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets *Pu
 			return target, models.PSPRoutingSkipNotArmed
 		}
 		return target, models.PSPRoutingSkipResolveFailed
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return target, models.PSPRoutingSkipResolveFailed
+	}
+	if (writeposture.View{Config: s.config, DB: s.db}).Provider(ctx, mid.UUID(), providerConfig.ID).ReadOnly() {
+		return target, models.PSPRoutingSkipNotArmed
 	}
 	if skip := s.railSkipReason(in.Price, target, providerConfig, in.Mode); skip != "" {
 		return target, skip

@@ -147,15 +147,25 @@ func TestRefundRecovery(t *testing.T) {
 		require.NoError(t, err)
 		a.clock.Advance(10 * time.Minute)
 		fleet := quietFleet(t, a.world)
-		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: a.alpha.MerchantID().UUID()}, &river.InsertOpts{Queue: "provider_refresh", MaxAttempts: 5})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			row, err := fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && row.State == rivertype.JobStateRetryable
+		}, 20*time.Second, 25*time.Millisecond)
 		read, err := a.alpha.GetPayment(t.Context(), payment)
 		require.NoError(t, err)
 		require.EqualValues(t, 10_000_000, read.AmountRefunded, "the reversals read records a refund the full read never reaches")
 		require.Len(t, read.Refunds, 1)
-		// The roster reads again: the full read finds the refund already recorded.
+		// The same refresh retries the roster and leaves the recorded refund intact.
 		p.core.ClearIntercepts()
 		a.clock.Advance(10 * time.Minute)
-		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		_, err = fleet.JobRetry(t.Context(), job.Job.ID)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			row, err := fleet.JobGet(t.Context(), job.Job.ID)
+			return err == nil && row.State == rivertype.JobStateCompleted
+		}, 30*time.Second, 25*time.Millisecond)
 		read, err = a.alpha.GetPayment(t.Context(), payment)
 		require.NoError(t, err)
 		require.EqualValues(t, 10_000_000, read.AmountRefunded, "both reads record the refund once")

@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Custodian-held cards: the custodian (Basis Theory) holds the card and the
@@ -84,7 +85,7 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config}
+	return &railresolve.NMIFactory{Config: s.Config, DB: s.DB}
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
@@ -99,6 +100,7 @@ func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client,
 		BaseURL:       cfg.Custody.APIBaseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
 		ReadOnly:      s.Config != nil && config.IsProviderReadOnly(s.Config),
+		GuardWrite:    (writeposture.View{Config: s.Config, DB: s.DB}).ProviderGuard(cfg.MerchantID.UUID(), cfg.Scope.ID),
 		Transport:     s.BasisTheoryTransport,
 	})
 }

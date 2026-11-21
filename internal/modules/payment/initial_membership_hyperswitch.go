@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, _ gen.BillingProviderIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
@@ -46,7 +47,7 @@ func hyperSwitchProxy(ctx context.Context, cfg *config.Config, d *db.DB, accepte
 	if err != nil || binding != accepted {
 		return nil, charge.ErrInstrumentChanged
 	}
-	client, err := railresolve.HyperSwitchClient(cfg, mid, custodian)
+	client, err := railresolve.HyperSwitchClient(cfg, mid, custodian, (writeposture.View{Config: cfg, DB: d}).ProviderGuard(mid.UUID(), instrument.PSPID))
 	if err != nil {
 		return nil, err
 	}

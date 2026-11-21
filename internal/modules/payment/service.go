@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -255,7 +256,7 @@ func resolveStripeCustomerWith(ctx context.Context, store *payments.RailCustomer
 	if psp == uuid.Nil {
 		return "", errors.New("Stripe customer resolution needs an account-bound client")
 	}
-	ctx = db.WithPSPID(ctx, psp)
+	ctx = writeposture.WithOrigin(db.WithPSPID(ctx, psp), writeposture.OriginUser)
 	customer, err := db.ResolveCustomerID(user.ID)
 	if err != nil {
 		return "", err
@@ -373,6 +374,7 @@ func (s *PurchaseService) createStripeCheckoutSession(ctx context.Context, param
 		values.Set("metadata[order_id]", params.OrderID)
 	}
 
+	ctx = writeposture.WithOrigin(db.WithPSPID(ctx, stripeProc.ID), writeposture.OriginUser)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
 	if err != nil {
 		return stripeCheckoutSession{}, err
