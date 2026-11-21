@@ -188,6 +188,17 @@ func TestPSPControls(t *testing.T) {
 		require.True(t, psp.Credentials["secret_key"].Configured)
 		require.NotNil(t, psp.Credentials["secret_key"].ValidatedAt)
 		input := saleInput(t, a, p.provider)
+		blocked, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "default-psp-mode"})
+		require.Equal(t, http.StatusUnprocessableEntity, blocked, string(raw))
+		require.Empty(t, p.provider.effects(t), "a newly provisioned account cannot charge without an explicit mode")
+		var receipt struct {
+			PSPID     string `json:"psp_id"`
+			WriteMode string `json:"write_mode"`
+		}
+		out := hostCLI(t, a.world, "psp-write-mode", "--merchant", "id:"+a.alpha.MerchantID().String(), "--psp", psp.ID.String(), "--mode", "full")
+		require.NoError(t, json.Unmarshal([]byte(out), &receipt))
+		require.Equal(t, psp.ID.String(), receipt.PSPID)
+		require.Equal(t, "full", receipt.WriteMode)
 		preview, err := a.alphaRemote.PreviewPSPRouting(t.Context(), billing.PreviewPSPRoutingParams{PriceID: input.Lines[0].PriceID, PSP: "stripe"})
 		require.NoError(t, err)
 		require.Equal(t, ptr("stripe"), preview.PSP)
@@ -253,8 +264,9 @@ func TestPSPControls(t *testing.T) {
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 		require.Contains(t, string(raw), `"code":"payment_option_unavailable"`)
 		require.Empty(t, p.provider.effects(t))
-		_, err = a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		ready, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
+		allowFixturePSPWrites(t, a.world, ready.ID)
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "armed-processor"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Len(t, p.provider.effects(t), 1)
@@ -269,8 +281,9 @@ func TestPSPControls(t *testing.T) {
 						w.cfg.ProviderWriteMode = openrails.ProviderWritesLimited
 					}
 				})
-				_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+				psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 				require.NoError(t, err, "read-only credential probes are allowed in both postures")
+				allowFixturePSPWrites(t, a.world, psp.ID)
 				if mode == "readonly" {
 					input := saleInput(t, a, p.provider)
 					status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "readonly-purchase"})

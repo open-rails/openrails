@@ -69,6 +69,10 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	}
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
+	// These fixture accounts are intended to exercise provider writes under
+	// the deployment and merchant limits chosen by each scenario.
+	_, err = pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "psps"}.Sanitize()+" SET write_mode = 'full'")
+	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
 	w.alpha, err = w.engine.MerchantBySlug("alpha")
 	require.NoError(t, err)
@@ -77,6 +81,13 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
 	return w
+}
+
+func allowFixturePSPWrites(t *testing.T, w *world, id billing.PSPID) {
+	t.Helper()
+	tag, err := w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "psps"}.Sanitize()+" SET write_mode = 'full' WHERE id = $1", id.UUID())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
 }
 
 // The only substituted dependency here is the external FX wire. Every known

@@ -10,9 +10,16 @@ SELECT
 FROM (SELECT 1) AS one
 LEFT JOIN billing.merchant_write_posture p ON p.merchant_id = sqlc.arg(merchant_id)::uuid;
 
--- name: GetPSPWriteMode :one
-SELECT write_mode FROM billing.psps
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(psp_id)::uuid;
+-- name: GetPSPWritePosture :one
+-- Read the account, merchant hold and book identity in one snapshot.
+SELECT
+    COALESCE((SELECT r.write_mode FROM billing.psps r
+        WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.id = sqlc.arg(psp_id)::uuid), 'readonly')::text AS account_mode,
+    COALESCE(p.mode, 'full')::text AS mode,
+    p.reason,
+    billing.book_armed()::boolean AS book_armed
+FROM (SELECT 1) AS one
+LEFT JOIN billing.merchant_write_posture p ON p.merchant_id = sqlc.arg(merchant_id)::uuid;
 
 -- name: SetPSPWriteMode :execrows
 UPDATE billing.psps

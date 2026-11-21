@@ -14,11 +14,13 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -99,7 +101,8 @@ func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) bi
 // loadPaymentConfig projects the merchant's armed PSPs and Solana acceptance
 // onto the browser-safe payment setup.
 func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.PaymentConfig, bool) {
-	psps, err := r.State.Merchants.PublicPSPs(r.Request.Context(), mid, pspArmed(r.State.RailConfigs))
+	posture := writeposture.View{Config: r.State.Config, DB: r.State.DB}
+	psps, err := r.State.Merchants.PublicPSPs(r.Request.Context(), mid, pspArmed(r.State.RailConfigs, posture, mid))
 	if err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("payment config: PSPs could not be loaded")
 		r.ErrorCode(billing.CodeInternalError, "failed to load payment configuration")
@@ -146,12 +149,15 @@ func httpsURL(raw string) *string {
 // pspArmed reports whether a declared account resolves with its full credential
 // shape — the same question PSP routing asks before charging. Resolution
 // errors fail closed.
-func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope) (bool, error) {
+func pspArmed(rails railresolve.Source, posture writeposture.View, mid billing.MerchantID) func(context.Context, merchants.PSPScope) (bool, error) {
 	return func(ctx context.Context, scope merchants.PSPScope) (bool, error) {
 		if rails == nil {
 			return false, nil
 		}
-		if _, err := rails.RailConfig(ctx, scope.Rail, scope.AccountID); err != nil {
+		if posture.Provider(ctx, mid.UUID(), scope.ID).ReadOnly() {
+			return false, nil
+		}
+		if _, err := rails.RailConfig(db.WithPSPID(ctx, scope.ID), scope.Rail, scope.AccountID); err != nil {
 			if errors.Is(err, railresolve.ErrRailNotArmed) {
 				return false, nil
 			}

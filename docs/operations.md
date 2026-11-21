@@ -148,9 +148,24 @@ protection.
 | `catalog apply` publishing a recurring Solana plan | yes | binds an existing plan, else refuses the price | same as `limited` |
 | `catalog apply` local changes, provider reads, webhooks | yes | yes | yes |
 
-`limited` stops what the system initiates; `readonly` stops the wire, enforced in
-each rail's transport. Verified receipt recovery runs in every mode. The lower
-of `provider_write_mode`, the merchant's posture and the book identity applies.
+`limited` holds system-initiated writes. `readonly` blocks provider mutations
+and allows provider reads and receipt recovery. Existing and new payment
+provider accounts start in `readonly`. Set `limited` or `full` explicitly for
+each account that OpenRails should be able to write to. The effective mode is
+the most restrictive of the account, merchant, deployment, and billing book.
+Inspect the stored and effective modes with the operator CLI.
+
+```sh
+openrails --config /etc/openrails/config.yaml psp-write-mode --merchant shop --psp psp_…
+openrails --config /etc/openrails/config.yaml psp-write-mode --merchant shop --psp psp_… --mode limited
+```
+
+Before upgrading, inventory the accounts that need write access. Stop the old
+fleet before relying on the account holds, then apply migration `0003` and set
+the intended mode for each account. An already issued checkout or a charge the
+provider itself schedules can still settle. Incoming receipts remain eligible
+for recovery. Provider environment is [set separately](psp-environments.md).
+
 `engine_admission_hold: true` additionally pauses admission and first submission
 of new engine payments; already-submitted ones are still verified.
 
@@ -254,6 +269,7 @@ server or workers, and keep standard output parseable.
 | `billing export` / `import` / `prepare-target` | move one merchant's billing ([portability](merchant-portability.md)) |
 | `merchants list\|get\|create\|rename\|delete\|restore` | the merchant directory; delete is soft |
 | `merchant arm`, `merchant hold`, `book status`, `book arm` | write posture and book identity (above) |
+| `psp-write-mode --merchant NAME --psp psp_… [--mode readonly\|limited\|full]` | inspect or set one payment provider account's write mode |
 | `merchant purge --merchant NAME --by NAME [--inventory RUN --expect-rows N --confirm PHRASE]` | alone, record a purge inventory; with it typed back, delete the merchant's rows permanently (the kill switch must be on) |
 | `admin-lockouts unlock <user-id>` | clear an administrator lockout |
 | `destructive-holds list`, `destructive-holds clear` | review destructive-action incidents ([limits](destructive-actions.md)) |

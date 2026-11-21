@@ -48,6 +48,9 @@ func (c *Client) ProxyNMI(ctx context.Context, destination, methodID string, for
 		Headers map[string]json.RawMessage `json:"response_headers"`
 	}
 	if err := c.call(ctx, http.MethodPost, "/v2/proxy", request, &response); err != nil {
+		if errors.Is(err, ErrReadOnly) {
+			return nil, errors.Join(ErrNotDispatched, err)
+		}
 		// Even a proxy 4xx is not a provider nonexecution receipt. Once this
 		// request was attempted, no status or missing response permits retry.
 		return nil, ErrUnknown

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/writeposture"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -141,7 +142,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil || binding != p.Binding {
 		return parkedBeforeEffect("accepted custodian binding changed")
 	}
-	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row)
+	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row, (writeposture.View{Config: h.Rails.Config, DB: h.DB}).CustodianGuard(current.MerchantID))
 	if err != nil {
 		return parkedBeforeEffect("accepted custodian credentials are unavailable")
 	}

@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -32,10 +31,4 @@ type solanaPlanContext struct {
 	BillingCycleDays     *int
 	BillingIntervalHours *int
 	RemoteWritesDisabled bool
-}
-
-// catalogRemoteWritesDisabled reports whether the operating mode blocks
-// publishing provider objects. Reads stay on.
-func (s *Service) catalogRemoteWritesDisabled() bool {
-	return s != nil && s.rt != nil && s.rt.Config != nil && config.IsLimitedMode(s.rt.Config)
 }

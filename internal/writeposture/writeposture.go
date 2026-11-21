@@ -144,15 +144,16 @@ func (v View) Provider(ctx context.Context, merchantID, pspID uuid.UUID) Posture
 	if merchantID == uuid.Nil || pspID == uuid.Nil {
 		return Posture{ReadOnly, "provider write requires an exact merchant and PSP"}
 	}
-	bound := v.Posture(ctx, merchantID)
-	if bound.ReadOnly() {
-		return bound
+	process, _ := ParseMode(config.GetProviderWriteMode(v.Config))
+	if process == ReadOnly || v.DB == nil {
+		return v.Posture(ctx, merchantID)
 	}
-	mode, err := v.DB.Gen(ctx).GetPSPWriteMode(ctx, gen.GetPSPWriteModeParams{MerchantID: merchantID, PspID: pspID})
+	row, err := v.DB.Gen(ctx).GetPSPWritePosture(ctx, gen.GetPSPWritePostureParams{MerchantID: merchantID, PspID: pspID})
 	if err != nil {
 		return Posture{ReadOnly, fmt.Sprintf("PSP write posture unreadable (%v)", err)}
 	}
-	account, _ := ParseMode(mode)
+	bound := effective(process, gen.GetWritePostureRow{Mode: row.Mode, Reason: row.Reason, BookArmed: row.BookArmed})
+	account, _ := ParseMode(row.AccountMode)
 	if account < bound.Mode {
 		return Posture{account, "the payment provider account's write mode is " + account.String()}
 	}
@@ -177,6 +178,17 @@ func (v View) GuardCurrentProvider(ctx context.Context) error {
 		return err
 	}
 	return v.ProviderGuard(mid.UUID(), db.PSPIDFromContext(ctx))(ctx)
+}
+
+// CustodianGuard rechecks the merchant for custody work with its own address.
+// A charge through a custodian proxy also has a provider account guard.
+func (v View) CustodianGuard(merchantID uuid.UUID) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if reason := v.Posture(ctx, merchantID).HoldReason(originFromContext(ctx)); reason != "" {
+			return errors.New(reason)
+		}
+		return nil
+	}
 }
 
 func effective(process Mode, row gen.GetWritePostureRow) Posture {
