@@ -9,19 +9,19 @@ import (
 // ProvisioningTokenID names a provisioning token; on the wire "ptk_<uuid>".
 type ProvisioningTokenID uuid.UUID
 
-// ProvisioningTokenIDPrefix starts a ProvisioningTokenID on the wire.
-const ProvisioningTokenIDPrefix = "ptk_"
+// provisioningTokenIDPrefix starts a ProvisioningTokenID on the wire.
+const provisioningTokenIDPrefix = "ptk_"
 
 // ParseProvisioningTokenID reads a ProvisioningTokenID.
 func ParseProvisioningTokenID(s string) (ProvisioningTokenID, error) {
-	u, err := parsePrefixedID("provisioning token", ProvisioningTokenIDPrefix, s)
+	u, err := parsePrefixedID("provisioning token", provisioningTokenIDPrefix, s)
 	return ProvisioningTokenID(u), err
 }
 
 func (id ProvisioningTokenID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id ProvisioningTokenID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id ProvisioningTokenID) String() string {
-	return formatPrefixedID(ProvisioningTokenIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(provisioningTokenIDPrefix, uuid.UUID(id))
 }
 func (id ProvisioningTokenID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *ProvisioningTokenID) UnmarshalText(b []byte) error {

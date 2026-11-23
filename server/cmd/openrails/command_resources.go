@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
@@ -57,8 +58,10 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	opts := controlplane.Options{LocalSignIn: h.LocalSignIn, Naming: h.Naming,
-		Console: h.LocalSignIn && (h.AdminConsole == nil || !h.AdminConsole.Disabled)}
+	opts := controlplane.Options{LocalSignIn: h.LocalSignIn, Naming: h.Naming}
+	if h.LocalSignIn && (h.AdminConsole == nil || !h.AdminConsole.Disabled) {
+		opts.ConsoleClientID = server.ConsoleClientID
+	}
 	akCfg, err := controlplane.AuthKit(h.Config, h.Auth, opts)
 	if err != nil {
 		return nil, err
@@ -128,7 +131,7 @@ func (c *commandControlPlane) GetMerchant(ctx context.Context, id billing.Mercha
 }
 
 func (c *commandControlPlane) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error) {
-	m, err := c.cp.RenameMerchant(ctx, id, req.Name, req.ActorUserID, req.ActorUserID == "")
+	m, err := c.cp.RenameMerchant(ctx, id, req.Name, "", true)
 	if err != nil {
 		return nil, err
 	}

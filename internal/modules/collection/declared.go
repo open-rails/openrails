@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // PolicyOf converts and validates a declared dunning policy. Nil is the
@@ -20,13 +20,13 @@ func PolicyOf(declared *billing.DunningPolicy) (Policy, error) {
 		p.CustomerRetries = *declared.CustomerRetries
 	}
 	for _, t := range declared.Tiers {
-		if t.MaxCycleHours < 0 || t.MaxCycleHours > catalog.MaxDurationHours {
-			return Policy{}, fmt.Errorf("dunning_policy: max_cycle_hours must be between 0 and %d", catalog.MaxDurationHours)
+		if t.MaxCycleHours < 0 || t.MaxCycleHours > syntax.MaxDurationHours {
+			return Policy{}, fmt.Errorf("dunning_policy: max_cycle_hours must be between 0 and %d", syntax.MaxDurationHours)
 		}
 		tier := Tier{MaxCycle: time.Duration(t.MaxCycleHours) * time.Hour}
 		for _, h := range t.RetryAfterHours {
-			if h <= 0 || h > catalog.MaxDurationHours {
-				return Policy{}, fmt.Errorf("dunning_policy: retry_after_hours must be between 1 and %d", catalog.MaxDurationHours)
+			if h <= 0 || h > syntax.MaxDurationHours {
+				return Policy{}, fmt.Errorf("dunning_policy: retry_after_hours must be between 1 and %d", syntax.MaxDurationHours)
 			}
 			tier.Offsets = append(tier.Offsets, time.Duration(h)*time.Hour)
 		}

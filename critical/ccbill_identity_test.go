@@ -47,7 +47,7 @@ func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld
 	return newAuthorityWorld(t, func(w *world) {
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
+		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		for _, change := range configure {
@@ -233,7 +233,7 @@ func TestCCBillIdentity(t *testing.T) {
 				var preview billing.OrderPreview
 				require.NoError(t, json.Unmarshal(raw, &preview))
 				require.Len(t, preview.PaymentOptions, 1)
-				require.Equal(t, "ccbill", preview.PaymentOptions[0].Rail)
+				require.Equal(t, billing.RailCCBill, preview.PaymentOptions[0].Rail)
 				return preview.PaymentOptions[0].Requires
 			}
 			require.Empty(t, requires(token), "a verified email and username name the customer")
@@ -432,7 +432,7 @@ func TestCCBillIdentity(t *testing.T) {
 			w.clock.Advance(-30 * 24 * time.Hour)
 			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 			m := cfgMerchant(w.cfg, "alpha")
-			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "member", DisplayName: "Member", Entitlements: []string{"member:paid"}})
@@ -499,10 +499,10 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Len(t, held, 1, "the second charge is recorded once: %+v", listed.Items)
 		require.Equal(t, billing.PaymentSucceeded, held[0].Status)
 		require.EqualValues(t, 10_000_000, held[0].Amount)
-		require.Equal(t, "ccbill", *held[0].Rail)
+		require.Equal(t, billing.RailCCBill, *held[0].Rail)
 		require.Equal(t, order.ID, *held[0].OrderID)
 		require.Nil(t, held[0].SubscriptionID, "the sale grants nothing")
-		require.Equal(t, "stripe", onlySubscription(t, a.alpha, alice).Rail, "the card's membership is the only one")
+		require.Equal(t, billing.RailStripe, onlySubscription(t, a.alpha, alice).Rail, "the card's membership is the only one")
 		late, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.order.late_payment"})
 		require.NoError(t, err)
 		require.Len(t, late.Items, 1)

@@ -23,7 +23,7 @@ func admitInput(p billing.AdmitParams) billingservice.AdmitInput {
 		InvokerType:             p.InvokerType,
 		TrustLevel:              strings.TrimSpace(p.TrustLevel),
 		Resource:                p.Resource,
-		Currency:                p.Currency,
+		Currency:                string(p.Currency),
 		EstimatedAmount:         p.EstimatedAmount,
 		Usage:                   p.Usage,
 		AccrualRateDeltaPerHour: p.AccrualRateDeltaPerHour,

@@ -2,6 +2,8 @@ package billing
 
 import (
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // PaymentKind is what a payment row records: a charge, or a reversal of one.
@@ -42,13 +44,13 @@ const (
 // positive for a charge or dispute reversal, negative for a refund or
 // chargeback. Rail and PSPID are null off-rail.
 type Payment struct {
-	ID             PaymentID     `json:"id"`
-	Kind           PaymentKind   `json:"kind"`
-	Status         PaymentStatus `json:"status"`
-	Amount         int64         `json:"amount,string"`
-	AmountRefunded int64         `json:"amount_refunded,string"`
-	Currency       string        `json:"currency"`
-	CustomerID     CustomerID    `json:"customer_id"`
+	ID             PaymentID        `json:"id"`
+	Kind           PaymentKind      `json:"kind"`
+	Status         PaymentStatus    `json:"status"`
+	Amount         int64            `json:"amount,string"`
+	AmountRefunded int64            `json:"amount_refunded,string"`
+	Currency       catalog.Currency `json:"currency"`
+	CustomerID     CustomerID       `json:"customer_id"`
 	// CustomerContact is the customer's directory contact on a staff list;
 	// absent when the directory holds none or could not answer.
 	CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
@@ -59,7 +61,7 @@ type Payment struct {
 	// that bills no seats.
 	Quantity          *int            `json:"quantity"`
 	Channel           PaymentChannel  `json:"channel"`
-	Rail              *string         `json:"rail"`
+	Rail              *Rail           `json:"rail"`
 	PSPID             *PSPID          `json:"psp_id"`
 	TransactionID     string          `json:"transaction_id"`
 	Card              *CardDetails    `json:"card"`
@@ -84,7 +86,7 @@ type PaymentListParams struct {
 	SubscriptionID SubscriptionID `form:"subscription_id"`
 	OrderID        OrderID        `form:"order_id"`
 	Status         PaymentStatus  `form:"status"`
-	Rail           string         `form:"rail"`
+	Rail           Rail           `form:"rail"`
 	Kind           PaymentKind    `form:"kind"`
 	TransactionID  string         `form:"transaction_id"`
 	PageRequest

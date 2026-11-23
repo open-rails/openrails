@@ -29,7 +29,7 @@ const (
 
 // handWrittenMethods are the exported Client methods that call no route of
 // their own.
-var handWrittenMethods = []string{"ActingFor", "CheckEntitlementsLive", "CustomerAssertion", "CustomerToken", "EventReader", "MerchantID", "Uncached"}
+var handWrittenMethods = []string{"ActingFor", "CreateCustomerAssertion", "CreateCustomerToken", "EventReader", "MerchantID", "Uncached"}
 
 // goClient renders ClientFile from the client routes, after checking that
 // the root package declares every other exported Client method in

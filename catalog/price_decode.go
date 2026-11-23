@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // UnmarshalJSON accepts readable money and duration aliases and normalizes
@@ -42,7 +44,7 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 		}
 		decoded.BillingIntervalHours = Null[int]()
 		if !decoded.BillingInterval.Null {
-			hours, months, err := ParseBillingInterval(decoded.BillingInterval.Value)
+			hours, months, err := syntax.ParseBillingInterval(decoded.BillingInterval.Value)
 			if err != nil {
 				return err
 			}
@@ -70,7 +72,7 @@ func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {
 			*field.hours = Null[int]()
 			continue
 		}
-		hours, err := ParseDurationHours(field.text.Value)
+		hours, err := syntax.ParseDurationHours(field.text.Value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field.name, err)
 		}

@@ -99,7 +99,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend
 	}
 	if in.ProviderRefundAccess != nil {
-		policy, err := NormalizeProviderRefundAccess(strings.TrimSpace(*in.ProviderRefundAccess))
+		policy, err := NormalizeProviderRefundAccess(billing.ProviderRefundAccess(strings.TrimSpace(string(*in.ProviderRefundAccess))))
 		if err != nil {
 			return Settings{}, err
 		}
@@ -190,7 +190,7 @@ func NormalizeDeclaredBillingPolicy(in billing.BillingPolicy) (string, models.Bi
 		CollectionCycleBoundary:   in.CollectionCycleBoundary,
 		DelinquencyGraceDays:      in.DelinquencyGraceDays,
 		DelinquencyAmountFloor:    in.DelinquencyAmountFloor,
-		PolicyCurrency:            in.PolicyCurrency,
+		PolicyCurrency:            string(in.PolicyCurrency),
 	})
 	return name, body, err
 }
@@ -198,7 +198,7 @@ func NormalizeDeclaredBillingPolicy(in billing.BillingPolicy) (string, models.Bi
 func budgetWindows(ws []billing.BudgetWindow) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
+		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: string(w.Currency)})
 	}
 	return out
 }
@@ -255,7 +255,7 @@ func NormalizeBalanceNotices(in billing.BalanceNoticeSettings) (models.BalanceNo
 		out.RunwayHours = &hours
 	}
 	for i, line := range in.LowAmounts {
-		currency := moneyutil.NormalizeCurrency(line.Currency)
+		currency := moneyutil.NormalizeCurrency(string(line.Currency))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {
 			return out, fmt.Errorf("balance_notices.low_amounts[%d].currency: %w", i, err)
 		}

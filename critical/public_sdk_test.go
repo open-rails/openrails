@@ -48,10 +48,10 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 	oneUsage(t, a.alpha, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EventType: "sdk-compute",
 		Dimensions: map[string]int64{"units": 2}, Source: "critical-sdk", SourceID: "worked-usage"})
 	for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
-		known, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		known, err := client.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 9_990_000, known.UnitAmount)
-		require.Equal(t, "USD", known.Currency)
+		require.Equal(t, catalog.Currency("USD"), known.Currency)
 	}
 	var recurring []billing.PriceID
 	for i, key := range []string{"sdk-basic", "sdk-premium"} {
@@ -78,7 +78,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: vault.URL()}
 			merchant := cfgMerchant(w.cfg, "alpha")
-			merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
+			merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
 			merchant.CardVault = "nmi"
 			setCfgMerchant(&w.cfg, "alpha", merchant)
 		})

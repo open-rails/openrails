@@ -82,7 +82,7 @@ func newNMIWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *nmi
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		merchant := cfgMerchant(w.cfg, "alpha")
-		merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{GatewayID: "critical-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "critical-nmi-key", WebhookSigningSecret: "critical-nmi-webhook", TokenizationKey: "critical-collect-key"}.PSPConfig()}
+		merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{GatewayID: "critical-gateway", Environment: billing.EnvironmentTest, SecurityKey: "critical-nmi-key", WebhookSigningSecret: "critical-nmi-webhook", TokenizationKey: "critical-collect-key"}.PSPConfig()}
 		merchant.CardVault = "nmi"
 		setCfgMerchant(&w.cfg, "alpha", merchant)
 		for _, change := range configure {
@@ -201,7 +201,7 @@ func nmiRenewalReadback(t *testing.T, a *authorityWorld, p *nmiJournal, sub *bil
 	access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
 	require.NoError(t, err)
 	require.True(t, access.Entitlements["nmi:member"])
-	events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+	events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2, "imported initial receipt and exactly one renewed receipt")
 	p.money(t, 2, 2000)

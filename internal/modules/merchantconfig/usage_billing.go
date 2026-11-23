@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -18,14 +19,14 @@ func NormalizeUsageBilling(in billing.UsageBillingSettings) (billing.UsageBillin
 	seen := map[string]bool{}
 	for i := range in.Currencies {
 		c := &in.Currencies[i]
-		c.Currency = moneyutil.NormalizeCurrency(c.Currency)
-		if err := moneyutil.ValidateCurrency(c.Currency); err != nil {
+		c.Currency = catalog.Currency(moneyutil.NormalizeCurrency(string(c.Currency)))
+		if err := moneyutil.ValidateCurrency(string(c.Currency)); err != nil {
 			return in, fmt.Errorf("usage_billing.currencies[%d].currency: %w", i, err)
 		}
-		if seen[c.Currency] {
+		if seen[string(c.Currency)] {
 			return in, fmt.Errorf("usage_billing.currencies names %s twice", c.Currency)
 		}
-		seen[c.Currency] = true
+		seen[string(c.Currency)] = true
 		if c.CreditLimit < 0 || c.MinimumInvoiceAmount < 0 {
 			return in, fmt.Errorf("usage_billing amounts must be nonnegative")
 		}

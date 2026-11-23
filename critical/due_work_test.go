@@ -82,7 +82,7 @@ func TestDueWork(t *testing.T) {
 			return list.Items
 		}
 		missed := func() int64 {
-			result, err := a.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"rebills_missed"},
+			result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"rebills_missed"},
 				Range: &billing.MetricsRange{From: due.Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}})
 			require.NoError(t, err)
 			var total int64
@@ -391,7 +391,7 @@ func TestDueWork(t *testing.T) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs = billing.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
-				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})

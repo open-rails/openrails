@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -53,7 +54,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req billing.Create
 		}
 		req.ProductID = product.ID
 		req.ProductData = nil
-		req.Currency = money.NormalizeCurrency(req.Currency)
+		req.Currency = catalog.Currency(money.NormalizeCurrency(string(req.Currency)))
 		products, prices, err := scoped.requireCatalogServices()
 		if err != nil {
 			return err

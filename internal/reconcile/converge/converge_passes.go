@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -309,7 +310,7 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 
 	ev := map[string]any{
 		"access_id": o.AccessID.String(), "customer_id": o.CustomerID.String(),
-		"product_id": product.String(), "source_type": o.SourceType, "source_id": billing.SourceRef(o.SourceType, o.SourceID),
+		"product_id": product.String(), "source_type": o.SourceType, "source_id": catalogrules.SourceRef(o.SourceType, o.SourceID),
 		"cause":               o.Cause,
 		recommend.EvidenceKey: rec.Map(),
 	}
@@ -598,7 +599,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": cust.String(), "product_id": product.String(),
-				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": billing.SourceRef(c.SourceType, c.SourceID),
+				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": catalogrules.SourceRef(c.SourceType, c.SourceID),
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
@@ -673,7 +674,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Provider:   "self",
 			Evidence: map[string]any{
 				"access_id": accessID.String(), "customer_id": userID,
-				"product_id": billing.ProductID(product).String(), "source_type": sourceType, "source_id": billing.SourceRef(sourceType, sourceID),
+				"product_id": billing.ProductID(product).String(), "source_type": sourceType, "source_id": catalogrules.SourceRef(sourceType, sourceID),
 			},
 			// surface-only: a dangling source has no safe auto-repair (it may be a
 			// valid historical record or a real corruption) — an admin decides.
@@ -778,7 +779,7 @@ type ownershipPurchase struct {
 }
 
 func (r ownershipPurchaseRow) evidence() ownershipPurchase {
-	p := ownershipPurchase{GrantID: r.GrantID, SourceType: r.SourceType, SourceID: billing.SourceRef(r.SourceType, r.SourceID), Amount: r.Amount, Currency: r.Currency, PurchasedAt: r.PurchasedAt}
+	p := ownershipPurchase{GrantID: r.GrantID, SourceType: r.SourceType, SourceID: catalogrules.SourceRef(r.SourceType, r.SourceID), Amount: r.Amount, Currency: r.Currency, PurchasedAt: r.PurchasedAt}
 	if r.PaymentID != nil {
 		if u, err := uuid.Parse(*r.PaymentID); err == nil {
 			typed := billing.PaymentID(u).String()

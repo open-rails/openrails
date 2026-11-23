@@ -196,10 +196,10 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	}
 	failed := map[windowKey][]money.FailedUsageWindow{}
 	for _, u := range p.Usage {
-		if u.Outcome != billing.UsageFailed || u.CustomerID.IsZero() || moneyutil.ValidateCurrency(money.NormalizeCurrency(u.Currency)) != nil {
+		if u.Outcome != billing.UsageFailed || u.CustomerID.IsZero() || moneyutil.ValidateCurrency(money.NormalizeCurrency(string(u.Currency))) != nil {
 			continue
 		}
-		k := windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(u.Currency)}
+		k := windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(string(u.Currency))}
 		if _, ok := failed[k]; ok || s.FailedWindows == nil {
 			continue
 		}
@@ -224,7 +224,7 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 		d := s.DB.NewWithPgxTx(tx)
 		run := &syncRun{Syncer: s, ctx: ctx, q: q, d: d, merchant: mid.UUID(), now: now, p: p, began: began, lockTimeout: lockBudget,
 			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d, func() time.Time { return now }), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
-				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(u.Currency)}]
+				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(string(u.Currency))}]
 			}}
 		var err error
 		if out, err = run.sync(); err != nil {
@@ -1213,7 +1213,7 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 		return money.UsageItem{}, invalid("invoker_type", `invoker_type must be "customer" or "delegated"`)
 	}
 	item := money.UsageItem{Customer: identity.CustomerID(u.CustomerID), Invoker: u.Invoker, Delegated: u.InvokerType == billing.InvokerTypeDelegated,
-		Currency: u.Currency, EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: u.Amount,
+		Currency: string(u.Currency), EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: u.Amount,
 		Failed: u.Outcome == billing.UsageFailed, OccurredAt: u.OccurredAt}
 	if item.Failed {
 		item.FailedWindows = r.failed(u)
@@ -1230,7 +1230,7 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 		if at.IsZero() {
 			at = r.now
 		}
-		if h := r.current(holdKey{u.CustomerID.UUID(), *u.LimitSet}, at); h != nil && h.row.Currency == money.NormalizeCurrency(u.Currency) {
+		if h := r.current(holdKey{u.CustomerID.UUID(), *u.LimitSet}, at); h != nil && h.row.Currency == money.NormalizeCurrency(string(u.Currency)) {
 			sh := &money.SettleHold{ID: h.row.ID, CreatedAt: h.row.CreatedAt, Consume: r.live}
 			for _, p := range h.parts {
 				sh.Parts = append(sh.Parts, money.HoldPart{Key: p.key, Unit: p.unit, WindowStartsAt: p.start, WindowEndsAt: p.end, Held: p.held})
@@ -1408,7 +1408,7 @@ func prefixParam(err error, prefix string) error {
 // them.
 func itemDigest(u billing.LeaseUsage) string {
 	u.OccurredAt = u.OccurredAt.UTC().Truncate(time.Microsecond)
-	u.Currency = money.NormalizeCurrency(u.Currency)
+	u.Currency = catalog.Currency(money.NormalizeCurrency(string(u.Currency)))
 	raw, _ := json.Marshal(u)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])

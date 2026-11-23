@@ -13,7 +13,7 @@ type Config struct {
 	// providers: ProviderWritesFull (normal operation), ProviderWritesLimited
 	// (no system-initiated provider writes) or ProviderWritesReadOnly (no
 	// provider writes: it never charges anyone). Required.
-	ProviderWriteMode string
+	ProviderWriteMode ProviderWriteMode
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
@@ -94,35 +94,18 @@ type Config struct {
 	WebhookSecretOverlap string
 }
 
-// Config.ProviderWriteMode's values.
+// ProviderWriteMode is how much OpenRails may do against payment providers.
+type ProviderWriteMode string
+
 const (
 	// ProviderWritesFull is normal operation.
-	ProviderWritesFull = "full"
+	ProviderWritesFull ProviderWriteMode = "full"
 	// ProviderWritesLimited makes no system-initiated provider writes:
 	// dunning, invoice collection and the other proactive operations wait,
 	// while purchase and customer or staff actions run.
-	ProviderWritesLimited = "limited"
+	ProviderWritesLimited ProviderWriteMode = "limited"
 	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
-	ProviderWritesReadOnly = "readonly"
-)
-
-// A PSP's environment (billing.PSPConfig.Environment) is its rail's own;
-// omitted, it is the rail's real-money one.
-const (
-	// EnvironmentLive moves real money on nmi, stripe and ccbill.
-	EnvironmentLive = "live"
-	// EnvironmentTest is the provider's own system moving no money: an NMI
-	// account in test mode, Stripe test keys.
-	EnvironmentTest = "test"
-	// EnvironmentSandbox is the provider's separate sandbox system:
-	// sandbox.nmi.com, CCBill's sandbox.
-	EnvironmentSandbox = "sandbox"
-	// EnvironmentMainnet is Solana's real-money network.
-	EnvironmentMainnet = "mainnet"
-	// EnvironmentDevnet is Solana's devnet.
-	EnvironmentDevnet = "devnet"
-	// EnvironmentTestnet is Solana's testnet.
-	EnvironmentTestnet = "testnet"
+	ProviderWritesReadOnly ProviderWriteMode = "readonly"
 )
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
@@ -212,7 +195,7 @@ type VaultConfig struct {
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type CardVaultConfig struct {
 	// Kind is the vault vendor: basis_theory.
-	Kind string
+	Kind billing.CardVaultKind
 	// TenantID is the vendor's tenant id.
 	TenantID string
 	// KVMount holds the platform credential document. Empty uses
@@ -306,7 +289,7 @@ func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 // handles', not the engine's.
 func engineConfig(cfg Config) config.Config {
 	out := config.Config{
-		ProviderWriteMode:       cfg.ProviderWriteMode,
+		ProviderWriteMode:       string(cfg.ProviderWriteMode),
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),

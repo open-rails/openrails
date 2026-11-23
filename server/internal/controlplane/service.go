@@ -36,6 +36,8 @@ type ControlPlane struct {
 	registration iam.RegistrationMode
 	// localSignIn mounts AuthKit's sign-in surface (Options.LocalSignIn).
 	localSignIn bool
+	// consoleClientID is Options.ConsoleClientID.
+	consoleClientID string
 	// merchantCreation is the hosted policy for user-claimed merchant names
 	// (or#914); nil otherwise.
 	merchantCreation *MerchantCreationConfig
@@ -66,17 +68,13 @@ type Options struct {
 	// (or#914); nil for operator-provisioned deployments. With LocalSignIn,
 	// a hosted product may explicitly enable open native registration.
 	MerchantCreation *MerchantCreationConfig
-	// Console: the server's own accounts act on a merchant through a token
-	// exchanged for it (ConsoleClientID), as its admin console does; off
-	// when the console is disabled or signs staff in at a trusted issuer.
-	Console bool
+	// ConsoleClientID is the admin console's first-party OAuth client, which
+	// the control plane declares: a public client trading the person's session
+	// token for one bound to the merchant they act on (RFC 8693 token exchange
+	// naming the merchant's group). Empty when the console is disabled or signs
+	// staff in at a trusted issuer.
+	ConsoleClientID string
 }
-
-// ConsoleClientID is the admin console's first-party OAuth client, which the
-// server declares: a public client trading the person's session token for one
-// bound to the merchant they act on (RFC 8693 token exchange naming the
-// merchant's group).
-const ConsoleClientID = "openrails-console"
 
 // AccessTokenTTL is how long the access tokens of the server's resource last
 // unless auth.authorization_server.access_token_ttl says otherwise: customer
@@ -145,8 +143,8 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 		if auth.AuthorizationServer.AccessTokenTTL == 0 {
 			auth.AuthorizationServer.AccessTokenTTL = AccessTokenTTL
 		}
-		if opts.Console {
-			if err := declareConsoleClient(&auth); err != nil {
+		if opts.ConsoleClientID != "" {
+			if err := declareConsoleClient(&auth, opts.ConsoleClientID); err != nil {
 				return authkit.Config{}, err
 			}
 		}
@@ -163,7 +161,7 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	if reg.NativeUserMode != iam.RegistrationModeClosed && reg.Verification == "" {
 		reg.Verification = iam.RegistrationVerificationRequired
 	}
-	if opts.LocalSignIn && opts.Console {
+	if opts.LocalSignIn && opts.ConsoleClientID != "" {
 		consoleFrontend(&auth.Frontend, cfg.PublicBillingBaseURL, auth.Token.Issuer)
 	}
 	var http authkit.HTTPConfig
@@ -209,15 +207,15 @@ func defaultResource(base string) string {
 	return ""
 }
 
-// declareConsoleClient registers ConsoleClientID for the server's resource,
-// whose openrails:merchant tokens it exchanges for.
-func declareConsoleClient(auth *authkit.Config) error {
+// declareConsoleClient registers the console's client id for the server's
+// resource, whose openrails:merchant tokens it exchanges for.
+func declareConsoleClient(auth *authkit.Config, id string) error {
 	as := &auth.AuthorizationServer
-	if slices.ContainsFunc(as.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == ConsoleClientID }) {
-		return fmt.Errorf("controlplane: auth.authorization_server.clients declares %s, the admin console's client, which the server declares itself", ConsoleClientID)
+	if slices.ContainsFunc(as.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == id }) {
+		return fmt.Errorf("controlplane: auth.authorization_server.clients declares %s, the admin console's client, which the server declares itself", id)
 	}
 	resource := auth.Resource.ID
-	as.Clients = append(as.Clients, authkit.OAuthClientConfig{ID: ConsoleClientID, Name: "Admin console",
+	as.Clients = append(as.Clients, authkit.OAuthClientConfig{ID: id, Name: "Admin console",
 		GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange}, Resources: []string{resource}})
 	i := slices.IndexFunc(as.Resources, func(r authkit.ResourceServerConfig) bool { return r.ID == resource })
 	if i < 0 {
@@ -235,6 +233,10 @@ func declareConsoleClient(auth *authkit.Config) error {
 	}
 	return nil
 }
+
+// ConsoleClientID is the console's OAuth client the control plane declares;
+// empty when it declares none.
+func (c *ControlPlane) ConsoleClientID() string { return c.consoleClientID }
 
 // TokenEndpoint is the token endpoint of the server's AuthKit (RFC 8414).
 func (c *ControlPlane) TokenEndpoint() string {
@@ -310,7 +312,7 @@ func New(logger *slog.Logger, client *authkit.Client, cfg *config.Config, auth a
 	}
 	return &ControlPlane{
 		client: client, issuer: strings.TrimSpace(auth.Token.Issuer), registration: auth.Registration.NativeUserMode,
-		localSignIn: opts.LocalSignIn, merchantCreation: opts.MerchantCreation, merchantCreationPattern: pattern, naming: naming,
+		localSignIn: opts.LocalSignIn, consoleClientID: opts.ConsoleClientID, merchantCreation: opts.MerchantCreation, merchantCreationPattern: pattern, naming: naming,
 		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Token.Issuer),
 		Log: logger,
 	}, nil

@@ -258,7 +258,7 @@ func TestLeaseSyncs(t *testing.T) {
 				require.NoError(t, err)
 				require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "no hold takes the balance past what it holds")
 				if refusal != nil {
-					require.Contains(t, []string{billing.DenyCapacityHeld, "insufficient_balance"}, refusal.DenyCode)
+					require.Contains(t, []billing.DenyCode{billing.DenyCapacityHeld, billing.DenyInsufficientBalance}, refusal.DenyCode)
 					refused++
 					held[i] = 0
 					continue

@@ -75,35 +75,57 @@ type LimitOverride struct {
 	Capacity int64  `json:"capacity,string"`
 }
 
-// AdjustLimitParams adds Amount (negative takes away) to the capacity of
+// AdjustCustomerLimitParams adds Amount (negative takes away) to the capacity of
 // the customer's current window of Limit only; the next window starts from
 // the products' capacity again. It opens a session or first-use window not
 // yet open. A rate limit takes no adjustment. SourceID identifies the
 // adjustment per customer for 61 days: a retry with the same terms answers
 // the customer's line without adding again, one with another limit or
 // amount is ErrIdempotencyKeyReused.
-type AdjustLimitParams struct {
+type AdjustCustomerLimitParams struct {
 	Limit    string `json:"limit"`
 	Amount   int64  `json:"amount,string"`
 	SourceID string `json:"source_id"`
 }
 
-// Deny codes of a limit refusal. Money refusals keep their own codes
-// (insufficient_balance, insufficient_credit, budget_exceeded, ...).
+// DenyCode is why a request was not admitted.
+type DenyCode string
+
 const (
 	// DenyLimitReached: the request would not fit a limit even if every other
 	// hold were returned. The refusal names the limit and when it resets.
-	DenyLimitReached = "limit_reached"
+	DenyLimitReached DenyCode = "limit_reached"
 	// DenyCapacityHeld: the request would fit but for capacity gates' lease
 	// holds keep; they shrink at their next sync. Retry after
 	// RetryAfterSeconds. A gate's want and an admission alike.
-	DenyCapacityHeld = "capacity_held"
+	DenyCapacityHeld DenyCode = "capacity_held"
+	// DenyInsufficientBalance: the prepaid balance does not cover the request.
+	DenyInsufficientBalance DenyCode = "insufficient_balance"
+	// DenyInsufficientCredit: the request does not fit the credit line.
+	DenyInsufficientCredit DenyCode = "insufficient_credit"
+	// DenyOutstandingCapReached: unpaid arrears have reached the customer's
+	// credit line.
+	DenyOutstandingCapReached DenyCode = "outstanding_cap_reached"
+	// DenyDelinquentUnpaidOrder: a debt has outlived the merchant's grace
+	// window.
+	DenyDelinquentUnpaidOrder DenyCode = "delinquent_unpaid_order"
+	// DenyBudgetExceeded: a spend-cap window is full.
+	DenyBudgetExceeded DenyCode = "budget_exceeded"
+	// DenyAccrualRateCapReached: the measured accrual rate, with the request,
+	// would pass the customer's hourly quota.
+	DenyAccrualRateCapReached DenyCode = "accrual_rate_cap_reached"
+	// DenyDelegatedSpendNotAllowed: only the customer's own credential spends
+	// its balance, not a delegated invoker.
+	DenyDelegatedSpendNotAllowed DenyCode = "delegated_spend_not_allowed"
+	// DenyFailureRateLimited: a delegated invoker's wasted spend passed its
+	// cutoff.
+	DenyFailureRateLimited DenyCode = "failure_rate_limited"
 )
 
 // Refusal is why a request was not admitted: the deny code, the limit it
 // names and when that limit resets, and when to retry.
 type Refusal struct {
-	DenyCode          string     `json:"deny_code"`
+	DenyCode          DenyCode   `json:"deny_code"`
 	Limit             *string    `json:"limit"`
 	ResetsAt          *time.Time `json:"resets_at"`
 	RetryAfterSeconds *int64     `json:"retry_after_seconds"`

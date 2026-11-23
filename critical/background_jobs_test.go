@@ -518,7 +518,7 @@ func TestBackgroundJobs(t *testing.T) {
 // is set.
 func declareCCBill(w *world, feed *httptest.Server) {
 	m := cfgMerchant(w.cfg, "alpha")
-	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
+	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
 	if feed != nil {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: feed.URL}

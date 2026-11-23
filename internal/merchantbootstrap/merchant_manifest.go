@@ -426,7 +426,7 @@ func validatePSPDeclaration(key string, account billing.PSPConfig) (billing.PSPC
 	if rail == string(models.RailStripe) {
 		if raw, ok := account.Settings["publishable_key"]; ok {
 			value, _ := raw.(string)
-			if err := config.ValidateStripePublishableKeyEnvironment(account.Environment, value); err != nil {
+			if err := config.ValidateStripePublishableKeyEnvironment(string(account.Environment), value); err != nil {
 				return account, fmt.Errorf("psps.%s.publishable_key: %w", key, err)
 			}
 		}

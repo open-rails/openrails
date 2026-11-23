@@ -120,7 +120,7 @@ func renewalSettled(t *testing.T, a *authorityWorld, p *providerLedger, sub *bil
 		require.Equal(t, billing.PaymentSucceeded, payment.Status)
 		require.EqualValues(t, 10_000_000, payment.Amount)
 	}
-	events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+	events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2)
 	require.NotEqual(t, events.Events[0].ID, events.Events[1].ID)

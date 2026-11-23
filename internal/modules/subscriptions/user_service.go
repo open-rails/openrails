@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -408,7 +409,7 @@ func applySubscriptionAccess(responses []*UserSubscriptionResponse, active []*mo
 		response.Access = nil
 		if grant := bySource[[2]string{response.CustomerID.String(), response.ID.String()}]; grant != nil {
 			copy := *grant
-			copy.Kind, copy.Rail = "subscription", string(response.Rail)
+			copy.Kind, copy.Rail = "subscription", billing.Rail(response.Rail)
 			response.Access = &copy
 		}
 	}
@@ -416,7 +417,7 @@ func applySubscriptionAccess(responses []*UserSubscriptionResponse, active []*mo
 
 func windowAccess(window *models.ProductAccess) *billing.SubscriptionAccess {
 	grant := &billing.SubscriptionAccess{Kind: "product", ProductID: billing.ProductID(window.ProductID), SourceType: string(window.SourceType),
-		SourceID: billing.SourceRef(string(window.SourceType), window.SourceID), StartsAt: window.StartsAt, EndsAt: window.EndsAt}
+		SourceID: catalogrules.SourceRef(string(window.SourceType), window.SourceID), StartsAt: window.StartsAt, EndsAt: window.EndsAt}
 	if window.SourceType == models.AccessSourceSubscription || window.SourceType == models.AccessSourceGrace {
 		if id, err := uuid.Parse(window.SourceID); err == nil {
 			grant.SubscriptionID = billing.SubscriptionID(id)

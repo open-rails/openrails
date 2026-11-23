@@ -138,7 +138,7 @@ func (s *Service) renewalOptions(ctx context.Context, order *orders.Order) ([]bi
 	if err != nil {
 		return nil, err
 	}
-	return []billing.OrderPaymentOption{{PSPID: billing.PSPID(sub.PspID), Rail: string(sub.Rail), Accepts: []string{"saved_card"}}}, nil
+	return []billing.OrderPaymentOption{{PSPID: billing.PSPID(sub.PspID), Rail: billing.Rail(sub.Rail), Accepts: []string{"saved_card"}}}, nil
 }
 
 // reconsentPaying verifies, with the customer present, the saved card they

@@ -179,7 +179,7 @@ func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.Cust
 	m := money[customer.UUID()]
 	currencies := make([]string, 0, len(m.Balances))
 	for _, b := range m.Balances {
-		currencies = append(currencies, b.Currency)
+		currencies = append(currencies, string(b.Currency))
 	}
 	lines, err := s.moneyService().LowBalanceLines(ctx, customer, currencies)
 	if err != nil {

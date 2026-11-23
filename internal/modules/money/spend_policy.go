@@ -21,11 +21,6 @@ const (
 	BillingModeArrears = "arrears"
 )
 
-const (
-	DenyInsufficientBalance = "insufficient_balance"
-	DenyInsufficientCredit  = "insufficient_credit"
-)
-
 // GetAccountSettings returns the stored settings for (payer, currency), or the
 // implicit prepaid policy when none exists (never nil, never an error for a
 // missing row).

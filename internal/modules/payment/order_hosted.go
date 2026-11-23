@@ -285,7 +285,7 @@ func (s *OrderAttemptService) CloseOrderHosted(ctx context.Context, attemptID uu
 	if err != nil || attempt.OrderID == nil || !hostedAttempt(attempt) {
 		return err
 	}
-	failure := &billing.PaymentFailure{Reason: "payment_page_expired", Message: "The payment page expired before you paid."}
+	failure := &billing.PaymentFailure{Reason: billing.DeclinePaymentPageExpired, Message: "The payment page expired before you paid."}
 	if failed {
 		failure = &billing.PaymentFailure{Reason: "generic_decline", Message: "The payment was declined."}
 	}

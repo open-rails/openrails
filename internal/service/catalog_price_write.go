@@ -122,7 +122,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 				Amount:               req.UnitAmount,
 				CustomerAmount:       req.CustomerAmount,
 				Quantity:             req.Quantity,
-				Currency:             req.Currency,
+				Currency:             string(req.Currency),
 				AccessDurationHours:  req.AccessDurationHours,
 				BillingIntervalHours: req.BillingIntervalHours,
 				TrialUnitAmount:      req.TrialUnitAmount,

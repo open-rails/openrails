@@ -19,7 +19,7 @@ func Fulfil(ctx context.Context, shop *openrails.Client, db *pgxpool.Pool) error
 		if err != nil {
 			return err
 		}
-		page, err := shop.ListEvents(ctx, billing.EventQuery{After: cursor, Limit: 100,
+		page, err := shop.ListEvents(ctx, billing.EventListParams{After: cursor, Limit: 100,
 			Types: []string{string(billing.HostEventOrderCompleted)}})
 		var status *billing.StatusError
 		if errors.As(err, &status) && status.Code == billing.CodeEventCursorExpired {

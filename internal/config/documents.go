@@ -163,7 +163,7 @@ func decodeCustodians(c *billing.Custodians, raw []byte) error {
 		if err != nil {
 			return fmt.Errorf("custodians.%s: %w", key, err)
 		}
-		out[key] = billing.CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+		out[key] = billing.CustodianConfig{Kind: billing.CardVaultKind(d.Kind), Environment: billing.Environment(d.Environment), AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	}
 	*c = out
 	return nil
@@ -174,7 +174,7 @@ func pspFromDocument(fields map[string]any) (billing.PSPConfig, error) {
 	if err != nil {
 		return billing.PSPConfig{}, err
 	}
-	return billing.PSPConfig{Rail: billing.Rail(d.Rail), Environment: d.Environment, AccountID: d.AccountID, Custodian: d.Custodian, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}, nil
+	return billing.PSPConfig{Rail: billing.Rail(d.Rail), Environment: billing.Environment(d.Environment), AccountID: d.AccountID, Custodian: d.Custodian, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}, nil
 }
 
 // decodePSPConfig reads a PSP's flat document.
@@ -194,7 +194,7 @@ func decodePSPConfig(p *billing.PSPConfig, raw []byte) error {
 // encodePSPConfig writes a PSP's flat document.
 func encodePSPConfig(p billing.PSPConfig) ([]byte, error) {
 	first := append([]string{"rail", "environment"}, rails.AccountFields(models.Rail(p.Rail))...)
-	return yaml.Marshal(orderedFields(PSPDocument{Rail: string(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Custodian: p.Custodian, Archived: p.Archived, Settings: p.Settings, Secrets: p.Secrets}.Fields(), first...))
+	return yaml.Marshal(orderedFields(PSPDocument{Rail: string(p.Rail), Environment: string(p.Environment), AccountID: p.AccountID, Custodian: p.Custodian, Archived: p.Archived, Settings: p.Settings, Secrets: p.Secrets}.Fields(), first...))
 }
 
 // CustodianDocument is a custodian as its document spells it.
@@ -292,13 +292,13 @@ func decodeCustodianConfig(c *billing.CustodianConfig, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	*c = billing.CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+	*c = billing.CustodianConfig{Kind: billing.CardVaultKind(d.Kind), Environment: billing.Environment(d.Environment), AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	return nil
 }
 
 // encodeCustodianConfig writes a custodian's flat document.
 func encodeCustodianConfig(c billing.CustodianConfig) ([]byte, error) {
-	return yaml.Marshal(orderedFields(CustodianDocument{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: c.Settings, Secrets: c.Secrets}.Fields(), "kind", "environment", "account_id"))
+	return yaml.Marshal(orderedFields(CustodianDocument{Kind: string(c.Kind), Environment: string(c.Environment), AccountID: c.AccountID, Archived: c.Archived, Settings: c.Settings, Secrets: c.Secrets}.Fields(), "kind", "environment", "account_id"))
 }
 
 // orderedFields renders fields with first leading, the rest sorted and

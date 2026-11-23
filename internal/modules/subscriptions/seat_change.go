@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"time"
 
 	"github.com/google/uuid"
@@ -275,7 +276,7 @@ func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscript
 	data := billing.NotificationData{
 		Source: "staff", Message: "Changed by support at your request.",
 		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: refs[sub.PriceID], ToPriceID: refs[n.PriceID], ToProductName: n.ProductName,
-		Quantity: CloneQuantity(n.Quantity), Currency: n.Currency, NewAmount: &next, EffectiveAt: &at, TransactionID: n.TransactionID,
+		Quantity: CloneQuantity(n.Quantity), Currency: catalogwire.Currency(n.Currency), NewAmount: &next, EffectiveAt: &at, TransactionID: n.TransactionID,
 	}
 	if n.Charged > 0 {
 		charged := n.Charged

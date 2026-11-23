@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -59,7 +60,7 @@ type slot struct {
 // live hold, and the code a want that does not fit it is refused with.
 type moneyRoom struct {
 	room int64
-	code string
+	code billing.DenyCode
 }
 
 func (r *syncRun) want(i int) error {
@@ -69,7 +70,7 @@ func (r *syncRun) want(i int) error {
 		status, d := Details(prefixParam(err, fmt.Sprintf("wants[%d]", i)))
 		*res = billing.LeaseWantResult{Status: status, Error: &d}
 	}
-	currency := money.NormalizeCurrency(w.Currency)
+	currency := money.NormalizeCurrency(string(w.Currency))
 	switch {
 	case w.CustomerID.IsZero():
 		fail(invalid("customer_id", "customer_id required"))
@@ -477,7 +478,7 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 		case s.balance:
 			return &billing.Refusal{DenyCode: room.code}, nil
 		case strings.HasPrefix(s.key, limits.SpendKeyPrefix):
-			out := &billing.Refusal{DenyCode: admission.DenyBudgetExceeded}
+			out := &billing.Refusal{DenyCode: billing.DenyBudgetExceeded}
 			if s.claim.Window.EndsAt != nil {
 				retry := ceilSeconds(s.claim.Window.EndsAt.Sub(r.now))
 				out.RetryAfterSeconds = &retry
@@ -772,7 +773,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 	if err != nil {
 		return billing.Hold{}, false, err
 	}
-	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: h.row.Currency,
+	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: catalog.Currency(h.row.Currency),
 		Limits: make([]billing.HoldLimit, 0, len(h.parts)), RateCards: cards, PriceBounds: bounds, Version: h.version}
 	for _, p := range h.parts {
 		line := billing.HoldLimit{Limit: p.key, Unit: p.unit, Held: p.answered, Overrun: cmp.Or(p.overrun, catalog.OverrunRequireEstimate)}
@@ -789,7 +790,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 		}
 		if def, ok := r.def(p.key); ok {
 			line.Overrun = def.Overrun
-			if !catalog.LimitUnitCurrency(def.Unit) {
+			if !syntax.LimitUnitCurrency(def.Unit) {
 				for _, card := range def.RateCards {
 					m := r.meters[card.Meter]
 					key := def.Key

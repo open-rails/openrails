@@ -10,7 +10,7 @@ import (
 // Revenue reads net revenue by month for the last year.
 func Revenue(ctx context.Context, shop *openrails.Client) (*billing.MetricsResult, error) {
 	// guide:metrics
-	return shop.QueryMetrics(ctx, billing.MetricsQuery{
+	return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 		Measures: []string{"net_revenue", "mrr"},
 		By:       []string{"time"},
 		Grain:    "month",

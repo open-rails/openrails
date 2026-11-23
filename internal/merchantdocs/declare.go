@@ -25,7 +25,7 @@ func Declared(id billing.MerchantID, m billing.MerchantDocument, loaded time.Tim
 		Secrets:          MerchantSecrets{SCIMToken: strings.TrimSpace(m.Secrets.SCIMToken)},
 	}
 	for i, w := range m.AlertWebhooks {
-		format := billing.AlertWebhookFormat(strings.ToLower(strings.TrimSpace(w.Format)))
+		format := billing.AlertWebhookFormat(strings.ToLower(strings.TrimSpace(string(w.Format))))
 		if format == "" {
 			format = billing.AlertWebhookGeneric
 		}
@@ -42,7 +42,7 @@ func Declared(id billing.MerchantID, m billing.MerchantDocument, loaded time.Tim
 		account := strings.TrimSpace(p.AccountID)
 		rail := strings.ToLower(strings.TrimSpace(string(p.Rail)))
 		doc := PSP{
-			Rail: rail, Environment: DefaultEnvironment(rail, p.Environment), AccountID: account,
+			Rail: rail, Environment: DefaultEnvironment(rail, string(p.Environment)), AccountID: account,
 			Archived: p.Archived, Custodian: strings.ToLower(strings.TrimSpace(p.Custodian)),
 			Settings: maps.Clone(p.Settings), Secrets: normalizedSecrets(p.Secrets),
 		}
@@ -51,7 +51,7 @@ func Declared(id billing.MerchantID, m billing.MerchantDocument, loaded time.Tim
 	for key, c := range m.Custodians {
 		key = strings.ToLower(strings.TrimSpace(key))
 		set.Custodians[key] = Doc[Custodian]{Value: Custodian{
-			Kind: strings.ToLower(strings.TrimSpace(c.Kind)), Environment: DeclaredCustodianEnvironment(c.Environment), AccountID: strings.TrimSpace(c.AccountID),
+			Kind: strings.ToLower(strings.TrimSpace(string(c.Kind))), Environment: DeclaredCustodianEnvironment(string(c.Environment)), AccountID: strings.TrimSpace(c.AccountID),
 			Archived: c.Archived, Settings: maps.Clone(c.Settings), Secrets: normalizedSecrets(c.Secrets),
 		}, UpdatedAt: loaded}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -128,13 +129,13 @@ func (w Want) MoneyTerms() string {
 // BalanceRefusal is the deny code a want that does not fit the balance gets,
 // as Admit answers it: insufficient_balance, insufficient_credit with a
 // credit line, or outstanding_cap_reached when the policy gates on debt.
-func (w Want) BalanceRefusal() string {
-	code := money.DenyInsufficientBalance
+func (w Want) BalanceRefusal() billing.DenyCode {
+	code := billing.DenyInsufficientBalance
 	if w.CreditLine > 0 {
-		code = money.DenyInsufficientCredit
+		code = billing.DenyInsufficientCredit
 	}
 	if w.resolved.GatesOnOutstandingOwed() && w.CreditLine == 0 && w.Available <= 0 && w.Outstanding > 0 {
-		code = DenyOutstandingCap
+		code = billing.DenyOutstandingCapReached
 	}
 	return code
 }

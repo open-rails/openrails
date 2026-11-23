@@ -10,16 +10,16 @@ import (
 // DestructiveHoldID identifies a durable break-glass incident.
 type DestructiveHoldID uuid.UUID
 
-const DestructiveHoldIDPrefix = "dsh_"
+const destructiveHoldIDPrefix = "dsh_"
 
 func ParseDestructiveHoldID(s string) (DestructiveHoldID, error) {
-	u, err := parsePrefixedID("destructive hold", DestructiveHoldIDPrefix, s)
+	u, err := parsePrefixedID("destructive hold", destructiveHoldIDPrefix, s)
 	return DestructiveHoldID(u), err
 }
 func (id DestructiveHoldID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id DestructiveHoldID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id DestructiveHoldID) String() string {
-	return formatPrefixedID(DestructiveHoldIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(destructiveHoldIDPrefix, uuid.UUID(id))
 }
 func (id DestructiveHoldID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *DestructiveHoldID) UnmarshalText(b []byte) error {

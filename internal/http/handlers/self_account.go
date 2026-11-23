@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -52,7 +53,7 @@ func ListMyBalanceTransactions(r *httprequest.Request) {
 	if !bindList(r, &query, &query.PageRequest) {
 		return
 	}
-	listBalanceTransactions(r, payer, billing.BalanceTransactionListParams{PageRequest: query.PageRequest, Currency: query.Currency})
+	listBalanceTransactions(r, payer, billing.BalanceTransactionListParams{PageRequest: query.PageRequest, Currency: catalog.Currency(query.Currency)})
 }
 
 // SetMyLowBalanceLine sets the customer's own low-balance line in one

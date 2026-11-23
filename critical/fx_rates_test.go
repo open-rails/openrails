@@ -24,7 +24,7 @@ func TestFXRates(t *testing.T) {
 		buy := func(key string) (int, []byte) {
 			product, err := s.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Euro purchase", Ownership: catalog.OwnershipConsumable, Entitlements: []string{key + ":paid"}})
 			require.NoError(t, err)
-			price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "EUR", SellVia: []string{billing.SellViaSolana}})
+			price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "EUR", SellVia: []catalog.SellVia{catalog.SellViaSolana}})
 			require.NoError(t, err)
 			return s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.OrderPaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": key})
 		}

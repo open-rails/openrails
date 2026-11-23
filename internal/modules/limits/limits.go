@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -215,7 +216,7 @@ func (c Customer) window(ctx context.Context, def Definition, newest *Stored) (W
 			return time.Time{}, time.Time{}, fmt.Errorf("limit %q: no pricing period", def.Key)
 		}
 		unit := ""
-		if catalog.LimitUnitCurrency(def.Unit) {
+		if syntax.LimitUnitCurrency(def.Unit) {
 			unit = def.Unit
 		}
 		return c.Period(ctx, unit, at)
@@ -321,7 +322,7 @@ func (c Customer) holder() Holder {
 // a named-unit limit those its rate cards read. Only a customer some product
 // or override gives capacity in is subject to it.
 func Applies(def Definition, meters map[string]Meter, currency, eventType string) bool {
-	if catalog.LimitUnitCurrency(def.Unit) {
+	if syntax.LimitUnitCurrency(def.Unit) {
 		return def.Unit == currency
 	}
 	return eventType != "" && Counts(def, meters, eventType)

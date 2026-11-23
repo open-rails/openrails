@@ -115,7 +115,7 @@ func billingRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, s 
 			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-		token, err := bill.CustomerToken(c, billing.CustomerTokenParams{
+		token, err := bill.CreateCustomerToken(c, billing.CustomerTokenParams{
 			CustomerID: customer, Email: claims.Email, EmailVerified: claims.EmailVerified,
 		})
 		if err != nil {

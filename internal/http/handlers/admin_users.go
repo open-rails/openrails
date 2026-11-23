@@ -69,7 +69,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 	}
 	page := params.PageRequest
 	filters := subscriptions.GetSubscriptionsFilters{
-		CustomerID: params.CustomerID, Status: string(params.Status), PriceID: params.PriceID, Rail: params.Rail,
+		CustomerID: params.CustomerID, Status: string(params.Status), PriceID: params.PriceID, Rail: string(params.Rail),
 		CreatedAfter: instant(params.CreatedAfter), CreatedBefore: instant(params.CreatedBefore), CanceledAfter: instant(params.CanceledAfter),
 		CanceledBefore: instant(params.CanceledBefore), ExpiresBefore: instant(params.ExpiresBefore), Dunning: params.Dunning, Sort: params.Sort,
 		IDs: uuidutil.Of(ids),

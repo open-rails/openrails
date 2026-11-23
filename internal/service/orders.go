@@ -745,7 +745,7 @@ func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, payer *O
 		for _, id := range o.SavedPaymentMethodIDs {
 			saved = append(saved, billing.PaymentMethodID(id))
 		}
-		option := billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: o.Rail, Accepts: o.Accepts(), SavedPaymentMethodIDs: saved}
+		option := billing.OrderPaymentOption{PSPID: billing.PSPID(o.PSPID), Rail: billing.Rail(o.Rail), Accepts: o.Accepts(), SavedPaymentMethodIDs: saved}
 		if payer != nil && o.Rail == string(models.RailCCBill) {
 			// A hint only: paying checks again, so a directory outage
 			// leaves the option without it rather than failing the read.

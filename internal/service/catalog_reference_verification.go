@@ -57,7 +57,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if plan == nil || reader == nil {
 		return nil, fmt.Errorf("Solana plan and mint readers must be configured before applying recurring references")
 	}
-	if !strings.EqualFold(req.Currency, "USD") {
+	if !strings.EqualFold(string(req.Currency), "USD") {
 		return nil, apperr.Invalidf("Solana recurring references require USD billing")
 	}
 	mid, err := merchant.Require(ctx)

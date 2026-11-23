@@ -71,14 +71,14 @@ func dumpDeclaration(set merchantdocs.Set, slug string) billing.MerchantDocument
 		if out.Custodians == nil {
 			out.Custodians = map[string]billing.CustodianConfig{}
 		}
-		out.Custodians[key] = billing.CustodianConfig{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
+		out.Custodians[key] = billing.CustodianConfig{Kind: billing.CardVaultKind(c.Kind), Environment: billing.Environment(c.Environment), AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
 	}
 	for _, key := range set.PSPKeys() {
 		p := set.PSPs[key].Value
 		if out.PSPs == nil {
 			out.PSPs = map[string]billing.PSPConfig{}
 		}
-		out.PSPs[key] = billing.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
+		out.PSPs[key] = billing.PSPConfig{Rail: billing.Rail(p.Rail), Environment: billing.Environment(p.Environment), AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
 	}
 	return out
 }

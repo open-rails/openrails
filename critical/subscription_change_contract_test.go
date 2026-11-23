@@ -225,7 +225,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		effects := p.effects(t)
 		require.Len(t, effects, 2)
 		require.ElementsMatch(t, []int64{1000, 1500}, []int64{effects[0].Amount, effects[1].Amount})
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 2)
 		upgraded, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: *changed.SubscriptionID})

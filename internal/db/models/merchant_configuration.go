@@ -47,7 +47,7 @@ type MerchantConfiguration struct {
 	// ProviderRefundAccess decides what a refund made at the provider (not
 	// through OpenRails) does to the refunded charge's access: revoke_on_full
 	// ("" default), revoke_on_any or keep.
-	ProviderRefundAccess string `json:"provider_refund_access,omitempty"`
+	ProviderRefundAccess billing.ProviderRefundAccess `json:"provider_refund_access,omitempty"`
 
 	// DunningPolicy replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.

@@ -96,43 +96,43 @@ func TestMerchantCustodyConfiguration(t *testing.T) {
 		require.EqualValues(t, 1, saved.Revision)
 		require.True(t, saved.Credentials["api_key"].Configured)
 		require.NotContains(t, string(raw), "private-owned")
-		request := billing.PutCustodianParams{ExpectedRevision: 1, Kind: "basis_theory", Environment: "test", AccountID: "00000000-0000-4000-8000-000000000011"}
+		request := billing.SetCustodianParams{ExpectedRevision: 1, Kind: "basis_theory", Environment: "test", AccountID: "00000000-0000-4000-8000-000000000011"}
 		before, err := a.alphaRemote.ListCustodians(t.Context())
 		require.NoError(t, err)
 		require.Len(t, before.Items, 2)
 		for _, check := range []struct {
 			name, key string
 			merchant  *openrails.Client
-			change    func(*billing.PutCustodianParams)
+			change    func(*billing.SetCustodianParams)
 			status    int
 		}{
-			{"stale", "owned", a.alphaRemote, func(r *billing.PutCustodianParams) {
+			{"stale", "owned", a.alphaRemote, func(r *billing.SetCustodianParams) {
 				r.ExpectedRevision = 0
 				r.Settings = map[string]any{"public_api_key": "stale-public"}
 			}, 409},
-			{"identity change", "owned", a.alphaRemote, func(r *billing.PutCustodianParams) {
+			{"identity change", "owned", a.alphaRemote, func(r *billing.SetCustodianParams) {
 				r.AccountID = "00000000-0000-4000-8000-000000000012"
 				r.Credentials = map[string]string{"api_key": "private-foreign"}
 			}, 409},
-			{"wrong account proof", "wrong-account", a.alphaRemote, func(r *billing.PutCustodianParams) {
+			{"wrong account proof", "wrong-account", a.alphaRemote, func(r *billing.SetCustodianParams) {
 				r.ExpectedRevision = 0
 				r.AccountID = "00000000-0000-4000-8000-000000000012"
 				r.Settings = map[string]any{"public_api_key": "public-owned"}
 				r.Credentials = map[string]string{"api_key": "private-owned"}
 			}, 400},
-			{"other merchant", "owned", a.betaRemote, func(r *billing.PutCustodianParams) {
+			{"other merchant", "owned", a.betaRemote, func(r *billing.SetCustodianParams) {
 				r.ExpectedRevision = 0
 				r.Settings = map[string]any{"public_api_key": "public-owned"}
 				r.Credentials = map[string]string{"api_key": "private-owned"}
 			}, 409},
-			{"private key in public settings", "owned", a.alphaRemote, func(r *billing.PutCustodianParams) { r.Settings = map[string]any{"public_api_key": "private-owned"} }, 400},
-			{"rejected credential", "owned", a.alphaRemote, func(r *billing.PutCustodianParams) { r.Credentials = map[string]string{"api_key": "private-rejected"} }, 400},
-			{"credential redirect", "owned", a.alphaRemote, func(r *billing.PutCustodianParams) { r.Credentials = map[string]string{"api_key": "private-redirect"} }, 503},
+			{"private key in public settings", "owned", a.alphaRemote, func(r *billing.SetCustodianParams) { r.Settings = map[string]any{"public_api_key": "private-owned"} }, 400},
+			{"rejected credential", "owned", a.alphaRemote, func(r *billing.SetCustodianParams) { r.Credentials = map[string]string{"api_key": "private-rejected"} }, 400},
+			{"credential redirect", "owned", a.alphaRemote, func(r *billing.SetCustodianParams) { r.Credentials = map[string]string{"api_key": "private-redirect"} }, 503},
 		} {
 			t.Run(check.name, func(t *testing.T) {
 				in := request
 				check.change(&in)
-				_, err := check.merchant.PutCustodian(t.Context(), check.key, in)
+				_, err := check.merchant.SetCustodian(t.Context(), check.key, in)
 				var refusal *billing.StatusError
 				require.ErrorAs(t, err, &refusal)
 				require.Equal(t, check.status, refusal.Status)
@@ -154,7 +154,7 @@ func TestMerchantCustodyConfiguration(t *testing.T) {
 			require.Nil(t, unwritten, "refused account claims do not write credential documents")
 		}
 		request.Credentials = map[string]string{"api_key": "private-rotated"}
-		rotated, err := a.alphaRemote.PutCustodian(t.Context(), "owned", request)
+		rotated, err := a.alphaRemote.SetCustodian(t.Context(), "owned", request)
 		require.NoError(t, err)
 		require.Equal(t, saved.AccountID, rotated.AccountID)
 		require.EqualValues(t, 2, rotated.Revision)

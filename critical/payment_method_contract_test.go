@@ -117,7 +117,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &methods))
 		require.Empty(t, methods.Items)
 		require.Empty(t, p.effects(t))
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 
@@ -143,7 +143,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 		require.Contains(t, string(raw), `"code":"payment_method_stale"`)
 		journal.money(t, 0, 0)
-		facts, err = nmi.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err = nmi.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 	})

@@ -510,7 +510,7 @@ func (im *Importer) Fail(ctx context.Context, id billing.PSPImportID, cause erro
 }
 
 func (im *Importer) view(ctx context.Context, row gen.BillingPspImport) (*billing.PSPImport, error) {
-	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: row.Rail,
+	out := &billing.PSPImport{ID: billing.PSPImportID(row.ID), PSP: billing.PSPID(row.PspID), Rail: billing.Rail(row.Rail),
 		Status: billing.PSPImportStatus(row.Status), HistorySince: row.HistorySince, HistoryThrough: row.HistoryThrough, PulledAt: row.PulledAt, AppliedAt: row.AppliedAt,
 		Error: row.Error, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Counts: []billing.PSPImportCount{}}
 	if row.ErrorCode != nil {

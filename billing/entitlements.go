@@ -9,17 +9,17 @@ import (
 // ProductAccessID names one product-access window (pa_).
 type ProductAccessID uuid.UUID
 
-const ProductAccessIDPrefix = "pa_"
+const productAccessIDPrefix = "pa_"
 
 func ParseProductAccessID(s string) (ProductAccessID, error) {
-	u, err := parsePrefixedID("product access", ProductAccessIDPrefix, s)
+	u, err := parsePrefixedID("product access", productAccessIDPrefix, s)
 	return ProductAccessID(u), err
 }
 
 func (id ProductAccessID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id ProductAccessID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id ProductAccessID) String() string {
-	return formatPrefixedID(ProductAccessIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(productAccessIDPrefix, uuid.UUID(id))
 }
 func (id ProductAccessID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *ProductAccessID) UnmarshalText(text []byte) error {

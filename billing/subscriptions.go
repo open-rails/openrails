@@ -46,7 +46,7 @@ type SubscriptionListParams struct {
 	// Dunning keeps the subscriptions in dunning: past_due or
 	// awaiting_method, each with its Dunning.
 	Dunning bool             `form:"dunning"`
-	Rail    string           `form:"rail"`
+	Rail    Rail             `form:"rail"`
 	PriceID PriceID          `form:"price_id"`
 	Sort    SubscriptionSort `form:"sort"`
 	// CreatedAfter through ExpiresBefore bound the instants they name; zero
@@ -81,7 +81,7 @@ type Subscription struct {
 	// amount times Quantity. Null unless the price is sold per seat.
 	Quantity           *int               `json:"quantity"`
 	PSPID              PSPID              `json:"psp_id"`
-	Rail               string             `json:"rail"`
+	Rail               Rail               `json:"rail"`
 	RailSubscriptionID *string            `json:"rail_subscription_id"`
 	Status             SubscriptionStatus `json:"status"`
 	// ScheduledChange is the change waiting for the next renewal, or null.
@@ -150,14 +150,15 @@ type SubscriptionDunning struct {
 // SubscriptionAccess is how a customer currently holds premium access: Kind
 // is subscription (the subscription itself) or entitlement (a standing
 // entitlement window, e.g. a one-off purchase or an admin grant). SourceID is
-// the source's own wire id (see SourceRef).
+// the source's own wire id: a SubscriptionID for a subscription or grace
+// source, a PaymentID for a purchase, the host's declared id otherwise.
 type SubscriptionAccess struct {
 	Kind           string         `json:"kind"`
 	ProductID      ProductID      `json:"product_id"`
 	SourceType     string         `json:"source_type,omitempty"`
 	SourceID       string         `json:"source_id,omitempty"`
 	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
-	Rail           string         `json:"rail,omitempty"`
+	Rail           Rail           `json:"rail,omitempty"`
 	StartsAt       time.Time      `json:"starts_at"`
 	EndsAt         *time.Time     `json:"ends_at,omitempty"`
 }

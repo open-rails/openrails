@@ -560,7 +560,7 @@ func (s *PaymentService) ListPage(ctx context.Context, p billing.PaymentListPara
 		params.Status = &status
 	}
 	if p.Rail != "" {
-		params.Rail = &p.Rail
+		params.Rail = (*string)(&p.Rail)
 	}
 	if p.TransactionID != "" {
 		params.TransactionID = &p.TransactionID

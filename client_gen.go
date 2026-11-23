@@ -224,6 +224,26 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams)
 	return &out, nil
 }
 
+// GetPrice reads a price.
+func (c *Client) GetPrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
+	var out billing.Price
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, cache: config.ReadCatalog}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// VerifyPrice reads a price and, for a provider price, its terms at its
+// provider: Provider.SyncStatus and Drift say whether they still match. It
+// never writes, and is never answered from memory.
+func (c *Client) VerifyPrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
+	var out billing.Price
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}/verification", args: []string{id.String()}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListPriceHistory returns one page of the history of a price's key, most
 // recent first: when the key moved to which price, or was retired.
 func (c *Client) ListPriceHistory(ctx context.Context, id billing.PriceID, params billing.PageRequest) (*billing.ListPage[billing.PriceKeyMovement], error) {
@@ -393,7 +413,7 @@ func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigra
 // GetAccessTenure returns the customer's elapsed access to the requested
 // entitlement keys, including past product access and retired keys.
 // params.At must not be in the future; zero uses OpenRails' clock.
-func (c *Client) GetAccessTenure(ctx context.Context, customerID billing.CustomerID, params billing.AccessTenureParams) (*billing.AccessTenure, error) {
+func (c *Client) GetAccessTenure(ctx context.Context, customerID billing.CustomerID, params billing.GetAccessTenureParams) (*billing.AccessTenure, error) {
 	var out billing.AccessTenure
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/access-tenure", args: []string{customerID.String()}, query: params}, &out); err != nil {
 		return nil, err
@@ -711,7 +731,7 @@ func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams
 // current window of params.Limit only, and answers where it stands after. A
 // retry with the same params.SourceID answers the line without adding again;
 // other terms under it are billing.ErrIdempotencyKeyReused.
-func (c *Client) AdjustCustomerLimit(ctx context.Context, customerID billing.CustomerID, params billing.AdjustLimitParams) (*billing.CustomerLimit, error) {
+func (c *Client) AdjustCustomerLimit(ctx context.Context, customerID billing.CustomerID, params billing.AdjustCustomerLimitParams) (*billing.CustomerLimit, error) {
 	var out billing.CustomerLimit
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/customers/{customer_id}/limit-adjustments", args: []string{customerID.String()}, body: params}, &out); err != nil {
 		return nil, err
@@ -819,8 +839,8 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.Cus
 	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/admin/customers/{customer_id}/payment-methods/{id}", args: []string{customerID.String(), id.String()}}, nil)
 }
 
-// PutCustodian configures one merchant vault at its explicit revision.
-func (c *Client) PutCustodian(ctx context.Context, key string, params billing.PutCustodianParams) (*billing.Custodian, error) {
+// SetCustodian configures one merchant vault at its explicit revision.
+func (c *Client) SetCustodian(ctx context.Context, key string, params billing.SetCustodianParams) (*billing.Custodian, error) {
 	var out billing.Custodian
 	if err := c.send(ctx, routeCall{method: http.MethodPut, path: "/v1/merchant/custodians/{key}", args: []string{key}, body: params}, &out); err != nil {
 		return nil, err
@@ -1077,7 +1097,7 @@ func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.Par
 // ListEvents reads retained facts of the handle's merchant. Reading starts
 // no worker and changes no delivery state. Persist NextCursor after
 // processing.
-func (c *Client) ListEvents(ctx context.Context, params billing.EventQuery) (*billing.EventPage, error) {
+func (c *Client) ListEvents(ctx context.Context, params billing.EventListParams) (*billing.EventPage, error) {
 	var out billing.EventPage
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/events", query: params}, &out); err != nil {
 		return nil, err
@@ -1120,7 +1140,7 @@ func (c *Client) GetAdminAccess(ctx context.Context) (*billing.AdminAccess, erro
 }
 
 // QueryMetrics runs one metrics query.
-func (c *Client) QueryMetrics(ctx context.Context, params billing.MetricsQuery) (*billing.MetricsResult, error) {
+func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsParams) (*billing.MetricsResult, error) {
 	var out billing.MetricsResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/metrics/query", body: params}, &out); err != nil {
 		return nil, err

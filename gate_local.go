@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -1429,7 +1430,7 @@ func (g *localGate) limits(ctx context.Context, customer billing.CustomerID) ([]
 	for _, q := range g.queues {
 		for _, e := range q.items {
 			if e.item.CustomerID == customer {
-				addUnsent(unsent, e.item.Currency, e.takes)
+				addUnsent(unsent, string(e.item.Currency), e.takes)
 			}
 		}
 	}
@@ -1460,7 +1461,7 @@ func addUnsent(unsent map[string]int64, currency string, takes []take) {
 func lessUnsent(lines []billing.CustomerLimit, unsent map[string]int64) []billing.CustomerLimit {
 	for i, l := range lines {
 		key := l.Limit + "\x00"
-		if catalog.LimitUnitCurrency(l.Unit) {
+		if syntax.LimitUnitCurrency(l.Unit) {
 			key += l.Unit
 		}
 		if c := unsent[key]; c != 0 {

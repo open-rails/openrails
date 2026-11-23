@@ -78,7 +78,7 @@ func checkProviderPriceRail(pspKey, rail string, decl catalogwire.ApplyProviderP
 		if decl.UnitAmount == nil {
 			return apperr.Invalidf("CCBill has no read API: a CCBill provider price declares its amount and billing_interval")
 		}
-		if err := moneyutil.RequireFiatCurrency(decl.Currency); err != nil {
+		if err := moneyutil.RequireFiatCurrency(string(decl.Currency)); err != nil {
 			return apperr.Invalidf("%v", err)
 		}
 	default:
@@ -95,7 +95,7 @@ func (s *Service) readProviderPriceTerms(ctx context.Context, account merchants.
 	var ref string
 	switch models.Rail(account.Rail) {
 	case models.RailCCBill:
-		terms := providerPriceTerms{currency: moneyutil.NormalizeCurrency(decl.Currency), unitAmount: *decl.UnitAmount, billingIntervalHours: decl.BillingIntervalHours,
+		terms := providerPriceTerms{currency: moneyutil.NormalizeCurrency(string(decl.Currency)), unitAmount: *decl.UnitAmount, billingIntervalHours: decl.BillingIntervalHours,
 			trialUnitAmount: decl.TrialUnitAmount, trialDurationHours: decl.TrialDurationHours}
 		return terms, decl.References(), nil
 	case models.RailNMI:
@@ -139,7 +139,7 @@ func observedTerms(account merchants.PSPScope, decl catalogwire.ApplyProviderPri
 	terms := providerPriceTerms{currency: obj.Currency}
 	ids := map[string]string{models.RailKeyStripePriceID: obj.Ref}
 	if models.Rail(account.Rail) == models.RailNMI {
-		terms.currency = moneyutil.NormalizeCurrency(cmp.Or(decl.Currency, "USD"))
+		terms.currency = moneyutil.NormalizeCurrency(string(cmp.Or(decl.Currency, "USD")))
 		ids = map[string]string{models.RailKeyPlanID: obj.Ref}
 	} else if obj.ProductRef != "" {
 		ids[models.RailKeyStripeProductID] = obj.ProductRef
@@ -179,7 +179,7 @@ func (s *Service) providerObjects() *providerobjects.Observer {
 // provider's terms, with access for the billing interval unless declared,
 // and no renewal when one-off or not recurring at the provider.
 func providerPriceRequest(product *models.Product, key string, decl catalogwire.ApplyProviderPrice, terms providerPriceTerms, archived bool) billing.CreatePriceParams {
-	req := billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), Key: key, UnitAmount: terms.unitAmount, Currency: terms.currency,
+	req := billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), Key: key, UnitAmount: terms.unitAmount, Currency: catalogwire.Currency(terms.currency),
 		BillingIntervalHours: terms.billingIntervalHours, TrialUnitAmount: terms.trialUnitAmount, TrialDurationHours: terms.trialDurationHours, Archived: archived}
 	if decl.AccessDurationHours.Set && !decl.AccessDurationHours.Null {
 		req.AccessDurationHours = new(decl.AccessDurationHours.Value)
@@ -493,7 +493,7 @@ func (s *Service) verifyProviderPrice(ctx context.Context, price *models.Price, 
 		out.SyncStatus = billing.SyncStatusSyncDisabled
 		return
 	}
-	decl := catalogwire.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID], Currency: price.Currency}
+	decl := catalogwire.ApplyProviderPrice{PSP: key, PlanID: link[models.RailKeyPlanID], PriceID: link[models.RailKeyStripePriceID], Currency: catalogwire.Currency(price.Currency)}
 	ref := cmp.Or(decl.PlanID, decl.PriceID)
 	objects := s.providerObjects()
 	if objects == nil {

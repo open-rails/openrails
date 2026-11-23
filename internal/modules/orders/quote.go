@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -54,7 +55,7 @@ func (q *Quote) Refused() int {
 
 // Preview is the quote as the customer reads it.
 func (q *Quote) Preview(options []billing.OrderPaymentOption) billing.OrderPreview {
-	out := billing.OrderPreview{Currency: q.Currency, Total: q.Total, Lines: make([]billing.OrderPreviewLine, 0, len(q.Lines)), PaymentOptions: options}
+	out := billing.OrderPreview{Currency: catalog.Currency(q.Currency), Total: q.Total, Lines: make([]billing.OrderPreviewLine, 0, len(q.Lines)), PaymentOptions: options}
 	if out.PaymentOptions == nil {
 		out.PaymentOptions = []billing.OrderPaymentOption{}
 	}
@@ -157,9 +158,9 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 	if err != nil {
 		return nil, err
 	}
-	sold := map[uuid.UUID][]catalog.OwnershipPrice{}
+	sold := map[uuid.UUID][]catalogrules.OwnershipPrice{}
 	for _, p := range current {
-		sold[p.ProductID] = append(sold[p.ProductID], catalog.OwnershipPrice{Recurring: p.BillingIntervalHours != nil || p.BillingIntervalMonths != nil, AccessDuration: p.AccessDurationHours != nil})
+		sold[p.ProductID] = append(sold[p.ProductID], catalogrules.OwnershipPrice{Recurring: p.BillingIntervalHours != nil || p.BillingIntervalMonths != nil, AccessDuration: p.AccessDurationHours != nil})
 	}
 
 	out := &Quote{Lines: make([]QuotedLine, len(lines))}
@@ -180,7 +181,7 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 		}
 		seenProducts[product.ID] = i
 		line.Price, line.Product = price, product
-		line.Ownership = catalog.DeriveOwnership(product.Ownership, product.CreditGrant != nil, sold[product.ID])
+		line.Ownership = catalogrules.DeriveOwnership(product.Ownership, product.CreditGrant != nil, sold[product.ID])
 		if chosen, refused := chosenAmount(price, l.Amount); refused != nil {
 			line.Refusal = refused
 		} else {
@@ -462,7 +463,7 @@ func creditSnapshot(product *models.Product, price *models.Price) (*models.Credi
 	if price.IsRecurring() && price.ProviderOwned {
 		return nil, fmt.Errorf("recurring credit benefits require an engine-owned price")
 	}
-	currency := strings.ToUpper(strings.TrimSpace(policy.Currency))
+	currency := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
 	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {
 		return nil, fmt.Errorf("purchased credit currency must match payment currency")
 	}

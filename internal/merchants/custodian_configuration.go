@@ -38,7 +38,7 @@ func (s *Service) CustodianConfigurations(ctx context.Context, merchant billing.
 				}
 			}
 		}
-		out = append(out, billing.Custodian{Key: scope.Key, Kind: scope.Kind, Environment: scope.Environment, AccountID: scope.AccountID, Settings: maps.Clone(scope.Settings), Credentials: credentials, Archived: scope.Archived, Revision: scope.Revision})
+		out = append(out, billing.Custodian{Key: scope.Key, Kind: billing.CardVaultKind(scope.Kind), Environment: billing.Environment(scope.Environment), AccountID: scope.AccountID, Settings: maps.Clone(scope.Settings), Credentials: credentials, Archived: scope.Archived, Revision: scope.Revision})
 	}
 	slices.SortFunc(out, func(a, b billing.Custodian) int { return strings.Compare(a.Key, b.Key) })
 	return out, nil
@@ -71,7 +71,7 @@ func (s *Service) validatePSPCustodian(ctx context.Context, mid billing.Merchant
 	return nil
 }
 
-func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.MerchantID, key string, request billing.PutCustodianParams) (billing.Custodian, error) {
+func (s *Service) SetCustodianConfiguration(ctx context.Context, mid billing.MerchantID, key string, request billing.SetCustodianParams) (billing.Custodian, error) {
 	var zero billing.Custodian
 	if !s.config.Writable() {
 		return zero, ErrConfigReadOnly
@@ -101,10 +101,10 @@ func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.Mer
 	}
 	if scope, found, err := s.CustodianScopeByKey(ctx, mid, key); err != nil {
 		return zero, err
-	} else if found && (scope.Kind != request.Kind || scope.Environment != request.Environment || scope.AccountID != request.AccountID) {
+	} else if found && (scope.Kind != string(request.Kind) || scope.Environment != string(request.Environment) || scope.AccountID != request.AccountID) {
 		return zero, apperr.New(http.StatusConflict, billing.CodeResourceConflict, "custodian identity is immutable; configure another key")
 	}
-	next := merchantdocs.Custodian{Kind: request.Kind, Environment: request.Environment, AccountID: request.AccountID, Settings: maps.Clone(held.Value.Settings), Secrets: maps.Clone(held.Value.Secrets), Archived: held.Value.Archived}
+	next := merchantdocs.Custodian{Kind: string(request.Kind), Environment: string(request.Environment), AccountID: request.AccountID, Settings: maps.Clone(held.Value.Settings), Secrets: maps.Clone(held.Value.Secrets), Archived: held.Value.Archived}
 	if next.Archived {
 		return zero, apperr.Invalidf("an archived custodian cannot be changed")
 	}

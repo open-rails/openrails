@@ -219,7 +219,7 @@ type holdPricing struct {
 
 func newHoldPricing(h billing.Hold, events map[string]bool) *holdPricing {
 	p := &holdPricing{
-		currency: strings.ToUpper(strings.TrimSpace(h.Currency)),
+		currency: strings.ToUpper(strings.TrimSpace(string(h.Currency))),
 		units:    map[string]limits.Definition{},
 		meters:   map[string]limits.Meter{},
 		bounds:   map[boundKey]billing.PriceBound{},
@@ -246,7 +246,7 @@ func newHoldPricing(h billing.Hold, events map[string]bool) *holdPricing {
 		p.events[m.EventType] = true
 		card := catalog.LimitRateCard{Meter: rc.Meter, Filter: rc.Filter, Price: rc.Price}
 		if rc.Limit == nil {
-			if c := strings.ToUpper(strings.TrimSpace(rc.Price.Currency)); c == "" || c == p.currency {
+			if c := strings.ToUpper(strings.TrimSpace(string(rc.Price.Currency))); c == "" || c == p.currency {
 				p.money = append(p.money, moneyCard{meter: m, card: card})
 			}
 			continue

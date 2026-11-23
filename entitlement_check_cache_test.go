@@ -129,7 +129,7 @@ func check(t *testing.T, client *Client, customer billing.CustomerID, keys ...st
 
 func checkLive(t *testing.T, client *Client, customer billing.CustomerID, keys ...string) *billing.EntitlementCheck {
 	t.Helper()
-	out, err := client.CheckEntitlementsLive(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: keys})
+	out, err := client.Uncached().CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: keys})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +696,7 @@ func TestEntitlementLiveEvictionKeepsCallerDeadline(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
 		started := time.Now()
-		out, err := client.CheckEntitlementsLive(ctx, billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}})
+		out, err := client.Uncached().CheckEntitlements(ctx, billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}})
 		if err != nil || out.Entitlements["premium"] {
 			t.Fatalf("live check = %+v, %v; want the denial", out, err)
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -214,7 +215,7 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 			fields["credit_grant"] = catalogJSON(req.CreditGrant)
 		}
 		if req.SetEntitlements {
-			keys, err := catalogwire.NormalizeEntitlements(req.Entitlements)
+			keys, err := syntax.NormalizeEntitlements(req.Entitlements)
 			if err != nil {
 				return nil, apperr.Invalidf("%s", err)
 			}
@@ -223,7 +224,7 @@ func productEditPlan(id billing.ProductID, req UpdateProductRequest) catalogClas
 			fields["entitlements"] = catalogJSON(keys)
 		}
 		if req.SetRequiredEntitlements {
-			keys, err := catalogwire.NormalizeRequiredEntitlements(req.RequiredEntitlements)
+			keys, err := syntax.NormalizeRequiredEntitlements(req.RequiredEntitlements)
 			if err != nil {
 				return nil, apperr.Invalidf("%s", err)
 			}
@@ -335,10 +336,10 @@ func createProductPlan(req billing.CreateProductParams) catalogClassification {
 		if _, err := normalizeCreditGrant(req.CreditGrant); err != nil {
 			return nil, err
 		}
-		if _, err := catalogwire.NormalizeEntitlements(req.Entitlements); err != nil {
+		if _, err := syntax.NormalizeEntitlements(req.Entitlements); err != nil {
 			return nil, apperr.Invalidf("%s", err)
 		}
-		if _, err := catalogwire.NormalizeRequiredEntitlements(req.RequiredEntitlements); err != nil {
+		if _, err := syntax.NormalizeRequiredEntitlements(req.RequiredEntitlements); err != nil {
 			return nil, apperr.Invalidf("%s", err)
 		}
 		return nil, nil
@@ -411,7 +412,7 @@ func priceEditPlan(id billing.PriceID, req UpdatePriceRequest) catalogClassifica
 
 func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
-		req.Currency = money.NormalizeCurrency(req.Currency)
+		req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
 		if err := validateCatalogPriceTerms(req); err != nil {
 			return nil, err
 		}

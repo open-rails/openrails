@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -120,7 +121,7 @@ func (s *Service) agreements(ctx context.Context, customer billing.CustomerID, r
 			a.EndedAt = &at
 		}
 		if m.Currency != nil {
-			a.Currency = *m.Currency
+			a.Currency = catalog.Currency(*m.Currency)
 		}
 		if m.PaymentMethodID != nil {
 			id := billing.PaymentMethodID(*m.PaymentMethodID)
@@ -235,7 +236,7 @@ func (s *Service) revokeRecurring(ctx context.Context, customer billing.Customer
 	view := page.Items[0].View()
 	currency := ""
 	if view.Price != nil {
-		currency = view.Price.Currency
+		currency = string(view.Price.Currency)
 	}
 	if err := s.endAgreement(ctx, m, currency, nil); err != nil {
 		return nil, err
@@ -298,7 +299,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 				return err
 			}
 		}
-		data := billing.NotificationData{Reason: "agreement_revoked", Currency: currency, EffectiveAt: &now}
+		data := billing.NotificationData{Reason: "agreement_revoked", Currency: catalog.Currency(currency), EffectiveAt: &now}
 		if due > 0 {
 			data.AmountDue = &due
 		}
@@ -337,7 +338,7 @@ func (s *Service) endAgreement(ctx context.Context, m gen.BillingMandate, curren
 		if n == 0 {
 			return ErrAgreementNotFound
 		}
-		event := billing.MandateHostEvent{MandateID: billing.MandateID(m.ID), Kind: billing.MandateKind(m.Kind), CustomerID: billing.CustomerID(m.CustomerID), Currency: currency, RevokedAt: now}
+		event := billing.MandateHostEvent{MandateID: billing.MandateID(m.ID), Kind: billing.MandateKind(m.Kind), CustomerID: billing.CustomerID(m.CustomerID), Currency: catalog.Currency(currency), RevokedAt: now}
 		if m.SubscriptionID != nil {
 			sub := billing.SubscriptionID(*m.SubscriptionID)
 			event.SubscriptionID = &sub

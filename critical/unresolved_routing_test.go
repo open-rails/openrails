@@ -43,7 +43,7 @@ func armAlternateStripe(t *testing.T, w *world) *providerLedger {
 	declaration := cfgMerchant(w.cfg, "alpha")
 	declaration.CardVault = ""
 	declaration.PSPRouting = &[]billing.PSPRoutingRule{{Prefer: []string{"stripe", "alternate"}}}
-	declaration.PSPs["alternate"] = openrails.StripePSP{AccountID: "acct_other", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_alternate", WebhookSigningSecret: "whsec_alternate", PublishableKey: "pk_test_alternate"}.PSPConfig()
+	declaration.PSPs["alternate"] = openrails.StripePSP{AccountID: "acct_other", Environment: billing.EnvironmentTest, SecretKey: "sk_test_alternate", WebhookSigningSecret: "whsec_alternate", PublishableKey: "pk_test_alternate"}.PSPConfig()
 	setCfgMerchant(&w.cfg, "alpha", declaration)
 	return alternate
 }

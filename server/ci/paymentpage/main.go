@@ -112,8 +112,8 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
 			Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{Slug: "shop", DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
 				MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]billing.PSPConfig{
-					"nmi":    openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
-					"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
+					"nmi":    openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+					"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}}},
 		},
 		Auth: authkit.Config{

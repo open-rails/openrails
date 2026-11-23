@@ -150,7 +150,7 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 	data.SubscriptionID = billing.SubscriptionID(sub.ID)
 	data.ProductID = billing.ProductID(sub.ProductID)
 	if data.Rail == "" {
-		data.Rail, data.RailSubscriptionID = string(sub.Rail), sub.RailSubscriptionID
+		data.Rail, data.RailSubscriptionID = billing.Rail(sub.Rail), sub.RailSubscriptionID
 	}
 	if kind == lifecycle.NoticeEnded && opts.EndedReason != "" {
 		data.Reason = string(opts.EndedReason)

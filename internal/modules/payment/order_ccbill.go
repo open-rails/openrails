@@ -71,7 +71,7 @@ func CCBillIdentityMissing(user *UserIdentity) []string {
 // redelivers the sale.
 var errCCBillSaleWaits = errors.New("ccbill sale waits: another payment on the order is unresolved")
 
-var ccbillPageLapsed = &billing.PaymentFailure{Reason: "payment_page_expired", Message: "The payment page expired before you paid."}
+var ccbillPageLapsed = &billing.PaymentFailure{Reason: billing.DeclinePaymentPageExpired, Message: "The payment page expired before you paid."}
 
 func ccbillAttempt(attempt gen.BillingOrderAttempt) bool {
 	return attempt.Rail == string(models.RailCCBill) && railStateText(attempt.RailState, "flow") == ccbillFlow

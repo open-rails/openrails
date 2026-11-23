@@ -14,9 +14,9 @@ var entitlementsRoutes = []Route{
 		Doc: "GetAccessTenure returns the customer's elapsed access to the requested entitlement keys, including " +
 			"past product access and retired keys. params.At must not be in the future; zero uses OpenRails' " +
 			"clock.",
-		Query: billing.AccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.GetAccessTenure)},
+		Query: billing.GetAccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.GetAccessTenure)},
 	{Method: GET, Path: "/v1/me/access-tenure", Group: Customer, Auth: AuthCustomer,
-		Query: billing.AccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.SelfAccessTenure)},
+		Query: billing.GetAccessTenureParams{}, Responses: []Reply{{200, billing.AccessTenure{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.SelfAccessTenure)},
 	{Method: GET, Path: "/v1/admin/entitlements", Group: Admin, Auth: AuthMerchant, Name: "ListEntitlements", Level: LevelRead,
 		Doc: "ListEntitlements returns one page of the keys customers hold at params.At (zero: now), by customer " +
 			"then key in byte order: of params.CustomerIDs (1 to billing.MaxBatchItems), only params.Entitlements " +

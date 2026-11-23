@@ -113,7 +113,7 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 	default:
 		return nil, invalidInspectionQuery("state", "state must be open, expired, released or captured")
 	}
-	currency, err := inspectionCurrency(params.Currency)
+	currency, err := inspectionCurrency(string(params.Currency))
 	if err != nil {
 		return nil, err
 	}

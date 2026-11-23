@@ -19,6 +19,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,8 +97,8 @@ func fixedFX(t *testing.T) http.RoundTripper {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		base := strings.TrimSuffix(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:], ".json")
 		rates := map[string]int{}
-		for _, c := range billing.Currencies() {
-			rates[strings.ToLower(c.Code)] = 1
+		for _, c := range catalog.Currencies() {
+			rates[strings.ToLower(string(c.Code))] = 1
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"date": time.Now().UTC().Format(time.DateOnly), base: rates})
@@ -151,7 +152,7 @@ func balance(t *testing.T, client *openrails.Client, customer billing.CustomerID
 	b, err := client.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, customer, b.CustomerID)
-	require.Equal(t, "USD", b.Currency)
+	require.Equal(t, catalog.Currency("USD"), b.Currency)
 	require.Equal(t, available, b.AvailableAmount)
 	require.Equal(t, held, b.HeldAmount)
 	require.Equal(t, posted, b.BalanceAmount)

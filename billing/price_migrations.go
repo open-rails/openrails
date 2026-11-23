@@ -9,17 +9,17 @@ import (
 // PriceMigrationID names one price migration (pmig_).
 type PriceMigrationID uuid.UUID
 
-const PriceMigrationIDPrefix = "pmig_"
+const priceMigrationIDPrefix = "pmig_"
 
 func ParsePriceMigrationID(s string) (PriceMigrationID, error) {
-	u, err := parsePrefixedID("price migration", PriceMigrationIDPrefix, s)
+	u, err := parsePrefixedID("price migration", priceMigrationIDPrefix, s)
 	return PriceMigrationID(u), err
 }
 
 func (id PriceMigrationID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id PriceMigrationID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id PriceMigrationID) String() string {
-	return formatPrefixedID(PriceMigrationIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(priceMigrationIDPrefix, uuid.UUID(id))
 }
 func (id PriceMigrationID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *PriceMigrationID) UnmarshalText(text []byte) error {
@@ -140,7 +140,7 @@ const (
 // PriceMigrationOutcome is one subscription's disposition.
 type PriceMigrationOutcome struct {
 	SubscriptionID SubscriptionID            `json:"subscription_id"`
-	Rail           string                    `json:"rail"`
+	Rail           Rail                      `json:"rail"`
 	Disposition    PriceMigrationDisposition `json:"disposition"`
 	Reason         *string                   `json:"reason"`
 }

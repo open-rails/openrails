@@ -25,11 +25,11 @@ func respellHeld(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, book
 		if s.RailSubscriptionID == "" || s.Rail == "" {
 			continue
 		}
-		psp, err := psps.resolve(s.PSP, s.Rail, "subscription "+s.SourceID)
+		psp, err := psps.resolve(s.PSP, string(s.Rail), "subscription "+s.SourceID)
 		if err != nil {
 			continue // the import refuses it with its reason
 		}
-		p.PspIds, p.Rails, p.Refs = append(p.PspIds, psp), append(p.Rails, s.Rail), append(p.Refs, s.RailSubscriptionID)
+		p.PspIds, p.Rails, p.Refs = append(p.PspIds, psp), append(p.Rails, string(s.Rail)), append(p.Refs, s.RailSubscriptionID)
 	}
 	if len(p.Refs) == 0 {
 		return book, nil

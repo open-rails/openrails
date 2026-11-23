@@ -13,10 +13,10 @@ func pspWriteErrors(own ...billing.ErrorCode) []billing.ErrorCode {
 // pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be
 // armed on, and the callbacks providers send.
 var pspsRoutes = []Route{
-	{Method: PUT, Path: "/v1/merchant/custodians/{key}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "PutCustodian", When: FeatureMerchantConfigManages,
+	{Method: PUT, Path: "/v1/merchant/custodians/{key}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "SetCustodian", When: FeatureMerchantConfigManages,
 		Args:    []any{""},
-		Doc:     "PutCustodian configures one merchant vault at its explicit revision.",
-		Request: billing.PutCustodianParams{}, Responses: []Reply{{200, billing.Custodian{}}}, Errors: codes("invalid_param", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.PutCustodian)},
+		Doc:     "SetCustodian configures one merchant vault at its explicit revision.",
+		Request: billing.SetCustodianParams{}, Responses: []Reply{{200, billing.Custodian{}}}, Errors: codes("invalid_param", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.SetCustodian)},
 	{Method: GET, Path: "/v1/merchant/custodians", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListCustodians",
 		Doc:       "ListCustodians reads the merchant's declared vault accounts without secrets.",
 		Responses: []Reply{{200, billing.ListPage[billing.Custodian]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListCustodians)},

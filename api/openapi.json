@@ -2597,7 +2597,7 @@
           "catalog"
         ],
         "operationId": "GetPrice",
-        "description": "GetPrice reads a price; params.Verify also reads a provider price's terms at its provider and reports their drift.",
+        "description": "GetPrice reads a price.",
         "parameters": [
           {
             "name": "id",
@@ -2605,13 +2605,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "verify",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
             }
           },
           {
@@ -2661,8 +2654,7 @@
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       },
       "patch": {
@@ -2739,6 +2731,73 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      }
+    },
+    "/v1/catalog/prices/{id}/verification": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "operationId": "VerifyPrice",
+        "description": "VerifyPrice reads a price and, for a provider price, its terms at its provider: Provider.SyncStatus and Drift say whether they still match. It never writes, and is never answered from memory.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
+        },
+        "x-openrails-errors": [
+          "catalog_benefit_overlap",
+          "price_key_cadence_conflict",
+          "price_key_not_found",
+          "price_not_found",
+          "price_not_sellable",
+          "product_not_found",
+          "resource_conflict",
+          "revision_mismatch",
+          "trial_unsupported_on_rail"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -2943,7 +3002,13 @@
             "name": "rail",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "ccbill",
+                "nmi",
+                "solana",
+                "stripe"
+              ]
             }
           },
           {
@@ -7628,7 +7693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdjustLimitParams"
+                "$ref": "#/components/schemas/AdjustCustomerLimitParams"
               }
             }
           }
@@ -7817,7 +7882,13 @@
             "name": "rail",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "ccbill",
+                "nmi",
+                "solana",
+                "stripe"
+              ]
             }
           },
           {
@@ -9469,8 +9540,8 @@
         "tags": [
           "merchant_config"
         ],
-        "operationId": "PutCustodian",
-        "description": "PutCustodian configures one merchant vault at its explicit revision.",
+        "operationId": "SetCustodian",
+        "description": "SetCustodian configures one merchant vault at its explicit revision.",
         "parameters": [
           {
             "name": "key",
@@ -9494,7 +9565,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PutCustodianParams"
+                "$ref": "#/components/schemas/SetCustodianParams"
               }
             }
           }
@@ -11886,7 +11957,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MetricsQuery"
+                "$ref": "#/components/schemas/QueryMetricsParams"
               }
             }
           }
@@ -12869,7 +12940,7 @@
           "seconds"
         ]
       },
-      "AdjustLimitParams": {
+      "AdjustCustomerLimitParams": {
         "type": "object",
         "properties": {
           "limit": {
@@ -13016,7 +13087,19 @@
           "deny_code": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "accrual_rate_cap_reached",
+                  "budget_exceeded",
+                  "capacity_held",
+                  "delegated_spend_not_allowed",
+                  "delinquent_unpaid_order",
+                  "failure_rate_limited",
+                  "insufficient_balance",
+                  "insufficient_credit",
+                  "limit_reached",
+                  "outstanding_cap_reached"
+                ]
               },
               {
                 "type": "null"
@@ -13784,7 +13867,11 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "card",
+                    "solana"
+                  ]
                 }
               },
               {
@@ -15601,7 +15688,15 @@
             ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "custodian": {
             "type": "string"
@@ -15740,7 +15835,11 @@
           "sell_via": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "card",
+                "solana"
+              ]
             }
           },
           "archived": {
@@ -16202,10 +16301,22 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "basis_theory",
+              "hyperswitch"
+            ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "account_id": {
             "type": "string"
@@ -16733,7 +16844,7 @@
             "type": "string"
           },
           "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
+            "$ref": "#/components/schemas/QueryMetricsParams"
           },
           "grid": {
             "$ref": "#/components/schemas/DashboardGrid"
@@ -16863,7 +16974,13 @@
             "$ref": "#/components/schemas/PSPRef"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "transaction_id": {
             "type": "string"
@@ -16935,7 +17052,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -16952,7 +17075,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -17013,7 +17142,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -17053,10 +17188,10 @@
           "quantity": {
             "type": "string"
           },
-          "payer": {
+          "from_wallet": {
             "type": "string"
           },
-          "recipient": {
+          "to_wallet": {
             "type": "string"
           }
         }
@@ -17189,7 +17324,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_subscription_id": {
             "type": "string"
@@ -17403,10 +17544,18 @@
             "type": "integer"
           },
           "access_during_dunning": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "suspend"
+            ]
           },
           "access_while_renewal_held": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "suspend"
+            ]
           }
         },
         "required": [
@@ -19337,7 +19486,12 @@
             "type": "integer"
           },
           "provider_refund_access": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "revoke_on_any",
+              "revoke_on_full"
+            ]
           },
           "arrears_grace_days": {
             "type": "integer"
@@ -19650,7 +19804,7 @@
             "type": "string"
           },
           "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
+            "$ref": "#/components/schemas/QueryMetricsParams"
           }
         },
         "required": [
@@ -19723,81 +19877,6 @@
             "type": "string"
           }
         }
-      },
-      "MetricsQuery": {
-        "type": "object",
-        "properties": {
-          "measures": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "by": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/MetricsRange"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "filters": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "order": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsOrder"
-            }
-          },
-          "limit": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compare": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "measures",
-          "by",
-          "grain",
-          "range",
-          "filters",
-          "order",
-          "limit",
-          "compare"
-        ]
       },
       "MetricsRange": {
         "type": "object",
@@ -20600,7 +20679,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "accepts": {
             "type": "array",
@@ -20960,7 +21045,15 @@
             ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "archived": {
             "type": "boolean"
@@ -21073,7 +21166,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "status": {
             "type": "string",
@@ -21508,7 +21607,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "custodian": {
             "type": "string"
@@ -21529,7 +21634,10 @@
             }
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "temporarily_unavailable"
+            ]
           },
           "retry_after": {
             "type": "integer"
@@ -21718,7 +21826,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "subscription_ref": {
             "type": "string"
@@ -21921,7 +22035,13 @@
           "rail": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "ccbill",
+                  "nmi",
+                  "solana",
+                  "stripe"
+                ]
               },
               {
                 "type": "null"
@@ -22068,6 +22188,7 @@
               "merchant_config",
               "no_such_issuer",
               "over_limit",
+              "payment_page_expired",
               "pickup_card",
               "processing_error",
               "restricted_card",
@@ -22075,6 +22196,7 @@
               "security_violation",
               "stolen_card",
               "stop_recurring",
+              "stored_credential_required",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -22122,7 +22244,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp_id": {
             "type": "string"
@@ -22269,13 +22397,60 @@
         "type": "object",
         "properties": {
           "reason": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "authentication_required",
+              "blocked_by_psp",
+              "call_issuer",
+              "card_not_supported",
+              "communication_error",
+              "currency_not_supported",
+              "do_not_honor",
+              "duplicate_transaction",
+              "expired_card",
+              "fraudulent",
+              "gateway_rejected",
+              "generic_decline",
+              "incorrect_address",
+              "incorrect_cvc",
+              "incorrect_number",
+              "incorrect_zip",
+              "insufficient_funds",
+              "invalid_account",
+              "invalid_expiry",
+              "invalid_pin",
+              "invalid_request",
+              "issuer_unavailable",
+              "lost_card",
+              "merchant_config",
+              "no_such_issuer",
+              "over_limit",
+              "payment_page_expired",
+              "pickup_card",
+              "processing_error",
+              "restricted_card",
+              "retry_later",
+              "security_violation",
+              "stolen_card",
+              "stop_recurring",
+              "stored_credential_required",
+              "transaction_not_allowed",
+              "try_again_later",
+              "unknown",
+              "update_cardholder_data"
+            ]
           },
           "message": {
             "type": "string"
           },
           "field": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cvc",
+              "expiry",
+              "number",
+              "postal_code"
+            ]
           }
         },
         "required": [
@@ -22293,7 +22468,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp_id": {
             "oneOf": [
@@ -22472,7 +22653,13 @@
         "type": "object",
         "properties": {
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_customer_ref": {
             "type": "string"
@@ -22506,7 +22693,48 @@
         "type": "object",
         "properties": {
           "last_failure_reason": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "authentication_required",
+              "blocked_by_psp",
+              "call_issuer",
+              "card_not_supported",
+              "communication_error",
+              "currency_not_supported",
+              "do_not_honor",
+              "duplicate_transaction",
+              "expired_card",
+              "fraudulent",
+              "gateway_rejected",
+              "generic_decline",
+              "incorrect_address",
+              "incorrect_cvc",
+              "incorrect_number",
+              "incorrect_zip",
+              "insufficient_funds",
+              "invalid_account",
+              "invalid_expiry",
+              "invalid_pin",
+              "invalid_request",
+              "issuer_unavailable",
+              "lost_card",
+              "merchant_config",
+              "no_such_issuer",
+              "over_limit",
+              "payment_page_expired",
+              "pickup_card",
+              "processing_error",
+              "restricted_card",
+              "retry_later",
+              "security_violation",
+              "stolen_card",
+              "stop_recurring",
+              "stored_credential_required",
+              "transaction_not_allowed",
+              "try_again_later",
+              "unknown",
+              "update_cardholder_data"
+            ]
           },
           "retryable": {
             "type": "boolean"
@@ -22722,7 +22950,11 @@
           "sell_via": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "card",
+                "solana"
+              ]
             }
           },
           "provider": {
@@ -23011,7 +23243,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "disposition": {
             "type": "string",
@@ -23138,7 +23376,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "ids": {
             "oneOf": [
@@ -24097,33 +24341,6 @@
           "embed_origins"
         ]
       },
-      "PutCustodianParams": {
-        "type": "object",
-        "properties": {
-          "expected_revision": {
-            "type": "integer"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "environment": {
-            "type": "string"
-          },
-          "account_id": {
-            "type": "string"
-          },
-          "settings": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "credentials": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "Quantity": {
         "type": "object",
         "properties": {
@@ -24137,6 +24354,81 @@
         "required": [
           "min",
           "max"
+        ]
+      },
+      "QueryMetricsParams": {
+        "type": "object",
+        "properties": {
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grain": {
+            "type": "string"
+          },
+          "range": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filters": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsOrder"
+            }
+          },
+          "limit": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "measures",
+          "by",
+          "grain",
+          "range",
+          "filters",
+          "order",
+          "limit",
+          "compare"
         ]
       },
       "RailDefinition": {
@@ -24175,7 +24467,15 @@
           "environments": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "devnet",
+                "live",
+                "mainnet",
+                "sandbox",
+                "test",
+                "testnet"
+              ]
             }
           }
         },
@@ -24321,7 +24621,19 @@
         "type": "object",
         "properties": {
           "deny_code": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "accrual_rate_cap_reached",
+              "budget_exceeded",
+              "capacity_held",
+              "delegated_spend_not_allowed",
+              "delinquent_unpaid_order",
+              "failure_rate_limited",
+              "insufficient_balance",
+              "insufficient_credit",
+              "limit_reached",
+              "outstanding_cap_reached"
+            ]
           },
           "limit": {
             "oneOf": [
@@ -24389,7 +24701,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "owner": {
             "type": "string"
@@ -24670,6 +24988,45 @@
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          }
+        }
+      },
+      "SetCustodianParams": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "basis_theory",
+              "hyperswitch"
+            ]
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
@@ -25017,7 +25374,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_subscription_id": {
             "oneOf": [
@@ -25230,7 +25593,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "starts_at": {
             "type": "string",
@@ -25270,7 +25639,13 @@
             ]
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "subscription_id": {
             "type": "string"
@@ -25360,7 +25735,13 @@
             ]
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "currency": {
             "type": "string"
@@ -25473,6 +25854,7 @@
                   "merchant_config",
                   "no_such_issuer",
                   "over_limit",
+                  "payment_page_expired",
                   "pickup_card",
                   "processing_error",
                   "restricted_card",
@@ -25480,6 +25862,7 @@
                   "security_violation",
                   "stolen_card",
                   "stop_recurring",
+                  "stored_credential_required",
                   "transaction_not_allowed",
                   "try_again_later",
                   "unknown",
@@ -26097,7 +26480,12 @@
             "type": "integer"
           },
           "provider_refund_access": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "revoke_on_any",
+              "revoke_on_full"
+            ]
           },
           "arrears_grace_days": {
             "type": "integer"
@@ -26245,7 +26633,11 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "card",
+                    "solana"
+                  ]
                 }
               },
               {

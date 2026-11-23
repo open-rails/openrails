@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/destructive"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -43,7 +46,7 @@ func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.Credit
 	case row.StartsAt.After(now):
 		state = billing.CreditGrantScheduled
 	}
-	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
 		Amount: row.Amount, SpentAmount: row.SpentAmount, RemainingAmount: row.RemainingAmount, RevokedAmount: row.RevokedAmount,
 		ExpiredAmount: row.ExpiredAmount, State: state, SourceType: row.SourceType, SourceID: sourceRef(row.SourceType, row.SourceID),
 		Description: row.Reason, StartsAt: row.StartsAt, ExpiresAt: row.EndsAt, CreatedAt: row.CreatedAt,
@@ -80,7 +83,7 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, params billing.Cred
 	}
 	var currency, sourceID *string
 	if params.Currency != "" {
-		code := normalizeCurrency(params.Currency)
+		code := normalizeCurrency(string(params.Currency))
 		currency = &code
 	}
 	if params.SourceID != "" {
@@ -258,6 +261,6 @@ func sourceRef(sourceType string, id *string) *string {
 	if id == nil {
 		return nil
 	}
-	ref := billing.SourceRef(sourceType, *id)
+	ref := catalogrules.SourceRef(sourceType, *id)
 	return &ref
 }

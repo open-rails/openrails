@@ -100,8 +100,8 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	}
 	price.Model = catalog.Model(strings.ToLower(strings.TrimSpace(string(price.Model))))
 	if price.Currency != "" {
-		price.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
-		if !validRateCurrency(price.Currency) {
+		price.Currency = catalog.Currency(strings.ToUpper(strings.TrimSpace(string(price.Currency))))
+		if !validRateCurrency(string(price.Currency)) {
 			return fmt.Errorf("%s: currency must be an ISO money currency", where)
 		}
 	}
@@ -404,7 +404,7 @@ func ValidateLimitRateCard(where string, rc *catalog.LimitRateCard) error {
 	if rc.Meter == "" {
 		return fmt.Errorf("%s: a limit's rate card requires a meter", where)
 	}
-	if strings.TrimSpace(rc.Price.Currency) != "" {
+	if strings.TrimSpace(string(rc.Price.Currency)) != "" {
 		return fmt.Errorf("%s: a limit's rate card prices in the limit's unit and names no currency", where)
 	}
 	if err := ValidateUsagePrice(where, &rc.Price); err != nil {

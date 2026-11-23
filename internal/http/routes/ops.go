@@ -8,7 +8,7 @@ import (
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
-	{Method: GET, Path: "/v1/app/events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListEvents", Query: billing.EventQuery{}, Responses: []Reply{{200, billing.EventPage{}}}, Errors: codes("invalid_cursor", "invalid_query", "invalid_param", "event_cursor_expired"), Handler: h(handlers.ListEvents),
+	{Method: GET, Path: "/v1/app/events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListEvents", Query: billing.EventListParams{}, Responses: []Reply{{200, billing.EventPage{}}}, Errors: codes("invalid_cursor", "invalid_query", "invalid_param", "event_cursor_expired"), Handler: h(handlers.ListEvents),
 		Doc: "ListEvents reads retained facts of the handle's merchant. Reading starts no worker and changes no " +
 			"delivery state. Persist NextCursor after processing."},
 	{Method: GET, Path: "/v1/merchant/destructive-holds", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListDestructiveHolds", Level: LevelRead, Query: billing.DestructiveHoldListParams{}, Responses: []Reply{{200, billing.ListPage[billing.DestructiveHold]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListDestructiveHolds),
@@ -27,7 +27,7 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.AdminAccess{}}}, Bind: adminAccess},
 	{Method: POST, Path: "/v1/metrics/query", Group: Metrics, Auth: AuthMerchant, Name: "QueryMetrics",
 		Doc:     "QueryMetrics runs one metrics query.",
-		Request: billing.MetricsQuery{}, Responses: []Reply{{200, billing.MetricsResult{}}}, Errors: codes("metrics_query_invalid", "service_unavailable"), Handler: h(handlers.MerchantMetricsQuery)},
+		Request: billing.QueryMetricsParams{}, Responses: []Reply{{200, billing.MetricsResult{}}}, Errors: codes("metrics_query_invalid", "service_unavailable"), Handler: h(handlers.MerchantMetricsQuery)},
 	{Method: GET, Path: "/v1/metrics/schema", Group: Metrics, Auth: AuthMerchant, Name: "GetMetricsSchema",
 		Doc:       "GetMetricsSchema lists every measure, dimension and grain a query may use.",
 		Responses: []Reply{{200, billing.MetricsSchema{}}}, Handler: h(handlers.MerchantMetricsSchema)},

@@ -23,8 +23,8 @@ type NMIPSP struct {
 	GatewayID string `psp:"gateway_id"`
 	// Environment is live (the default), test (a gateway account in test
 	// mode) or sandbox (a sandbox.nmi.com account).
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 	// Custodian is the key of a declared custodian holding this PSP's cards;
 	// "" means NMI's customer vault holds them.
 	Custodian string `psp:"custodian"`
@@ -69,8 +69,8 @@ type StripePSP struct {
 	AccountID string `psp:"account_id"`
 	// Environment is live (the default) or test, as the secret key's prefix
 	// says.
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 
 	SecretKey            string `psp:"secrets.secret_key,required"`
 	WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
@@ -110,8 +110,8 @@ type CCBillPSP struct {
 	ClientAccnum string `psp:"client_accnum"`
 	ClientSubacc string `psp:"client_subacc"`
 	// Environment is live (the default) or sandbox (CCBill's sandbox).
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 
 	// Salt signs FlexForm links and verifies their callbacks.
 	Salt             string `psp:"secrets.salt,required"`
@@ -138,8 +138,8 @@ func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 // treasury.
 type SolanaPSP struct {
 	// Environment is mainnet (the default), devnet or testnet.
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 	// Treasury is the Solana address every payment to the merchant lands in:
 	// the PSP's identity.
 	Treasury string `psp:"treasury"`

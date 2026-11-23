@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // DeclaredBilling is one merchant's declared billing facts: what a host knows
@@ -50,10 +52,10 @@ type DeclaredHistoricalPayment struct {
 	SourceID      string                     `json:"source_id"`
 	Customer      CustomerID                 `json:"customer"`
 	PSP           PSPRef                     `json:"psp,omitzero"`
-	Rail          string                     `json:"rail"`
+	Rail          Rail                       `json:"rail"`
 	TransactionID string                     `json:"transaction_id"`
 	Amount        int64                      `json:"amount,string"`
-	Currency      string                     `json:"currency"`
+	Currency      catalog.Currency           `json:"currency"`
 	PaidAt        time.Time                  `json:"paid_at"`
 	Refunds       []DeclaredHistoricalRefund `json:"refunds,omitempty"`
 }
@@ -74,11 +76,11 @@ type DeclaredHistoricalRefund struct {
 type DeclaredPurchase struct {
 	SourceID string     `json:"source_id"`
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account that took the payment; falls back to DefaultPSP.
 	PSP           PSPRef              `json:"psp,omitzero"`
 	TransactionID string              `json:"transaction_id"`
-	Currency      string              `json:"currency"`
+	Currency      catalog.Currency    `json:"currency"`
 	Amount        int64               `json:"amount,string"`
 	PaidAt        time.Time           `json:"paid_at"`
 	Lines         []DeclaredOrderLine `json:"lines"`
@@ -100,12 +102,12 @@ type DeclaredOrderLine struct {
 
 // DeclaredSettlement is how the rail settled a purchase, as its record shows:
 // for Solana, the transfer's token mint, its amount in the token's base units
-// and the paying and receiving wallets.
+// and the wallets it moved from and to.
 type DeclaredSettlement struct {
-	Asset     string `json:"asset"`
-	Quantity  string `json:"quantity"`
-	Payer     string `json:"payer,omitempty"`
-	Recipient string `json:"recipient,omitempty"`
+	Asset      string `json:"asset"`
+	Quantity   string `json:"quantity"`
+	FromWallet string `json:"from_wallet,omitempty"`
+	ToWallet   string `json:"to_wallet,omitempty"`
 }
 
 // DeclaredCustomer ensures a customer row for a host subject. Who the
@@ -125,7 +127,7 @@ type PSPRef struct {
 // String. A psp_ prefix that is no id is an error.
 func ParsePSPRef(s string) (PSPRef, error) {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, PSPIDPrefix) {
+	if !strings.HasPrefix(s, pspIDPrefix) {
 		return PSPRef{Key: s}, nil
 	}
 	id, err := ParsePSPID(s)
@@ -151,7 +153,7 @@ func (r PSPRef) String() string {
 // (psp, rail_customer_ref, rail_method_ref).
 type DeclaredPaymentMethod struct {
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account holding the vault entry; falls back to DefaultPSP.
 	PSP             PSPRef `json:"psp,omitzero"`
 	RailCustomerRef string `json:"rail_customer_ref"`
@@ -173,7 +175,7 @@ type DeclaredPaymentMethod struct {
 type DeclaredPSPCustomer struct {
 	SourceID string     `json:"source_id,omitempty"`
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account holding the customer; falls back to DefaultPSP.
 	PSP               PSPRef `json:"psp,omitzero"`
 	RemoteCustomerRef string `json:"remote_customer_ref"`
@@ -181,7 +183,7 @@ type DeclaredPSPCustomer struct {
 
 // PaymentMethodRef links a DeclaredSubscription to a DeclaredPaymentMethod.
 type PaymentMethodRef struct {
-	Rail            string `json:"rail"`
+	Rail            Rail   `json:"rail"`
 	RailCustomerRef string `json:"rail_customer_ref"`
 	RailMethodRef   string `json:"rail_method_ref"`
 }
@@ -213,14 +215,14 @@ type DeclaredTransaction struct {
 	// SourceID requests a receipt outcome independently of the subscription (NMI).
 	SourceID string `json:"source_id,omitempty"`
 	// OriginalTransactionID links a separate NMI refund to its successful charge.
-	OriginalTransactionID string    `json:"original_transaction_id,omitempty"`
-	RailSubscriptionID    string    `json:"rail_subscription_id"`
-	TransactionID         string    `json:"transaction_id"`
-	Type                  string    `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
-	Success               bool      `json:"success"`
-	Amount                int64     `json:"amount,string"`
-	Currency              string    `json:"currency"`
-	OccurredAt            time.Time `json:"occurred_at"`
+	OriginalTransactionID string           `json:"original_transaction_id,omitempty"`
+	RailSubscriptionID    string           `json:"rail_subscription_id"`
+	TransactionID         string           `json:"transaction_id"`
+	Type                  string           `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
+	Success               bool             `json:"success"`
+	Amount                int64            `json:"amount,string"`
+	Currency              catalog.Currency `json:"currency"`
+	OccurredAt            time.Time        `json:"occurred_at"`
 	// NextBillingAt is the verified provider boundary accompanying this receipt.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 	// StripeInvoice is the complete verified bill, repeated identically for each receipt.
@@ -232,7 +234,7 @@ type DeclaredSubscription struct {
 	SourceID           string     `json:"source_id"` // host's stable id: idempotency and audit
 	Customer           CustomerID `json:"customer"`
 	Price              PriceID    `json:"price"`
-	Rail               string     `json:"rail"`
+	Rail               Rail       `json:"rail"`
 	RailSubscriptionID string     `json:"rail_subscription_id"`
 	// PSP is the merchant account owning this subscription at the provider;
 	// falls back to DefaultPSP.
@@ -253,11 +255,11 @@ type DeclaredSubscription struct {
 // DeclaredProviderSchedule is the accepted recurring obligation of a provider
 // schedule. FirstDueAt anchors its first renewal; retry dates do not move it.
 type DeclaredProviderSchedule struct {
-	SourceReference string `json:"source_reference"`
-	Amount          int64  `json:"amount,string"`
-	Currency        string `json:"currency"`
-	Quantity        *int   `json:"quantity,omitempty"`
-	IntervalHours   int    `json:"interval_hours,omitempty"`
+	SourceReference string           `json:"source_reference"`
+	Amount          int64            `json:"amount,string"`
+	Currency        catalog.Currency `json:"currency"`
+	Quantity        *int             `json:"quantity,omitempty"`
+	IntervalHours   int              `json:"interval_hours,omitempty"`
 	// IntervalMonths selects calendar cadence; exactly one interval is set.
 	IntervalMonths int       `json:"interval_months,omitempty"`
 	FirstDueAt     time.Time `json:"first_due_at"`
@@ -297,7 +299,7 @@ type DeclaredStripeInvoice struct {
 	CustomerReference string                         `json:"customer_reference"`
 	Status            string                         `json:"status"`
 	Reason            string                         `json:"reason"`
-	Currency          string                         `json:"currency"`
+	Currency          catalog.Currency               `json:"currency"`
 	Total             int64                          `json:"total,string"`
 	AmountDue         int64                          `json:"amount_due,string"`
 	AmountPaid        int64                          `json:"amount_paid,string"`

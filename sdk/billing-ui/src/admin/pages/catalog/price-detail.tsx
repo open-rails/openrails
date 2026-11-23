@@ -61,8 +61,8 @@ export function PriceDetailPage() {
   const id = priceIDFromPath(useLocation().pathname)
   const writesAllowed = useCatalogWrites()
   const navigate = useNavigate()
-  // verify is opt-in: it makes GET price read a provider price's terms at its
-  // provider again, a network round trip.
+  // verify is opt-in: it reads the price's verification, which reads a
+  // provider price's terms at its provider again, a network round trip.
   const [verify, setVerify] = React.useState(false)
   const {
     data: price,

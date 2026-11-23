@@ -50,9 +50,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 - The root package is the interface: `openrails.New` (in process) returns the `*Engine`
   (workers, routes, every declared merchant), and `engine.Merchant(id)` the `*Client` bound
   to one merchant; over HTTP, `openrails.NewRemote` (a credential per merchant id) and
-  `Remote.Merchant(id)` return the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
-  `ctx` first, request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …) and
-  typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
+  `Remote.Merchant(id)` return the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`,
+  or an action verb from the closed list in `internal/apisurface/lint.go`), `ctx` first,
+  request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …), typed enums and
+  `catalog.Currency`. A positional `string` is only a host-chosen `key`, `reference`,
+  `requestID(s)` or `idempotencyKey`. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
 - The Go client is the admin API, generated into `client_gen.go` from the route catalog
@@ -264,5 +266,4 @@ through `host-four`; these are placeholders, not customer or repository names.
   `scripts/check.sh vet` (each module, every build tag) and `unit` (each module's untagged tests).
 - Static checks: `scripts/check.sh guards`, `scripts/check-embedded-auth-boundary.sh`,
   `sqlc vet` and `go run ./scripts/contracts`. `go run ./scripts/contracts -lint` (in guards)
-  checks the Go API's conventions against `api/lint-baseline.txt`, which only shrinks: a new
-  finding fails, and so does a line nothing matches (`-lint -prune` drops those).
+  checks the Go API's conventions; it has no baseline left, so any new finding fails.

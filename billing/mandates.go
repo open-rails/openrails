@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // MandateKind is the agreement a mandate records.
 type MandateKind string
@@ -55,7 +59,7 @@ type Mandate struct {
 	Kind            MandateKind      `json:"kind"`
 	// SubscriptionID scopes a recurring mandate; Currency an unscheduled one.
 	SubscriptionID *SubscriptionID   `json:"subscription_id"`
-	Currency       *string           `json:"currency"`
+	Currency       *catalog.Currency `json:"currency"`
 	Status         MandateStatus     `json:"status"`
 	EndReason      *MandateEndReason `json:"end_reason"`
 	EndedAt        *time.Time        `json:"ended_at"`

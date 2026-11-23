@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // Mapping helpers between sqlc row types (internal/db/gen) and these domain
@@ -172,7 +173,7 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 		Key:                  p.Key,
 		ProviderOwned:        p.ProviderOwned,
 		ProviderPSPID:        p.ProviderPspID, BillingIntervalMonths: DerefIntPtr(p.BillingIntervalMonths), ProviderAccessDefault: p.ProviderAccessDefault,
-		SellVia:   p.SellVia,
+		SellVia:   normalize.Strings[catalog.SellVia](p.SellVia),
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
 	}

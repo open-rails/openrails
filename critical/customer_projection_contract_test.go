@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,7 @@ func TestCustomerProjectionContracts(t *testing.T) {
 		require.Equal(t, customer, before.ID)
 		require.Equal(t, settings.CreditLimits, before.Settings.CreditLimits)
 		require.Len(t, before.Balances, 1)
-		require.Equal(t, "USD", before.Balances[0].Currency)
+		require.Equal(t, catalog.Currency("USD"), before.Balances[0].Currency)
 		require.EqualValues(t, 12_000_000, before.Balances[0].BalanceAmount)
 
 		pool, err := pgxpool.New(t.Context(), os.Getenv("OPENRAILS_CRITICAL_DSN"))

@@ -1,5 +1,7 @@
 package billing
 
+import "github.com/open-rails/openrails/catalog"
+
 // PublicConfig is what a browser needs to know about this deployment, at
 // GET /v1/config: no credential, the same for every merchant. Every value
 // is public by nature.
@@ -7,7 +9,7 @@ type PublicConfig struct {
 	// Capabilities is what the mount serving the request serves.
 	Capabilities Capabilities `json:"capabilities"`
 	// Currencies is the scale registry behind every amount on the wire.
-	Currencies []CurrencyUnits `json:"currencies"`
+	Currencies []catalog.CurrencyUnits `json:"currencies"`
 	// Rails is the rail registry: each rail a PSP can be declared on, with
 	// the credentials and settings it takes.
 	Rails []RailDefinition `json:"rails"`
@@ -89,7 +91,7 @@ type PSPPaymentConfig struct {
 	// Key is the PSP's key, the purchase payment.psp selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
-	Rail string `json:"rail"`
+	Rail Rail `json:"rail"`
 	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
 	Custodian   string `json:"custodian"`
 	DisplayName string `json:"display_name"`
@@ -107,10 +109,13 @@ type PSPPaymentConfig struct {
 	// Status is PSPTemporarilyUnavailable when the PSP's credentials could not
 	// be checked just now: it is listed without Config, and the document is
 	// not cacheable. Empty is available. RetryAfter is in seconds.
-	Status     string `json:"status,omitempty"`
-	RetryAfter int    `json:"retry_after,omitempty"`
+	Status     PSPPaymentStatus `json:"status,omitempty"`
+	RetryAfter int              `json:"retry_after,omitempty"`
 }
 
-// PSPTemporarilyUnavailable marks a PSP (or option) whose credentials could
-// not be checked just now; retry after RetryAfter seconds.
-const PSPTemporarilyUnavailable = "temporarily_unavailable"
+// PSPPaymentStatus is an armed PSP's state for a browser; empty is available.
+type PSPPaymentStatus string
+
+// PSPTemporarilyUnavailable marks a PSP whose credentials could not be
+// checked just now; retry after RetryAfter seconds.
+const PSPTemporarilyUnavailable PSPPaymentStatus = "temporarily_unavailable"

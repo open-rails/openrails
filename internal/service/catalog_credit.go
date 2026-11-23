@@ -15,8 +15,8 @@ func normalizeCreditGrant(spec *catalogwire.CreditGrantSpec) (*catalogwire.Credi
 		return nil, nil
 	}
 	out := *spec
-	out.Currency = moneyutil.NormalizeCurrency(out.Currency)
-	if err := moneyutil.ValidateCurrency(out.Currency); err != nil {
+	out.Currency = catalogwire.Currency(moneyutil.NormalizeCurrency(string(out.Currency)))
+	if err := moneyutil.ValidateCurrency(string(out.Currency)); err != nil {
 		return nil, apperr.Invalidf("credit_grant: %v", err)
 	}
 	if (out.Amount != nil) == out.FromPayment {
@@ -56,7 +56,7 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 	if price.Quantity != nil {
 		return apperr.Invalidf("credit products do not support per-seat prices")
 	}
-	if !strings.EqualFold(credit.Currency, price.Currency) {
+	if !strings.EqualFold(string(credit.Currency), string(price.Currency)) {
 		return apperr.Invalidf("credit_grant currency must match the price currency")
 	}
 	if price.CustomerAmount != nil && !credit.FromPayment {

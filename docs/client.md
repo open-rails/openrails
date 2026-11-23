@@ -12,7 +12,7 @@ Import `github.com/open-rails/openrails` and its types from
 `github.com/open-rails/openrails/billing` and `/catalog`. Every method takes
 `ctx` first, then typed ids (`billing.CustomerID`, `billing.PriceID`, …) and a
 params struct. Amounts are `int64` native units: micros for USD
-(`4_990_000` is $4.99), each currency's scale in `billing.Currencies()`. The
+(`4_990_000` is $4.99), each currency's scale in `catalog.Currencies()` (`Currency.Units()` for one). The
 methods are generated from the route catalog, and each one's godoc is its
 route's documentation; this page is about the tasks.
 
@@ -133,8 +133,8 @@ provider are shown under **Integration**. Keep the key on your server.
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application (standalone: the manifest's `remote_application`; SaaS:
 **Integration → Customer tokens**) sets `RemoteCredential.Assertion`.
-`CustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token
-(about 15 minutes); `CustomerAssertion` only signs one, for the browser to redeem
+`CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token
+(about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem
 with its own DPoP key. An API key alone cannot mint customer tokens.
 
 The [hosted example](../examples/hosted) files its key as
@@ -149,7 +149,7 @@ r.POST("/api/billing/token", authkitgin.Required(ak), func(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	token, err := bill.CustomerToken(c, billing.CustomerTokenParams{
+	token, err := bill.CreateCustomerToken(c, billing.CustomerTokenParams{
 		CustomerID: customer, Email: claims.Email, EmailVerified: claims.EmailVerified,
 	})
 	if err != nil {
@@ -178,7 +178,7 @@ contact claims if receipts should use them. Clear tokens on sign-out.
 | `GetBalance` | its balance in one currency (`GetBalanceParams.Currency`): available, accrued, rate and when it runs out |
 | `ListBalanceTransactions` | its ledger lines, newest first, each usage posting with its per-meter detail |
 | `ListPaymentMethods`, `DeletePaymentMethod` | its saved cards; remove one |
-| `GetAccessTenure` | how long it has held access (`AccessTenureParams`), for loyalty rules |
+| `GetAccessTenure` | how long it has held access (`GetAccessTenureParams`), for loyalty rules |
 | `CreateProvisioningToken`, `ListProvisioningTokens`, `DeleteProvisioningToken` | SCIM tokens for a directory that cannot use your issuer |
 
 `UpdateCustomer` never creates a customer (`404 customer_not_found`); an amount of
@@ -222,7 +222,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `CreatePSP` | add a PSP (Vault only); credentials are checked with the provider before anything is stored |
 | `UpdatePSP` | rotate credentials, change settings or archive; archiving the last active PSP of a rail is `409 psp_last_active` |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
-| `ListCustodians`, `PutCustodian` | card custodians (Basis Theory) a PSP charges through |
+| `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
 | `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 
@@ -446,6 +446,7 @@ return nil
 | `ListProducts`, `GetProduct` | products with their current prices; filter by `Keys`, `Entitlements`, `ForSale`, `Archived` |
 | `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
 | `ListPrices`, `GetPrice`, `ListPriceHistory` | prices and the movements of a price key |
+| `VerifyPrice` | a price with each linked PSP's copy read and drift reported (`GET /v1/catalog/prices/{id}/verification`) |
 | `CreatePrice`, `UpdatePrice` | edit prices; `ProductData` creates the product in the same call |
 | `CreateProviderPrice` | link a provider's own price (an NMI plan, a Stripe price, a CCBill FlexForm) read-only |
 | `ListMeters`, `GetMeter`, `SetMeter` | meters, with their rate cards |
@@ -729,7 +730,6 @@ price.
 | Method | Use it to |
 |---|---|
 | `CheckEntitlements` | which of up to 100 keys (and 10 prefixes) a customer holds now or `At` an instant, with seat quantities |
-| `CheckEntitlementsLive` | the same, always asking OpenRails and dropping cached denials |
 | `ListEntitlements` | keys held, by customer or by key: a page of users in one call |
 | `ListProductAccess` | the windows of products a customer holds, bought, subscribed or granted |
 | `CreateProductAccess` | grant up to 100 products, all or none, for `Hours`, until `EndsAt`, or indefinitely; takes `idempotencyKey` |
@@ -960,7 +960,7 @@ for {
 	if err != nil {
 		return err
 	}
-	page, err := shop.ListEvents(ctx, billing.EventQuery{After: cursor, Limit: 100,
+	page, err := shop.ListEvents(ctx, billing.EventListParams{After: cursor, Limit: 100,
 		Types: []string{string(billing.HostEventOrderCompleted)}})
 	var status *billing.StatusError
 	if errors.As(err, &status) && status.Code == billing.CodeEventCursorExpired {
@@ -1097,7 +1097,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout |
 
 ```go guide:metrics
-return shop.QueryMetrics(ctx, billing.MetricsQuery{
+return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 	Measures: []string{"net_revenue", "mrr"},
 	By:       []string{"time"},
 	Grain:    "month",
@@ -1260,8 +1260,8 @@ allowed keys only, never a denial: a check is answered from the cache only when
 every key is allowed there, so a newly bought key shows at once. A revocation or
 seat change can take up to `MaxAge` (2 minutes, `DefaultEntitlementCheckMaxAge`),
 and an allowed answer also expires at its next scheduled change, such as a
-rental's end. `CheckEntitlementsLive` always asks and drops the keys it finds
-denied. `EntitlementCheckCacheOptions.Redis`, your own client, shares entries
+rental's end. `Uncached().CheckEntitlements` always asks and drops the keys it
+finds denied. `EntitlementCheckCacheOptions.Redis`, your own client, shares entries
 between replicas with the same endpoint, merchant, credential and `MaxAge`;
 `Disabled` turns the cache off. Prefix and historical checks always ask.
 

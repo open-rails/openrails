@@ -39,7 +39,7 @@ import {
 } from "#orck/admin/components/ui/chart"
 import type {
   MetricsResult,
-  MetricsQuery,
+  QueryMetricsParams,
   WidgetViz as VizType,
 } from "#orck/admin/lib/api/metrics"
 import { cn } from "#orck/admin/lib/utils"
@@ -71,7 +71,7 @@ export function WidgetVizView({
 }: {
   viz: VizType
   result: MetricsResult
-  query?: MetricsQuery
+  query?: QueryMetricsParams
 }) {
   const currency = filteredCurrency(query)
   switch (viz) {

@@ -40,7 +40,7 @@ func TestHostTransactions(t *testing.T) {
 				_, err := w.pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{hostSchema}.Sanitize()+" CASCADE")
 				require.NoError(t, err)
 			})
-			before, err := w.alpha.ListEvents(t.Context(), billing.EventQuery{Limit: 100})
+			before, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 			require.NoError(t, err)
 			tx, err := w.pool.Begin(t.Context())
 			require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestHostTransactions(t *testing.T) {
 				require.Len(t, ledger.Items, 1)
 				_, err := w.alpha.GetAdmission(t.Context(), "host-work")
 				require.ErrorIs(t, err, billing.ErrNotFound)
-				events, err := w.alpha.ListEvents(t.Context(), billing.EventQuery{After: before.NextCursor, Limit: 100})
+				events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{After: before.NextCursor, Limit: 100})
 				require.NoError(t, err)
 				require.Empty(t, events.Events)
 			}

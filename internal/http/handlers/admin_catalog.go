@@ -206,26 +206,36 @@ func ListPrices(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPrice reads a price; ?verify=true also reads a provider price's terms at
-// its provider and reports their drift.
+// GetPrice reads a price.
 func GetPrice(r *httprequest.Request) {
 	id, ok := priceIDParam(r)
 	if !ok {
-		return
-	}
-	var query billing.GetPriceParams
-	if !r.BindQuery(&query) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	read := svc.GetPrice
-	if query.Verify {
-		read = svc.VerifyPublicPriceSync
+	out, err := svc.GetPrice(r.Request.Context(), id)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
 	}
-	out, err := read(r.Request.Context(), id)
+	r.JSON(http.StatusOK, out)
+}
+
+// VerifyPrice reads a price and a provider price's terms at its provider,
+// reporting their drift.
+func VerifyPrice(r *httprequest.Request) {
+	id, ok := priceIDParam(r)
+	if !ok {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.VerifyPublicPriceSync(r.Request.Context(), id)
 	if err != nil {
 		writeCatalogError(r, err)
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -516,7 +517,7 @@ func ForSubscriptions(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 func View(m gen.BillingMandate) billing.Mandate {
 	out := billing.Mandate{
 		ID: billing.MandateID(m.ID), CustomerID: billing.CustomerID(m.CustomerID), PSPID: billing.PSPID(m.PspID),
-		Kind: billing.MandateKind(m.Kind), Currency: m.Currency, Status: billing.MandateStatus(m.Status), EndedAt: m.EndedAt,
+		Kind: billing.MandateKind(m.Kind), Currency: (*catalog.Currency)(m.Currency), Status: billing.MandateStatus(m.Status), EndedAt: m.EndedAt,
 		CardBrand: m.CardBrand, InitialTransactionID: m.InitialTransactionID, NetworkTransactionID: m.NetworkTransactionID,
 		TransactionLinkID: m.TransactionLinkID, AcceptedAt: m.AcceptedAt, CreatedAt: m.CreatedAt,
 	}

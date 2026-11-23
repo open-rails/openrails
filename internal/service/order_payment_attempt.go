@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders"
@@ -56,7 +57,7 @@ func (s *Service) GetOrderPaymentAttempt(ctx context.Context, actor *OrderActor,
 		return nil, fmt.Errorf("order attempt has no accepted amount")
 	}
 	result := &billing.OrderPaymentAttempt{OrderID: id, CustomerID: billing.CustomerID(order.CustomerID), AttemptID: billing.OrderAttemptID(attempt.ID),
-		State: attempt.Status, PSPID: billing.PSPID(attempt.PspID), Amount: *attempt.Amount, Currency: *attempt.Currency}
+		State: attempt.Status, PSPID: billing.PSPID(attempt.PspID), Amount: *attempt.Amount, Currency: catalog.Currency(*attempt.Currency)}
 	if attempt.PaymentID != nil {
 		value := billing.PaymentID(*attempt.PaymentID)
 		result.PaymentID = &value

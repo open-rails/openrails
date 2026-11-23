@@ -11,7 +11,7 @@
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
-//			"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+//			"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //
@@ -22,6 +22,7 @@ package nmimock
 import (
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -71,7 +72,8 @@ type Mock struct{ m *nmimock.Mock }
 type Sale struct {
 	TransactionID, OrderID, Vault, Last4 string
 	// Amount is NMI's wire decimal ("9.99").
-	Amount, Currency string
+	Amount   string
+	Currency catalog.Currency
 	// Declined is the decline code; "" is approved.
 	Declined string
 	At       time.Time
@@ -209,5 +211,5 @@ func sale(s *nmimock.Sale) *Sale {
 		return nil
 	}
 	return &Sale{TransactionID: s.TransactionID, OrderID: s.OrderID, Vault: s.Vault, Last4: s.Card.Last4,
-		Amount: s.Amount, Currency: s.Currency, Declined: s.Declined, At: s.At}
+		Amount: s.Amount, Currency: catalog.Currency(s.Currency), Declined: s.Declined, At: s.At}
 }
