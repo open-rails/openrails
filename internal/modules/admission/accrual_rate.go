@@ -15,10 +15,9 @@ import (
 const secondsPerHour = int64(3600)
 
 // AccrualRateMeter measures a customer's current accrual rate, in micros per
-// hour, for the accrual_rate_cap quota. It sums usage_events over the policy's
-// window (served by usage_events_customer_id_occurred_at_idx), so it sees only
-// reported usage: admission takes the host's prospective delta for what is
-// about to start.
+// hour, for the accrual_rate_cap quota. It sums the per-minute spend of the
+// policy's window, so it sees only settled usage: admission takes the host's
+// prospective delta for what is about to start.
 type AccrualRateMeter struct {
 	db  *db.DB
 	now func() time.Time
@@ -52,7 +51,7 @@ func (m *AccrualRateMeter) MeasuredRatePerHour(ctx context.Context, payer identi
 	var total int64
 	err = m.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var qerr error
-		total, qerr = m.db.Gen(ctx).SumUsageAmountSince(ctx, gen.SumUsageAmountSinceParams{
+		total, qerr = m.db.Gen(ctx).SumUsageMinutesSince(ctx, gen.SumUsageMinutesSinceParams{
 			MerchantID: tid.UUID(),
 			CustomerID: payer.UUID(),
 			Currency:   currency,

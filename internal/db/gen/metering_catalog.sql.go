@@ -141,13 +141,16 @@ func (q *Queries) GetUsageMeterForUpdate(ctx context.Context, arg GetUsageMeterF
 
 const getUsageMeterWithCatalog = `-- name: GetUsageMeterWithCatalog :one
 WITH activity AS (
-    -- Each meter's latest retained event: a backward index probe per partition,
-    -- never a count of its events. It spans every retained month by definition.
+    -- Each meter's latest settled usage: the newest day of its event type's
+    -- rollups, by a backward index probe, and that day's last settlement.
     SELECT m.key AS meter_key,
-           (SELECT max(ue.occurred_at)
-              FROM billing.usage_events ue
-             WHERE ue.merchant_id = m.merchant_id
-               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+           (SELECT max(ud.updated_at)
+              FROM billing.usage_daily ud
+             WHERE ud.merchant_id = m.merchant_id
+               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
+               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
+                                 WHERE last.merchant_id = m.merchant_id
+                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = $1
 )
@@ -279,13 +282,16 @@ func (q *Queries) InsertUsageMeter(ctx context.Context, arg InsertUsageMeterPara
 
 const listUsageMetersWithCatalog = `-- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
-    -- Each meter's latest retained event: a backward index probe per partition,
-    -- never a count of its events. It spans every retained month by definition.
+    -- Each meter's latest settled usage: the newest day of its event type's
+    -- rollups, by a backward index probe, and that day's last settlement.
     SELECT m.key AS meter_key,
-           (SELECT max(ue.occurred_at)
-              FROM billing.usage_events ue
-             WHERE ue.merchant_id = m.merchant_id
-               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+           (SELECT max(ud.updated_at)
+              FROM billing.usage_daily ud
+             WHERE ud.merchant_id = m.merchant_id
+               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
+               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
+                                 WHERE last.merchant_id = m.merchant_id
+                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = $1
 )
@@ -394,15 +400,6 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 	return items, nil
 }
 
-const lockUsageEventsForMeterCorrection = `-- name: LockUsageEventsForMeterCorrection :exec
-LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE
-`
-
-func (q *Queries) LockUsageEventsForMeterCorrection(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, lockUsageEventsForMeterCorrection)
-	return err
-}
-
 const lockUsageMeterKey = `-- name: LockUsageMeterKey :exec
 
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
@@ -506,25 +503,4 @@ func (q *Queries) UpsertDefaultUsageRateCard(ctx context.Context, arg UpsertDefa
 		arg.Price,
 	)
 	return err
-}
-
-const usageEventsExistForTypes = `-- name: UsageEventsExistForTypes :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.usage_events
-    WHERE merchant_id = $1
-      AND event_type = ANY($2::text[])
-)
-`
-
-type UsageEventsExistForTypesParams struct {
-	MerchantID uuid.UUID
-	EventTypes []string
-}
-
-func (q *Queries) UsageEventsExistForTypes(ctx context.Context, arg UsageEventsExistForTypesParams) (bool, error) {
-	row := q.db.QueryRow(ctx, usageEventsExistForTypes, arg.MerchantID, arg.EventTypes)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
 }

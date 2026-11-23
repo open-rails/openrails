@@ -16,9 +16,9 @@ DO UPDATE SET layout = EXCLUDED.layout, updated_by = EXCLUDED.updated_by, update
 RETURNING merchant_id, layout, updated_at, updated_by;
 
 -- name: HasUsageActivity :one
--- Any usage-stream signal for the merchant: metered events or purchased credit
+-- Any usage-stream signal for the merchant: settled usage or purchased credit
 -- lots. Decides whether the default dashboard seeds usage widgets.
-SELECT (EXISTS (SELECT 1 FROM billing.usage_events
-WHERE usage_events.merchant_id = sqlc.arg(merchant_id)::uuid
+SELECT (EXISTS (SELECT 1 FROM billing.usage_daily
+WHERE usage_daily.merchant_id = sqlc.arg(merchant_id)::uuid
 )
     OR EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity;

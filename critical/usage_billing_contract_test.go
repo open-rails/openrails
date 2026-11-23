@@ -65,6 +65,30 @@ func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*wo
 	return a, p, customer
 }
 
+// postUsageDay ends the day the usage occurred: its accrual posts, and what
+// it leaves owed is billed as usage billing bills owed.
+func postUsageDay(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	nextDay(w)
+	postDays(t, fleet)
+}
+
+// unscheduledAgreement is alice's USD collection agreement.
+func unscheduledAgreement(t *testing.T, a *authorityWorld) billing.Agreement {
+	t.Helper()
+	status, raw := a.request(t, http.MethodGet, "/v1/me/agreements", a.aliceToken, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var agreements billing.ListPage[billing.Agreement]
+	require.NoError(t, json.Unmarshal(raw, &agreements))
+	for _, agreement := range agreements.Items {
+		if agreement.Subscription == nil && agreement.Currency == "USD" {
+			return agreement
+		}
+	}
+	require.Fail(t, "alice has no USD collection agreement")
+	return billing.Agreement{}
+}
+
 func oneUsageOrder(t *testing.T, a *authorityWorld, customer billing.CustomerID) billing.Order {
 	t.Helper()
 	rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
@@ -114,6 +138,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		oneUsage(t, a.alpha, usageInput(customer, "debt-without-opt-in", 3))
 		a.clock.Advance(48 * time.Hour)
 		fleet := startFleet(t, a.world)
+		postDays(t, fleet)
 		runUsageDue(t, fleet)
 		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
 		require.NoError(t, err)
@@ -130,6 +155,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "finished-work", 3))
 				fleet := startFleet(t, a.world)
+				postUsageDay(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				order := oneUsageOrder(t, a, customer)
 				require.Equal(t, billing.OrderOpen, order.Status)
@@ -181,6 +207,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 				fleet := startFleet(t, a.world)
+				postUsageDay(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -227,6 +254,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "settled-at-once", 3))
 				fleet := startFleet(t, a.world)
+				postUsageDay(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -257,23 +285,14 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false, false)
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
-		status, raw := a.request(t, http.MethodGet, "/v1/me/agreements", a.aliceToken, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var agreements billing.ListPage[billing.Agreement]
-		require.NoError(t, json.Unmarshal(raw, &agreements))
-		var unscheduled *billing.Agreement
-		for i := range agreements.Items {
-			if agreements.Items[i].Subscription == nil && agreements.Items[i].Currency == "USD" {
-				unscheduled = &agreements.Items[i]
-			}
-		}
-		require.NotNil(t, unscheduled)
+		// What the revocation bills is owed once the day's usage posts.
+		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
 		// Revoking the collection agreement bills what is owed so far.
-		status, raw = a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduled.ID.String()+"/revoke", a.aliceToken, nil)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		order := oneUsageOrder(t, a, customer)
 		require.Equal(t, billing.OrderOpen, order.Status)
-		fleet := startFleet(t, a.world)
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		notices, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order_overdue"}, Limit: 100})
@@ -295,6 +314,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, err)
 		oneUsage(t, a.alpha, usageInput(customer, "past-the-first-page", 3))
 		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
 		require.Eventually(t, func() bool {
 			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
 			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
@@ -343,6 +363,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		defer hold.Release()
 		oneUsage(t, a.alpha, usageInput(customer, "queued-collection", 3))
 		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		select {
 		case <-hold.Arrived():
@@ -381,6 +402,65 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.EqualValues(t, 14_321_000, order.Total)
 		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
 	})
+	t.Run("OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, true)
+		oneUsage(t, a.alpha, usageInput(customer, "on-time", 1))
+		fleet := quietFleet(t, a.world)
+		a.clock.Advance(13 * time.Hour)
+		runUsageDue(t, fleet)
+		first := oneUsageOrder(t, a, customer)
+		require.EqualValues(t, 10_000_000, first.Total)
+		// Usage of the billed day reported an hour after its order, enough to
+		// reach the threshold: it is billed at once, in a period no order
+		// billed.
+		a.clock.Advance(time.Hour)
+		late := usageInput(customer, "late", 3)
+		late.OccurredAt = time.Date(2026, 9, 24, 13, 0, 0, 0, time.UTC)
+		oneUsage(t, a.alpha, late)
+		runUsageDue(t, fleet)
+		rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		require.NoError(t, err)
+		require.Len(t, rows.Items, 2)
+		second := rows.Items[0]
+		if second.ID == first.ID {
+			second = rows.Items[1]
+		}
+		require.NotNil(t, second.Usage)
+		require.EqualValues(t, 30_000_000, second.Total)
+		require.False(t, second.Usage.PeriodStartsAt.Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day: %s < %s",
+			second.Usage.PeriodStartsAt, first.Usage.PeriodEndsAt)
+	})
+	t.Run("OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, true)
+		// The customer's periods turn at 14:00 on the 25th.
+		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{UsageBilling: []billing.UsageBillingAccountUpdate{{Currency: "USD",
+			BillingAnchor: catalog.Value(time.Date(2026, 1, 25, 14, 0, 0, 0, time.UTC))}}})
+		require.NoError(t, err)
+		fleet := quietFleet(t, a.world)
+		a.clock.Advance(22 * time.Hour)
+		oneUsage(t, a.alpha, usageInput(customer, "before-the-turn", 1))
+		// The bill date's pass, after the turn, posts the day so far: what
+		// occurred before 14:00 is owed in the period that ended then.
+		a.clock.Advance(5 * time.Hour)
+		runUsageDue(t, fleet)
+		order := oneUsageOrder(t, a, customer)
+		require.EqualValues(t, 10_000_000, order.Total)
+		turn := time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC)
+		require.True(t, order.Usage.PeriodStartsAt.Before(turn), "owed at %s, after its period ended", order.Usage.PeriodStartsAt)
+	})
+	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, false, false)
+		oneUsage(t, a.alpha, usageInput(customer, "today", 3))
+		// No day ended and no pass ran: the revocation posts today's usage on
+		// its own clock and bills it.
+		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var revoked billing.AgreementRevocation
+		require.NoError(t, json.Unmarshal(raw, &revoked))
+		require.NotNil(t, revoked.UsageOrder, "the final bill")
+		require.EqualValues(t, 30_000_000, revoked.UsageOrder.Total)
+		require.Equal(t, revoked.UsageOrder.ID, oneUsageOrder(t, a, customer).ID)
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := w.cfg.Merchants["alpha"]
@@ -392,6 +472,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, err)
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-under-strict-policy", 3))
 		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)

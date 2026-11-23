@@ -250,10 +250,10 @@ func usageMeterHasActivity(
 	// activity predicate is checked so a concurrent report cannot slip between
 	// the check and the semantic update and then be reinterpreted.
 	queries := gen.New(tx)
-	if err := queries.LockUsageEventsForMeterCorrection(ctx); err != nil {
+	if err := queries.LockUsageDailyForMeterCorrection(ctx); err != nil {
 		return false, fmt.Errorf("lock usage activity: %w", err)
 	}
-	hasActivity, err := queries.UsageEventsExistForTypes(ctx, gen.UsageEventsExistForTypesParams{
+	hasActivity, err := queries.UsageDailyExistsForTypes(ctx, gen.UsageDailyExistsForTypesParams{
 		MerchantID: merchantID,
 		EventTypes: eventTypes,
 	})

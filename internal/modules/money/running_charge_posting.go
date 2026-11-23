@@ -18,10 +18,10 @@ import (
 )
 
 // A posting moves what a running charge accrued through an instant to the
-// ledger: balance first, the rest owed, as a capture does. Postings happen on
-// events only: the stop, each 00:00 UTC (the balance watch gets to it),
-// before a credit lot the accrual draws is expired, revoked or refunded, and
-// before usage is billed. No posting straddles 00:00 UTC, and any number of
+// ledger: balance first, the rest owed, as an accrual's posting does.
+// Postings happen on events only: the stop, each 00:00 UTC (the balance watch
+// gets to it), before a credit lot the accrual draws is expired, revoked or
+// refunded, and before usage is billed. No posting straddles 00:00 UTC, and any number of
 // them sums to the charge's total through its stop.
 
 const (
@@ -35,10 +35,22 @@ func init() { grants.PostRunningCharges = postRunningChargesThrough }
 
 // runningChargePosting is what a posting's ledger write runs under: accrual is
 // held as of through, the lots that had not lapsed just before it are drawn,
-// and the balance legs carry the charge's resource.
+// and the balance legs carry the charge's resource. A usage accrual's posting
+// runs under it too.
 type runningChargePosting struct {
 	through  time.Time
 	resource string
+	// owed splits what an accrual's posting leaves owed by meter.
+	owed []owedShare
+	// owedAt dates what an accrual's posting leaves owed: when its usage
+	// occurred. Zero dates it at the posting.
+	owedAt time.Time
+}
+
+// owedShare is one meter's weight in an accrual posting's owed remainder.
+type owedShare struct {
+	meter  string
+	weight int64
 }
 
 func (s *MoneyService) accruedAsOf() *time.Time {
@@ -155,11 +167,14 @@ func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, 
 	return posted, nil
 }
 
-// settleRunningCharges posts what the customer's running charges have accrued
-// through now, in the caller's transaction: a read that follows sees what its
-// credit lots hold once that spend is in the ledger.
+// settleRunningCharges posts what the customer's running charges and usage
+// have accrued through now, in the caller's transaction: a read that follows
+// sees what its credit lots hold once that spend is in the ledger.
 func (s *MoneyService) settleRunningCharges(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) error {
 	now := s.now()
-	_, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now)
+	if _, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now); err != nil {
+		return err
+	}
+	_, err := s.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, nil, nil, now)
 	return err
 }

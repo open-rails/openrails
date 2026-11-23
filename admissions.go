@@ -66,26 +66,3 @@ func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdm
 	}
 	return out.Items, nil
 }
-
-// RecordUsage records 1 to billing.MaxUsageBatchItems usage events, one
-// result per item in order: each is recorded or refused on its own, exactly
-// as recording it alone would be. An event's source and source id make a
-// retry record and charge it once (Status 200, Replayed); a retry with a
-// different amount or outcome is refused with idempotency_key_reused. An
-// item with Outcome failed is forgiven up to the customer's grace and charged
-// past it (see billing.UsageFailed).
-func (c *Client) RecordUsage(ctx context.Context, items []billing.RecordUsageParams, requestOptions ...RequestOption) ([]billing.UsageEventResult, error) {
-	if err := batchSize(len(items), billing.MaxUsageBatchItems); err != nil {
-		return nil, err
-	}
-	body := billing.RecordUsageBatchParams{Items: make([]billing.RecordUsageParams, len(items))}
-	for i, item := range items {
-		item.Currency = normalizeCurrency(item.Currency)
-		body.Items[i] = item
-	}
-	var out billing.RecordUsageBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/app/usage-events", body, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}

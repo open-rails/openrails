@@ -46,13 +46,14 @@ type CatalogWarning struct {
 }
 
 // CatalogObjectKind is a catalog object a document declares: a product, one
-// of its price keys or a meter. Each applies whole or not at all.
+// of its price keys, a meter or a limit. Each applies whole or not at all.
 type CatalogObjectKind string
 
 const (
 	CatalogObjectProduct CatalogObjectKind = "product"
 	CatalogObjectPrice   CatalogObjectKind = "price"
 	CatalogObjectMeter   CatalogObjectKind = "meter"
+	CatalogObjectLimit   CatalogObjectKind = "limit"
 )
 
 // CatalogChange is one object a document changed: the fields it set and the

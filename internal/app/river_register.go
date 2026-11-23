@@ -115,15 +115,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.BalanceLookWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance look worker: %w", err)
 	}
-	// Flushes closed hours of the Redis admission-denial counters to PG.
-	// Redis may be nil (no-admission deployments); the worker no-ops then.
-	if err := addWorker(workers, &riverjobs.AdmissionDenialFlushWorker{
-		DB:    r.DB,
-		Redis: r.RedisClient,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add admission denial flush worker: %w", err)
-	}
 	// A customer's convergence, queued by each mutation that changed it.
 	if err := addWorker(workers, &riverjobs.CustomerConvergeWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
@@ -215,7 +206,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}
+	accruals := &riverjobs.UsageAccrualWorker{DB: r.DB, Money: r.MoneyService}
 	scans := []riverjobs.Scan{
+		// A day's usage posts once its day ends, before anything bills it.
+		{Kind: riverjobs.KindUsageAccruals, Run: accruals.Pass, DueBy: accruals.DueBy},
 		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
@@ -416,8 +410,6 @@ func (r *Runtime) declares(gate riverjobs.Gate) bool {
 	switch gate {
 	case riverjobs.WithUsageBilling:
 		return r.Config != nil && r.Config.UsageBillingEnabled
-	case riverjobs.WithRedis:
-		return r.RedisClient != nil
 	}
 	return true
 }

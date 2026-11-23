@@ -89,8 +89,8 @@ func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 	return decoder.Decode(&f.Value)
 }
 
-// Application is one atomic merchant catalog batch. Products, prices and
-// meters are maps keyed by their key. Its canonical content hash is its
+// Application is one atomic merchant catalog batch. Products, prices,
+// meters and limits are maps keyed by their key. Its canonical content hash is its
 // permanent replay identity; omitted records and fields are preserved.
 type Application struct {
 	SchemaVersion int  `json:"schema_version"`
@@ -100,6 +100,7 @@ type Application struct {
 	EntitlementReplacements []EntitlementReplacement `json:"entitlement_replacements,omitempty"`
 	Products                map[string]ApplyProduct  `json:"products,omitempty"`
 	Meters                  map[string]ApplyMeter    `json:"meters,omitempty"`
+	Limits                  map[string]ApplyLimit    `json:"limits,omitempty"`
 }
 
 // MaxEntitlementReplacements bounds the replacements of one application.
@@ -174,6 +175,10 @@ type ApplyProduct struct {
 	// price of the product, ours or a provider's.
 	ProviderPrices map[string]ApplyProviderPrice `json:"provider_prices,omitempty"`
 	RateCards      Field[[]RateCard]             `json:"rate_cards,omitzero"`
+	// Limits is the capacity the product gives each limit it names, per
+	// window; a customer's capacity is the sum over its live products. It
+	// replaces the product's whole set; {} gives none.
+	Limits Field[map[string]Capacity] `json:"limits,omitzero"`
 }
 
 // ApplyPrice declares the price its map key names: OpenRails vaults the card
@@ -208,7 +213,7 @@ func (a Application) Validate() error {
 	if err := validateReplacements(a.EntitlementReplacements); err != nil {
 		return err
 	}
-	count := len(a.Products) + len(a.Meters) + len(a.EntitlementReplacements)
+	count := len(a.Products) + len(a.Meters) + len(a.Limits) + len(a.EntitlementReplacements)
 	for _, key := range slices.Sorted(maps.Keys(a.Products)) {
 		p := a.Products[key]
 		if err := validApplicationKey(key, "product"); err != nil {
@@ -238,7 +243,10 @@ func (a Application) Validate() error {
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
 			return fmt.Errorf("product %q: text exceeds catalog limit", key)
 		}
-		count += len(p.Prices) + len(p.ProviderPrices) + len(p.RateCards.Value)
+		if err := validateProductLimits(p.Limits); err != nil {
+			return fmt.Errorf("product %q: %w", key, err)
+		}
+		count += len(p.Prices) + len(p.ProviderPrices) + len(p.RateCards.Value) + len(p.Limits.Value)
 		for _, priceKey := range slices.Sorted(maps.Keys(p.ProviderPrices)) {
 			if err := validApplicationKey(priceKey, "provider price"); err != nil {
 				return fmt.Errorf("product %q: %w", key, err)
@@ -296,6 +304,16 @@ func (a Application) Validate() error {
 		if err := validateApplicationFields(a.Meters[key]); err != nil {
 			return fmt.Errorf("meter %q: %w", key, err)
 		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(a.Limits)) {
+		if err := ValidateLimitKey(key); err != nil {
+			return err
+		}
+		limit := a.Limits[key]
+		if err := limit.validate(); err != nil {
+			return fmt.Errorf("limit %q: %w", key, err)
+		}
+		count += len(limit.RateCards.Value)
 	}
 	if count > MaxApplicationItems {
 		return fmt.Errorf("catalog application exceeds %d items", MaxApplicationItems)

@@ -77,12 +77,6 @@ FROM (
         AND mq.period_starts_at < sqlc.arg(meter_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    (SELECT DISTINCT ad.merchant_id AS mid
-       FROM billing.admission_denials_hourly ad
-      WHERE (sqlc.narg(after)::uuid IS NULL OR ad.merchant_id > sqlc.narg(after)::uuid)
-        AND ad.hour_at < sqlc.arg(counter_cutoff)::timestamptz
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT wh.merchant_id AS mid
        FROM billing.webhook_health_daily wh
       WHERE (sqlc.narg(after)::uuid IS NULL OR wh.merchant_id > sqlc.narg(after)::uuid)
@@ -115,6 +109,36 @@ FROM (
        FROM billing.parked_provider_subscriptions pk
       WHERE (sqlc.narg(after)::uuid IS NULL OR pk.merchant_id > sqlc.narg(after)::uuid)
         AND pk.released_at < sqlc.arg(park_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT lw.merchant_id AS mid
+       FROM billing.limit_windows lw
+      WHERE (sqlc.narg(after)::uuid IS NULL OR lw.merchant_id > sqlc.narg(after)::uuid)
+        AND lw.window_ends_at < sqlc.arg(limit_window_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT le.merchant_id AS mid
+       FROM billing.leases le
+      WHERE (sqlc.narg(after)::uuid IS NULL OR le.merchant_id > sqlc.narg(after)::uuid)
+        AND le.last_sync_at < sqlc.arg(replay_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT la.merchant_id AS mid
+       FROM billing.limit_adjustments la
+      WHERE (sqlc.narg(after)::uuid IS NULL OR la.merchant_id > sqlc.narg(after)::uuid)
+        AND la.created_at < sqlc.arg(replay_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ud.merchant_id AS mid
+       FROM billing.usage_daily ud
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ud.merchant_id > sqlc.narg(after)::uuid)
+        AND ud.day_at < sqlc.arg(usage_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT um.merchant_id AS mid
+       FROM billing.usage_minutes um
+      WHERE (sqlc.narg(after)::uuid IS NULL OR um.merchant_id > sqlc.narg(after)::uuid)
+        AND um.minute_at < sqlc.arg(usage_minute_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
@@ -260,6 +284,19 @@ WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.wind
     LIMIT sqlc.arg(row_limit)::int
 );
 
+-- A closed limit window past the replay horizon; a row another writer
+-- holds waits for a later pass.
+-- name: DeleteLimitWindowsBefore :execrows
+DELETE FROM billing.limit_windows w
+WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.limit_key, e.window_starts_at
+    FROM billing.limit_windows e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.window_ends_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.window_ends_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
 -- A row another writer holds waits for a later pass.
 -- name: DeleteMeterPeriodQuantitiesBefore :execrows
 DELETE FROM billing.meter_period_quantities q
@@ -272,14 +309,49 @@ WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_s
     FOR UPDATE SKIP LOCKED
 );
 
--- name: DeleteAdmissionDenialsBefore :execrows
-DELETE FROM billing.admission_denials_hourly d
-WHERE (d.merchant_id, d.customer_id, d.denial_reason, d.hour_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.denial_reason, e.hour_at
-    FROM billing.admission_denials_hourly e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.hour_at < sqlc.arg(cutoff)::timestamptz
-    ORDER BY e.hour_at
+-- A lease goes with its holds.
+-- name: DeleteLeasesBefore :execrows
+DELETE FROM billing.leases l
+WHERE (l.merchant_id, l.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.leases e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.last_sync_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.last_sync_at
     LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteUsageDailyBefore :execrows
+DELETE FROM billing.usage_daily d
+WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter_key, d.cell, d.invoker, d.outcome) IN (
+    SELECT e.merchant_id, e.customer_id, e.day_at, e.currency, e.event_type, e.meter_key, e.cell, e.invoker, e.outcome
+    FROM billing.usage_daily e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.day_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.day_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteUsageMinutesBefore :execrows
+DELETE FROM billing.usage_minutes m
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute_at
+    FROM billing.usage_minutes e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.minute_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.minute_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteLimitAdjustmentsBefore :execrows
+DELETE FROM billing.limit_adjustments a
+WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.source_id
+    FROM billing.limit_adjustments e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.created_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
 );
 
 -- name: DeleteWebhookHealthDaysBefore :execrows

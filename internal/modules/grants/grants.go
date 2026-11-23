@@ -386,6 +386,10 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 				return fmt.Errorf("grants: decode credit funding: %w", err)
 			}
 		}
+		// The customer's usage so far draws the balance before the deposit.
+		if _, err := l.settleUsage(ctx, g.CustomerID, *g.Currency, nil); err != nil {
+			return fmt.Errorf("grants: post usage before the deposit: %w", err)
+		}
 		coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: g.ID.String()}
 		if spec.Deposit != nil && spec.Deposit.PaidAmount != nil {
 			if err := l.money.PurchasedDeposit(ctx, g.CustomerID, *g.Currency, *g.Amount, *spec.Deposit.PaidAmount, coord, g.ID); err != nil {

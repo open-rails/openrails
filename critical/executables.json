@@ -391,6 +391,81 @@
     "OR-J23-S05": [
       "TestHostTransactions/OR-J23-S05/host-transaction-owns-financial-commit"
     ],
+    "OR-J23-S07": [
+      "TestUsageLimits/OR-J23-S07/limits-declare-apply-and-refuse-invalid-terms"
+    ],
+    "OR-J23-S08": [
+      "TestUsageLimits/OR-J23-S08/capacity-sums-the-customers-live-products"
+    ],
+    "OR-J23-S09": [
+      "TestUsageLimits/OR-J23-S09/an-override-replaces-the-products-capacity"
+    ],
+    "OR-J23-S10": [
+      "TestUsageLimits/OR-J23-S10/an-adjustment-adds-to-the-current-window-only"
+    ],
+    "OR-J23-S11": [
+      "TestUsageLimits/OR-J23-S11/limit-reads-stay-within-their-merchant-and-customer"
+    ],
+    "OR-J23-S12": [
+      "TestUsageLimits/OR-J23-S12/a-customer-reads-its-own-limits"
+    ],
+    "OR-J23-S13": [
+      "TestLimitHolds/OR-J23-S13/a-session-and-a-weekly-cap-let-the-crossing-request-finish"
+    ],
+    "OR-J23-S14": [
+      "TestLimitHolds/OR-J23-S14/balance-and-a-monthly-spend-cap-hold-both-or-neither"
+    ],
+    "OR-J23-S15": [
+      "TestLimitHolds/OR-J23-S15/four-replicas-racing-for-the-last-units-admit-exactly-the-capacity"
+    ],
+    "OR-J23-S16": [
+      "TestLimitHolds/OR-J23-S16/an-overrun-settles-past-capacity-and-records-reached-once"
+    ],
+    "OR-J23-S17": [
+      "TestLimitHolds/OR-J23-S17/a-delegated-invoker-is-refused-and-holds-nothing"
+    ],
+    "OR-J23-S18": [
+      "TestLimitHolds/OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own"
+    ],
+    "OR-J23-S19": [
+      "TestGate/OR-J23-S19/remote-and-embedded-gates-decide-warm-without-openrails"
+    ],
+    "OR-J23-S20": [
+      "TestGate/OR-J23-S20/racing-requests-on-two-limits-never-take-more-than-either-hold"
+    ],
+    "OR-J23-S21": [
+      "TestGate/OR-J23-S21/restarts-lost-replies-and-dead-leases-converge-once"
+    ],
+    "OR-J23-S22": [
+      "TestGate/OR-J23-S22/a-ticket-lives-across-syncs-and-captures-across-a-session-reset"
+    ],
+    "OR-J23-S23": [
+      "TestGate/OR-J23-S23/processes-sharing-redis-form-one-gate"
+    ],
+    "OR-J23-S24": [
+      "TestGate/OR-J23-S24/refusals-are-verdicts-and-openrails-down-is-unavailable"
+    ],
+    "OR-J23-S25": [
+      "TestGate/OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units"
+    ],
+    "OR-J23-S26": [
+      "TestLimitHolds/OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back"
+    ],
+    "OR-J23-S27": [
+      "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-a-shared-lease-ends-with-its-last-process"
+    ],
+    "OR-J23-S28": [
+      "TestGate/OR-J23-S28/a-units-only-plan-takes-zero-money-through-redis-and-gives-every-unit-back"
+    ],
+    "OR-J23-S29": [
+      "TestGate/OR-J23-S29/a-lost-reply-after-a-shrink-keeps-the-capacity-until-the-gate-applies-it"
+    ],
+    "OR-J23-S30": [
+      "TestGate/OR-J23-S30/a-lease-answered-dead-is-closed-and-its-holds-free-at-once"
+    ],
+    "OR-J23-S31": [
+      "TestGate/OR-J23-S31/a-redis-usage-write-whose-reply-was-lost-posts-once-when-retried"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -405,6 +480,96 @@
     ],
     "OR-J24-S05": [
       "TestUsageContracts/OR-J24-S05/charged-failure-replayed-past-its-key-window-charges-once"
+    ],
+    "OR-J24-S06": [
+      "TestLeaseSyncs/OR-J24-S06/a-lost-reply-resends-a-gap-is-refused"
+    ],
+    "OR-J24-S07": [
+      "TestLeaseSyncs/OR-J24-S07/a-new-process-resends-a-dead-leases-outbox-once"
+    ],
+    "OR-J24-S08": [
+      "TestLeaseSyncs/OR-J24-S08/a-batch-job-that-loses-its-first-reply-posts-once"
+    ],
+    "OR-J24-S09": [
+      "TestLeaseSyncs/OR-J24-S09/a-batch-is-priced-on-its-total"
+    ],
+    "OR-J24-S10": [
+      "TestLeaseSyncs/OR-J24-S10/periods-and-rate-card-revisions-are-priced-apart"
+    ],
+    "OR-J24-S11": [
+      "TestLeaseSyncs/OR-J24-S11/a-day-posts-once-and-once-more-before-a-top-up"
+    ],
+    "OR-J24-S12": [
+      "TestLeaseSyncs/OR-J24-S12/two-leases-drain-one-customer-within-its-balance"
+    ],
+    "OR-J24-S13": [
+      "TestLeaseSyncs/OR-J24-S13/capacity-another-lease-holds-is-capacity-held-not-limit-reached"
+    ],
+    "OR-J24-S14": [
+      "TestLeaseSyncs/OR-J24-S14/an-occasional-customer-is-decided-locally-and-its-idle-holds-come-back"
+    ],
+    "OR-J24-S15": [
+      "TestLeaseSyncs/OR-J24-S15/a-hold-grows-with-its-traffic"
+    ],
+    "OR-J24-S16": [
+      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-returns-its-holds-and-takes-no-want"
+    ],
+    "OR-J24-S17": [
+      "TestLeaseVersions/OR-J24-S17/a-smaller-size-is-released-once-its-gate-applies-it-and-never-below-its-tickets"
+    ],
+    "OR-J24-S18": [
+      "TestLeaseVersions/OR-J24-S18/a-sync-past-its-leases-lifetime-renews-nothing-and-its-holds-count-through-the-grace"
+    ],
+    "OR-J24-S19": [
+      "TestLeaseVersions/OR-J24-S19/lease-ids-are-uuidv7-an-id-past-the-replay-horizon-is-not-found-and-a-usage-only-close-ends-an-earlier-lease"
+    ],
+    "OR-J24-S20": [
+      "TestLeaseVersions/OR-J24-S20/a-renewed-hold-reads-the-rate-cards-in-force"
+    ],
+    "OR-J24-S21": [
+      "TestLeaseVersions/OR-J24-S21/what-a-days-usage-leaves-owed-is-dated-on-its-day"
+    ],
+    "OR-J24-S22": [
+      "TestLeaseVersions/OR-J24-S22/usage-after-a-credit-lot-lapses-never-draws-it"
+    ],
+    "OR-J24-S23": [
+      "TestLeaseVersions/OR-J24-S23/a-lease-keeps-refused-items-numbers-and-codes-within-its-bound"
+    ],
+    "OR-J24-S24": [
+      "TestLeaseVersions/OR-J24-S24/wants-answer-per-customer-and-a-host-stated-want-holds-its-estimate"
+    ],
+    "OR-J24-S25": [
+      "TestLeaseVersions/OR-J24-S25/a-trust-levels-policy-is-its-own-limit-set-and-its-hold-renews-as-its-invoker"
+    ],
+    "OR-J24-S26": [
+      "TestLeaseVersions/OR-J24-S26/a-renewal-never-opens-a-session"
+    ],
+    "OR-J24-S27": [
+      "TestLeaseVersions/OR-J24-S27/admit-while-positive-wants-only-capacity-free-beyond-their-tickets"
+    ],
+    "OR-J24-S28": [
+      "TestLeaseVersions/OR-J24-S28/no-hold-holds-past-the-30-day-hold-lifetime"
+    ],
+    "OR-J24-S29": [
+      "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
+    ],
+    "OR-J24-S30": [
+      "TestLeaseVersions/OR-J24-S30/a-window-closing-for-every-customer-renews-a-bounded-few-holds-per-sync"
+    ],
+    "OR-J24-S31": [
+      "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
+    ],
+    "OR-J24-S32": [
+      "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-hold-apart"
+    ],
+    "OR-J24-S33": [
+      "TestLeaseVersions/OR-J24-S33/usage-without-a-grant-opens-no-window-and-a-lapsed-grants-windows-keep-counting"
+    ],
+    "OR-J24-S34": [
+      "TestLeaseVersions/OR-J24-S34/a-backlog-across-a-thousand-customers-settles-a-bounded-prefix-per-sync"
+    ],
+    "OR-J24-S35": [
+      "TestLeaseVersions/OR-J24-S35/a-hold-another-lease-waits-for-shrinks-while-its-customer-is-busy"
     ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
@@ -540,6 +705,9 @@
     "OR-J31-S13": [
       "TestBaselineAdoption/OR-J31-S13/a-start-that-skips-migrations-is-refused-on-an-edited-baseline-until-the-migration-step-runs"
     ],
+    "OR-J31-S14": [
+      "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
+    ],
     "OR-J32-S01": [
       "TestMerchantHost/OR-J32-S01/provision-find-list-rename-retains-identity"
     ],
@@ -647,9 +815,6 @@
     ],
     "OR-J04-S07": [
       "TestBackgroundJobs/OR-J04-S07/host-worker-on-the-composed-fleet-is-rescued-after-a-crash"
-    ],
-    "OR-J23-S06": [
-      "TestBackgroundJobs/OR-J23-S06/denials-count-each-closed-hour-once"
     ],
     "OR-J29-S07": [
       "TestBackgroundJobs/OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish"
@@ -830,7 +995,7 @@
       "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
     ],
     "OR-J29-S08": [
-      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state"
+      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state"
     ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
@@ -852,6 +1017,9 @@
     ],
     "OR-J29-S40": [
       "TestBackgroundJobs/OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants"
+    ],
+    "OR-J29-S41": [
+      "TestBackgroundJobs/OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts"
     ],
     "OR-J26-S50": [
       "TestUsageBillingContracts/OR-J26-S50/paid",
@@ -876,6 +1044,15 @@
     ],
     "OR-J26-S55": [
       "TestNMICollectionRefusal/OR-J26-S55/a-never-sent-collection-retains-its-proof"
+    ],
+    "OR-J26-S56": [
+      "TestUsageBillingContracts/OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order"
+    ],
+    "OR-J26-S57": [
+      "TestUsageBillingContracts/OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it"
+    ],
+    "OR-J26-S58": [
+      "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
     ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"

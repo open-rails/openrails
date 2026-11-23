@@ -206,7 +206,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
-		case "admission_operations.state":
+		case "limit_holds.state":
 			if v != "released" && v != "captured" {
 				return bad()
 			}

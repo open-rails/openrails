@@ -155,7 +155,7 @@ func (s *Service) FinalizeUsage(ctx context.Context, payer identity.CustomerID, 
 	if err != nil {
 		return nil, err
 	}
-	order, err := s.moneyService().FinalizeUsage(ctx, payer, cur, from, to)
+	order, err := s.moneyService().FinalizeUsage(ctx, payer, cur, from, to, s.now())
 	if err != nil {
 		return nil, err
 	}

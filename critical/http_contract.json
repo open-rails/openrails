@@ -80,6 +80,12 @@
       "feature": ""
     },
     {
+      "method": "POST",
+      "path": "/v1/admin/customers/{customer_id}/limit-adjustments",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
       "method": "GET",
       "path": "/v1/admin/customers/{customer_id}/payment-methods",
       "auth": "merchant",
@@ -285,6 +291,18 @@
     },
     {
       "method": "POST",
+      "path": "/v1/app/leases/sync",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/limits",
+      "auth": "application",
+      "feature": ""
+    },
+    {
+      "method": "POST",
       "path": "/v1/app/orders",
       "auth": "application",
       "feature": ""
@@ -398,26 +416,26 @@
       "feature": "customer_provisioning"
     },
     {
-      "method": "GET",
-      "path": "/v1/app/usage-events",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/app/usage-events",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "GET",
-      "path": "/v1/app/usage-events/{id}",
-      "auth": "application",
-      "feature": ""
-    },
-    {
       "method": "POST",
       "path": "/v1/catalog/apply",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/limits",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/catalog/limits/{key}",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/catalog/limits/{key}",
       "auth": "merchant",
       "feature": ""
     },
@@ -610,6 +628,12 @@
     {
       "method": "GET",
       "path": "/v1/me/entitlements",
+      "auth": "customer",
+      "feature": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/limits",
       "auth": "customer",
       "feature": ""
     },

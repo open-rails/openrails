@@ -80,7 +80,7 @@ An error's `code` is contract; its `message` is not.
 Every table, column (type, nullability, default), constraint, index, trigger
 and function the migrations install. `api/schema.txt` is read back from the
 catalogs of a PostgreSQL 18 after the real migrator ran, at the default schema
-`billing`. The monthly partitions of `usage_events` and `admission_operations`
+`billing`. The monthly partitions of `limit_holds` and `limit_hold_parts`
 are left out, because their names follow the calendar; the partitioned tables
 are in.
 

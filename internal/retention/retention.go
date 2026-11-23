@@ -21,18 +21,17 @@ const (
 	// UsageBillingLagMonths is how long after a month ends its usage is
 	// billed at the latest: the longest billing period is one month.
 	UsageBillingLagMonths = 1
-	// UsageIngestWindow is how far back a usage event may be dated when it is
-	// recorded, and how long its idempotency key is honoured after it occurred.
+	// UsageIngestWindow is how far back usage may be dated when it settles.
 	UsageIngestWindow = 35 * Day
-	// UsageClockSkew is how far ahead of the server clock an event may be dated.
+	// UsageClockSkew is how far ahead of the server clock usage may be dated.
 	UsageClockSkew = 5 * time.Minute
 
 	// AdmissionMaxWindow is the longest spend window a policy may declare.
 	AdmissionMaxWindow = 31 * Day
-	// AdmissionMaxHold is the longest a hold may live past its admission.
+	// AdmissionMaxHold is the longest a hold row may live past its creation.
 	AdmissionMaxHold = 30 * Day
-	// Admissions is how long an admitted request is kept: the longest spend
-	// window that may still count it, plus 30 days.
+	// Admissions is how long a hold is kept, the replay horizon: the longest
+	// spend window that may still count it, plus 30 days.
 	Admissions = AdmissionMaxWindow + 30*Day
 
 	// PartitionsAheadMonths is how many months past the current one always
@@ -59,12 +58,23 @@ const (
 	// UnpaidOrders keeps an unpaid closed order that never started a payment
 	// attempt 90 days past its close.
 	UnpaidOrders = 90 * Day
-	// MetricCounters keeps an hourly admission-denial count and a daily
-	// webhook-health count 13 months: a month is compared with a year before.
+	// MetricCounters keeps a daily webhook-health count 13 months: a month is
+	// compared with a year before.
 	MetricCounters = 397 * Day
 	// OrphanState keeps the deployment-global lease of a periodic kind no
 	// fleet has scheduled for 30 days.
 	OrphanState = 30 * Day
+	// LimitWindows keeps a closed limit window 61 days past its end: the
+	// replay horizon, within which late usage and replays still resolve.
+	LimitWindows = 61 * Day
+	// Leases keeps a gate's lease 61 days past its last sync, so its late
+	// reports and replays still resolve.
+	Leases = Admissions
+	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
+	LimitAdjustments = Admissions
+	// UsageMinutes keeps a minute of a customer's usage spend past the
+	// longest accrual-rate window, a day.
+	UsageMinutes = 25 * time.Hour
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day
@@ -101,10 +111,12 @@ type MonthlyPartitions struct {
 	DropBefore func(now time.Time) time.Time
 }
 
-// Partitioned lists the partitioned tables.
+// Partitioned lists the partitioned tables. Hold parts have no foreign key
+// to their hold (a referenced partition cannot be dropped); readers join the
+// hold, and a month of parts drops before its month of holds.
 var Partitioned = []MonthlyPartitions{
-	{Table: "usage_events", Key: "occurred_at", WriteBack: UsageIngestWindow, DropBefore: UsageDropBefore},
-	{Table: "admission_operations", Key: "admitted_at", DropBefore: AdmissionsDropBefore},
+	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
+	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
 }
 
 // MonthStart is the first instant of t's UTC month.
@@ -119,7 +131,7 @@ func UsageDropBefore(now time.Time) time.Time {
 	return MonthStart(now).AddDate(0, -(UsageBilledMonths + UsageBillingLagMonths), 0)
 }
 
-// AdmissionsDropBefore is the oldest admission still kept.
+// AdmissionsDropBefore is the oldest hold still kept.
 func AdmissionsDropBefore(now time.Time) time.Time { return now.UTC().Add(-Admissions) }
 
 // Range is the span of months a row may be written into at now, plus the

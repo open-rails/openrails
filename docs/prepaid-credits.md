@@ -2,7 +2,13 @@
 
 A product with a `credit_grant` tops up a currency balance that priced usage draws
 down ([usage billing](usage-billing.md)). It is a monetary balance, not a request
-or token counter.
+or token counter: holds and reads call it the built-in limit `balance`, and it is
+never declared as a limit. Show it in your own unit (1 credit = 1¢) if you like;
+a cap in requests or tokens is a [limit](usage-billing.md#limits).
+
+Usage draws the balance once a day: a customer's day of usage in a currency posts
+as one deduction after the day ends, or earlier before the balance next moves
+(a top-up, an expiry, a revocation or refund). Until then the balance holds it.
 
 ```yaml
 schema_version: 1
@@ -53,8 +59,9 @@ the `amount` alias. `from_payment: true` grants exactly what was paid.
   The amount cannot change once ordered; fixed-price packs refuse one.
   Customer-chosen amounts sell on Stripe and NMI. Recurring credit benefits are not
   supported.
-- A voluntary refund needs the lot's credits unused and unheld; a forced reversal
-  uses the source lot and keeps the rules for usage already authorized.
+- A voluntary refund needs the lot's credits unused and unheld (the day's usage
+  posts first); a forced reversal uses the source lot and keeps the rules for usage
+  already authorized.
 - Staff fund balances directly with `POST /v1/admin/credit-grants`
   ([merchant operations](merchant-operations.md#credit-grants)).
 

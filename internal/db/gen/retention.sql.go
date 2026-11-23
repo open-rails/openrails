@@ -65,31 +65,6 @@ func (q *Queries) DeleteAbandonedOrderAttemptsBefore(ctx context.Context, arg De
 	return result.RowsAffected(), nil
 }
 
-const deleteAdmissionDenialsBefore = `-- name: DeleteAdmissionDenialsBefore :execrows
-DELETE FROM billing.admission_denials_hourly d
-WHERE (d.merchant_id, d.customer_id, d.denial_reason, d.hour_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.denial_reason, e.hour_at
-    FROM billing.admission_denials_hourly e
-    WHERE e.merchant_id = $1::uuid AND e.hour_at < $2::timestamptz
-    ORDER BY e.hour_at
-    LIMIT $3::int
-)
-`
-
-type DeleteAdmissionDenialsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteAdmissionDenialsBefore(ctx context.Context, arg DeleteAdmissionDenialsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAdmissionDenialsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteEndedFailedUsageWindows = `-- name: DeleteEndedFailedUsageWindows :execrows
 DELETE FROM billing.failed_usage_windows w
 WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
@@ -170,6 +145,87 @@ type DeleteHostOutboxBeforeParams struct {
 // goes at one cutoff.
 func (q *Queries) DeleteHostOutboxBefore(ctx context.Context, arg DeleteHostOutboxBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteHostOutboxBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLeasesBefore = `-- name: DeleteLeasesBefore :execrows
+DELETE FROM billing.leases l
+WHERE (l.merchant_id, l.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.leases e
+    WHERE e.merchant_id = $1::uuid AND e.last_sync_at < $2::timestamptz
+    ORDER BY e.last_sync_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLeasesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A lease goes with its holds.
+func (q *Queries) DeleteLeasesBefore(ctx context.Context, arg DeleteLeasesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLeasesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLimitAdjustmentsBefore = `-- name: DeleteLimitAdjustmentsBefore :execrows
+DELETE FROM billing.limit_adjustments a
+WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.source_id
+    FROM billing.limit_adjustments e
+    WHERE e.merchant_id = $1::uuid AND e.created_at < $2::timestamptz
+    ORDER BY e.created_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLimitAdjustmentsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteLimitAdjustmentsBefore(ctx context.Context, arg DeleteLimitAdjustmentsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLimitAdjustmentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLimitWindowsBefore = `-- name: DeleteLimitWindowsBefore :execrows
+DELETE FROM billing.limit_windows w
+WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.limit_key, e.window_starts_at
+    FROM billing.limit_windows e
+    WHERE e.merchant_id = $1::uuid AND e.window_ends_at < $2::timestamptz
+    ORDER BY e.window_ends_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLimitWindowsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A closed limit window past the replay horizon; a row another writer
+// holds waits for a later pass.
+func (q *Queries) DeleteLimitWindowsBefore(ctx context.Context, arg DeleteLimitWindowsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLimitWindowsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -362,6 +418,58 @@ func (q *Queries) DeleteSubscriptionTransitionsPastRetention(ctx context.Context
 	return result.RowsAffected(), nil
 }
 
+const deleteUsageDailyBefore = `-- name: DeleteUsageDailyBefore :execrows
+DELETE FROM billing.usage_daily d
+WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter_key, d.cell, d.invoker, d.outcome) IN (
+    SELECT e.merchant_id, e.customer_id, e.day_at, e.currency, e.event_type, e.meter_key, e.cell, e.invoker, e.outcome
+    FROM billing.usage_daily e
+    WHERE e.merchant_id = $1::uuid AND e.day_at < $2::timestamptz
+    ORDER BY e.day_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteUsageDailyBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteUsageDailyBefore(ctx context.Context, arg DeleteUsageDailyBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUsageDailyBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteUsageMinutesBefore = `-- name: DeleteUsageMinutesBefore :execrows
+DELETE FROM billing.usage_minutes m
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute_at
+    FROM billing.usage_minutes e
+    WHERE e.merchant_id = $1::uuid AND e.minute_at < $2::timestamptz
+    ORDER BY e.minute_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteUsageMinutesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteUsageMinutesBefore(ctx context.Context, arg DeleteUsageMinutesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUsageMinutesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteWebhookHealthDaysBefore = `-- name: DeleteWebhookHealthDaysBefore :execrows
 DELETE FROM billing.webhook_health_daily
 WHERE ctid IN (
@@ -495,12 +603,6 @@ FROM (
         AND mq.period_starts_at < $10::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
-    (SELECT DISTINCT ad.merchant_id AS mid
-       FROM billing.admission_denials_hourly ad
-      WHERE ($1::uuid IS NULL OR ad.merchant_id > $1::uuid)
-        AND ad.hour_at < $11::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
     (SELECT DISTINCT wh.merchant_id AS mid
        FROM billing.webhook_health_daily wh
       WHERE ($1::uuid IS NULL OR wh.merchant_id > $1::uuid)
@@ -534,6 +636,36 @@ FROM (
       WHERE ($1::uuid IS NULL OR pk.merchant_id > $1::uuid)
         AND pk.released_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT lw.merchant_id AS mid
+       FROM billing.limit_windows lw
+      WHERE ($1::uuid IS NULL OR lw.merchant_id > $1::uuid)
+        AND lw.window_ends_at < $15::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT le.merchant_id AS mid
+       FROM billing.leases le
+      WHERE ($1::uuid IS NULL OR le.merchant_id > $1::uuid)
+        AND le.last_sync_at < $16::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT la.merchant_id AS mid
+       FROM billing.limit_adjustments la
+      WHERE ($1::uuid IS NULL OR la.merchant_id > $1::uuid)
+        AND la.created_at < $16::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT ud.merchant_id AS mid
+       FROM billing.usage_daily ud
+      WHERE ($1::uuid IS NULL OR ud.merchant_id > $1::uuid)
+        AND ud.day_at < $17::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT um.merchant_id AS mid
+       FROM billing.usage_minutes um
+      WHERE ($1::uuid IS NULL OR um.merchant_id > $1::uuid)
+        AND um.minute_at < $18::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -554,6 +686,10 @@ type ListRetentionWorkMerchantsParams struct {
 	FindingCutoff       time.Time
 	ProviderWriteCutoff time.Time
 	ParkCutoff          time.Time
+	LimitWindowCutoff   time.Time
+	ReplayCutoff        time.Time
+	UsageCutoff         time.Time
+	UsageMinuteCutoff   time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -576,6 +712,10 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.FindingCutoff,
 		arg.ProviderWriteCutoff,
 		arg.ParkCutoff,
+		arg.LimitWindowCutoff,
+		arg.ReplayCutoff,
+		arg.UsageCutoff,
+		arg.UsageMinuteCutoff,
 	)
 	if err != nil {
 		return nil, err

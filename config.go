@@ -183,7 +183,7 @@ const (
 	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
 	// ListPrices.
 	ReadCatalog = config.ReadCatalog
-	// ReadMeters is GetMeter and ListMeters.
+	// ReadMeters is GetMeter, ListMeters, GetLimit and ListLimits.
 	ReadMeters = config.ReadMeters
 	// ReadPublicConfig is GetPublicConfig.
 	ReadPublicConfig = config.ReadPublicConfig

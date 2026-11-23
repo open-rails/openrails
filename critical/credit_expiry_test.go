@@ -77,7 +77,7 @@ func TestCreditExpiry(t *testing.T) {
 		captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("still-authorized", 100)})
 		require.NoError(t, err)
 		require.NoError(t, captured[0].Err())
-		balance(t, w.alpha, customer, 400, 0, 400)
+		balance(t, w.alpha, customer, 400, 100, 500)
 		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
 		expiredEntries := 0

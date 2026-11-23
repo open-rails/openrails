@@ -13,6 +13,7 @@ are in [routes](api/routes.md).
 | failed renewals | `GET /v1/admin/subscriptions?dunning=true` ([dunning](dunning.md)) |
 | grant a product, revoke a window | `POST /v1/admin/product-access` (batch; `hours` at most 2562047, none for no end), `…/{id}/revoke` |
 | record money received outside OpenRails | `POST /v1/admin/payments` |
+| change a customer's [usage limits](usage-billing.md#limits) | `limits` on `PATCH /v1/admin/customers/{customer_id}`; this window only: `POST /v1/admin/customers/{customer_id}/limit-adjustments` |
 | subscriptions | `GET /v1/admin/subscriptions`, `sort` `created_at`, `current_period_ends_at` or `canceled_at` |
 | findings | `GET /v1/merchant/findings` (merchant configuration, not customer support) |
 

@@ -89,13 +89,13 @@ names: a route acting on merchant M admits the `merchant:` name held in M's scop
 | Routes | `merchant:` / `root:` | Covers |
 |---|---|---|
 | admin reads | `MerchantCustomerRead` / `RootCustomerRead` | customer support's reads |
-| admin changes | `MerchantCustomerManage` / `RootCustomerManage` | refunds, cancellations, credits |
-| catalog reads | `MerchantCatalogRead` / `RootCatalogRead` | products, prices, meters, price migrations |
+| admin changes | `MerchantCustomerManage` / `RootCustomerManage` | refunds, cancellations, credits, limits |
+| catalog reads | `MerchantCatalogRead` / `RootCatalogRead` | products, prices, meters, limits, price migrations |
 | catalog edits | `MerchantCatalogManage` / `RootCatalogManage` | edits, documents, migrations |
 | merchant config | `MerchantConfigRead`, `MerchantConfigManage` / `RootConfig…` | PSPs, imports, findings, settings, billing export |
 | metrics | `MerchantMetricsRead` / `RootMetricsRead` | metrics and dashboards |
 | `/v1/app` | `MerchantEntitlementsRead` / `RootEntitlementsRead` | `POST /v1/app/entitlements/check` |
-| `/v1/app` | `MerchantUsageRead`, `MerchantUsageManage` / `RootUsage…` | admissions, usage events, running charges |
+| `/v1/app` | `MerchantUsageRead`, `MerchantUsageManage` / `RootUsage…` | admissions, lease syncs, customer limits, running charges |
 | `/v1/app` | `MerchantEventsRead` / `RootEventsRead` | the event log |
 | `/v1/app` | `MerchantOrdersManage` / `RootOrdersManage` | merchant orders |
 | none | `MerchantCustomersRead` / `RootCustomersRead` | declared; no route checks it |

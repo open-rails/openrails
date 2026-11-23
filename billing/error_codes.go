@@ -91,6 +91,23 @@ const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 // current revision; metadata.revision is the current one.
 const CodeRevisionMismatch = "revision_mismatch"
 
+// CodeLimitNotFound: the catalog declares no limit under the key.
+const CodeLimitNotFound = "limit_not_found"
+
+// Lease codes.
+const (
+	// CodeLeaseNotFound: the lease id is a UUIDv7 older than the replay
+	// horizon and no lease of the merchant has it: it was forgotten, and its
+	// items cannot be settled again safely.
+	CodeLeaseNotFound = "lease_not_found"
+	// CodeLeaseNotHeld: the lease is closed or stopped syncing, so it holds
+	// nothing and takes no hold.
+	CodeLeaseNotHeld = "lease_not_held"
+	// CodeUsageOutOfOrder: a usage item skips a number the lease has not
+	// settled.
+	CodeUsageOutOfOrder = "usage_out_of_order"
+)
+
 // CodeProductInUse: a record refers to the product or one of its prices (a
 // purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
@@ -330,6 +347,10 @@ var errorCodes = []ErrorCode{
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
+	{CodeLimitNotFound, 404, invalid, "The catalog declares no limit under this key."},
+	{CodeLeaseNotFound, 404, invalid, "No lease of the merchant has this id, which is older than the replay horizon; start a new lease."},
+	{CodeLeaseNotHeld, 409, invalid, "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease."},
+	{CodeUsageOutOfOrder, 409, invalid, "A usage item skips a number the lease has not settled; send the items in order."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

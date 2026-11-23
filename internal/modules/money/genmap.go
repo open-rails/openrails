@@ -128,36 +128,3 @@ func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {
 		UpdatedAt:            r.UpdatedAt,
 	}
 }
-
-// UsageEventFromRow decodes the stored usage fact shared by writes and inspections.
-func UsageEventFromRow(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
-	m := &models.UsageEvent{
-		ID:               r.ID,
-		MerchantID:       r.MerchantID,
-		CustomerID:       r.CustomerID,
-		Invoker:          r.InvokerID,
-		Currency:         r.Currency,
-		Resource:         r.Resource,
-		EventType:        r.EventType,
-		Amount:           r.Amount,
-		Outcome:          r.Outcome,
-		ForgivenAmount:   r.ForgivenAmount,
-		Source:           r.Source,
-		SourceID:         r.SourceID,
-		LedgerTransferID: r.LedgerTransferID,
-		StatedAmount:     r.StatedAmount,
-		OccurredAt:       r.OccurredAt,
-		CreatedAt:        r.CreatedAt,
-	}
-	if err := fromJSONBC(r.Dimensions, &m.Dimensions, "usage_events.dimensions"); err != nil {
-		return nil, err
-	}
-	if err := fromJSONBC(r.Metadata, &m.Metadata, "usage_events.metadata"); err != nil {
-		return nil, err
-	}
-	m.Charges = []models.UsageCharge{}
-	if err := fromJSONBC(r.Charges, &m.Charges, "usage_events.charges"); err != nil {
-		return nil, err
-	}
-	return m, nil
-}

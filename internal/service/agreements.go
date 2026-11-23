@@ -257,6 +257,10 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 	}
 	now := s.now().UTC()
 	var billed *gen.BillingOrder
+	// What the customer's usage accrued is owed before the agreement ends.
+	if _, err := s.rt.MoneyService.PostUsageAccruals(ctx, customer.UUID(), currency, time.Time{}, now); err != nil {
+		return nil, err
+	}
 	from, err := s.rt.DB.Gen(ctx).EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency})
 	switch {
 	case db.IsNotFound(err):
@@ -265,7 +269,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 	default:
 		// The window closes just past now: usage accrued this instant is in it
 		// (timestamps are microseconds).
-		if billed, err = s.rt.MoneyService.FinalizeUsage(ctx, identity.CustomerID(customer), currency, from, now.Add(time.Microsecond)); err != nil {
+		if billed, err = s.rt.MoneyService.FinalizeUsage(ctx, identity.CustomerID(customer), currency, from, now.Add(time.Microsecond), now); err != nil {
 			return nil, err
 		}
 	}

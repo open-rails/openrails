@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 345,
+  "scenario_count": 404,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -571,17 +571,17 @@
     {
       "id": "OR-J24-S01",
       "journey": "J24",
-      "name": "Duplicate usage event has one immutable quantity and attribution"
+      "name": "A resent usage item answers its receipt and a changed one conflicts"
     },
     {
       "id": "OR-J24-S02",
       "journey": "J24",
-      "name": "Late event and changed meter retain documented accepted pricing"
+      "name": "Late usage and a changed meter keep the accepted pricing"
     },
     {
       "id": "OR-J24-S03",
       "journey": "J24",
-      "name": "Batch boundary errors do not leak another customer item"
+      "name": "A refused item leaves its neighbours and another merchant's lease"
     },
     {
       "id": "OR-J24-S04",
@@ -591,7 +591,157 @@
     {
       "id": "OR-J24-S05",
       "journey": "J24",
-      "name": "Charged failed usage replayed past its key window is charged once"
+      "name": "Charged failed usage resent past its key window is charged once"
+    },
+    {
+      "id": "OR-J24-S06",
+      "journey": "J24",
+      "name": "A lost reply's resend settles once and a gap is refused"
+    },
+    {
+      "id": "OR-J24-S07",
+      "journey": "J24",
+      "name": "A dead lease's outbox resend settles each item once and renews nothing"
+    },
+    {
+      "id": "OR-J24-S08",
+      "journey": "J24",
+      "name": "A batch job's lost first reply posts its usage once"
+    },
+    {
+      "id": "OR-J24-S09",
+      "journey": "J24",
+      "name": "A thousand items are priced exactly on their total"
+    },
+    {
+      "id": "OR-J24-S10",
+      "journey": "J24",
+      "name": "Pricing periods and rate-card revisions are priced in separate groups"
+    },
+    {
+      "id": "OR-J24-S11",
+      "journey": "J24",
+      "name": "A day's usage posts once and once more before a top-up, held until then"
+    },
+    {
+      "id": "OR-J24-S12",
+      "journey": "J24",
+      "name": "Two leases drain one customer without holding past its balance"
+    },
+    {
+      "id": "OR-J24-S13",
+      "journey": "J24",
+      "name": "Capacity another lease holds is capacity_held, and its next syncs give it back"
+    },
+    {
+      "id": "OR-J24-S14",
+      "journey": "J24",
+      "name": "An occasional customer is decided locally and its idle holds come back near its limit"
+    },
+    {
+      "id": "OR-J24-S15",
+      "journey": "J24",
+      "name": "A hold grows with its traffic within a few syncs"
+    },
+    {
+      "id": "OR-J24-S16",
+      "journey": "J24",
+      "name": "A sync with close settles its usage, returns every hold and ends the lease; later wants are lease_not_held and usage still settles"
+    },
+    {
+      "id": "OR-J24-S17",
+      "journey": "J24",
+      "name": "A smaller hold size is released only once its gate reports the version that carried it applied, never below what its tickets took, and a lost answer comes again"
+    },
+    {
+      "id": "OR-J24-S18",
+      "journey": "J24",
+      "name": "A sync past its lease's lifetime answers live false and renews nothing; readers count its holds through a grace that outlasts any sync"
+    },
+    {
+      "id": "OR-J24-S19",
+      "journey": "J24",
+      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close settles and ends an earlier lease"
+    },
+    {
+      "id": "OR-J24-S20",
+      "journey": "J24",
+      "name": "A renewed hold reads the rate cards in force: a price change issues it again at the new price"
+    },
+    {
+      "id": "OR-J24-S21",
+      "journey": "J24",
+      "name": "What a day's usage leaves owed is dated on its day, so the bill of the period that holds it bills it whenever it posted"
+    },
+    {
+      "id": "OR-J24-S22",
+      "journey": "J24",
+      "name": "Usage after a credit lot lapses never draws it: the lot pays for the usage before its lapse and expires with the rest"
+    },
+    {
+      "id": "OR-J24-S23",
+      "journey": "J24",
+      "name": "A lease keeps each refused item's number and code within a byte bound: a resend answers them and the lease keeps syncing"
+    },
+    {
+      "id": "OR-J24-S24",
+      "journey": "J24",
+      "name": "Wants are answered per customer and limit set, and a host-stated want holds its estimated_amount, never with usage"
+    },
+    {
+      "id": "OR-J24-S25",
+      "journey": "J24",
+      "name": "A trust level's policy is its own limit set, and its hold renews as the invoker it was resolved for"
+    },
+    {
+      "id": "OR-J24-S26",
+      "journey": "J24",
+      "name": "A renewal never opens a session: an ended session's hold with usage is answered empty, and only a want or a use opens the next"
+    },
+    {
+      "id": "OR-J24-S27",
+      "journey": "J24",
+      "name": "admit_while_positive wants only capacity free beyond their tickets; with none free, capacity other leases hold is capacity_held"
+    },
+    {
+      "id": "OR-J24-S28",
+      "journey": "J24",
+      "name": "No hold holds past the 30-day hold lifetime, an abandoned admission in a long window included"
+    },
+    {
+      "id": "OR-J24-S29",
+      "journey": "J24",
+      "name": "Concurrent syncs and admissions on the same customers never deadlock and never hold past capacity"
+    },
+    {
+      "id": "OR-J24-S30",
+      "journey": "J24",
+      "name": "A window that closes for every customer at once renews a bounded number of holds per sync, most urgent first, and the next syncs renew the rest"
+    },
+    {
+      "id": "OR-J24-S31",
+      "journey": "J24",
+      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+    },
+    {
+      "id": "OR-J24-S32",
+      "journey": "J24",
+      "name": "Trust levels whose spend windows share a key but not a cap resolve to different limit sets, each refused by its own cap"
+    },
+    {
+      "id": "OR-J24-S33",
+      "journey": "J24",
+      "name": "Usage without a grant opens no window of any reset kind, so a late buyer gets the whole capacity and unpaid use starts no session; usage while a grant has lapsed is not enforced but counts in the windows the grant opened while they last, which the returning grant reads"
+    },
+    {
+      "id": "OR-J24-S34",
+      "journey": "J24",
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+    },
+    {
+      "id": "OR-J24-S35",
+      "journey": "J24",
+      "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
     },
     {
       "id": "OR-J25-S01",
@@ -804,6 +954,11 @@
       "name": "A start that skips migrations is refused on a baseline record of other content until the migration step has run"
     },
     {
+      "id": "OR-J31-S14",
+      "journey": "J31",
+      "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
+    },
+    {
       "id": "OR-J32-S01",
       "journey": "J32",
       "name": "Provision find list and rename merchant retain stable identity"
@@ -954,9 +1109,129 @@
       "name": "Host workers on a composed fleet keep River's job timeout and crash rescue"
     },
     {
-      "id": "OR-J23-S06",
+      "id": "OR-J23-S07",
       "journey": "J23",
-      "name": "Admission denial statistics count each closed hour once"
+      "name": "Limits declare in documents and edits with field ownership and refuse invalid terms"
+    },
+    {
+      "id": "OR-J23-S08",
+      "journey": "J23",
+      "name": "A customer is subject only to the limits a live product or override gives it capacity in, and its capacity is their sum"
+    },
+    {
+      "id": "OR-J23-S09",
+      "journey": "J23",
+      "name": "A customer override replaces its products' capacity and inherit restores it"
+    },
+    {
+      "id": "OR-J23-S10",
+      "journey": "J23",
+      "name": "A limit adjustment adds to the current window only, once per source_id"
+    },
+    {
+      "id": "OR-J23-S11",
+      "journey": "J23",
+      "name": "Limit reads and adjustments stay within their merchant, customer and permission"
+    },
+    {
+      "id": "OR-J23-S12",
+      "journey": "J23",
+      "name": "A customer reads its own limits at /v1/me/limits"
+    },
+    {
+      "id": "OR-J23-S13",
+      "journey": "J23",
+      "name": "A five-hour session and a weekly cap in weighted tokens: first use opens the session, a hold keeps its window, the crossing request finishes and the next is refused limit_reached"
+    },
+    {
+      "id": "OR-J23-S14",
+      "journey": "J23",
+      "name": "Balance and a monthly spend cap: one request holds and settles both or neither"
+    },
+    {
+      "id": "OR-J23-S15",
+      "journey": "J23",
+      "name": "Four replicas racing for a limit's last units admit exactly its capacity"
+    },
+    {
+      "id": "OR-J23-S16",
+      "journey": "J23",
+      "name": "An overrun settles past capacity unclamped, refuses holds until a refill, and records reached_at once"
+    },
+    {
+      "id": "OR-J23-S17",
+      "journey": "J23",
+      "name": "A delegated invoker is refused as before and holds no money and no limit"
+    },
+    {
+      "id": "OR-J23-S18",
+      "journey": "J23",
+      "name": "Invokers with the same limits share their windows; another trust level is held against its own"
+    },
+    {
+      "id": "OR-J23-S19",
+      "journey": "J23",
+      "name": "Remote and embedded gates decide with the same code; a warm decision needs no I/O and holds while OpenRails is unreachable"
+    },
+    {
+      "id": "OR-J23-S20",
+      "journey": "J23",
+      "name": "Racing requests on two limits never take more than either hold; holding 80 of 100 and capturing 30 leaves 70"
+    },
+    {
+      "id": "OR-J23-S21",
+      "journey": "J23",
+      "name": "A lost sync reply and a restart with unsent usage converge once, with and without an outbox; a dead lease's holds never reopen"
+    },
+    {
+      "id": "OR-J23-S22",
+      "journey": "J23",
+      "name": "A gate ticket lives across many syncs without a deadline and its capture settles in the session it was admitted in"
+    },
+    {
+      "id": "OR-J23-S23",
+      "journey": "J23",
+      "name": "Processes sharing Redis form one gate: warm on each other, never past the hold, syncing handed over without loss, own leases while Redis is down"
+    },
+    {
+      "id": "OR-J23-S24",
+      "journey": "J23",
+      "name": "Gate refusals are verdicts (limit_reached with its reset, capacity_held waited out or refused); OpenRails down is ErrUnavailable"
+    },
+    {
+      "id": "OR-J23-S25",
+      "journey": "J23",
+      "name": "With usage_gate_safe_spend a hold's safe is its money size; a gate spends it only while OpenRails is unreachable, and never for units"
+    },
+    {
+      "id": "OR-J23-S26",
+      "journey": "J23",
+      "name": "An admission that fits only were gates' lease holds returned is capacity_held (Admit and AdmitTx, limits and balance) and takes those holds back at their next sync"
+    },
+    {
+      "id": "OR-J23-S27",
+      "journey": "J23",
+      "name": "Closing a gate ends its lease and returns its holds at once; with Redis the group lease lives while a process remains and ends with the last"
+    },
+    {
+      "id": "OR-J23-S28",
+      "journey": "J23",
+      "name": "With Redis, a units-only plan's zero-cost money parts are taken, released, captured and settled, and every released unit comes back"
+    },
+    {
+      "id": "OR-J23-S29",
+      "journey": "J23",
+      "name": "A sync reply lost after a shrink releases nothing until the gate has applied the shrink, and the capacity then reaches the gate that waited"
+    },
+    {
+      "id": "OR-J23-S30",
+      "journey": "J23",
+      "name": "A lease a sync answers dead is closed and its holds free at once, in process and through Redis; its hold never decides again"
+    },
+    {
+      "id": "OR-J23-S31",
+      "journey": "J23",
+      "name": "A Redis usage write whose reply was lost posts once when retried, before or after it settled; a Record repeated with its source and source_id posts once"
     },
     {
       "id": "OR-J29-S07",
@@ -1271,7 +1546,7 @@
     {
       "id": "OR-J29-S08",
       "journey": "J29",
-      "name": "Retention cleanup alone ages out unpaid orders, metric counters and orphan state; order expiry alone expires abandoned attempts"
+      "name": "Retention cleanup alone ages out unpaid orders, stale gate leases and orphan state; order expiry alone expires abandoned attempts"
     },
     {
       "id": "OR-J19-S05",
@@ -1399,6 +1674,11 @@
       "name": "Retention cleanup continues past a full batch of merchants in a new job and reaches every merchant"
     },
     {
+      "id": "OR-J29-S41",
+      "journey": "J29",
+      "name": "Partition retention drops a month of holds and the month of their parts in one pass once it is past the replay horizon, and keeps the current month"
+    },
+    {
       "id": "OR-J26-S50",
       "journey": "J26",
       "name": "Paying, waiving or writing off a usage order clears its customer's delinquency in the same change"
@@ -1432,6 +1712,21 @@
       "id": "OR-J26-S55",
       "journey": "J26",
       "name": "A direct NMI collection refused before dispatch retains nonexecution proof and recovers without duplicate payment"
+    },
+    {
+      "id": "OR-J26-S56",
+      "journey": "J26",
+      "name": "Usage of a billed day reported after its usage order is owed after that order's period and billed by the next order"
+    },
+    {
+      "id": "OR-J26-S57",
+      "journey": "J26",
+      "name": "Usage before a period that ends within a day is owed in that period, not the next one"
+    },
+    {
+      "id": "OR-J26-S58",
+      "journey": "J26",
+      "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
       "id": "OR-J37-S60",

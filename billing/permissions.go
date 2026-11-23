@@ -40,7 +40,7 @@ const (
 	// The admin group's reads: customers, their subscriptions and payments.
 	MerchantCustomerRead Permission = "merchant:customer:read"
 	RootCustomerRead     Permission = "root:customer:read"
-	// The admin group's changes: refunds, cancellations, credits.
+	// The admin group's changes: refunds, cancellations, credits, limits.
 	MerchantCustomerManage Permission = "merchant:customer:manage"
 	RootCustomerManage     Permission = "root:customer:manage"
 	// The catalog group.
@@ -58,13 +58,13 @@ const (
 	// The programmatic routes' (/v1/app). The content gate.
 	MerchantEntitlementsRead Permission = "merchant:entitlements:read"
 	RootEntitlementsRead     Permission = "root:entitlements:read"
-	// Catalog reads: products, prices, meters and price migrations.
+	// Catalog reads: products, prices, meters, limits and price migrations.
 	MerchantCatalogRead Permission = "merchant:catalog:read"
 	RootCatalogRead     Permission = "root:catalog:read"
 	// Read usage and running charges without recording or collecting them.
 	MerchantUsageRead Permission = "merchant:usage:read"
 	RootUsageRead     Permission = "root:usage:read"
-	// Admissions and usage events, which charge customers.
+	// Admissions and lease syncs, which charge customers.
 	MerchantUsageManage Permission = "merchant:usage:manage"
 	RootUsageManage     Permission = "root:usage:manage"
 	// Host events: reading and acknowledging them.

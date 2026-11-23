@@ -71,8 +71,10 @@ func TestHostTransactions(t *testing.T) {
 			require.NoError(t, err)
 			if scenario.commit {
 				require.Equal(t, 2, hostRows)
-				balance(t, w.alpha, customer, 550, 0, 550)
-				require.Len(t, ledger.Items, 2)
+				// The capture's accrual committed with the host's work; it
+				// posts once its day ends.
+				balance(t, w.alpha, customer, 550, 450, 1000)
+				require.Len(t, ledger.Items, 1)
 				admission, err := w.alpha.GetAdmission(t.Context(), "host-work")
 				require.NoError(t, err)
 				require.NotNil(t, admission.State)

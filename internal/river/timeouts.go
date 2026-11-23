@@ -31,7 +31,6 @@ const RescueAfter = 10 * time.Minute
 var kinds = map[string]time.Duration{
 	balancelook.Kind:                     DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
-	KindAdmissionDenialFlush:             DefaultTimeout,
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,

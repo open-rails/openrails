@@ -1,32 +1,43 @@
 # Spend limits and delinquency
 
-How much a customer may owe or spend (billing policies, checked at admission), and
-what happens when an arrears bill goes unpaid (delinquency). OpenRails measures
-both from the ledger, never from usage orders or numbers you send, and enforces
-them at [admission](usage-billing.md#admissions). Which policy binds to whom, and
-what to shut off when a customer is delinquent, are yours.
+How much a customer may owe or spend (billing policies), and what happens when an
+arrears bill goes unpaid (delinquency). OpenRails measures both from the ledger,
+never from usage orders or numbers you send, and enforces them when a hold is
+issued: at [admission](usage-billing.md#admissions) and in a gate's sync. Which
+policy binds to whom, and what to shut off when a customer is delinquent, are
+yours. Usage caps in your own units are [limits](usage-billing.md#limits).
 
 ## Billing policies
 
 A policy is a named object; a binding points the merchant default, a trust tier or
-a customer at one. Rebinding moves no money and takes effect at the next admission
-in every runtime.
+a customer at one. Rebinding moves no money and applies to holds issued or grown
+after it, in every runtime.
 
 | `kind` | Caps | Refusal |
 |---|---|---|
 | `outstanding_cap` | unpaid arrears from the ledger: $155 owed against $200 leaves $45 | `outstanding_cap_reached` |
-| `window_spend_cap` | new spend per rolling window; prior debt does not gate it | `budget_exceeded` |
+| `window_spend_cap` | new spend per window; prior debt does not gate it | `budget_exceeded` |
 | `accrual_rate_cap` | the measured accrual rate, native units per hour | `accrual_rate_cap_reached` |
 
-These differ from `insufficient_credit` (this request does not fit) and
-`delinquent_unpaid_order` (an unpaid bill past grace), so a host can tell the
-customer which it is.
+These differ from `insufficient_credit` (this request does not fit),
+`delinquent_unpaid_order` (an unpaid bill past grace) and `limit_reached` (a
+declared limit), so a host can tell the customer which it is.
+
+A spend window is a currency limit: a fixed window of `window_seconds` (at most
+31 days) tiled from an offset of the customer's own. A hold, and what it settles,
+counts in the window it was issued in, never clamped; a request that does not fit
+is refused `budget_exceeded` (`blocked_by: budget`) with `retry_after_seconds` to
+the window's end, or `capacity_held` when it would fit were gates' holds
+returned ([refusals](usage-billing.md#limits)). One request holds `balance`, every spend window and every limit
+it counts toward, or none of them. Spend windows are not declared limits:
+`ListCustomerLimits` and `limits_reached` leave them out.
 
 `accrual_rate_cap` asks about the future, so admission takes your prospective
 delta (`accrual_rate_delta_per_hour`): OpenRails measures what is already accruing
-over `accrual_rate_window_seconds` (default 3600, minimum 60) and refuses when
-measured + delta > cap. It sees only reported usage, which is why the delta is an
-input. Work billed by the hour is a [running charge](running-charges.md).
+over `accrual_rate_window_seconds` (default 3600, from 60 to 86400) and refuses
+when measured + delta > cap. It sees only settled usage, which is why the delta is
+an input; a gate sends a request that declares one to the server. Work billed by
+the hour is a [running charge](running-charges.md).
 
 ```yaml
 settings:
@@ -49,7 +60,7 @@ settings:
 ```
 
 The same `settings` go through `PATCH /v1/merchant/configuration`, with the same
-validator. Each kind takes only its own limit. A spend window is at most 31 days.
+validator. Each kind takes only its own limit.
 Bindings name no customer: a customer's policy is its `billing_policy` setting
 (`PATCH /v1/admin/customers/{customer_id}` with `{"billing_policy": "cloud_monthly"}`,
 `null` to inherit; `Client.UpdateCustomer` with `catalog.Value` or `catalog.Null`),

@@ -45,7 +45,8 @@ Every `/v1/me` route acts on the token's own customer; no path names a user.
 ```
 GET  /v1/me                                    balances, default cards, low-balance lines
 GET  /v1/me/balance/transactions?currency=USD  newest first
-GET  /v1/me/usage?currency=USD                 usage by event_type, resource or invoker, largest first
+GET  /v1/me/usage?currency=USD                 usage by event_type, invoker or meter, largest first
+GET  /v1/me/limits                             where the customer stands on each limit
 GET  /v1/me/orders[/{id}]                      purchases, renewals, usage orders
 GET  /v1/me/payments                           payments and refunds
 GET  /v1/me/entitlements, /v1/me/access-tenure
@@ -64,8 +65,9 @@ POST /v1/me/stripe/billing-portal-sessions     Stripe's portal
 GET  /v1/me/config                             the merchant's name and payment setup
 ```
 
-Every route is in [routes](api/routes.md). `GET /v1/me/usage` covers `from`..`to` (default the last month), `limit` 1–1,000
-groups; a cursor is valid only for its own currency, grouping and window. The
+Every route is in [routes](api/routes.md). `GET /v1/me/usage` covers the UTC days
+overlapping `from`..`to` (default the last month), `limit` 1–1,000 groups; a cursor
+is valid only for its own currency, grouping and window. The
 browser never reads the catalog: your server picks products with
 `Client.ListProducts` and puts them in its page with `billing.BuyerPrices`, and
 `<ProductList products>` / `<BuyButton price>` sell them.

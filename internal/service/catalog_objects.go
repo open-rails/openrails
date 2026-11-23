@@ -16,13 +16,14 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // A catalog object is what a document declares and an edit changes: a
-// product, one of its price keys (every version, ours or a provider's) or a
-// meter. Each carries a revision and per-field ownership; a document applies
+// product, one of its price keys (every version, ours or a provider's), a
+// meter or a limit. Each carries a revision and per-field ownership; a document applies
 // an object whole or skips it.
 type catalogObject struct {
 	kind     billing.CatalogObjectKind
@@ -38,6 +39,9 @@ func priceObject(product, key string) catalogObject {
 }
 func meterObject(key string) catalogObject {
 	return catalogObject{kind: billing.CatalogObjectMeter, key: key}
+}
+func limitObject(key string) catalogObject {
+	return catalogObject{kind: billing.CatalogObjectLimit, key: key}
 }
 
 // ownKey is the object's own key: a price's key, otherwise key.
@@ -69,9 +73,10 @@ func compareCatalogObjects(a, b catalogObject) int {
 
 // catalogFields are each object's owned fields, in the order results list them.
 var catalogFields = map[billing.CatalogObjectKind][]string{
-	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards"},
+	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards", "limits"},
 	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "billing_interval_months", "provider_access_default", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "sell_via", "provider"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
+	billing.CatalogObjectLimit:   {"unit", "reset", "overrun", "rate_cards"},
 }
 
 // catalogObjectState is one object as stored: each field as the document
@@ -138,6 +143,17 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
+	productLimits, err := q.ListCatalogProductLimits(ctx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	capacities := map[uuid.UUID]map[string]catalogwire.Capacity{}
+	for _, pl := range productLimits {
+		if capacities[pl.ProductID] == nil {
+			capacities[pl.ProductID] = map[string]catalogwire.Capacity{}
+		}
+		capacities[pl.ProductID][pl.LimitKey] = catalogwire.Capacity(pl.Capacity)
+	}
 	productKeys := make(map[uuid.UUID]string, len(products))
 	for _, p := range products {
 		productKeys[p.ID] = p.Key
@@ -173,6 +189,7 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 			"credit_grant":          credit,
 			"rate_cards":            rateCards,
 			"required_entitlements": catalogJSON(append([]string{}, p.RequiredEntitlements...)),
+			"limits":                catalogProductLimitsValue(capacities[p.ID]),
 		}}
 	}
 	prices, err := q.ListCatalogStatePrices(ctx, merchantID)
@@ -251,7 +268,37 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 	for _, m := range billingState.Meters {
 		state[meterObject(m.Key)] = &catalogObjectState{revision: meterRevisions[m.Key], hidden: meterCards[m.Key], fields: catalogMeterValues(m)}
 	}
+	definitions, err := limits.Definitions(ctx, q, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range definitions {
+		state[limitObject(d.Key)] = &catalogObjectState{revision: d.Revision, fields: catalogLimitValues(d)}
+	}
 	return state, nil
+}
+
+// catalogProductLimitsValue is a product's limits field: its capacity per
+// limit key; {} for none.
+func catalogProductLimitsValue(capacities map[string]catalogwire.Capacity) json.RawMessage {
+	if capacities == nil {
+		capacities = map[string]catalogwire.Capacity{}
+	}
+	return catalogJSON(capacities)
+}
+
+// catalogLimitValues are a limit's fields as the document writes them.
+func catalogLimitValues(d limits.Definition) map[string]json.RawMessage {
+	cards := d.RateCards
+	if cards == nil {
+		cards = []catalogwire.LimitRateCard{}
+	}
+	return map[string]json.RawMessage{
+		"unit":       catalogJSON(d.Unit),
+		"reset":      catalogJSON(d.Reset),
+		"overrun":    catalogJSON(string(d.Overrun)),
+		"rate_cards": catalogJSON(cards),
+	}
 }
 
 func catalogMeterValues(m CatalogMeterSpec) map[string]json.RawMessage {
@@ -366,6 +413,9 @@ func documentProductFields(key string, d catalogwire.ApplyProduct) (map[string]j
 			}
 			out["credit_grant"] = catalogJSON(normalized)
 		}
+	}
+	if d.Limits.Set {
+		out["limits"] = catalogProductLimitsValue(d.Limits.Value)
 	}
 	if d.RateCards.Set {
 		specs, err := documentRateCards(key, d.RateCards.Value)
@@ -483,6 +533,25 @@ func documentMeterFields(key string, d catalogwire.ApplyMeter) map[string]json.R
 		}
 	}
 	return out
+}
+
+// documentLimitFields are the limit fields a declaration names, normalized
+// as the apply stores them.
+func documentLimitFields(key string, d catalogwire.ApplyLimit) (map[string]json.RawMessage, error) {
+	def := limits.Definition{Key: key, Unit: d.Unit.Value, Reset: d.Reset.Value, Overrun: d.Overrun.Value}
+	cards, err := normalizeLimitRateCards(key, d.RateCards.Value)
+	if err != nil {
+		return nil, err
+	}
+	def.RateCards = cards
+	values := catalogLimitValues(def)
+	out := map[string]json.RawMessage{}
+	for field, set := range map[string]bool{"unit": d.Unit.Set, "reset": d.Reset.Set, "overrun": d.Overrun.Set, "rate_cards": d.RateCards.Set} {
+		if set {
+			out[field] = values[field]
+		}
+	}
+	return out, nil
 }
 
 // emptyCatalogValue is a field nobody set: an object created without it holds

@@ -1,80 +1,138 @@
 # Usage billing
 
-Usage is priced when it is recorded, draws the prepaid balance first and is owed
-for the rest. Admissions hold the expected cost before work starts. With
-automatic usage billing, owed usage becomes a usage order collected from the
-customer's default card. Related: [prepaid credits](prepaid-credits.md),
+Usage is reported on a lease, priced in batches, and accrues to the customer's
+day, which posts to the ledger as one deduction: the prepaid balance first, owed
+for the rest. Limits cap what a customer may use per window; admissions and the
+Go SDK's gate set capacity aside before work starts. With automatic usage
+billing, owed usage becomes a usage order collected from the customer's default
+card. Related: [prepaid credits](prepaid-credits.md),
 [spend limits](spend-limits.md), [running charges](running-charges.md) (billing by
 the hour).
 
 ## Recording usage
 
-`POST /v1/app/usage-events` (`RecordUsage`, `merchant:usage:manage`), up to 1,000
-items, one result each. An event is idempotent on `(source, source_id)` for 35
-days, and `occurred_at` may be up to 35 days old, never in the future. It is priced
-by its meters' rate cards in the transaction that records it, so the balance,
-admissions, spend windows and threshold see the charge at once. The event returns
-`charges` (one `{meter_key, model, cell, quantity, amount}` per meter) and their
-sum, `amount`.
+`POST /v1/app/leases/sync` (`SyncLeases`, `merchant:usage:manage`) is the only
+usage intake. The [gate](#the-gate) sends it for you, with the `wants`, `returns`,
+`committed` and `applied` that ask for, give back and account for its holds; a
+batch job calls it directly with `usage` alone.
+
+- **Lease.** The client picks the `lease_id` (`lse_` and a UUIDv7; any other
+  version is `400 invalid_param`): a gate when it starts, a batch job once for its
+  whole stream. The first sync under a new id creates the lease, so a lost first
+  reply repeats harmlessly. An id more than 60 days old that names no lease is
+  `404 lease_not_found`, so a forgotten lease's usage never posts twice: start a
+  new one. A sync renews its lease only within 10 seconds of its last one;
+  `lease.live: false` says it had already ended and the sync renewed nothing.
+  Its holds still count for 5 seconds more, longer than any sync runs: a sync
+  that would commit later, or cannot take its customers' locks within 2
+  seconds, is refused `503 service_unavailable` and changes nothing, so retry
+  it. A sync with `close: true` settles its usage, returns every hold of the
+  lease and ends it, a dead lease's too. An ended lease answers wants
+  `409 lease_not_held`, and usage against it still settles, in full.
+- **Holds.** A want states `usage` or a host-stated `estimated_amount`, not both.
+  Each hold an answer carries has a `version`, which rises whenever its size
+  changes; the next sync reports in `applied` the latest version applied of each
+  hold answered since. A smaller size stays set aside until then, and never
+  below what `committed` says open tickets took; an answer not reported applied
+  comes again. Every hold has a `balance` part.
+- **Items.** `usage` holds up to 1,000 items
+  `{n, customer_id, limit_set, invoker, invoker_type, currency, source, source_id,
+  outcome, event_type, dimensions, metadata, amount, occurred_at}`, numbered once
+  per lease and sent in order of `n`. `limit_set` names the hold the item was
+  decided against (null without one), `source_id` is your call id and `amount` a
+  stated cost. `occurred_at` may be up to 35 days old and at most 5 minutes ahead.
+- **Replay.** The lease keeps its highest settled number (`usage.through_n`). A
+  sync settles a prefix of its new items: those of at most 100 customers, 20
+  customers at a time, starting no more after 1.5 seconds. `through_n` says how
+  far it got; items past it are neither settled nor refused, so send them
+  again, as a gate does at once. A backlog drains over several syncs. A
+  resent item answers as settled; a changed item under a settled `n` is
+  `422 idempotency_key_reused`; a gap refuses that item and the ones after it
+  `409 usage_out_of_order`. Any credential of the merchant may report on its
+  leases, live or not, so a restarted process resends from an outbox. An item
+  refused alone (`usage.refused`: `{n, status, error}`) posts nothing; the others
+  settle, and a resend answers its code again.
 
 Usage is never refused for money: the work happened, and admission is the gate
-before it. A charge draws the prepaid balance, the rest is owed, and what is owed
-refuses the next admission. A priced meter that cannot price an event refuses it
-`422 usage_not_priced` and records nothing (a matrix with no cell for the event's
-value, with `param` naming the field; rate cards only in other currencies). An
-event no priced meter consumes is recorded and charges nothing.
+before it. A priced meter that cannot price an item refuses it
+`422 usage_not_priced` (a matrix with no cell for the item's value, with `param`
+naming the field; rate cards only in other currencies). An item no priced meter
+consumes settles and charges nothing.
 
 `outcome: failed` is work that cost and did not deliver. It states its own cost and
 is never rated. The customer's own failures are forgiven up to its policy's
-`bad_spend_windows` and charged past them (`amount` charged, `forgiven_amount`
-absorbed); a delegated invoker's (`invoker_type: delegated`) are never charged and
-count toward `delegated_invoker_wasted_spend_limits`, past which admission refuses
-it `failure_rate_limited`.
+`bad_spend_windows` and charged past them, at once and with their own ledger legs;
+a delegated invoker's (`invoker_type: delegated`) are never charged and count
+toward `delegated_invoker_wasted_spend_limits`, past which admission refuses it
+`failure_rate_limited`.
 
-**Inspecting.** `GetUsageEvent` / `GET /v1/app/usage-events/{id}` reads one event
-(`uev_`); `ListUsageEvents` / `GET /v1/app/usage-events` lists them by
-`customer_id`, `currency`, `event_type`, `source` (+ `source_id`) and `outcome`,
-newest first, over at most 31 days of occurrence time (`from` inclusive, `to`
-exclusive; default the latest 31 days). Both need `merchant:usage:read`, never
-charge, and see only retained usage. Reports: `POST /v1/metrics/query`
-(`usage_units`, `usage_revenue`, `forgiven_usage` by `customer`, `invoker`,
-`outcome`, `sku` or `rate_card`).
+**One deduction per day.** A sync settles its usage in one transaction: it prices
+the items, counts them toward the customer's limits, and adds the charges to the
+customer's accrual for that currency, UTC day and pricing period
+(`usage_accruals`). An accrual posts once its day ends, in the hourly billing
+pass, or earlier, before any other movement of that balance (a top-up or staff
+grant, a credit lot's expiry, revocation or refund, a usage order): one `spend`
+per credit lot it draws and one `owed_accrual` for the rest, owed as of its day
+(the end of its day and pricing period, or the posting if earlier), so the usage
+order of that period bills it. Usage of a period an order already billed is
+owed from that order's end and billed by the next order. A sync expires the customer's lapsed credit lots before its usage
+accrues: usage never draws a lot that lapsed before it. Until it posts,
+`balance` holds it, so admissions refuse exactly as if it had posted.
+
+**Reading usage.** No usage event is stored. What settles is kept as aggregates
+that grow with customers and days, not requests: limit windows,
+`meter_period_quantities`, accruals, daily rollups (`usage_daily`, per customer,
+invoker, currency, event type, meter, cell and outcome) and per-minute spend
+(`usage_minutes`, kept a day). Keep your own log if you need each request.
+
+- `GET /v1/me/usage`: the customer's usage in one `currency` over the UTC days
+  overlapping [`from`, `to`) (default the month before now), grouped by
+  `event_type` (default), `invoker` or `meter` (per meter and cell, with
+  `quantity`).
+- `ListBalanceTransactions` and `GET /v1/me/balance/transactions`: each leg of a
+  usage deduction carries `usage`, `{day, amount, lines}` with `requests`,
+  `quantity` and `amount` per `meter_key` and `cell`: "Nov 22: 1,204 requests,
+  3.1M tokens of chat (large), $4.12".
+- `POST /v1/metrics/query`: `usage_units`, `usage_revenue` and `forgiven_usage`
+  by `customer`, `invoker`, `outcome` or `rate_card`; `active_customers` by
+  `rate_card`; `limits_reached` by `limit` and `customer`.
 
 ## Pricing
 
-A meter (`count`, or `sum` of its `value_property` from the event's `dimensions`,
-then `metadata`) with a rate card in the event's currency takes a quantity from it;
-a card's `filter` can exclude the event. With Q the customer's quantity so far in
-the period and q the event's, the event is charged
+A meter (`count`, or `sum` of its `value_property` from the item's `dimensions`,
+then `metadata`) with a rate card in the item's currency takes a quantity from it;
+a card's `filter` can exclude the item. A sync prices together the items that
+share a customer, currency, pricing period, meter cell and rate card: with Q the
+customer's quantity so far in the period and q the group's, the group is charged
 
     R(Q + q) − R(Q)
 
-where R prices a whole period's quantity. R never falls, so no charge is negative,
-and a period's charges sum exactly to R of its total: 1,000 events of 1,234 tokens
-at $0.15 per million cost 185.1 micros each, rounded where they fall, and exactly
-185,100 together. Quantities are kept per period in `meter_period_quantities`.
+and the amount is shared to its items by quantity, exactly. R prices a whole
+period's quantity and never falls, so no charge is negative, and a period's
+charges sum exactly to R of its total however its usage is batched: 1,000 items
+of 1,234 tokens at $0.15 per million accrue exactly 185,100 micros. Quantities
+are kept per period in `meter_period_quantities`.
 
 | Model | R(Q) |
 |---|---|
 | `per_unit` | `round(Q × unit_amount / divide_by)` (`round: up\|down\|half_up`, default `half_up`), capped by `maximum_amount` per period; a `matrix` prices each value of one dimension in its own cell |
-| `tiered` | `graduated` only (volume tiers would make later events refund earlier ones) |
+| `tiered` | `graduated` only (volume tiers would make later usage refund earlier usage) |
 | `package` | `ceil((Q − free_units) / package_size) × amount` |
-| `dynamic` | the event's own `amount` (native units) when its `sum` quantity is positive; no allowance |
+| `dynamic` | the item's own `amount` (native units) when its `sum` quantity is positive; no allowance |
 | `flat` | a fixed fee per period, on a rate card with no meter |
 
 `allowance.included` comes off Q first, per period and cell. A metered card states
-no `payment_term`. A `dynamic` card and catalog cards on the same event each
-charge; the stated amount is kept as `stated_amount`, and a retry with a different
-amount (absent → `"0"` included) is `idempotency_key_reused`. An event dated in an
-earlier period is priced at that period's quantity and billed by the open period's
-order. A rate card change applies from the next event; a replay answers its first
-charges.
+no `payment_term`. A `dynamic` card and catalog cards on the same item each
+charge. Usage dated in an earlier period is priced at that period's quantity and
+billed by the open period's order. Usage decided against a hold is priced by the
+cards the hold pinned; other usage by the cards in force when it settles, and
+items under two revisions of a card are priced apart.
 
 With automatic usage billing the customer's monthly anchor defines the pricing
 period; otherwise the merchant's `billing_period_boundary`, anchored on the
 customer's first activity.
 
-Per million tokens: one event per request with disjoint dimensions
+Per million tokens: one item per request with disjoint dimensions
 (`input_tokens`, `cached_input_tokens`, `output_tokens`), one `sum` meter each,
 `per_unit` with `divide_by: 1000000` and a `model` matrix:
 
@@ -105,23 +163,81 @@ products:
 Meters are declared in a catalog document or with `PUT /v1/catalog/meters/{key}`
 (`SetMeter`, with its rate card).
 
+## Limits
+
+The catalog declares [limits](catalog.md#a-document) and products give them
+capacity. A currency limit counts every request and item in its currency at its
+money price; a named-unit limit counts, in its unit, the usage its rate cards'
+meters read. A host-stated admission (`estimated_amount`, no usage) holds no
+named-unit limit, and its capture counts there.
+
+- **The rule.** Each customer, limit and window (`limit_windows`, windows by the
+  server clock) keeps its settled units; held is the sum of its live holds. A hold
+  is issued or grown only while settled + held + the increase fits the capacity.
+  Settled alone may pass it: late usage and overruns settle in full, never
+  clamped, and nothing more is held until a refill or reset. A customer is
+  subject to a limit only when a live product or an override gives it capacity
+  there (an override of 0 included); one with neither is not limited by it.
+  Its usage never opens a window: it counts only in a window a grant or a
+  staff adjustment opened, while that window lasts. A customer who buys
+  mid-window starts with the plan's whole capacity, and a grant that lapses
+  and returns within a window finds what the window used meanwhile.
+- **Overrun.** `require_estimate` admits a request only when its whole estimate
+  fits. `admit_while_positive` admits while any capacity remains and holds what is
+  left, so the crossing request finishes and the limit stays below zero.
+- **Refusals.** `limit_reached` (`blocked_by: limit`) names the `limit` and its
+  `resets_at` (null when nothing refills it), with `retry_after_seconds` until
+  then: the request would not fit even were every gate's hold returned. A
+  request that would fit but for capacity gates hold, a gate's want or an
+  admission alike, is refused `capacity_held` (`blocked_by: limit`) with
+  `retry_after_seconds` of one sync interval, and those holds shrink at their
+  next sync. The same rule holds for `balance` and spend windows: their own
+  codes mean the request would not fit even then.
+- **`balance`.** The prepaid balance and credit line are the built-in limit
+  `balance`, per currency, checked first and refused with the money codes
+  (`insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached`). A
+  billing policy's spend windows are currency limits too
+  ([spend limits](spend-limits.md)).
+- **Reads.** `ListCustomerLimits` (`GET /v1/app/limits?customer_id=`,
+  `merchant:usage:read`) and `GET /v1/me/limits` answer
+  `{customer_id, limit, unit, capacity, used, held, remaining, window_starts_at,
+  resets_at}` for every limit the customer is subject to, by key, then a
+  `balance` line per currency
+  (capacity the balance plus credit line, used what is owed, held the held total;
+  no window).
+- **Staff.** `limits` on `UpdateCustomer` replaces a customer's capacity
+  (`"limits": [{"limit": "weekly", "capacity": "8000"}]`; `inherit: true` restores
+  its products'). `AdjustCustomerLimit`
+  (`POST /v1/admin/customers/{customer_id}/limit-adjustments`,
+  `{limit, amount, source_id}`, `merchant:customer:manage`) adds to the current
+  window only; a retry with its `source_id` adds nothing again. A rate limit takes
+  no adjustment.
+- **Reached.** A window records `reached_at` the first time settled + held take it
+  to capacity; `limits_reached` in `/v1/metrics/query` counts them.
+
 ## Admissions
 
 `/v1/app/admissions` (`Admit`, `CaptureAdmissions`, `ReleaseAdmissions`,
-`ExtendAdmissions`), up to 1,000 items with one result each. The durable
-`request_id` (1–255 bytes) owns replay; no `Idempotency-Key`.
+`ExtendAdmissions`), up to 1,000 items with one result each. An admission is a
+hold owned by one request. The durable `request_id` (1–255 bytes) owns replay; no
+`Idempotency-Key`.
 
 - **Admit** with `usage: {event_type, dimensions, metadata}` (an LLM request:
   `{input_tokens: <prompt>, output_tokens: <max_tokens>}`): the rate cards price it
-  at the current period quantity without advancing it, and that is the hold and
-  `estimated_amount`. The cards are pinned: capture pays the admitted price. A
-  host-stated `estimated_amount` is the alternative; with neither nothing is held.
+  at the current period quantity without advancing it, and that is the money hold
+  and `estimated_amount`. The cards are pinned: capture pays the admitted price. A
+  host-stated `estimated_amount` is the alternative. The request is checked
+  against `balance`, then its spend windows, then the declared limits it counts
+  toward by key; the first that would not fit even were gates' holds returned
+  refuses it, else one that fits only then makes it `capacity_held`, and
+  nothing is held. An allowed request holds its estimate in every one of them.
 - **Capture** (`{request_id, usage: {…, resource, source, source_id}}`, same event
-  type) prices the consumed usage with the pinned cards, records the event and
-  posts its charges as the hold leaves, in one transaction. Above the hold the
-  whole charge posts and the excess is owed, never clamped: bound it by the
-  estimate. The receipt has `estimated_amount`, `amount`, `charges`,
-  `usage_event_id`, `balance_transaction_id` and `replayed`.
+  type) prices the consumed usage with the pinned cards and settles it in the
+  hold's windows as the hold leaves, in one transaction. Above the hold the whole
+  charge settles and the excess is owed, never clamped: bound it by the estimate.
+  The receipt has `estimated_amount`, `amount`, `charges`,
+  `balance_transaction_id` (the first leg of the day's posting, null until it
+  posts) and `replayed`.
 - **Release** frees the hold; **extend** moves an open, unexpired hold's deadline
   later (at most 30 days past admission).
 
@@ -129,25 +245,106 @@ A request binds immutable terms (customer, unit, estimate, deadline, invoker,
 trust, roles, resource, source, prospective rate); a repeat with other terms
 conflicts and an exact retry returns the original decision with `replayed: true`
 and the current `state` (`open`, `expired`, `released`, `captured`). `allowed` on a
-replay is not permission to start new work. Expiry follows the deadline with no
-worker. An admission is kept 61 days (`admission_operations`, monthly partitions);
-after that it reads as never admitted and a late capture is `admission_not_found`.
+replay is not permission to start new work. A hold that sets anything aside needs
+`expires_at`. Past it, the hold reserves no money and nothing in a lifetime or
+rate limit, but still counts in windows that end until it is captured or
+released, or 30 days after admission, and a late capture counts in its original
+windows. Expiry needs no
+worker. A hold is kept 61 days (`limit_holds`, monthly partitions); after that
+it reads as never admitted and a late capture is `admission_not_found`.
 
-Holds and spend windows live in PostgreSQL under the customer's money lock, never
-Redis. A spend window counts open estimates and captured amounts in the original
-admission window; an expired hold reserves nothing but still counts until released
-or captured, and a late capture counts in its original window. One held total
-covers live estimates, pending credit refunds and running charges' unposted
-accruals.
+OpenRails keeps holds and windows in PostgreSQL, under the customer's money
+lock. One held total covers live estimates, pending credit refunds, running
+charges' unposted accruals and unposted usage.
 
 Embedded, `Engine.LocalMerchant(id)` returns a `*LocalClient` whose `AdmitTx`,
 `CaptureAdmissionsTx` and `ReleaseAdmissionsTx` take a transaction from the host's
 pool: the host's own row and its hold commit together.
 
 `GetAdmission` / `GET /v1/app/admissions/{request_id}` and `ListAdmissions` (by
-`customer_id`, `currency`, `state`, admission time) read holds without replaying
-them; a denied request made no reservation and is `admission_not_found`. They need
-`merchant:usage:read`.
+`customer_id`, `currency`, `state`, admission time) read request holds without
+replaying them; a denied request made no reservation and is
+`admission_not_found`. They need `merchant:usage:read`. A gate's holds have no
+read route.
+
+## The gate
+
+`openrails.NewGate(client, openrails.GateConfig{})` admits in your process, over
+a remote or embedded `*Client` whose credential holds `merchant:usage:manage`
+and `merchant:usage:read`. It keeps one lease and holds of each served customer's
+capacity, sized from traffic: a warm decision takes the request's cost from
+every limit of its hold, or from none, with no I/O, so it holds while OpenRails
+is unreachable. A cold customer, or a hold short of its demand, waits for one
+`SyncLeases` round trip. The gate syncs on a fixed cadence while it lives,
+carrying the usage its tickets captured, and the server prices that usage
+exactly.
+
+```go
+gate, err := openrails.NewGate(client, openrails.GateConfig{})
+ticket, err := gate.Admit(ctx, billing.AdmitParams{RequestID: id, CustomerID: customer,
+    Invoker: user, Currency: "USD", Usage: &billing.UsageEstimate{EventType: "chat", Dimensions: estimate}})
+if r := ticket.Refusal(); r != nil { /* 429: r.DenyCode, r.Limit, r.ResetsAt, r.RetryAfterSeconds */ }
+// … do the work, then:
+err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.Release(ctx)
+```
+
+- `Admit` takes `AdmitParams` with a `request_id`; `expires_at` is not needed,
+  since a ticket lives while the gate syncs. A request that declares `accrual_rate_delta_per_hour` is
+  admitted by the server as a request hold. `Consume` admits a known cost and
+  captures it at once; `Record` sends usage no admission held. `Limits` shows a
+  customer's lines less the usage not yet sent, for display. `Flush` syncs now
+  and waits for settlement; `Close` sends pending usage and closes the lease,
+  returning its holds at once. A lease a sync answers dead is closed the same
+  way, and the gate starts another. A gate that starts another lease for any
+  other reason (a gap in its numbering, or a lease that lapsed by its own
+  clock) closes the old one only once no open ticket or unsettled usage counts
+  on its holds, or leaves it to expire: closing frees those holds.
+- A refusal is a verdict on the ticket, never an error; `capacity_held` is
+  waited out within the request's context first. The error is bad input or
+  `ErrUnavailable`: OpenRails unreachable (a 5xx or 429 answer counts) and no
+  hold covering the request. A failed sync never drops usage; only an item
+  refused alone posts nothing. Under a context with no deadline, `Flush` and
+  `Close` give up after 30 seconds.
+- Safe spending is off unless the merchant sets `usage_gate_safe_spend: true`.
+  Each hold then names a `safe` amount, its money size, that the gate may spend
+  unreserved while OpenRails is unreachable, once the hold's own money is spent
+  or its lease has died. It covers money only: units are never taken past a
+  live hold, so a request that counts units waits for OpenRails. What safe
+  spending admits settles as late usage, owed past the balance.
+- Without Redis, state is in process memory: usage captured but not yet sent is
+  lost if the process crashes, and never billed. `GateConfig.Outbox`
+  (`UsageOutbox`, not with Redis) stores it before `Capture` returns. `Put`
+  stores all of its items or none: one that returns an error stored nothing,
+  and fails the capture, whose usage is never billed. An outbox that stores an
+  item and still returns an error bills it after a restart. A restarted
+  process resends what it stored against its original leases, closing them. A resent item is matched by its lease
+  and `n`: the server checks its terms only when the resend repeats a whole
+  recent settlement, and otherwise answers it as settled, so an outbox
+  returns items exactly as stored.
+- With `GateConfig.Redis`, your processes sharing that Redis are one gate: one
+  lease and one hold per customer and limit set, decided by one Redis script, so a
+  customer one process served is warm on all. Usage waits in a Redis stream and
+  one process at a time syncs. Redis keeps each usage write's key until 15
+  minutes after the usage settles: a capture's by its ticket, a `Record`'s by
+  its customer, event type, `source` and `source_id`. A `Capture` or `Record`
+  whose write may or may not have landed returns an error, and retrying it in
+  the same process posts it once: the retry goes to Redis only. A `Record`
+  repeated with the same four posts once while Redis answers both. Without
+  Redis a gate does not deduplicate: every `Record` that returns nil posts,
+  and one that returns an error stored nothing. A capture or
+  `Record` retried more than 15 minutes after such a write can bill twice. A
+  process that cannot reach Redis admits from its own lease meanwhile, and
+  reports there only usage it knows Redis never took; it closes that lease once
+  Redis is back and the lease is idle. Losing Redis, or a failover that drops recent writes,
+  loses that unsent usage, never billed, and the lease's unused capacity comes
+  back when the lease expires. `Close` leaves the group; the last process to
+  close ends the group's lease.
+
+Nothing in `GateConfig` tunes sizes, timing or process counts: holds follow
+traffic, and a merchant declares only limits, products and prices. A gate that
+stops syncing loses its lease within seconds and its unused capacity is released;
+usage it reports later posts as late usage. [`examples/gate`](../examples/gate)
+runs one.
 
 ## Automatic usage billing
 
@@ -196,7 +393,8 @@ billing pass finds due accounts, then due orders, and runs each charge as an
 
 A usage order (`origin: usage`) bills its window's owed charges once, one line per
 source (`metered:<meter>`), no price or product; a window with nothing owed bills
-nothing. `usage` carries `period_starts_at`, `period_ends_at`, `due_at` (billed
+nothing. Unposted usage posts before its order is billed. `usage` carries
+`period_starts_at`, `period_ends_at`, `due_at` (billed
 plus net terms; no expiry), `amount_paid`, `amount_due`, the collection method and
 the customer's `invoice_profile` as billed (`po_number`, `memo`, `tax`,
 `billing_contacts`; tax facts calculate no tax). Null profile means net 0, charged
@@ -209,7 +407,8 @@ one overdue past the customer's grace ([spend limits](spend-limits.md)).
 - **Collection:** `charge_automatically` orders are charged to the default card for
   the currency once due (no fallback card), each attempt an `order_collection`
   operation; the order is `processing` meanwhile, and a decline leaves it `open`
-  for the retry schedule. `send_invoice` orders are never charged: the customer
+  for the [retry schedule](dunning.md) of a cycle as long as its period, at least
+  4 days. `send_invoice` orders are never charged: the customer
   remits, or pays with `POST /v1/me/orders/{id}/pay`. Funding the balance repays
   owed orders first, oldest first (a ledger transfer, not a payment).
 - **Events:** `order_due` when billed, `order_overdue` once when still owed past
