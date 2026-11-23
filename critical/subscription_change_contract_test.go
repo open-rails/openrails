@@ -361,4 +361,24 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.NotNil(t, current.ScheduledChange)
 		require.Equal(t, s.silver.ID, current.ScheduledChange.PriceID)
 	})
+	t.Run("OR-J18-S07/an-upgrade-in-the-microsecond-the-membership-started-ends-its-period-validly", func(t *testing.T) {
+		// The purchase and the upgrade land 200ns into one microsecond, which
+		// the stored period start loses.
+		inMicrosecond := func(w *world) { w.clock.Advance(200 - time.Duration(w.clock.Now().Nanosecond()%1000)) }
+		a, _, sub := purchasedMembershipWith(t, 24, inMicrosecond)
+		price := upgradePrice(t, a, sub)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", a.aliceToken, map[string]any{"price_id": price.ID}, map[string]string{"Idempotency-Key": "upgrade-at-once"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var changed billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &changed))
+		require.Equal(t, "succeeded", changed.Status, string(raw))
+		require.NotNil(t, changed.SubscriptionID)
+		current, err := a.alpha.GetSubscription(t.Context(), *changed.SubscriptionID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, current.Status)
+		prior, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, prior.Status)
+		require.True(t, prior.CurrentPeriodStartsAt.Before(*prior.CurrentPeriodEndsAt), "the superseded period ends after it starts")
+	})
 }

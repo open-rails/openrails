@@ -75,7 +75,9 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 	if err != nil {
 		return err
 	}
-	at := terms.PeriodStart
+	// at is at the microsecond the row stores, so the period below still ends
+	// after it starts when the upgrade lands in the microsecond it started.
+	at := terms.PeriodStart.Truncate(time.Microsecond)
 	reason := models.CancelTypeUpgrade
 	old.Status, old.CancelType, old.CanceledAt, old.EndedAt = models.StatusCanceled, &reason, &at, &at
 	if err := dropPendingChange(ctx, txDB, old.ID, at); err != nil {

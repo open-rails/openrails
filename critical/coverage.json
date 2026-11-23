@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 436,
+  "scenario_count": 437,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2037,6 +2037,11 @@
       "id": "OR-J18-S06",
       "journey": "J18",
       "name": "A Stripe downgrade schedules the new price for the subscription's seats"
+    },
+    {
+      "id": "OR-J18-S07",
+      "journey": "J18",
+      "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
     },
     {
       "id": "OR-J19-S07",

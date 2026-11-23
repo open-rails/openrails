@@ -1260,6 +1260,9 @@
     "OR-J18-S06": [
       "TestSubscriptionChangeContracts/OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats"
     ],
+    "OR-J18-S07": [
+      "TestSubscriptionChangeContracts/OR-J18-S07/an-upgrade-in-the-microsecond-the-membership-started-ends-its-period-validly"
+    ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ],
