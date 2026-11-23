@@ -51,6 +51,3 @@ done
 	echo "no tracked hooks found under $root/scripts/hooks" >&2
 	exit 1
 }
-
-echo
-echo "Verify with: task doctor"

@@ -18,11 +18,6 @@ tasks:
     cmds:
       - task -l
 
-  doctor:
-    desc: Diagnose local build and test prerequisites with actionable fixes
-    cmds:
-      - bash scripts/doctor.sh
-
   setup:
     desc: Prepare a fresh clone after system prerequisites are installed
     cmds:
@@ -109,16 +104,6 @@ tasks:
     desc: Verify Cloudflared routing reaches local openrails (/health/live + /health/ready)
     cmds:
       - bash scripts/verify_webhook_tunnel.sh
-
-  mint-jwt:
-    desc: Mint a JWT from local AuthKit devserver (requires docker-up-e2e-sandbox + AUTHKIT_DEV_MINT_SECRET)
-    cmds:
-      - bash scripts/mint_jwt.sh
-
-  nmi-query:
-    desc: Call NMI Query API (requires NMI_QUERY_SECURITY_KEY)
-    cmds:
-      - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
   sqlc:
     desc: Generate SQL bindings and prepare every query against a disposable migrated database

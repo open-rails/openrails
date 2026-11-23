@@ -11,10 +11,7 @@ else
     echo "setup: created .env from .env.example"
 fi
 
-# Doctor verifies tracked hooks, so install clone-owned hooks before asking it
-# to validate the completed setup.
 ./scripts/install-git-hooks.sh
-bash ./scripts/doctor.sh
 for module in . server examples; do (cd "$module" && go mod download); done
 docker volume create go_mod_cache_persistent >/dev/null
 

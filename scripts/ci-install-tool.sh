@@ -7,10 +7,10 @@
 # no version and no integrity check. Measured on ubuntu-latest: `task` 61s,
 # `gosec` 47s; this path is ~2s.
 #
-#   scripts/ci-install-tool.sh <task|gosec|sqlc|helm> [dest-dir]   # default: bin/
+#   scripts/ci-install-tool.sh <gosec|sqlc|helm> [dest-dir]   # default: bin/
 #
 # Prints the absolute path of the installed binary on stdout; everything else
-# goes to stderr, so:  TASK="$(scripts/ci-install-tool.sh task)"
+# goes to stderr, so:  HELM="$(scripts/ci-install-tool.sh helm)"
 #
 # BUMPING: change the version AND the sha256 together. Getting a checksum
 # mismatch means the artifact changed under a tag — do not "fix" it by
@@ -25,7 +25,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-tool="${1:?usage: ci-install-tool.sh <task|gosec|sqlc|helm> [dest-dir]}"
+tool="${1:?usage: ci-install-tool.sh <gosec|sqlc|helm> [dest-dir]}"
 dest="${2:-bin}"
 
 case "$(uname -s)-$(uname -m)" in
@@ -34,13 +34,6 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 case "$tool" in
-    task)
-        version="3.52.0"
-        url="https://github.com/go-task/task/releases/download/v${version}/task_linux_amd64.tar.gz"
-        # upstream task_checksums.txt
-        sha256="02c679ffae53dca791804847d78b31731615894e292948397c971c87ac9e95bd"
-        member="task"
-        ;;
     gosec)
         version="2.28.0"
         url="https://github.com/securego/gosec/releases/download/v${version}/gosec_${version}_linux_amd64.tar.gz"
