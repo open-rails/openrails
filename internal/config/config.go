@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"path"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	log "github.com/sirupsen/logrus"
 )
 
 // configContextKey is a distinct type so this key cannot collide with another
@@ -112,7 +112,6 @@ type Config struct {
 	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string
-
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -1109,22 +1108,22 @@ func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaPr
 // LogStartupStatus writes the operator-facing posture banners for long-running
 // OpenRails processes. Keep this out of Load so one-off CLIs do not look like
 // they started the payment server.
-func LogStartupStatus(cfg *Config) {
-	logOperatingModeStatus(cfg)
+func LogStartupStatus(logger *slog.Logger, cfg *Config) {
+	logOperatingModeStatus(logger, cfg)
 }
 
-func logOperatingModeStatus(cfg *Config) {
+func logOperatingModeStatus(logger *slog.Logger, cfg *Config) {
 	switch GetProviderWriteMode(cfg) {
 	case ProviderWriteModeReadOnly:
-		log.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
-		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
-		log.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
+		logger.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
+		logger.Info("   Reconciliation/forensics posture: provider reads + local serving only")
+		logger.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
 	case ProviderWriteModeLimited:
-		log.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
-		log.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
-		log.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
-		log.Info("   Set provider_write_mode=full to resume proactive operations")
+		logger.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
+		logger.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
+		logger.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
+		logger.Info("   Set provider_write_mode=full to resume proactive operations")
 	case ProviderWriteModeFull:
-		log.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
+		logger.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -56,6 +57,7 @@ type StripeConvergeService struct {
 	Objects *providerobjects.Observer
 	// Findings notifies an operator of the finding a park raises.
 	Findings reconcile.FindingNotifier
+	Log      *slog.Logger
 }
 
 func (s *StripeConvergeService) now() time.Time {
@@ -359,7 +361,7 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	ended := status == "canceled" || status == "incomplete_expired"
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		subRepo := subscriptions.NewSubscriptionRepo(txdb)
 		sub, err := subRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -53,6 +54,7 @@ type UserSubscriptionService struct {
 	// providerCancel queues the durable provider cancel of a membership the
 	// member ends (injected post-construction, after the intent ledger).
 	providerCancel ProviderCancelScheduler
+	Log            *slog.Logger
 }
 
 // ProviderCancelScheduler queues the durable cancel of a provider-billed
@@ -303,7 +305,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			}
 			subscription.DeletionScheduledAt = &deleteAt
 			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
-				if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(tx), subscription); err != nil {
+				if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(s.Log, tx), subscription); err != nil {
 					return err
 				}
 				return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
@@ -321,7 +323,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			return err
 		}
 		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
-			if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(tx), subscription); err != nil {
+			if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(s.Log, tx), subscription); err != nil {
 				return err
 			}
 			return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
@@ -345,7 +347,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// Persist the cancellation; any durable remote intent (deferred NMI delete,
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		// Decide on the locked row, never on the snapshot read above.
 		locked, err := NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subscription.ID)
 		if err != nil {
@@ -441,7 +443,7 @@ func (s *UserSubscriptionService) activeProductAccess(ctx context.Context, userI
 }
 
 // NewUserSubscriptionService creates a new UserSubscriptionService
-func NewUserSubscriptionService(
+func NewUserSubscriptionService(logger *slog.Logger,
 	subscriptionService *SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
@@ -462,5 +464,6 @@ func NewUserSubscriptionService(
 		NotificationService: notificationService,
 		EntitlementService:  entitlementService,
 		clock:               timeutil.FirstClock(clocks...),
+		Log:                 logger,
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -493,7 +494,7 @@ func TestMerchantConsole(t *testing.T) {
 		require.Len(t, holds.Items, 1)
 		// An open finding with a long recommendation, as an undeclared PSP
 		// account raises.
-		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 		require.NoError(t, err)
 		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
 			_, err := (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.merchant_config.undeclared_account", SubjectKey: "accounts/nmi/0000000", Severity: reconcile.SeverityHigh,

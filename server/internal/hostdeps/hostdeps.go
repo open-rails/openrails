@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -60,8 +61,8 @@ type Opened struct {
 // Open opens cfg's connections. It waits for the database until ctx ends; a
 // malformed optional section (redis, vault, email_smtp) is left out and
 // reported in Degraded.
-func Open(ctx context.Context, cfg *hostconfig.Config) (*Opened, error) {
-	pool, err := Pool(ctx, cfg, true)
+func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Opened, error) {
+	pool, err := Pool(ctx, logger, cfg, true)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func (o *Opened) Close() {
 
 // Pool opens the db section's pool. retry waits for the database until ctx
 // ends, as a serving process does; otherwise it tries once.
-func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
+func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
 	url := cfg.DB.ConnectionString()
 	if url == "" {
 		return nil, errors.New("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
@@ -139,7 +140,7 @@ func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Poo
 	}
 	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
 	if cfg.DB.SQLTrace {
-		pc.ConnConfig.Tracer = db.NewSQLTracer()
+		pc.ConnConfig.Tracer = db.NewSQLTracer(logger)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {

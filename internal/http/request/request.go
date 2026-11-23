@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"reflect"
@@ -43,10 +44,11 @@ type Request struct {
 	w         http.ResponseWriter
 	wrote     bool
 	requestID string
+	Log       *slog.Logger
 }
 
 // New builds the Request a route handler answers.
-func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
+func New(logger *slog.Logger, w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
 	var clock clockwork.Clock
 	if runtime != nil {
 		clock = runtime.Clock
@@ -56,6 +58,7 @@ func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request 
 		Request: r,
 		Clock:   timeutil.FirstClock(clock),
 		w:       w,
+		Log:     logger,
 	}
 }
 

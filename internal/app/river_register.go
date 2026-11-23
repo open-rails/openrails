@@ -155,6 +155,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Objects:                      r.ProviderObjects,
 		Importer:                     r.PSPImporter,
 		Findings:                     r.findingNotifier(),
+		Log:                          r.Log,
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}

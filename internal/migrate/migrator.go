@@ -92,7 +92,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	// Partitions follow the calendar, not the migration chain: a database
 	// migrated months ago still needs this month's.
-	data, err := db.NewWithPGXPool(pool, schema)
+	data, err := db.NewWithPGXPool(logger, pool, schema)
 	if err != nil {
 		return err
 	}

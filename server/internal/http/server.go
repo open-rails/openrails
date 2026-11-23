@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/open-rails/authkit/auth"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -100,6 +101,7 @@ type Server struct {
 	checkoutOrigin string
 	paymentHost    paymentpage.Host
 	paymentHandler http.Handler
+	Log            *slog.Logger
 }
 
 // recordRoute appends a registered pattern to the server's route table.
@@ -140,7 +142,7 @@ func (s *Server) handle(mux router.Registrar, pattern string, h http.Handler) {
 
 // New assembles the standalone surface over the engine's initialized runtime
 // and the server's control plane.
-func New(deps Dependencies) (*Server, error) {
+func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	if deps.Config == nil {
 		return nil, fmt.Errorf("server config is required")
 	}
@@ -203,6 +205,7 @@ func New(deps Dependencies) (*Server, error) {
 		adminConsole:            deps.AdminConsole,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
+		Log:                     logger,
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -220,7 +223,7 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Single (standalone-friendly) HTTP surface on the framework-neutral
 	// net/http mux (#670): the same stack the embedded surface serves.
-	mux := &router.Table{}
+	mux := &router.Table{Log: logger}
 	// Standalone mode owns service-level health/meta routes.
 	s.registerStandaloneMetaRoutes(mux)
 	// Canonical: /v1/*
@@ -265,7 +268,7 @@ func New(deps Dependencies) (*Server, error) {
 		return nil, err
 	}
 	s.publicHandler = s.dispatchPaymentPage(s.wrapPublicHandler(mux.Handler()))
-	s.nativeRoutes = &router.Table{}
+	s.nativeRoutes = &router.Table{Log: logger}
 	for _, entry := range mux.Entries {
 		switch entry.Path {
 		case "/health/live", "/health/ready":
@@ -352,7 +355,7 @@ func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 
 // HTTPRoutes returns the native hosted surface without process health routes.
 func (s *Server) HTTPRoutes() *router.Table {
-	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...)}
+	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...), Log: s.Log}
 }
 
 // Drain fails /health/ready from now on, so load balancers stop routing here

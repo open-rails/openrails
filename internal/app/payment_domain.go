@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -65,7 +65,7 @@ func (r *Runtime) followPaymentDomain(mid billing.MerchantID, previous, current 
 	}
 	r.Go("purchase domain registration", func(ctx context.Context) {
 		if err := r.registerPaymentDomains(ctx, mid, psps, domains); err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("purchase domain: cannot queue its registration")
+			r.Log.WarnContext(ctx, "purchase domain: cannot queue its registration", logx.Err(err), "merchant_id", mid.String())
 		}
 	})
 }

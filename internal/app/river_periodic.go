@@ -6,9 +6,9 @@ import (
 
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -48,11 +48,11 @@ func (r *Runtime) claimPeriodic(id string, interval time.Duration) bool {
 		Kind: id, Holder: holder, TtlSeconds: (interval * 4 / 5).Seconds(),
 	})
 	if err != nil {
-		log.WithError(err).WithField("periodic", id).Warn("periodic lease unreadable; running the pass")
+		r.Log.WarnContext(ctx, "periodic lease unreadable; running the pass", logx.Err(err), "periodic", id)
 		return true
 	}
 	if n == 0 {
-		log.WithFields(log.Fields{"periodic": id, "fleet": holder}).Debug("periodic pass leased to another fleet; skipped")
+		r.Log.DebugContext(ctx, "periodic pass leased to another fleet; skipped", "periodic", id, "fleet", holder)
 		return false
 	}
 	return true

@@ -29,7 +29,7 @@ func New(rt *app.Runtime, origin string, assets fs.FS, issuers []string, limiter
 	if err != nil {
 		return "", nil, err
 	}
-	mux := &router.Table{}
+	mux := &router.Table{Log: rt.Log}
 	httproutes.RegisterPaymentPageRoutes(router.NewMux(mux, "", rt), rt, httproutes.Options{Capabilities: &billing.Capabilities{RouteGroups: map[string]bool{}, Features: map[string]bool{}}})
 	captcha := ""
 	if config.CaptchaEnabled(rt.Config.Captcha) {

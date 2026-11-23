@@ -33,7 +33,7 @@ func (e *Engine) CustomerRoutes(sel config.CustomerRoutes) ([]routebundle.Route,
 	if err := config.ValidateMountPath("CustomerRoutes.Prefix", strings.Join(parts, "/")); err != nil {
 		return nil, err
 	}
-	table, err := embedhttp.BuildMappedCustomerRoutes(e.App, sel)
+	table, err := embedhttp.BuildMappedCustomerRoutes(e.Log, e.App, sel)
 	if err != nil {
 		return nil, err
 	}

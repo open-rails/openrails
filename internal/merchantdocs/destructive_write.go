@@ -10,7 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/destructive"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // SetDestructiveAdmissions binds the shared admission owner and the stable
@@ -63,7 +63,7 @@ func (c *Cache) BeginEdit(ctx context.Context, terms any) (context.Context, func
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if err := admissions.Finish(finish, edit.action.MerchantID, edit.action.ID, destructive.OutcomeNoEffect, ""); err != nil {
-			log.WithError(err).Warn("configuration edit: retaining reservation after no-effect finalization failure")
+			c.Log.WarnContext(ctx, "configuration edit: retaining reservation after no-effect finalization failure", logx.Err(err))
 		}
 	}, nil
 }

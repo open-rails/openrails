@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -57,7 +58,7 @@ func newUndoRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.UndoRun(c.Context(), hosttools.UndoRunOptions{
+			return hosttools.UndoRun(c.Context(), slog.Default(), hosttools.UndoRunOptions{
 				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, RunID: runID, Actor: cliActor(),
 				Apply: apply, ExpectRows: expectRows, Format: format, Out: os.Stdout,
 			})

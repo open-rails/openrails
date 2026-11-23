@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -96,7 +96,7 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 		}
 		if err != nil {
 			if ctx.Err() == nil {
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
+				r.Log.ErrorContext(ctx, "provider posture: cannot read merchant PSPs", logx.Err(err), "merchant_id", mid.String())
 			}
 			unreadable++
 			continue
@@ -168,13 +168,13 @@ func verifiesPosture(scope merchants.PSPScope) bool {
 func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) bool {
 	svc := r.Merchants
 	scope, ok, err := svc.PSPScopeByID(ctx, mid, pspID)
-	fields := log.Fields{"merchant_id": mid.String(), "psp_id": pspID.String()}
+	fields := []any{"merchant_id", mid.String(), "psp_id", pspID.String()}
 	if err != nil || !ok {
-		log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: PSP unavailable")
+		r.Log.With(fields...).ErrorContext(ctx, "provider posture: PSP unavailable", logx.Err(err))
 		return false
 	}
-	fields["rail"] = scope.Rail
-	fields["account_id"] = scope.AccountID
+	fields = append(fields, "rail", scope.Rail)
+	fields = append(fields, "account_id", scope.AccountID)
 	var status providerposture.Status
 	var check providerposture.Check
 	switch scope.Rail {
@@ -182,7 +182,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		armer := &railresolve.NMIArmer{Config: r.Config, DB: r.DB, MerchantsFn: func() *merchants.Service { return svc }, Factory: r.NMIClients}
 		client, err := armer.NMIClient(ctx, mid, scope)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
+			r.Log.With(fields...).ErrorContext(ctx, "provider posture: NMI credentials unavailable; PSP disarmed", logx.Err(err))
 			return r.refuseCredentials(mid, scope, err)
 		}
 		if client.LoopbackFixture && !client.Live() {
@@ -192,7 +192,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 	case string(models.RailStripe):
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: Stripe credentials unavailable; PSP disarmed")
+			r.Log.With(fields...).ErrorContext(ctx, "provider posture: Stripe credentials unavailable; PSP disarmed", logx.Err(err))
 			return r.refuseCredentials(mid, scope, err)
 		}
 		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
@@ -202,12 +202,12 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		}
 		client, err := r.SolanaRPCResolver.Resolve(ctx, mid)
 		if err != nil || client == nil {
-			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: Solana RPC unavailable; PSP disarmed")
+			r.Log.With(fields...).ErrorContext(ctx, "provider posture: Solana RPC unavailable; PSP disarmed", logx.Err(err))
 			return false
 		}
 		status, check = client.VerifyPosture(ctx), client.CheckPosture
 	case string(models.RailCCBill):
-		log.WithContext(ctx).WithFields(fields).Warn("provider posture: CCBill has no authoritative test-mode signal; a sandbox CCBill PSP's mutations are refused")
+		r.Log.With(fields...).WarnContext(ctx, "provider posture: CCBill has no authoritative test-mode signal; a sandbox CCBill PSP's mutations are refused")
 		return true
 	default:
 		return true
@@ -215,13 +215,13 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 	r.providerPosture.AddPSP(mid.UUID(), pspID, status.Key, check)
 	switch {
 	case status.Armed():
-		log.WithContext(ctx).WithFields(fields).Info("provider posture: credentials verified; PSP armed")
+		r.Log.With(fields...).InfoContext(ctx, "provider posture: credentials verified; PSP armed")
 	case status.Verdict == providerposture.Unknown:
-		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Warn("provider posture: provider did not answer; PSP disarmed until it does, retrying in the background")
+		r.Log.With(fields...).WarnContext(ctx, "provider posture: provider did not answer; PSP disarmed until it does, retrying in the background", logx.Err(status.Error()))
 	case status.Verdict == providerposture.Unsupported:
-		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: provider's environment answer is not one OpenRails understands; PSP disarmed until its credentials are reloaded")
+		r.Log.With(fields...).ErrorContext(ctx, "provider posture: provider's environment answer is not one OpenRails understands; PSP disarmed until its credentials are reloaded", logx.Err(status.Error()))
 	default:
-		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: credentials not verified; PSP disarmed")
+		r.Log.With(fields...).ErrorContext(ctx, "provider posture: credentials not verified; PSP disarmed", logx.Err(status.Error()))
 	}
 	return status.Verdict != providerposture.Unknown
 }
@@ -253,7 +253,7 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 		scopes, err := r.Merchants.LivePSPScopes(ctx, mid)
 		if err != nil {
 			if ctx.Err() == nil {
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
+				r.Log.ErrorContext(ctx, "provider posture: cannot read merchant PSPs", logx.Err(err), "merchant_id", mid.String())
 			}
 			return
 		}
@@ -339,9 +339,9 @@ func (r *Runtime) CheckBookIdentity(ctx context.Context) {
 	armed, err := writeposture.BookArmed(ctx, r.DB.GenDirectory())
 	switch {
 	case err != nil:
-		log.WithContext(ctx).WithError(err).Error("billing book identity unreadable: provider writes stay readonly")
+		r.Log.ErrorContext(ctx, "billing book identity unreadable: provider writes stay readonly", logx.Err(err))
 	case !armed:
-		log.WithContext(ctx).Error("this database is a copy of the billing book (another cluster, database or schema than the one it was armed in): " +
+		r.Log.ErrorContext(ctx, "this database is a copy of the billing book (another cluster, database or schema than the one it was armed in): "+
 			"every provider write stays readonly. Once every other copy is stopped, run `openrails book arm --by NAME`")
 	}
 }
@@ -361,7 +361,7 @@ func (r *Runtime) PreloadMerchantConfig(declared ...billing.MerchantID) {
 			}
 			seen[mid] = true
 			if _, err := r.MerchantConfig.Get(merchant.WithID(ctx, mid), mid); err != nil && ctx.Err() == nil {
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("merchant config: cannot load; the first request retries")
+				r.Log.ErrorContext(ctx, "merchant config: cannot load; the first request retries", logx.Err(err), "merchant_id", mid.String())
 			}
 		}
 	})

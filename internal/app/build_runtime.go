@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/authkit/userinfo"
 
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/writeposture"
 
@@ -23,7 +24,6 @@ import (
 
 	"github.com/ccoveille/go-safecast/v2"
 	redis "github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/abusestate"
@@ -101,6 +101,7 @@ type runtimeOverrides struct {
 type devnetParityPriceProvider struct {
 	inner   solanamodule.TokenPriceProvider
 	network func(context.Context) string
+	Log     *slog.Logger
 }
 
 func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) (float64, error) {
@@ -111,14 +112,13 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 		if price, err := p.inner.PriceUSD(ctx, symbol); err == nil && price > 0 {
 			return price, nil
 		} else if err != nil {
-			log.WithError(err).WithField("token", symbol).
-				Debug("solana devnet/testnet: pyth price unavailable; using $1.00 parity (fake money)")
+			p.Log.DebugContext(ctx, "solana devnet/testnet: pyth price unavailable; using $1.00 parity (fake money)", logx.Err(err), "token", symbol)
 		}
 	}
 	return 1.0, nil
 }
 
-func createPythPriceProvider(network func(context.Context) string) (solanamodule.TokenPriceProvider, error) {
+func createPythPriceProvider(logger *slog.Logger, network func(context.Context) string) (solanamodule.TokenPriceProvider, error) {
 	// Always constructed (#788): whether a merchant's Solana rail is armed is
 	// per-merchant runtime state, not boot config; the client is a cheap
 	// lazily-used HTTP wrapper.
@@ -141,7 +141,7 @@ func createPythPriceProvider(network func(context.Context) string) (solanamodule
 	if err != nil {
 		return nil, fmt.Errorf("create pyth client: %w", err)
 	}
-	return devnetParityPriceProvider{inner: client, network: network}, nil
+	return devnetParityPriceProvider{inner: client, network: network, Log: logger}, nil
 }
 
 func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
@@ -239,7 +239,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
 	}
-	solanaPriceProvider, err := createPythPriceProvider(solanaRPCResolver.Network)
+	solanaPriceProvider, err := createPythPriceProvider(logger, solanaRPCResolver.Network)
 	if err != nil {
 		return nil, err
 	}
@@ -659,7 +659,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	}
 
 	postures := writeposture.View{Config: cfg, DB: database}
-	userSubscriptionService := subscriptions.NewUserSubscriptionService(
+	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
 		subscriptionService,
 		productService,
 		priceService,
@@ -705,6 +705,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		RailConfigs:                  railConfigs,
 		NMIResolver:                  collectionResolver,
 		MoneyService:                 moneyService,
+		Log:                          database.Log,
 	}
 
 	// Create purchase service for unified purchase endpoint

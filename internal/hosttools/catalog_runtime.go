@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
@@ -10,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -20,10 +22,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/service"
-	log "github.com/sirupsen/logrus"
 )
 
-func catalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
+func catalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
 	if opts.App != nil {
 		if opts.App.Runtime == nil {
 			return nil, nil, nil, fmt.Errorf("catalog runtime is not initialized")
@@ -34,23 +35,23 @@ func catalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runtime
 		}
 		return opts.App.Runtime, svc, func() {}, nil
 	}
-	return newCatalogRuntime(ctx, opts)
+	return newCatalogRuntime(ctx, logger, opts)
 }
 
-func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
+func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
 	cfg := opts.Config
 	if cfg == nil {
 		return nil, nil, nil, fmt.Errorf("catalog runtime configuration is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	database, err := openEmbeddedDB(cfg, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, cfg, opts.PGXPool)
 	if err != nil {
 		cancel()
 		return nil, nil, nil, err
 	}
 	// Mapping a provider price wakes the subscriptions parked on it.
 	bindParkWakes(ctx, cfg, database)
-	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
+	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: logger}
 	rt.StripeClients = stripeapi.NewFactory(nil)
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
 		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
@@ -58,11 +59,11 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	cleanup := func() {
 		cancel()
 		if err := rt.Close(context.Background()); err != nil {
-			log.WithError(err).Error("catalog runtime cleanup failed")
+			logger.ErrorContext(ctx, "catalog runtime cleanup failed", logx.Err(err))
 		}
 	}
 	fail := func(err error) (*app.Runtime, *service.Service, func(), error) { cleanup(); return nil, nil, nil, err }
-	directory, err := merchants.NewDirectoryService(database.DataPool())
+	directory, err := merchants.NewDirectoryService(logger, database.DataPool())
 	if err != nil {
 		return fail(err)
 	}

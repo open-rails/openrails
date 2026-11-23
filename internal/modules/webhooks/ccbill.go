@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,7 @@ type CCBillWebhookService struct {
 	DeduplicationService         *DeduplicationService
 	OrderAttemptService          *payment.OrderAttemptService
 	MoneyService                 *money.MoneyService
+	Log                          *slog.Logger
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -639,7 +641,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				Data: billing.NotificationData{Source: "customer_checkout", FailureCode: failureCode, FailureReason: failureReason,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
-			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
 				return err
 			}
 		}
@@ -650,7 +652,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if err := attempts.Record(ctx, db.NewWithPgxTx(tx).Gen(ctx), attempts.Attempt{
+			if err := attempts.Record(ctx, db.NewWithPgxTx(s.Log, tx).Gen(ctx), attempts.Attempt{
 				MerchantID: price.MerchantID, CustomerID: identity.CustomerIDFromString(userID).UUID(), PSPID: psp, Rail: string(models.RailCCBill),
 				Kind: attempts.Initial, Owner: attempts.OwnerProvider, NewCard: true, ObservedVia: "webhook", Target: price.ID.String(),
 				Answer: decline.Evidence{Code: strings.TrimSpace(failureCode), Text: strings.TrimSpace(failureReason)}, TransactionID: strings.TrimSpace(transactionID),
@@ -728,7 +730,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 	var mismatchRepairAlert *alerting.LedgerRepair
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock)
@@ -895,7 +897,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 				EventType:  models.NotificationSubscriptionChanged,
 				Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), ToPriceID: newPrice.PublicID},
 			}
-			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
 				return err
 			}
 		}
@@ -1024,7 +1026,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				Data: billing.NotificationData{Source: "customer_subscription_change", FailureCode: failureCode, FailureReason: failureReason,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
-			if err := s.recordNotices(ctx, db.NewWithPgxTx(tx), notification); err != nil {
+			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
 				return err
 			}
 		}
@@ -1060,7 +1062,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		return fmt.Errorf("missing nextRenewalDate")
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		sub, err := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(tx)).GetByPSPSubscriptionID(ctx, string(models.RailCCBill), data.SubscriptionID)
+		sub, err := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(s.Log, tx)).GetByPSPSubscriptionID(ctx, string(models.RailCCBill), data.SubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for rail subscription ID: %s", data.SubscriptionID)
@@ -1090,7 +1092,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 	pSubscriptionID := data.SubscriptionID
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
@@ -1134,7 +1136,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		return fmt.Errorf("missing required field: transactionId")
 	}
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := db.NewWithPgxTx(tx)
+		d := db.NewWithPgxTx(s.Log, tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
 			return fmt.Errorf("load subscription for reactivation: %w", err)
@@ -1372,7 +1374,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	var chargebackRepairAlert *alerting.LedgerRepair
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
 		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), pSubscriptionID)
@@ -1546,7 +1548,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	var blocked error
 	var sub *models.Subscription
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := db.NewWithPgxTx(tx)
+		d := db.NewWithPgxTx(s.Log, tx)
 		var err error
 		if sub, err = subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID); err != nil {
 			return fmt.Errorf("failed to get subscription for renewal: %w", err)
@@ -1632,7 +1634,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	}
 
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := db.NewWithPgxTx(tx)
+		d := db.NewWithPgxTx(s.Log, tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)

@@ -9,13 +9,13 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/solana/change"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
@@ -32,11 +32,11 @@ func (r *Runtime) ArmSolanaRecurringServices(transit solanaint.TransitClient) {
 	}
 	crankers, err := recurring.BuildCrankers(config.SolanaCrankers(r.Config), transit, CrankerPins{DB: r.DB})
 	if err != nil {
-		log.WithError(err).Error("solana: the crankers are not armed; Solana rebilling is off")
+		r.Log.Error("solana: the crankers are not armed; Solana rebilling is off", logx.Err(err))
 		return
 	}
 	if crankers.Len() == 0 {
-		log.Info("solana: no solana.crankers; Solana rebilling is off, one-time Solana payments work")
+		r.Log.Info("solana: no solana.crankers; Solana rebilling is off, one-time Solana payments work")
 		return
 	}
 	r.SolanaCrankers = crankers
@@ -67,7 +67,7 @@ func (r *Runtime) ArmSolanaRecurringServices(transit solanaint.TransitClient) {
 // solana_tier_change operation, and what the change route records and hints
 // through. It needs no cranker; without a chain reader or lifecycle it parks.
 func (r *Runtime) SolanaPlanChanges(clock clockwork.Clock) *change.Handler {
-	h := &change.Handler{DB: r.DB, Clock: clock, Store: intents.NewStore(r.DB)}
+	h := &change.Handler{DB: r.DB, Clock: clock, Store: intents.NewStore(r.DB), Log: r.Log}
 	if r.SubscriptionLifecycleService != nil {
 		h.Lifecycle = r.SubscriptionLifecycleService
 	}

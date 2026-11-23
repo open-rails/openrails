@@ -1,6 +1,7 @@
 package embedhttp
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,7 @@ import (
 func TestChainRecoversPanics(t *testing.T) {
 	passthrough := func(h http.Handler) http.Handler { return h }
 	boom := router.Entry{Method: http.MethodGet, Path: EmbeddedV1Prefix + "/boom", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })}
-	h := (&Assembler{}).chain(boom, passthrough)
+	h := (&Assembler{Log: slog.Default()}).chain(boom, passthrough)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, boom.Path, nil))
@@ -27,6 +28,6 @@ func TestChainRecoversPanics(t *testing.T) {
 
 	abort := router.Entry{Method: http.MethodGet, Path: boom.Path, Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })}
 	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
-		(&Assembler{}).chain(abort, passthrough).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, boom.Path, nil))
+		(&Assembler{Log: slog.Default()}).chain(abort, passthrough).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, boom.Path, nil))
 	}, "a client-abort panic still propagates to the server")
 }

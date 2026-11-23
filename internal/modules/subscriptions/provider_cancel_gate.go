@@ -86,7 +86,7 @@ func raiseProviderCancelHeld(ctx context.Context, d *db.DB, sub *models.Subscrip
 	}
 	ctx = merchant.WithID(ctx, billing.MerchantID(sub.MerchantID))
 	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := db.NewWithPgxTx(tx).Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		_, err := db.NewWithPgxTx(d.Log, tx).Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: sub.MerchantID, FindingType: ProviderCancelHeldFindingType, SubjectKey: sub.ID.String(),
 			Severity: "critical", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 		})

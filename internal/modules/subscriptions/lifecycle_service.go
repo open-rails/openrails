@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -54,6 +55,7 @@ type SubscriptionLifecycleService struct {
 	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
 	// when nil a terminal outcome cannot stop the provider schedule.
 	providerCancel ProviderCancelScheduler
+	Log            *slog.Logger
 }
 
 func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) *entitlements.EntitlementService {
@@ -100,6 +102,7 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
+		Log:                 db.Log,
 	}
 }
 
@@ -167,7 +170,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	}).Info("Starting membership creation flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		dbb := db.NewWithPgxTx(tx)
+		dbb := db.NewWithPgxTx(s.Log, tx)
 		var err error
 		subscription, _, err = s.CreateMembershipTx(ctx, dbb, params)
 		return err
@@ -734,7 +737,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		ctx = db.WithPSPID(ctx, psp)
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
@@ -846,7 +849,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	}).Info("Starting membership renewal flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		paymentService := payments.NewPaymentService(db, s.Clock())
@@ -1287,7 +1290,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 	var reactivated *models.Subscription
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, nil, s.Clock())
@@ -1382,7 +1385,7 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 	var result *CancelMembershipTxResult
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		result, err = s.CancelMembershipTx(ctx, db.NewWithPgxTx(tx), params)
+		result, err = s.CancelMembershipTx(ctx, db.NewWithPgxTx(s.Log, tx), params)
 		return err
 	})
 	if err != nil {
@@ -1855,7 +1858,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationService(db)
@@ -1968,7 +1971,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	}).Warn("Starting membership failure flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationService(db)

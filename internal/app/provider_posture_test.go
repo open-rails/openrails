@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -60,7 +61,7 @@ func TestPostureStateReadsArmingAtOnce(t *testing.T) {
 		return providerposture.Unknown, errors.New("no answer")
 	}
 	registry.Verify(ctx, key, silent)
-	r := &Runtime{}
+	r := &Runtime{Log: slog.Default()}
 	r.postureWait.Store(&postureWait{first: true})
 	require.ErrorContains(t, r.postureState(), "first verification pending")
 	r.providerPosture.AddPSP(merchant, psp, key, silent)

@@ -121,7 +121,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 		history = append(history, declared)
 	}
 	psp := billing.PSPID(pspID)
-	res, err := billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: mid, Clock: im.Clock, Authority: reconcile.ProviderFacts, Book: billing.DeclaredBilling{
+	res, err := billingimport.Import(ctx, im.Log, billingimport.Options{DB: im.DB, MerchantID: mid, Clock: im.Clock, Authority: reconcile.ProviderFacts, Book: billing.DeclaredBilling{
 		AsOf: l.asOf, DefaultPSP: billing.PSPRef{ID: &psp}, Customers: []billing.DeclaredCustomer{{Customer: billing.CustomerID(customer)}},
 		Subscriptions: []billing.DeclaredSubscription{declared}, Transactions: history,
 	}})

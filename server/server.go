@@ -223,7 +223,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {
-			admission, err := operator.MerchantCreationAdmission(func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
+			admission, err := operator.MerchantCreationAdmission(logger, func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
 				FreeAllowance: c.FreeAllowance, HasVaultedPaymentMethod: deps.HasVaultedPaymentMethod,
 			})
 			if err != nil {
@@ -260,7 +260,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return fail(fmt.Errorf("server: build AuthKit: %w", err))
 	}
-	if s.cp, err = controlplane.New(ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
+	if s.cp, err = controlplane.New(logger, ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
 		_ = ak.Close(context.WithoutCancel(ctx))
 		return fail(err)
 	}

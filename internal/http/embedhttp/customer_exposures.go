@@ -3,6 +3,7 @@ package embedhttp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -23,7 +24,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Ta
 	if err != nil {
 		return nil, err
 	}
-	table := &router.Table{}
+	table := &router.Table{Log: a.Log}
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: auth, Providers: providers})
 	return wrapCustomerRoutes(a.Runtime, table, auth), nil
@@ -31,7 +32,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Ta
 
 // BuildMappedCustomerRoutes uses a host-authorized binding without entering
 // the ordinary customer issuer/native-network enrollment path.
-func BuildMappedCustomerRoutes(a *app.App, selection config.CustomerRoutes) (*router.Table, error) {
+func BuildMappedCustomerRoutes(logger *slog.Logger, a *app.App, selection config.CustomerRoutes) (*router.Table, error) {
 	if a == nil || a.Runtime == nil || httproutes.IsNilAuth(selection.Auth) || selection.Resolve == nil {
 		return nil, fmt.Errorf("openrails: CustomerRoutes requires an initialized engine, Auth and Resolve")
 	}
@@ -39,7 +40,7 @@ func BuildMappedCustomerRoutes(a *app.App, selection config.CustomerRoutes) (*ro
 	if err != nil {
 		return nil, err
 	}
-	table := &router.Table{}
+	table := &router.Table{Log: logger}
 	httproutes.RegisterMappedCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: selection.Auth, Providers: providers}, selection.Resolve)
 	return wrapCustomerRoutes(a.Runtime, table, selection.Auth), nil

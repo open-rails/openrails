@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"regexp"
@@ -49,6 +50,7 @@ type ControlPlane struct {
 	authPrefix string
 	// merchants is the runtime's merchants service (BindMerchants).
 	merchants *merchants.Service
+	Log       *slog.Logger
 }
 
 // Options is what the server decides about its control plane beside
@@ -283,7 +285,7 @@ func consoleFrontend(front *authkit.FrontendConfig, publicURL, issuer string) {
 // New is the control plane over client, the AuthKit client built from
 // AuthKit's configuration, and pool, OpenRails' database. Closing it closes
 // client.
-func New(client *authkit.Client, cfg *config.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
+func New(logger *slog.Logger, client *authkit.Client, cfg *config.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
 	switch {
 	case client == nil:
 		return nil, errors.New("controlplane: an AuthKit client is required")
@@ -310,6 +312,7 @@ func New(client *authkit.Client, cfg *config.Config, auth authkit.Config, pool *
 		client: client, issuer: strings.TrimSpace(auth.Token.Issuer), registration: auth.Registration.NativeUserMode,
 		localSignIn: opts.LocalSignIn, merchantCreation: opts.MerchantCreation, merchantCreationPattern: pattern, naming: naming,
 		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Token.Issuer),
+		Log: logger,
 	}, nil
 }
 

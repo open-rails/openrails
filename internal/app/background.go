@@ -3,10 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/logx"
 	"runtime/debug"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type backgroundTasks struct {
@@ -35,7 +34,7 @@ func (r *Runtime) Go(name string, fn func(context.Context)) {
 		defer b.wg.Done()
 		defer func() {
 			if p := recover(); p != nil {
-				log.WithField("task", name).WithField("stack", string(debug.Stack())).WithError(fmt.Errorf("panic: %v", p)).Error("background task panicked")
+				r.Log.ErrorContext(ctx, "background task panicked", "task", name, "stack", string(debug.Stack()), logx.Err(fmt.Errorf("panic: %v", p)))
 			}
 		}()
 		fn(ctx)

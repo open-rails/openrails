@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -139,7 +140,7 @@ type ProvisionMerchantParams struct {
 // manifest names merchants only (slug, remote_application) and is
 // refused when it declares more. Issuer registration is declarative and does
 // not fetch the JWKS.
-func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
+func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")
 	}
@@ -170,7 +171,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		log.Info("merchant bootstrap manifest has no merchants")
 		return nil
 	}
-	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
+	database, err := db.NewWithPGXPool(logger, cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}

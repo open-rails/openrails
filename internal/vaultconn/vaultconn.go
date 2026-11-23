@@ -5,13 +5,14 @@ package vaultconn
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	vaultapi "github.com/hashicorp/vault/api"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/retry"
 )
 
@@ -42,7 +43,7 @@ type Connection struct {
 // Open binds client to the mounts cfg names. A mount named without a client,
 // or a malformed mount path, leaves Vault unusable, never an error: its
 // operations refuse and Err reports why.
-func Open(ctx context.Context, cfg *config.Config, client *vaultapi.Client) (*Connection, error) {
+func Open(ctx context.Context, logger *slog.Logger, cfg *config.Config, client *vaultapi.Client) (*Connection, error) {
 	mount := config.MerchantConfigKVMount(cfg)
 	platformMount, err := config.CardVaultKVMount(cfg)
 	if err != nil {
@@ -60,11 +61,11 @@ func Open(ctx context.Context, cfg *config.Config, client *vaultapi.Client) (*Co
 		conn.Err = ErrNoClient
 	}
 	if conn.Err != nil {
-		log.WithError(conn.Err).Error("vault: configuration refused; Vault-backed merchant configuration and signing are unavailable")
+		logger.ErrorContext(ctx, "vault: configuration refused; Vault-backed merchant configuration and signing are unavailable", logx.Err(conn.Err))
 	} else if mount != "" {
 		verify, stop := context.WithCancel(context.WithoutCancel(ctx))
 		conn.stop = stop
-		go verifyCapabilities(verify, client, mount, vc.ScopePrefix)
+		go verifyCapabilities(verify, logger, client, mount, vc.ScopePrefix)
 	}
 	transitMount := vc.TransitMount
 	if transitMount == "" {
@@ -98,16 +99,16 @@ func (c *Connection) State() error {
 // verifyCapabilities reports a token that cannot serve the merchant
 // configuration mount, retrying until Vault answers. Diagnostics only: reads
 // and writes fail at runtime either way.
-func verifyCapabilities(ctx context.Context, client *vaultapi.Client, kvMount, scopePrefix string) {
+func verifyCapabilities(ctx context.Context, logger *slog.Logger, client *vaultapi.Client, kvMount, scopePrefix string) {
 	_ = retry.Forever(ctx, func(ctx context.Context) error {
 		caps, err := vault.SelfCapabilities(ctx, client, kvMount, scopePrefix)
 		if err != nil {
 			return err
 		}
 		if !caps.KVRead {
-			log.WithField("kv_mount", kvMount).Error("vault: the token cannot read the KV mount; merchant configuration is unavailable")
+			logger.ErrorContext(ctx, "vault: the token cannot read the KV mount; merchant configuration is unavailable", "kv_mount", kvMount)
 		} else if !caps.KVWrite {
-			log.Warn("vault: read-only KV capability; merchant configuration edits fail")
+			logger.WarnContext(ctx, "vault: read-only KV capability; merchant configuration edits fail")
 		}
 		return nil
 	}, nil)

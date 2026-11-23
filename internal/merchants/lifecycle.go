@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -94,6 +95,7 @@ type Service struct {
 	platformVault  *config.CardVaultConfig
 	platformKV     *vault.KVv2Adapter
 	platformPrefix string
+	Log            *slog.Logger
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -107,7 +109,7 @@ func (s *Service) WithDestructivePolicy(p *destructive.Gate) *Service {
 
 // NewService builds the lifecycle service over the merchants' configuration,
 // with the platform vault and fake providers cfg names.
-func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Config) (*Service, error) {
+func NewService(logger *slog.Logger, pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Config) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
@@ -117,7 +119,7 @@ func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Co
 	if cfg == nil {
 		return nil, errors.New("merchants: the engine configuration is required")
 	}
-	service, err := NewDirectoryService(pool)
+	service, err := NewDirectoryService(logger, pool)
 	if err != nil {
 		return nil, err
 	}
@@ -134,15 +136,15 @@ func NewService(pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Co
 // lookup over billing.merchants, with no secret store (scoped credential
 // lookups are unavailable). It is the lifecycle
 // slice the control-plane provisioning seam needs (#738).
-func NewDirectoryService(pool *db.Pool) (*Service, error) {
+func NewDirectoryService(logger *slog.Logger, pool *db.Pool) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
-	database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
+	database, err := db.NewWithPGXPool(logger, pool.Raw(), pool.Schema())
 	if err != nil {
 		return nil, err
 	}
-	return &Service{pool: pool, database: database}, nil
+	return &Service{pool: pool, database: database, Log: logger}, nil
 }
 
 // Config is the merchants' configuration; nil on a directory-only Service.

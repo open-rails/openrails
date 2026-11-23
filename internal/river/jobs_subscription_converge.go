@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -113,6 +114,7 @@ type SubscriptionConvergeWorker struct {
 	Importer func() *pspimport.Importer
 	// Findings notifies an operator of the finding a park raises.
 	Findings reconcile.FindingNotifier
+	Log      *slog.Logger
 }
 
 func (SubscriptionConvergeWorker) Kind() string { return KindSubscriptionConverge }
@@ -184,6 +186,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			OrderAttemptService: w.OrderAttemptService,
 			Objects:             w.objects(),
 			Findings:            w.Findings,
+			Log:                 w.Log,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 

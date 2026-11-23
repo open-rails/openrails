@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,6 +57,7 @@ type Handler struct {
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	Tokens    recurring.Tokens
 	Store     *intents.Store
+	Log       *slog.Logger
 }
 
 func (h *Handler) now() time.Time { return timeutil.FirstClock(h.Clock).Now().UTC() }
@@ -117,7 +119,7 @@ func (h *Handler) settle(ctx context.Context, c solanasubs.Change, signature str
 	if h.Chain == nil || h.Lifecycle == nil {
 		return nil, errors.New("solana plan change: chain reader or lifecycle not wired")
 	}
-	svc := recurring.NewConfirmTierChangeService(h.Chain, h.Lifecycle, solanasubs.NewSolanaSubscriptionRepo(h.DB), subscriptions.NewSubscriptionRepo(h.DB), h.DB, h.Tokens)
+	svc := recurring.NewConfirmTierChangeService(h.Log, h.Chain, h.Lifecycle, solanasubs.NewSolanaSubscriptionRepo(h.DB), subscriptions.NewSubscriptionRepo(h.DB), h.DB, h.Tokens)
 	return svc.Confirm(ctx, recurring.ConfirmTierChangeInput{
 		Signature: signature, Reference: c.Reference,
 		OldSubscriptionID: c.OldSubscriptionID, UserID: c.CustomerID.String(),

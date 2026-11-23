@@ -78,7 +78,7 @@ func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merc
 // Ambient host context is stripped before it. It serves no customer routes:
 // the Go client has no customer methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
-	mux := &router.Table{}
+	mux := &router.Table{Log: rt.Log}
 	opts := httproutes.HostOptions()
 	caps := embedhttp.CapabilitiesFor(rt, opts.Groups, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
 	opts.Capabilities = &caps

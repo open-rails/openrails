@@ -8,6 +8,7 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -73,7 +74,7 @@ type pruneConverge struct {
 // provider no longer lists. It reads the provider and never writes it. An
 // applied prune stamps every row with a destructive run, which
 // `openrails undo-run` reverses.
-func Prune(ctx context.Context, opts PruneOptions) error {
+func Prune(ctx context.Context, logger *slog.Logger, opts PruneOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
@@ -85,7 +86,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 	if err != nil {
 		return err
 	}
-	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, logger, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err

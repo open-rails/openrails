@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -166,7 +167,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if err := resources.loadMerchants(ctx); err != nil {
 		return err
 	}
-	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config()}
+	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config(), Log: slog.Default()}
 	if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return err
 	}
@@ -212,7 +213,7 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 	if err != nil {
 		return err
 	}
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, vault, resources.cp, opts.slug)
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, slog.Default(), cfg, vault, resources.cp, opts.slug)
 	if err != nil {
 		return err
 	}
@@ -300,7 +301,7 @@ func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp
 		fmt.Fprintf(out, "merchants: %d declared (plan-only; --seed provisions them)\n", len(manifest.Merchants))
 		return nil
 	}
-	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, reconcileOpts); err != nil {
+	if err := bootstrap.ReconcileMerchantManifestData(ctx, slog.Default(), cfg, cp, manifest, reconcileOpts); err != nil {
 		return fmt.Errorf("merchant bootstrap: %w", err)
 	}
 	fmt.Fprintf(out, "merchants: %d provisioned\n", len(manifest.Merchants))

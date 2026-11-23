@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -77,7 +78,7 @@ func newProposalsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.ProposalsList(c.Context(), opts, hosttools.ProposalSet{PSP: psp, Pull: pull, Kind: kind, Source: source})
+			return hosttools.ProposalsList(c.Context(), slog.Default(), opts, hosttools.ProposalSet{PSP: psp, Pull: pull, Kind: kind, Source: source})
 		},
 	}
 	filters(list)
@@ -89,7 +90,7 @@ func newProposalsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.ProposalsShow(c.Context(), opts, args[0])
+			return hosttools.ProposalsShow(c.Context(), slog.Default(), opts, args[0])
 		},
 	}
 
@@ -115,15 +116,15 @@ func newProposalsCmd() *cobra.Command {
 	}
 	approve := resolveCmd("approve [<id>…]", "Approve proposals: each applies in its own transaction",
 		func(c *cobra.Command, opts hosttools.ProposalsOptions, s hosttools.ProposalSet) error {
-			return hosttools.ProposalsApprove(c.Context(), opts, s, notes)
+			return hosttools.ProposalsApprove(c.Context(), slog.Default(), opts, s, notes)
 		})
 	dismiss := resolveCmd("dismiss [<id>…]", "Dismiss proposals without applying them",
 		func(c *cobra.Command, opts hosttools.ProposalsOptions, s hosttools.ProposalSet) error {
-			return hosttools.ProposalsDismiss(c.Context(), opts, s, notes)
+			return hosttools.ProposalsDismiss(c.Context(), slog.Default(), opts, s, notes)
 		})
 	foreign := resolveCmd("foreign [<id>…]", "Close provider schedules that are not this merchant's (another environment's on a shared gateway); they stop holding provider recovery",
 		func(c *cobra.Command, opts hosttools.ProposalsOptions, s hosttools.ProposalSet) error {
-			return hosttools.ProposalsForeign(c.Context(), opts, s, notes)
+			return hosttools.ProposalsForeign(c.Context(), slog.Default(), opts, s, notes)
 		})
 
 	runs := &cobra.Command{
@@ -133,7 +134,7 @@ func newProposalsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.ProposalsRuns(c.Context(), opts, limit)
+			return hosttools.ProposalsRuns(c.Context(), slog.Default(), opts, limit)
 		},
 	}
 	runs.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")

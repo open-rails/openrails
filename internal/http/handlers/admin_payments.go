@@ -143,7 +143,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		if err := gen.New(tx).LockAdminRefund(ctx, adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
-		txDB := db.NewWithPgxTx(tx)
+		txDB := db.NewWithPgxTx(r.Log, tx)
 		paymentService := payments.NewPaymentService(txDB, r.Clock)
 		result, err := prepareAdminRefund(ctx, r, txDB, paymentService, paymentID, req, idempotencyKey)
 		if err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -48,7 +49,7 @@ type NMIDeclineReportOptions struct {
 // NMIDeclineReport reads an NMI account's authorization history through the
 // Query API and reports approval and refusal rates by month and kind, and each
 // refusal's reason and category from the decline classifier. Read-only.
-func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
+func NMIDeclineReport(ctx context.Context, logger *slog.Logger, opts NMIDeclineReportOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
@@ -66,7 +67,7 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 	if until.IsZero() {
 		until = time.Now().UTC()
 	}
-	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, logger, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err

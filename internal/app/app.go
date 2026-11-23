@@ -29,6 +29,7 @@ type App struct {
 	// which owns merchant identity and the HTTP surface: the embedded mount
 	// refuses.
 	Standalone bool
+	Log        *slog.Logger
 }
 
 // BootstrapOptions is what the application graph reaches outside its
@@ -91,7 +92,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	database, err := db.NewWithPGXPoolAndSessions(opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
+	database, err := db.NewWithPGXPoolAndSessions(logger, opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
 	if err != nil {
 		return nil, fmt.Errorf("use pgx pool: %w", err)
 	}
@@ -121,6 +122,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		Config:      cfg,
 		Runtime:     runtime,
 		RedisClient: runtime.RedisClient,
+		Log:         logger,
 	}
 
 	return app, nil

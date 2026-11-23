@@ -23,5 +23,5 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 		return nil
 	}
 	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
-		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock}
+		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock, Log: r.Log}
 }

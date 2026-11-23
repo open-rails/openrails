@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
@@ -167,8 +166,7 @@ func (s *Service) ActivePSPScope(ctx context.Context, id billing.MerchantID, rai
 	}
 	live := j.live(rail)
 	if len(live) > 1 {
-		log.WithFields(log.Fields{"merchant_id": id.String(), "rail": rail, "active_count": len(live)}).
-			Warn("multiple active PSPs configured; using newest for new work")
+		s.Log.WarnContext(ctx, "multiple active PSPs configured; using newest for new work", "merchant_id", id.String(), "rail", rail, "active_count", len(live))
 	}
 	if len(live) == 0 {
 		for _, p := range j.psps {

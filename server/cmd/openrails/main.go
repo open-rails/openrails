@@ -159,7 +159,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
 	log.Info(buildinfo.Get().String())
-	config.LogStartupStatus(cfg)
+	config.LogStartupStatus(slog.Default(), cfg)
 
 	// The boot waits for the database as long as it takes (a failover, a slow
 	// start); only a stop signal ends the wait. Meanwhile the process is not
@@ -209,7 +209,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 func runWorker(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	config.LogStartupStatus(cfg)
+	config.LogStartupStatus(slog.Default(), cfg)
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)

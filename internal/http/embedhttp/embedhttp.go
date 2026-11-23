@@ -4,6 +4,7 @@
 package embedhttp
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/abusestate"
@@ -47,10 +48,11 @@ type Assembler struct {
 	// Auth is the mount's Routes.Auth: who a staff, programmatic or
 	// purchase-session request is.
 	Auth billingauth.Authenticator
+	Log  *slog.Logger
 }
 
 // FromApp builds an Assembler from the application graph.
-func FromApp(a *app.App) *Assembler {
+func FromApp(logger *slog.Logger, a *app.App) *Assembler {
 	if a == nil {
 		return nil
 	}
@@ -59,6 +61,7 @@ func FromApp(a *app.App) *Assembler {
 		Runtime:      a.Runtime,
 		CaptchaStore: a.Runtime.CaptchaStore,
 		AdminLimiter: middleware.NewAdminOperationLimiter(a.Runtime.AbuseState),
+		Log:          logger,
 	}
 }
 
@@ -68,7 +71,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		panic(err)
 	}
 	providerRoutes := s.providerRoutes(opts.ProviderRoutes)
-	mux := &router.Table{}
+	mux := &router.Table{Log: s.Log}
 
 	// The public configuration (GET /v1/config) is always on, so even a
 	// minimal deployment is discoverable.

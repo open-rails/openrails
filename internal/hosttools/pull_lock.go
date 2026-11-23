@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -27,7 +25,7 @@ func waitForMerchantPullLock(ctx context.Context, database *db.DB, merchantID bi
 			return release, nil
 		}
 		if !waited {
-			log.WithContext(ctx).WithField("merchant_id", merchantID.String()).Info("another pull of this merchant is running; waiting for it to finish")
+			database.Log.InfoContext(ctx, "another pull of this merchant is running; waiting for it to finish", "merchant_id", merchantID.String())
 		}
 		select {
 		case <-ctx.Done():

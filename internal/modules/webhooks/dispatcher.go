@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,6 +74,7 @@ type WebhookDispatcher struct {
 	// ObserveEnqueuer schedules the read of a catalog object a Stripe
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
+	Log             *slog.Logger
 }
 
 // webhookRegistry resolves WebhookHandlers by rail: adding a rail means
@@ -81,7 +83,7 @@ func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
 	reg.Register(StripeWebhookHandler{})
 	reg.Register(NMIWebhookHandler{})
-	reg.Register(CCBillWebhookHandler{})
+	reg.Register(CCBillWebhookHandler{Log: d.Log})
 	reg.Register(BasisTheoryWebhookHandler{})
 	return reg
 }
@@ -135,6 +137,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		DeduplicationService:         d.DeduplicationService,
 		OrderAttemptService:          d.OrderAttemptService,
 		MoneyService:                 d.MoneyService,
+		Log:                          h.Log,
 	}
 	return service.HandleCCBillWebhook(ctx)
 }

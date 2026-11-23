@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"sync"
@@ -14,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/tracelog"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/sirupsen/logrus"
 )
 
 // MerchantGUC carries the selected merchant for stored functions and SQL that
@@ -221,6 +222,7 @@ type lazyMerchantPgxConn struct {
 	conn *pgxpool.Conn
 	// poolTx marks a pool transaction open on the pin.
 	poolTx bool
+	Log    *slog.Logger
 }
 
 // get returns the pinned connection, acquiring it on first use. It hands out
@@ -270,7 +272,7 @@ func (l *lazyMerchantPgxConn) release() {
 	// pool a connection that may still carry a merchant GUC: on reset failure,
 	// close it so the pool destroys it.
 	if _, err := gen.New(l.conn).SetConfig(context.Background(), gen.SetConfigParams{Setting: MerchantGUC}); err != nil {
-		logrus.WithError(err).Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection")
+		l.Log.Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection", logx.Err(err))
 		_ = l.conn.Conn().Close(context.Background())
 	}
 	l.conn.Release()
@@ -368,36 +370,36 @@ func (r errRow) Scan(...interface{}) error { return r.err }
 // NewSQLTracer logs every query at debug level, for a pool a host opens
 // with sql_trace on. It logs each statement, never its arguments: they carry
 // customer data.
-func NewSQLTracer() *tracelog.TraceLog {
+func NewSQLTracer(logger *slog.Logger) *tracelog.TraceLog {
 	return &tracelog.TraceLog{
 		Logger: tracelog.LoggerFunc(func(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
-			logPGX(ctx, level, msg, data)
+			logPGX(ctx, logger, level, msg, data)
 		}),
 		LogLevel: tracelog.LogLevelDebug,
 	}
 }
 
-func logPGX(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
-	fields := logrus.Fields{}
+func logPGX(ctx context.Context, logger *slog.Logger, level tracelog.LogLevel, msg string, data map[string]any) {
+	fields := []any{}
 	for _, k := range slices.Sorted(maps.Keys(data)) {
 		switch v := data[k].(type) {
 		case error:
-			fields[logrus.ErrorKey] = v
+			fields = append(fields, logx.Err(v))
 		default:
 			if k != "args" {
-				fields[k] = v
+				fields = append(fields, k, v)
 			}
 		}
 	}
-	entry := logrus.WithContext(ctx).WithFields(fields)
+	entry := logger.With(fields...)
 	switch level {
 	case tracelog.LogLevelTrace, tracelog.LogLevelDebug:
-		entry.Debug(msg)
+		entry.DebugContext(ctx, msg)
 	case tracelog.LogLevelInfo:
-		entry.Info(msg)
+		entry.InfoContext(ctx, msg)
 	case tracelog.LogLevelWarn:
-		entry.Warn(msg)
+		entry.WarnContext(ctx, msg)
 	default:
-		entry.Error(msg)
+		entry.ErrorContext(ctx, msg)
 	}
 }

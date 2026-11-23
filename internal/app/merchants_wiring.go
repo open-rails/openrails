@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"reflect"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/jackc/pgx/v5"
 
@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -35,7 +36,7 @@ import (
 // over it, and binds the settings reader every database handle reads through.
 // Login and loads run later: nothing here waits on Vault.
 func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Client, custodianTransport http.RoundTripper) error {
-	conn, err := vaultconn.Open(ctx, r.Config, borrowed)
+	conn, err := vaultconn.Open(ctx, r.Log, r.Config, borrowed)
 	if err != nil {
 		return err
 	}
@@ -46,15 +47,15 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		if r.Config.Vault != nil {
 			prefix = r.Config.Vault.ScopePrefix
 		}
-		if source, err = merchantdocs.NewVaultSource(conn.KV, prefix); err != nil {
+		if source, err = merchantdocs.NewVaultSource(r.Log, conn.KV, prefix); err != nil {
 			// vault.scope_prefix is malformed, so Vault is unusable
 			// (vaultconn.Open): the default prefix is never read.
-			source, _ = merchantdocs.NewVaultSource(conn.KV, "")
+			source, _ = merchantdocs.NewVaultSource(r.Log, conn.KV, "")
 		}
 	}
-	cache := merchantdocs.NewCache(source)
+	cache := merchantdocs.NewCache(r.Log, source)
 	r.MerchantConfig = cache
-	svc, err := merchants.NewService(r.DB.DataPool(), cache, r.Config)
+	svc, err := merchants.NewService(r.Log, r.DB.DataPool(), cache, r.Config)
 	if err != nil {
 		return err
 	}
@@ -225,7 +226,7 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		if err := scim.Declare(ctx, q, id, doc.Secrets.SCIMToken); err != nil {
 			return err
 		}
-		return recordDanglingPolicies(ctx, q, id, settings)
+		return recordDanglingPolicies(ctx, r.Log, q, id, settings)
 	})
 	if err != nil {
 		if errors.Is(err, scim.ErrTokenTooShort) {
@@ -299,7 +300,7 @@ func (r *Runtime) recordRefusedDocuments(ctx context.Context, id billing.Merchan
 	})
 	if err != nil {
 		if ctx.Err() == nil {
-			log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: recording what is not served failed")
+			r.Log.WarnContext(ctx, "merchant config: recording what is not served failed", logx.Err(err), "merchant_id", id.String())
 		}
 		return
 	}
@@ -317,7 +318,7 @@ func (r *Runtime) alertConfigFindings(ctx context.Context, findings []gen.Billin
 	}
 	for _, f := range findings {
 		if err := r.AlertService.NotifyFinding(ctx, reconcile.FindingRecordFromRow(f)); err != nil && ctx.Err() == nil {
-			log.WithError(err).WithField("finding_id", f.ID.String()).Warn("merchant config: alerting the operator failed; the finding stays in the console")
+			r.Log.WarnContext(ctx, "merchant config: alerting the operator failed; the finding stays in the console", logx.Err(err), "finding_id", f.ID.String())
 		}
 	}
 }
@@ -339,7 +340,7 @@ const DanglingPolicyFindingType = "consistency.dangling_billing_policy"
 // recordDanglingPolicies opens a finding while customers are assigned a
 // billing policy the settings no longer declare (an edit outside OpenRails);
 // they fall back to their tier's policy, then the default.
-func recordDanglingPolicies(ctx context.Context, q *gen.Queries, id billing.MerchantID, settings merchantconfig.Settings) error {
+func recordDanglingPolicies(ctx context.Context, logger *slog.Logger, q *gen.Queries, id billing.MerchantID, settings merchantconfig.Settings) error {
 	names := make([]string, 0, len(settings.Policies))
 	for name := range settings.Policies {
 		names = append(names, name)
@@ -358,7 +359,7 @@ func recordDanglingPolicies(ctx context.Context, q *gen.Queries, id billing.Merc
 		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: []byte(fmt.Sprintf(`{"policy":%q}`, missing)),
 	})
 	if err == nil {
-		log.WithFields(log.Fields{"merchant_id": id.String(), "policy": missing}).Warn("merchant config: customers are assigned an undeclared billing policy")
+		logger.WarnContext(ctx, "merchant config: customers are assigned an undeclared billing policy", "merchant_id", id.String(), "policy", missing)
 	}
 	return err
 }

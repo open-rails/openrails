@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -266,7 +267,9 @@ func mapNMIEventType(t string) WebhookEventType {
 // CCBillWebhookHandler normalizes CCBill webhooks. CCBill signs nothing:
 // ingestion gates the source IP and the service matches the armed account,
 // so there is no per-message HMAC to re-check.
-type CCBillWebhookHandler struct{}
+type CCBillWebhookHandler struct {
+	Log *slog.Logger
+}
 
 func (CCBillWebhookHandler) Rail() string { return "ccbill" }
 

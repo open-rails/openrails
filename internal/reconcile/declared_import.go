@@ -3,6 +3,7 @@ package reconcile
 import (
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/merchant"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -145,7 +146,7 @@ func (c DeclaredCoverage) validate(got int) error {
 // decider lane; charges land ON CONFLICT DO NOTHING. Charges that are settled
 // history go to history, when given, for RecordDeclaredHistory.
 func ImportDeclaredSubscriptions(
-	ctx context.Context,
+	ctx context.Context, logger *slog.Logger,
 	database *db.DB,
 	lc *subscriptions.SubscriptionLifecycleService,
 	deferDelete subscriptions.ProviderCancelScheduler,
@@ -365,7 +366,7 @@ func ImportDeclaredSubscriptions(
 			// customer's slot) from poisoning the book transaction.
 			err = database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				var err error
-				txq := db.NewWithPgxTx(tx).Gen(ctx)
+				txq := db.NewWithPgxTx(logger, tx).Gen(ctx)
 				if f.CancelKind != DeclaredCancelNone {
 					subID, err = insertDeclaredCanceled(ctx, txq, merchantID, f, price, periodStart, periodEnd, authority)
 				} else {
@@ -467,7 +468,7 @@ func ImportDeclaredSubscriptions(
 				factSnap := *snap
 				factSnap.Transactions = kept
 				return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-					txdb := db.NewWithPgxTx(tx)
+					txdb := db.NewWithPgxTx(logger, tx)
 					_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, &factSnap, asOf, 0, declaredImportLookback, time.Time{})
 					if err != nil || outcome != DeclaredImported {
 						return err

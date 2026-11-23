@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"sort"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -106,7 +106,7 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 		}
 		labels := oneLabelPerAccount(rows, candidates, reject)
 		accepted := slices.Sorted(maps.Values(labels))
-		if err := moveLabels(ctx, q, id, rows, labels); err != nil {
+		if err := moveLabels(ctx, s.Log, q, id, rows, labels); err != nil {
 			return err
 		}
 		for _, key := range accepted {
@@ -188,7 +188,7 @@ func oneLabelPerAccount(rows []gen.BillingPsp, candidates map[pspIdentity][]stri
 // current PSP its documents declare under another label steps aside for it;
 // one no document declares any more is superseded: it keeps every record and
 // has no credentials until a document declares its account again.
-func moveLabels(ctx context.Context, q *gen.Queries, id billing.MerchantID, rows []gen.BillingPsp, labels map[pspIdentity]string) error {
+func moveLabels(ctx context.Context, logger *slog.Logger, q *gen.Queries, id billing.MerchantID, rows []gen.BillingPsp, labels map[pspIdentity]string) error {
 	taken := map[string]pspIdentity{}
 	for identity, key := range labels {
 		taken[strings.ToLower(key)] = identity
@@ -212,8 +212,7 @@ func moveLabels(ctx context.Context, q *gen.Queries, id billing.MerchantID, rows
 		if err := q.SupersedePSP(ctx, gen.SupersedePSPParams{MerchantID: id.UUID(), ID: row.ID}); err != nil {
 			return err
 		}
-		log.WithFields(log.Fields{"merchant_id": id.String(), "psp": row.Key, "rail": row.Rail, "account_id": row.AccountID, "declared_account_id": next.account}).
-			Warn("merchant config: a PSP's label names another account; the account it named keeps its records and has no declared credentials until a document declares it again")
+		logger.WarnContext(ctx, "merchant config: a PSP's label names another account; the account it named keeps its records and has no declared credentials until a document declares it again", "merchant_id", id.String(), "psp", row.Key, "rail", row.Rail, "account_id", row.AccountID, "declared_account_id", next.account)
 	}
 	return nil
 }

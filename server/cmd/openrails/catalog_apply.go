@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -58,7 +59,7 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if err != nil {
 		return err
 	}
-	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), hosttools.CatalogApplyOptions{
+	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), slog.Default(), hosttools.CatalogApplyOptions{
 		Config:           cfg,
 		PGXPool:          pool,
 		Vault:            vault,

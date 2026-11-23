@@ -5,6 +5,7 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -37,7 +38,7 @@ type CatalogApplyOptions struct {
 
 // ApplyMerchantCatalog applies opts' document to opts.Merchant with local
 // operator authority.
-func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billing.CatalogApplicationReceipt, error) {
+func ApplyMerchantCatalog(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*billing.CatalogApplicationReceipt, error) {
 	if strings.TrimSpace(opts.Merchant) == "" {
 		return nil, fmt.Errorf("catalog merchant is required")
 	}
@@ -60,7 +61,7 @@ func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billi
 	if err != nil {
 		return nil, err
 	}
-	rt, svc, cleanup, err := catalogRuntime(ctx, opts)
+	rt, svc, cleanup, err := catalogRuntime(ctx, logger, opts)
 	if err != nil {
 		return nil, err
 	}
