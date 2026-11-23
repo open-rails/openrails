@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"io"
 	"net/http"
 	"sync"
@@ -371,7 +372,7 @@ func TestGate(t *testing.T) {
 		require.EqualValues(t, 11, customerLimit(t, a.alpha, customer, "daily").Used, "the outbox's 3 units settle once; the 5 without one never")
 
 		// The stopped processes' leases die and their holds never reopen.
-		a.clock.Advance(11 * time.Second)
+		a.clock.Advance(limits.LeaseLifetime + limits.LeaseGrace + time.Second)
 		gateFlush(t, restarted)
 		_, err = restarted.Consume(t.Context(), gateWork(customer, "after", 1))
 		require.NoError(t, err)
@@ -379,7 +380,7 @@ func TestGate(t *testing.T) {
 		daily := customerLimit(t, a.alpha, customer, "daily")
 		require.EqualValues(t, 12, daily.Used)
 		require.NoError(t, restarted.Close(t.Context()))
-		a.clock.Advance(11 * time.Second)
+		a.clock.Advance(limits.LeaseLifetime + limits.LeaseGrace + time.Second)
 		require.Zero(t, customerLimit(t, a.alpha, customer, "daily").Held, "no dead lease holds capacity")
 	})
 
@@ -502,7 +503,7 @@ func TestGate(t *testing.T) {
 			require.NoError(t, p.gate.Close(t.Context()), "closing returns each process's own holds")
 		}
 		require.Positive(t, customerLimit(t, a.alpha, customer, "daily").Held, "the group lease still holds until it expires")
-		a.clock.Advance(11 * time.Second)
+		a.clock.Advance(limits.LeaseLifetime + limits.LeaseGrace + time.Second)
 		require.Zero(t, customerLimit(t, a.alpha, customer, "daily").Held, "the expired group lease's capacity came back")
 	})
 

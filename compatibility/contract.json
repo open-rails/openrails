@@ -3760,6 +3760,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "reflect": "reflect",
       "retention": "github.com/open-rails/openrails/internal/retention",
       "sha256": "crypto/sha256",
       "slices": "slices",
