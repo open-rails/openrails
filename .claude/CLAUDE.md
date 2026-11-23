@@ -29,12 +29,14 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
   version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
 - A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
+  `scripts/ci-scope.py` selects the light suites from the changed paths (a deletion or rename selects
+  all; docs-only runs the guards alone); draft PRs run nothing; `CI Gate` needs every selected job.
 - No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
-  A release is a tag on master; not every master commit is one. Details: `docs/ci.md`.
+  A release is a tag on master; not every master commit is one.
 
 ## v1 is frozen
-- From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
+- From v1.0.0 three contracts change only by adding to them (`compatibility/README.md`):
   the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `server/web/console`, `server`), the
   HTTP API, and the database schema. `api/go.txt` lists both modules.
 - Each has a generated snapshot: `api/go.txt`, `api/openapi.json`, `api/schema.txt`.
@@ -123,6 +125,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   `stripeapi.APIVersion`: ONE const drives the outbound `Stripe-Version` header AND the
   webhook-endpoint registration. Bump it deliberately; don't float.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
+- Rails evidence: CI's deterministic NMI and Stripe transports are regression coverage, not
+  provider qualification. A sandbox or live run qualifies only the operation exercised; its
+  record names posture, request, response and date, never credentials or amounts. A change to
+  a rail's wire behaviour is unverified until exercised against the provider again.
 
 ## PSP identity
 - `billing.psps` is an OPERATOR-DECLARED catalog: `account_id` is the operator's label.
@@ -193,12 +199,12 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
-  state), stated in its table comment; `docs/operations.md` lists the periods.
+  state), stated in its table comment; the `retention` package doc lists the periods.
   `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
   them names a time range. Usage keeps no events: settlement writes aggregates only.
 - External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
-  with its `order_lines`, provider-run renewals included (`docs/provider-managed-orders.md`);
+  with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
   an `order_attempts` row (`oat_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
@@ -207,7 +213,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
   caches (FX rates) live in Redis, or in process memory without Redis; never in Postgres.
   Several instances need Redis. Destructive-command admissions and holds are the
-  deliberate exception: `docs/destructive-actions.md`.
+  deliberate exception (`DestructiveActionLimitsConfig`'s doc).
 
 ## Layer altitude
 - A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen`
@@ -232,13 +238,20 @@ through `host-four`; these are placeholders, not customer or repository names.
   in tracker issues, which are the source of truth.
 
 ## Docs
-- `docs/` is public documentation for integrators and operators; design history lives in
-  the tracker. No tracker ids, no host names. A document names only routes, Go
-  identifiers, tables, permissions and error codes that exist.
+- `docs/` holds the integration guide (`guide.md`, `embedded.md`, `standalone.md`,
+  `client.md`), the generated API references and the architecture docs; design history
+  lives in the tracker, maintainer internals in Go doc comments on what they describe.
+  No tracker ids, no host names. A document names only routes, Go identifiers, tables,
+  permissions and error codes that exist.
+- `go run ./scripts/docscheck` (in guards) enforces it: Go and YAML fences equal their
+  `// guide:<name>` regions in `examples/` (`-write` refreshes them), references and links
+  resolve, and the guide names every handle method, server config key, chart value and
+  CLI command. `docs/architecture/` gets the link check only.
 
 ## Tests
 - The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis and
-  Vault (`docs/dev/testing.md`). `critical/coverage.json` lists the scenarios and
+  Vault (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`, all owned
+  and disposable; `--suite browser` runs the browser cases). `critical/coverage.json` lists the scenarios and
   `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
   registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
   disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.

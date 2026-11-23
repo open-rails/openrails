@@ -18,6 +18,6 @@ names the existing merchant UUID and the canonical tenant UUID; its AuthKit
 group is keyed by the merchant UUID. No role assignment is inferred from a
 deployment's default tenant.
 
-See [the embedded binding guide](../../docs/embedding-tenant-binding.md) for
+See [the embedded guide](../../docs/embedded.md#merchants) for
 configuration and restore behavior. Integration tests use only a disposable
 database supplied as `OPENRAILS_E2E_DSN`.
