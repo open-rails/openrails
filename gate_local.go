@@ -434,14 +434,17 @@ type pendingWant struct {
 	answer    wantAnswer
 }
 
-func (g *localGate) holdFor(attrs string, customer billing.CustomerID) (*localHold, string) {
+// holdFor is the current lease's hold for attrs' requests of the customer.
+// With expired, a hold of a lease that died by the local clock serves when
+// the current lease has none: only safe spending decides from it.
+func (g *localGate) holdFor(attrs string, customer billing.CustomerID, expired bool) (*localHold, string) {
 	g.index.RLock()
 	defer g.index.RUnlock()
 	set, ok := g.sets[attrs]
 	if !ok {
 		return nil, ""
 	}
-	if h := g.holds[holdKey{customer, set}]; h != nil {
+	if h := g.holds[holdKey{customer, set}]; h != nil || !expired {
 		return h, set
 	}
 	return g.expired[holdKey{customer, set}], set
@@ -455,7 +458,7 @@ func (g *localGate) admit(ctx context.Context, gate *Gate, p billing.AdmitParams
 	answered := false
 	for round := 0; ; round++ {
 		now := time.Now()
-		if h, set := g.holdFor(attrs, p.CustomerID); h != nil {
+		if h, set := g.holdFor(attrs, p.CustomerID, false); h != nil {
 			takes, low, out, err := h.decide(now, r, g.leaseLive(now), false)
 			switch {
 			case err != nil:
@@ -498,7 +501,7 @@ func (g *localGate) admit(ctx context.Context, gate *Gate, p billing.AdmitParams
 // while its lease lives, else from its safe amount, else ErrUnavailable.
 func (g *localGate) safe(gate *Gate, p billing.AdmitParams, r request, attrs string, failure error) (*Ticket, error) {
 	now := time.Now()
-	h, set := g.holdFor(attrs, p.CustomerID)
+	h, set := g.holdFor(attrs, p.CustomerID, true)
 	if h == nil {
 		return nil, unavailable(failure)
 	}

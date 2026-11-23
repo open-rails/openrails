@@ -625,7 +625,7 @@ func TestGateDecidesWarmWhileUnreachableAndSpendsSafe(t *testing.T) {
 			if err := normalizeGateAdmit(&p); err != nil {
 				t.Fatal(err)
 			}
-			h, _ := g.local.holdFor(attrsKey(p), customer)
+			h, _ := g.local.holdFor(attrsKey(p), customer, false)
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			return h.parts[partID("balance", nil)].avail()
@@ -1007,6 +1007,46 @@ func TestGateDecidesFromTheCurrentWindowOfMergedHolds(t *testing.T) {
 	if out != decideAllowed || takes[0].part != partID("daily", &t1) && takes[1].part != partID("daily", &t1) {
 		t.Fatalf("tomorrow's request took %+v (%d), want tomorrow's window", takes, out)
 	}
+}
+
+func TestGateLeavesADeadLeasesHoldsToSafeSpending(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		_ = mustAdmit(t, g, work(customer, "warm", 1)).Release(t.Context())
+		synctest.Wait()
+		p := work(customer, "probe", 1)
+		if err := normalizeGateAdmit(&p); err != nil {
+			t.Fatal(err)
+		}
+		attrs := attrsKey(p)
+		warm, _ := g.local.holdFor(attrs, customer, false)
+		if warm == nil {
+			t.Fatal("no hold after a warm admit")
+		}
+		// OpenRails unreachable past the lease's life: the gate starts a new
+		// lease and keeps the dead one's holds for safe spending alone.
+		f.set(func(f *fakeSync) { f.down = true })
+		time.Sleep(limits.LeaseLifetime + 2*limits.SyncInterval)
+		synctest.Wait()
+		if h, _ := g.local.holdFor(attrs, customer, false); h != nil {
+			t.Fatal("an ordinary decision found the dead lease's hold")
+		}
+		if h, _ := g.local.holdFor(attrs, customer, true); h != warm {
+			t.Fatal("safe spending lost the dead lease's hold")
+		}
+		f.set(func(f *fakeSync) { f.down = false })
+		time.Sleep(limits.SyncInterval)
+		synctest.Wait()
+		ticket := mustAdmit(t, g, work(customer, "after", 1))
+		if ticket.local == nil || ticket.local.hold == warm {
+			t.Fatal("a request after the outage was decided from the dead lease's hold")
+		}
+		_ = ticket.Release(t.Context())
+	})
 }
 
 func TestGateDominationDecidesWhoSharesARefusal(t *testing.T) {
