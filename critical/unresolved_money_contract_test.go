@@ -96,15 +96,15 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		// Manifest-owned credentials change through a deployment, not the
 		// merchant API (which requires managed Vault configuration).
 		require.NoError(t, a.engine.Close(t.Context()))
-		m := a.cfg.Merchants["alpha"]
+		m := cfgMerchant(a.cfg, "alpha")
 		psp := m.PSPs["stripe"]
 		psp.Archived = true
 		m.PSPs["stripe"] = psp
 		m.CardVault = ""
-		a.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&a.cfg, "alpha", m)
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		queue := hostFleet(t, a.world)
 		settled := recoverSale(t, a, p, queue, order.ID)

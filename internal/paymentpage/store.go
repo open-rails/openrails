@@ -26,7 +26,7 @@ func NewStore(d *db.DB) *Store { return &Store{db: d} }
 // when the order has one already or is not an open merchant order.
 func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.MerchantID, c PayURL, now time.Time) (string, error) {
 	if origin == "" {
-		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin")
+		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin")
 	}
 	secret, hash, err := NewSecret()
 	if err != nil {
@@ -40,7 +40,7 @@ func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.Merc
 	case err != nil:
 		return "", err
 	case n != 1:
-		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "only an open merchant order without a pay URL takes one")
+		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "only an open merchant order without a pay URL takes one")
 	}
 	if err := q.SaveOrderPayURLReceipt(ctx, gen.SaveOrderPayURLReceiptParams{
 		MerchantID: mid.UUID(), OrderID: c.OrderID.UUID(), Secret: secret, Now: now, ExpiresAt: c.ExpiresAt,

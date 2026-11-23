@@ -108,12 +108,12 @@ type CreditGrant struct {
 // CreditGrantListParams filters a customer's credit grants, newest first.
 type CreditGrantListParams struct {
 	// CustomerID is whose grants to list; required unless IDs is set.
-	CustomerID CustomerID `form:"-"`
+	CustomerID CustomerID `form:"customer_id"`
 	Currency   string     `form:"currency"`
 	SourceID   string     `form:"source_id"`
 	// IDs instead reads 1 to MaxBatchItems named grants in one page, whatever
 	// their state; unknown ones are absent.
-	IDs []CreditGrantID `form:"-"`
+	IDs []CreditGrantID `form:"ids,comma"`
 	PageRequest
 }
 
@@ -176,7 +176,7 @@ type BalanceTransaction struct {
 // transactions in one page, in any currency; unknown ones are absent.
 type BalanceTransactionListParams struct {
 	Currency string                 `form:"currency"`
-	IDs      []BalanceTransactionID `form:"-"`
+	IDs      []BalanceTransactionID `form:"ids,comma"`
 	PageRequest
 }
 
@@ -188,6 +188,11 @@ const (
 	BillingModePrepaid BillingMode = "prepaid"
 	BillingModeArrears BillingMode = "arrears"
 )
+
+// GetBalanceParams names the currency of a customer's balance.
+type GetBalanceParams struct {
+	Currency string `form:"currency"`
+}
 
 // Balance is a customer's money in one currency, as of AsOf. AvailableAmount
 // is BalanceAmount less HeldAmount and AccruedAmount; OwedAmount is unpaid

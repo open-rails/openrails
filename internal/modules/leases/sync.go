@@ -114,13 +114,13 @@ type receipt struct {
 }
 
 type refusedEntry struct {
-	N    int64  `json:"n"`
-	Code string `json:"code"`
+	N    int64             `json:"n"`
+	Code billing.ErrorCode `json:"code"`
 }
 
 // answer is a refused item's answer rebuilt from its receipt.
 func (e refusedEntry) answer() billing.LeaseUsageRefusal {
-	status, typ, meaning := http.StatusUnprocessableEntity, "", "the usage item was refused when it settled"
+	status, typ, meaning := http.StatusUnprocessableEntity, billing.ErrorType(""), "the usage item was refused when it settled"
 	if info, ok := billing.LookupErrorCode(e.Code); ok {
 		status, typ = info.Status, info.Type
 		if info.Meaning != "" {

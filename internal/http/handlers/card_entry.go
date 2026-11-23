@@ -25,7 +25,7 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 		return false
 	}
 	if !r.SecureTransport() && !noLivePSP(r) {
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "card_requires_https", "a card is accepted only over HTTPS"))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeCardRequiresHTTPS, "a card is accepted only over HTTPS"))
 		return false
 	}
 	for _, value := range others {
@@ -59,7 +59,7 @@ func writeCardEntryError(r *httprequest.Request, err error) bool {
 	case errors.Is(err, paymentmethods.ErrCardWithToken):
 		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())
 	case errors.Is(err, paymentmethods.ErrCardNotSaved):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeAPI, "card_not_saved", "The card was not saved. Enter it again."))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeAPI, billing.CodeCardNotSaved, "The card was not saved. Enter it again."))
 	default:
 		return false
 	}

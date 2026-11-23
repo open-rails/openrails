@@ -180,8 +180,8 @@ type PriceMigrationCancel struct {
 type PriceMigrationListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named migrations in one page.
-	IDs []PriceMigrationID
+	IDs []PriceMigrationID `form:"ids,comma"`
 	// ProductKey and PriceKey keep the migrations of that price key.
-	ProductKey string
-	PriceKey   string
+	ProductKey string `form:"product_key"`
+	PriceKey   string `form:"price_key"`
 }

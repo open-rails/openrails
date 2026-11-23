@@ -11,31 +11,20 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// PSPListQuery filters GET /v1/merchant/psps.
-type PSPListQuery struct {
-	Rail     billing.Rail `form:"rail"`
-	Archived *bool        `form:"archived"`
-}
-
 // ListPSPs handles GET /v1/merchant/psps.
 func ListPSPs(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
 		return
 	}
-	var query PSPListQuery
-	if !r.BindQuery(&query) {
+	var params billing.PSPListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
-	page, ok := r.Page()
-	if !ok {
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePSPID)
-	if !ok {
-		return
-	}
-	out, err := svc.ListPSPs(r.Request.Context(), id, billing.PSPListParams{IDs: ids, Rail: query.Rail, Archived: query.Archived, PageRequest: page})
+	out, err := svc.ListPSPs(r.Request.Context(), id, params)
 	if err != nil {
 		writePSPError(r, err)
 		return
@@ -123,7 +112,7 @@ func writePSPError(r *httprequest.Request, err error) {
 	var lastActive *merchants.LastActivePSPError
 	switch {
 	case errors.As(err, &lastActive):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "psp_last_active", err.Error()).
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePSPLastActive, err.Error()).
 			WithMetadata(map[string]any{"psp_id": lastActive.PSP.String()}))
 	case errors.Is(err, merchants.ErrConfigUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")

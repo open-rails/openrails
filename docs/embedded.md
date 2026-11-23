@@ -11,17 +11,24 @@ merchants behind the host's own authentication.
 ## Boot
 
 ```go guide:embedded-new
-// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
-merchant, err := openrails.ReadMerchantFile("merchant.yaml")
+// You, the seller, and your payment processor accounts (PSPs), declared in
+// merchant.yaml. It carries PSP credentials: keep it out of version control.
+raw, err := os.ReadFile("merchant.yaml")
+if err != nil {
+	return nil, nil, err
+}
+merchant, err := openrails.ParseMerchantDocument(raw)
 if err != nil {
 	return nil, nil, err
 }
 
-merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
-	Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
+	Merchants: []openrails.MerchantDeclaration{{
+		MerchantDocument: merchant,
+		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
+	}},
 }
 
 // Build the billing engine; it creates or upgrades its own tables. It has no logins
@@ -34,7 +41,12 @@ if err != nil {
 	return nil, nil, err
 }
 // Your merchant's handle: the Go client your own code calls, in process.
-shop, err := bill.MerchantBySlug(merchant.Slug)
+id, err := bill.DeclaredMerchant(merchant.Slug)
+if err != nil {
+	_ = bill.Close(context.WithoutCancel(ctx))
+	return nil, nil, err
+}
+shop, err := bill.Merchant(id)
 if err != nil {
 	_ = bill.Close(context.WithoutCancel(ctx))
 	return nil, nil, err
@@ -457,9 +469,9 @@ Set `Config.CheckoutOrigin` and `Deps.CheckoutAssets`, then route that origin's
 requests to `Engine.CheckoutPage()`'s handler ahead of everything else. With Gin:
 
 ```go guide:embedded-checkout
-origin, page, err := bill.CheckoutPage("https://pay.example.com", assets)
-if err != nil {
-	return err
+origin, page := bill.CheckoutPage()
+if page == nil {
+	return errors.New("no checkout page: set Config.CheckoutOrigin and Deps.CheckoutAssets")
 }
 pay, err := openrailsgin.CheckoutOrigin(origin, page)
 if err != nil {

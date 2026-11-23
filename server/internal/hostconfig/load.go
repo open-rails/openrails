@@ -91,10 +91,14 @@ func topLevelKoanfKeys() (scalar, nested map[string]bool) {
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
-	// VAULT_ADDR is HashiCorp's canonical name for the server URL; the field is
-	// vault.address (the mechanical split would yield vault.addr).
-	if s == "vault_addr" {
+	// VAULT_ADDR and VAULT_CACERT are HashiCorp's canonical names for the
+	// server URL and its CA file (the mechanical split would yield vault.addr
+	// and vault.cacert).
+	switch s {
+	case "vault_addr":
 		return "vault.address"
+	case "vault_cacert":
+		return "vault.ca_cert"
 	}
 
 	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
@@ -343,18 +347,18 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		}); err != nil {
 			return nil, fmt.Errorf("unmarshaling database config: %w", err)
 		}
-		databaseConfig := &Config{Config: &billing.Config{DB: dbConfig, Database: billing.DatabaseConfig{
-			Schema: k.String("database.schema"), RiverSchema: k.String("database.river_schema"),
+		databaseConfig := &Config{DB: *dbConfig, Config: &billing.Config{Database: billing.DatabaseConfig{
+			Schema: k.String("database.schema"), RiverSchema: k.String("database.river_schema"), LeaseConns: dbConfig.LeaseConns,
 		}}}
-		if databaseConfig.DB.URL, err = databaseURL(databaseConfig.DB); err != nil {
+		if databaseConfig.DB.URL, err = databaseURL(dbConfig); err != nil {
 			return nil, err
 		}
 		databaseConfig.Database.Schema = billing.SchemaName(databaseConfig.Config)
-		if err := billing.ValidateDatabase(databaseConfig.Config); err != nil {
+		if err := billing.ValidateDatabase(databaseConfig.Database); err != nil {
 			return nil, err
 		}
 		if options.directory && k.Exists("vault") {
-			var vault billing.VaultConfig
+			var vault vaultFile
 			if err := k.UnmarshalWithConf("vault", &vault, koanf.UnmarshalConf{
 				DecoderConfig: &mapstructure.DecoderConfig{
 					DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
@@ -364,7 +368,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 				return nil, fmt.Errorf("unmarshaling directory vault config: %w", err)
 			}
 			vault.SecretsPath = cmp.Or(vault.SecretsPath, secretsDir)
-			databaseConfig.Vault = &vault
+			databaseConfig.Vault, databaseConfig.Config.Vault = vault.split()
 		}
 		return databaseConfig, nil
 	}
@@ -385,6 +389,15 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// plane.
 	if k.Exists("auth.control_plane.enabled") {
 		return nil, fmt.Errorf("auth.control_plane.enabled was removed: the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
+	}
+	if k.Exists("dashboard_base_url") {
+		return nil, fmt.Errorf("dashboard_base_url was removed: alert links point at the server's console")
+	}
+	if k.Exists("ccbill_webhook_ip_allowlist") {
+		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was renamed: set provider_sandbox.ccbill_webhook_sources")
+	}
+	if k.Exists("database.lease_conns") {
+		return nil, fmt.Errorf("database.lease_conns is db.lease_conns (DB_LEASE_CONNS)")
 	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
@@ -517,7 +530,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 
 	if f.RateLimitsDisabled { // defaults() seeded them; off means none
-		f.RateLimits, f.Captcha = nil, nil
+		f.RateLimits, f.Captcha = billing.RateLimitsConfig{}, nil
 	}
 	if f.Vault != nil && f.Vault.SecretsPath == "" {
 		f.Vault.SecretsPath = secretsDir
@@ -526,7 +539,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if err != nil {
 		return nil, err
 	}
-	if cfg.DB.URL, err = databaseURL(cfg.DB); err != nil {
+	if cfg.DB.URL, err = databaseURL(&cfg.DB); err != nil {
 		return nil, err
 	}
 

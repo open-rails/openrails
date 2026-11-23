@@ -40,26 +40,41 @@ var (
 // codedError is a stable machine code that also matches its status class, so a
 // host transaction error and a Client StatusError classify identically.
 type codedError struct {
-	code  string
+	code  ErrorCode
 	class error
 }
 
-func (e *codedError) Error() string { return e.code }
+func (e *codedError) Error() string { return string(e.code) }
 
 // ErrorCode is the wire error code.
-func (e *codedError) ErrorCode() string { return e.code }
+func (e *codedError) ErrorCode() ErrorCode { return e.code }
 
 func (e *codedError) Is(target error) bool { return target == e.class }
 
-func newCodedError(code string, class error) *codedError {
+func newCodedError(code ErrorCode, class error) *codedError {
 	return &codedError{code: code, class: class}
+}
+
+// ErrorCodeFrom returns the wire code of an OpenRails refusal: a Client's
+// StatusError, or an in-process error with an ErrorCode method.
+func ErrorCodeFrom(err error) (ErrorCode, bool) {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code, status.Code != ""
+	}
+	var coded interface{ ErrorCode() ErrorCode }
+	if errors.As(err, &coded) {
+		code := coded.ErrorCode()
+		return code, code != ""
+	}
+	return "", false
 }
 
 // ErrorDetails is the canonical HTTP error payload. Metadata numbers decode as
 // json.Number so identifiers and monetary values retain their exact precision.
 type ErrorDetails struct {
-	Type      string         `json:"type"`
-	Code      string         `json:"code"`
+	Type      ErrorType      `json:"type"`
+	Code      ErrorCode      `json:"code"`
 	Message   string         `json:"message"`
 	RequestID string         `json:"request_id,omitempty"`
 	Param     *string        `json:"param,omitempty"`
@@ -80,7 +95,7 @@ type StatusError struct {
 func (e *StatusError) Error() string {
 	msg := e.Message
 	if msg == "" {
-		msg = e.Code
+		msg = string(e.Code)
 	}
 	if msg == "" {
 		msg = http.StatusText(e.Status)
@@ -95,9 +110,9 @@ func (e *StatusError) Is(target error) bool {
 	}
 	switch target {
 	case ErrInsufficientCredits:
-		return e.Code == "insufficient_credits"
+		return e.Code == CodeInsufficientCredits
 	case ErrIdempotencyKeyReused:
-		return e.Code == "idempotency_key_reused"
+		return e.Code == CodeIdempotencyKeyReused
 	case ErrUnauthorized:
 		return e.Status == http.StatusUnauthorized
 	case ErrDenied:

@@ -76,7 +76,7 @@ func (e *LineError) HeldBy() (uuid.UUID, bool) {
 }
 
 // Code is the wire error code.
-func (e *LineError) Code() string {
+func (e *LineError) Code() billing.ErrorCode {
 	switch e.Refusal.Code {
 	case RefusalAlreadyOwned:
 		return billing.CodeAlreadyOwned
@@ -99,7 +99,7 @@ const (
 	RefusalAmountRequired   = "amount_required"
 	RefusalAmountInvalid    = "amount_invalid"
 	// RefusalQuantityNotAllowed is also the line's error code.
-	RefusalQuantityNotAllowed = billing.CodeQuantityNotAllowed
+	RefusalQuantityNotAllowed = string(billing.CodeQuantityNotAllowed)
 )
 
 // Service reads and writes orders for the context's merchant.

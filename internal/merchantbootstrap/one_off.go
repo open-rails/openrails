@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	vaultapi "github.com/hashicorp/vault/api"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -28,18 +29,16 @@ type Merchants struct {
 }
 
 // OpenMerchants builds the merchant configuration a one-off process reads:
-// Vault when a KV mount is named (awaiting its login), else an empty file
-// source the caller fills. The database handle reads settings through it.
-func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB) (*Merchants, error) {
-	conn, err := vaultconn.Open(ctx, cfg, nil)
+// Vault, over client, when a KV mount is named, else an empty file source the
+// caller fills. The database handle reads settings through it.
+func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
+	conn, err := vaultconn.Open(ctx, cfg, client)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Vault != nil {
-		if err := conn.Await(ctx, vaultconn.AwaitTimeout); err != nil {
-			conn.Close()
-			return nil, err
-		}
+	if err := conn.State(); err != nil && conn.KV != nil {
+		conn.Close()
+		return nil, fmt.Errorf("vault holds merchant configuration: %w", err)
 	}
 	var source merchantdocs.Source = merchantdocs.NewFileSource()
 	if conn.KV != nil {
@@ -78,8 +77,8 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB) (*M
 // through: Vault when a KV mount is named; else the merchant's entry in the
 // manifest on disk fills a file source. No manifest and none at the
 // conventional path leaves the merchant without configuration: nothing arms.
-func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
-	opened, err := OpenMerchants(ctx, cfg, database)
+func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
+	opened, err := OpenMerchants(ctx, cfg, database, client)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +106,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, m
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
 // else the file at manifestPath, else the conventional path when it exists.
-func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*config.MerchantDeclaration, error) {
+func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*config.MerchantDocument, error) {
 	if manifest == nil {
 		path := strings.TrimSpace(manifestPath)
 		explicit := path != ""
@@ -130,7 +129,7 @@ func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}
-	var selected *config.MerchantDeclaration
+	var selected *config.MerchantDocument
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
 		if errors.Is(err, merchants.ErrMerchantNotFound) {

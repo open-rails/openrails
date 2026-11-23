@@ -1,0 +1,52 @@
+
+// GetMeter reads one meter with its rate card.
+func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
+	var out billing.Meter
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetBalance reads a customer's balance in params.Currency.
+func (c *Client) GetBalance(ctx context.Context, customerID billing.CustomerID, params billing.GetBalanceParams) (*billing.Balance, error) {
+	var out billing.Balance
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/balance", args: []string{customerID.String()}, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RefundPayment refunds a charge through its rail.
+//
+// A retry with idempotencyKey returns the same refund.
+func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id billing.PaymentID, params billing.RefundPaymentParams) (*billing.Payment, error) {
+	var out billing.Payment
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/payments/{id}/refunds", idempotencyKey: idempotencyKey, args: []string{id.String()}, body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReleaseAdmissions frees the holds of admissions whose work failed.
+func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error) {
+	var out billing.AdmissionBatchResult
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/release", body: billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}}, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// ApplyCatalog applies a catalog document; params.Force overwrites edits.
+func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
+	var out billing.CatalogApplicationReceipt
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/apply", body: application, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeletePaymentMethod removes an unused card.
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, id billing.PaymentMethodID) error {
+	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/admin/customers/{customer_id}/payment-methods/{id}", args: []string{customerID.String(), id.String()}}, nil)
+}

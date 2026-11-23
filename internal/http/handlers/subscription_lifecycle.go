@@ -241,7 +241,7 @@ func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *model
 			return refusal
 		}
 		log.WithContext(ctx).WithField("detail", redact.Secrets(err.Error())).Warn("solana: resume could not read the on-chain subscription")
-		return api.Coded(codeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
+		return api.Coded(billing.CodeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
 	}
 	if !renewable {
 		return api.Coded(billing.CodeInvalidParam, "the subscription was canceled in the customer's wallet, so it ends with its paid period; subscribe again to continue")

@@ -23,7 +23,8 @@ type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 //
 // Accepted when EITHER:
 //  1. the source is inside CCBill's documented ranges, or
-//  2. both hold: the source is declared in ccbill_webhook_ip_allowlist, and
+//  2. both hold: the source is declared in
+//     provider_sandbox.ccbill_webhook_sources, and
 //     the database proves the account the webhook names moves no money.
 //
 // Anything unproven (no probe, probe error, LiveRailUnknown) refuses.
@@ -31,10 +32,7 @@ func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProb
 	if iputil.IsValidCCBillIP(clientIP) {
 		return true
 	}
-	if cfg == nil {
-		return false
-	}
-	if !iputil.IPInAnyCIDR(clientIP, cfg.CCBillWebhookIPAllowlist) {
+	if !iputil.IPInAnyCIDR(clientIP, config.SandboxCCBillWebhookSources(cfg)) {
 		return false
 	}
 	// Log only the parsed form: validates the header-derived value (no log

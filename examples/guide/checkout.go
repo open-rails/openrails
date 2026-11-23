@@ -11,10 +11,10 @@ import (
 // send them.
 func Checkout(ctx context.Context, shop *openrails.Client, customer billing.CustomerID, price billing.PriceID, key string) (string, error) {
 	// guide:checkout
-	order, err := shop.CreateOrder(ctx, billing.CreateOrderParams{
-		IdempotencyKey: key, // made when the buyer decided, stored, resent on every retry
-		CustomerID:     customer,
-		Lines:          []billing.OrderLineParams{{PriceID: price}},
+	// key is made when the buyer decides, stored, and resent on every retry.
+	order, err := shop.CreateOrder(ctx, key, billing.CreateOrderParams{
+		CustomerID: customer,
+		Lines:      []billing.OrderLineParams{{PriceID: price}},
 		PayURL: &billing.OrderPayURLParams{
 			SuccessURL: "https://shop.example/thanks?order={ORDER_ID}",
 			CancelURL:  new("https://shop.example/cart"),

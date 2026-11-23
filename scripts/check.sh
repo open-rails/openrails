@@ -9,12 +9,17 @@ in_modules() {
   local module
   for module in "${modules[@]}"; do (cd "$module" && "$@"); done
 }
+# Static guards: one command each.
 guards() {
-  bash scripts/migration-prefix-collision.sh
-  bash scripts/check_business_time.sh
+  go run ./scripts/business-time
   bash scripts/check-one-pull-entry.sh
+  bash scripts/check-borrowed-connections.sh
   bash scripts/scan-injected-code.sh --all
+  go run ./scripts/contracts -lint
   go run ./scripts/docscheck
+  gofmt_clean
+}
+gofmt_clean() {
   local files=() unformatted
   while IFS= read -r -d '' file; do
     [[ -e "$file" ]] && files+=("$file")

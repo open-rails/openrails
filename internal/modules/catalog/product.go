@@ -22,11 +22,11 @@ import (
 )
 
 // ErrProductTierGroupInUse requires an explicit product migration instead of regrouping live subscriptions.
-var ErrProductTierGroupInUse = apperr.New(http.StatusConflict, "product_tier_group_in_use", "product tier group cannot change while a live subscription has a plan change in flight")
+var ErrProductTierGroupInUse = apperr.New(http.StatusConflict, billing.CodeProductTierGroupInUse, "product tier group cannot change while a live subscription has a plan change in flight")
 
 // ErrProductTierGroupConflict refuses joining products into a group in which
 // a customer would hold two live memberships.
-var ErrProductTierGroupConflict = apperr.New(http.StatusConflict, "product_tier_group_conflict", "a customer holds live subscriptions to more than one product of this tier group")
+var ErrProductTierGroupConflict = apperr.New(http.StatusConflict, billing.CodeProductTierGroupConflict, "a customer holds live subscriptions to more than one product of this tier group")
 
 type ProductService struct {
 	db *db.DB

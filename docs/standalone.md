@@ -678,7 +678,7 @@ proved.
 
 An order's pay URL is a page on an origin of its own, `/pay/<order>#<secret>`,
 where the customer pays that one order. The server serves it at
-`checkout_origin` (`server.Config.CheckoutOrigin`), answering by `Host`: point
+`checkout_origin` (the engine's `Config.CheckoutOrigin`), answering by `Host`: point
 that origin's DNS and TLS at the same server. The checkout origin has no path
 and must differ from `public_billing_base_url`, the server's issuer and the
 frontend's origin: the page runs the PSPs' scripts and never shares an origin
@@ -687,8 +687,8 @@ for a pay URL is `400 pay_url_unavailable`.
 
 The page is built from `web/pay` and embedded in the release binary and image.
 A host building its own binary on `server` builds it with
-`scripts/build-payment-page.sh <dir>` and passes it as
-`server.Deps.PaymentPageAssets`; one that mounts the server's routes on its own
+`scripts/build-payment-page.sh <dir>` and passes it as the engine's
+`Deps.CheckoutAssets`; one that mounts the server's routes on its own
 router sends the checkout origin's requests to `Server.CheckoutPage`. The
 checkout origin also serves Stripe's Apple Pay domain-association file at
 `/.well-known/apple-developer-merchantid-domain-association`, and declaring a

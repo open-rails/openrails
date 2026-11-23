@@ -40,14 +40,8 @@ var (
 	errNoAssertionKey         = errors.New("openrails: the handle's credential has no assertion key (RemoteCredential.Assertion)")
 )
 
-// CustomerAssertion signs the assertion that names params.CustomerID as the
-// merchant's customer, for a frontend to redeem itself at the token endpoint
-// (grant_type urn:ietf:params:oauth:grant-type:jwt-bearer, scope
-// openrails:self), with its own DPoP proof when it binds the token to a key.
-// It is valid for two minutes and redeems once. It makes no request. It fails
-// on a handle whose credential has no Assertion and on an in-process handle,
-// whose host mints with its own AuthKit.
-func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error) {
+// customerAssertion is CustomerAssertion.
+func (c *Client) customerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error) {
 	key, err := c.assertionKey()
 	if err != nil {
 		return "", err
@@ -83,15 +77,9 @@ func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerT
 	return signed, nil
 }
 
-// CustomerToken mints an access token for params.CustomerID as the merchant's
-// customer: it signs a CustomerAssertion and redeems it at the credential's
-// Assertion.TokenURL. The backend hands the token to its frontend, which sends
-// it to the customer routes as its Bearer. It fails on a handle whose
-// credential has no Assertion and on an in-process handle, whose host mints
-// with its own AuthKit. A refusal is a *billing.StatusError carrying the token
-// endpoint's status and its OAuth error as the message, with no code.
-func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error) {
-	assertion, err := c.CustomerAssertion(ctx, params)
+// customerToken is CustomerToken.
+func (c *Client) customerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error) {
+	assertion, err := c.customerAssertion(ctx, params)
 	if err != nil {
 		return nil, err
 	}

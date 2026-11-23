@@ -81,7 +81,7 @@ func TestBaselineAdoption(t *testing.T) {
 
 		built := baselineRecord(t, w)
 		other := editBaselineRecord(t, w)
-		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg), "a schema equal to a fresh build is accepted whichever months it holds")
+		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg.Database), "a schema equal to a fresh build is accepted whichever months it holds")
 		require.Equal(t, built, baselineRecord(t, w), "the record is this build's again")
 		var audited int
 		require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT count(*) FROM public.migration_repairs
@@ -133,7 +133,7 @@ func TestBaselineAdoption(t *testing.T) {
 		require.NotContains(t, err.Error(), "\n")
 		require.Equal(t, other, baselineRecord(t, w), "the refused start settles nothing")
 
-		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg))
+		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg.Database))
 		require.Equal(t, built, baselineRecord(t, w))
 		started, err := openrails.New(t.Context(), skipping, w.deps)
 		require.NoError(t, err)

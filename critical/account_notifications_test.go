@@ -292,7 +292,7 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		alphaSale, betaSale := sale(a.alpha), sale(a.beta)
 		paid := func(client *openrails.Client, customer string, price billing.PriceID, key string) func() error {
 			return func() error {
-				order, err := client.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.OrderLineParams{{PriceID: price}}, IdempotencyKey: key})
+				order, err := client.CreateOrder(ctx, key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.OrderLineParams{{PriceID: price}}})
 				if err != nil {
 					return err
 				}

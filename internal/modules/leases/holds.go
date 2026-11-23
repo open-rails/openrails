@@ -81,7 +81,7 @@ func (r *syncRun) want(i int) error {
 		fail(invalid("invoker_type", `invoker_type must be "customer" or "delegated"`))
 		return nil
 	case moneyutil.ValidateCurrency(currency) != nil:
-		fail(apperr.New(http.StatusBadRequest, "currency_unsupported", "currency is not supported").WithParam("currency"))
+		fail(apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam("currency"))
 		return nil
 	case w.Usage != nil && w.EstimatedAmount != nil:
 		fail(invalid("usage", "usage and estimated_amount are exclusive: the rate cards price usage"))

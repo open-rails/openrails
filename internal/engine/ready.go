@@ -23,11 +23,7 @@ type Probe struct {
 // background, for a host's dependency supervisor.
 func (e *Engine) Probes() []Probe {
 	rt := e.App.Runtime
-	var out []Probe
-	if rt.UsesVault() {
-		out = append(out, Probe{Name: "openrails_vault", Check: rt.VaultProbe})
-	}
-	return append(out,
+	return append([]Probe(nil),
 		Probe{Name: "openrails_psp_posture", Check: func(context.Context) error { return rt.PostureState() }},
 		Probe{Name: "openrails_configuration", Check: func(context.Context) error { return rt.RefusalState() }},
 		Probe{Name: "openrails_solana_crankers", Check: rt.SolanaCrankersCheck},

@@ -14,9 +14,9 @@ import (
 // per-merchant Ed25519 key is created non-extractable (exportable=false) so it
 // NEVER leaves Vault; OpenRails only ever requests signatures.
 type TransitAdapter struct {
-	client *vaultapi.Client
-	mount  string
-	sup    *Supervisor
+	client  *vaultapi.Client
+	mount   string
+	refused error
 }
 
 // NewTransitAdapter builds a Transit adapter for the given mount (e.g. "transit").
@@ -24,19 +24,18 @@ func NewTransitAdapter(client *vaultapi.Client, mount string) *TransitAdapter {
 	return &TransitAdapter{client: client, mount: strings.Trim(strings.TrimSpace(mount), "/")}
 }
 
-// WithSupervisor gates every operation on sup's auth state: until the
-// background login succeeds they fail fast with ErrNotAuthenticated.
-func (t *TransitAdapter) WithSupervisor(sup *Supervisor) *TransitAdapter {
-	t.sup = sup
+// Refuse makes every operation fail with err (wrapped in ErrUnavailable):
+// Vault is named but cannot be used.
+func (t *TransitAdapter) Refuse(err error) *TransitAdapter {
+	if err != nil {
+		t.refused = fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
 	return t
 }
 
 func (t *TransitAdapter) failed(op string, err error) error {
 	var response *vaultapi.ResponseError
 	if errors.As(err, &response) && response.StatusCode < 500 {
-		if IsPermissionDenied(err) && t.sup != nil {
-			t.sup.NotifyPermissionDenied(err)
-		}
 		return fmt.Errorf("vault transit %s: %w", op, err)
 	}
 	return fmt.Errorf("vault transit %s: %w: %w", op, ErrUnavailable, err)
@@ -46,8 +45,8 @@ func (t *TransitAdapter) failed(op string, err error) error {
 // Vault Ed25519 signs the raw message (prehashed=false; hash_algorithm ignored),
 // which is what Solana verifies over.
 func (t *TransitAdapter) Sign(ctx context.Context, name string, input []byte) ([]byte, error) {
-	if err := t.sup.AuthState(); err != nil {
-		return nil, fmt.Errorf("vault transit sign: %w", err)
+	if t.refused != nil {
+		return nil, fmt.Errorf("vault transit sign: %w", t.refused)
 	}
 	res, err := t.client.Logical().WriteWithContext(ctx, t.mount+"/sign/"+name, map[string]any{
 		"input":     base64.StdEncoding.EncodeToString(input),
@@ -74,8 +73,8 @@ func (t *TransitAdapter) Sign(ctx context.Context, name string, input []byte) ([
 // PublicKey returns the raw 32-byte Ed25519 public key for the latest version of
 // key `name` (which is the merchant's Solana address as base58).
 func (t *TransitAdapter) PublicKey(ctx context.Context, name string) ([]byte, error) {
-	if err := t.sup.AuthState(); err != nil {
-		return nil, fmt.Errorf("vault transit read key: %w", err)
+	if t.refused != nil {
+		return nil, fmt.Errorf("vault transit read key: %w", t.refused)
 	}
 	res, err := t.client.Logical().ReadWithContext(ctx, t.mount+"/keys/"+name)
 	if err != nil {

@@ -6,15 +6,17 @@ import (
 	"github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // incidentClear requires additional root operator authority. Merchant config
-// permission alone, application identities and delegation cannot clear holds.
+// permission alone, application identities and delegation cannot clear holds:
+// only a self-acting human, or the person the in-process host names.
 func incidentClear(e *Env) router.Handler {
 	return func(r *httprequest.Request) {
 		staff, ok := r.Staff()
 		v, verified := billingauth.VerifiedFrom(r.Request.Context())
-		if !ok || !verified || !billingauth.Interactive(staff.Identity) {
+		if !ok || !verified || !billingauth.Interactive(staff.Identity) && !hostNamedPerson(r, staff.Identity) {
 			r.ErrorCode(billing.CodePermissionRequired, "incident clearance requires a self-acting human operator")
 			return
 		}
@@ -36,4 +38,11 @@ func incidentClear(e *Env) router.Handler {
 		}
 		handlers.ClearDestructiveHold(r)
 	}
+}
+
+// hostNamedPerson is the in-process host acting for a person it named
+// (Client.ActingFor), whom it authenticated itself.
+func hostNamedPerson(r *httprequest.Request, who billingauth.Identity) bool {
+	host, inProcess := requestauth.HostPrincipalFromContext(r.Request.Context())
+	return inProcess && host.Invoker != nil && who.Issuer == billingauth.HostIssuer && who.Invoker == *host.Invoker
 }

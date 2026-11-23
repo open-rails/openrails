@@ -60,6 +60,6 @@ func PutMerchantDashboard(r *httprequest.Request) {
 }
 
 func dashboardValidationError(r *httprequest.Request, verr *metrics.ValidationError) {
-	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "dashboard_invalid", verr.Error()).
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeDashboardInvalid, verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }

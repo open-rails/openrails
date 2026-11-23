@@ -60,11 +60,11 @@ const (
 // answer replayed verbatim (its next action read again, since no client
 // secret is stored).
 type orderKeyResult struct {
-	OrderID uuid.UUID      `json:"order_id"`
-	Digest  []byte         `json:"digest"`
-	Status  int            `json:"status,omitempty"`
-	Code    string         `json:"code,omitempty"`
-	Order   *billing.Order `json:"order,omitempty"`
+	OrderID uuid.UUID         `json:"order_id"`
+	Digest  []byte            `json:"digest"`
+	Status  int               `json:"status,omitempty"`
+	Code    billing.ErrorCode `json:"code,omitempty"`
+	Order   *billing.Order    `json:"order,omitempty"`
 }
 
 // OrderAnswer is an order request's answer: the order, and Status 201
@@ -74,7 +74,7 @@ type orderKeyResult struct {
 type OrderAnswer struct {
 	Order    *billing.Order
 	Status   int
-	Code     string
+	Code     billing.ErrorCode
 	Replayed bool
 }
 
@@ -223,7 +223,7 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	}
 	// A one-call buy's key names its payment attempt.
 	if strings.TrimSpace(key) == "" {
-		return OrderAnswer{}, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required with a payment")
+		return OrderAnswer{}, apperr.New(http.StatusBadRequest, billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required with a payment")
 	}
 	digest, err := s.orderCreationDigest(ctx, params, params.Lines)
 	if err != nil {
@@ -920,7 +920,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, false, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
+		return nil, false, apperr.New(http.StatusBadRequest, billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required")
 	}
 	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
 		return nil, false, err
@@ -972,7 +972,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	if params.PayURL != nil {
 		origin := s.rt.CheckoutOrigin()
 		if origin == "" {
-			return nil, false, apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin").WithParam("pay_url")
+			return nil, false, apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin").WithParam("pay_url")
 		}
 		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt)
 		if err != nil {
@@ -1050,7 +1050,7 @@ func (s *Service) embedOrigins(ctx context.Context) ([]string, error) {
 	return origins, nil
 }
 
-var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, "embed_origins_required",
+var errEmbedOriginsRequired = apperr.New(http.StatusBadRequest, billing.CodeEmbedOriginsRequired,
 	"an embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins")
 
 // payURLOrigin is the checkout origin a customer's order's pay URL is on,
@@ -1065,7 +1065,7 @@ func (s *Service) payURLOrigin(ctx context.Context, params billing.CreateMyOrder
 	}
 	origin := s.rt.CheckoutOrigin()
 	if origin == "" {
-		return "", apperr.New(http.StatusBadRequest, "pay_url_unavailable", "this deployment serves no checkout origin").WithParam("pay_url")
+		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin").WithParam("pay_url")
 	}
 	if _, err := s.embedOrigins(ctx); err != nil {
 		return "", err

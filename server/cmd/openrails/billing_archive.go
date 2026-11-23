@@ -58,7 +58,7 @@ func newBillingCmd() *cobra.Command {
 }
 
 func addBillingArchiveFlags(cmd *cobra.Command, opts *billingArchiveOptions) {
-	cmd.Flags().StringVar(&opts.merchant, "merchant", "", "Exact merchant UUID (optionally prefixed with id:) for a local run, preserved on import; with --url the token's merchant is the one")
+	cmd.Flags().StringVar(&opts.merchant, "merchant", "", "Exact merchant UUID (optionally prefixed with id:), preserved on import; with --url, the merchant the token is bound to")
 	cmd.Flags().StringVar(&opts.url, "url", "", "Remote OpenRails base URL; omit to use the local database configuration")
 	cmd.Flags().StringVar(&opts.tokenFile, "token-file", "", "File holding an access token from the merchant's trusted issuer (client credentials), read on every call; required with --url")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0, "Optional archive operation deadline (0 uses caller cancellation)")
@@ -69,7 +69,7 @@ func newBillingExportCmd() *cobra.Command {
 	var out string
 	var overwrite, sourceStopped bool
 	cmd := &cobra.Command{
-		Use:   "export (--merchant UUID | --url URL --token-file PATH) --out PATH",
+		Use:   "export --merchant UUID [--url URL --token-file PATH] --out PATH",
 		Short: "Export a complete billing snapshot to a private local file",
 		Long: "Export a versioned billing snapshot. Quiesce all source writers before a final cutover. " +
 			"The destination file appears only after the complete export succeeds; existing files require --overwrite.",
@@ -99,16 +99,11 @@ func newBillingExportCmd() *cobra.Command {
 				if err := client.ExportBillingArchive(ctx, counter); err != nil {
 					return err
 				}
-				// A remote run learns its merchant from the server's answer.
-				bytes, mid = counter.n, client.MerchantID()
+				bytes = counter.n
 				return nil
 			})
 			if err != nil {
 				return fmt.Errorf("export billing: %w", err)
-			}
-			if mid.IsZero() {
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "exported bytes=%d file=%s\n", bytes, out)
-				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "exported merchant=%s bytes=%d file=%s\n", mid, bytes, out)
 			return err
@@ -126,7 +121,7 @@ func newBillingImportCmd() *cobra.Command {
 	var in string
 	var targetStopped bool
 	cmd := &cobra.Command{
-		Use:   "import (--merchant UUID | --url URL --token-file PATH) --in PATH",
+		Use:   "import --merchant UUID [--url URL --token-file PATH] --in PATH",
 		Short: "Restore a billing snapshot into an empty, separately provisioned merchant",
 		Long: "Restore a complete snapshot atomically, preserving the merchant UUID and billing identities. " +
 			"Provision the destination separately and keep its writers and workers stopped until cutover. " +
@@ -168,19 +163,13 @@ func newBillingImportCmd() *cobra.Command {
 	return cmd
 }
 
-// validate returns the merchant a local run names; a remote run names none,
-// since its token's merchant is the one the server acts on.
+// validate returns the merchant the run names, local or remote.
 func (o billingArchiveOptions) validate() (billing.MerchantID, error) {
-	remote := strings.TrimSpace(o.url) != ""
 	switch {
-	case remote != (strings.TrimSpace(o.tokenFile) != ""):
+	case (strings.TrimSpace(o.url) != "") != (strings.TrimSpace(o.tokenFile) != ""):
 		return billing.MerchantID{}, fmt.Errorf("--url and --token-file must be supplied together")
 	case o.timeout < 0:
 		return billing.MerchantID{}, fmt.Errorf("--timeout cannot be negative")
-	case remote && strings.TrimSpace(o.merchant) != "":
-		return billing.MerchantID{}, fmt.Errorf("--merchant names a local merchant; with --url the token's merchant is the one read or restored")
-	case remote:
-		return billing.MerchantID{}, nil
 	}
 	return parseBillingArchiveMerchant(o.merchant)
 }
@@ -208,13 +197,9 @@ func parseBillingArchiveMerchant(value string) (billing.MerchantID, error) {
 // binds a River producer.
 func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID, queueJobs bool) (*openrails.Client, func(), error) {
 	if strings.TrimSpace(opts.url) != "" {
-		if _, err := readTokenFile(opts.tokenFile); err != nil {
-			return nil, nil, err
-		}
-		client, err := openrails.NewRemoteMerchant(opts.url, tokenFileCredential(opts.tokenFile))
-		return client, func() {}, err
+		return remoteMerchant(ctx, opts.url, opts.tokenFile, mid)
 	}
-	database, err := openCLIDB(ctx, cfg)
+	database, err := openCLIDB(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -238,6 +223,23 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 // inprocessClient is merchant's handle over an in-process transport.
 func inprocessClient(transport http.RoundTripper, merchant billing.MerchantID) *openrails.Client {
 	return engine.NewClient(transport, merchant).(*openrails.Client)
+}
+
+// remoteMerchant is merchant's handle on the server at url, authenticated by
+// the token in tokenFile, and the release of its connections.
+func remoteMerchant(ctx context.Context, url, tokenFile string, merchant billing.MerchantID) (*openrails.Client, func(), error) {
+	if _, err := readTokenFile(tokenFile); err != nil {
+		return nil, nil, err
+	}
+	remote, err := openrails.NewRemote(url, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{merchant: tokenFileCredential(tokenFile)}})
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := remote.Merchant(merchant)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, func() { _ = remote.Close(context.WithoutCancel(ctx)) }, nil
 }
 
 // tokenFileCredential authenticates each call with the token in path, read
@@ -365,9 +367,8 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			if unbound {
-				database, err := openCLIDB(ctx, cfg)
+				database, err := openCLIDB(ctx)
 				if err != nil {
 					return err
 				}

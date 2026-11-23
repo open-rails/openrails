@@ -35,7 +35,7 @@ type Manifest[M any] struct {
 }
 
 // BillingConfig is the manifest as the engine reads it.
-type BillingConfig = Manifest[config.MerchantDeclaration]
+type BillingConfig = Manifest[config.MerchantDocument]
 
 // LoadManifestFiles loads a merchant config YAML file plus optional
 // structured YAML overlays (LoadManifest).
@@ -249,7 +249,7 @@ type ProvisionMerchantParams struct {
 	// declaration fills (a file) or seeds (Vault).
 	Merchants *merchants.Service
 	Slug      string
-	Merchant  config.MerchantDeclaration
+	Merchant  config.MerchantDocument
 	// Insert registers the merchant when it is missing.
 	Insert bool
 }
@@ -309,7 +309,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *mer
 // configuration's reconciliation rejects. One refused document never refuses the others. With Vault as the
 // source there is nothing to put: a declaration naming configuration was
 // refused before.
-func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing.MerchantID, mt config.MerchantDeclaration) (map[string]string, error) {
+func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing.MerchantID, mt config.MerchantDocument) (map[string]string, error) {
 	cache := req.Merchants.Config()
 	source, ok := cache.Source().(*merchantdocs.FileSource)
 	if !ok {
@@ -336,7 +336,7 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 // alone. Settings that do not normalize, or a card custody the deployment
 // cannot serve, refuse the merchant document and with it every PSP and
 // custodian, which never serve without their merchant's settings.
-func ScopeDeclaration(cfg *config.Config, mt config.MerchantDeclaration) (config.MerchantDeclaration, map[string]string) {
+func ScopeDeclaration(cfg *config.Config, mt config.MerchantDocument) (config.MerchantDocument, map[string]string) {
 	refused := map[string]string{}
 	mt.PSPs, mt.Custodians = maps.Clone(mt.PSPs), maps.Clone(mt.Custodians)
 	if err := validateMerchantDocument(cfg, mt); err != nil {
@@ -386,7 +386,7 @@ func NormalizeManifestRail(raw string) string {
 // ValidateMerchantDeclaration refuses a declaration any of whose documents
 // ScopeDeclaration would refuse: an operator command applies all of it or
 // nothing.
-func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclaration) error {
+func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDocument) error {
 	if _, refused := ScopeDeclaration(cfg, mt); len(refused) > 0 {
 		if why, ok := refused[merchantdocs.MerchantDoc]; ok {
 			return errors.New(why)
@@ -398,7 +398,7 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 
 // validateMerchantDocument checks the merchant document a declaration names
 // before it is served.
-func validateMerchantDocument(cfg *config.Config, mt config.MerchantDeclaration) error {
+func validateMerchantDocument(cfg *config.Config, mt config.MerchantDocument) error {
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.MerchantSettings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}

@@ -55,6 +55,6 @@ type CustomerAccount struct {
 // MaxBatchItems named customers in one page; unknown ones are absent.
 type CustomerListParams struct {
 	Search string       `form:"search"`
-	IDs    []CustomerID `form:"-"`
+	IDs    []CustomerID `form:"ids,comma"`
 	PageRequest
 }

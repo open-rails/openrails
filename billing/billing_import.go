@@ -121,6 +121,20 @@ type PSPRef struct {
 	Key string `json:"key,omitempty"`
 }
 
+// ParsePSPRef reads a PSP named by id (psp_…) or key: the inverse of
+// String. A psp_ prefix that is no id is an error.
+func ParsePSPRef(s string) (PSPRef, error) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, PSPIDPrefix) {
+		return PSPRef{Key: s}, nil
+	}
+	id, err := ParsePSPID(s)
+	if err != nil {
+		return PSPRef{}, err
+	}
+	return PSPRef{ID: &id}, nil
+}
+
 // IsZero reports whether the ref names nothing.
 func (r PSPRef) IsZero() bool {
 	return (r.ID == nil || r.ID.IsZero()) && strings.TrimSpace(r.Key) == ""

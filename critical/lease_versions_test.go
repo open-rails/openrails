@@ -111,24 +111,24 @@ products:
 
 // sameWindowTrust caps one spend window apart by trust level.
 func sameWindowTrust(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
 		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
 		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // goldTrust hold a gold trust level against its own spend window.
 func goldTrust(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
 		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
 		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // answeredHold is an answer's hold of the customer and limit set.
@@ -356,7 +356,7 @@ func TestLeaseVersions(t *testing.T) {
 		fleet := startFleet(t, w)
 		nextDay(w)
 		postDays(t, fleet)
-		b, err := w.alpha.GetBalance(t.Context(), customer, "USD")
+		b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Zero(t, b.BalanceAmount, "the lot paid for the usage before it lapsed and expired with the rest")
 		require.EqualValues(t, 300, b.OwedAmount, "usage after the lapse is owed, never drawn from the lapsed lot")
@@ -735,7 +735,7 @@ func TestLeaseVersions(t *testing.T) {
 			require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, key).Used, "granted usage opens and counts in %s", key)
 		}
 		w.clock.Advance(2 * time.Hour)
-		page, err := w.alpha.ListCustomerLimits(t.Context(), customer)
+		page, err := w.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.NotContains(t, limitKeys(page.Items), "quota", "a customer reads only the limits it is granted")
 		require.NotContains(t, limitKeys(page.Items), "ever")

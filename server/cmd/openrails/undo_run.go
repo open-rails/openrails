@@ -53,8 +53,12 @@ func newUndoRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pool, vault, err := cliDeps(c.Context())
+			if err != nil {
+				return err
+			}
 			return hosttools.UndoRun(c.Context(), hosttools.UndoRunOptions{
-				Config: cfg, MerchantID: mid, RunID: runID, Actor: cliActor(),
+				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, RunID: runID, Actor: cliActor(),
 				Apply: apply, ExpectRows: expectRows, Format: format, Out: os.Stdout,
 			})
 		},

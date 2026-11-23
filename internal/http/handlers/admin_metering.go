@@ -46,25 +46,25 @@ func SetMeter(r *httprequest.Request) {
 	}
 	meter := catalogrules.Meter{Key: r.Param("key"), EventType: params.EventType, ValueProperty: params.ValueProperty, Aggregation: params.Aggregation, Unit: params.Unit, GroupBy: params.GroupBy}
 	if err := catalogrules.ValidateMeter("meter", &meter); err != nil {
-		writeMeteringValidationError(r, "usage_meter_invalid", err)
+		writeMeteringValidationError(r, billing.CodeUsageMeterInvalid, err)
 		return
 	}
 	if !catalogrules.BillingSupported(meter.Aggregation) {
-		writeMeteringValidationError(r, "usage_meter_invalid", errors.New("meter aggregation must be sum or count"))
+		writeMeteringValidationError(r, billing.CodeUsageMeterInvalid, errors.New("meter aggregation must be sum or count"))
 		return
 	}
 	var card *billingservice.UsageRateCardInput
 	if params.RateCard.Set && !params.RateCard.Null {
 		rc := params.RateCard.Value
 		if rc.ProductID.IsZero() {
-			writeMeteringValidationError(r, "usage_rate_card_invalid", errors.New("rate_card.product_id required"))
+			writeMeteringValidationError(r, billing.CodeUsageRateCardInvalid, errors.New("rate_card.product_id required"))
 			return
 		}
 		if rc.Filter == nil {
 			rc.Filter = map[string][]string{}
 		}
 		if err := moneyutil.ValidateCurrency(rc.Price.Currency); err != nil {
-			writeMeteringValidationError(r, "usage_rate_card_invalid", err)
+			writeMeteringValidationError(r, billing.CodeUsageRateCardInvalid, err)
 			return
 		}
 		productID := rc.ProductID.UUID()
@@ -112,26 +112,26 @@ func loadMeter(r *httprequest.Request) (*billing.Meter, bool) {
 	return meter, true
 }
 
-func writeMeteringValidationError(r *httprequest.Request, code string, err error) {
+func writeMeteringValidationError(r *httprequest.Request, code billing.ErrorCode, err error) {
 	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, code, err.Error()))
 }
 
 func writeMeteringError(r *httprequest.Request, err error) {
 	var status int
-	var code string
+	var code billing.ErrorCode
 	switch {
 	case errors.Is(err, billingservice.ErrUsageMeterNotFound):
-		status, code = http.StatusNotFound, "usage_meter_not_found"
+		status, code = http.StatusNotFound, billing.CodeUsageMeterNotFound
 	case errors.Is(err, billingservice.ErrDefaultRateCardNotFound):
-		status, code = http.StatusNotFound, "default_rate_card_not_found"
+		status, code = http.StatusNotFound, billing.CodeDefaultRateCardNotFound
 	case errors.Is(err, billingservice.ErrRateCardProductNotFound):
-		status, code = http.StatusNotFound, "rate_card_product_not_found"
+		status, code = http.StatusNotFound, billing.CodeRateCardProductNotFound
 	case errors.Is(err, billingservice.ErrUsageRateCardInvalid):
-		status, code = http.StatusBadRequest, "usage_rate_card_invalid"
+		status, code = http.StatusBadRequest, billing.CodeUsageRateCardInvalid
 	case errors.Is(err, billingservice.ErrMeterInUse):
-		status, code = http.StatusConflict, "meter_in_use"
+		status, code = http.StatusConflict, billing.CodeMeterInUse
 	case errors.Is(err, billingservice.ErrMeterRateCardConflict):
-		status, code = http.StatusConflict, "meter_rate_card_conflict"
+		status, code = http.StatusConflict, billing.CodeMeterRateCardConflict
 	default:
 		writeRefusal(r, err, "metering operation failed")
 		return

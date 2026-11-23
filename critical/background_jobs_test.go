@@ -265,7 +265,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, price := publicSale(t, a, "retained-order", 9_990_000, nil)
-		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "closed-unpaid"})
+		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), "closed-unpaid", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		_, err = a.alphaRemote.CancelOrder(t.Context(), unpaid.ID)
 		require.NoError(t, err)
@@ -517,14 +517,14 @@ func TestBackgroundJobs(t *testing.T) {
 // declareCCBill gives alpha a CCBill PSP, read by a DataLink pull when feed
 // is set.
 func declareCCBill(w *world, feed *httptest.Server) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
 	if feed != nil {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: feed.URL}
 	}
 	m.PSPs = openrails.PSPs{"ccbill": psp.PSPConfig()}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // importCCBillAttribution imports a CCBill membership whose initial sale has

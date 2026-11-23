@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -18,8 +15,6 @@ import (
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // catalogPlan is a document reduced to the objects it may apply: an object
@@ -319,73 +314,14 @@ func (s *Service) reportCatalogConflicts(ctx context.Context, receipt *billing.C
 	if len(receipt.Conflicts) == 0 {
 		return store.ResolveRaisedFinding(ctx, FindingCatalogConflicts, catalogConflictsSubject)
 	}
-	lines := ReadableCatalogConflicts(receipt.Conflicts)
+	lines := make([]string, len(receipt.Conflicts))
+	for i, conflict := range receipt.Conflicts {
+		lines[i] = conflict.String()
+	}
 	_, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCatalogConflicts, SubjectKey: catalogConflictsSubject, Severity: reconcile.SeverityMedium,
 		RecommendedAction: fmt.Sprintf("The catalog document %s skipped %d object(s) whose fields an edit set differently; everything else applied. Change the document to agree, remove those fields from it, or apply it with force.", receipt.ApplicationID, len(receipt.Conflicts)),
 		Evidence:          map[string]any{"application_id": receipt.ApplicationID, "conflicts": lines},
 	})
 	return err
-}
-
-// ReadableCatalogConflicts writes each skipped object and its conflicting
-// fields for a person: money and durations in readable units.
-func ReadableCatalogConflicts(conflicts []billing.CatalogConflict) []string {
-	var out []string
-	for _, c := range conflicts {
-		name := fmt.Sprintf("%s %s", c.Object, c.Key)
-		if c.ProductKey != nil {
-			name = fmt.Sprintf("price %s of product %s", c.Key, *c.ProductKey)
-		}
-		fields := make([]string, 0, len(c.Fields))
-		currency := conflictCurrency(c)
-		for _, f := range c.Fields {
-			fields = append(fields, fmt.Sprintf("%s: the file says %s, an edit set %s (%s, %s)", f.Field,
-				readableCatalogValue(f.Field, f.FileValue, currency.file), readableCatalogValue(f.Field, f.LiveValue, currency.live), f.SetBy, f.SetAt.UTC().Format(time.RFC3339)))
-		}
-		out = append(out, fmt.Sprintf("%s skipped: %s", name, strings.Join(fields, "; ")))
-	}
-	return out
-}
-
-type conflictCurrencies struct{ file, live string }
-
-// conflictCurrency is the currency each side's money is in: the conflicting
-// currencies when currency is a field, otherwise the price's.
-func conflictCurrency(c billing.CatalogConflict) conflictCurrencies {
-	var out conflictCurrencies
-	if c.Currency != nil {
-		out.file, out.live = *c.Currency, *c.Currency
-	}
-	for _, f := range c.Fields {
-		if f.Field == "currency" {
-			_ = json.Unmarshal(f.FileValue, &out.file)
-			_ = json.Unmarshal(f.LiveValue, &out.live)
-		}
-	}
-	return out
-}
-
-func readableCatalogValue(field string, raw json.RawMessage, currency string) string {
-	if string(raw) == "null" {
-		return "none"
-	}
-	switch field {
-	case "unit_amount", "trial_unit_amount":
-		var text string
-		if json.Unmarshal(raw, &text) == nil {
-			if amount, err := strconv.ParseInt(text, 10, 64); err == nil {
-				if _, known := moneyutil.LookupCurrency(currency); known {
-					return moneyutil.FormatAmount(amount, currency)
-				}
-				return fmt.Sprintf("%d micros", amount)
-			}
-		}
-	case "access_duration_hours", "billing_interval_hours", "billing_interval_months", "trial_duration_hours":
-		var hours int
-		if json.Unmarshal(raw, &hours) == nil {
-			return cadence.FormatHours(hours)
-		}
-	}
-	return string(raw)
 }

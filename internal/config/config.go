@@ -1,7 +1,6 @@
 package config
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	log "github.com/sirupsen/logrus"
@@ -29,112 +29,92 @@ const ConfigContextKey configContextKey = "config"
 // outside the process is in Deps. ProviderWriteMode is required. Whether money
 // is real is each PSP's declared environment, never the deployment's.
 type Config struct {
-	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
-	UsageBillingEnabled bool `yaml:"usage_billing_enabled" json:"usage_billing_enabled"`
-
-	// EventRetention is the retained event-log lifetime, as a Go duration.
-	// Empty is 90 days. Reader progress never extends retention.
-	EventRetention string `yaml:"event_retention" json:"event_retention"`
-
 	// ProviderWriteMode is how much OpenRails may do against payment
 	// providers: "full" (normal operation), "limited" (no system-initiated
 	// provider writes) or "readonly" (no provider writes: it never charges
 	// anyone). Required.
-	ProviderWriteMode string `yaml:"provider_write_mode" json:"provider_write_mode"`
+	ProviderWriteMode string
+	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
+	EngineAdmissionHold bool
+	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
+	UsageBillingEnabled bool
 
 	// Database names the Postgres schemas New creates or upgrades.
-	Database DatabaseConfig `yaml:"database" json:"database"`
+	Database DatabaseConfig
 	// Merchants declares the merchants an embedded engine provisions on
-	// start, by slug; none leaves that to run time (a standalone server's
-	// are provisioned through its API). Without a Vault KV mount a
-	// declaration is the merchant's configuration, read-only; with one it
-	// seeds Vault once, when Vault holds nothing for the merchant. A request
-	// acts on the merchant its credential is bound to: see
-	// MerchantDeclaration.Issuer.
-	Merchants map[string]MerchantDeclaration `yaml:"merchants" json:"merchants"`
+	// start; none leaves that to run time (a standalone server's are
+	// provisioned through its API). A slug declared twice provisions neither
+	// entry. Without a Vault KV mount a declaration is the merchant's
+	// configuration, read-only; with one it seeds Vault once, when Vault
+	// holds nothing for the merchant. A request acts on the merchant its
+	// credential is bound to: see MerchantDeclaration.Issuer.
+	Merchants []MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
-	PublicBillingBaseURL string `yaml:"public_billing_base_url" json:"public_billing_base_url"`
-	// DashboardBaseURL is where administrative links point.
-	DashboardBaseURL string `yaml:"dashboard_base_url" json:"dashboard_base_url"`
-
-	// DB opens OpenRails' own pool when Deps.Postgres is nil.
-	DB *DBConfig `yaml:"db" json:"db"`
-	// Redis opens OpenRails' own client when Deps.Redis is nil.
-	Redis *RedisConfig `yaml:"redis" json:"redis"`
-	// Logger sets the log level.
-	Logger *LoggerConfig `yaml:"logger" json:"logger"`
-	// SMTP selects the built-in SMTP sender for billing and control-plane
-	// email when Deps.Email is nil; with neither, OpenRails sends no email.
-	SMTP *SMTPConfig `yaml:"smtp" json:"smtp"`
-	// RateLimits are the per-bucket request limits; nil takes the built-in
-	// defaults.
-	RateLimits *RateLimitsConfig `yaml:"rate_limits" json:"rate_limits"`
-	// RateLimitsDisabled turns off the built-in rate limits and captcha
-	// escalation, for a host that fronts billing with its own limiter.
-	RateLimitsDisabled bool `yaml:"rate_limits_disabled" json:"rate_limits_disabled"`
-	// UserActionRateLimit bounds customer card deletes and soft cancellations
-	// across this merchant's users, actors and processes. Always enabled,
-	// including when the host owns ordinary HTTP rate limits.
-	UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit" json:"user_action_rate_limit"`
-	// DestructiveActionLimits are the staff limits on refunds, revokes,
-	// cancels and the other held destructive actions. Zero fields keep the
-	// defaults.
-	DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits" json:"destructive_action_limits"`
-	// Captcha challenges a client that keeps hitting a rate limit.
-	Captcha *CaptchaConfig `yaml:"captcha" json:"captcha"`
-	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
-	// mounts: a KV mount makes Vault hold merchant configuration.
-	Vault *VaultConfig `yaml:"vault" json:"vault"`
-	// Solana is the deployment's Solana configuration: its crankers.
-	Solana *SolanaConfig `yaml:"solana" json:"solana"`
-
-	// LLM is the model behind the console's catalog questions.
-	// Without an API key those features are off.
-	LLM *LLMConfig `yaml:"llm" json:"llm"`
-
-	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
-	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
-	WebhookSecretOverlap string `yaml:"webhook_secret_overlap" json:"webhook_secret_overlap"`
-
+	PublicBillingBaseURL string
 	// ReturnOrigins are the exact origins (scheme://host[:port]) that purchase
 	// and billing-portal return URLs may name. Empty allows only the origin of
 	// PublicBillingBaseURL.
-	ReturnOrigins []string `yaml:"return_origins" json:"return_origins"`
-
+	ReturnOrigins []string
 	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
 	// resolving a client's address. Empty trusts none: the socket peer is the
 	// client.
-	TrustedProxies []string `yaml:"trusted_proxies" json:"trusted_proxies"`
+	TrustedProxies []string
+	// CheckoutOrigin is the origin (https://pay.example.com) of the payment
+	// page, which Engine.CheckoutPage serves from Deps.CheckoutAssets. It is
+	// an origin of its own, apart from PublicBillingBaseURL and every
+	// declared Issuer; one that is not is refused and reported. Empty serves
+	// none.
+	CheckoutOrigin string
 
-	// CloudflareProxies are Cloudflare's egress CIDRs, set only where
-	// Cloudflare fronts this origin. They are trusted like TrustedProxies, and
-	// they alone may assert CF-Connecting-IP.
-	CloudflareProxies []string `yaml:"cloudflare_proxies" json:"cloudflare_proxies"`
+	// RateLimits are the per-bucket request limits: nil takes the built-in
+	// limits, an empty map limits nothing (a host that fronts billing with its
+	// own limiter).
+	RateLimits RateLimitsConfig
+	// Captcha challenges a client that keeps hitting a rate limit.
+	Captcha *CaptchaConfig
+	// UserActionRateLimit bounds customer card deletes and soft cancellations
+	// across this merchant's users, actors and processes. Always enabled,
+	// including when the host owns ordinary HTTP rate limits.
+	UserActionRateLimit UserActionRateLimitConfig
+	// DestructiveActionLimits are the staff limits on refunds, revokes,
+	// cancels and the other held destructive actions. Zero fields keep the
+	// defaults.
+	DestructiveActionLimits DestructiveActionLimitsConfig
 
-	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
-	// webhook origins. CCBill signs nothing, so the source address is the
-	// authentication: the list is honored only for a sandbox account.
-	// Empty accepts CCBill's own ranges alone.
-	CCBillWebhookIPAllowlist []string `yaml:"ccbill_webhook_ip_allowlist" json:"ccbill_webhook_ip_allowlist"`
-
-	// ProviderSandbox points non-live PSPs' provider clients at loopback
-	// gateways, to qualify a process against fake providers. Refused beside a
-	// live PSP and for anything but a literal loopback address.
-	ProviderSandbox *ProviderSandboxConfig `yaml:"provider_sandbox" json:"provider_sandbox"`
-	// HyperSwitch is the host's trusted HyperSwitch deployment.
-	HyperSwitch *HyperSwitchConfig `yaml:"hyperswitch" json:"hyperswitch"`
+	// Vault names the mounts of Deps.Vault: a KV mount makes Vault hold
+	// merchant configuration.
+	Vault *VaultConfig
 	// CardVault is the operator's card vault; nil refuses
 	// settings.card_vault platform.
-	CardVault *CardVaultConfig `yaml:"card_vault" json:"card_vault"`
-
-	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool `yaml:"engine_admission_hold" json:"engine_admission_hold"`
-
+	CardVault *CardVaultConfig
+	// HyperSwitch is the host's trusted HyperSwitch deployment.
+	HyperSwitch *HyperSwitchConfig
+	// Solana is the deployment's Solana configuration: its crankers.
+	Solana *SolanaConfig
+	// LLM is the model behind the console's catalog questions.
+	// Without an API key those features are off.
+	LLM *LLMConfig
 	// ReadCache overrides how long the engine's handles serve catalog and
 	// configuration reads from memory; nil keeps the defaults.
-	ReadCache ReadCache `yaml:"read_cache" json:"read_cache"`
+	ReadCache ReadCache
+
+	// ProviderSandbox points non-live PSPs' provider clients at loopback
+	// gateways, to qualify a process against fake providers, and accepts
+	// extra CCBill webhook sources for sandbox accounts. A gateway is refused
+	// beside a live PSP and for anything but a literal loopback address.
+	ProviderSandbox *ProviderSandboxConfig
+
+	// EventRetention is the retained event-log lifetime, as a Go duration.
+	// Empty is 90 days. Reader progress never extends retention.
+	EventRetention string
+	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
+	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
+	WebhookSecretOverlap string
+
+	// Logger sets the log level.
+	Logger *LoggerConfig
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -142,14 +122,19 @@ type Config struct {
 // userinfo; hostnames, even "localhost", are refused.
 type ProviderSandboxConfig struct {
 	// NMIGatewayURL replaces the NMI sandbox endpoints.
-	NMIGatewayURL string `yaml:"nmi_gateway_url" json:"nmi_gateway_url"`
+	NMIGatewayURL string
 	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
 	// pinned API version still apply.
-	StripeAPIURL string `yaml:"stripe_api_url" json:"stripe_api_url"`
+	StripeAPIURL string
 	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
-	SolanaRPCURL string `yaml:"solana_rpc_url" json:"solana_rpc_url"`
+	SolanaRPCURL string
 	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
-	CCBillDataLinkURL string `yaml:"ccbill_datalink_url" json:"ccbill_datalink_url"`
+	CCBillDataLinkURL string
+	// CCBillWebhookSources are extra source CIDRs accepted as a sandbox
+	// CCBill account's webhook origins. CCBill signs nothing, so the source
+	// address is the authentication: a live account accepts CCBill's own
+	// ranges alone.
+	CCBillWebhookSources []string
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
@@ -189,6 +174,15 @@ func SandboxCCBillDataLinkURL(cfg *Config) string {
 	return strings.TrimSpace(cfg.ProviderSandbox.CCBillDataLinkURL)
 }
 
+// SandboxCCBillWebhookSources are the extra CCBill webhook source CIDRs
+// declared for sandbox accounts.
+func SandboxCCBillWebhookSources(cfg *Config) []string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return nil
+	}
+	return cfg.ProviderSandbox.CCBillWebhookSources
+}
+
 // ValidateLoopbackGatewayURL accepts only a literal loopback destination: an
 // absolute http(s) URL, no userinfo, whose host is an IP literal that
 // net.IP.IsLoopback classifies. A hostname is never enough (no DNS).
@@ -219,37 +213,18 @@ func MerchantConfigKVMount(cfg *Config) string {
 	return strings.Trim(strings.TrimSpace(cfg.Vault.KVMount), "/")
 }
 
-// VaultConfig connects to HashiCorp Vault: a non-nil Config.Vault (or
-// Deps.Vault) is the connection. Name a KV mount and Vault holds merchant
-// configuration. CardVault.KVMount can read card credentials separately;
-// TransitMount selects the Solana signing mount.
+// VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
+// makes Vault hold merchant configuration; CardVault.KVMount can read card
+// credentials separately.
 type VaultConfig struct {
-	Namespace   string `yaml:"namespace" json:"namespace"`
-	ScopePrefix string `yaml:"scope_prefix" json:"scope_prefix"`
-	// Address is the server URL; empty uses the Vault client's default.
-	Address string `yaml:"address" json:"address"`
-	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is
-	// token.
-	AuthMethod string `yaml:"auth_method" json:"auth_method"`
-	// Token is a pre-issued Vault token.
-	Token    string `yaml:"token" json:"token"`
-	RoleID   string `yaml:"role_id" json:"role_id"`
-	SecretID string `yaml:"secret_id" json:"secret_id"`
-	// SecretsPath is a directory of operator-mounted secret files named after
-	// environment variables. Approle reauthentication re-reads VAULT_SECRET_ID
-	// there, so a rotated secret is used; empty re-reads nothing.
-	SecretsPath string `yaml:"secrets_path" json:"secrets_path"`
-	K8sRole     string `yaml:"k8s_role" json:"k8s_role"`
-	// AuthMount is where the approle or kubernetes auth method is mounted:
-	// the -path of `vault auth enable`, without auth/. Empty is the method's
-	// name.
-	AuthMount string `yaml:"auth_mount" json:"auth_mount"`
 	// KVMount is the KV v2 mount merchant configuration lives in, under
-	// ScopePrefix (empty: "openrails"). Empty: a file holds it.
-	KVMount string `yaml:"kv_mount" json:"kv_mount"`
+	// ScopePrefix. Empty: Config.Merchants holds it.
+	KVMount string
+	// ScopePrefix is the path under KVMount; empty is "openrails".
+	ScopePrefix string
 	// TransitMount is the Transit mount Solana signing keys live under; empty
 	// is "transit".
-	TransitMount string `yaml:"transit_mount" json:"transit_mount"`
+	TransitMount string
 }
 
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
@@ -290,21 +265,21 @@ const (
 type LLMConfig struct {
 	// Provider selects the API dialect: "anthropic" (the default) or
 	// "openai". Any other value is refused.
-	Provider string `yaml:"provider" json:"provider"`
+	Provider string
 	// Model is the provider's model ID; empty is the provider's default.
-	Model string `yaml:"model" json:"model"`
+	Model string
 	// BaseURL replaces the provider's public endpoint: an absolute https URL.
 	// With openai it includes the version segment
 	// (https://host/v1); with anthropic it is the origin.
-	BaseURL string `yaml:"base_url" json:"base_url"`
+	BaseURL string
 	// APIKey is the provider credential. Empty turns the features off.
-	APIKey string `yaml:"api_key" json:"api_key"`
+	APIKey string
 	// CatalogCopilotEnabled turns on read-only questions about the catalog,
 	// which send aggregate catalog and subscriber counts to the provider.
-	CatalogCopilotEnabled bool `yaml:"catalog_copilot_enabled" json:"catalog_copilot_enabled"`
+	CatalogCopilotEnabled bool
 	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
 	// changes. Drafts are proposals; nothing is applied.
-	CatalogDraftingEnabled bool `yaml:"catalog_drafting_enabled" json:"catalog_drafting_enabled"`
+	CatalogDraftingEnabled bool
 }
 
 // LLMConfigured reports whether a model backend is configured (fail-closed on a
@@ -346,80 +321,23 @@ func LLMModel(c *LLMConfig) string {
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {
+	// Schema holds OpenRails' tables. Empty is "billing".
+	Schema string
+	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
+	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
+	// host's River. Start runs OpenRails' own River client there, and a host
+	// fleet passed to Start with WithRiverClient must use the same schema.
+	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
 	// migrations or preparing startup partitions: a migration that is missing,
 	// or was applied with other content, is ErrMigrationsRequired. Call
 	// openrails.Migrate first.
 	// Normal request-time and scheduled partition maintenance is unchanged.
-	SkipMigrations bool `yaml:"skip_migrations" json:"skip_migrations"`
-	// Schema holds OpenRails' tables. Empty is "billing".
-	Schema string `yaml:"schema" json:"schema"`
-	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
-	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
-	// host's River. Start runs OpenRails' own River client there, and a host
-	// fleet passed to Start with WithRiverClient must use the same schema.
-	RiverSchema string `yaml:"river_schema" json:"river_schema"`
-}
-
-// DBConfig is a Postgres connection. URL takes precedence; otherwise the
-// connection string is built from the parts.
-type DBConfig struct {
-	URL string `yaml:"url" json:"url"`
-
-	Host     string `yaml:"host" json:"host"`
-	Port     string `yaml:"port" json:"port"`
-	Database string `yaml:"database" json:"database"`
-	Username string `yaml:"username" json:"username"`
-	Password string `yaml:"password" json:"password"`
-	// SSLMode defaults to "require".
-	SSLMode string `yaml:"sslmode" json:"sslmode"`
-
-	// SQLTrace logs every query at debug level on pools OpenRails opens.
-	SQLTrace bool `yaml:"sql_trace" json:"sql_trace"`
-	// LeaseConns caps the separate pool for idempotency lease renewals. Zero
-	// uses four connections.
-	LeaseConns int `yaml:"lease_conns" json:"lease_conns"`
-}
-
-// DBConnectionString returns the database connection string.
-// Priority order:
-// 1. If URL is set, use it directly
-// 2. If all atomic parameters are present, build connection string from them
-// 3. Return empty string (caller should use defaults or error based on environment)
-func DBConnectionString(c *DBConfig) string {
-	// 1. If URL is provided, use it
-	if c.URL != "" {
-		return c.URL
-	}
-
-	// 2. Build connection string from atomic parameters if all required fields are present
-	if c.Host != "" && c.Port != "" && c.Database != "" && c.Username != "" {
-		// Format: postgresql://username:password@host:port/database?sslmode=...
-		//
-		// Credentials and the database name are percent-encoded via net/url
-		// rather than interpolated raw. A password containing reserved URL
-		// characters (most dangerously '@' or '/') would otherwise corrupt the
-		// DSN — e.g. a password "p@ss/0" makes the parser read a different host,
-		// which at best fails to connect and at worst silently redirects the
-		// connection to an attacker-influenced endpoint. url.UserPassword +
-		// url.URL.String() escape every component correctly.
-		sslMode := c.SSLMode
-		if sslMode == "" {
-			// Default to TLS when sslmode is omitted. Local compose sets disable explicitly.
-			sslMode = "require"
-		}
-		u := url.URL{
-			Scheme:   "postgresql",
-			User:     url.UserPassword(c.Username, c.Password),
-			Host:     net.JoinHostPort(c.Host, c.Port),
-			Path:     "/" + c.Database,
-			RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
-		}
-		return u.String()
-	}
-
-	// 3. No URL and incomplete atomic parameters - return empty (caller handles defaults)
-	return ""
+	SkipMigrations bool
+	// LeaseConns caps the separate pool, copied from Deps.Postgres's
+	// configuration, that renews idempotency leases. Zero is four
+	// connections.
+	LeaseConns int
 }
 
 // DefaultSchema is the Postgres schema used when none is configured. All SQL
@@ -778,10 +696,10 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 // change; a refusal answers 429, records a finding and opens no hold.
 // Renewals, expiry and provider-side cancellation spend nothing.
 type UserActionRateLimitConfig struct {
-	MinimumCustomersPerHour        int64 `yaml:"minimum_customers_per_hour" json:"minimum_customers_per_hour"`
-	PaidCustomersPerHourlyCustomer int64 `yaml:"paid_customers_per_hourly_customer" json:"paid_customers_per_hourly_customer"`
-	MinimumCustomersPerDay         int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
-	PaidCustomersPerDailyCustomer  int64 `yaml:"paid_customers_per_daily_customer" json:"paid_customers_per_daily_customer"`
+	MinimumCustomersPerHour        int64
+	PaidCustomersPerHourlyCustomer int64
+	MinimumCustomersPerDay         int64
+	PaidCustomersPerDailyCustomer  int64
 }
 
 func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLimitConfig, error) {
@@ -827,12 +745,12 @@ func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLi
 // are delivered at least once. Holds and the action audit belong to the
 // deployment: keep them in full backups; a merchant archive cannot reset them.
 type DestructiveActionLimitsConfig struct {
-	ActorPerHour      int64 `yaml:"actor_per_hour" json:"actor_per_hour"`
-	ActorPerDay       int64 `yaml:"actor_per_day" json:"actor_per_day"`
-	MerchantPerHour   int64 `yaml:"merchant_per_hour" json:"merchant_per_hour"`
-	MerchantPerDay    int64 `yaml:"merchant_per_day" json:"merchant_per_day"`
-	DeploymentPerHour int64 `yaml:"deployment_per_hour" json:"deployment_per_hour"`
-	DeploymentPerDay  int64 `yaml:"deployment_per_day" json:"deployment_per_day"`
+	ActorPerHour      int64
+	ActorPerDay       int64
+	MerchantPerHour   int64
+	MerchantPerDay    int64
+	DeploymentPerHour int64
+	DeploymentPerDay  int64
 }
 
 // NormalizeDestructiveActionLimits fills the defaults and refuses limits that
@@ -909,19 +827,6 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeReadOnly: true,
 }
 
-// SMTPConfig is the SMTP server OpenRails' email is sent through, from any
-// provider: SendGrid is smtp.sendgrid.net with username "apikey" and an API
-// key as the password. Port 465 is implicit TLS, any other STARTTLS; 0 is
-// 587. Billing email is sent from the merchant's profile from_email when it
-// has one; From is the deployment's own address, for everything else.
-type SMTPConfig struct {
-	Host     string       `yaml:"host" json:"host"`
-	Port     int          `yaml:"port" json:"port"`
-	Username string       `yaml:"username" json:"username"`
-	Password string       `yaml:"password" json:"password"`
-	From     EmailAddress `yaml:"from" json:"from"`
-}
-
 // LoggerConfig sets the log level: debug, info, warn or error.
 type LoggerConfig struct {
 	Level string `yaml:"level" json:"level"`
@@ -929,7 +834,7 @@ type LoggerConfig struct {
 
 // RateLimit is one bucket's limit over a fixed one-minute window.
 type RateLimit struct {
-	RequestsPerMinute int `yaml:"requests_per_minute" json:"requests_per_minute"`
+	RequestsPerMinute int
 }
 
 const (
@@ -949,9 +854,9 @@ const (
 // from GET /v1/config's captcha block or the error's metadata.
 type CaptchaConfig struct {
 	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
-	Provider  string `yaml:"provider" json:"provider"`
-	SiteKey   string `yaml:"site_key" json:"site_key"`
-	SecretKey string `yaml:"secret_key" json:"secret_key"`
+	Provider  string
+	SiteKey   string
+	SecretKey string
 }
 
 // CaptchaEnabled reports whether captcha challenges are active. There is no
@@ -1009,8 +914,9 @@ func CaptchaChallengeBuckets() []string {
 }
 
 // Validate refuses what the engine cannot serve without: an unknown provider
-// write mode (#346), missing rate limits and the database. Every optional
-// setting is Degrade's: it is turned off with a reason, never refused.
+// write mode (#346), impossible limits and the database schema. Every
+// optional setting is Degrade's: it is turned off with a reason, never
+// refused.
 func Validate(cfg *Config) error {
 	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
 		return err
@@ -1024,10 +930,7 @@ func Validate(cfg *Config) error {
 	if !ValidProviderWriteModes[providerWriteMode] {
 		return fmt.Errorf("invalid provider_write_mode %q: must be one of full, limited, readonly", providerWriteMode)
 	}
-	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
-		return fmt.Errorf("rate_limits is required unless rate_limits_disabled is explicitly set for a host-owned limiter")
-	}
-	if err := ValidateDatabase(cfg); err != nil {
+	if err := ValidateDatabase(cfg.Database); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 	return nil
@@ -1073,21 +976,13 @@ func validateSourceCIDR(raw string) error {
 	return nil
 }
 
-// ValidateVault refuses a malformed Vault auth mount or mount path: Vault is
-// then unusable (vaultconn.Open), never a boot failure.
+// ValidateVault refuses a mount path that is not a plain Vault path: Vault
+// is then unusable (vaultconn.Open), never a boot failure.
 func ValidateVault(vc *VaultConfig) error {
 	if vc == nil {
 		return nil
 	}
-	if mount := strings.Trim(strings.TrimSpace(vc.AuthMount), "/"); mount != "" {
-		switch method := strings.ToLower(strings.TrimSpace(vc.AuthMethod)); {
-		case method != "approle" && method != "kubernetes":
-			return fmt.Errorf("vault.auth_mount applies to the approle and kubernetes auth methods, not %q", cmp.Or(method, "token"))
-		case strings.HasPrefix(mount, "auth/"):
-			return fmt.Errorf("vault.auth_mount %q is the path after auth/: %q", vc.AuthMount, strings.TrimPrefix(mount, "auth/"))
-		}
-	}
-	for name, raw := range map[string]string{"vault.auth_mount": vc.AuthMount, "vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
+	for name, raw := range map[string]string{"vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
 		p := strings.Trim(strings.TrimSpace(raw), "/")
 		if p != "" && (path.Clean(p) != p || strings.Contains(p, "..")) {
 			return fmt.Errorf("%s %q must be a plain Vault path", name, raw)
@@ -1242,25 +1137,20 @@ func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	return nil
 }
 
-// ValidateDatabase validates the database configuration and schema.
-func ValidateDatabase(cfg *Config) error {
-	if cfg == nil || cfg.DB == nil {
-		return fmt.Errorf("database configuration is required")
-	}
-	if cfg.DB.URL == "" {
-		return fmt.Errorf("database URL could not be determined")
-	}
-	if cfg.DB.LeaseConns < 0 {
-		return fmt.Errorf("db.lease_conns %d is negative", cfg.DB.LeaseConns)
+// ValidateDatabase refuses a schema that is not a safe identifier and a
+// negative lease pool.
+func ValidateDatabase(d DatabaseConfig) error {
+	if d.LeaseConns < 0 {
+		return fmt.Errorf("database.lease_conns %d is negative", d.LeaseConns)
 	}
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
-	return validateSchema(cfg.Database.Schema)
+	return validateSchema(d.Schema)
 }
 
 // DefaultRateLimits are the built-in per-bucket limits, applied whenever
-// Config.RateLimits is nil and limits are not disabled.
-func DefaultRateLimits() *RateLimitsConfig {
-	return &RateLimitsConfig{
+// Config.RateLimits is nil.
+func DefaultRateLimits() RateLimitsConfig {
+	return RateLimitsConfig{
 		// Mutation endpoint; the per-user limit is the real fraud control.
 		"subscribe": &RateLimit{RequestsPerMinute: 20},
 		// Kept tight to deter card testing.
@@ -1275,8 +1165,8 @@ func DefaultRateLimits() *RateLimitsConfig {
 	}
 }
 
-// DefaultCaptcha is the captcha configuration applied with DefaultRateLimits:
-// no account, so no challenge.
+// DefaultCaptcha is the captcha configuration applied when Config.Captcha is
+// nil: no account, so no challenge.
 func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaProviderTurnstile} }
 
 // LogStartupStatus writes the operator-facing posture banners for long-running

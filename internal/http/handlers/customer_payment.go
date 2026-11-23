@@ -36,7 +36,7 @@ func customerInitiatedChargeAllowed(r *httprequest.Request) bool {
 		return false
 	}
 	if !scope.Present() {
-		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, billing.CodeCustomerActionRequired, "verified customer action required"))
 		return false
 	}
 	return true
@@ -45,11 +45,11 @@ func customerInitiatedChargeAllowed(r *httprequest.Request) bool {
 func paymentActionKey(r *httprequest.Request) (string, bool) {
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_param", "Idempotency-Key (1–255 bytes) is required"))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeInvalidParam, "Idempotency-Key (1–255 bytes) is required"))
 		return "", false
 	}
 	if cardguard.ContainsPAN(key) {
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_param", "Idempotency-Key must not contain card data"))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeInvalidParam, "Idempotency-Key must not contain card data"))
 		return "", false
 	}
 	return key, true
@@ -77,7 +77,6 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInvalidParam, "invalid payment_method_id")
 		return
 	}
-	body.SubscriptionID, body.IdempotencyKey = id, key
 	if refuseBlockedCardAttempt(r, payer.String()) {
 		return
 	}
@@ -87,7 +86,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
-	result, err := svc.RetrySubscriptionNow(ctx, payer, body, verifiedPrincipal(r))
+	result, err := svc.RetrySubscriptionNow(ctx, payer, id, key, body, verifiedPrincipal(r))
 	if err != nil {
 		var refusal *billingservice.CustomerPaymentRefusal
 		if errors.As(err, &refusal) {
@@ -112,21 +111,21 @@ func customerPaymentError(r *httprequest.Request, err error) {
 	case errors.Is(err, money.ErrUsageRecoveryHeld):
 		r.ErrorCode(billing.CodeServiceUnavailable, "this order needs its provider payment history to be verified")
 	case errors.Is(err, money.ErrCustomerSessionRequired):
-		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, billing.CodeCustomerActionRequired, "verified customer action required"))
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, subscriptions.ErrSubscriptionNotFound):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "billing resource not found"))
 	case errors.Is(err, intents.ErrRebillKeyConflict):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_idempotency_conflict", "key belongs to another payment request"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentIdempotencyConflict, "key belongs to another payment request"))
 	case errors.Is(err, intents.ErrRebillInProgress):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_in_progress", "a payment is already unresolved; read this resource before retrying"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentInProgress, "a payment is already unresolved; read this resource before retrying"))
 	case errors.Is(err, money.ErrCustomerPaymentUnsupported), errors.Is(err, intents.ErrRebillUnsupported):
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "customer_payment_unsupported", "customer-present payment is unsupported for this rail or method"))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeCustomerPaymentUnsupported, "customer-present payment is unsupported for this rail or method"))
 	case errors.Is(err, intents.ErrRetryNeedsNewMethod):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "this card is not charged again for this renewal; set another payment method on the subscription"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentNotRetryable, "this card is not charged again for this renewal; set another payment method on the subscription"))
 	case errors.Is(err, intents.ErrRebillNotRetryable):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "resource is not payable now"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentNotRetryable, "resource is not payable now"))
 	case errors.Is(err, money.ErrDefaultPaymentMethodInvalid), errors.Is(err, money.ErrDefaultPaymentMethodRequired), errors.Is(err, charge.ErrAgreementRequired):
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_payment_method", "payment method is not eligible"))
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeInvalidPaymentMethod, "payment method is not eligible"))
 	default:
 		r.InternalError("customer payment failed", err)
 	}

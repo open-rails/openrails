@@ -33,9 +33,9 @@ func newAccountClassWorld(t *testing.T, alpha, beta openrails.PSPs, configure ..
 	return newAuthorityWorld(t, func(w *world) {
 		w.deps.Clock, w.deps.FXTransport = nil, nil
 		for slug, psps := range map[string]openrails.PSPs{"alpha": alpha, "beta": beta} {
-			declaration := w.cfg.Merchants[slug]
+			declaration := cfgMerchant(w.cfg, slug)
 			declaration.PSPs = psps
-			w.cfg.Merchants[slug] = declaration
+			setCfgMerchant(&w.cfg, slug, declaration)
 		}
 		for _, change := range configure {
 			change(w)
@@ -53,9 +53,9 @@ func (a *authorityWorld) restartWith(t *testing.T, change func(*openrails.Config
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
-	a.beta, err = a.engine.MerchantBySlug("beta")
+	a.beta, err = declaredMerchant(a.engine, "beta")
 	require.NoError(t, err)
 	a.serve(t)
 	a.alphaRemote = a.remote(t, a.alpha.MerchantID(), a.alphaKey.Secret)
@@ -124,10 +124,10 @@ func TestWebhookAccountClasses(t *testing.T) {
 		a := newAccountClassWorld(t, openrails.PSPs{
 			"stripe": openrails.StripePSP{AccountID: "acct_owned", Environment: openrails.EnvironmentLive, SecretKey: "sk_live_owner", WebhookSigningSecret: "whsec_owner"}.PSPConfig(),
 		}, nil, func(w *world) {
-			declaration := w.cfg.Merchants["alpha"]
+			declaration := cfgMerchant(w.cfg, "alpha")
 			declaration.Custodians = openrails.Custodians{"cards": {Kind: "basis_theory", Environment: "live", AccountID: "00000000-0000-4000-8000-0000000000c1",
 				Settings: map[string]any{"public_api_key": "public-owner"}, Secrets: map[string]string{"api_key": "private-owner"}}}
-			w.cfg.Merchants["alpha"] = declaration
+			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
 		owner := pspIDs(t, a.alpha)["stripe"]
 		require.NotEqual(t, uuid.Nil, owner)
@@ -139,21 +139,12 @@ func TestWebhookAccountClasses(t *testing.T) {
 		}
 		delivered("evt_before_claims", "prod_before_claims")
 
-		beta, err := a.engine.LocalMerchant(a.beta.MerchantID())
-		require.NoError(t, err)
-		_, err = beta.DeclarePSP(t.Context(), billing.PSPDeclaration{Key: "squat", Rail: billing.RailStripe, Environment: openrails.EnvironmentTest, PSPAccount: billing.PSPAccount{AccountID: "acct_owned"}})
-		require.ErrorIs(t, err, billing.ErrConflict)
-		var refusal interface{ ErrorCode() string }
-		require.ErrorAs(t, err, &refusal)
-		require.Equal(t, "psp_exists", refusal.ErrorCode())
-		delivered("evt_after_declaration", "prod_after_declaration")
-
 		a.restartWith(t, func(cfg *openrails.Config) {
-			declaration := cfg.Merchants["beta"]
+			declaration := cfgMerchant(*cfg, "beta")
 			declaration.PSPs = openrails.PSPs{"squat": openrails.StripePSP{AccountID: "acct_owned", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_squat", WebhookSigningSecret: "whsec_squat"}.PSPConfig()}
 			declaration.Custodians = openrails.Custodians{"cards": {Kind: "basis_theory", Environment: "test", AccountID: "00000000-0000-4000-8000-0000000000c1",
 				Settings: map[string]any{"public_api_key": "public-squat"}, Secrets: map[string]string{"api_key": "private-squat"}}}
-			cfg.Merchants["beta"] = declaration
+			setCfgMerchant(cfg, "beta", declaration)
 		})
 		require.Empty(t, pspIDs(t, a.beta), "a file-declared claim of another merchant's account in the other class is not served")
 		require.Equal(t, map[string]uuid.UUID{"stripe": owner}, pspIDs(t, a.alpha))
@@ -169,7 +160,7 @@ func TestWebhookAccountClasses(t *testing.T) {
 		squat := stripeCatalogNotice(t, "evt_squat", "prod_squat", false)
 		status, raw := callback(t, a, "acct_owned", squat, stripeSignature(squat, "whsec_squat"))
 		require.Equal(t, http.StatusUnauthorized, status, raw)
-		require.Equal(t, map[string]uuid.UUID{"prod_before_claims": owner, "prod_after_declaration": owner, "prod_after_claims": owner}, woken(t, fleet, "openrails.provider_object_observe"))
+		require.Equal(t, map[string]uuid.UUID{"prod_before_claims": owner, "prod_after_claims": owner}, woken(t, fleet, "openrails.provider_object_observe"))
 	})
 	t.Run("OR-J28-S07/one-merchants-live-and-test-psps-on-one-account-each-receive-their-own-events", func(t *testing.T) {
 		t.Run("stripe", func(t *testing.T) {

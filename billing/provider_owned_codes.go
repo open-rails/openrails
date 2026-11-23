@@ -6,14 +6,14 @@ const (
 	// CodeProviderCancelHeld: canceling would delete the provider's billing
 	// schedule, and destructive provider actions are not armed for this
 	// merchant. Nothing changed; an operator finding records the request.
-	CodeProviderCancelHeld = "provider_cancel_held"
+	CodeProviderCancelHeld ErrorCode = "provider_cancel_held"
 	// CodePaymentMethodSameVault: the provider bills a vault's primary card,
 	// so another card of the same vault cannot become the subscription's
 	// payment method. Save the card as a new payment method instead.
-	CodePaymentMethodSameVault = "payment_method_same_vault"
+	CodePaymentMethodSameVault ErrorCode = "payment_method_same_vault"
 	// CodePaymentDuplicateRefused: the provider refused the charge unprocessed
 	// because an identical charge (same card and amount) was just made. Nothing
 	// was charged; the same request succeeds once the provider's duplicate
 	// window has passed.
-	CodePaymentDuplicateRefused = "payment_duplicate_refused"
+	CodePaymentDuplicateRefused ErrorCode = "payment_duplicate_refused"
 )

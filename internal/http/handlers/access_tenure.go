@@ -28,7 +28,11 @@ func SelfAccessTenure(r *httprequest.Request) {
 }
 
 func accessTenure(r *httprequest.Request, customer billing.CustomerID) {
-	keys := r.Request.URL.Query()["entitlement"]
+	var params billing.AccessTenureParams
+	if !r.BindQuery(&params) {
+		return
+	}
+	keys := params.Entitlements
 	if len(keys) == 0 || len(keys) > billing.MaxEntitlementChecks {
 		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("entitlement must name 1 to %d keys", billing.MaxEntitlementChecks)).WithParam("entitlement"))
 		return
@@ -38,10 +42,7 @@ func accessTenure(r *httprequest.Request, customer billing.CustomerID) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("entitlement"))
 		return
 	}
-	at, ok := parseAtQuery(r)
-	if !ok {
-		return
-	}
+	at := params.At.UTC()
 	now := r.Clock.Now()
 	if at.IsZero() {
 		at = now

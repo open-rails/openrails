@@ -12,11 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
-const (
-	codeSolanaTransactionRefused = "solana_transaction_refused"
-	codeSolanaRPCUnavailable     = "solana_rpc_unavailable"
-)
-
 // solanaUnavailable is the refusal for a transient Solana outage, or nil. An
 // RPC failure's text carries endpoint URLs, which carry the merchant's
 // provider credential: it is logged, never answered.
@@ -27,7 +22,7 @@ func solanaUnavailable(err error) *api.APIError {
 	case errors.Is(err, solanarpc.ErrAllRPCEndpointsFailed):
 		log.WithField("detail", redact.Secrets(err.Error())).
 			Warn("solana: RPC chain unavailable; returning a generic error to the client (#SEC-17)")
-		return api.Coded(codeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
+		return api.Coded(billing.CodeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
 	}
 	return nil
 }
@@ -39,5 +34,5 @@ func solanaClientError(err error) *api.APIError {
 	if refusal := solanaUnavailable(err); refusal != nil {
 		return refusal
 	}
-	return api.Coded(codeSolanaTransactionRefused, redact.Secrets(err.Error()))
+	return api.Coded(billing.CodeSolanaTransactionRefused, redact.Secrets(err.Error()))
 }

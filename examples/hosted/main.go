@@ -144,10 +144,9 @@ func billingRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, s 
 			c.AbortWithStatus(http.StatusBadRequest)
 			return
 		}
-		order, err := bill.CreateOrder(c, billing.CreateOrderParams{
-			IdempotencyKey: key,
-			CustomerID:     customer,
-			Lines:          []billing.OrderLineParams{{PriceID: price}},
+		order, err := bill.CreateOrder(c, key, billing.CreateOrderParams{
+			CustomerID: customer,
+			Lines:      []billing.OrderLineParams{{PriceID: price}},
 			PayURL: &billing.OrderPayURLParams{
 				SuccessURL: s.PublicURL + "/?order={ORDER_ID}", // access follows the order, not this redirect
 				CancelURL:  new(s.PublicURL + "/"),

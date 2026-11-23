@@ -47,9 +47,9 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
 		ProviderWriteMode: openrails.ProviderWritesFull,
-		Merchants: map[string]openrails.MerchantDeclaration{
-			"acme":   {DisplayName: "Acme"},
-			"globex": {DisplayName: "Globex"},
+		Merchants: []openrails.MerchantDeclaration{
+			{MerchantDocument: openrails.MerchantDocument{Slug: "acme", DisplayName: "Acme"}},
+			{MerchantDocument: openrails.MerchantDocument{Slug: "globex", DisplayName: "Globex"}},
 		},
 	}, openrails.Deps{Postgres: db, UserInfo: directory{db}})
 	if err != nil {
@@ -62,12 +62,12 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	}
 	var ids []billing.MerchantID
 	for _, slug := range []string{"acme", "globex"} {
-		handle, err := bill.MerchantBySlug(slug)
+		id, err := bill.DeclaredMerchant(slug)
 		if err != nil {
 			return fail(err)
 		}
-		s.merchants[slug] = handle.MerchantID()
-		ids = append(ids, handle.MerchantID())
+		s.merchants[slug] = id
+		ids = append(ids, id)
 	}
 
 	mux := http.NewServeMux()

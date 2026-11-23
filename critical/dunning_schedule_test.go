@@ -17,9 +17,9 @@ import (
 // dunningPolicy declares alpha's dunning policy.
 func dunningPolicy(policy billing.DunningPolicy) func(*world) {
 	return func(w *world) {
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.MerchantSettings.DunningPolicy = &policy
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	}
 }
 

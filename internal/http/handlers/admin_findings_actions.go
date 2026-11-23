@@ -62,7 +62,7 @@ func findingActionRefusal(err error) *api.APIError {
 		out.Message = message
 		return &out
 	}
-	return api.Coded(codeFindingActionFailed, message)
+	return api.Coded(billing.CodeFindingActionFailed, message)
 }
 
 func compactJSON(v any) string {

@@ -142,7 +142,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		extraB, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: extra.ID, Key: "nmi-extra-b", UnitAmount: 900_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = nmi.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: extraA.ID}}, IdempotencyKey: "nmi-merchant-extra"})
+		_, err = nmi.alphaRemote.CreateOrder(t.Context(), "nmi-merchant-extra", billing.CreateOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: extraA.ID}}})
 		require.NoError(t, err)
 		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: extraB.ID}}})
 		require.Equal(t, http.StatusOK, status, string(raw))

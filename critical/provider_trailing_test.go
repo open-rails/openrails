@@ -264,7 +264,7 @@ func TestProviderTrailing(t *testing.T) {
 		tw.stripe.AddPrice(stripemock.Price{ID: "price_new", Product: "prod_new", Amount: 1200, Interval: "month"})
 		created := tw.send(t, "price.created", stripemock.Object{"id": "price_new", "object": "price"})
 		completedOnce(t, tw.fleet, kindObserve)
-		catalog := tw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "stripe"}})
+		catalog := tw.catalog(t, billing.ProviderCatalogListParams{PSP: "stripe"})
 		require.Equal(t, "webhook", catalog["price:price_new"].ObservedVia)
 		require.Equal(t, "12.00", *catalog["price:price_new"].Terms.StatedAmount)
 		unmapped := tw.findings(t, "catalog.price.unmapped")
@@ -295,7 +295,7 @@ func TestProviderTrailing(t *testing.T) {
 		tw.send(t, "price.updated", stripemock.Object{"id": "price_pulled", "object": "price"})
 		completedOnce(t, tw.fleet, kindObserve)
 		require.NotContains(t, tw.findings(t, "catalog.price.unmapped"), "price_pulled", "the pull's backlog is the import's to list")
-		require.Equal(t, "webhook", tw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "stripe"}})["price:price_pulled"].ObservedVia)
+		require.Equal(t, "webhook", tw.catalog(t, billing.ProviderCatalogListParams{PSP: "stripe"})["price:price_pulled"].ObservedVia)
 	})
 
 	t.Run("OR-J15-S09/stripe-unmapped-signup-parks-then-lands-once", func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestProviderTrailing(t *testing.T) {
 		require.Equal(t, "high", finding.Severity)
 		require.EqualValues(t, 1, finding.Evidence["parked"])
 		require.Empty(t, tw.subscriptions(t, customerOf(tw.alice)))
-		require.Equal(t, "read", tw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "stripe"}})["price:price_gold"].ObservedVia, "the parked price is observed")
+		require.Equal(t, "read", tw.catalog(t, billing.ProviderCatalogListParams{PSP: "stripe"})["price:price_gold"].ObservedVia, "the parked price is observed")
 
 		product := tw.stripeProduct(t, "gold", "member:gold")
 		require.False(t, tw.entitled(t, customerOf(tw.alice), "member:gold"))
@@ -742,7 +742,7 @@ func TestProviderTrailing(t *testing.T) {
 		_, err = tw.alphaRemote.ListParkedSubscriptions(t.Context(), billing.ParkedSubscriptionListParams{PSP: "nope"})
 		status, code := refusalCode(t, err)
 		require.Equal(t, http.StatusNotFound, status)
-		require.Equal(t, "psp_not_found", code)
+		require.Equal(t, billing.CodePSPNotFound, code)
 		_, err = tw.alphaRemote.ListParkedSubscriptions(t.Context(), billing.ParkedSubscriptionListParams{Reason: "lost"})
 		status, _ = refusalCode(t, err)
 		require.Equal(t, http.StatusBadRequest, status)

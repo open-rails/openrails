@@ -166,7 +166,7 @@ func TestRenewal(t *testing.T) {
 		var err error
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)

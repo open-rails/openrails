@@ -144,9 +144,8 @@ func newPSPWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *psp
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
-		for slug, declaration := range w.cfg.Merchants {
-			declaration.DisplayName = ""
-			w.cfg.Merchants[slug] = declaration
+		for i := range w.cfg.Merchants {
+			w.cfg.Merchants[i].DisplayName = ""
 		}
 		for _, change := range configure {
 			change(w)
@@ -170,7 +169,7 @@ func assertNoPSPSecrets(t *testing.T, value any) {
 	}
 }
 
-func pspRefusal(t *testing.T, err error, status int, code string) {
+func pspRefusal(t *testing.T, err error, status int, code billing.ErrorCode) {
 	t.Helper()
 	var refusal *billing.StatusError
 	require.ErrorAs(t, err, &refusal)
@@ -234,9 +233,9 @@ func TestPSPControls(t *testing.T) {
 				}
 				_, err := a.alphaRemote.CreatePSP(t.Context(), in)
 				if profile == "environment" {
-					pspRefusal(t, err, 409, "psp_environment_refused")
+					pspRefusal(t, err, 409, billing.CodePSPEnvironmentRefused)
 				} else {
-					pspRefusal(t, err, 400, "psp_credentials_rejected")
+					pspRefusal(t, err, 400, billing.CodePSPCredentialsRejected)
 				}
 				require.NotContains(t, err.Error(), in.Credentials["secret_key"])
 				psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
@@ -245,9 +244,13 @@ func TestPSPControls(t *testing.T) {
 				require.Empty(t, p.provider.effects(t))
 			})
 		}
-		declared, err := a.local.DeclarePSP(t.Context(), billing.PSPDeclaration{Key: "stripe", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2e"}})
+		unarmed := pspInput()
+		unarmed.Credentials = map[string]string{}
+		_, err := a.alphaRemote.CreatePSP(t.Context(), unarmed)
+		pspRefusal(t, err, 403, billing.CodePSPClaimRequiresProof)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
-		require.False(t, declared.Credentials["secret_key"].Configured)
+		require.Empty(t, psps.Items, "an account claimed without credentials is not declared")
 		input := saleInput(t, a, p.provider)
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "unarmed-processor"})
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
@@ -327,7 +330,7 @@ func TestPSPControls(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond, "another replica must invalidate its cached credential immediately")
 		require.Less(t, time.Since(cachedAt), 30*time.Second, "the periodic cache fallback is not notification proof")
 		_, err = a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{ExpectedRevision: &initial.Revision, Credentials: map[string]string{"secret_key": "sk_test_critical"}})
-		pspRefusal(t, err, 409, "revision_mismatch")
+		pspRefusal(t, err, 409, billing.CodeRevisionMismatch)
 		p.mu.Lock()
 		p.keys = nil
 		p.mu.Unlock()
@@ -340,7 +343,7 @@ func TestPSPControls(t *testing.T) {
 		require.Contains(t, keys, "sk_test_rotated")
 		require.NotContains(t, keys, "sk_test_critical")
 		_, err = a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{Archived: true})
-		pspRefusal(t, err, 409, "psp_last_active")
+		pspRefusal(t, err, 409, billing.CodePSPLastActive)
 		archived, err := a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{Archived: true, AllowLast: true})
 		require.NoError(t, err)
 		require.True(t, archived.Archived)
@@ -365,7 +368,7 @@ func TestPSPControls(t *testing.T) {
 		require.NotContains(t, string(encoded), "private-hook-token")
 		for _, destination := range []string{"http://127.0.0.1/private", "http://169.254.169.254/latest/meta-data", "http://[::1]/private", "file:///etc/passwd"} {
 			_, err := a.alphaRemote.CreateAlertWebhook(t.Context(), billing.CreateAlertWebhookParams{Name: "blocked", URL: destination})
-			pspRefusal(t, err, 400, "webhook_invalid")
+			pspRefusal(t, err, 400, billing.CodeWebhookInvalid)
 		}
 		hooks, err := a.alphaRemote.ListAlertWebhooks(t.Context(), billing.AlertWebhookListParams{})
 		require.NoError(t, err)
@@ -380,7 +383,7 @@ func TestPSPControls(t *testing.T) {
 		p.redirect = private.URL + "/secret-destination"
 		p.mu.Unlock()
 		_, err = a.alphaRemote.CreatePSP(t.Context(), pspInput())
-		pspRefusal(t, err, 503, "service_unavailable")
+		pspRefusal(t, err, 503, billing.CodeServiceUnavailable)
 		require.NotContains(t, err.Error(), "secret-destination")
 		require.Zero(t, received.Load())
 		// Allow only this fixture's entry address. A redirect to a different
@@ -654,22 +657,22 @@ func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
 	t.Helper()
 	w := newWorld(t, func(w *world) {
 		declareCCBill(w, nil)
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.AlertEmail = ptr("ops@alpha.example")
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 		w.deps.Email = mail
 	})
 	importCCBillAttribution(t, w)
 	// The operator removes the account from the declaration while the
 	// provider still bills a membership on it.
 	require.NoError(t, w.engine.Close(t.Context()))
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.PSPs = nil
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 	var err error
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
-	w.alpha, err = w.engine.MerchantBySlug("alpha")
+	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)
 	return w
 }

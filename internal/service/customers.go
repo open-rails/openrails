@@ -21,10 +21,10 @@ import (
 )
 
 // ErrCustomerNotFound is a customer the merchant never declared or billed.
-var ErrCustomerNotFound = apperr.New(http.StatusNotFound, "customer_not_found", "customer not found")
+var ErrCustomerNotFound = apperr.New(http.StatusNotFound, billing.CodeCustomerNotFound, "customer not found")
 
 // errDirectoryUnavailable is a read the merchant's directory could not answer.
-var errDirectoryUnavailable = apperr.New(http.StatusServiceUnavailable, "service_unavailable", "The customer directory is unavailable.")
+var errDirectoryUnavailable = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "The customer directory is unavailable.")
 
 // customers builds the customer objects of rows, in order: their contacts in
 // one directory lookup, and each billing section in one read for every row.

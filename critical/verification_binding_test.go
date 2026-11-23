@@ -100,9 +100,9 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old", "sk_test_new")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")
@@ -135,13 +135,13 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 	t.Helper()
 	a, accounts, sub := stripeMembership(t)
 	require.NoError(t, a.engine.Close(context.Background()))
-	m := a.cfg.Merchants["alpha"]
+	m := cfgMerchant(a.cfg, "alpha")
 	m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", true), "new": stripePSP("acct_new", "sk_test_new", false)}
-	a.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&a.cfg, "alpha", m)
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
 	return a, accounts, sub
 }
@@ -242,12 +242,12 @@ func TestVerificationBinding(t *testing.T) {
 		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "old", PlanID: "weekly", Currency: "USD"})
 		require.NoError(t, err)
 		require.NoError(t, a.engine.Close(context.Background()))
-		m := a.cfg.Merchants["alpha"]
+		m := cfgMerchant(a.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
-		a.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&a.cfg, "alpha", m)
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		quietFleet(t, a.world)
 		old.TruncateRoster(1)
@@ -340,8 +340,7 @@ func unretractedGrant(t *testing.T, a *authorityWorld) (billing.CustomerID, stri
 	customer := billing.CustomerID(uuid.New())
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp-reader", DisplayName: "Comp reader", Entitlements: []string{key}})
 	require.NoError(t, err)
-	granted, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "comp-reader",
-		Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 365), Reason: billing.GrantReasonComp}}})
+	granted, err := a.alpha.CreateProductAccess(t.Context(), "comp-reader", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 365), Reason: billing.GrantReasonComp}})
 	require.NoError(t, err)
 	require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), granted[0].ID, billing.RevokeProductAccessParams{Reason: "critical drift"}))
 	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET revoked_at=NULL, revoke_reason=NULL WHERE id=$1", uuid.UUID(granted[0].ID))
@@ -406,9 +405,9 @@ func nmiAccountsWorld(t *testing.T) (*authorityWorld, *nmiAccounts) {
 		t.Cleanup(wire.CloseIdleConnections)
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": nmiPSP("old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	return a, accounts
 }

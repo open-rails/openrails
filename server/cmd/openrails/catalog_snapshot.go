@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/spf13/cobra"
 )
@@ -44,8 +43,7 @@ dump-merchant-catalog for an editable document. Artifacts are bounded at
 		}
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		database, err := openCLIDB(ctx, cfg)
+		database, err := openCLIDB(ctx)
 		if err != nil {
 			return err
 		}
@@ -88,8 +86,7 @@ charges, grants access or schedules jobs.`, Args: cobra.NoArgs}
 		defer input.Close()
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		database, err := openCLIDB(ctx, cfg)
+		database, err := openCLIDB(ctx)
 		if err != nil {
 			return err
 		}

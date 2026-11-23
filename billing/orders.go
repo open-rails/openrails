@@ -134,16 +134,14 @@ type PreviewOrderParams struct {
 // customer, which they pay on the merchant's own site
 // (POST /v1/me/orders/{id}/pay), or, with PayURL, at its pay URL. It never
 // charges. ExpiresAt defaults to 30 days, or to the pay URL's expiry with
-// PayURL, and is at most 120 days away. IdempotencyKey is required: a retry
-// with it answers the same order.
+// PayURL, and is at most 120 days away.
 type CreateOrderParams struct {
 	CustomerID CustomerID        `json:"customer_id"`
 	Lines      []OrderLineParams `json:"lines"`
 	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
 	// PayURL asks for the order's pay URL (Order.PayURL), where the
 	// customer pays. The deployment must serve a checkout origin.
-	PayURL         *OrderPayURLParams `json:"pay_url,omitempty"`
-	IdempotencyKey string             `json:"-"`
+	PayURL *OrderPayURLParams `json:"pay_url,omitempty"`
 }
 
 // PayOrderParams pays an open order; Reusable as in CreateMyOrderParams.
@@ -389,12 +387,12 @@ type OrderLineRefusal struct {
 // customer's own list ignores CustomerID. IDs instead reads 1 to
 // MaxBatchItems named orders in one page; unknown ones are absent.
 type OrderListParams struct {
-	IDs            []OrderID
-	CustomerID     CustomerID
-	PriceID        PriceID
-	SubscriptionID SubscriptionID
-	Status         OrderStatus
-	Origin         OrderOrigin
-	Overdue        bool
+	IDs            []OrderID      `form:"ids,comma"`
+	CustomerID     CustomerID     `form:"customer_id"`
+	PriceID        PriceID        `form:"price_id"`
+	SubscriptionID SubscriptionID `form:"subscription_id"`
+	Status         OrderStatus    `form:"status"`
+	Origin         OrderOrigin    `form:"origin"`
+	Overdue        bool           `form:"overdue"`
 	PageRequest
 }

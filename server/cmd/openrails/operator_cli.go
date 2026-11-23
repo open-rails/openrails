@@ -20,6 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
+	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
 
 // The operator's commands over the server's Go API: the merchant directory,
@@ -259,14 +261,11 @@ func newAdminLockoutsCmd() *cobra.Command {
 			if _, err := uuid.Parse(strings.TrimSpace(args[0])); err != nil {
 				return fmt.Errorf("a user id: %w", err)
 			}
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			if cfg == nil {
-				return fmt.Errorf("config not loaded")
-			}
-			if cfg.Redis == nil {
+			h := hostconfig.FromContext(cmd.Context())
+			if h.Redis == nil {
 				return fmt.Errorf("Redis is required to unlock another process's administrator lockout")
 			}
-			opts, err := config.RedisOptions(cfg.Redis)
+			opts, err := hostdeps.RedisOptions(h.Redis)
 			if err != nil {
 				return err
 			}

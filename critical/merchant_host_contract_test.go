@@ -173,7 +173,7 @@ func TestMerchantHost(t *testing.T) {
 		}
 		require.NotEmpty(t, documents(), "the PSP's credentials live in Vault")
 		enableLifecycleMaintenance(t, a)
-		vault := map[string]any{"vault": map[string]any{"address": a.cfg.Vault.Address, "token": a.cfg.Vault.Token, "kv_mount": a.cfg.Vault.KVMount}}
+		vault := map[string]any{"vault": map[string]any{"address": a.deps.Vault.Address(), "token": a.deps.Vault.Token(), "kv_mount": a.cfg.Vault.KVMount}}
 		purge := func(out any, args ...string) error {
 			stdout, err := hostCLICommand(t, a.world, vault, append([]string{"merchant", "purge", "--merchant", "alpha", "--by", "critical operator"}, args...)...).Output()
 			var exit *exec.ExitError

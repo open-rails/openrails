@@ -74,6 +74,12 @@ type AdmitBatchParams struct {
 	Items []AdmitParams `json:"items"`
 }
 
+// Validate refuses a batch of no requests or more than
+// MaxAdmissionBatchItems, for the route and AdmitTx alike.
+func (p AdmitBatchParams) Validate() error {
+	return batchSize("items", len(p.Items), MaxAdmissionBatchItems)
+}
+
 // AdmissionState is where an admitted request's hold stands.
 type AdmissionState string
 
@@ -188,6 +194,12 @@ type CaptureAdmissionBatchParams struct {
 	Items []CaptureAdmissionParams `json:"items"`
 }
 
+// Validate refuses a batch of no items or more than MaxAdmissionBatchItems,
+// for the route and CaptureAdmissionsTx alike.
+func (p CaptureAdmissionBatchParams) Validate() error {
+	return batchSize("items", len(p.Items), MaxAdmissionBatchItems)
+}
+
 // CaptureReceipt is the result of settling one admitted request: Amount is
 // what it charged, the sum of Charges. The charge accrues to the customer's
 // day of usage, which posts to the ledger once the day ends or before the
@@ -232,6 +244,12 @@ type ReleaseAdmissionBatchParams struct {
 	RequestIDs []string `json:"request_ids"`
 }
 
+// Validate refuses a batch of no request ids or more than
+// MaxAdmissionBatchItems, for the route and ReleaseAdmissionsTx alike.
+func (p ReleaseAdmissionBatchParams) Validate() error {
+	return batchSize("request_ids", len(p.RequestIDs), MaxAdmissionBatchItems)
+}
+
 // ExtendAdmissionParams moves an open hold's deadline later, to at most 30
 // days past its admission.
 type ExtendAdmissionParams struct {
@@ -242,6 +260,11 @@ type ExtendAdmissionParams struct {
 // ExtendAdmissionBatchParams extends 1 to MaxAdmissionBatchItems holds.
 type ExtendAdmissionBatchParams struct {
 	Items []ExtendAdmissionParams `json:"items"`
+}
+
+// Validate refuses a batch of no items or more than MaxAdmissionBatchItems.
+func (p ExtendAdmissionBatchParams) Validate() error {
+	return batchSize("items", len(p.Items), MaxAdmissionBatchItems)
 }
 
 // AdmissionResult is one item of a release or extend batch: Status is what

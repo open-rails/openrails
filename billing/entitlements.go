@@ -88,10 +88,10 @@ type HeldEntitlements struct {
 // meaning; its last byte must be printable ASCII (0x21-0x7E).
 type EntitlementListParams struct {
 	PageRequest
-	CustomerIDs  []CustomerID
-	Entitlements []string
-	Prefix       string
-	At           time.Time
+	CustomerIDs  []CustomerID `form:"customer_id,comma"`
+	Entitlements []string     `form:"entitlement"`
+	Prefix       string       `form:"prefix"`
+	At           time.Time    `form:"at"`
 }
 
 // CustomerEntitlement is one key a customer holds: a key of a product they
@@ -177,12 +177,10 @@ type CreateProductAccessParams struct {
 }
 
 // CreateProductAccessBatchParams grants 1 to MaxBatchItems products, across
-// any customers, in one transaction. IdempotencyKey (the Idempotency-Key
-// header) makes a retry replay the first answer; reusing it for other items
-// is ErrIdempotencyKeyReused.
+// any customers, in one transaction. Reusing an Idempotency-Key for other
+// items is ErrIdempotencyKeyReused.
 type CreateProductAccessBatchParams struct {
-	IdempotencyKey string                      `json:"-"`
-	Items          []CreateProductAccessParams `json:"items"`
+	Items []CreateProductAccessParams `json:"items"`
 }
 
 // CreateProductAccessBatchResult is every grant, in request order.
@@ -196,8 +194,8 @@ type CreateProductAccessBatchResult struct {
 // windows in one page; unknown ones are absent.
 type ProductAccessListParams struct {
 	PageRequest
-	CustomerIDs []CustomerID
-	ProductIDs  []ProductID
-	LiveOnly    bool
-	IDs         []ProductAccessID
+	CustomerIDs []CustomerID      `form:"customer_id,comma"`
+	ProductIDs  []ProductID       `form:"product_id,comma"`
+	LiveOnly    bool              `form:"live"`
+	IDs         []ProductAccessID `form:"ids,comma"`
 }

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +21,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/scim"
 )
@@ -50,10 +51,6 @@ type Options struct {
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
-
-	// SCIMMerchant serves the SCIM routes for this merchant without a
-	// credential: a directory in the same process holding the engine.
-	SCIMMerchant billing.MerchantID
 
 	// External are the handlers the assembly owns.
 	External External
@@ -160,7 +157,7 @@ func (e *Env) enabled(f Feature) bool {
 	case FeatureCatalogCopilot:
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureCustomerProvisioning:
-		return rt != nil && !rt.HostUserInfo && (e.Groups.Programmatic || !e.SCIMMerchant.IsZero())
+		return rt != nil && !rt.HostUserInfo && e.Groups.Programmatic
 	}
 	panic("routes: unknown feature " + string(f))
 }
@@ -203,9 +200,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthProvider:
 		mw = conn
 	case AuthProvisioning:
-		if e.SCIMMerchant.IsZero() {
-			mw = []router.Middleware{e.provisioningGate(route)}
-		}
+		mw = []router.Middleware{e.provisioningGate(route)}
 	case AuthApplication:
 		mw = append(e.appGates(route), conn...)
 	case AuthCustomer:
@@ -227,11 +222,8 @@ func (e *Env) gates(route Route) []router.Middleware {
 	default:
 		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
 	}
-	if checked := checkedParams(route.Query); len(checked) > 0 {
-		mw = append(mw, strictQueryMW(checked))
-	}
-	if slices.Contains(route.Query, idsParam) {
-		mw = append(mw, idsMW)
+	if route.Query != nil {
+		mw = append(mw, queryMW(route))
 	}
 	return mw
 }
@@ -253,62 +245,38 @@ func (e *Env) cardAttack(route Route) []router.Middleware {
 	return nil
 }
 
-// idsMW bounds a list's ids filter and refuses any other parameter beside it,
-// so every list reads named records the same way.
-func idsMW(next router.Handler) router.Handler {
-	return func(r *httprequest.Request) {
-		query := r.Request.URL.Query()
-		raw, named := query["ids"]
-		if !named {
-			next(r)
-			return
-		}
-		refuse := func(message string) {
-			r.AbortAPIError(api.Coded(billing.CodeInvalidQuery, message).WithParam("ids"))
-		}
-		if len(raw) != 1 {
-			refuse("ids is one comma-separated list")
-			return
-		}
-		ids := strings.Split(raw[0], ",")
-		if len(ids) > billing.MaxBatchItems || strings.TrimSpace(raw[0]) == "" {
-			refuse(fmt.Sprintf("ids must hold 1 to %d ids", billing.MaxBatchItems))
-			return
-		}
-		for name := range query {
-			if name != "ids" {
-				refuse("ids takes no other parameter: " + name)
-				return
-			}
-		}
-		next(r)
-	}
-}
-
-func checkedParams(params []Param) []string {
-	var out []string
-	for _, p := range params {
-		if p.Checked {
-			out = append(out, p.Name)
-		}
-	}
-	return out
-}
-
-// strictQueryMW refuses a declared integer query parameter that is not a
-// non-negative integer, so a handler never reads a malformed one as its
-// default.
-func strictQueryMW(names []string) router.Middleware {
+// queryMW refuses a query whose declared parameter does not parse as its
+// field (400 invalid_query), so a handler never reads a malformed one as
+// its default. A list's ids are bounded, and take no other parameter: every
+// list reads named records the same way.
+func queryMW(route Route) router.Middleware {
+	t := reflect.TypeOf(route.Query)
+	declared, _ := route.QueryParams()
+	ids := slices.ContainsFunc(declared, func(p wireform.Param) bool { return p.Name == "ids" })
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			for _, name := range names {
-				raw := strings.TrimSpace(r.Query(name))
-				if raw == "" {
-					continue
+			query := r.Request.URL.Query()
+			if err := wireform.Decode(query, reflect.New(t).Interface()); err != nil {
+				r.AbortAPIError(httprequest.QueryError(err))
+				return
+			}
+			if raw, named := query["ids"]; ids && named {
+				refuse := func(message string) {
+					r.AbortAPIError(api.Coded(billing.CodeInvalidQuery, message).WithParam("ids"))
 				}
-				if n, err := strconv.Atoi(raw); err != nil || n < 0 {
-					r.AbortAPIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
+				if len(raw) != 1 {
+					refuse("ids is one comma-separated list")
 					return
+				}
+				if n := len(strings.Split(raw[0], ",")); n > billing.MaxBatchItems || strings.TrimSpace(raw[0]) == "" {
+					refuse(fmt.Sprintf("ids must hold 1 to %d ids", billing.MaxBatchItems))
+					return
+				}
+				for name := range query {
+					if name != "ids" {
+						refuse("ids takes no other parameter: " + name)
+						return
+					}
 				}
 			}
 			next(r)
@@ -410,13 +378,6 @@ func RegisterAppRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	env.mount(rr, "/v1", in(App, func(r Route) bool {
 		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning)
 	}))
-}
-
-// RegisterSCIMRoutes mounts the SCIM routes for merchant, without a
-// credential, on a router rooted at the SCIM root: a directory in the same
-// process pushes to them.
-func RegisterSCIMRoutes(rr *router.Router, rt *app.Runtime, merchant billing.MerchantID) {
-	newEnv(rt, Options{SCIMMerchant: merchant}).mount(rr, SCIMRoot, in(App, func(r Route) bool { return r.Auth == AuthProvisioning }))
 }
 
 // SCIMRoot is where the SCIM routes are, beneath the API root.

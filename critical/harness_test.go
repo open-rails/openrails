@@ -58,9 +58,9 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		ReturnOrigins:     []string{"https://critical.invalid"},
-		Merchants: map[string]openrails.MerchantDeclaration{
-			"alpha": {DisplayName: "Alpha"},
-			"beta":  {DisplayName: "Beta"},
+		Merchants: []openrails.MerchantDeclaration{
+			{MerchantDocument: openrails.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
+			{MerchantDocument: openrails.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
 		},
 	}
 	w.deps = openrails.Deps{Postgres: pool, Clock: w.clock, FXTransport: fixedFX(t)}
@@ -70,13 +70,22 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
-	w.alpha, err = w.engine.MerchantBySlug("alpha")
+	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)
-	w.beta, err = w.engine.MerchantBySlug("beta")
+	w.beta, err = declaredMerchant(w.engine, "beta")
 	require.NoError(t, err)
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
 	return w
+}
+
+// declaredMerchant is the handle of the merchant engine declares under slug.
+func declaredMerchant(engine *openrails.Engine, slug string) (*openrails.Client, error) {
+	id, err := engine.DeclaredMerchant(slug)
+	if err != nil {
+		return nil, err
+	}
+	return engine.Merchant(id)
 }
 
 // The only substituted dependency here is the external FX wire. Every known
@@ -114,9 +123,32 @@ func (w loopbackWire) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func ptr[T any](v T) *T { return &v }
 
+// cfgMerchant is a copy of cfg's declaration of slug; the bare slug when it
+// declares none.
+func cfgMerchant(cfg openrails.Config, slug string) openrails.MerchantDeclaration {
+	for _, m := range cfg.Merchants {
+		if m.Slug == slug {
+			return m
+		}
+	}
+	return openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{Slug: slug}}
+}
+
+// setCfgMerchant replaces cfg's declaration of slug with m, or adds it.
+func setCfgMerchant(cfg *openrails.Config, slug string, m openrails.MerchantDeclaration) {
+	m.Slug = slug
+	for i := range cfg.Merchants {
+		if cfg.Merchants[i].Slug == slug {
+			cfg.Merchants[i] = m
+			return
+		}
+	}
+	cfg.Merchants = append(cfg.Merchants, m)
+}
+
 func balance(t *testing.T, client *openrails.Client, customer billing.CustomerID, available, held, posted int64) {
 	t.Helper()
-	b, err := client.GetBalance(t.Context(), customer, "USD")
+	b, err := client.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, customer, b.CustomerID)
 	require.Equal(t, "USD", b.Currency)

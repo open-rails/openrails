@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/http/inprocess"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -26,8 +25,8 @@ func init() {
 				return v.engine
 			}
 		case *LocalClient:
-			if v != nil && v.Client != nil {
-				return v.engine
+			if v != nil && v.client != nil {
+				return v.client.engine
 			}
 		case *Client:
 			if v != nil {
@@ -66,11 +65,11 @@ type Engine struct {
 // Normal runtime partition maintenance remains active. ctx bounds the
 // wait for the database; nothing else does. It provisions each merchant
 // Config.Merchants declares and never changes a catalog: a catalog document
-// is an operator's ApplyCatalog. Vault login, PSP posture checks and Redis
+// is an operator's ApplyCatalog. Vault, PSP posture checks and Redis
 // recover in the background and fail only the features that need them (see
 // Probes). It fails only on what the engine cannot serve without: the
-// database and its migrations, an unknown ProviderWriteMode, an invalid
-// River schema, or a test seam beside a live PSP. Any other setting, merchant
+// database (Deps.Postgres) and its migrations, an unknown ProviderWriteMode,
+// an invalid River schema, or a test seam beside a live PSP. Any other setting, merchant
 // or document that cannot be served is refused alone and reported by Ready
 // and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
@@ -106,26 +105,14 @@ func (e *Engine) Merchant(id billing.MerchantID) (*Client, error) {
 	return e.handle(id), nil
 }
 
-// MerchantBySlug is Merchant for the merchant Config.Merchants declares
-// under slug; any other slug is billing.ErrMerchantUnresolved. It does no
-// I/O.
-func (e *Engine) MerchantBySlug(slug string) (*Client, error) {
+// DeclaredMerchant is the ID of the merchant Config.Merchants declares under
+// slug; any other slug is billing.ErrMerchantUnresolved. It does no I/O.
+func (e *Engine) DeclaredMerchant(slug string) (billing.MerchantID, error) {
 	id, ok := e.engine.DeclaredMerchant(slug)
 	if !ok {
-		return nil, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
+		return billing.MerchantID{}, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
 	}
-	return e.Merchant(id)
-}
-
-// WithInvoker names the signed-in person an in-process call acts for, by
-// issuer and subject as the host's identity provider verified them. The call
-// is then theirs: their destructive-action ceilings and holds apply, as to
-// their own HTTP call. A call naming no one is the host's own work: recorded
-// in the destructive-action audit, but never counted or held. An issuer
-// beginning "openrails:" or an empty name is refused (host_principal_invalid).
-// A remote handle ignores it; its credential names the caller.
-func WithInvoker(ctx context.Context, invoker Invoker) context.Context {
-	return inprocess.WithInvoker(ctx, invoker)
+	return id, nil
 }
 
 // StartOption adjusts Start.
@@ -181,7 +168,7 @@ func (e *Engine) Ready(ctx context.Context) error { return e.engine.Ready(ctx) }
 
 // Probe checks one optional dependency.
 type Probe struct {
-	// Name is stable for dashboards: openrails_vault, openrails_psp_posture,
+	// Name is stable for dashboards: openrails_psp_posture,
 	// openrails_configuration, openrails_solana_crankers,
 	// openrails_job_progress.
 	Name string
@@ -190,9 +177,8 @@ type Probe struct {
 }
 
 // Probes lists the optional dependencies the engine reconnects to in the
-// background, for the host's dependency supervisor. openrails_vault is a
-// live token lookup (only when OpenRails logs in to Vault itself).
-// openrails_psp_posture fails while a PSP is unverified or disarmed.
+// background, for the host's dependency supervisor; the host probes its own
+// connections (helpers/vault's Session.Probe for Vault). openrails_psp_posture fails while a PSP is unverified or disarmed.
 // openrails_configuration fails while something configured is not served,
 // naming each with why: an optional setting turned off, a declared merchant
 // not provisioned yet, a merchant document refused (a PSP whose secret or

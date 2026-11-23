@@ -97,8 +97,8 @@ func mixedPendingRefund(t *testing.T) {
 	p.mu.Lock()
 	p.lostRefundResponse = true
 	p.mu.Unlock()
-	params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Return the credit pack", IdempotencyKey: "credit-pack-return"}
-	_, _ = a.alpha.RefundPayment(t.Context(), payment, params)
+	params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Return the credit pack"}
+	_, _ = a.alpha.RefundPayment(t.Context(), "credit-pack-return", payment, params)
 	refunded := 0
 	for _, effect := range p.effects(t) {
 		if effect.Kind == "refund" {
@@ -174,7 +174,7 @@ func mixedReversals(t *testing.T) {
 	t.Run("full-refund", func(t *testing.T) {
 		payment := m.buy(t, "mixed-full-refund")
 		balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
-		refund, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Full: true, Reason: "Refund the order", IdempotencyKey: "mixed-full-refund"})
+		refund, err := a.alpha.RefundPayment(t.Context(), "mixed-full-refund", payment, billing.RefundPaymentParams{Full: true, Reason: "Refund the order"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, refund.Status)
 		require.EqualValues(t, -100_000_000, refund.Amount)
@@ -188,11 +188,11 @@ func mixedReversals(t *testing.T) {
 	t.Run("credit-line-first-then-the-rest", func(t *testing.T) {
 		payment := m.buy(t, "mixed-split-refund")
 		balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
-		first, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Amount: 50_000_000, Reason: "Half back", IdempotencyKey: "mixed-half"})
+		first, err := a.alpha.RefundPayment(t.Context(), "mixed-half", payment, billing.RefundPaymentParams{Amount: 50_000_000, Reason: "Half back"})
 		require.NoError(t, err)
 		require.EqualValues(t, -50_000_000, first.Amount)
 		balance(t, a.alpha, m.customer, 0, 0, 0)
-		rest, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Full: true, Reason: "The rest", IdempotencyKey: "mixed-rest"})
+		rest, err := a.alpha.RefundPayment(t.Context(), "mixed-rest", payment, billing.RefundPaymentParams{Full: true, Reason: "The rest"})
 		require.NoError(t, err)
 		require.EqualValues(t, -50_000_000, rest.Amount, "the rest is the toolkit's and needs no credit")
 		balance(t, a.alpha, m.customer, 0, 0, 0)
@@ -237,7 +237,7 @@ func mixedDisputeAroundRefund(t *testing.T) {
 	m.notice(t, "evt_credit_line_dispute", "charge.dispute.created", dispute)
 	balance(t, a.alpha, m.customer, 0, 0, 0)
 
-	refund, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Amount: 90_000_000, Reason: "Return the toolkit", IdempotencyKey: "toolkit-return"})
+	refund, err := a.alpha.RefundPayment(t.Context(), "toolkit-return", payment, billing.RefundPaymentParams{Amount: 90_000_000, Reason: "Return the toolkit"})
 	require.NoError(t, err)
 	require.Equal(t, billing.PaymentSucceeded, refund.Status)
 	require.EqualValues(t, -90_000_000, refund.Amount)

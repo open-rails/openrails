@@ -44,9 +44,9 @@ func stripePastDueMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *b
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")
@@ -198,8 +198,7 @@ func TestDueWork(t *testing.T) {
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)
 		grant := func(key string) error {
-			_, err := w.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: key,
-				Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24), Reason: billing.GrantReasonComp}}})
+			_, err := w.alpha.CreateProductAccess(t.Context(), key, []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24), Reason: billing.GrantReasonComp}})
 			return err
 		}
 		restore := storageFault(t, w, w.schema, "river_job", "NEW.kind = 'openrails.customer_converge'")
@@ -216,8 +215,7 @@ func TestDueWork(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)
-		granted, err := w.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "comp",
-			Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 30), Reason: billing.GrantReasonComp}}})
+		granted, err := w.alpha.CreateProductAccess(t.Context(), "comp", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 30), Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
@@ -232,8 +230,7 @@ func TestDueWork(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pass", DisplayName: "Day pass", Entitlements: []string{"pass:day"}})
 		require.NoError(t, err)
-		_, err = w.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "pass",
-			Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(1), Reason: billing.GrantReasonComp}}})
+		_, err = w.alpha.CreateProductAccess(t.Context(), "pass", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(1), Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
@@ -391,12 +388,12 @@ func TestDueWork(t *testing.T) {
 	t.Run("OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs = openrails.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
 				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			}
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		listed, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)

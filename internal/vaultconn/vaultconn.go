@@ -1,11 +1,10 @@
-// Package vaultconn connects the runtime to HashiCorp Vault for merchant
+// Package vaultconn binds the host's Vault client to the runtime's merchant
 // configuration, platform card credentials and Solana Transit signing.
 package vaultconn
 
 import (
 	"context"
-	"fmt"
-	"time"
+	"errors"
 
 	vaultapi "github.com/hashicorp/vault/api"
 	log "github.com/sirupsen/logrus"
@@ -19,13 +18,12 @@ import (
 // DefaultTransitMount is used when config.VaultConfig.TransitMount is empty.
 const DefaultTransitMount = "transit"
 
-// AwaitTimeout bounds how long a one-off tool waits for Vault.
-const AwaitTimeout = 30 * time.Second
+// ErrNoClient refuses a Vault mount named without a client to reach it.
+var ErrNoClient = errors.New("Config names a Vault mount but Deps.Vault is nil")
 
-// Connection is the runtime's Vault: none, a borrowed client, or one this
-// process logs in to and supervises.
+// Connection is the runtime's Vault: the host's client over the mounts
+// Config names, or none.
 type Connection struct {
-	closeAuth context.CancelFunc
 	// KV is the merchant configuration mount; nil when none is named.
 	KV *vault.KVv2Adapter
 	// PlatformKV holds platform card credentials independently of merchant configuration.
@@ -33,124 +31,75 @@ type Connection struct {
 	// SolanaTransit signs for a vault_transit Solana cranker; nil without
 	// Vault.
 	SolanaTransit solanaint.TransitClient
-	// Auth supervises the owned login; nil without Vault or with a borrowed
-	// client.
-	Auth *vault.Supervisor
+	// Err is why the named mounts cannot be used: they refuse every
+	// operation, and a KV mount keeps naming Vault as the merchant
+	// configuration's source.
+	Err error
+
+	stop context.CancelFunc
 }
 
-// Open connects to Vault when the configuration names it (cfg.Vault) or the
-// host lends a client. Login runs in the background; a caller that needs
-// Vault now awaits it. Without Vault nothing is opened. A configuration Login
-// refuses (no token, an unknown auth method, a malformed mount) leaves Vault
-// unusable, never an error: its operations refuse, State reports why and a
-// KV mount keeps naming Vault as the merchant configuration's source.
-func Open(ctx context.Context, cfg *config.Config, borrowed *vaultapi.Client) (*Connection, error) {
-	if cfg == nil || (cfg.Vault == nil && borrowed == nil) {
-		return &Connection{}, nil
-	}
+// Open binds client to the mounts cfg names. A mount named without a client,
+// or a malformed mount path, leaves Vault unusable, never an error: its
+// operations refuse and Err reports why.
+func Open(ctx context.Context, cfg *config.Config, client *vaultapi.Client) (*Connection, error) {
+	mount := config.MerchantConfigKVMount(cfg)
 	platformMount, err := config.CardVaultKVMount(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg == nil || client == nil && mount == "" && platformMount == "" && !config.SolanaTransitSigns(cfg) {
+		return &Connection{}, nil
 	}
 	vc := cfg.Vault
 	if vc == nil {
 		vc = &config.VaultConfig{}
 	}
-	conn := &Connection{}
-	client := borrowed
-	mount := config.MerchantConfigKVMount(cfg)
-	err = config.ValidateVault(vc)
-	if err == nil && client == nil {
-		authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-		if client, conn.Auth, err = vault.Login(authCtx, vaultConfig(vc)); err != nil {
-			cancel()
-		} else {
-			conn.closeAuth = cancel
-			if mount != "" {
-				go verifyCapabilities(authCtx, client, conn.Auth, mount, vc.ScopePrefix)
-			}
-		}
+	conn := &Connection{Err: config.ValidateVault(vc)}
+	if client == nil {
+		conn.Err = ErrNoClient
 	}
-	if err != nil {
-		log.WithError(err).Error("vault: configuration refused; Vault-backed merchant configuration and signing are unavailable")
-		conn.Auth = vault.Unusable(err)
-		if client, err = vaultapi.NewClient(&vaultapi.Config{}); err != nil {
-			return nil, fmt.Errorf("vault client: %w", err)
-		}
+	if conn.Err != nil {
+		log.WithError(conn.Err).Error("vault: configuration refused; Vault-backed merchant configuration and signing are unavailable")
+	} else if mount != "" {
+		verify, stop := context.WithCancel(context.WithoutCancel(ctx))
+		conn.stop = stop
+		go verifyCapabilities(verify, client, mount, vc.ScopePrefix)
 	}
 	transitMount := vc.TransitMount
 	if transitMount == "" {
 		transitMount = DefaultTransitMount
 	}
-	conn.SolanaTransit = vault.NewTransitAdapter(client, transitMount).WithSupervisor(conn.Auth)
+	conn.SolanaTransit = vault.NewTransitAdapter(client, transitMount).Refuse(conn.Err)
 	if mount != "" {
-		conn.KV = vault.NewKVv2Adapter(client, mount).WithReauthTrigger(conn.Auth)
+		conn.KV = vault.NewKVv2Adapter(client, mount).Refuse(conn.Err)
 	}
 	if platformMount != "" {
-		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).WithReauthTrigger(conn.Auth)
+		conn.PlatformKV = vault.NewKVv2Adapter(client, platformMount).Refuse(conn.Err)
 	}
 	return conn, nil
 }
 
-// Close stops only authentication supervision owned by this runtime. It never
-// revokes a borrowed host token or closes a borrowed client.
+// Close stops the capability check. The host's client stays open.
 func (c *Connection) Close() {
-	if c != nil && c.closeAuth != nil {
-		c.closeAuth()
+	if c != nil && c.stop != nil {
+		c.stop()
 	}
 }
 
-// State is the cached Vault auth state: nil when no owned Vault is in use or
-// it is authenticated. It never touches the network.
+// State is why the named mounts cannot be used; nil when they can.
 func (c *Connection) State() error {
 	if c == nil {
 		return nil
 	}
-	return c.Auth.AuthState()
+	return c.Err
 }
 
-// Await waits up to timeout for the background Vault login.
-func (c *Connection) Await(ctx context.Context, timeout time.Duration) error {
-	if c == nil {
-		return nil
-	}
-	if err := c.Auth.Wait(ctx, timeout); err != nil {
-		return fmt.Errorf("vault: %w", err)
-	}
-	return nil
-}
-
-// Probe is the live Vault check for a host dependency supervisor; nil when no
-// owned Vault is in use.
-func (c *Connection) Probe(ctx context.Context) error {
-	if c == nil {
-		return nil
-	}
-	return c.Auth.Probe(ctx)
-}
-
-func vaultConfig(vc *config.VaultConfig) vault.Config {
-	return vault.Config{
-		Address:     vc.Address,
-		Namespace:   vc.Namespace,
-		AuthMethod:  vc.AuthMethod,
-		Token:       vc.Token,
-		RoleID:      vc.RoleID,
-		SecretID:    vc.SecretID,
-		SecretsPath: vc.SecretsPath,
-		K8sRole:     vc.K8sRole,
-		AuthMount:   vc.AuthMount,
-	}
-}
-
-// verifyCapabilities reports, once Vault authenticates, a token that cannot
-// serve the merchant configuration mount. Diagnostics only: reads and writes
-// fail at runtime either way.
-func verifyCapabilities(ctx context.Context, client *vaultapi.Client, sup *vault.Supervisor, kvMount, scopePrefix string) {
+// verifyCapabilities reports a token that cannot serve the merchant
+// configuration mount, retrying until Vault answers. Diagnostics only: reads
+// and writes fail at runtime either way.
+func verifyCapabilities(ctx context.Context, client *vaultapi.Client, kvMount, scopePrefix string) {
 	_ = retry.Forever(ctx, func(ctx context.Context) error {
-		if err := sup.AuthState(); err != nil {
-			return err
-		}
 		caps, err := vault.SelfCapabilities(ctx, client, kvMount, scopePrefix)
 		if err != nil {
 			return err

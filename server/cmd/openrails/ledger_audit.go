@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -50,8 +49,7 @@ type ledgerAuditResult struct {
 }
 
 func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
-	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	database, err := openCLIDB(cmd.Context(), cfg)
+	database, err := openCLIDB(cmd.Context())
 	if err != nil {
 		return err
 	}

@@ -4,42 +4,47 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/paymentpagehttp"
 	"github.com/open-rails/openrails/internal/paymentpage"
 )
 
-// CheckoutPage installs the embedded engine's one isolated checkout origin.
-// Like route composition, this happens before workers or HTTP start.
-func (e *Engine) CheckoutPage(origin string, assets fs.FS) (string, http.Handler, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return "", nil, fmt.Errorf("openrails: engine is closed")
+// serveCheckout builds the payment page Config.CheckoutOrigin declares, from
+// assets. An origin that is not its own, or assets without the page, are
+// refused alone and reported; nil assets issue pay URLs without serving the
+// page.
+func (e *Engine) serveCheckout(cfg config.Config, declarations []config.MerchantDeclaration, assets fs.FS) {
+	if strings.TrimSpace(cfg.CheckoutOrigin) == "" {
+		return
 	}
-	if e.App.Standalone {
-		return "", nil, fmt.Errorf("openrails: a standalone payment page belongs to server.CheckoutPage")
-	}
-	if e.stopWorkers != nil {
-		return "", nil, fmt.Errorf("openrails: configure the payment page before Start")
-	}
-	if e.App.Runtime.CheckoutOrigin() != "" {
-		return "", nil, fmt.Errorf("openrails: the payment page is already configured")
-	}
-	forbidden := []string{e.App.Config.PublicBillingBaseURL, e.App.Config.DashboardBaseURL}
-	for _, merchant := range e.App.Config.Merchants {
-		forbidden = append(forbidden, merchant.Issuer)
-	}
-	origin, err := paymentpage.Origin(origin, forbidden...)
-	if err != nil {
-		return "", nil, err
+	forbidden := []string{cfg.PublicBillingBaseURL}
+	for _, m := range declarations {
+		forbidden = append(forbidden, m.Issuer)
 	}
 	rt := e.App.Runtime
+	origin, err := paymentpage.Origin(cfg.CheckoutOrigin, forbidden...)
+	if err != nil {
+		rt.Refuse("checkout_origin", fmt.Errorf("%w; no payment page is served and orders get no pay URL", err))
+		return
+	}
 	if assets == nil {
 		rt.SetCheckoutOrigin(origin)
-		return origin, nil, nil
+		e.checkoutOrigin = origin
+		return
 	}
 	limiter := middleware.RateLimitHTTP(rt.Config.RateLimits, rt.Config.Captcha, rt.AbuseState, rt.CaptchaStore, rt.TrustedProxies)
-	return paymentpagehttp.New(rt, origin, assets, nil, limiter)
+	if e.checkoutOrigin, e.checkout, err = paymentpagehttp.New(rt, origin, assets, nil, limiter); err != nil {
+		rt.Refuse("checkout_assets", fmt.Errorf("%w; no payment page is served and orders get no pay URL", err))
+	}
+}
+
+// CheckoutPage is the payment page's origin and handler: serve the handler
+// only on that origin (openrailsgin.CheckoutOrigin does). "" and nil when
+// Config declares none or refused it; the origin and a nil handler without
+// Deps.CheckoutAssets.
+func (e *Engine) CheckoutPage() (origin string, handler http.Handler) {
+	return e.checkoutOrigin, e.checkout
 }

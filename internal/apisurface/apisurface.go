@@ -1,6 +1,7 @@
 // Package apisurface lists the Go API that OpenRails v1 freezes: every exported
 // constant, variable, function, type, field (with its struct tag) and method of
-// the public packages, one per line, in api/go.txt (TestGoAPISurface).
+// the public packages, one per line, in api/go.txt; and lints it against the
+// API conventions (Lint).
 package apisurface
 
 import (
@@ -42,12 +43,27 @@ const AuthKitAdapterModule = "adapters/authkit"
 type Surface struct {
 	// Features is one sorted line per exported feature.
 	Features []string
-	// Leaks are internal types the covered API reaches without a covered
-	// package naming them by an alias.
-	Leaks []string
-	// AliasMethods are the exported methods a covered alias of an internal
-	// struct or scalar type brings with it.
-	AliasMethods []string
+
+	pkgs     []Package
+	pkgNames map[string]string // import path to package name
+	fields   []field
+	internal []string // features whose type names an internal package's type
+}
+
+// Package is one covered package.
+type Package struct {
+	// Name is "openrails" for the root, else the path below Module.
+	Name  string
+	Types *types.Package
+	// Files are its non-test Go files.
+	Files []string
+}
+
+// field is an exported struct field: owner.name.
+type field struct {
+	owner, name string
+	typ         types.Type
+	tag         string
 }
 
 // Load type-checks the covered packages from their export data (go list
@@ -68,20 +84,19 @@ func Load(ctx context.Context, repo string) (*Surface, error) {
 	}
 	// One importer over the module lists: a root package keeps the root module's
 	// export data, so both modules' packages share its types.
-	exports := map[string]string{}
+	listed := map[string]listing{}
 	for _, dir := range []string{".", ServerModule, AuthKitAdapterModule} {
-		if err := listExports(ctx, filepath.Join(repo, dir), byModule[dir], exports); err != nil {
+		if err := listExports(ctx, filepath.Join(repo, dir), byModule[dir], listed); err != nil {
 			return nil, err
 		}
 	}
 	imp := importer.ForCompiler(token.NewFileSet(), "gc", func(path string) (io.ReadCloser, error) {
-		if exports[path] == "" {
+		if listed[path].export == "" {
 			return nil, fmt.Errorf("no export data for %s", path)
 		}
-		return os.Open(exports[path])
+		return os.Open(listed[path].export)
 	})
-
-	s := &surfacer{aliased: map[*types.TypeName]bool{}, reached: map[*types.TypeName]bool{}}
+	pkgs := make([]Package, len(paths))
 	for i, path := range paths {
 		pkg, err := imp.Import(path)
 		if err != nil {
@@ -89,25 +104,35 @@ func Load(ctx context.Context, repo string) (*Surface, error) {
 		}
 		name := "openrails"
 		if Packages[i] != "" {
-			name += "/" + Packages[i]
+			name = Packages[i]
 		}
-		s.walk(pkg, name)
+		pkgs[i] = Package{Name: name, Types: pkg, Files: listed[path].files}
 	}
-	slices.Sort(s.lines)
-	surface := &Surface{Features: slices.Compact(s.lines)}
-	for tn := range s.reached {
-		if !s.aliased[tn] {
-			surface.Leaks = append(surface.Leaks, tn.Pkg().Path()+"."+tn.Name())
-		}
+	names := map[string]string{}
+	for path, l := range listed {
+		names[path] = l.name
 	}
-	slices.Sort(surface.Leaks)
-	slices.Sort(s.aliasMethods)
-	surface.AliasMethods = s.aliasMethods
-	return surface, nil
+	return surfaceOf(pkgs, names), nil
 }
 
-func listExports(ctx context.Context, dir string, paths []string, exports map[string]string) error {
-	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Export}}"}, paths...)...)
+// surfaceOf lists the features of pkgs; names maps import paths to package
+// names.
+func surfaceOf(pkgs []Package, names map[string]string) *Surface {
+	s := &surfacer{}
+	for _, p := range pkgs {
+		s.walk(p.Types, p.Name)
+	}
+	slices.Sort(s.lines)
+	return &Surface{Features: slices.Compact(s.lines), pkgs: pkgs, pkgNames: names, fields: s.fields, internal: s.internal}
+}
+
+type listing struct {
+	name, export string
+	files        []string
+}
+
+func listExports(ctx context.Context, dir string, paths []string, listed map[string]listing) error {
+	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Name}}\t{{.Export}}\t{{.Dir}}\t{{join .GoFiles \"\\t\"}}"}, paths...)...)
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -116,10 +141,17 @@ func listExports(ctx context.Context, dir string, paths []string, exports map[st
 		return fmt.Errorf("go list in %s: %w: %s", dir, err, stderr.Bytes())
 	}
 	for line := range strings.Lines(string(out)) {
-		path, file, _ := strings.Cut(strings.TrimSpace(line), "\t")
-		if _, ok := exports[path]; !ok {
-			exports[path] = file
+		parts := strings.Split(strings.TrimSuffix(line, "\n"), "\t")
+		if _, ok := listed[parts[0]]; ok || len(parts) < 4 {
+			continue
 		}
+		l := listing{name: parts[1], export: parts[2]}
+		for _, f := range parts[4:] {
+			if f != "" {
+				l.files = append(l.files, filepath.Join(parts[3], f))
+			}
+		}
+		listed[parts[0]] = l
 	}
 	return nil
 }
@@ -140,30 +172,32 @@ func importPath(rel string) string {
 }
 
 type surfacer struct {
-	lines   []string
-	aliased map[*types.TypeName]bool // internal types a covered alias names
-	reached map[*types.TypeName]bool // internal types the covered API reaches
-
-	aliasMethods []string
+	lines    []string
+	fields   []field
+	internal []string
 }
 
-// walk lists pkg's exported features under name.
+// walk lists pkg's exported features; name is its Package.Name.
 func (s *surfacer) walk(pkg *types.Package, name string) {
-	w := &writer{s: s, pkg: pkg, name: name}
+	listed := "openrails"
+	if name != listed {
+		listed += "/" + name
+	}
+	w := &writer{s: s, pkg: pkg, listed: listed, name: name}
 	scope := pkg.Scope()
 	for _, id := range scope.Names() {
 		switch obj := scope.Lookup(id).(type) {
 		case *types.Const:
 			if obj.Exported() {
-				w.emit("const %s %s = %s", id, w.typ(obj.Type()), obj.Val().ExactString())
+				w.emit(id, "const %s %s = %s", id, w.typ(obj.Type()), obj.Val().ExactString())
 			}
 		case *types.Var:
 			if obj.Exported() {
-				w.emit("var %s %s", id, w.typ(obj.Type()))
+				w.emit(id, "var %s %s", id, w.typ(obj.Type()))
 			}
 		case *types.Func:
 			if obj.Exported() {
-				w.emit("func %s%s", id, w.sig(obj.Signature()))
+				w.emit(id, "func %s%s", id, w.sig(obj.Signature()))
 			}
 		case *types.TypeName:
 			if obj.Exported() {
@@ -173,36 +207,42 @@ func (s *surfacer) walk(pkg *types.Package, name string) {
 	}
 }
 
-// internal reports a package of either module under an internal/ directory.
-func (s *surfacer) internal(p *types.Package) bool {
-	return p != nil && strings.HasPrefix(p.Path(), Module+"/") && slices.Contains(strings.Split(p.Path(), "/"), "internal")
+// internalPkg reports a package of either module under an internal/ directory.
+func internalPkg(p *types.Package) bool {
+	return p != nil && internalPath(p.Path())
+}
+
+func internalPath(path string) bool {
+	return strings.HasPrefix(path, Module+"/") && slices.Contains(strings.Split(path, "/"), "internal")
 }
 
 type writer struct {
-	s    *surfacer
-	pkg  *types.Package
-	name string
+	s      *surfacer
+	pkg    *types.Package
+	listed string // the package's name in File
+	name   string // the package's name in findings
+	// hit: a type spelled since the last emit came from an internal package.
+	hit bool
 }
 
-func (w *writer) emit(format string, args ...any) {
-	w.s.lines = append(w.s.lines, "pkg "+w.name+", "+fmt.Sprintf(format, args...))
+// emit lists one feature; id names it below the package.
+func (w *writer) emit(id, format string, args ...any) {
+	w.s.lines = append(w.s.lines, "pkg "+w.listed+", "+fmt.Sprintf(format, args...))
+	if w.hit && id != "" {
+		w.s.internal = append(w.s.internal, w.name+"."+id)
+	}
+	w.hit = false
 }
 
 func (w *writer) typeName(obj *types.TypeName) {
 	name := obj.Name()
 	if a, ok := obj.Type().(*types.Alias); ok {
-		w.emit("type %s%s = %s", name, w.tparams(a.TypeParams()), w.typ(a.Rhs()))
+		// The alias is the finding (rule 1), not the type it names.
+		w.emit("", "type %s%s = %s", name, w.tparams(a.TypeParams()), w.typ(a.Rhs()))
 		// An alias of an internal type is how the covered API spells it: list
 		// the target's members under the alias's name.
-		if n, ok := types.Unalias(a).(*types.Named); ok && w.s.internal(n.Obj().Pkg()) {
-			w.s.aliased[n.Origin().Obj()] = true
-			before := len(w.s.lines)
+		if n, ok := types.Unalias(a).(*types.Named); ok && internalPkg(n.Obj().Pkg()) {
 			w.members(name, n.Origin())
-			for _, line := range w.s.lines[before:] {
-				if _, method, ok := strings.Cut(line, ", method "); ok {
-					w.s.aliasMethods = append(w.s.aliasMethods, w.name+": "+method)
-				}
-			}
 		}
 		return
 	}
@@ -215,10 +255,10 @@ func (w *writer) members(name string, n *types.Named) {
 	tp := w.tparams(n.TypeParams())
 	switch u := n.Underlying().(type) {
 	case *types.Struct:
-		w.emit("type %s%s struct", name, tp)
+		w.emit(name, "type %s%s struct", name, tp)
 		w.fields(name, u)
 	case *types.Interface:
-		w.emit("type %s%s interface", name, tp)
+		w.emit(name, "type %s%s interface", name, tp)
 		sealed := false
 		for i := range u.NumMethods() {
 			m := u.Method(i)
@@ -226,19 +266,20 @@ func (w *writer) members(name string, n *types.Named) {
 				sealed = true
 				continue
 			}
-			w.emit("type %s interface, %s%s", name, m.Name(), w.sig(m.Signature()))
+			w.emit(name+"."+m.Name(), "type %s interface, %s%s", name, m.Name(), w.sig(m.Signature()))
 		}
 		for i := range u.NumEmbeddeds() {
 			if _, ok := u.EmbeddedType(i).Underlying().(*types.Interface); !ok {
-				w.emit("type %s interface, %s", name, w.typ(u.EmbeddedType(i)))
+				t := w.typ(u.EmbeddedType(i))
+				w.emit(name+"."+t, "type %s interface, %s", name, t)
 			}
 		}
 		if sealed {
-			w.emit("type %s interface, unexported methods", name)
+			w.emit("", "type %s interface, unexported methods", name)
 		}
 		return
 	default:
-		w.emit("type %s%s %s", name, tp, w.typ(u))
+		w.emit(name, "type %s%s %s", name, tp, w.typ(u))
 	}
 	recv := name
 	if tp != "" {
@@ -259,7 +300,7 @@ func (w *writer) members(name string, n *types.Named) {
 		if value.Lookup(m.Pkg(), m.Name()) != nil {
 			r = recv
 		}
-		w.emit("method (%s) %s%s", r, m.Name(), w.sig(sel.Type().(*types.Signature)))
+		w.emit(name+"."+m.Name(), "method (%s) %s%s", r, m.Name(), w.sig(sel.Type().(*types.Signature)))
 	}
 }
 
@@ -267,7 +308,7 @@ func (w *writer) fields(name string, st *types.Struct) {
 	for i := range st.NumFields() {
 		f := st.Field(i)
 		if f.Embedded() {
-			w.emit("type %s struct, embedded %s", name, w.typ(f.Type()))
+			w.emit(name+"."+f.Name(), "type %s struct, embedded %s", name, w.typ(f.Type()))
 			if !f.Exported() {
 				// An unexported embedded struct still promotes its exported fields.
 				if inner, ok := f.Type().Underlying().(*types.Struct); ok {
@@ -283,7 +324,8 @@ func (w *writer) fields(name string, st *types.Struct) {
 		if t := st.Tag(i); t != "" {
 			tag = " `" + t + "`"
 		}
-		w.emit("type %s struct, %s %s%s", name, f.Name(), w.typ(f.Type()), tag)
+		w.emit(name+"."+f.Name(), "type %s struct, %s %s%s", name, f.Name(), w.typ(f.Type()), tag)
+		w.s.fields = append(w.s.fields, field{owner: w.name + "." + name, name: f.Name(), typ: f.Type(), tag: st.Tag(i)})
 	}
 }
 
@@ -367,15 +409,11 @@ func (w *writer) typ(t types.Type) string {
 	case *types.Signature:
 		return "func" + w.sig(t)
 	case *types.Named:
-		if w.s.internal(t.Obj().Pkg()) {
-			// Follow what an internal type exposes, so a leak behind it shows.
-			w.reach(t.Origin())
-		}
+		w.hit = w.hit || internalPkg(t.Obj().Pkg())
 		return w.qualified(t.Obj(), t.TypeArgs())
 	case *types.Alias:
-		if n, ok := types.Unalias(t).(*types.Named); ok && w.s.internal(n.Obj().Pkg()) {
-			w.reach(n.Origin())
-		}
+		// An alias a covered package declares is its own finding.
+		w.hit = w.hit || internalPkg(t.Obj().Pkg())
 		return w.qualified(t.Obj(), t.TypeArgs())
 	case *types.TypeParam:
 		return t.Obj().Name()
@@ -421,16 +459,4 @@ func (w *writer) typ(t types.Type) string {
 		return "struct{ " + strings.Join(parts, "; ") + " }"
 	}
 	return t.String()
-}
-
-// reach records the internal types n's exported members expose.
-func (w *writer) reach(n *types.Named) {
-	if w.s.reached[n.Obj()] {
-		return
-	}
-	w.s.reached[n.Obj()] = true
-	probe := &writer{s: w.s, pkg: n.Obj().Pkg(), name: "-"}
-	saved := len(w.s.lines)
-	probe.members(n.Obj().Name(), n)
-	w.s.lines = w.s.lines[:saved]
 }

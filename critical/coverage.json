@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 405,
+  "scenario_count": 410,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -861,7 +861,7 @@
     {
       "id": "OR-J28-S06",
       "journey": "J28",
-      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused, by file or by declaration, and the owner's webhooks keep working"
+      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused by file, and the owner's webhooks keep working"
     },
     {
       "id": "OR-J28-S07",
@@ -1564,6 +1564,11 @@
       "name": "Kill switch turned off during a provider pull holds that pull's convergence retractions"
     },
     {
+      "id": "OR-J34-S31",
+      "journey": "J34",
+      "name": "Only an in-process handle acts for a named person; a remote handle refuses ActingFor"
+    },
+    {
       "id": "OR-J16-S30",
       "journey": "J16",
       "name": "A provider-seen NMI decline opens dunning and schedules its retry in one transaction"
@@ -1987,6 +1992,26 @@
       "id": "OR-J04-S38",
       "journey": "J04",
       "name": "A billing pass that starts while another still runs exits without running a scan; the running pass takes what is due"
+    },
+    {
+      "id": "OR-J04-S72",
+      "journey": "J04",
+      "name": "An engine boots on a borrowed pool built from settings, with no connection string, and refuses one without a pool"
+    },
+    {
+      "id": "OR-J04-S73",
+      "journey": "J04",
+      "name": "A Vault KV mount with no Vault client is refused and reported, and merchant configuration answers unavailable"
+    },
+    {
+      "id": "OR-J04-S74",
+      "journey": "J04",
+      "name": "A slug declared twice provisions neither entry and is reported; the other declarations serve"
+    },
+    {
+      "id": "OR-J04-S75",
+      "journey": "J04",
+      "name": "The generated client gets the server's own refusals: a malformed query value is invalid_query before any handler, a batch or field the client no longer checks is the server's invalid_param, and an empty path segment is refused before any I/O"
     },
     {
       "id": "OR-J25-S37",

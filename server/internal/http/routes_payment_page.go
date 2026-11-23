@@ -1,23 +1,17 @@
 package server
 
 import (
-	"io/fs"
 	"net/http"
 
-	"github.com/open-rails/openrails/internal/http/paymentpagehttp"
 	"github.com/open-rails/openrails/internal/paymentpage"
 )
 
-// buildPaymentPage serves the payment page at origin: the page, and the
-// routes a pay URL's secret opens, under the host's own headers. The
-// public handler then sends that host's requests here and nothing else.
-func (s *Server) buildPaymentPage(origin string, assets fs.FS) error {
-	if origin == "" {
+// buildPaymentPage serves the engine's payment page at origin: the page, and
+// the routes a pay URL's secret opens. The public handler then sends that
+// host's requests here and nothing else.
+func (s *Server) buildPaymentPage(origin string, handler http.Handler) error {
+	if origin == "" || handler == nil {
 		return nil
-	}
-	origin, handler, err := paymentpagehttp.New(s.runtime, origin, assets, nil, s.sharedRateLimit)
-	if err != nil {
-		return err
 	}
 	host, err := paymentpage.NewHost(origin)
 	if err != nil {

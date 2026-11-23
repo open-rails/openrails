@@ -62,7 +62,7 @@ func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx conte
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -322,7 +322,7 @@ func printResults(w io.Writer, res billing.ProposalResults) {
 		detail := ""
 		switch {
 		case r.Error != nil:
-			detail = r.Error.Code + ": " + r.Error.Message
+			detail = string(r.Error.Code) + ": " + r.Error.Message
 		case len(r.Execution) > 0:
 			b, _ := json.Marshal(r.Execution)
 			detail = string(b)

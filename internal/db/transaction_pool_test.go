@@ -166,9 +166,9 @@ func TestTransactionPooler(t *testing.T) {
 		cfg := openrails.Config{
 			Database:          openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
 			ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			Merchants: map[string]openrails.MerchantDeclaration{
-				"alpha": {DisplayName: "Alpha"},
-				"beta":  {DisplayName: "Beta"},
+			Merchants: []openrails.MerchantDeclaration{
+				{MerchantDocument: openrails.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
+				{MerchantDocument: openrails.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
 			},
 		}
 		bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, PostgresSession: direct})
@@ -178,11 +178,11 @@ func TestTransactionPooler(t *testing.T) {
 			defer cancel()
 			require.NoError(t, bill.Close(cleanup))
 		}()
-		alpha, err := bill.MerchantBySlug("alpha")
+		alpha, err := bill.DeclaredMerchant("alpha")
 		require.NoError(t, err)
-		beta, err := bill.MerchantBySlug("beta")
+		beta, err := bill.DeclaredMerchant("beta")
 		require.NoError(t, err)
-		require.NotEqual(t, alpha.MerchantID(), beta.MerchantID())
+		require.NotEqual(t, alpha, beta)
 		require.NoError(t, bill.Start(ctx))
 		require.NoError(t, bill.Ready(ctx))
 		table := pgx.Identifier{schema, "river_job"}.Sanitize()

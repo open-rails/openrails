@@ -31,14 +31,14 @@ func (id *RunID) UnmarshalText(b []byte) error {
 const (
 	// CodeFindingRequiresMerchantConfig: ResolveFinding refuses a pull.*
 	// finding; it is a proposal.
-	CodeFindingRequiresMerchantConfig = "finding_requires_merchant_config"
+	CodeFindingRequiresMerchantConfig ErrorCode = "finding_requires_merchant_config"
 	// CodeDestructiveActionsHeld: the kill switch holds the proposal.
-	CodeDestructiveActionsHeld = "destructive_actions_held"
+	CodeDestructiveActionsHeld ErrorCode = "destructive_actions_held"
 	// CodeProviderWritesHeld: a readonly write posture holds the proposal.
-	CodeProviderWritesHeld = "provider_writes_held"
+	CodeProviderWritesHeld ErrorCode = "provider_writes_held"
 	// CodePersonRequired: only a person acting in person, or the in-process
 	// host, approves; an API key or service token does not.
-	CodePersonRequired = "person_required"
+	CodePersonRequired ErrorCode = "person_required"
 )
 
 // ChangeKind is what approving a proposal does. The set is closed.
@@ -147,13 +147,13 @@ type ChangeEvidence struct {
 // named proposals in one page.
 type ProposalListParams struct {
 	PageRequest
-	IDs    []FindingID
-	PSPID  PSPID
-	Kind   ChangeKind
-	Source ProposalSource
-	Status FindingStatus
+	IDs    []FindingID    `form:"ids,comma"`
+	PSPID  PSPID          `form:"psp_id"`
+	Kind   ChangeKind     `form:"kind"`
+	Source ProposalSource `form:"source"`
+	Status FindingStatus  `form:"status"`
 	// Pull is the PSP import whose pull last raised them.
-	Pull PSPImportID
+	Pull PSPImportID `form:"pull_id"`
 }
 
 // ApproveProposalsParams approves 1 to MaxBatchItems proposals, each applied
@@ -214,6 +214,6 @@ type ProposalResult struct {
 // ProposalError is why a proposal was held or failed: a registered code and a
 // message.
 type ProposalError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    ErrorCode `json:"code"`
+	Message string    `json:"message"`
 }

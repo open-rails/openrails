@@ -201,7 +201,7 @@ func (im *Importer) psp(ctx context.Context, mid billing.MerchantID, ref billing
 		return scope, err
 	}
 	if !found {
-		return scope, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", ref.String())).WithParam("psp")
+		return scope, apperr.New(404, billing.CodePSPNotFound, fmt.Sprintf("PSP %s not found", ref.String())).WithParam("psp")
 	}
 	return scope, nil
 }
@@ -265,8 +265,10 @@ func (im *Importer) List(ctx context.Context, p billing.PSPImportListParams) (bi
 		return out, err
 	}
 	params := gen.ListPSPImportsPageParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
-	if !p.PSP.IsZero() {
-		scope, err := im.psp(ctx, mid, p.PSP)
+	if ref, err := billing.ParsePSPRef(p.PSP); err != nil {
+		return out, apperr.Invalidf("psp names a PSP by id or key").WithParam("psp")
+	} else if !ref.IsZero() {
+		scope, err := im.psp(ctx, mid, ref)
 		if err != nil {
 			return out, err
 		}

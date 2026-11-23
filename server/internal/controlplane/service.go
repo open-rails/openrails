@@ -169,7 +169,7 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 		http = *auth.HTTP
 	}
 	if !http.DirectPeerIP && len(http.TrustedProxies) == 0 && len(http.CloudflareProxies) == 0 {
-		http.TrustedProxies, http.CloudflareProxies = cfg.TrustedProxies, cfg.CloudflareProxies
+		http.TrustedProxies = cfg.TrustedProxies
 	}
 	if http.Groups == nil {
 		http.Groups = routeGroups(reg.NativeUserMode, auth.Resource.Enabled())

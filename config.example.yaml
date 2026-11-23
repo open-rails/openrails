@@ -104,12 +104,13 @@ naming:
 #   kv_mount: ""      # KV v2 mount holding merchant configuration
 #   scope_prefix: ""  # path under the mount; default openrails
 #   transit_mount: "" # Transit mount for Solana crankers; default transit
-#   address: ""       # defaults to the Vault client default / VAULT_ADDR
+#   address: ""       # VAULT_ADDR; default https://127.0.0.1:8200
+#   ca_cert: ""       # path of the private CA's PEM (VAULT_CACERT); the only trust when set
 #   auth_method: ""   # token | approle | kubernetes
 #   token: ""
 #   role_id: ""
 #   secret_id: ""
-#   secrets_path: "" # directory of mounted secret files; a VAULT_SECRET_ID file there is re-read on re-auth
+#   secrets_path: "" # directory of mounted secret files; every approle login reads VAULT_SECRET_ID there
 #   k8s_role: ""
 #   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
 
@@ -191,13 +192,6 @@ user_action_rate_limit:
 # cloudflare_proxies:
 #   - 173.245.48.0/20
 
-# EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
-# CCBill signs nothing, so this list is authentication: entries are honored only
-# for a webhook naming a sandbox CCBill account. `/0` is refused. Empty
-# (default) accepts CCBill's ranges alone.
-# ccbill_webhook_ip_allowlist:
-#   - 127.0.0.1/32
-
 # Loopback-only provider gateway for sandbox qualification: every store-armed
 # NMI client (purchase sales, invoice collection, payment-method updates and
 # their verify reads) talks to nmi_gateway_url; Stripe requests use
@@ -207,11 +201,17 @@ user_action_rate_limit:
 # credentials are sent there, so the host must be a loopback IP literal
 # (127.0.0.0/8 or ::1; no hostnames, no userinfo) and the posture sandbox;
 # anything else refuses to boot. Process config only, never a merchant setting.
+# ccbill_webhook_sources are EXTRA CCBill webhook source CIDRs, on top of
+# CCBill's own documented ranges. CCBill signs nothing, so this list is
+# authentication: entries are honored only for a webhook naming a sandbox
+# CCBill account. `/0` is refused.
 # provider_sandbox:
 #   nmi_gateway_url: http://127.0.0.1:9091
 #   stripe_api_url: http://127.0.0.1:9092
 #   solana_rpc_url: http://127.0.0.1:9093
 #   ccbill_datalink_url: http://127.0.0.1:9094
+#   ccbill_webhook_sources:
+#     - 127.0.0.1/32
 
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha

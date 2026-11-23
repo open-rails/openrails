@@ -69,31 +69,30 @@ func ImportBillingArchive(r *httprequest.Request) {
 
 func writeMerchantArchiveError(r *httprequest.Request, err error) {
 	status := http.StatusInternalServerError
-	detail := billing.ErrorDetails{Type: "api_error", Code: "billing_archive_unavailable", Message: "billing archive operation failed"}
+	detail := billing.ErrorDetails{Type: billing.ErrorTypeAPI, Code: billing.CodeBillingArchiveUnavailable, Message: "billing archive operation failed"}
 	var oversized *http.MaxBytesError
 	var failure *merchantarchive.Error
 	switch {
 	case errors.As(err, &oversized):
 		status = http.StatusRequestEntityTooLarge
-		detail = billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeRequestBodyTooLarge, Message: "billing archive exceeds its size limit"}
+		detail = billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeRequestBodyTooLarge, Message: "billing archive exceeds its size limit"}
 	case errors.As(err, &failure):
-		detail.Type = "invalid_request_error"
-		detail.Code = "billing_archive_" + failure.Code
+		detail.Type = billing.ErrorTypeInvalidRequest
 		switch failure.Code {
 		case "invalid_artifact":
-			status, detail.Message = http.StatusBadRequest, "invalid, incomplete or unsupported billing archive"
+			status, detail.Code, detail.Message = http.StatusBadRequest, billing.CodeBillingArchiveInvalidArtifact, "invalid, incomplete or unsupported billing archive"
 		case "merchant_mismatch":
-			status, detail.Message = http.StatusConflict, "archive merchant does not match the destination binding"
+			status, detail.Code, detail.Message = http.StatusConflict, billing.CodeBillingArchiveMerchantMismatch, "archive merchant does not match the destination binding"
 		case "not_empty":
-			status, detail.Message = http.StatusConflict, "destination billing state must be empty"
+			status, detail.Code, detail.Message = http.StatusConflict, billing.CodeBillingArchiveNotEmpty, "destination billing state must be empty"
 		case "unsupported_state":
-			status, detail.Message = http.StatusConflict, "merchant has state that cannot safely be moved"
+			status, detail.Code, detail.Message = http.StatusConflict, billing.CodeBillingArchiveUnsupportedState, "merchant has state that cannot safely be moved"
 		case "platform_cards":
-			status, detail.Message = http.StatusConflict, "the merchant holds cards in the platform vault; export or remove them first"
+			status, detail.Code, detail.Message = http.StatusConflict, billing.CodeBillingArchivePlatformCards, "the merchant holds cards in the platform vault; export or remove them first"
 		case "integrity":
-			status, detail.Message = http.StatusUnprocessableEntity, "billing archive integrity validation failed"
+			status, detail.Code, detail.Message = http.StatusUnprocessableEntity, billing.CodeBillingArchiveIntegrity, "billing archive integrity validation failed"
 		default:
-			detail.Type, detail.Code, detail.Message = "api_error", "billing_archive_unavailable", "billing archive operation failed"
+			detail.Type, detail.Code, detail.Message = billing.ErrorTypeAPI, billing.CodeBillingArchiveUnavailable, "billing archive operation failed"
 		}
 		if failure.Table != "" && status < 500 {
 			detail.Metadata = map[string]any{"table": failure.Table, "count": failure.Count}

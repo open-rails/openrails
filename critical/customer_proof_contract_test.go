@@ -64,7 +64,7 @@ func signCustomerProof(t *testing.T, signer keys.Signer, typ string, claims map[
 	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
 
-func requireProofCode(t *testing.T, err error, code string) {
+func requireProofCode(t *testing.T, err error, code billing.ErrorCode) {
 	t.Helper()
 	var status *billing.StatusError
 	require.ErrorAs(t, err, &status)

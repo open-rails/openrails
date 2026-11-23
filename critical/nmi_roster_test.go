@@ -79,15 +79,15 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, b
 	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "old", PlanID: "weekly", Currency: "USD"})
 	require.NoError(t, err)
 	require.NoError(t, a.engine.Close(context.Background()))
-	m := a.cfg.Merchants["alpha"]
+	m := cfgMerchant(a.cfg, "alpha")
 	m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
-	a.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&a.cfg, "alpha", m)
 	// A refresh pass verifies unverified rows only for a merchant whose
 	// provider writes are not held, so the next whole read can happen.
 	a.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
 	armDestructive(t, a, true)
 

@@ -98,7 +98,7 @@ type RateLimitDecision struct {
 // RateLimitDeps is the engine's collaborator set. State and ChallengeStore
 // are required; Verifier may be nil (no captcha).
 type RateLimitDeps struct {
-	Limits         *config.RateLimitsConfig
+	Limits         config.RateLimitsConfig
 	Captcha        *config.CaptchaConfig
 	State          *abusestate.Store
 	ChallengeStore *captcha.ChallengeStore
@@ -264,8 +264,8 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 // client is limited rather than the load balancer; nil or empty uses the
 // socket peer. state is the process's abuse state; nil counts in memory of
 // this middleware's own.
-func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
-	if limits == nil {
+func RateLimitHTTP(limits config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
+	if len(limits) == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	if state == nil {
@@ -303,7 +303,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitCaptchaRequired:
 		w.Header().Set("X-Captcha-Required", "true")
-		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_required", "Captcha verification required").
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, billing.CodeCaptchaRequired, "Captcha verification required").
 			WithMetadata(map[string]any{
 				"provider": config.CaptchaProvider(captchaCfg),
 				"site_key": strings.TrimSpace(captchaSiteKey(captchaCfg)),
@@ -316,7 +316,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		if msg == "" {
 			msg = "Captcha verification failed"
 		}
-		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_invalid", msg)
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, billing.CodeCaptchaInvalid, msg)
 		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitTooMany:
 		apiErr := api.Coded(billing.CodeRateLimitExceeded, "Rate limit exceeded")
@@ -450,22 +450,22 @@ func bucketKeys(subjectKeys []string, buckets []string) []string {
 	return keys
 }
 
-func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*config.RateLimit, string) {
-	if cfg == nil || req == nil {
+func resolveRateLimitPolicy(cfg config.RateLimitsConfig, req *http.Request) (*config.RateLimit, string) {
+	if len(cfg) == 0 || req == nil {
 		return nil, ""
 	}
 	bucket := ClassifyBucket(strings.ToLower(policyRequestPath(req)), req.Method)
 	switch bucket {
 	case "webhook":
-		return (*cfg)["webhook"], bucket
+		return cfg["webhook"], bucket
 	case "subscriptions":
-		return (*cfg)["subscribe"], bucket
+		return cfg["subscribe"], bucket
 	case "purchase":
-		return (*cfg)["purchase"], bucket
+		return cfg["purchase"], bucket
 	case "payment-methods":
-		return (*cfg)["payment"], bucket
+		return cfg["payment"], bucket
 	case "catalog-ask":
-		return (*cfg)[bucket], bucket
+		return cfg[bucket], bucket
 	}
 	// Generic per-address ceilings belong to the proxy in front of OpenRails.
 	return nil, bucket
@@ -519,7 +519,7 @@ func isPurchasePath(path string) bool {
 // the address. A captcha the address limiter verified on this request is not
 // asked for again. Nil where the runtime enforces no captcha.
 func CardAttackCaptcha(rt *app.Runtime) router.Middleware {
-	if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || rt.CaptchaStore == nil || rt.AbuseState == nil || !config.CaptchaEnabled(rt.Config.Captcha) {
+	if rt == nil || rt.Config == nil || len(rt.Config.RateLimits) == 0 || rt.CaptchaStore == nil || rt.AbuseState == nil || !config.CaptchaEnabled(rt.Config.Captcha) {
 		return nil
 	}
 	return cardAttackCaptcha(RateLimitDeps{
@@ -579,7 +579,7 @@ func PayURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*re
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			order := key(r)
-			if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
+			if rt == nil || rt.Config == nil || len(rt.Config.RateLimits) == 0 || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
 				next(r)
 			}
 		}

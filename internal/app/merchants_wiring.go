@@ -165,10 +165,8 @@ func (r *Runtime) readyMerchantConfig(ctx context.Context) error {
 		ctx, cancel = context.WithTimeout(ctx, awaitTimeout)
 		defer cancel()
 	}
-	if r.Vault.Auth != nil {
-		if err := r.Vault.Auth.Wait(ctx, awaitTimeout); err != nil {
-			return fmt.Errorf("initialize merchant services: Vault holds merchant configuration and is unreachable: %w", err)
-		}
+	if err := r.Vault.State(); err != nil {
+		return fmt.Errorf("initialize merchant services: Vault holds merchant configuration and cannot be used: %w", err)
 	}
 	key, err := vault.FingerprintKey(ctx)
 	if err != nil {

@@ -111,11 +111,11 @@ func recurringCredits(t *testing.T) {
 			renewalPayment = payment.ID
 		}
 	}
-	refund, err := a.alpha.RefundPayment(t.Context(), renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal", IdempotencyKey: "credit-renewal-refund"})
+	refund, err := a.alpha.RefundPayment(t.Context(), "credit-renewal-refund", renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal"})
 	require.NoError(t, err)
 	require.EqualValues(t, -20_000_000, refund.Amount)
 	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
-	replay, err := a.alpha.RefundPayment(t.Context(), renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal", IdempotencyKey: "credit-renewal-refund"})
+	replay, err := a.alpha.RefundPayment(t.Context(), "credit-renewal-refund", renewalPayment, billing.RefundPaymentParams{Full: true, Reason: "Refund renewal"})
 	require.NoError(t, err)
 	require.Equal(t, refund.ID, replay.ID)
 	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)

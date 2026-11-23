@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -28,26 +27,26 @@ import (
 
 var (
 	// ErrPSPNotFound: the merchant has no such PSP.
-	ErrPSPNotFound = apperr.New(http.StatusNotFound, "psp_not_found", "merchants: PSP not found")
+	ErrPSPNotFound = apperr.New(http.StatusNotFound, billing.CodePSPNotFound, "merchants: PSP not found")
 	// ErrPSPExists: the account is already a PSP, of this merchant or another.
-	ErrPSPExists = apperr.New(http.StatusConflict, "psp_exists", "merchants: the account is already a PSP")
+	ErrPSPExists = apperr.New(http.StatusConflict, billing.CodePSPExists, "merchants: the account is already a PSP")
 	// ErrPSPKeyTaken: another PSP holds the key.
-	ErrPSPKeyTaken = apperr.New(http.StatusConflict, "psp_key_taken", "merchants: another PSP holds this key")
+	ErrPSPKeyTaken = apperr.New(http.StatusConflict, billing.CodePSPKeyTaken, "merchants: another PSP holds this key")
 	// ErrPSPCredentialsRejected: the provider refused the credentials, or
 	// answered that they are not in the PSP's declared environment.
-	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, "psp_credentials_rejected", "the provider rejected the credentials")
+	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, billing.CodePSPCredentialsRejected, "the provider rejected the credentials")
 	// ErrPSPClaimUnproven refuses a merchant's first claim of an account whose
 	// credentials do not prove control of it (SEC-33). The operator declares
 	// such accounts instead.
-	ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, "psp_claim_requires_proof", "provider account claims require credentials that prove control of the account, or operator declaration")
+	ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, billing.CodePSPClaimRequiresProof, "provider account claims require credentials that prove control of the account, or operator declaration")
 	// ErrRevisionMismatch refuses an edit naming a revision the document has
 	// moved past.
 	ErrRevisionMismatch = apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, "the configuration changed since the revision the request names; read it again")
 	// ErrPSPEnvironmentRefused: a live PSP where the deployment wires fake
 	// providers.
-	ErrPSPEnvironmentRefused = apperr.New(http.StatusConflict, "psp_environment_refused", "a live PSP never talks to a fake provider")
+	ErrPSPEnvironmentRefused = apperr.New(http.StatusConflict, billing.CodePSPEnvironmentRefused, "a live PSP never talks to a fake provider")
 	// ErrConfigReadOnly refuses an edit of configuration read from a file.
-	ErrConfigReadOnly = apperr.New(http.StatusConflict, "merchant_config_read_only", "the merchant's configuration is read from a file; change the file")
+	ErrConfigReadOnly = apperr.New(http.StatusConflict, billing.CodeMerchantConfigReadOnly, "the merchant's configuration is read from a file; change the file")
 )
 
 // providerCredentialError types a provider-side credential rejection; any
@@ -826,65 +825,4 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", p.Rail, p.AccountID, err))
 	}
 	return nil
-}
-
-// DeclarePSP records a PSP identity without a document, for imported billing
-// facts attributed to it. It never arms the PSP; an account already declared
-// keeps its id, key and discovered state.
-func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declaration billing.PSPDeclaration) (billing.PSP, error) {
-	if s == nil || s.pool == nil {
-		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
-	}
-	key := strings.ToLower(strings.TrimSpace(declaration.Key))
-	rail := normalizeProviderSecretType(string(declaration.Rail))
-	switch {
-	case id.IsZero():
-		return billing.PSP{}, apperr.Invalidf("a merchant is required")
-	case !merchantdocs.KeyShape.MatchString(key):
-		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
-	case !supportedRail(rail):
-		return billing.PSP{}, apperr.Invalidf("unknown rail %q", declaration.Rail).WithParam("rail")
-	}
-	accountID, err := pspAccount(key, rail, declaration.PSPAccount)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	environment, err := config.ResolvePSPEnvironment(key, rail, declaration.Environment)
-	if err != nil {
-		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
-	}
-	if why := s.environmentRefusal(rail, environment); why != "" {
-		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentRefused, why)
-	}
-	if err := s.AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
-		return billing.PSP{}, err
-	}
-	pspID, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, accountID)
-	var row gen.BillingPsp
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).DeclarePSPIdentity(ctx, gen.DeclarePSPIdentityParams{
-			ID: pspID, MerchantID: id.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key,
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The account is declared under another key.
-		return billing.PSP{}, ErrPSPExists
-	}
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "psps_key_key" {
-			return billing.PSP{}, ErrPSPKeyTaken
-		}
-		return billing.PSP{}, err
-	}
-	scope, ok, err := s.PSPScopeByID(ctx, id, row.ID)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	if !ok {
-		return billing.PSP{}, ErrPSPNotFound
-	}
-	return s.pspWithObligations(ctx, id, scope)
 }

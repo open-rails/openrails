@@ -9,13 +9,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ErrInvalidDeclaredInput identifies a refused host-authored field before any
 // database work. HTTP callers receive the same invalid_param contract.
-var ErrInvalidDeclaredInput = apperr.New(http.StatusBadRequest, "invalid_param", "import billing: invalid declared input")
+var ErrInvalidDeclaredInput = apperr.New(http.StatusBadRequest, billing.CodeInvalidParam, "import billing: invalid declared input")
 
 // A declared book is host-authored free text that lands in the same columns
 // purchase writes and the merchant archive later exports: rail_method_ref,

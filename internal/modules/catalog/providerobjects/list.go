@@ -30,7 +30,11 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 	if err != nil {
 		return out, err
 	}
-	if p.PSP.IsZero() {
+	psp, err := billing.ParsePSPRef(p.PSP)
+	if err != nil {
+		psp = billing.PSPRef{Key: strings.TrimSpace(p.PSP)}
+	}
+	if psp.IsZero() {
 		return out, apperr.Invalidf("psp is required").WithParam("psp")
 	}
 	if o.Merchants == nil {
@@ -38,15 +42,15 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 	}
 	var scope merchants.PSPScope
 	var found bool
-	if p.PSP.ID != nil && !p.PSP.ID.IsZero() {
-		scope, found, err = o.Merchants.PSPScopeByID(ctx, mid, p.PSP.ID.UUID())
+	if psp.ID != nil {
+		scope, found, err = o.Merchants.PSPScopeByID(ctx, mid, psp.ID.UUID())
 	} else {
-		scope, found, err = o.Merchants.PSPScopeByKey(ctx, mid, strings.TrimSpace(p.PSP.Key))
+		scope, found, err = o.Merchants.PSPScopeByKey(ctx, mid, psp.Key)
 	}
 	if err != nil {
 		return out, err
 	} else if !found {
-		return out, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", p.PSP)).WithParam("psp")
+		return out, apperr.New(404, billing.CodePSPNotFound, fmt.Sprintf("PSP %s not found", psp)).WithParam("psp")
 	}
 	params := gen.ListProviderCatalogParams{MerchantID: mid.UUID(), PspID: scope.ID, Mapped: p.Mapped, Retired: p.Retired}
 	switch p.Kind {

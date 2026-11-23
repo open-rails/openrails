@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -62,9 +61,13 @@ func SetLimit(r *httprequest.Request) {
 
 // ListCustomerLimits is where ?customer_id= stands on every limit.
 func ListCustomerLimits(r *httprequest.Request) {
-	id, err := billing.ParseCustomerID(strings.TrimSpace(r.Query("customer_id")))
-	if err != nil || id.IsZero() {
-		r.APIError(api.Coded("invalid_customer_id", "").WithParam("customer_id"))
+	var query billing.CustomerLimitListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	id := query.CustomerID
+	if id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidCustomerID, "").WithParam("customer_id"))
 		return
 	}
 	if !requireServiceCustomerScope(r, id) {

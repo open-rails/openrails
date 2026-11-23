@@ -1,7 +1,8 @@
 // Package contract renders the route catalog and the error-code registry as
-// the files other tools read: the OpenAPI document, the TypeScript wire types
-// of the browser SDK and the console, and the route and error-code tables of
-// the API reference. They are committed; Verify fails when one is stale.
+// the files other tools read: the Go Client, the OpenAPI document, the
+// TypeScript wire types of the browser SDK and the console, and the route and
+// error-code tables of the API reference. They are committed; Verify fails
+// when one is stale.
 package contract
 
 import (
@@ -48,7 +49,12 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	client, err := goClient(fsys, routes.Catalog())
+	if err != nil {
+		return nil, err
+	}
 	return map[string][]byte{
+		ClientFile:                      client,
 		OpenAPIFile:                     openapi,
 		RoutesDoc:                       listed.routesMD(),
 		CodesDoc:                        errorCodesMD(),

@@ -53,6 +53,11 @@ type Engine struct {
 	handlerOnce sync.Once
 	handler     http.Handler
 
+	// checkoutOrigin and checkout are the payment page Config and Deps
+	// declare; "" and nil without one.
+	checkoutOrigin string
+	checkout       http.Handler
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -79,35 +84,24 @@ func Graph(client any) *app.App {
 // AuthKit migrates itself as it is built.
 // Database.SkipMigrations validates existing schemas instead of
 // applying startup schema, partition or River changes. ctx bounds the
-// database; nothing else does. Only the database, an unknown provider write
-// mode, an invalid River schema and the money-safety refusal (a test seam
-// beside a live PSP) fail construction. Anything else that cannot be served
-// is refused alone and reported (Ready, Probes' openrails_configuration): an
-// optional setting, a declared merchant, one of its documents. Vault login, PSP posture and Redis recover in the
-// background. It never changes a catalog: a catalog document applies by an
-// explicit ApplyCatalog.
+// database; nothing else does. Only the database (Deps.Postgres is required),
+// an unknown provider write mode, an invalid River schema and the
+// money-safety refusal (a test seam beside a live PSP) fail construction.
+// Anything else that cannot be served is refused alone and reported (Ready,
+// Probes' openrails_configuration): an optional setting, a declared merchant,
+// one of its documents, the checkout origin. PSP posture and Redis recover in
+// the background. It never changes a catalog: a catalog document applies by
+// an explicit ApplyCatalog.
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if deps.Postgres == nil {
+		return nil, fmt.Errorf("openrails: Deps.Postgres is required")
+	}
 	declarations, refused, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
-	}
-	if deps.PostgresSession != nil && deps.Postgres == nil {
-		return nil, fmt.Errorf("openrails: Deps.PostgresSession requires Deps.Postgres")
-	}
-	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
-		url := deps.Postgres.Config().ConnString()
-		if url == "" {
-			return nil, fmt.Errorf("openrails: Config.DB is required when Deps.Postgres was not built from a connection string")
-		}
-		db := config.DBConfig{}
-		if cfg.DB != nil {
-			db = *cfg.DB
-		}
-		db.URL = url
-		cfg.DB = &db
 	}
 	bootstrap := &app.BootstrapOptions{
 		PGXPool:              deps.Postgres,
@@ -134,6 +128,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	rt := application.Runtime
 	rt.RefuseDegraded(refused)
+	if rt.Vault.State() != nil {
+		rt.Refuse("vault", rt.Vault.State())
+	}
 	// Client operations need the same provider and secret graph as the
 	// standalone server; neither workers nor routes are prerequisites.
 	if err := rt.ServeMerchantsService(ctx); err != nil {
@@ -155,6 +152,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
 	}
+	e.serveCheckout(cfg, declarations, deps.CheckoutAssets)
 	rt.CheckBookIdentity(ctx)
 	ids := e.declaredIDs()
 	rt.PreloadMerchantConfig(ids...)
@@ -222,8 +220,7 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 	return ids
 }
 
-// validate enforces what embedded construction must declare and seeds the
-// protective defaults the standalone loader applies; it returns
+// validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
 func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, []config.Degradation, error) {
@@ -236,10 +233,7 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 	default:
 		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
 	}
-	declarations, refused, err := config.DeclaredMerchants(cfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("openrails: %w", err)
-	}
+	declarations, refused := config.DeclaredMerchants(cfg)
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return nil, nil, err
@@ -252,17 +246,9 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 	// Vault holds a merchant's configuration: what its declaration names
 	// beside its slug is ignored, and reported.
 	for i, m := range declarations {
-		if err := config.RefuseDeclarationBesideVault(cfg, m.Slug, m); err != nil {
+		if err := config.RefuseDeclarationBesideVault(cfg, m.Slug, m.MerchantDocument); err != nil {
 			refused = append(refused, config.Degradation{Field: merchantSubject(m.Slug) + ".declaration", Err: fmt.Errorf("%w; Vault's configuration serves", err)})
-			declarations[i] = config.MerchantDeclaration{Slug: m.Slug, Issuer: m.Issuer}
-		}
-	}
-	if !cfg.RateLimitsDisabled {
-		if cfg.RateLimits == nil {
-			cfg.RateLimits = config.DefaultRateLimits()
-		}
-		if cfg.Captcha == nil {
-			cfg.Captcha = config.DefaultCaptcha()
+			declarations[i] = config.MerchantDeclaration{MerchantDocument: config.MerchantDocument{Slug: m.Slug}, Issuer: m.Issuer, Binding: m.Binding}
 		}
 	}
 	return declarations, refused, nil

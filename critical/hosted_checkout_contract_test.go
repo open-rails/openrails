@@ -15,24 +15,33 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
 
-func hostCheckoutPage(t *testing.T, w *world) *httptest.Server {
+// declareCheckoutPage declares the payment page on a loopback origin of its
+// own, from the built assets, before the engine is built;
+// serveCheckoutPage serves it there.
+func declareCheckoutPage(t *testing.T, cfg *openrails.Config, deps *openrails.Deps) *httptest.Server {
 	t.Helper()
 	assets := os.Getenv("OPENRAILS_CRITICAL_PAYMENT_ASSETS")
 	require.NotEmpty(t, assets, "built real payment assets are mandatory")
 	server := httptest.NewUnstartedServer(nil)
-	origin := "http://" + server.Listener.Addr().String()
-	canonical, handler, err := w.engine.CheckoutPage(origin, os.DirFS(assets))
-	require.NoError(t, err)
-	require.Equal(t, origin, canonical)
+	t.Cleanup(server.Close)
+	cfg.CheckoutOrigin = "http://" + server.Listener.Addr().String()
+	deps.CheckoutAssets = os.DirFS(assets)
+	return server
+}
+
+func serveCheckoutPage(t *testing.T, server *httptest.Server, engine *openrails.Engine) *httptest.Server {
+	t.Helper()
+	origin, handler := engine.CheckoutPage()
+	require.Equal(t, "http://"+server.Listener.Addr().String(), origin)
 	require.NotNil(t, handler)
 	server.Config.Handler = handler
 	server.Start()
-	t.Cleanup(server.Close)
 	return server
 }
 func hostPageRequest(t *testing.T, server *httptest.Server, method, path, token string, body any, headers ...map[string]string) (int, http.Header, []byte) {
@@ -60,7 +69,7 @@ func hostPageRequest(t *testing.T, server *httptest.Server, method, path, token 
 func hostPayOrder(t *testing.T, a *authorityWorld, key string, embedded bool) (*billing.Order, string) {
 	t.Helper()
 	price := hostProduct(t, a.alpha, key)
-	order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: key, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done?order={ORDER_ID}", Embedded: embedded}})
+	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done?order={ORDER_ID}", Embedded: embedded}})
 	require.NoError(t, err)
 	require.NotNil(t, order.PayURL)
 	address, err := url.Parse(*order.PayURL)
@@ -70,8 +79,9 @@ func hostPayOrder(t *testing.T, a *authorityWorld, key string, embedded bool) (*
 }
 func TestHostedCheckout(t *testing.T) {
 	t.Run("OR-J03-S01/capability-pays-only-its-order", func(t *testing.T) {
-		a, p := newPaymentWorld(t)
-		page := hostCheckoutPage(t, a.world)
+		var page *httptest.Server
+		a, p := newPaymentWorld(t, func(w *world) { page = declareCheckoutPage(t, &w.cfg, &w.deps) })
+		serveCheckoutPage(t, page, a.engine)
 		order, secret := hostPayOrder(t, a, "hosted", false)
 		status, headers, raw := hostPageRequest(t, page, "GET", "/v1/me/orders/"+order.ID.String(), secret, nil)
 		require.Equal(t, 200, status, string(raw))
@@ -96,8 +106,9 @@ func TestHostedCheckout(t *testing.T) {
 		require.Equal(t, found.Payment.PaymentID, canonical.Payment.PaymentID)
 	})
 	t.Run("OR-J03-S02/foreign-tampered-and-expired-capability-refused", func(t *testing.T) {
-		a, p := newPaymentWorld(t)
-		page := hostCheckoutPage(t, a.world)
+		var page *httptest.Server
+		a, p := newPaymentWorld(t, func(w *world) { page = declareCheckoutPage(t, &w.cfg, &w.deps) })
+		serveCheckoutPage(t, page, a.engine)
 		first, secret := hostPayOrder(t, a, "first", false)
 		second, secondSecret := hostPayOrder(t, a, "second", false)
 		for _, trial := range []struct {
@@ -117,12 +128,14 @@ func TestHostedCheckout(t *testing.T) {
 		require.Empty(t, money.Items)
 	})
 	t.Run("OR-J03-S03/checkout-and-api-authority-stay-separate", func(t *testing.T) {
+		var page *httptest.Server
 		a, _ := newPaymentWorld(t, func(w *world) {
-			declaration := w.cfg.Merchants["alpha"]
+			declaration := cfgMerchant(w.cfg, "alpha")
 			declaration.Checkout = &billing.MerchantCheckoutSettings{EmbedOrigins: []string{"https://merchant.critical.invalid"}}
-			w.cfg.Merchants["alpha"] = declaration
+			setCfgMerchant(&w.cfg, "alpha", declaration)
+			page = declareCheckoutPage(t, &w.cfg, &w.deps)
 		})
-		page := hostCheckoutPage(t, a.world)
+		serveCheckoutPage(t, page, a.engine)
 		order, secret := hostPayOrder(t, a, "embedded", true)
 		for _, token := range []string{secret, a.alphaKey.Secret, a.aliceToken} {
 			status, _, raw := hostPageRequest(t, page, "GET", "/v1/admin/customers", token, nil)
@@ -138,8 +151,9 @@ func TestHostedCheckout(t *testing.T) {
 		require.Empty(t, headers.Get("Access-Control-Allow-Origin"))
 	})
 	t.Run("OR-J03-S05/real-assets-and-config-redact-private-state", func(t *testing.T) {
-		a, p := newPaymentWorld(t)
-		page := hostCheckoutPage(t, a.world)
+		var page *httptest.Server
+		a, p := newPaymentWorld(t, func(w *world) { page = declareCheckoutPage(t, &w.cfg, &w.deps) })
+		serveCheckoutPage(t, page, a.engine)
 		order, secret := hostPayOrder(t, a, "assets", false)
 		status, headers, html := hostPageRequest(t, page, "GET", "/pay/"+order.ID.String(), "", nil)
 		require.Equal(t, 200, status, string(html))

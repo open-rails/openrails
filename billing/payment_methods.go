@@ -9,7 +9,7 @@ import (
 // unknown ones are absent.
 type PaymentMethodListParams struct {
 	PageRequest
-	IDs []PaymentMethodID
+	IDs []PaymentMethodID `form:"ids,comma"`
 }
 
 // PaymentMethodStatus is where a saved card stands. Only an active card is
@@ -167,10 +167,10 @@ type UpdatePaymentMethodParams struct {
 const (
 	// CodeDefaultPaymentMethodRequired: the customer has no default card for
 	// the currency (400).
-	CodeDefaultPaymentMethodRequired = "default_payment_method_required"
+	CodeDefaultPaymentMethodRequired ErrorCode = "default_payment_method_required"
 	// CodeDefaultPaymentMethodInvalid: the card cannot be the customer's
 	// default for the currency (400).
-	CodeDefaultPaymentMethodInvalid = "default_payment_method_invalid"
+	CodeDefaultPaymentMethodInvalid ErrorCode = "default_payment_method_invalid"
 )
 
 // SetDefaultPaymentMethodParams makes a saved card the customer's default for

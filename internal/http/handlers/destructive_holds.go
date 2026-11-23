@@ -19,7 +19,11 @@ func ListDestructiveHolds(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "")
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseDestructiveHoldID)
+	var query billing.DestructiveHoldListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}

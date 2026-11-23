@@ -77,10 +77,10 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 			t.Cleanup(vault.Close)
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: vault.URL()}
-			merchant := w.cfg.Merchants["alpha"]
+			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.PSPs = openrails.PSPs{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
 			merchant.CardVault = "nmi"
-			w.cfg.Merchants["alpha"] = merchant
+			setCfgMerchant(&w.cfg, "alpha", merchant)
 		})
 		psps, err := cards.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
@@ -239,6 +239,33 @@ func TestPublicSDK(t *testing.T) {
 		}
 		require.True(t, found, "the SDK's report created its real observable merchant finding")
 
+	})
+	t.Run("OR-J04-S75/the-generated-client-gets-the-servers-own-refusals", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		// A malformed query value is refused before any handler, the same way
+		// on every route.
+		for _, path := range []string{"/v1/admin/orders?overdue=maybe", "/v1/admin/payment-attempts?since=yesterday", "/v1/admin/orders?ids=ord_nonsense"} {
+			status, raw := a.request(t, http.MethodGet, path, a.alphaKey.Secret, nil)
+			require.Equal(t, http.StatusBadRequest, status, path+": "+string(raw))
+			require.Contains(t, string(raw), `"code":"invalid_query"`, path)
+		}
+		// What the client once refused itself the server now answers, in
+		// process and over HTTP alike.
+		for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
+			_, err := client.Admit(t.Context(), nil)
+			var refused *billing.StatusError
+			require.ErrorAs(t, err, &refused)
+			require.Equal(t, billing.CodeInvalidParam, refused.Code)
+			require.NotNil(t, refused.Param)
+			require.Equal(t, "items", *refused.Param)
+			_, err = client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{Amount: 1, Currency: "usd", Source: "probe", SourceID: "probe"}})
+			require.ErrorAs(t, err, &refused)
+			require.Equal(t, billing.CodeInvalidParam, refused.Code)
+			// No URL carries an empty path segment: refused before any I/O.
+			_, err = client.GetOrder(t.Context(), billing.OrderID{})
+			require.ErrorIs(t, err, billing.ErrInvalid)
+		}
+		require.Empty(t, p.effects(t))
 	})
 	t.Run("OR-J04-S03/browser-network-retry-and-cancellation-stay-bounded", func(t *testing.T) {
 		a, p := newPaymentWorld(t)

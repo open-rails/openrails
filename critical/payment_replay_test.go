@@ -30,7 +30,7 @@ func TestPaymentReplay(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		var accepted []billing.Order
 		for _, key := range []string{"first-independent-order", "second-independent-order"} {
-			order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: key})
+			order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines})
 			require.NoError(t, err)
 			require.NotEqual(t, billing.OrderComplete, order.Status)
 			accepted = append(accepted, *order)

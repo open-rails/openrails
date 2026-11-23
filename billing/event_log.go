@@ -5,14 +5,14 @@ import (
 	"time"
 )
 
-const CodeEventCursorExpired = "event_cursor_expired"
+const CodeEventCursorExpired ErrorCode = "event_cursor_expired"
 
 // EventQuery reads committed facts after a caller-owned cursor. Types is fixed
 // for that cursor; an empty cursor starts at the oldest retained fact.
 type EventQuery struct {
-	After string
-	Limit int
-	Types []string
+	After string   `form:"after"`
+	Limit int      `form:"limit"`
+	Types []string `form:"type"`
 }
 
 type EventSubject struct {

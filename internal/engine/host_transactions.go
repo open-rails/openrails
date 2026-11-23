@@ -45,6 +45,9 @@ func (e *Engine) StopRunningChargeTx(ctx context.Context, mid billing.MerchantID
 // AdmitTx admits each request inside tx; commit it with the host's request
 // rows. A refused request is a verdict and writes nothing.
 func (e *Engine) AdmitTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
+	if err := (billing.AdmitBatchParams{Items: requests}).Validate(); err != nil {
+		return nil, err
+	}
 	ctx, err := e.bind(ctx, mid, tx)
 	if err != nil {
 		return nil, err
@@ -58,6 +61,9 @@ func (e *Engine) AdmitTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx,
 // CaptureAdmissionsTx settles each admission inside tx; commit it with the
 // host's record of the finished work.
 func (e *Engine) CaptureAdmissionsTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
+	if err := (billing.CaptureAdmissionBatchParams{Items: items}).Validate(); err != nil {
+		return nil, err
+	}
 	ctx, err := e.bind(ctx, mid, tx)
 	if err != nil {
 		return nil, err
@@ -70,6 +76,9 @@ func (e *Engine) CaptureAdmissionsTx(ctx context.Context, mid billing.MerchantID
 // ReleaseAdmissionsTx releases each admission inside tx; commit it with the
 // host's record of the failed work.
 func (e *Engine) ReleaseAdmissionsTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
+	if err := (billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}).Validate(); err != nil {
+		return nil, err
+	}
 	ctx, err := e.bind(ctx, mid, tx)
 	if err != nil {
 		return nil, err

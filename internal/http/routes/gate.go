@@ -72,7 +72,7 @@ const (
 )
 
 // codeFor is the code a host's error from st answers.
-func codeFor(st step, err error) string {
+func codeFor(st step, err error) billing.ErrorCode {
 	switch st {
 	case stepCan:
 		switch {
@@ -148,7 +148,7 @@ func refuse(r *httprequest.Request, route Route, a any, st step, err error) {
 
 // refuseCode answers a refusal of OpenRails' own rules; a fault names the
 // provider's misbehavior for the log.
-func refuseCode(r *httprequest.Request, route Route, a any, code, why string) {
+func refuseCode(r *httprequest.Request, route Route, a any, code billing.ErrorCode, why string) {
 	err := error(billingauth.Refusal(code))
 	if why != "" {
 		err = errors.Join(err, fault(why))
@@ -811,11 +811,8 @@ func (w *scimRefusals) flush() {
 }
 
 // scimMerchant is the merchant the SCIM gate admitted: a provisioning
-// token's, an application's, or the in-process directory's.
+// token's or an application's.
 func (e *Env) scimMerchant(r *http.Request) (billing.MerchantID, error) {
-	if !e.SCIMMerchant.IsZero() {
-		return e.SCIMMerchant, nil
-	}
 	if mid, ok := r.Context().Value(provisionerKey{}).(billing.MerchantID); ok && !mid.IsZero() {
 		return mid, nil
 	}

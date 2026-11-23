@@ -1,7 +1,7 @@
 package guide
 
 import (
-	"io/fs"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,12 +10,13 @@ import (
 )
 
 // EmbeddedCheckoutPage serves the payment page on its own origin, ahead of
-// every other route. assets is the built web/pay page.
-func EmbeddedCheckoutPage(router *gin.Engine, bill *openrails.Engine, assets fs.FS, format gin.LogFormatter) error {
+// every other route. The engine was built with Config.CheckoutOrigin and
+// Deps.CheckoutAssets.
+func EmbeddedCheckoutPage(router *gin.Engine, bill *openrails.Engine, format gin.LogFormatter) error {
 	// guide:embedded-checkout
-	origin, page, err := bill.CheckoutPage("https://pay.example.com", assets)
-	if err != nil {
-		return err
+	origin, page := bill.CheckoutPage()
+	if page == nil {
+		return errors.New("no checkout page: set Config.CheckoutOrigin and Deps.CheckoutAssets")
 	}
 	pay, err := openrailsgin.CheckoutOrigin(origin, page)
 	if err != nil {

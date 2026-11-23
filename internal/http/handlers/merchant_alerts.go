@@ -36,7 +36,7 @@ func pathID[T interface{ IsZero() bool }](r *httprequest.Request, parse func(str
 }
 
 func alertValidationError(r *httprequest.Request, verr *alerting.ValidationError) {
-	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_invalid", verr.Error()).
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeWebhookInvalid, verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 
@@ -56,7 +56,11 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 
 // ListAlertWebhooks handles GET /v1/merchant/alert-webhooks.
 func ListAlertWebhooks(r *httprequest.Request) {
-	ids, ok := listIDs(r, billing.ParseAlertWebhookID)
+	var query billing.AlertWebhookListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}

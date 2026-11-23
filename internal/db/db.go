@@ -1,14 +1,10 @@
 package db
 
 import (
-	"context"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/sirupsen/logrus"
 )
 
 // DB wraps the application's database handle: a pgx/v5 pool that all
@@ -24,8 +20,8 @@ type DB struct {
 	// direct is set only for transaction pooling and copied from the host.
 	direct *pgxpool.Config
 
-	// ownsPool: NewDB created the pool and Close() must close it; pools
-	// injected by embedded hosts (NewWithPGXPool) stay open.
+	// ownsPool: Close closes the pool (NewOwningPGXPool, SeparatePool);
+	// pools injected by embedded hosts (NewWithPGXPool) stay open.
 	ownsPool bool
 
 	// rw relocates statements to the configured schema (#471); identity for
@@ -36,125 +32,6 @@ type DB struct {
 	partitions *partitionState
 }
 
-// Connect retry pacing (xs-007 row 40). There is deliberately NO overall
-// budget: a database that is not reachable yet is observed by the ping that
-// fails, and the only thing that ends the wait is the caller's context — a
-// process asked to stop (SIGTERM), or a test that gave up. The 60 s cap this
-// replaced turned a two-minute failover into a fatal boot and a crash loop;
-// a process that is waiting is not ready (no listener, no /readyz), which is
-// the truthful state, and it becomes ready the moment the ping succeeds.
-// Each ping is a single I/O call with its own bound; the delay between them
-// backs off to a poll cadence.
-const (
-	dbConnectBaseDelay   = time.Second
-	dbConnectMaxDelay    = 5 * time.Second
-	dbConnectPingTimeout = 5 * time.Second
-
-	dbMaxOpenConns    = 30
-	dbConnMaxLifetime = time.Hour
-	dbConnMaxIdleTime = 15 * time.Minute
-)
-
-// NewDB opens the application pool and waits for the database to answer.
-// ctx bounds the wait: it is the boot context (canceled by SIGTERM in the
-// standalone binary), never a package clock.
-func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
-	return newDB(ctx, cfg, true)
-}
-
-// NewDBOnce opens the same owned, schema-aware pool with one connectivity
-// attempt. One-shot callers bound ctx; serving processes use NewDB's retry.
-func NewDBOnce(ctx context.Context, cfg *config.Config) (*DB, error) {
-	return newDB(ctx, cfg, false)
-}
-
-func newDB(ctx context.Context, cfg *config.Config, retry bool) (_ *DB, err error) {
-	if cfg == nil || cfg.DB == nil {
-		return nil, fmt.Errorf("database config is nil")
-	}
-	url := config.DBConnectionString(cfg.DB)
-	if url == "" {
-		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	pool, err := newTunedPGXPool(ctx, url, cfg.DB.SQLTrace, retry)
-	if err != nil {
-		return nil, err
-	}
-	return &DB{river: &runtimeBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg)), partitions: &partitionState{}}, nil
-}
-
-// newTunedPGXPool parses the connection string, applies the pool tuning,
-// installs the optional query tracer, and verifies connectivity with the
-// caller's retry policy.
-func newTunedPGXPool(ctx context.Context, url string, sqlTrace, retry bool) (*pgxpool.Pool, error) {
-	pcfg, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return nil, fmt.Errorf("parse postgres config: %w", err)
-	}
-	pcfg.MaxConns = dbMaxOpenConns
-	pcfg.MaxConnLifetime = dbConnMaxLifetime
-	pcfg.MaxConnIdleTime = dbConnMaxIdleTime
-	if sqlTrace {
-		pcfg.ConnConfig.Tracer = newSQLTracer()
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
-	if err != nil {
-		return nil, fmt.Errorf("create pgx pool: %w", err)
-	}
-	ping := pool.Ping
-	if retry {
-		ping = func(ctx context.Context) error { return pingWithRetry(ctx, pool.Ping, "database") }
-	}
-	if err := ping(ctx); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return pool, nil
-}
-
-func pingWithRetry(ctx context.Context, ping func(context.Context) error, label string) error {
-	started := time.Now()
-	delay := dbConnectBaseDelay
-	var lastErr error
-	for {
-		pingCtx, cancel := context.WithTimeout(ctx, dbConnectPingTimeout)
-		lastErr = ping(pingCtx)
-		cancel()
-		if lastErr == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return fmt.Errorf("failed to connect to %s after %s (last: %v): %w", label, time.Since(started).Round(time.Second), lastErr, ctx.Err())
-		}
-
-		logrus.WithError(lastErr).WithField("waiting_for", time.Since(started).Round(time.Second).String()).
-			Warnf("%s ping failed; retrying in %s (no deadline: the caller's context ends the wait)", label, delay.Round(100*time.Millisecond))
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return fmt.Errorf("failed to connect to %s after %s (last: %v): %w", label, time.Since(started).Round(time.Second), lastErr, ctx.Err())
-		case <-timer.C:
-		}
-		if delay < dbConnectMaxDelay {
-			delay *= 2
-			if delay > dbConnectMaxDelay {
-				delay = dbConnectMaxDelay
-			}
-		}
-	}
-}
-
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
 // host keeps ownership of its pool; Close() is a no-op for it. schema is the
 // OpenRails Postgres schema (config.SchemaName); when it differs from
@@ -162,6 +39,17 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 // because OpenRails shares the host's pool and cannot repoint its search_path.
 func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 	return NewWithPGXPoolAndSessions(pool, schema, nil)
+}
+
+// NewOwningPGXPool wraps pool and takes it over: Close closes it. For a
+// one-off process that opened its own pool.
+func NewOwningPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
+	d, err := NewWithPGXPool(pool, schema)
+	if err != nil {
+		return nil, err
+	}
+	d.ownsPool = true
+	return d, nil
 }
 
 // NewWithPGXPoolAndSessions uses direct for session work when pool is

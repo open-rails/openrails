@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	auth "github.com/open-rails/authkit/auth"
 )
 
 // DestructiveHoldID identifies a durable break-glass incident.
@@ -49,19 +50,12 @@ type DestructiveHold struct {
 // to MaxBatchItems named incidents in one page; unknown ones are absent.
 type DestructiveHoldListParams struct {
 	PageRequest
-	IDs []DestructiveHoldID
+	IDs []DestructiveHoldID `form:"ids,comma"`
 }
 
 // ClearDestructiveHoldParams records why an authorized operator cleared this episode.
 type ClearDestructiveHoldParams struct {
 	Reason string `json:"reason"`
-}
-
-// DestructiveOperator identifies the trusted human operating an embedded
-// engine or server. Never populate it from an unverified HTTP request.
-type DestructiveOperator struct {
-	Issuer string `json:"issuer"`
-	ID     string `json:"id"`
 }
 
 // DestructiveHoldEvent announces one incident transition, without exposing
@@ -71,12 +65,13 @@ type DestructiveHoldEvent struct {
 	Scope  string            `json:"scope"`
 }
 
-// DestructiveHoldReview contains private operator evidence. It is available
-// only through trusted in-process operator methods, never merchant list routes.
+// DestructiveHoldReview is an incident with its private evidence: the actor
+// whose action opened it, the target, and who cleared it. Only the
+// standalone server's operator methods read it, never a merchant route.
 type DestructiveHoldReview struct {
-	Hold         DestructiveHold      `json:"hold"`
-	TriggerActor DestructiveOperator  `json:"trigger_actor"`
-	Target       string               `json:"target"`
-	ClearedBy    *DestructiveOperator `json:"cleared_by"`
-	ClearReason  string               `json:"clear_reason,omitempty"`
+	Hold         DestructiveHold `json:"hold"`
+	TriggerActor auth.Invoker    `json:"trigger_actor"`
+	Target       string          `json:"target"`
+	ClearedBy    *auth.Invoker   `json:"cleared_by"`
+	ClearReason  string          `json:"clear_reason,omitempty"`
 }

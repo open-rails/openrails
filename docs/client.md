@@ -86,15 +86,19 @@ tokens := (&clientcredentials.Config{
 	ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
 	EndpointParams: url.Values{"resource": {cc.Resource}},
 }).TokenSource(context.WithoutCancel(ctx)) // caches each token until it expires
-return openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{
-	Token: func(context.Context) (string, error) {
+remote, err := openrails.NewRemote(s.OpenRailsURL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{
+	s.Merchant: {Token: func(context.Context) (string, error) {
 		t, err := tokens.Token()
 		if err != nil {
 			return "", err
 		}
 		return t.AccessToken, nil
-	},
-})
+	}},
+}})
+if err != nil {
+	return nil, err
+}
+return remote.Merchant(s.Merchant)
 ```
 
 A merchant API key (`RemoteCredential.APIKey`) works the same way and carries
@@ -411,7 +415,7 @@ receipt, err := shop.ApplyCatalog(ctx, products, billing.ApplyCatalogParams{})
 if err != nil {
 	return err
 }
-if err := openrails.WriteCatalogReceipt(out, receipt); err != nil {
+if _, err := io.WriteString(out, receipt.String()); err != nil {
 	return err
 }
 if n := len(receipt.Conflicts); n > 0 {
@@ -507,10 +511,10 @@ own gate.
 a pay URL and send them there:
 
 ```go guide:checkout
-order, err := shop.CreateOrder(ctx, billing.CreateOrderParams{
-	IdempotencyKey: key, // made when the buyer decided, stored, resent on every retry
-	CustomerID:     customer,
-	Lines:          []billing.OrderLineParams{{PriceID: price}},
+// key is made when the buyer decides, stored, and resent on every retry.
+order, err := shop.CreateOrder(ctx, key, billing.CreateOrderParams{
+	CustomerID: customer,
+	Lines:      []billing.OrderLineParams{{PriceID: price}},
 	PayURL: &billing.OrderPayURLParams{
 		SuccessURL: "https://shop.example/thanks?order={ORDER_ID}",
 		CancelURL:  new("https://shop.example/cart"),
@@ -632,11 +636,11 @@ return nil
 | `RecordExternalPayment` | money received outside OpenRails against a usage order, idempotent on its transaction id, at most what it owes (`409 payment_exceeds_due`) |
 
 ```go guide:refund
-return shop.RefundPayment(ctx, payment, billing.RefundPaymentParams{
-	IdempotencyKey: key, // one per refund decision; a retry with it refunds once
-	Full:           true,
-	Reason:         "requested_by_customer",
-	RevokeAccess:   true,
+// key: one per refund decision; a retry with it refunds once
+return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
+	Full:         true,
+	Reason:       "requested_by_customer",
+	RevokeAccess: true,
 })
 ```
 
@@ -748,15 +752,12 @@ return check.Entitlements, nil
 ```
 
 ```go guide:grant-access
-_, err := shop.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{
-	IdempotencyKey: key,
-	Items: []billing.CreateProductAccessParams{{
-		CustomerID: customer,
-		ProductID:  product,
-		Hours:      new(7 * 24), // after its latest live window; nil with no EndsAt is indefinite
-		Reason:     billing.GrantReasonComp,
-	}},
-})
+_, err := shop.CreateProductAccess(ctx, key, []billing.CreateProductAccessParams{{
+	CustomerID: customer,
+	ProductID:  product,
+	Hours:      new(7 * 24), // after its latest live window; nil with no EndsAt is indefinite
+	Reason:     billing.GrantReasonComp,
+}})
 return err
 ```
 
@@ -794,7 +795,7 @@ network call and continues while OpenRails is unreachable; a cold one waits for
 one `SyncLeases` round trip or is `openrails.ErrUnavailable`. Nothing tunes it.
 
 ```go guide:gate-new
-var cfg openrails.GateConfig
+var deps openrails.GateDeps
 if url := os.Getenv("REDIS_URL"); url != "" {
 	opts, err := redis.ParseURL(url)
 	if err != nil {
@@ -802,9 +803,9 @@ if url := os.Getenv("REDIS_URL"); url != "" {
 	}
 	rdb := redis.NewClient(opts)
 	defer rdb.Close()
-	cfg.Redis = rdb
+	deps.Redis = rdb
 }
-gate, err := openrails.NewGate(client, cfg)
+gate, err := openrails.NewGate(client, deps)
 if err != nil {
 	log.Fatal(err)
 }
@@ -1075,8 +1076,7 @@ ids := make([]billing.FindingID, 0, len(page.Items))
 for _, p := range page.Items {
 	ids = append(ids, p.ID) // each carries its Change: what applying it does
 }
-_, err = shop.ApproveProposals(ctx, billing.ApproveProposalsParams{IDs: ids, Notes: "reviewed"},
-	openrails.WithIdempotencyKey(key))
+_, err = shop.ApproveProposals(ctx, key, billing.ApproveProposalsParams{IDs: ids, Notes: "reviewed"})
 return err
 ```
 
@@ -1180,8 +1180,8 @@ case errors.Is(err, billing.ErrPaymentRefused): // 402: nothing charged; another
 	return "declined"
 case errors.Is(err, billing.ErrIdempotencyKeyReused): // the key was sent with other terms: a bug
 	return "bug"
-case errors.As(err, &status) && status.Status < 500: // a refusal: act on status.Code, never Message
-	return status.Code
+case errors.As(err, &status) && status.Status < 500: // a refusal: act on its code, never Message
+	return string(status.Code) // a billing.ErrorCode, e.g. billing.CodeCardDeclined
 default: // no answer, or a 5xx: it may have committed; retry with the same key and terms
 	return "retry"
 }

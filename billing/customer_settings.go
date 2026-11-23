@@ -89,9 +89,8 @@ type TrustLevel struct {
 // low-balance line replaces that currency's (nulls inherit the merchant's).
 // Limits merge by limit: an override replaces what the customer's products
 // give, and inherit clears it. A null BillingPolicy or InvoiceProfile clears
-// it. Every field can change the
-// customer's spending authority: a person signed in needs a recent sign-in for
-// any write.
+// it. Every field can change the customer's spending authority, so a write
+// needs the admin route's permission; no recent sign-in is asked for.
 type UpdateCustomerParams struct {
 	UsageBilling    []UsageBillingAccountUpdate   `json:"usage_billing,omitempty"`
 	CreditLimits    []CreditLimit                 `json:"credit_limits,omitempty"`

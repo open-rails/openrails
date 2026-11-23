@@ -266,12 +266,12 @@ func TestCallbackContracts(t *testing.T) {
 	})
 	t.Run("OR-J28-S03/previous-signing-secret-expires-at-the-declared-deadline", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			psp := m.PSPs["stripe"]
 			psp.Secrets["webhook_signing_secret_previous"] = "whsec_previous_fixture"
 			psp.Settings["webhook_overlap_expires_at"] = w.clock.Now().Add(time.Hour).Format(time.RFC3339Nano)
 			m.PSPs["stripe"] = psp
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		fleet, order, object := unknownSale(t, a, p)
 		body := stripeNotice(t, "evt_overlap", "payment_intent.succeeded", object)
@@ -306,11 +306,11 @@ func TestCallbackContracts(t *testing.T) {
 	})
 	t.Run("OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			psp := m.PSPs["stripe"]
 			psp.Secrets["webhook_signing_secret_thin"] = "whsec_critical_thin"
 			m.PSPs["stripe"] = psp
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		// No pass runs: only the thin notice can settle the order.
 		passlessFleet(t, a.world)

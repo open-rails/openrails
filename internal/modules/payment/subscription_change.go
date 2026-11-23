@@ -326,7 +326,7 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 		sub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
 		// Ownership compares parsed customer ids, not their spelling.
 		if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
-			return nil, &TierChangeError{Code: codeSubscriptionNotFound, Message: "subscription not found"}
+			return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 		}
 	} else if sub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID); err != nil {
 		return nil, ErrTierChangeNoSubscription
@@ -352,10 +352,10 @@ func (s *PurchaseService) resolveChange(ctx context.Context, req *SubscriptionCh
 	if ref := strings.TrimSpace(req.PriceID); ref != "" {
 		c.priceGiven = true
 		if c.price, err = catalog.ResolveReference(ctx, s.PriceService, "", ref); err != nil {
-			return nil, &TierChangeError{Code: codePriceNotFound, Message: "price not found"}
+			return nil, &TierChangeError{Code: billing.CodePriceNotFound, Message: "price not found"}
 		}
 		if c.product, err = s.ProductService.GetByID(ctx, c.price.ProductID); err != nil {
-			return nil, &TierChangeError{Code: codeProductNotFound, Message: "product not found"}
+			return nil, &TierChangeError{Code: billing.CodeProductNotFound, Message: "product not found"}
 		}
 		c.tier = c.product.ID != c.currentProduct.ID
 		// A provider-run subscription moves within its provider's prices; an

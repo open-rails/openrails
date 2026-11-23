@@ -37,9 +37,9 @@ type Gate struct {
 	closed bool
 }
 
-// GateConfig configures a Gate. Nothing in it tunes timing, sizes or
-// tolerance: those follow from traffic.
-type GateConfig struct {
+// GateDeps is what a Gate keeps its state in beyond its process. Nothing
+// tunes timing, sizes or tolerance: those follow from traffic.
+type GateDeps struct {
 	// Redis makes the merchant's processes one gate: one lease and one hold
 	// per customer and limit set, kept in Redis, decided by one script per
 	// request. A process that cannot reach Redis admits from its own lease
@@ -98,22 +98,25 @@ const (
 // newLeaseID is a gate's lease id: a UUIDv7, as the server requires.
 func newLeaseID() billing.LeaseID { return billing.LeaseID(uuid.Must(uuid.NewV7())) }
 
-// NewGate starts a gate over c, a remote or embedded merchant handle. Its
-// lease is created on the first sync.
-func NewGate(c *Client, cfg GateConfig) (*Gate, error) {
+// NewGate starts a gate over c, a remote or embedded merchant handle acting
+// as itself: a gate serves every request, so a handle made with ActingFor is
+// refused. Its lease is created on the first sync.
+func NewGate(c *Client, deps GateDeps) (*Gate, error) {
 	switch {
 	case c == nil:
 		return nil, fmt.Errorf("openrails: NewGate needs a merchant handle")
-	case cfg.Redis != nil && cfg.Outbox != nil:
-		return nil, fmt.Errorf("openrails: GateConfig takes Redis or Outbox, not both")
+	case c.invoker != nil:
+		return nil, fmt.Errorf("openrails: NewGate needs the merchant's own handle, not one made with ActingFor")
+	case deps.Redis != nil && deps.Outbox != nil:
+		return nil, fmt.Errorf("openrails: GateDeps takes Redis or Outbox, not both")
 	}
 	g := &Gate{c: c}
-	if cfg.Redis != nil {
-		g.shared = newSharedGate(c, cfg.Redis)
+	if deps.Redis != nil {
+		g.shared = newSharedGate(c, deps.Redis)
 		g.shared.start()
 		return g, nil
 	}
-	g.local = newLocalGate(c, cfg.Outbox, true)
+	g.local = newLocalGate(c, deps.Outbox, true)
 	return g, nil
 }
 
@@ -186,10 +189,11 @@ func (g *Gate) Record(ctx context.Context, u billing.UsageParams) error {
 	return g.local.record(ctx, item)
 }
 
-// Limits is where the customer stands on each limit, for display: the values
-// of the last sync that reported them (or a read when none did), less the
-// usage the gate has not yet sent. It never adds spendable capacity.
-func (g *Gate) Limits(ctx context.Context, customer billing.CustomerID) ([]billing.CustomerLimit, error) {
+// ListCustomerLimits is where the customer stands on each limit, for
+// display: the values of the last sync that reported them (or a read when
+// none did), less the usage the gate has not yet sent. It never adds
+// spendable capacity.
+func (g *Gate) ListCustomerLimits(ctx context.Context, customer billing.CustomerID) ([]billing.CustomerLimit, error) {
 	if customer.IsZero() {
 		return nil, invalidParam("customer_id", "customer_id is required")
 	}
@@ -301,7 +305,7 @@ func (t *Ticket) Capture(ctx context.Context, u billing.CaptureUsage) error {
 	t.mu.Lock()
 	if t.state != ticketOpen {
 		t.mu.Unlock()
-		return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceConflict, Message: "the ticket was already captured or released"}}
+		return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeResourceConflict, Message: "the ticket was already captured or released"}}
 	}
 	t.state = ticketCaptured
 	t.mu.Unlock()
@@ -621,7 +625,7 @@ func capacityHeld(retry int64) *billing.Refusal {
 }
 
 func errNotPriced(eventType string) error {
-	return &billing.StatusError{Status: http.StatusUnprocessableEntity, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeUsageNotPriced,
+	return &billing.StatusError{Status: http.StatusUnprocessableEntity, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeUsageNotPriced,
 		Message: fmt.Sprintf("the hold OpenRails issued does not price event type %q", eventType)}}
 }
 
@@ -743,4 +747,15 @@ func (g *Gate) releaseRemote(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("%w: release answered %d results for one item", billing.ErrUnreachable, len(results))
 	}
 	return results[0].Err()
+}
+
+// normalizeCurrency is the server's spelling of a currency or unit code, so
+// the gate's local accounts match its own: a qualified unit keeps its exact
+// spelling.
+func normalizeCurrency(currency string) string {
+	currency = strings.TrimSpace(currency)
+	if strings.ContainsAny(currency, ":/") {
+		return currency // a qualified unit keeps its exact spelling
+	}
+	return strings.ToUpper(currency)
 }

@@ -30,10 +30,10 @@ import (
 )
 
 // ErrProductNotFound: a grant names no product of the merchant.
-var ErrProductNotFound = apperr.New(http.StatusNotFound, "resource_not_found", "product not found")
+var ErrProductNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "product not found")
 
 // ErrIdempotencyKeyReused: the key already granted another customer or product.
-var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, "idempotency_key_reused", "idempotency key already granted another product or customer")
+var ErrIdempotencyKeyReused = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "idempotency key already granted another product or customer")
 
 // Service owns free product grants and product access reads.
 type Service struct {

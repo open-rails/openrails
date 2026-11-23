@@ -33,7 +33,7 @@ func publicGrant(t *testing.T, a *authorityWorld, key string, hours int) billing
 	t.Helper()
 	product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: []string{"library:read"}})
 	require.NoError(t, err)
-	grants, err := a.alphaRemote.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: key, Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), ProductID: product.ID, Hours: ptr(hours), Reason: billing.GrantReasonComp}}})
+	grants, err := a.alphaRemote.CreateProductAccess(t.Context(), key, []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), ProductID: product.ID, Hours: ptr(hours), Reason: billing.GrantReasonComp}})
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	require.Equal(t, product.ID, grants[0].ProductID)
@@ -70,7 +70,7 @@ func TestPublicEntitlements(t *testing.T) {
 		}
 		publicAccess(t, a, start.Add(36*time.Hour), false)
 		a.clock.Advance(24 * time.Hour)
-		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: order.CustomerID, Entitlements: []string{"library:read"}})
+		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), order.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}})
 		require.NoError(t, err)
 		require.EqualValues(t, 129600, tenure.Seconds["library:read"], "36 hours, not the sum of two overlapping 24-hour sources")
 	})
@@ -151,12 +151,12 @@ func TestPublicEntitlements(t *testing.T) {
 			at      time.Time
 			seconds int64
 		}{{grant.StartsAt, 0}, {grant.StartsAt.Add(3 * time.Hour), 10800}, {*grant.EndsAt, 21600}} {
-			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
+			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
 			require.NoError(t, err)
 			require.Equal(t, sample.seconds, tenure.Seconds["library:read"])
 			require.Zero(t, tenure.Seconds["never:granted"])
 		}
-		_, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
+		_, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
 		require.ErrorIs(t, err, billing.ErrInvalid)
 	})
 	t.Run("OR-J27-S04/archive-and-refund-obey-explicit-access-policy", func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestPublicEntitlements(t *testing.T) {
 				_, err := a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 				require.NoError(t, err)
 				publicAccess(t, a, time.Time{}, true)
-				refund, err := a.alphaRemote.RefundPayment(t.Context(), *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: revoke, Reason: "Explicit customer refund policy", IdempotencyKey: "policy-refund"})
+				refund, err := a.alphaRemote.RefundPayment(t.Context(), "policy-refund", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: revoke, Reason: "Explicit customer refund policy"})
 				require.NoError(t, err)
 				require.Equal(t, billing.PaymentSucceeded, refund.Status)
 				publicAccess(t, a, time.Time{}, !revoke)
@@ -207,9 +207,9 @@ func TestPublicEntitlements(t *testing.T) {
 		t.Run("membership-renews-after-a-partial-or-kept-access-refund", func(t *testing.T) {
 			a, _, sub := purchasedMembership(t)
 			payment := membershipPayment(t, a, sub)
-			_, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Amount: 4_000_000, RevokeAccess: true, Reason: "Partial goodwill", IdempotencyKey: "membership-partial"})
+			_, err := a.alpha.RefundPayment(t.Context(), "membership-partial", payment, billing.RefundPaymentParams{Amount: 4_000_000, RevokeAccess: true, Reason: "Partial goodwill"})
 			require.NoError(t, err)
-			_, err = a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Full: true, Reason: "Rest, access kept", IdempotencyKey: "membership-rest"})
+			_, err = a.alpha.RefundPayment(t.Context(), "membership-rest", payment, billing.RefundPaymentParams{Full: true, Reason: "Rest, access kept"})
 			require.NoError(t, err)
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestPublicEntitlements(t *testing.T) {
 		t.Run("membership-full-refund-revoking-access-ends-it", func(t *testing.T) {
 			a, p, sub := purchasedMembership(t)
 			a.clock.Advance(time.Hour)
-			_, err := a.alpha.RefundPayment(t.Context(), membershipPayment(t, a, sub), billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end", IdempotencyKey: "membership-full"})
+			_, err := a.alpha.RefundPayment(t.Context(), "membership-full", membershipPayment(t, a, sub), billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end"})
 			require.NoError(t, err)
 			ended, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestPublicEntitlements(t *testing.T) {
 			a.clock.Advance(due.Sub(a.clock.Now()))
 			runRegistered(t, startFleet(t, a.world), "openrails.billing_pass", 1)
 			renewalSettled(t, a, p, sub, due)
-			_, err := a.alpha.RefundPayment(t.Context(), first, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the first period", IdempotencyKey: "membership-first"})
+			_, err := a.alpha.RefundPayment(t.Context(), "membership-first", first, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the first period"})
 			require.NoError(t, err)
 			current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 			require.NoError(t, err)
@@ -429,7 +429,7 @@ func TestSubscriptionAccessBoundary(t *testing.T) {
 			windows = append(windows, window)
 		}
 		// A manual grant overlaps the same product; it must survive the subscription closure.
-		grants, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "unrelated-source", Items: []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, EndsAt: &end, Reason: billing.GrantReasonComp}}})
+		grants, err := a.alpha.CreateProductAccess(t.Context(), "unrelated-source", []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, EndsAt: &end, Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		require.Len(t, grants, 1)
 		var before string

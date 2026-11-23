@@ -19,7 +19,7 @@ func GetAdmission(r *httprequest.Request) {
 	}
 	out, err := svc.GetAdmission(r.Request.Context(), r.Param("request_id"))
 	if errors.Is(err, spendgate.ErrNotFound) {
-		r.ErrorCode("admission_not_found", "")
+		r.ErrorCode(billing.CodeAdmissionNotFound, "")
 		return
 	}
 	if err != nil {

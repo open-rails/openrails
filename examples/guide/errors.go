@@ -17,8 +17,8 @@ func Classify(err error) string {
 		return "declined"
 	case errors.Is(err, billing.ErrIdempotencyKeyReused): // the key was sent with other terms: a bug
 		return "bug"
-	case errors.As(err, &status) && status.Status < 500: // a refusal: act on status.Code, never Message
-		return status.Code
+	case errors.As(err, &status) && status.Status < 500: // a refusal: act on its code, never Message
+		return string(status.Code) // a billing.ErrorCode, e.g. billing.CodeCardDeclined
 	default: // no answer, or a 5xx: it may have committed; retry with the same key and terms
 		return "retry"
 	}

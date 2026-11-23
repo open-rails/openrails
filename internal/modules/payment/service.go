@@ -450,7 +450,7 @@ func validateTierChangeSubscriptionStatus(subscription *models.Subscription) err
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPastDue {
 		return nil
 	}
-	return &TierChangeError{Code: codeSubscriptionNotActive, Message: "only active or past-due subscriptions can change tier"}
+	return &TierChangeError{Code: billing.CodeSubscriptionNotActive, Message: "only active or past-due subscriptions can change tier"}
 }
 
 func (s *PurchaseService) validateTierChangePreviewTarget(
@@ -486,7 +486,7 @@ func (s *PurchaseService) validateTierChangePreviewTarget(
 			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for CCBill"}
 		}
 		if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
-			return &TierChangeError{Code: codeCustomerEmailRequired, Message: "verified customer email and username are required for CCBill"}
+			return &TierChangeError{Code: billing.CodeCustomerEmailRequired, Message: "verified customer email and username are required for CCBill"}
 		}
 	case existingSub.Rail == models.RailSolana:
 		if !priceHasSolanaRecurring(newPrice) {

@@ -109,11 +109,11 @@ func lotExpired(t *testing.T, client *openrails.Client, id billing.CreditGrantID
 // suspendHeld declares the built-in schedule with held renewals suspended at
 // their allowance.
 func suspendHeld(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.MerchantSettings.DunningPolicy = &billing.DunningPolicy{Tiers: []billing.DunningTier{
 		{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 96, 144, 216}},
 	}, AccessWhileRenewalHeld: billing.DunningAccessSuspend}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 func TestBillingPass(t *testing.T) {
@@ -188,9 +188,9 @@ func TestBillingPass(t *testing.T) {
 	})
 	t.Run("OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(1)
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		oneUsage(t, a.alpha, usageInput(customer, "owed-past-grace", 3))
 		fleet := quietFleet(t, a.world)
@@ -215,7 +215,7 @@ func TestBillingPass(t *testing.T) {
 		_, price := publicSale(t, a, "tidied-order", 9_990_000, nil)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		expires := a.clock.Now().Add(time.Hour + 10*time.Minute)
-		order, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "tidied"})
+		order, err := a.alphaRemote.CreateOrder(t.Context(), "tidied", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
 		require.NoError(t, err)
 		advanceTo(a.world, expires.Add(time.Minute))
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: 9_990_000, Payment: billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "past-expiry"})
@@ -236,7 +236,7 @@ func TestBillingPass(t *testing.T) {
 		expires := a.clock.Now().Add(time.Hour)
 		// More than one batch of the expiry's reads.
 		for i := range 201 {
-			_, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: fmt.Sprintf("backlog-%d", i)})
+			_, err := a.alpha.CreateOrder(t.Context(), fmt.Sprintf("backlog-%d", i), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
 			require.NoError(t, err)
 		}
 		advanceTo(a.world, nextHour(expires))
@@ -250,7 +250,7 @@ func TestBillingPass(t *testing.T) {
 		_, price := publicSale(t, a, "overlapped-order", 9_990_000, nil)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		expires := a.clock.Now().Add(time.Hour)
-		order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "overlapped"})
+		order, err := a.alpha.CreateOrder(t.Context(), "overlapped", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
 		require.NoError(t, err)
 		advanceTo(a.world, nextHour(expires))
 		// The first pass reaches the order and waits on it.
@@ -296,7 +296,7 @@ func TestBillingPass(t *testing.T) {
 		require.NoError(t, err)
 		_, price := publicSale(t, a, "expires-before-the-renewal", 9_990_000, nil)
 		expires := due.Add(-20 * time.Minute)
-		order, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: sub.CustomerID, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "tidied-after-a-failed-scan"})
+		order, err := a.alphaRemote.CreateOrder(t.Context(), "tidied-after-a-failed-scan", billing.CreateOrderParams{CustomerID: sub.CustomerID, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
 		require.NoError(t, err)
 		fleet := quietFleet(t, a.world)
 		// The pass at the hour fails partway: the balance watch cannot post.

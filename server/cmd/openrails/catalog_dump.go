@@ -39,8 +39,13 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 		return fmt.Errorf("--slug is required")
 	}
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	pool, err := cliPool(cmd.Context())
+	if err != nil {
+		return err
+	}
 	return hosttools.DumpMerchantCatalog(cmd.Context(), hosttools.CatalogDumpOptions{
 		Config:   cfg,
+		PGXPool:  pool,
 		Merchant: slug,
 		Out:      cmd.OutOrStdout(),
 	})

@@ -60,13 +60,16 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (bill
 }
 
 func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name string) (billing.MerchantID, error) {
-	if cfg == nil || cfg.DB == nil {
+	if cfg == nil {
 		return billing.MerchantID{}, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(ctx, cfg)
+	pool, err := cliPool(ctx)
 	if err != nil {
 		return billing.MerchantID{}, err
 	}
-	defer database.Close()
+	database, err := db.NewWithPGXPool(pool, config.SchemaName(cfg))
+	if err != nil {
+		return billing.MerchantID{}, err
+	}
 	return resolveCLIMerchant(ctx, database, name)
 }

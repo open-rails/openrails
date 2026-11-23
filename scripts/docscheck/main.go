@@ -121,7 +121,7 @@ func realIndex(root string) (*Index, error) {
 		idx.Paths = append(idx.Paths, strings.Split(strings.TrimPrefix(p, "/"), "/"))
 	}
 	for _, c := range billing.ErrorCodes() {
-		idx.Codes[c.Code] = c.Status
+		idx.Codes[string(c.Code)] = c.Status
 	}
 	for _, p := range billing.Permissions() {
 		idx.Permissions[string(p)] = true
@@ -193,8 +193,7 @@ func realIndex(root string) (*Index, error) {
 			if json.Unmarshal(doc, &top) == nil && top["merchants"] != nil {
 				return nil
 			}
-			// W4 renames this ParseMerchantDocument.
-			_, err = openrails.ParseMerchantDeclaration(raw)
+			_, err = openrails.ParseMerchantDocument(raw)
 			return err
 		}
 		return nil

@@ -100,7 +100,7 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			d.Postgres = a.authPool
 			d.KeySource = keys.Static{Active: a.signer, Public: map[string]crypto.PublicKey{a.signer.KID(): a.signer.Public()}}
 		}))
-		w.cfg.Merchants["alpha"] = openrails.MerchantDeclaration{DisplayName: "Alpha", Issuer: authtest.Issuer}
+		setCfgMerchant(&w.cfg, "alpha", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Alpha"}, Issuer: authtest.Issuer})
 		w.deps.UserInfo = a.auth.UserInfo()
 		for _, change := range configure {
 			change(w)
@@ -144,19 +144,18 @@ func (a *authorityWorld) serve(t *testing.T) {
 func (a *authorityWorld) bindCustomers(t *testing.T, slug string) {
 	t.Helper()
 	require.NoError(t, a.engine.Close(context.Background()))
-	for name, declaration := range a.cfg.Merchants {
-		declaration.Issuer = ""
-		if name == slug {
-			declaration.Issuer = authtest.Issuer
+	for i := range a.cfg.Merchants {
+		a.cfg.Merchants[i].Issuer = ""
+		if a.cfg.Merchants[i].Slug == slug {
+			a.cfg.Merchants[i].Issuer = authtest.Issuer
 		}
-		a.cfg.Merchants[name] = declaration
 	}
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
-	a.beta, err = a.engine.MerchantBySlug("beta")
+	a.beta, err = declaredMerchant(a.engine, "beta")
 	require.NoError(t, err)
 	a.serve(t)
 }
@@ -226,12 +225,12 @@ func TestAuthority(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "authority-control"}})
 		require.NoError(t, err)
-		before, err := a.alpha.GetBalance(t.Context(), customer, "USD")
+		before, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		status, raw := a.request(t, "POST", "/v1/app/admissions", a.aliceToken, billing.AdmitBatchParams{Items: []billing.AdmitParams{{RequestID: "not-a-machine", CustomerID: customer, Currency: "USD", InvokerType: billing.InvokerTypeCustomer}}})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"application_required"`)
-		after, err := a.alpha.GetBalance(t.Context(), customer, "USD")
+		after, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Equal(t, before.BalanceAmount, after.BalanceAmount)
 		require.Equal(t, before.HeldAmount, after.HeldAmount)

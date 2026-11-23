@@ -18,8 +18,7 @@ func ApproveImport(ctx context.Context, shop *openrails.Client, pull billing.PSP
 	for _, p := range page.Items {
 		ids = append(ids, p.ID) // each carries its Change: what applying it does
 	}
-	_, err = shop.ApproveProposals(ctx, billing.ApproveProposalsParams{IDs: ids, Notes: "reviewed"},
-		openrails.WithIdempotencyKey(key))
+	_, err = shop.ApproveProposals(ctx, key, billing.ApproveProposalsParams{IDs: ids, Notes: "reviewed"})
 	return err
 	// guide:end
 }

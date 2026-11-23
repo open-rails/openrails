@@ -99,9 +99,9 @@ type PSPCredential struct {
 // reads 1 to MaxBatchItems named PSPs in one page, in any state or
 // environment; unknown ones are absent.
 type PSPListParams struct {
-	IDs      []PSPID
-	Rail     Rail
-	Archived *bool
+	IDs      []PSPID `form:"ids,comma"`
+	Rail     Rail    `form:"rail"`
+	Archived *bool   `form:"archived"`
 	PageRequest
 }
 
@@ -145,17 +145,6 @@ type UpdatePSPParams struct {
 	// archives only with AllowLast, and new purchase on the rail stops.
 	Archived  bool `json:"archived"`
 	AllowLast bool `json:"allow_last"`
-}
-
-// PSPDeclaration names a PSP account without credentials, for imported
-// billing facts. An account already declared keeps its id, key, archive state,
-// custody and credentials.
-type PSPDeclaration struct {
-	Key  string
-	Rail Rail
-	// Environment is the rail's own; omitted, its real-money one.
-	Environment string
-	PSPAccount
 }
 
 // RailDefinition is a rail a merchant can arm a PSP on: the fields and

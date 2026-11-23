@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/open-rails/authkit/auth"
 	"io/fs"
+	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
@@ -22,10 +23,10 @@ type Surface struct {
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
 	Resource string
-	// CheckoutOrigin serves the payment page there, from PaymentPageAssets;
-	// empty serves none.
-	CheckoutOrigin    string
-	PaymentPageAssets fs.FS
+	// CheckoutOrigin serves CheckoutHandler, the engine's payment page,
+	// there; empty serves none.
+	CheckoutOrigin  string
+	CheckoutHandler http.Handler
 }
 
 // StandaloneServer builds the standalone surface over the engine graph a and
@@ -42,6 +43,6 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		RouteGroups:             s.RouteGroups,
 		AdminConsole:            s.AdminConsole,
 		CheckoutOrigin:          s.CheckoutOrigin,
-		PaymentPageAssets:       s.PaymentPageAssets,
+		CheckoutHandler:         s.CheckoutHandler,
 	})
 }

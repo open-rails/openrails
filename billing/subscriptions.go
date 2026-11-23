@@ -40,15 +40,22 @@ type SubscriptionListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named subscriptions in one page,
 	// whatever their state; unknown ones are absent.
-	IDs        []SubscriptionID
-	CustomerID CustomerID
-	Status     SubscriptionStatus
+	IDs        []SubscriptionID   `form:"ids,comma"`
+	CustomerID CustomerID         `form:"customer_id"`
+	Status     SubscriptionStatus `form:"status"`
 	// Dunning keeps the subscriptions in dunning: past_due or
 	// awaiting_method, each with its Dunning.
-	Dunning bool
-	Rail    string
-	PriceID PriceID
-	Sort    SubscriptionSort
+	Dunning bool             `form:"dunning"`
+	Rail    string           `form:"rail"`
+	PriceID PriceID          `form:"price_id"`
+	Sort    SubscriptionSort `form:"sort"`
+	// CreatedAfter through ExpiresBefore bound the instants they name; zero
+	// bounds nothing.
+	CreatedAfter   time.Time `form:"created_after"`
+	CreatedBefore  time.Time `form:"created_before"`
+	CanceledAfter  time.Time `form:"canceled_after"`
+	CanceledBefore time.Time `form:"canceled_before"`
+	ExpiresBefore  time.Time `form:"expires_before"`
 }
 
 // Subscription is one subscription's lifecycle and recovery state. The
@@ -193,13 +200,13 @@ type SetSubscriptionPaymentMethodParams struct {
 // CodeCustomerActionRequired: only the customer can take this action, through
 // their own step (a wallet signature, the provider's hosted page, an
 // authenticated payment). Nothing changed.
-const CodeCustomerActionRequired = "customer_action_required"
+const CodeCustomerActionRequired ErrorCode = "customer_action_required"
 
 // CodePaymentMethodPSPMismatch: the saved method the request named was vaulted
 // by a different provider account than the one that owns the subscription
 // (type invalid_request_error, 409). Provider vault references are
 // account-scoped, so nothing was sent to the provider; collect the card again
 // on the subscription's active provider account.
-const CodePaymentMethodPSPMismatch = "payment_method_psp_mismatch"
+const CodePaymentMethodPSPMismatch ErrorCode = "payment_method_psp_mismatch"
 
 var ErrPaymentMethodPSPMismatch error = newCodedError(CodePaymentMethodPSPMismatch, ErrConflict)
