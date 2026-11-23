@@ -28,17 +28,39 @@ Every event type below has a built-in English message.
 | `one_off_purchase_completed` | Receipt for a one-off purchase |
 | `refund_completed` | Refund receipt |
 | `premium_started` | The subscription started |
-| `payment_method_failed` | A payment failed, with the update-card link |
+| `payment_method_failed` | A payment failed, with the update-card link; not the failure that ended a subscription (`recovery_action: resubscribe`), whose ending confirms it |
 | `payment_authentication_required` | The bank wants the customer to confirm a payment |
 | `payment_method_update_required` | The card on file no longer works |
-| `subscription_canceled` | Cancellation confirmation, worded by `Reason`: `user_cancel` (the customer, with a resume link), `admin` (staff) or anything else |
+| `subscription_canceled` | Cancellation confirmation while paid access remains, worded by `Reason`: `user_cancel` (the customer, with a resume link), `admin` (staff), `expired` or `non_recoverable` (failed payments) or anything else |
+| `premium_ended` | Cancellation confirmation once access has ended, for the causes below |
 | `order_collection_stopped` | Collection stopped after failed payments: the amount is still owed |
 | `subscription_reprice_scheduled` | Price-change notice: old and new amounts, the date and how to cancel |
 
-Off by default: `premium_renewed`, `premium_ended`, `payment_method_auto_updated`,
+Off by default: `premium_renewed`, `payment_method_auto_updated`,
 `account_delinquent`, `account_delinquency_cleared`, `usage_charged`,
 `balance_low`, `balance_depleted`, `order_due`, `order_overdue`,
 `subscription_plan_change_scheduled`, `subscription_changed`, `agreement_revoked`.
+
+### Cancellation confirmations
+
+A cancellation the customer, failed payments or staff cause is confirmed once.
+While paid access remains the fact is `subscription_canceled`; when access
+ends with it, `premium_ended`. `premium_ended` is on by default only for these
+`Reason`s, each in its own words:
+
+| `Reason` | Cause |
+|---|---|
+| `user_cancel` | The customer canceled |
+| `admin` | Staff canceled, through OpenRails (`CancelSubscription`, with or without `revoke_access`) |
+| `expired` | Payments failed: dunning spent its retries, the wait for a new card ran out, or the provider stopped after failed rebills |
+| `non_recoverable` | The card can no longer be charged |
+
+Any other ending sends nothing by default: `refund` (a refund that revoked
+access), `chargeback`, `rail_cancel` (the provider, a void or a tier change),
+`access_ended` (access reached its end, no cause recorded) and `unknown`. A
+merchant's `enabled` for `premium_ended` replaces the rule for every reason.
+An ending OpenRails mirrors from a provider's records through reconciliation
+is told when access closes, as `access_ended`.
 
 ## The messages document
 
@@ -115,6 +137,20 @@ type or layout and the error (`events.one_off_purchase_completed: text: …
 can't evaluate field Total`). The version before it keeps serving (none: the
 defaults), and a `consistency.merchant_config.not_served` finding stays open
 until it serves.
+
+## The log and checking a template
+
+| | |
+|---|---|
+| `Client.ListCustomerMessages`, `GET /v1/admin/customers/{customer_id}/messages` | The customer's messages (`billing.CustomerMessage`), newest first: event, status, attempts, last error, recipient, sent time. No body. `merchant:customer:read` |
+| `Client.PreviewMessage`, `POST /v1/merchant/messages/preview` | Renders an event type from the merchant's templates over a sample customer and fact, with the merchant's profile, in `language` or the default language. `template` replaces that language's template for this render only; one that does not render is `400 message_template_invalid`, naming the error. `merchant:config:read` |
+| `Client.CreateTestMessage`, `POST /v1/merchant/messages/test` | Sends that rendering to the merchant's `alert_email`, the only address a test goes to (none: `409 alert_email_required`). It is not logged. `merchant:config:manage` |
+
+A status is `pending`, `queued` or `sending` on the way, then `sent`,
+`disabled`, `test_environment`, `no_contact`, `rate_limited` or `failed`
+(`last_error`: `send_failed`, `refused`, `render_failed`, `invalid_recipient`,
+`no_sender`, `event_missing`, `event_unreadable`, `unavailable`). Previews and
+tests render the templates; a host's `MessageRenderer` is not asked.
 
 ## Rendering in your code
 
