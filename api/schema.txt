@@ -3,7 +3,7 @@
 # not edit. Monthly partitions are left out: their names follow the calendar.
 migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352cab53af9e6dd57fde0f661
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
-migration 0003_usage_limits.up.sql sha256:9dceb02e047be580f8bc1a9b1ba2455546c32482c4df52a1ffd1f3ae01343bd4
+migration 0003_usage_limits.up.sql sha256:334baf632ff86ac963ef9bdf95a0bab4de65f1fdc6700ff0fc462127a434601f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2882,6 +2882,7 @@ table billing.usage_accruals
   column currency text NOT NULL
   column day_at timestamp with time zone NOT NULL
   column period_starts_at timestamp with time zone NOT NULL
+  column period_ends_at timestamp with time zone NOT NULL
   column amount bigint NOT NULL
   column posted_amount bigint NOT NULL
   column postings integer NOT NULL
@@ -2895,6 +2896,7 @@ table billing.usage_accruals
   constraint usage_accruals_day_at_check CHECK ((day_at = date_trunc('day'::text, day_at, 'UTC'::text)))
   constraint usage_accruals_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
   constraint usage_accruals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint usage_accruals_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
   constraint usage_accruals_pkey PRIMARY KEY (merchant_id, id)
   constraint usage_accruals_posted_amount_check CHECK ((posted_amount >= 0))
   constraint usage_accruals_posted_at_check CHECK (((posted_at IS NULL) = (postings = 0)))
