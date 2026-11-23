@@ -65,13 +65,14 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 	var out *gen.BillingOrder
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to)
+		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to, s.now())
 		return err
 	})
 	return out, err
 }
 
-func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer identity.CustomerID, cur string, from, to time.Time) (*gen.BillingOrder, error) {
+// finalizeUsageTx bills the window [from, to) at now, the caller's clock.
+func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer identity.CustomerID, cur string, from, to, now time.Time) (*gen.BillingOrder, error) {
 	q := d.Gen(ctx)
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -86,11 +87,10 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		}
 		// Running charges are owed through the window's end, as far as it has
 		// come, and usage as it accrued, before the window is billed.
-		now := s.now()
 		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
 			return err
 		}
-		if _, err := s.WithDatabase(d).postUsageAccrualsTx(ctx, q, merchantID, payerID, cur, nil, nil); err != nil {
+		if _, err := s.WithDatabase(d).postUsageAccrualsTx(ctx, q, merchantID, payerID, cur, nil, nil, now); err != nil {
 			return err
 		}
 		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})

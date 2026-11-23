@@ -173,6 +173,8 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 			b.Results[i].Err = apperr.Invalidf("amount must be nonnegative").WithParam("amount")
 		case it.Failed && it.Amount == nil:
 			b.Results[i].Err = apperr.Invalidf("failed usage must state amount").WithParam("amount")
+		case len(it.Invoker) > 255:
+			b.Results[i].Err = apperr.Invalidf("invoker must be at most 255 bytes").WithParam("invoker")
 		case it.Delegated && (!it.Failed || it.Invoker == ""):
 			b.Results[i].Err = apperr.Invalidf("a delegated invoker reports only failed usage, and names its invoker").WithParam("invoker_type")
 		case it.OccurredAt.Before(from) || it.OccurredAt.After(to):
@@ -216,6 +218,11 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		if _, err := l.EnsureCustomerBalance(ctx, a.customer, a.currency); err != nil {
 			return nil, err
 		}
+		// A lot that lapsed is expired first, after the usage before it posts
+		// from it: what this batch accrues never draws a lapsed lot.
+		if _, err := s.grantLedger(q, merchantID).ExpireLapsedBy(ctx, a.customer, a.currency, now); err != nil {
+			return nil, err
+		}
 		anchor, err := s.periodAnchorFor(ctx, q, merchantID, a.customer, a.currency)
 		if err != nil {
 			return nil, err
@@ -234,6 +241,19 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 	}
 	b.defs, b.meters = defs, meters
+	// A customer counts usage only toward the limits a product or override
+	// gives it capacity in.
+	granted := map[uuid.UUID]map[string]bool{}
+	if len(defs) > 0 {
+		for _, a := range accounts {
+			if _, ok := granted[a.customer]; ok {
+				continue
+			}
+			if granted[a.customer], err = (limits.Customer{Q: q, MerchantID: merchantID, CustomerID: a.customer, Now: now}).Granted(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Each item's quantities under its cards.
 	type member struct {
@@ -269,7 +289,7 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 		usage := limits.Usage{EventType: it.EventType, Dimensions: it.Dimensions, Metadata: it.Metadata}
 		for _, def := range defs {
-			if catalog.LimitUnitCurrency(def.Unit) || !limits.Counts(def, meters, it.EventType) {
+			if catalog.LimitUnitCurrency(def.Unit) || !granted[it.Customer.UUID()][def.Key] || !limits.Counts(def, meters, it.EventType) {
 				continue
 			}
 			units, err := limits.Units(def, meters, usage)
@@ -423,13 +443,13 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 			return nil, err
 		}
 		key := failedUsageKey{merchant: merchantID, customer: it.Customer.UUID(), currency: it.Currency}
-		charge := stated
+		// A delegated invoker's failure, or one with no grace windows, is
+		// not charged.
+		var charge int64
 		switch {
 		case it.Delegated:
 			key.invoker = it.Invoker
-			charge = 0
 		case len(periods) == 0:
-			charge = 0
 		default:
 			left, err := key.graceLeft(ctx, q, periods)
 			if err != nil {
@@ -747,8 +767,11 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 					}
 				}
 			}
+			// A limit the customer is subject to and the hold does not name
+			// takes the usage in its current window.
 			for _, def := range defs {
-				if held[def.Key] {
+				c, subject := current[def.Key]
+				if held[def.Key] || !subject {
 					continue
 				}
 				units, counts := priced.units[def.Key]
@@ -758,7 +781,6 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 				if !counts {
 					continue
 				}
-				c := current[def.Key]
 				settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: c.Window, Capacity: c.Capacity, Units: units})
 				res.Units[def.Key] = units
 			}

@@ -42,6 +42,9 @@ type runningChargePosting struct {
 	resource string
 	// owed splits what an accrual's posting leaves owed by meter.
 	owed []owedShare
+	// owedAt dates what an accrual's posting leaves owed: when its usage
+	// occurred. Zero dates it at the posting.
+	owedAt time.Time
 }
 
 // owedShare is one meter's weight in an accrual posting's owed remainder.
@@ -172,6 +175,6 @@ func (s *MoneyService) settleRunningCharges(ctx context.Context, q *gen.Queries,
 	if _, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now); err != nil {
 		return err
 	}
-	_, err := s.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, nil, nil)
+	_, err := s.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, nil, nil, now)
 	return err
 }

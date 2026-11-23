@@ -28,6 +28,27 @@ func UsageEstimate(est billing.UsageEstimate) ([]byte, error) {
 	return json.Marshal(est)
 }
 
+// PinnedCards are the rate cards in force for an event type in a currency,
+// as a hold pins them; nil when none prices it. The cards of a lease's hold
+// are compared with these: a hold whose cards changed is issued again.
+func (s *MoneyService) PinnedCards(ctx context.Context, q *gen.Queries, eventType, currency string) ([]byte, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cards, err := usageCards(ctx, q, mid.UUID(), strings.TrimSpace(eventType), normalizeCurrency(currency))
+	var coded *apperr.Error
+	switch {
+	case errors.As(err, &coded):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case len(cards) == 0:
+		return nil, nil
+	}
+	return json.Marshal(cards)
+}
+
 // RateUsageEstimate prices an admission's usage estimate at the customer's
 // current period quantities, without advancing them, and answers the rate
 // cards that priced it, to be pinned. An event type no rate card prices is

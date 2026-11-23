@@ -39,14 +39,16 @@ func postUsageAccrualsHook(ctx context.Context, q *gen.Queries, merchantID, cust
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
 	}
 	svc := &MoneyService{clock: clockwork.NewFakeClockAt(now)}
-	return svc.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, liveAt, nil)
+	return svc.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, liveAt, nil, now)
 }
 
-// postUsageAccrualsTx posts what the customer's usage accrued in the currency
-// and the ledger has not taken, oldest day first, drawing the lots live just
-// before liveAt (now when nil); with dueBefore, only the days before it. It
-// takes the customer lock only when there is something to post.
-func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, liveAt, dueBefore *time.Time) (bool, error) {
+// postUsageAccrualsTx posts at now what the customer's usage accrued in the
+// currency and the ledger has not taken, oldest day first, drawing the lots
+// live just before liveAt (now when nil); with dueBefore, only the days
+// before it. What a posting leaves owed is dated when its usage occurred, the
+// end of its day or now if earlier, so the usage order of that period bills
+// it. It takes the customer lock only when there is something to post.
+func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, liveAt, dueBefore *time.Time, now time.Time) (bool, error) {
 	args := gen.ListUnpostedUsageAccrualsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
 	due := func(rows []gen.BillingUsageAccrual) []gen.BillingUsageAccrual {
 		if dueBefore == nil {
@@ -65,7 +67,7 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 		return false, err
 	}
 	rows = due(rows)
-	now := s.now()
+	now = instant(now)
 	through := now
 	if liveAt != nil && liveAt.Before(now) {
 		through = *liveAt
@@ -104,7 +106,8 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 			return false, err
 		}
 		posting := *s
-		posting.posting = &runningChargePosting{through: through, owed: owed}
+		posting.clock = clockwork.NewFakeClockAt(now)
+		posting.posting = &runningChargePosting{through: through, owed: owed, owedAt: earlier(row.DayAt.Add(24*time.Hour-time.Microsecond), now)}
 		key := MustIdempotencyKey(OpUsageAccrual, usageAccrualSourcePrefix+row.ID.String(), strconv.Itoa(int(row.Postings)+1))
 		_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
 		if err != nil {
@@ -132,7 +135,7 @@ func (s *MoneyService) PostUsageAccruals(ctx context.Context, customer uuid.UUID
 		if !dueBefore.IsZero() {
 			before = &dueBefore
 		}
-		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, gen.New(tx), mid.UUID(), customer, currency, nil, before)
+		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, gen.New(tx), mid.UUID(), customer, currency, nil, before, s.now())
 		return err
 	})
 	return posted, err

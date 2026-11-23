@@ -246,6 +246,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 // item, or one per meter an accrual's posting is for, so the order bills each
 // meter on its own line.
 func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, key IdempotencyKey, owed int64, now time.Time) error {
+	if s.posting != nil && !s.posting.owedAt.IsZero() {
+		now = s.posting.owedAt
+	}
 	if s.posting == nil || len(s.posting.owed) == 0 {
 		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, map[string]any{
 			"operation": string(key.Operation()),

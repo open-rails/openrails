@@ -275,7 +275,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if _, err := postRunningChargesThrough(ctx, q, mid.UUID(), customer, currency, now, now); err != nil {
 			return err
 		}
-		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, q, mid.UUID(), customer, currency, nil, nil); err != nil {
+		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, q, mid.UUID(), customer, currency, nil, nil, now); err != nil {
 			return err
 		}
 		if cur == nil {
@@ -357,7 +357,7 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	if amount <= 0 || amount < terms.minimum {
 		return false, nil
 	}
-	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff)
+	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)
 	if err != nil {
 		return false, fmt.Errorf("invoice usage: %w", err)
 	}
