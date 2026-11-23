@@ -1,7 +1,3 @@
-// Package retention holds how long OpenRails keeps each kind of row. The
-// periods are constants: the same for every merchant, and not configuration.
-// docs/operations.md lists them; the table comments in the baseline repeat
-// each table's class.
 package retention
 
 import (

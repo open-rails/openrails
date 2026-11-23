@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:
+// newIntentsCmd wires the read-only provider-intent-ledger CLI:
 //
 //	openrails intents [--status=pending|all|...] [--rail=...] [--type=...] [--merchant=...]
 //
@@ -40,7 +40,27 @@ func newIntentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "intents",
 		Short: "List the provider intent ledger: queued outbound provider mutations and which mode executes them (read-only)",
-		Args:  cobra.NoArgs,
+		Long: `Every outbound provider mutation is first a row in billing.provider_intents,
+executed by its own River job. This command lists them for one merchant and
+writes nothing.
+
+EXECUTES UNDER is the lowest provider_write_mode that runs a row: limited for
+user- and admin-origin rows, full for system-origin ones; nothing runs under
+readonly. Under limited or readonly the pending rows, and the drain forecast
+printed after them, are exactly what the next mode change will send. Read it
+before raising the mode, and resolve anything you did not expect first.
+
+Statuses: pending (waiting; LAST FAILURE names a blocker such as the mode, an
+unarmed PSP or a provider outage, and the row drains when it lifts),
+in_flight, succeeded, failed_retryable, failed (terminal), unknown (the
+provider may have executed it), superseded and expired (past their relevance
+window, never fired).
+
+An unknown row is never resent. The verifier keeps reading the provider; when
+reads cannot settle it, close it with "openrails intents resolve" from an exact
+provider receipt or provider-confirmed non-execution. "openrails intents-log"
+shows each attempt. A healthy deployment shows few active rows.`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runIntentsList(c, status, provider, intentType, format, merchantSlug, limit)
 		},
@@ -73,7 +93,25 @@ func newIntentsResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve",
 		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution (--not-executed also releases a never-submitted invoice collection)",
-		Args:  cobra.NoArgs,
+		Long: `Closes one unknown operation from provider evidence; it never resends.
+
+--receipt names the exact provider object (transaction, subscription,
+schedule or refund id). It is read back through the merchant's PSP and must
+match the frozen operation (a sale: the approved sale of its amount on its
+vault; an enrollment: a live, locally unowned subscription on its vault and
+plan; a refund: the approved refund of the reserved amount on the original
+sale) before the normal receipt path commits its local effects.
+
+--not-executed needs the operation type's own proof. For an NMI or custodian
+sale that is NMI showing a definitive decline as the one transaction under the
+sale's order; an empty search is never enough, and a submitted order
+collection, rebill or tier-change proration refuses it. An operation that never
+crossed its submission fence is released on that alone.
+
+--step selects the step of a multi-step operation (nmi_upgrade: successor or
+proration; stripe_tier_change: update, schedule or phases). --actor and
+--reason are recorded on the operation and in the mutation log.`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			id, err := uuid.Parse(strings.TrimSpace(intentID))
 			if err != nil {

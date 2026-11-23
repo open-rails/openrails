@@ -1,6 +1,3 @@
-// Package intents is the durable provider-write ledger: each mutation records
-// immutable terms in provider_intents, atomically with its River job, before
-// executing. An ambiguous outcome is resolved by provider reads before any retry.
 package intents
 
 import (

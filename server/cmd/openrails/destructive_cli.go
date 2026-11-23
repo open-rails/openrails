@@ -15,7 +15,20 @@ import (
 )
 
 func newDestructiveHoldsCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "destructive-holds", Short: "Inspect and explicitly clear persistent destructive-action incidents"}
+	cmd := &cobra.Command{Use: "destructive-holds", Short: "Inspect and explicitly clear persistent destructive-action incidents", Long: `A destructive-action incident opens when staff exceed
+destructive_action_limits. It holds new provider requests for refunds,
+cancellations, removals, revocations, write-offs and substantive catalog or
+configuration changes until a person clears it: waiting, restarting, rotating
+a key or resolving a finding does not. Reads and the completion of effects
+already started continue.
+
+Review before clearing: find the actor in the findings queue, revoke its
+credential where appropriate, and reconcile pending effects
+("openrails intents"). Clearing ends one episode and records the operator and
+reason; pending or uncertain actions stay reserved and a further breach opens
+a new incident. Over HTTP the clear takes merchant configuration authority
+plus root:admin-rate-limits:unlock from a self-acting person other than the
+triggering actor.`}
 	var limit int
 	var after string
 	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {

@@ -14,7 +14,7 @@ func (s *Server) ServiceProviderConfig() http.Handler {
 		supported := func(ok bool) map[string]bool { return map[string]bool{"supported": ok} }
 		writeJSON(w, http.StatusOK, map[string]any{
 			"schemas":          []string{ServiceProviderConfigSchema},
-			"documentationUri": "https://github.com/open-rails/openrails/blob/master/docs/customer-contacts.md",
+			"documentationUri": "https://github.com/open-rails/openrails/blob/master/docs/client.md#customers",
 			"patch":            supported(true),
 			"bulk":             map[string]any{"supported": true, "maxOperations": MaxOperations, "maxPayloadSize": MaxPayloadSize},
 			"filter":           map[string]any{"supported": true, "maxResults": MaxResults},

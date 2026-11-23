@@ -6,7 +6,7 @@ export type {
 
 export interface CreditGrantInput {
   currency: string
-  // Native units as an exact int64 decimal string (docs/api/conventions.md).
+  // Native units as an exact int64 decimal string (docs/client.md#without-the-go-client).
   amount: string
   source: "admin"
   source_id: string

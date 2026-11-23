@@ -170,7 +170,25 @@ const (
 )
 
 // Order is one bill with frozen lines and total. Its collection owner decides
-// how it is paid; its id is not a credential.
+// how it is paid; its id is not a credential. Payments record money that
+// moved and always name their order; a refund or dispute names the original
+// payment and order.
+//
+// Provider-run bills are orders too: an NMI schedule's renewal
+// (CollectionOwner OrderCollectionNMISchedule) or a Stripe or CCBill bill
+// (OrderCollectionProvider), with CollectionPSPID when known and
+// ProviderBills holding the provider's document references and verified
+// settlement facts. Such an order takes no saved-card collection from
+// OpenRails; the server refuses pay, confirm, remittance and retries on it.
+// The provider's confirmed amount, currency, service dates and terms are
+// frozen: catalog edits never reprice them. A renewal, an enrollment and an
+// adjustment are distinct bills; a decline then a successful retry is one.
+// Replayed or reordered webhooks reuse the accepted bill and payment, and a
+// financial identity reused with another amount, currency, customer or order
+// is refused. NMI and CCBill receipts match the accepted schedule version in
+// force; an extra capture is kept as money for review and grants nothing. A
+// charge before the first accepted cycle is settled history
+// (provider_pre_schedule): a complete order that renews and grants nothing.
 type Order struct {
 	ID         OrderID    `json:"id"`
 	CustomerID CustomerID `json:"customer_id"`

@@ -28,5 +28,13 @@ type ReadPolicy struct {
 	MaxStale     time.Duration `yaml:"max_stale" json:"max_stale"`
 }
 
-// ReadCache replaces the default policy of each Read it names.
+// ReadCache replaces the default policy of each Read it names
+// (Config.ReadCache for in-process handles, RemoteOptions.ReadCache for
+// remote ones). Defaults in process: ReadCatalog and ReadMeters refresh after
+// 1 minute, stale up to 10; the configuration reads are live. Over HTTP:
+// ReadCatalog, ReadMeters and ReadPublicConfig refresh after 10 minutes,
+// stale up to an hour; ReadMerchantConfiguration after 30 seconds, stale up
+// to 10 minutes. A handle's own catalog, configuration or archive write, and
+// any change the embedded engine commits, drops the merchant's cached answers
+// at once; another replica's change shows within RefreshAfter.
 type ReadCache map[Read]ReadPolicy

@@ -20,7 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// docs/operations.md defines this operator SQL switch as deployment setup.
+// docs/standalone.md#write-safety-and-the-kill-switch defines this operator
+// SQL switch as deployment setup.
 // Arm only the scenario's disposable schema; lifecycle outcomes still run
 // through the actual admission gate and registered workers.
 func enableLifecycleMaintenance(t *testing.T, a *authorityWorld) {

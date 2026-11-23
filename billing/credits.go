@@ -285,8 +285,31 @@ type BalanceNoticeAmount struct {
 // platform vault, in the merchant's partition.
 const CardVaultPlatform = "platform"
 
-// MerchantSettings is the merchant-owned admission/policy document installed by
-// standalone policy sync jobs.
+// MerchantSettings is the policy part of a merchant's configuration, beside
+// its display name, alert webhooks, PSPs and custodians. Merchant
+// configuration lives in a file (Config.Merchants or the standalone manifest,
+// read at startup, settings flat on the merchant) or, with a Vault KV mount,
+// in Vault, where UpdateMerchantConfiguration edits it; never in PostgreSQL.
+// An edit merges the fields it names: an omitted field keeps its value and a
+// declared list replaces the stored one. expected_revision refuses an edit
+// made since (409 revision_mismatch); the whole document is validated first,
+// a refusal changes nothing, and every replica reloads on commit. YAML and
+// JSON share one strict contract of at most 1 MiB (no unknown or duplicate
+// fields, aliases, anchors, merge keys or tags). Policy references must
+// resolve, and removing a policy a customer is bound to is refused.
+// Per-customer overrides are CustomerSettings.
+//
+// Profile holds the public links (support_url, subscribe_url, billing_url,
+// terms and privacy) and sender details; notices pick a URL by purpose
+// (MerchantProfile.NotificationURL), else support_url. AlertEmail receives
+// high and critical findings. UsageBilling is the default billing day (it
+// seeds new accounts only) and per-currency credit limits and minimum
+// invoices; CollectionThreshold, MonthlyFloor, BillingPeriodBoundary,
+// ArrearsGraceDays and ArrearsDelinquencyFloor govern when usage arrears are
+// billed and become delinquent. BillingPolicies are named spend policies and
+// BillingPolicyBindings decide which customers get which.
+// RepriceNoticeWindowDays is the notice before a price migration takes
+// effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
 	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
 	Profile                 *MerchantProfile      `json:"profile,omitempty"`
@@ -316,9 +339,6 @@ type MerchantSettings struct {
 	// gate may spend unreserved. Off by default. Unit limits are never spent
 	// past their holds.
 	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
-	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
-	// policies and the rungs that decide who gets which. They REPLACE the retired
-	// trust_level_spend_limits field, which could only ever mean "window cap".
 	// CardVault is where new cards are saved: a card PSP's key, whose own
 	// vault (or the custodian it names) holds them, or CardVaultPlatform.
 	// Absent: each card is saved where the PSP that takes it keeps cards. It
@@ -387,6 +407,35 @@ type BillingPolicyBinding struct {
 // TransientRetryMinutes (default: the built-in ladder, 5 and 30 minutes; an
 // empty list is none) is the quick ladder for processor try-again answers,
 // which does not count as dunning failures.
+//
+// It governs renewals OpenRails collects: engine memberships on Stripe and
+// NMI, Solana pulls and NMI schedules; provider-owned Stripe and CCBill
+// subscriptions use the provider's dunning. The built-in tiers end inside one
+// cycle: under 4 days no retry; 4 to 27 days +1 and +2 days; 28 days and
+// longer +2, +4, +6 and +9 days, the fifth failure terminal. A failure older
+// than its last offset plus min(24h, cycle/2) is never charged: it parks
+// unverified with access kept. An unknown cycle gets no schedule
+// (life.cadence.unknown). Per tier, scheduled, transient and customer retries
+// total at most 15 (Visa's 30-day limit), and the attempts inside any 24
+// hours at most 10 (Mastercard's); a policy past either is invalid_param.
+//
+// Soft declines and processor errors retry on schedule. Bad card data and
+// codes the networks forbid retrying wait for a new card (awaiting_method,
+// one payment_method_update_required notice), as do Stripe advice
+// do_not_try_again or confirm_card_data, Mastercard advice 01, 03 or 21, and
+// issuer codes 04, 07, 12, 14, 15, 41, 43, 46, 54, 57, R0, R1, R3. Stolen,
+// fraud and stop-recurring codes are terminal at once. Terminal failure
+// cancels, revokes access and queues the provider delete; with the kill
+// switch off it leaves the membership past_due. On an NMI schedule NMI's
+// decline is the first failure, and under a 96-hour cycle NMI's next charge
+// is the retry.
+//
+// A renewal is an order (origin subscription) per period. After each paid
+// period the member keeps access for min(24h, max(2h, period/10)) while the
+// hourly due pass admits it; a renewal held because collection is stopped
+// raises life.renewal.held. An NMI schedule with no attempt 24 hours after its
+// period is read from NMI (life.rebill.missed); OpenRails charges the period
+// itself only when NMI holds no transaction and moved on (provider_skipped).
 type DunningPolicy struct {
 	Tiers                 []DunningTier `json:"tiers"`
 	TransientRetryMinutes *[]int        `json:"transient_retry_minutes,omitempty"`

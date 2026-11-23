@@ -1,7 +1,3 @@
-// Package stripeapi is the choke point for all outbound Stripe HTTP (there is
-// no stripe-go dependency). Every call site takes its *http.Client from here:
-// the transport pins Stripe-Version and, in readonly mode, fails every
-// non-GET/HEAD request locally with ErrProviderReadOnly.
 package stripeapi
 
 import (

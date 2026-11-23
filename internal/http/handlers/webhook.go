@@ -449,7 +449,7 @@ type nmiSigned struct {
 // checkNMIWebhook checks an NMI delivery against one PSP's secrets.
 func checkNMIWebhook(r *httprequest.Request, body []byte) func(context.Context, merchants.PSPIdentity) (signedWebhook[nmiSigned], error) {
 	// NMI sends one signature header, `Webhook-Signature: t=<ts>,s=<hex>`
-	// (docs/rails/nmi.md). No other spelling is accepted, so a forged
+	// (package nmi). No other spelling is accepted, so a forged
 	// signature has one header to aim at.
 	header := strings.TrimSpace(r.Request.Header.Get("Webhook-Signature"))
 	rail := string(models.RailNMI)

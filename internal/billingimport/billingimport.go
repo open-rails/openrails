@@ -1,8 +1,3 @@
-// Package billingimport imports a host's legacy billing book as facts and
-// classifies them through the same decider the pull, probe and webhook paths
-// use, at the declared AsOf. Admin comps ride the same book. The wire
-// vocabulary (billing.DeclaredBilling, POST /v1/merchant/billing-import) is
-// aliased here.
 package billingimport
 
 import (

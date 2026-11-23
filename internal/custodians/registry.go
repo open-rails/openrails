@@ -1,15 +1,3 @@
-// Package custodians is the registry of custodian KINDS (or#880 phase 3).
-//
-// A custodian holds the card; a rail charges it. The two axes are orthogonal —
-// see docs/payment-method-custody.md. Everything a kind needs in order to be
-// declared, validated, armed and driven from a browser is DATA in this file:
-// its secret slots, its declared settings, which rails' charge paths can accept
-// its instruments, and how a payment page tokenizes against it.
-//
-// The point of the registry is that adding a second vendor (HyperSwitch,
-// JusPay, Spreedly) is a Descriptor plus an implementation of the seams it
-// names — never a new branch in the config validator, the manifest reconciler,
-// the browser-config projection and the webhook router.
 package custodians
 
 import (

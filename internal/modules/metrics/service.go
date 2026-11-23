@@ -35,7 +35,7 @@ type Column = billing.MetricsColumn
 
 // MoneyCell is a money measure cell: an exact int64 of the row's currency's
 // native units, encoded as a decimal JSON string like every other monetary
-// value on the wire (docs/api/conventions.md).
+// value on the wire (docs/client.md#without-the-go-client).
 type MoneyCell int64
 
 func (c MoneyCell) MarshalJSON() ([]byte, error) {

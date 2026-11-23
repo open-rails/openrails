@@ -1,8 +1,3 @@
-// Package server is standalone OpenRails: the engine (openrails.New)
-// composed, like any host of the library, with its own AuthKit and the
-// multi-merchant control plane, serving the standalone HTTP surface. The
-// openrails binary (cmd/openrails) and hosted products build on it; a host
-// embedding OpenRails for one merchant uses package openrails alone.
 package server
 
 import (
