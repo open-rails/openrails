@@ -120,7 +120,8 @@ func queryCustomerIDs(r *httprequest.Request, name string) ([]billing.CustomerID
 
 // AppCheckEntitlements answers an application's content gate: which of the
 // requested keys the body's customer holds, and the keys they hold under each
-// requested prefix, at one instant (zero: now).
+// requested prefix, at one instant (zero: now). Current exact-key checks can
+// request cache metadata with OpenRails-Entitlement-Cache-Metadata: 1.
 func AppCheckEntitlements(r *httprequest.Request) {
 	var req billing.CheckEntitlementsParams
 	if !r.BindJSON(&req) {
@@ -130,7 +131,8 @@ func AppCheckEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := r.State.EntitlementService.Check(r.Request.Context(), customer.UUID(), req)
+	includeCacheMetadata := r.Request.Header.Get("OpenRails-Entitlement-Cache-Metadata") == "1"
+	out, err := r.State.EntitlementService.Check(r.Request.Context(), customer.UUID(), req, includeCacheMetadata)
 	if err != nil {
 		writeRefusal(r, err, "entitlement check failed")
 		return

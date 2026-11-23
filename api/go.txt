@@ -2170,8 +2170,10 @@ pkg openrails/billing, type EntitlementChange struct, ProductKey string `json:"p
 pkg openrails/billing, type EntitlementChange struct, Removed []string `json:"removed"`
 pkg openrails/billing, type EntitlementCheck struct
 pkg openrails/billing, type EntitlementCheck struct, Entitlements map[string]bool `json:"entitlements"`
+pkg openrails/billing, type EntitlementCheck struct, EvaluatedAt *time.Time `json:"evaluated_at,omitempty"`
 pkg openrails/billing, type EntitlementCheck struct, Held map[string]HeldEntitlements `json:"held"`
 pkg openrails/billing, type EntitlementCheck struct, Quantities map[string]*int `json:"quantities"`
+pkg openrails/billing, type EntitlementCheck struct, ValidUntil *time.Time `json:"valid_until,omitempty"`
 pkg openrails/billing, type EntitlementListParams struct
 pkg openrails/billing, type EntitlementListParams struct, At time.Time
 pkg openrails/billing, type EntitlementListParams struct, CustomerIDs []CustomerID

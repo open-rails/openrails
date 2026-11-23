@@ -263,10 +263,10 @@ func ValidateCheck(params billing.CheckEntitlementsParams) error {
 	return nil
 }
 
-// Check answers an application's content gate through List: whether the
-// customer holds each key at params.At, with its seats, in one read, and the
-// first keys held under each prefix, in byte order.
-func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, params billing.CheckEntitlementsParams) (billing.EntitlementCheck, error) {
+// Check answers whether the customer holds each key at params.At, with its
+// seats, and the first keys held under each prefix, in byte order. When asked
+// for cache metadata, current exact-key checks also return the next boundary.
+func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, params billing.CheckEntitlementsParams, includeCacheMetadata bool) (billing.EntitlementCheck, error) {
 	out := billing.EntitlementCheck{Entitlements: map[string]bool{}, Quantities: map[string]*int{}, Held: map[string]billing.HeldEntitlements{}}
 	if err := ValidateCheck(params); err != nil {
 		return out, err
@@ -275,6 +275,10 @@ func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, para
 	keys := slices.Compact(slices.Sorted(slices.Values(params.Entitlements)))
 	for _, key := range keys {
 		out.Entitlements[key], out.Quantities[key] = false, nil
+	}
+	if includeCacheMetadata && params.At.IsZero() && len(params.Prefixes) == 0 {
+		err := s.checkWithCacheMetadata(ctx, customer, keys, &out)
+		return out, err
 	}
 	if len(keys) > 0 {
 		rows, _, err := s.List(ctx, Query{Customers: customers, Keys: keys, At: params.At, Limit: len(keys)})
@@ -312,6 +316,36 @@ func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, para
 		out.Held[prefix] = held
 	}
 	return out, nil
+}
+
+func (s *EntitlementService) checkWithCacheMetadata(ctx context.Context, customer uuid.UUID, keys []string, out *billing.EntitlementCheck) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	at := s.now().UTC().Truncate(time.Microsecond)
+	return s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		if err := customPlans(ctx, q); err != nil {
+			return err
+		}
+		rows, err := q.CheckDerivedEntitlementsWithBoundary(ctx, gen.CheckDerivedEntitlementsWithBoundaryParams{
+			MerchantID: mid.UUID(), CustomerID: customer, Entitlements: keys, AtTime: at,
+		})
+		if err != nil {
+			return err
+		}
+		out.EvaluatedAt = &at
+		for _, row := range rows {
+			out.Entitlements[row.Entitlement] = row.Allowed
+			out.Quantities[row.Entitlement] = models.SeatsOf(row.Quantity)
+			if row.ValidUntil.After(at) && (out.ValidUntil == nil || row.ValidUntil.Before(*out.ValidUntil)) {
+				boundary := row.ValidUntil.UTC()
+				out.ValidUntil = &boundary
+			}
+		}
+		return nil
+	})
 }
 
 // listHolders is the reverse lookup: customers holding key at at, after

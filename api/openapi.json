@@ -16638,6 +16638,14 @@
                 "type": "null"
               }
             ]
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [

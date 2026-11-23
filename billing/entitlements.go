@@ -61,6 +61,11 @@ type EntitlementCheck struct {
 	Entitlements map[string]bool             `json:"entitlements"`
 	Quantities   map[string]*int             `json:"quantities"`
 	Held         map[string]HeldEntitlements `json:"held"`
+	// EvaluatedAt is present when this answer includes cache metadata.
+	EvaluatedAt *time.Time `json:"evaluated_at,omitempty"`
+	// ValidUntil is the exclusive deadline for scheduled access changes. When
+	// EvaluatedAt is present and ValidUntil is nil, no boundary was found.
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
 // HeldEntitlements is the keys a customer holds under one prefix, in byte

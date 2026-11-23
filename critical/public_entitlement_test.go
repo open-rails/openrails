@@ -146,7 +146,7 @@ func TestPublicEntitlements(t *testing.T) {
 		}{{grant.StartsAt.Add(-time.Microsecond), false}, {grant.StartsAt, true}, {grant.EndsAt.Add(-time.Microsecond), true}, {*grant.EndsAt, false}} {
 			publicAccess(t, a, sample.at, sample.allowed)
 		}
-		a.clock.Advance(6 * time.Hour)
+		exactCheckCacheMetadata(t, a, grant)
 		for _, sample := range []struct {
 			at      time.Time
 			seconds int64
@@ -254,6 +254,73 @@ func TestPublicEntitlements(t *testing.T) {
 			require.True(t, member(t, a, sub))
 		})
 	})
+}
+
+func exactCheckCacheMetadata(t *testing.T, a *authorityWorld, grant billing.ProductAccessGrant) {
+	t.Helper()
+	database, err := db.NewWithPGXPool(a.pool, a.schema)
+	require.NoError(t, err)
+	service := entitlements.NewEntitlementService(database, a.clock)
+	ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+	movie, err := a.alphaRemote.CreateProduct(ctx, billing.CreateProductParams{Key: "scheduled-movie", DisplayName: "Scheduled movie", Entitlements: []string{"movie:rental"}})
+	require.NoError(t, err)
+	start := grant.StartsAt
+	_, err = service.PushAccess(ctx, entitlements.PushAccessParams{
+		UserID: a.alice.ID, CustomerID: grant.CustomerID.UUID(), ProductID: movie.ID.UUID(),
+		SourceType: models.AccessSourceGrant, SourceID: "scheduled-movie", Actor: a.alice.ID, GrantReason: grants.ReasonComp,
+		NotBefore: ptr(start.Add(time.Hour)), EndsAt: ptr(start.Add(4 * time.Hour)),
+	})
+	require.NoError(t, err)
+	_, err = service.PushAccess(ctx, entitlements.PushAccessParams{
+		UserID: a.alice.ID, CustomerID: grant.CustomerID.UUID(), ProductID: grant.ProductID.UUID(),
+		SourceType: models.AccessSourceSubscription, SourceID: uuid.NewString(), Quantity: ptr(5),
+		NotBefore: ptr(start.Add(2 * time.Hour)), EndsAt: ptr(start.Add(3 * time.Hour)),
+	})
+	require.NoError(t, err)
+
+	check := func(params billing.CheckEntitlementsParams, headers map[string]string) billing.EntitlementCheck {
+		t.Helper()
+		status, raw := a.request(t, http.MethodPost, "/v1/app/entitlements/check", a.alphaKey.Secret, params, headers)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var out billing.EntitlementCheck
+		require.NoError(t, json.Unmarshal(raw, &out))
+		return out
+	}
+	params := billing.CheckEntitlementsParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read", "movie:rental", "never:granted"}}
+	metadata := map[string]string{"OpenRails-Entitlement-Cache-Metadata": "1"}
+	require.Nil(t, check(params, nil).EvaluatedAt)
+	historical := params
+	historical.At = grant.StartsAt.Add(-time.Microsecond)
+	require.Nil(t, check(historical, metadata).EvaluatedAt)
+	prefix := params
+	prefix.Prefixes = []string{"library:"}
+	require.Nil(t, check(prefix, metadata).EvaluatedAt)
+	for _, tc := range []struct {
+		hour     int
+		nextHour int
+		library  bool
+		movie    bool
+		seats    *int
+	}{
+		{0, 1, true, false, nil},
+		{1, 2, true, true, nil},
+		{2, 3, true, true, ptr(5)},
+		{3, 4, true, true, nil},
+		{4, 6, true, false, nil},
+		{6, 0, false, false, nil},
+	} {
+		at := start.Add(time.Duration(tc.hour) * time.Hour)
+		a.clock.Advance(at.Sub(a.clock.Now()))
+		out := check(params, metadata)
+		require.Equal(t, &at, out.EvaluatedAt)
+		require.Equal(t, map[string]bool{"library:read": tc.library, "movie:rental": tc.movie, "never:granted": false}, out.Entitlements)
+		require.Equal(t, map[string]*int{"library:read": tc.seats, "movie:rental": nil, "never:granted": nil}, out.Quantities)
+		if tc.nextHour == 0 {
+			require.Nil(t, out.ValidUntil)
+		} else {
+			require.Equal(t, ptr(start.Add(time.Duration(tc.nextHour)*time.Hour)), out.ValidUntil)
+		}
+	}
 }
 
 func TestSubscriptionAccessRepair(t *testing.T) {

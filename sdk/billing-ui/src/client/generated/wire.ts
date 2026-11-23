@@ -1053,6 +1053,8 @@ export type EntitlementCheck = {
   entitlements: Record<string, boolean> | null
   quantities: Record<string, number | null> | null
   held: Record<string, HeldEntitlements> | null
+  evaluated_at?: string
+  valid_until?: string
 }
 
 export type EntitlementReplacement = {
