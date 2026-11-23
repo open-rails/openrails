@@ -52,11 +52,15 @@ type GateConfig struct {
 	Outbox UsageOutbox
 }
 
-// UsageOutbox stores a gate's captured usage until OpenRails settles it.
-// Put returns before Capture does, and a Capture whose Put fails fails;
-// Pending is read when a gate starts and resent against the original
-// leases; Ack follows settlement, or a Put the gate gave up on. It must be
-// safe for concurrent use.
+// UsageOutbox stores a gate's captured usage until OpenRails settles it. It
+// must be safe for concurrent use.
+//
+// Put stores all of its items or none: an error means it stored nothing. A
+// Capture or Record whose Put fails fails, and its usage is never billed; an
+// outbox that stored an item and still returned an error would bill it after
+// a restart. Pending is read when a gate starts and resent against the
+// original leases. Ack follows settlement (and, should an outbox break Put's
+// contract, a Put that failed).
 type UsageOutbox interface {
 	Put(ctx context.Context, items []billing.OutboxItem) error
 	Pending(ctx context.Context) ([]billing.OutboxItem, error)

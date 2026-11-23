@@ -313,9 +313,11 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   spending admits settles as late usage, owed past the balance.
 - Without Redis, state is in process memory: usage captured but not yet sent is
   lost if the process crashes, and never billed. `GateConfig.Outbox`
-  (`UsageOutbox`, not with Redis) stores it before `Capture` returns, and a
-  `Put` that fails fails the capture. A restarted process resends it against
-  its original leases, closing them. A resent item is matched by its lease
+  (`UsageOutbox`, not with Redis) stores it before `Capture` returns. `Put`
+  stores all of its items or none: one that returns an error stored nothing,
+  and fails the capture, whose usage is never billed. An outbox that stores an
+  item and still returns an error bills it after a restart. A restarted
+  process resends what it stored against its original leases, closing them. A resent item is matched by its lease
   and `n`: the server checks its terms only when the resend repeats a whole
   recent settlement, and otherwise answers it as settled, so an outbox
   returns items exactly as stored.

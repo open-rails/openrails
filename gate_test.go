@@ -1339,7 +1339,8 @@ func TestGateLeavesARolledOverLeaseToExpireWhileATicketOutlivesIt(t *testing.T) 
 }
 
 // leakyOutbox stores every item, but fails the first Put of number failN
-// and every Ack of it: a failed Put that stored the item anyway.
+// and every Ack of it: an outbox breaking Put's contract, whose failed Put
+// stored the item anyway. The gate still never issues its number again.
 type leakyOutbox struct {
 	memOutbox
 	failN int64

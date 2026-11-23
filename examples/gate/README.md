@@ -33,4 +33,6 @@ curl -H "X-Customer-ID: $CUSTOMER" localhost:8080/v1/limits
 
 `REDIS_URL` makes every replica one gate: a customer one replica served is
 warm on all of them. Without Redis, usage captured but not yet sent is lost
-if the process crashes, and never billed; `GateConfig.Outbox` keeps it.
+if the process crashes, and never billed; `GateConfig.Outbox` keeps it. An
+outbox's `Put` stores all of its items or none, and returns an error only when
+it stored nothing.
