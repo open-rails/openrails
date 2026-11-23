@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
 // fakeSync speaks the lease-sync wire with simple sizing: a want grants
@@ -33,13 +34,20 @@ type fakeSync struct {
 	size      func(cost int64) int64
 	settled   map[fakeLine]int64
 	holds     map[fakeHold]map[string]int64
+	versions  map[fakeHold]int64
 	leases    map[billing.LeaseID]*fakeLease
 	down      bool
 	dropReply int
+	reject    int
+	stall     bool
+	noHolds   bool
+	block     chan struct{}
 	capHeld   int
 	dead      map[billing.LeaseID]bool
 	calls     int
 	wants     int
+	sentWants []billing.LeaseWant
+	applied   [][]billing.HoldApplied
 	returns   []billing.HoldReturn
 	closed    []billing.LeaseID
 	firstSeen []int64
@@ -64,14 +72,17 @@ type fakeLease struct {
 const fakeSet = "standard"
 
 func newFakeSync(capacity map[string]int64) *fakeSync {
-	return &fakeSync{capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{},
+	return &fakeSync{capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{}, versions: map[fakeHold]int64{},
 		leases: map[billing.LeaseID]*fakeLease{}, dead: map[billing.LeaseID]bool{}}
 }
 
 func (f *fakeSync) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
-	down := f.down
+	down, block := f.down, f.block
 	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
 	if down {
 		return nil, errors.New("fake: connection refused")
 	}
@@ -152,26 +163,39 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if f.reject != 0 {
+		writeFakeError(w, f.reject, "fake_rejected", "rejected")
+		return
+	}
+	f.applied = append(f.applied, p.Applied)
+	f.sentWants = append(f.sentWants, p.Wants...)
 	lease := f.leases[p.LeaseID]
 	if lease == nil {
 		lease = &fakeLease{items: map[int64]string{}}
 		f.leases[p.LeaseID] = lease
 	}
+	live := !f.dead[p.LeaseID]
 	touched := map[billing.CustomerID]bool{}
-	res := billing.SyncLeasesResult{Lease: billing.Lease{ID: p.LeaseID, ExpiresAt: time.Now().Add(10 * time.Second).UTC()}, Wants: []billing.LeaseWantResult{}, Holds: []billing.Hold{}, Limits: []billing.CustomerLimit{}}
-	for _, u := range p.Usage {
+	res := billing.SyncLeasesResult{Lease: billing.Lease{ID: p.LeaseID, ExpiresAt: time.Now().Add(10 * time.Second).UTC(), Live: live},
+		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}, Wants: []billing.LeaseWantResult{}, Holds: []billing.Hold{}, Limits: []billing.CustomerLimit{}}
+	for i, u := range p.Usage {
+		if f.stall {
+			break
+		}
 		n := u.N
 		u.N = 0
 		body, _ := json.Marshal(u)
-		switch {
-		case n <= lease.through:
+		if n <= lease.through {
 			if lease.items[n] != string(body) {
 				res.Usage.Refused = append(res.Usage.Refused, billing.LeaseUsageRefusal{N: n, Status: 422, Error: &billing.ErrorDetails{Code: billing.CodeIdempotencyKeyReused}})
 			}
 			continue
-		case n != lease.through+1:
-			writeFakeError(w, 409, billing.CodeUsageOutOfOrder, fmt.Sprintf("usage %d after %d", n, lease.through))
-			return
+		}
+		if n != lease.through+1 {
+			for _, rest := range p.Usage[i:] {
+				res.Usage.Refused = append(res.Usage.Refused, billing.LeaseUsageRefusal{N: rest.N, Status: 409, Error: &billing.ErrorDetails{Code: billing.CodeUsageOutOfOrder}})
+			}
+			break
 		}
 		lease.through, lease.items[n] = n, string(body)
 		f.firstSeen = append(f.firstSeen, n)
@@ -180,8 +204,10 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, l := range f.limitsOf() {
 			c := fakeCost(l, units)
 			f.settled[fakeLine{u.CustomerID, l}] += c
-			if h := f.holds[fakeHold{p.LeaseID, u.CustomerID}]; h != nil {
+			k := fakeHold{p.LeaseID, u.CustomerID}
+			if h := f.holds[k]; h != nil && c > 0 {
 				h[l] -= min(c, h[l])
+				f.versions[k]++
 			}
 		}
 	}
@@ -211,8 +237,8 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		res.Wants = append(res.Wants, f.want(p.LeaseID, want, committed))
 	}
 	for k, h := range f.holds {
-		if k.lease == p.LeaseID && touched[k.customer] {
-			res.Holds = append(res.Holds, f.hold(k.customer, h))
+		if live && !f.noHolds && k.lease == p.LeaseID && touched[k.customer] {
+			res.Holds = append(res.Holds, f.hold(k.customer, h, f.versions[k]))
 		}
 	}
 	for customer := range touched {
@@ -252,6 +278,9 @@ func (f *fakeSync) want(lease billing.LeaseID, want billing.LeaseWant, committed
 	grant := map[string]int64{}
 	for _, l := range f.limitsOf() {
 		need := fakeCost(l, units)
+		if l == "balance" && want.EstimatedAmount != nil {
+			need = *want.EstimatedAmount
+		}
 		mine, others := f.heldBy(want.CustomerID, l, lease)
 		free := f.capOf(l) - f.settled[fakeLine{want.CustomerID, l}] - mine - others
 		uncommitted := mine - committed[fakeLine{want.CustomerID, l}]
@@ -276,11 +305,12 @@ func (f *fakeSync) want(lease billing.LeaseID, want billing.LeaseWant, committed
 	for l, v := range grant {
 		f.holds[k][l] = v
 	}
+	f.versions[k]++
 	return billing.LeaseWantResult{Status: 200, LimitSet: &set}
 }
 
-func (f *fakeSync) hold(customer billing.CustomerID, held map[string]int64) billing.Hold {
-	h := billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Limits: []billing.HoldLimit{}, RateCards: []billing.HoldRateCard{}, PriceBounds: []billing.PriceBound{}, Safe: f.safe}
+func (f *fakeSync) hold(customer billing.CustomerID, held map[string]int64, version int64) billing.Hold {
+	h := billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Limits: []billing.HoldLimit{}, RateCards: []billing.HoldRateCard{}, PriceBounds: []billing.PriceBound{}, Safe: f.safe, Version: version}
 	unit := catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}
 	for _, l := range f.limitsOf() {
 		if l == "balance" {
@@ -341,6 +371,12 @@ func newTestGate(t *testing.T, f *fakeSync, cfg GateConfig) *Gate {
 		t.Fatal(err)
 	}
 	return g
+}
+
+func leaseOf(g *Gate) billing.LeaseID {
+	g.local.mu.Lock()
+	defer g.local.mu.Unlock()
+	return g.local.lease
 }
 
 func closeGate(t *testing.T, g *Gate) {
@@ -531,6 +567,8 @@ func TestGateDecidesWarmWhileUnreachableAndSpendsSafe(t *testing.T) {
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		// A sync the warm-up started (its hold ran low) finishes first.
+		synctest.Wait()
 		var calls, after int
 		f.set(func(f *fakeSync) { f.down, calls = true, f.calls })
 		started := time.Now()
@@ -591,6 +629,8 @@ func TestGateSpendsSafeOnMoneyNeverOnUnits(t *testing.T) {
 			return billing.AdmitParams{RequestID: id, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EstimatedAmount: amount}
 		}
 		mustAdmit(t, g, work(customer, "warm-up", 2)).Release(t.Context())
+		mustAdmit(t, g, stated("warm-up-stated", 1000)).Release(t.Context())
+		synctest.Wait()
 		f.set(func(f *fakeSync) { f.down = true })
 		mustAdmit(t, g, work(customer, "from-hold", 4))
 		if _, err := g.Admit(t.Context(), work(customer, "past-units", 1)); !errors.Is(err, ErrUnavailable) {
@@ -668,13 +708,13 @@ func TestGateRollsOverADeadLease(t *testing.T) {
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		ticket := mustAdmit(t, g, work(customer, "first", 10))
-		first := g.local.lease
+		first := leaseOf(g)
 		f.set(func(f *fakeSync) { f.dead[first] = true })
 		if err := ticket.Capture(t.Context(), capture(2)); err != nil {
 			t.Fatal(err)
 		}
 		mustAdmit(t, g, work(billing.CustomerID(uuid.New()), "other", 1))
-		if g.local.lease == first {
+		if leaseOf(g) == first {
 			t.Fatal("a lease the server no longer holds was kept")
 		}
 		flush(t, g)
@@ -683,6 +723,9 @@ func TestGateRollsOverADeadLease(t *testing.T) {
 		f.mu.Unlock()
 		if through != 1 {
 			t.Fatalf("the old lease settled through %d, want its one item", through)
+		}
+		if uuid.UUID(leaseOf(g)).Version() != 7 {
+			t.Fatalf("lease id %s is not a UUIDv7", leaseOf(g))
 		}
 	})
 }
@@ -693,7 +736,7 @@ type memOutbox struct {
 	items map[billing.LeaseUsageRef]billing.LeaseUsage
 }
 
-func (o *memOutbox) Put(_ context.Context, items []OutboxItem) error {
+func (o *memOutbox) Put(_ context.Context, items []billing.OutboxItem) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, it := range items {
@@ -702,12 +745,12 @@ func (o *memOutbox) Put(_ context.Context, items []OutboxItem) error {
 	return nil
 }
 
-func (o *memOutbox) Pending(context.Context) ([]OutboxItem, error) {
+func (o *memOutbox) Pending(context.Context) ([]billing.OutboxItem, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]OutboxItem, 0, len(o.items))
+	out := make([]billing.OutboxItem, 0, len(o.items))
 	for ref, u := range o.items {
-		out = append(out, OutboxItem{LeaseID: ref.LeaseID, Usage: u})
+		out = append(out, billing.OutboxItem{LeaseID: ref.LeaseID, Usage: u})
 	}
 	return out, nil
 }
@@ -787,7 +830,7 @@ func TestGateCloseSendsUsageAndReturnsHolds(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		lease := g.local.lease
+		lease := leaseOf(g)
 		if err := g.Close(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -849,4 +892,446 @@ func TestGateRefusesBadInput(t *testing.T) {
 
 func nilRedisForTest() redis.UniversalClient {
 	return redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+}
+
+func dayHold(customer billing.CustomerID, start time.Time, daily, balance, version int64) billing.Hold {
+	end := start.Add(24 * time.Hour)
+	limit := "daily"
+	return billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Version: version,
+		Limits: []billing.HoldLimit{
+			{Limit: "daily", Unit: "units", Held: daily, Overrun: catalog.OverrunRequireEstimate, WindowStartsAt: &start, WindowEndsAt: &end},
+			{Limit: "balance", Unit: "USD", Held: balance, Overrun: catalog.OverrunRequireEstimate},
+		},
+		RateCards: []billing.HoldRateCard{
+			{Limit: &limit, Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum,
+				Price: catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}},
+			{Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum,
+				Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10, DivideBy: 1}}},
+		},
+		PriceBounds: []billing.PriceBound{{Meter: "work", UnitAmount: 10, DivideBy: 1}}}
+}
+
+func heldOf(h billing.Hold) map[string]int64 {
+	out := map[string]int64{}
+	for _, l := range h.Limits {
+		out[partID(l.Limit, l.WindowStartsAt)] += l.Held
+	}
+	return out
+}
+
+func TestGateHoldSetMergesNextWindowHoldsByPartAndWindow(t *testing.T) {
+	customer := billing.CustomerID(uuid.New())
+	t0 := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(24 * time.Hour)
+	today, tomorrow := partID("daily", &t0), partID("daily", &t1)
+	var set holdSet
+	set.apply([]billing.Hold{dayHold(customer, t0, 10, 100, 3), dayHold(customer, t1, 5, 50, 4)}, t0.Add(time.Hour))
+	if got := heldOf(set.merged()); got[today] != 10 || got[tomorrow] != 5 || got["balance@"] != 150 || set.Version != 4 {
+		t.Fatalf("merged %v version %d: both windows kept, balance summed", got, set.Version)
+	}
+	// An answer of the next window alone leaves the current one as it was.
+	set.apply([]billing.Hold{dayHold(customer, t1, 7, 60, 5)}, t0.Add(2*time.Hour))
+	if got := heldOf(set.merged()); got[today] != 10 || got[tomorrow] != 7 || got["balance@"] != 160 {
+		t.Fatalf("merged %v after a next-window answer", got)
+	}
+	set.consume("balance@", 30)
+	if got := heldOf(set.merged()); got["balance@"] != 130 {
+		t.Fatalf("balance %d after consuming 30 of 160", got["balance@"])
+	}
+	// Once today's window ends its hold is dropped.
+	set.apply([]billing.Hold{dayHold(customer, t1, 7, 60, 6)}, t1.Add(time.Hour))
+	if got := heldOf(set.merged()); got[today] != 0 || got["balance@"] != 60 {
+		t.Fatalf("merged %v after today's window ended", got)
+	}
+	// Holds of one answer with the same windows add up.
+	var twice holdSet
+	twice.apply([]billing.Hold{dayHold(customer, t0, 10, 100, 1), dayHold(customer, t0, 10, 100, 2)}, t0)
+	if got := heldOf(twice.merged()); got[today] != 20 || got["balance@"] != 200 {
+		t.Fatalf("merged %v: two holds of one window add up", got)
+	}
+	if empty := (&holdSet{}).merged(); len(empty.Limits) != 0 {
+		t.Fatalf("an empty set has parts %+v", empty.Limits)
+	}
+}
+
+func TestGateDecidesFromTheCurrentWindowOfMergedHolds(t *testing.T) {
+	customer := billing.CustomerID(uuid.New())
+	t0 := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(24 * time.Hour)
+	h := newLocalHold(holdKey{customer, fakeSet}, newLeaseID())
+	r := request{usage: &limits.Usage{EventType: "work", Dimensions: map[string]int64{"units": 3}}}
+	if _, _, out, _ := h.decide(t0, r, true, false); out != decideCold {
+		t.Fatalf("a hold without parts decided %d, want cold", out)
+	}
+	h.apply([]billing.Hold{dayHold(customer, t0, 10, 100, 1), dayHold(customer, t1, 5, 50, 2)}, t0)
+	takes, _, out, err := h.decide(t0.Add(time.Hour), r, true, false)
+	if err != nil || out != decideAllowed {
+		t.Fatalf("decide = %d, %v", out, err)
+	}
+	got := map[string]int64{}
+	for _, tk := range takes {
+		got[tk.part] = tk.cost
+	}
+	if got[partID("daily", &t0)] != 3 || got["balance@"] != 30 || len(got) != 2 {
+		t.Fatalf("takes %v: today's window and the money", got)
+	}
+	takes, _, out, _ = h.decide(t1.Add(time.Hour), r, true, false)
+	if out != decideAllowed || takes[0].part != partID("daily", &t1) && takes[1].part != partID("daily", &t1) {
+		t.Fatalf("tomorrow's request took %+v (%d), want tomorrow's window", takes, out)
+	}
+}
+
+func TestGateDominationDecidesWhoSharesARefusal(t *testing.T) {
+	customer := billing.CustomerID(uuid.New())
+	sent := leaseWant(work(customer, "sent", 10))
+	for _, c := range []struct {
+		p    billing.AdmitParams
+		want bool
+	}{
+		{work(customer, "same", 10), true},
+		{work(customer, "larger", 12), true},
+		{work(customer, "smaller", 2), false},
+	} {
+		if got := dominates(c.p, &sent); got != c.want {
+			t.Errorf("%s dominates = %v", c.p.RequestID, got)
+		}
+	}
+	other := work(customer, "other-meta", 20)
+	other.Usage.Metadata = map[string]any{"model": "large"}
+	if dominates(other, &sent) {
+		t.Error("other metadata may price in another cell")
+	}
+	stated := billing.AdmitParams{RequestID: "s", CustomerID: customer, Currency: "USD", EstimatedAmount: 500}
+	w := leaseWant(stated)
+	if w.EstimatedAmount == nil || *w.EstimatedAmount != 500 || w.Usage != nil {
+		t.Fatalf("a host-stated want carries its estimate: %+v", w)
+	}
+	if !dominates(stated, &w) || dominates(billing.AdmitParams{EstimatedAmount: 400}, &w) || dominates(stated, &sent) {
+		t.Fatal("host-stated estimates compare by amount, never against usage")
+	}
+	if attrsKey(work(customer, "a", 1)) == attrsKey(stated) {
+		t.Fatal("requests of different event types share a hold key")
+	}
+}
+
+func TestGateRollsOverWhenAnAnswerReportsTheLeaseDead(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 10 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(customer, "warm-up", 2)).Release(t.Context())
+		synctest.Wait()
+		first := leaseOf(g)
+		f.set(func(f *fakeSync) { f.dead[first] = true })
+		time.Sleep(1100 * time.Millisecond)
+		if leaseOf(g) == first {
+			t.Fatal("an answer that renewed nothing kept the lease")
+		}
+		var wants int
+		f.set(func(f *fakeSync) { wants = f.wants })
+		mustAdmit(t, g, work(customer, "after", 1))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.wants == wants {
+			t.Fatal("the dead lease's hold still decided")
+		}
+	})
+}
+
+func TestGateTakesOverloadAsUnreachableAndKeepsUsage(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 20 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		synctest.Wait()
+		for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+			f.set(func(f *fakeSync) { f.reject = status })
+			if _, err := g.Consume(t.Context(), work(customer, fmt.Sprint("warm-", status), 3)); err != nil {
+				t.Fatalf("%d: a warm decision needs no answer: %v", status, err)
+			}
+			if _, err := g.Admit(t.Context(), work(billing.CustomerID(uuid.New()), "cold", 1)); !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("%d: a cold request = %v, want ErrUnavailable", status, err)
+			}
+			if err := g.Flush(t.Context()); !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("%d: flush = %v, want ErrUnavailable", status, err)
+			}
+		}
+		f.set(func(f *fakeSync) { f.reject = http.StatusBadRequest })
+		if err := g.Flush(t.Context()); err == nil || errors.Is(err, ErrUnavailable) || !errors.Is(err, billing.ErrInvalid) {
+			t.Fatalf("flush refused by the call = %v, want its refusal", err)
+		}
+		f.set(func(f *fakeSync) { f.reject = 0 })
+		flush(t, g)
+		if got := f.settledOf(customer, "quota"); got != 6 {
+			t.Fatalf("settled %d, want the 6 units captured while syncs failed", got)
+		}
+	})
+}
+
+// stepOutbox is a memOutbox whose Put of one item waits and fails.
+type stepOutbox struct {
+	memOutbox
+	failN   int64
+	release chan struct{}
+}
+
+func (o *stepOutbox) Put(ctx context.Context, items []billing.OutboxItem) error {
+	for _, it := range items {
+		if it.Usage.N == o.failN && o.release != nil {
+			<-o.release
+			return errors.New("outbox: disk full")
+		}
+	}
+	return o.memOutbox.Put(ctx, items)
+}
+
+func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
+		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		first := leaseOf(g)
+		failed := make(chan error, 1)
+		var lost *Ticket
+		go func() {
+			var err error
+			lost, err = g.Consume(t.Context(), work(customer, "two", 2))
+			failed <- err
+		}()
+		synctest.Wait()
+		if _, err := g.Consume(t.Context(), work(customer, "three", 3)); err != nil {
+			t.Fatal(err)
+		}
+		close(outbox.release)
+		if err := <-failed; err == nil {
+			t.Fatal("a capture whose Put failed succeeded")
+		}
+		if err := lost.Release(t.Context()); err != nil {
+			t.Fatal("the failed capture left its ticket open:", err)
+		}
+		flush(t, g)
+		if got := f.settledOf(customer, "quota"); got != 4 {
+			t.Fatalf("settled %d, want 1 + 3: the unstored capture never bills", got)
+		}
+		f.mu.Lock()
+		through := f.leases[first].through
+		f.mu.Unlock()
+		if through != 1 || leaseOf(g) == first {
+			t.Fatalf("the gapped lease settled through %d and stayed current: the item past the gap moves to a new lease", through)
+		}
+		outbox.mu.Lock()
+		left := len(outbox.items)
+		outbox.mu.Unlock()
+		if left != 0 {
+			t.Fatalf("%d outbox items left: the moved item's old ref is acked and its new one settled", left)
+		}
+	})
+}
+
+func TestGateRollsOverWhenTheLeaseSettledNumbersItNeverIssued(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		flush(t, g)
+		first := leaseOf(g)
+		f.set(func(f *fakeSync) { f.leases[first].through = 50 })
+		time.Sleep(1100 * time.Millisecond)
+		if leaseOf(g) == first {
+			t.Fatal("a lease that settled numbers the gate never issued kept numbering")
+		}
+		if _, err := g.Consume(t.Context(), work(customer, "two", 2)); err != nil {
+			t.Fatal(err)
+		}
+		flush(t, g)
+		if got := f.settledOf(customer, "quota"); got != 3 {
+			t.Fatalf("settled %d, want 3", got)
+		}
+	})
+}
+
+func TestGateNeverMakesAnEmptyHold(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.noHolds = true
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		ticket, err := g.Admit(t.Context(), work(billing.CustomerID(uuid.New()), "no-hold", 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.local.index.RLock()
+		holds := len(g.local.holds)
+		g.local.index.RUnlock()
+		if ticket.Allowed() || holds != 0 {
+			t.Fatalf("admitted %v with %d local holds: a want answered without a hold admits nothing", ticket.Allowed(), holds)
+		}
+	})
+}
+
+func TestGateSmallerWaiterSendsItsOwnWant(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 5})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		block := make(chan struct{})
+		f.set(func(f *fakeSync) { f.block = block })
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		type result struct {
+			ticket *Ticket
+			err    error
+		}
+		small, large := make(chan result, 1), make(chan result, 1)
+		go func() {
+			ticket, err := g.Admit(t.Context(), work(customer, "small", 2))
+			small <- result{ticket, err}
+		}()
+		synctest.Wait()
+		go func() {
+			ticket, err := g.Admit(t.Context(), work(customer, "large", 10))
+			large <- result{ticket, err}
+		}()
+		synctest.Wait()
+		f.set(func(f *fakeSync) { f.block = nil })
+		close(block)
+		l, s := <-large, <-small
+		if l.err != nil || l.ticket.Allowed() || l.ticket.Refusal().DenyCode != billing.DenyLimitReached {
+			t.Fatalf("large = %+v, %v: refused limit_reached", l.ticket.Refusal(), l.err)
+		}
+		if s.err != nil || !s.ticket.Allowed() {
+			t.Fatalf("small = %+v, %v: it fits, and does not inherit the larger want's refusal", s.ticket.Refusal(), s.err)
+		}
+	})
+}
+
+func TestGateReportsAppliedVersionsUntilASyncIsAnswered(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(cost int64) int64 { return 10 * cost }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		mustAdmit(t, g, work(customer, "grow", 20)).Release(t.Context())
+		synctest.Wait()
+		var version int64
+		lease := leaseOf(g)
+		f.set(func(f *fakeSync) {
+			version = f.versions[fakeHold{lease, customer}]
+			f.applied, f.dropReply = nil, 1
+		})
+		time.Sleep(3100 * time.Millisecond)
+		f.mu.Lock()
+		applied := slices.Clone(f.applied)
+		f.mu.Unlock()
+		want := []billing.HoldApplied{{CustomerID: customer, LimitSet: fakeSet, Version: version}}
+		if len(applied) < 3 || !slices.Equal(applied[0], want) || !slices.Equal(applied[1], want) || len(applied[2]) != 0 {
+			t.Fatalf("applied %+v, want %+v twice (its first sync's reply was lost), then none", applied, want)
+		}
+	})
+}
+
+func TestGateFlushIsBoundedWithoutADeadline(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		f.set(func(f *fakeSync) { f.stall = true })
+		started := time.Now()
+		if err := g.Flush(context.Background()); !errors.Is(err, ErrUnavailable) || time.Since(started) != gateFlushBound {
+			t.Fatalf("flush that never settles = %v after %v, want ErrUnavailable after %v", err, time.Since(started), gateFlushBound)
+		}
+		f.set(func(f *fakeSync) { f.stall = false })
+		flush(t, g)
+	})
+}
+
+func TestGateClosesTheEarlierLeasesItResends(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 20 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		first := leaseOf(g)
+		f.set(func(f *fakeSync) { f.down = true })
+		if _, err := g.Consume(t.Context(), work(customer, "unsent", 2)); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(11 * time.Second)
+		if leaseOf(g) == first {
+			t.Fatal("a lease past its life by the local clock was kept")
+		}
+		f.set(func(f *fakeSync) { f.down = false })
+		flush(t, g)
+		f.mu.Lock()
+		closed := slices.Clone(f.closed)
+		through := f.leases[first].through
+		f.mu.Unlock()
+		if !slices.Contains(closed, first) || through != 1 {
+			t.Fatalf("closed %v, old lease through %d: its usage is resent with close", closed, through)
+		}
+	})
+}
+
+func TestGateNeverReturnsAHoldWithAnOpenTicket(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 10})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		g.local.mu.Lock()
+		g.local.maxHolds = 2
+		g.local.mu.Unlock()
+		customers := []billing.CustomerID{billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())}
+		open := mustAdmit(t, g, work(customers[0], "open", 1))
+		time.Sleep(10 * time.Millisecond)
+		for i, c := range customers[1:] {
+			if _, err := g.Consume(t.Context(), work(c, fmt.Sprint(i), 1)); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		flush(t, g)
+		time.Sleep(2 * time.Second)
+		f.mu.Lock()
+		returns := slices.Clone(f.returns)
+		f.mu.Unlock()
+		if len(returns) != 1 || returns[0].CustomerID != customers[1] {
+			t.Fatalf("returns %+v, want the least recently used idle hold, not the one with an open ticket", returns)
+		}
+		if err := open.Capture(t.Context(), capture(1)); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

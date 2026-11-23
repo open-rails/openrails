@@ -3,8 +3,10 @@ package openrails
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +59,140 @@ func partLimit(id string) string {
 // current reports whether the part's window contains now.
 func (p holdPart) current(now time.Time) bool {
 	return (p.start == nil || !now.Before(*p.start)) && (p.end == nil || now.Before(*p.end))
+}
+
+// holdSet is what a gate keeps of the server's holds of one customer and
+// limit set. The server may hold one key in several holds (a fixed window's
+// next-window hold beside the current one): each is kept by its windows, and
+// the same limit in the same window adds up across them.
+type holdSet struct {
+	Latest  billing.Hold            `json:"latest"`
+	Subs    map[string]billing.Hold `json:"subs"`
+	Version int64                   `json:"version"`
+}
+
+// holdWindows names a hold among its key's others: its windowed parts.
+func holdWindows(h billing.Hold) string {
+	ids := []string{}
+	for _, l := range h.Limits {
+		if l.WindowEndsAt != nil {
+			ids = append(ids, partID(l.Limit, l.WindowStartsAt))
+		}
+	}
+	slices.Sort(ids)
+	return strings.Join(ids, ",")
+}
+
+// apply takes one answer's holds of the key: each replaces the hold of its
+// windows, and holds of one answer with the same windows add up. A hold with
+// a window that ended by now is dropped; the server releases or reissues it.
+func (s *holdSet) apply(holds []billing.Hold, now time.Time) {
+	if s.Subs == nil {
+		s.Subs = map[string]billing.Hold{}
+	}
+	fresh := map[string]billing.Hold{}
+	for _, h := range holds {
+		w := holdWindows(h)
+		if prev, ok := fresh[w]; ok {
+			h = addHolds(prev, h)
+		}
+		fresh[w] = h
+		s.Latest = h
+		s.Version = max(s.Version, h.Version)
+	}
+	maps.Copy(s.Subs, fresh)
+	s.expire(now)
+}
+
+func (s *holdSet) expire(now time.Time) {
+	for w, h := range s.Subs {
+		for _, l := range h.Limits {
+			if l.WindowEndsAt != nil && !now.Before(*l.WindowEndsAt) {
+				delete(s.Subs, w)
+				break
+			}
+		}
+	}
+}
+
+// addHolds is two holds of one key and windows as one: b's cards, each
+// part's held and the safe amounts summed.
+func addHolds(a, b billing.Hold) billing.Hold {
+	out := b
+	out.Limits = slices.Clone(a.Limits)
+	for _, l := range b.Limits {
+		i := slices.IndexFunc(out.Limits, func(x billing.HoldLimit) bool {
+			return partID(x.Limit, x.WindowStartsAt) == partID(l.Limit, l.WindowStartsAt)
+		})
+		if i < 0 {
+			out.Limits = append(out.Limits, l)
+			continue
+		}
+		out.Limits[i].Held = satAdd(out.Limits[i].Held, l.Held)
+	}
+	out.Safe = addSafe(a.Safe, b.Safe)
+	return out
+}
+
+func addSafe(a, b *int64) *int64 {
+	if a == nil && b == nil {
+		return nil
+	}
+	v := satAdd(derefInt(a), derefInt(b))
+	return &v
+}
+
+// merged is the key's holds as one: each limit in each window once with its
+// held summed, and the latest answer's currency, cards and bounds. With no
+// hold it has no parts and admits nothing.
+func (s *holdSet) merged() billing.Hold {
+	out := s.Latest
+	out.Limits = []billing.HoldLimit{}
+	out.Safe = nil
+	for _, w := range slices.Sorted(maps.Keys(s.Subs)) {
+		h := s.Subs[w]
+		for _, l := range h.Limits {
+			i := slices.IndexFunc(out.Limits, func(x billing.HoldLimit) bool {
+				return partID(x.Limit, x.WindowStartsAt) == partID(l.Limit, l.WindowStartsAt)
+			})
+			if i < 0 {
+				out.Limits = append(out.Limits, l)
+				continue
+			}
+			out.Limits[i].Held = satAdd(out.Limits[i].Held, l.Held)
+		}
+		out.Safe = addSafe(out.Safe, h.Safe)
+	}
+	return out
+}
+
+// consume takes usage the server settled without answering its hold off the
+// holds that hold its part, in their windows' order.
+func (s *holdSet) consume(part string, cost int64) {
+	for _, w := range slices.Sorted(maps.Keys(s.Subs)) {
+		if cost <= 0 {
+			return
+		}
+		h := s.Subs[w]
+		for i, l := range h.Limits {
+			if partID(l.Limit, l.WindowStartsAt) != part || l.Held <= 0 {
+				continue
+			}
+			take := min(cost, l.Held)
+			h.Limits = slices.Clone(h.Limits)
+			h.Limits[i].Held -= take
+			cost -= take
+			s.Subs[w] = h
+			break
+		}
+	}
+}
+
+func satAdd(a, b int64) int64 {
+	if b > 0 && a > maxGateAmount-b {
+		return maxGateAmount
+	}
+	return a + b
 }
 
 type boundKey struct{ meter, cell string }

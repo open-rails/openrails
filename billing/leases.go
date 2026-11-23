@@ -116,6 +116,12 @@ type LeaseUsageRef struct {
 	N       int64   `json:"n"`
 }
 
+// OutboxItem is one usage item of a lease, as a gate's outbox stores it.
+type OutboxItem struct {
+	LeaseID LeaseID    `json:"lease_id"`
+	Usage   LeaseUsage `json:"usage"`
+}
+
 // LeaseWant asks for a hold for one customer and the invoker attributes of
 // a request, as AdmitParams names them, with the request's usage estimate.
 type LeaseWant struct {
