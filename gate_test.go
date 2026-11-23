@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -1655,6 +1656,32 @@ func TestGateRecordKeyNamesCustomerEventTypeSourceAndSourceID(t *testing.T) {
 		change(&other)
 		if recordKey(other) == recordKey(base) {
 			t.Fatalf("another %s is another Record", name)
+		}
+	}
+}
+
+func TestGateReclaimsTicketsOfDeadProcessesAndXTicketsPastTheirLease(t *testing.T) {
+	dead := map[string]bool{"gone": true}
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC).UnixMilli()
+	ttl := gateEarlierTicketTTL.Milliseconds()
+	made := func(ago int64) string { return strconv.FormatInt(now-ago, 10) }
+	for _, c := range []struct {
+		ticket string
+		want   bool
+	}{
+		{"o|gone|quota@=3", true},
+		{"o|live|quota@=3", false},
+		{"c|7|quota@=3", false},
+		{"x|gone|lse_old|" + made(0) + "|quota@=3", true},
+		{"x|live|lse_old|" + made(ttl-1) + "|quota@=3", false},
+		{"x|live|lse_old|" + made(ttl) + "|quota@=3", true},
+		// A captured ticket whose usage was lost with its lease's stream.
+		{"x|7|lse_old|" + made(ttl+time.Hour.Milliseconds()) + "|quota@=3", true},
+		{"x|7|lse_old|" + made(0) + "|quota@=3", false},
+		{"x|7|lse_old|quota@=3", false},
+	} {
+		if got := reclaimable(c.ticket, dead, now); got != c.want {
+			t.Errorf("reclaimable(%q) = %v, want %v", c.ticket, got, c.want)
 		}
 	}
 }

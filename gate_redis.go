@@ -59,10 +59,11 @@ import (
 //	                 h:<part> held, o:<part> taken by open tickets, u:<part>
 //	                 captured and unsettled, e:<part> end
 //	H:t        hash  ticket -> o|<process>|<part>=<cost>;... or c|<n>|...;
-//	                 x|<process or n>|<lease>|... an open or unsettled
-//	                 ticket of an earlier lease, which counts on nothing
-//	                 here and keeps that lease from closing until a release,
-//	                 its usage's settlement or a reclaim forgets it
+//	                 x|<process or n>|<lease>|<made, unix ms>|... an open or
+//	                 unsettled ticket of an earlier lease, which counts on
+//	                 nothing here and keeps that lease from closing until a
+//	                 release, its usage's settlement or a reclaim forgets it
+//	                 (its process dead, or gateEarlierTicketTTL after made)
 const (
 	gateKeyPrefix = "openrails:gate:v2:"
 	// gateLockTTL is how long the syncing process keeps the group's lock
@@ -107,6 +108,11 @@ const (
 	// gateWriteKeyBackstop bounds a key whose usage never settles here (its
 	// stream dropped with a dead lease, or unreadable).
 	gateWriteKeyBackstop = 24 * time.Hour
+	// gateEarlierTicketTTL is how long an x ticket is kept: past its
+	// lease's life and grace and the write-key window, its usage settled or
+	// never will (its stream lost), and it would only keep its hold from
+	// being evicted or deleted.
+	gateEarlierTicketTTL = limits.LeaseLifetime + limits.LeaseGrace + gateWriteKeyTTL
 	maxGateOrphans       = 10_000
 	// gateLeaseDead and gateLeaseReplaced are G:lease valid values: a lease
 	// the server answered dead, closed at once once replaced, and one to
@@ -1947,7 +1953,8 @@ func (s *sharedGate) evict(ctx context.Context, ns, lease string, holds *groupHo
 }
 
 // reclaim gives back what dead processes' open tickets took, never this
-// process's own, and forgets idle holds of earlier leases.
+// process's own, forgets x tickets of dead processes or past
+// gateEarlierTicketTTL, and forgets idle holds of earlier leases.
 func (s *sharedGate) reclaim(ctx context.Context, ns, lease string, holds *groupHolds) error {
 	procs, err := s.rdb.HGetAll(ctx, s.g(ns, "procs")).Result()
 	if err != nil {
@@ -1964,29 +1971,34 @@ func (s *sharedGate) reclaim(ctx context.Context, ns, lease string, holds *group
 	for id := range holds.refs {
 		ids = append(ids, id)
 	}
-	if len(dead) > 0 {
-		tickets := make([]*redis.MapStringStringCmd, len(ids))
-		if _, err := s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
-			for i, id := range ids {
-				tickets[i] = p.HGetAll(ctx, s.h(ns, id)+":t")
-			}
-			return nil
-		}); err != nil && !errors.Is(err, redis.Nil) {
-			return err
-		}
+	tickets := make([]*redis.MapStringStringCmd, len(ids))
+	if _, err := s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
 		for i, id := range ids {
-			var lost []any
-			for ticket, v := range tickets[i].Val() {
-				if fields := strings.SplitN(v, "|", 3); len(fields) == 3 && (fields[0] == "o" || fields[0] == "x") && dead[fields[1]] {
-					lost = append(lost, ticket)
-				}
-			}
-			if len(lost) > 0 {
-				if err := reclaimScript.Run(ctx, s.rdb, s.holdKeys(ns, id), lost...).Err(); err != nil {
-					return err
-				}
+			tickets[i] = p.HGetAll(ctx, s.h(ns, id)+":t")
+		}
+		return nil
+	}); err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+	args := []any{gateEarlierTicketTTL.Milliseconds(), len(dead)}
+	for proc := range dead {
+		args = append(args, proc)
+	}
+	now := time.Now().UnixMilli()
+	for i, id := range ids {
+		lost := slices.Clip(args)
+		for ticket, v := range tickets[i].Val() {
+			if reclaimable(v, dead, now) {
+				lost = append(lost, ticket)
 			}
 		}
+		if len(lost) > len(args) {
+			if err := reclaimScript.Run(ctx, s.rdb, s.holdKeys(ns, id), lost...).Err(); err != nil {
+				return err
+			}
+		}
+	}
+	if len(dead) > 0 {
 		stale := make([]string, 0, len(dead))
 		for proc := range dead {
 			stale = append(stale, proc)
@@ -2010,6 +2022,22 @@ func (s *sharedGate) reclaim(ctx context.Context, ns, lease string, holds *group
 		}
 	}
 	return nil
+}
+
+// reclaimable reports a ticket (its H:t value) a reclaim at now (unix ms)
+// forgets: an open ticket of a dead process, whose take it gives back, or an
+// x ticket of a dead process or made gateEarlierTicketTTL or more before.
+// reclaimScript applies the same rule by Redis's clock.
+func reclaimable(v string, dead map[string]bool, now int64) bool {
+	fields := strings.SplitN(v, "|", 5)
+	switch {
+	case len(fields) >= 3 && fields[0] == "o":
+		return dead[fields[1]]
+	case len(fields) == 5 && fields[0] == "x":
+		made, err := strconv.ParseInt(fields[3], 10, 64)
+		return dead[fields[1]] || err == nil && now-made >= gateEarlierTicketTTL.Milliseconds()
+	}
+	return false
 }
 
 func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([]billing.CustomerLimit, error) {
@@ -2322,18 +2350,34 @@ redis.call('HSET', KEYS[2], ARGV[1], 'c|' .. ARGV[2] .. '|' .. ARGV[3])
 return 1
 `)
 
-// reclaimScript: KEYS hold, tickets; ARGV open tickets of dead processes,
-// an earlier lease's ones included, which count on nothing here.
+// reclaimScript: KEYS hold, tickets; ARGV x ticket lifetime (ms), dead
+// process count, the dead processes, then tickets. Forgets each ticket that
+// is (still) reclaimable: an open ticket of a dead process, its take given
+// back, or an x ticket, which counts on nothing here, of a dead process or
+// made at least the lifetime ago by Redis's clock.
 var reclaimScript = redis.NewScript(luaCosts + `
+local ttl, nd = tonumber(ARGV[1]), tonumber(ARGV[2])
+if not ttl or ttl < 1 or not nd or nd < 0 or nd ~= math.floor(nd) or 2 + nd > #ARGV then
+  return redis.error_reply('reclaim: bad arguments')
+end
+local dead = {}
+for j = 3, 2 + nd do dead[ARGV[j]] = true end
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local lost, earlier = {}, {}
-for _, ticket in ipairs(ARGV) do
+for j = 3 + nd, #ARGV do
+  local ticket = ARGV[j]
   local v = redis.call('HGET', KEYS[2], ticket)
   if v and string.sub(v, 1, 1) == 'o' then
-    local list = parse(costs(v))
-    if not list then return redis.error_reply('reclaim: bad ticket') end
-    lost[#lost + 1] = {ticket, list}
+    if dead[string.match(v, '^o|([^|]*)|') or ''] then
+      local list = parse(costs(v))
+      if not list then return redis.error_reply('reclaim: bad ticket') end
+      lost[#lost + 1] = {ticket, list}
+    end
   elseif v and string.sub(v, 1, 1) == 'x' then
-    earlier[#earlier + 1] = ticket
+    local second, made = string.match(v, '^x|([^|]*)|[^|]*|([^|]*)|')
+    made = tonumber(made or '')
+    if dead[second or ''] or (made and now - made >= ttl) then earlier[#earlier + 1] = ticket end
   end
 end
 for _, l in ipairs(lost) do
@@ -2352,9 +2396,10 @@ return #lost + #earlier
 // hold's state after usage the answer left out, d only settles tickets, e
 // only adds event types the server priced to the lease's hold. Writing a
 // hold of another lease (or none) starts it over, keeping that lease's open
-// and unsettled tickets, and earlier leases' x tickets, as x tickets: they
-// count on nothing here and keep their lease from closing while they last.
-// Every write but e bumps ver; e bumps it for a new event type.
+// and unsettled tickets as x tickets made now (Redis's clock), and earlier
+// leases' x tickets as they are: they count on nothing here and keep their
+// lease from closing while they last. Every write but e bumps ver; e bumps it
+// for a new event type.
 var settleScript = redis.NewScript(luaCosts + `
 local h, t = KEYS[1], KEYS[2]
 local lease, mode = ARGV[1], ARGV[2]
@@ -2386,6 +2431,8 @@ local keep = {}
 if reset then
   local settled = {}
   for _, ticket in ipairs(tickets) do settled[ticket] = true end
+  local tm = redis.call('TIME')
+  local made = string.format('%d', tonumber(tm[1]) * 1000 + math.floor(tonumber(tm[2]) / 1000))
   local all = redis.call('HGETALL', t)
   for j = 1, #all, 2 do
     local id, v = all[j], all[j + 1]
@@ -2394,7 +2441,7 @@ if reset then
     elseif string.sub(v, 1, 1) == 'x' then
       keep[#keep + 1] = {id, v}
     elseif second and cur and cur ~= '' and cur ~= '-' then
-      keep[#keep + 1] = {id, 'x|' .. second .. '|' .. cur .. '|' .. rest}
+      keep[#keep + 1] = {id, 'x|' .. second .. '|' .. cur .. '|' .. made .. '|' .. rest}
     end
   end
 end
