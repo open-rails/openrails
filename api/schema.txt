@@ -3,7 +3,7 @@
 # not edit. Monthly partitions are left out: their names follow the calendar.
 migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352cab53af9e6dd57fde0f661
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
-migration 0003_usage_limits.up.sql sha256:334baf632ff86ac963ef9bdf95a0bab4de65f1fdc6700ff0fc462127a434601f
+migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -834,7 +834,6 @@ table billing.limit_hold_parts PARTITION BY RANGE (hold_created_at)
   constraint limit_hold_parts_answered_units_check CHECK ((answered_units >= 0))
   constraint limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint limit_hold_parts_held_check CHECK ((held >= 0))
-  constraint limit_hold_parts_hold_id_fkey FOREIGN KEY (merchant_id, hold_id, hold_created_at) REFERENCES billing.limit_holds(merchant_id, id, created_at) ON DELETE CASCADE
   constraint limit_hold_parts_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
   constraint limit_hold_parts_pkey PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at)
   constraint limit_hold_parts_request_units_check CHECK ((request_units >= 0))
