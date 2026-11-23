@@ -783,6 +783,50 @@ func TestLeaseVersions(t *testing.T) {
 			w.alpha.MerchantID().UUID()).Scan(&charged))
 		require.EqualValues(t, len(items), charged, "every item settled exactly once")
 	})
+
+	t.Run("OR-J24-S35/a-hold-another-lease-waits-for-shrinks-while-its-customer-is-busy", func(t *testing.T) {
+		w := newWorld(t)
+		applyLimits(t, w.alpha, unitPlan)
+		customer := billing.CustomerID(uuid.New())
+		grantLimitProduct(t, w.alpha, customer, "plan", 24)
+		overrideLimit(t, w, customer, "quota", 10)
+		first, second := newLease(), newLease()
+		var set string
+		for _, want := range []int64{2, 4, 5} {
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: first, Wants: []billing.LeaseWant{workWant(customer, 2)}})
+			var refusal *billing.Refusal
+			set, refusal = wanted(t, out)
+			require.Nil(t, refusal)
+			h, _ := heldIn(out, customer, set, "quota")
+			require.EqualValues(t, want, h)
+		}
+		_, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: second, Wants: []billing.LeaseWant{workWant(customer, 7)}}))
+		require.NotNil(t, refusal)
+		require.Equal(t, billing.DenyCapacityHeld, refusal.DenyCode)
+
+		// Another transaction holds the customer's spend lock while the first
+		// lease syncs idle. No item of that sync names the customer, but the
+		// shrink the second lease waits for is not skipped: the sync waits.
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
+			w.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		busy := 500 * time.Millisecond
+		freed := time.Now().Add(busy)
+		unlock := time.AfterFunc(busy, func() { _ = tx.Rollback(context.Background()) })
+		defer unlock.Stop()
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: first})
+		require.False(t, time.Now().Before(freed), "the sync waited for the busy customer")
+		h, listed := heldIn(out, customer, set, "quota")
+		require.True(t, listed, "the contended hold was sized, not skipped")
+		require.Zero(t, h, "an idle hold another lease waits for gives back what no ticket took")
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: first})
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
+		_, refusal = wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: second, Wants: []billing.LeaseWant{workWant(customer, 7)}}))
+		require.Nil(t, refusal, "the second lease gets what the first gave back")
+	})
 }
 
 func TestLimitArchive(t *testing.T) {

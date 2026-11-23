@@ -32,8 +32,8 @@ SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 100000
 
 -- name: TryLockCustomerForSpend :one
 -- The customer's spend lock unless another transaction holds it: a sync
--- renews the holds of a customer no item names only when it need not wait.
--- No row when skipped.
+-- does routine work on the holds of a customer no item names only when it
+-- need not wait. No row when skipped.
 SELECT id FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 FOR UPDATE SKIP LOCKED;

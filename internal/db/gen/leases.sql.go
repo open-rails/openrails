@@ -641,8 +641,8 @@ type TryLockCustomerForSpendParams struct {
 }
 
 // The customer's spend lock unless another transaction holds it: a sync
-// renews the holds of a customer no item names only when it need not wait.
-// No row when skipped.
+// does routine work on the holds of a customer no item names only when it
+// need not wait. No row when skipped.
 func (q *Queries) TryLockCustomerForSpend(ctx context.Context, arg TryLockCustomerForSpendParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, tryLockCustomerForSpend, arg.MerchantID, arg.ID)
 	var id uuid.UUID

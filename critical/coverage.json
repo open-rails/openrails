@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 403,
+  "scenario_count": 404,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -737,6 +737,11 @@
       "id": "OR-J24-S34",
       "journey": "J24",
       "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+    },
+    {
+      "id": "OR-J24-S35",
+      "journey": "J24",
+      "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
     },
     {
       "id": "OR-J25-S01",

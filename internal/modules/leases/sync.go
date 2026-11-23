@@ -637,12 +637,14 @@ func (r *syncRun) findMoved() error {
 	return err
 }
 
-// lockCustomers locks, in id order, the customers of the usage prefix and
-// those the sync's wants, returns and applied versions name, then, without
-// waiting, the customers of the most urgent holds no item names: one held
-// elsewhere is skipped and its holds wait for a later sync. The sync writes a
-// lease's parts only under their customer's lock, as every other writer of
-// them does.
+// lockCustomers locks, in id order, the customers of the usage prefix, those
+// the sync's wants, returns and applied versions name, and those of the most
+// urgent holds no item names whose work frees capacity others wait for
+// (class 0, but for a close: a closed lease's holds count nowhere); then,
+// without waiting, the customers of the other holds within the bound: one
+// held elsewhere is skipped and its holds wait for a later sync. The sync
+// writes a lease's parts only under their customer's lock, as every other
+// writer of them does.
 func (r *syncRun) lockCustomers() error {
 	r.locked = map[uuid.UUID]bool{}
 	var ids []uuid.UUID
@@ -669,6 +671,24 @@ func (r *syncRun) lockCustomers() error {
 			}
 		}
 	}
+	// The most urgent holds no item names, within the bound.
+	var extra []uuid.UUID
+	if r.live || r.p.Close {
+		tasks, err := r.rank(func(holdKey) bool { return true })
+		if err != nil {
+			return err
+		}
+		for _, t := range tasks[:min(len(tasks), maxRenewals)] {
+			c := t.key.customer
+			switch {
+			case r.Allows != nil && !r.Allows(billing.CustomerID(c)):
+			case t.class == 0 && !r.p.Close:
+				add(billing.CustomerID(c))
+			case !r.locked[c] && !slices.Contains(extra, c):
+				extra = append(extra, c)
+			}
+		}
+	}
 	slices.SortFunc(ids, compareUUID)
 	for _, id := range ids {
 		if err := db.EnsureCustomerRowQ(r.ctx, r.q, r.merchant, id); err != nil {
@@ -676,20 +696,6 @@ func (r *syncRun) lockCustomers() error {
 		}
 		if _, err := r.q.LockCustomerForSpend(r.ctx, gen.LockCustomerForSpendParams{MerchantID: r.merchant, ID: id}); err != nil {
 			return err
-		}
-	}
-	if !r.live && !r.p.Close {
-		return nil
-	}
-	// Of the holds no item names, the most urgent few, within the bound.
-	tasks, err := r.rank(func(holdKey) bool { return true })
-	if err != nil {
-		return err
-	}
-	var extra []uuid.UUID
-	for _, t := range tasks[:min(len(tasks), maxRenewals)] {
-		if c := t.key.customer; !r.locked[c] && !slices.Contains(extra, c) && (r.Allows == nil || r.Allows(billing.CustomerID(c))) {
-			extra = append(extra, c)
 		}
 	}
 	slices.SortFunc(extra, compareUUID)
