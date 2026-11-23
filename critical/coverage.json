@@ -1589,6 +1589,11 @@
       "name": "Concurrent imported grant declarations and lost responses replay once"
     },
     {
+      "id": "OR-J27-S13",
+      "journey": "J27",
+      "name": "The merchant SDK reuses scoped current entitlement checks through their scheduled cutoff"
+    },
+    {
       "id": "OR-J04-S42",
       "journey": "J04",
       "name": "An engine renewal is billed by the next hourly billing pass; its renewal grace reaches two passes past the due instant, so access holds across the gap"

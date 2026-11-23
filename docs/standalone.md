@@ -174,9 +174,7 @@ status and code ([errors](api/errors.md)). For admission, honor every clean deny
 decide per endpoint whether `ErrUnreachable` fails open or closed; keep the
 deadline short.
 
-### Cache entitlement checks
-
-For a backend using a merchant API key, set
+**Cache entitlement checks.** For a backend using a merchant API key, set
 `RemoteMerchantOptions.EntitlementCheckCache` (or the same field on
 `RemoteOptions`) to opt in:
 
@@ -192,8 +190,9 @@ client, err := openrails.NewRemoteMerchant(billingURL,
 
 `CheckEntitlements` caches exact-key checks for the present in bounded process
 memory. If you supply your own go-redis client as `EntitlementCheckCache.Redis`,
-replicas using the same OpenRails endpoint, merchant and API key can share the
-answers. Your backend owns that Redis client and its connection lifecycle.
+replicas using the same OpenRails endpoint, merchant, API key and cache age
+can share answers. Your backend owns that Redis client and its connection
+lifecycle.
 
 An answer can be reused for up to `MaxAge` and expires by the next scheduled
 access change. A new purchase, early revocation or API key permission change
