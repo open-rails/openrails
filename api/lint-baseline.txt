@@ -13,7 +13,6 @@ alias openrails.Custodians
 alias openrails.CustomerBinding
 alias openrails.CustomerProof
 alias openrails.CustomerRoutes
-alias openrails.DBConfig
 alias openrails.DatabaseConfig
 alias openrails.Deps
 alias openrails.DestructiveActionLimitsConfig
@@ -37,10 +36,8 @@ alias openrails.RateLimitsConfig
 alias openrails.Read
 alias openrails.ReadCache
 alias openrails.ReadPolicy
-alias openrails.RedisConfig
 alias openrails.RouteGroups
 alias openrails.Routes
-alias openrails.SMTPConfig
 alias openrails.SolanaConfig
 alias openrails.SolanaCrankerConfig
 alias openrails.SubjectKind
@@ -371,7 +368,6 @@ error-code webhook_account_mismatch
 error-code webhook_invalid
 internal openrails.Config.Captcha
 internal openrails.Config.CardVault
-internal openrails.Config.DB
 internal openrails.Config.Database
 internal openrails.Config.DestructiveActionLimits
 internal openrails.Config.HyperSwitch
@@ -381,8 +377,6 @@ internal openrails.Config.Merchants
 internal openrails.Config.ProviderSandbox
 internal openrails.Config.RateLimits
 internal openrails.Config.ReadCache
-internal openrails.Config.Redis
-internal openrails.Config.SMTP
 internal openrails.Config.Solana
 internal openrails.Config.UserActionRateLimit
 internal openrails.Config.Vault
@@ -394,10 +388,6 @@ internal openrails.Deps.Notifications
 internal openrails.Deps.UserInfo
 internal openrails.Email.From
 internal openrails.EmailSender.Send
-internal openrails.MerchantDeclaration.AlertWebhooks
-internal openrails.MerchantDeclaration.Custodians
-internal openrails.MerchantDeclaration.PSPs
-internal openrails.MerchantDeclaration.Secrets
 internal openrails.NotificationChannel.Recipient
 internal openrails.PSPs
 internal openrails.RateLimitsConfig
@@ -408,7 +398,6 @@ internal openrails.ReadMeters
 internal openrails.ReadPublicConfig
 internal openrails.Routes.Auth
 internal openrails.Routes.RouteGroups
-internal openrails.SMTPConfig.From
 internal openrails.SolanaConfig.Crankers
 internal openrailstest/nmimock.Billing.Card
 internal openrailstest/nmimock.Vault.Card
@@ -420,7 +409,6 @@ internal server.FormerNamesForever
 internal server.FormerNamesImmediate
 internal server.NamingConfig.FormerNames
 json-dash billing.RenameMerchantParams.ActorUserID
-json-dash openrails.MerchantDeclaration.Binding
 reexport openrails.CredentialAPIKey
 reexport openrails.CredentialAccessToken
 reexport openrails.CredentialDeviceKey
