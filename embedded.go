@@ -26,8 +26,8 @@ func init() {
 				return v.engine
 			}
 		case *LocalClient:
-			if v != nil && v.Client != nil {
-				return v.engine
+			if v != nil && v.client != nil {
+				return v.client.engine
 			}
 		case *Client:
 			if v != nil {
@@ -106,15 +106,14 @@ func (e *Engine) Merchant(id billing.MerchantID) (*Client, error) {
 	return e.handle(id), nil
 }
 
-// MerchantBySlug is Merchant for the merchant Config.Merchants declares
-// under slug; any other slug is billing.ErrMerchantUnresolved. It does no
-// I/O.
-func (e *Engine) MerchantBySlug(slug string) (*Client, error) {
+// DeclaredMerchant is the ID of the merchant Config.Merchants declares under
+// slug; any other slug is billing.ErrMerchantUnresolved. It does no I/O.
+func (e *Engine) DeclaredMerchant(slug string) (billing.MerchantID, error) {
 	id, ok := e.engine.DeclaredMerchant(slug)
 	if !ok {
-		return nil, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
+		return billing.MerchantID{}, fmt.Errorf("%w: Config declares no merchant %q", billing.ErrMerchantUnresolved, slug)
 	}
-	return e.Merchant(id)
+	return id, nil
 }
 
 // WithInvoker names the signed-in person an in-process call acts for, by

@@ -13,9 +13,9 @@ import (
 // was applied with other content. The validation failure is preserved.
 var ErrMigrationsRequired = migrate.ErrMigrationsRequired
 
-// Migrate explicitly prepares OpenRails' schema, initial partitions and River
-// tables without constructing a runtime. It runs regardless of SkipMigrations,
-// which controls automatic application startup only.
-func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
-	return engine.Migrate(ctx, pool, cfg)
+// Migrate prepares OpenRails' schema, this month's partitions and River's
+// tables in database's schemas, without constructing an engine. It runs
+// regardless of database.SkipMigrations, which controls New only.
+func Migrate(ctx context.Context, pool *pgxpool.Pool, database DatabaseConfig) error {
+	return engine.Migrate(ctx, pool, Config{Database: database})
 }

@@ -159,7 +159,7 @@ func TestWorkerProcess(t *testing.T) {
 		ready = server.URL
 	} else if config.StopReference != "" {
 		if !config.BeforeStop {
-			client, err := engine.MerchantBySlug("alpha")
+			client, err := declaredMerchant(engine, "alpha")
 			require.NoError(t, err)
 			_, err = client.StopRunningCharge(t.Context(), config.StopReference, billing.StopRunningChargeParams{StoppedAt: &config.At})
 			require.NoError(t, err)

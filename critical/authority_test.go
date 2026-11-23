@@ -154,9 +154,9 @@ func (a *authorityWorld) bindCustomers(t *testing.T, slug string) {
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
-	a.beta, err = a.engine.MerchantBySlug("beta")
+	a.beta, err = declaredMerchant(a.engine, "beta")
 	require.NoError(t, err)
 	a.serve(t)
 }

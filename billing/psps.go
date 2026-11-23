@@ -147,17 +147,6 @@ type UpdatePSPParams struct {
 	AllowLast bool `json:"allow_last"`
 }
 
-// PSPDeclaration names a PSP account without credentials, for imported
-// billing facts. An account already declared keeps its id, key, archive state,
-// custody and credentials.
-type PSPDeclaration struct {
-	Key  string
-	Rail Rail
-	// Environment is the rail's own; omitted, its real-money one.
-	Environment string
-	PSPAccount
-}
-
 // RailDefinition is a rail a merchant can arm a PSP on: the fields and
 // credentials a PSP on it takes over the API, and its environments.
 type RailDefinition struct {

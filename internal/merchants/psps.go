@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -828,63 +827,3 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	return nil
 }
 
-// DeclarePSP records a PSP identity without a document, for imported billing
-// facts attributed to it. It never arms the PSP; an account already declared
-// keeps its id, key and discovered state.
-func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declaration billing.PSPDeclaration) (billing.PSP, error) {
-	if s == nil || s.pool == nil {
-		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
-	}
-	key := strings.ToLower(strings.TrimSpace(declaration.Key))
-	rail := normalizeProviderSecretType(string(declaration.Rail))
-	switch {
-	case id.IsZero():
-		return billing.PSP{}, apperr.Invalidf("a merchant is required")
-	case !merchantdocs.KeyShape.MatchString(key):
-		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
-	case !supportedRail(rail):
-		return billing.PSP{}, apperr.Invalidf("unknown rail %q", declaration.Rail).WithParam("rail")
-	}
-	accountID, err := pspAccount(key, rail, declaration.PSPAccount)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	environment, err := config.ResolvePSPEnvironment(key, rail, declaration.Environment)
-	if err != nil {
-		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
-	}
-	if why := s.environmentRefusal(rail, environment); why != "" {
-		return billing.PSP{}, fmt.Errorf("%w: %s", ErrPSPEnvironmentRefused, why)
-	}
-	if err := s.AssertPSPUnowned(ctx, gen.New(s.pool), id.UUID(), rail, environment, accountID); err != nil {
-		return billing.PSP{}, err
-	}
-	pspID, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, accountID)
-	var row gen.BillingPsp
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).DeclarePSPIdentity(ctx, gen.DeclarePSPIdentityParams{
-			ID: pspID, MerchantID: id.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key,
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The account is declared under another key.
-		return billing.PSP{}, ErrPSPExists
-	}
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "psps_key_key" {
-			return billing.PSP{}, ErrPSPKeyTaken
-		}
-		return billing.PSP{}, err
-	}
-	scope, ok, err := s.PSPScopeByID(ctx, id, row.ID)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	if !ok {
-		return billing.PSP{}, ErrPSPNotFound
-	}
-	return s.pspWithObligations(ctx, id, scope)
-}

@@ -83,17 +83,6 @@ SELECT * FROM billing.psps
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 FOR SHARE;
 
--- Declaration supplies attribution only. A matching existing account keeps
--- its original id, key and discovered state.
--- name: DeclarePSPIdentity :one
-INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
-VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text,
-        sqlc.arg(environment)::text, sqlc.arg(account_id)::text, sqlc.arg(key)::text)
-ON CONFLICT (rail, live, account_id) DO UPDATE SET id=billing.psps.id
-WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
-  AND billing.psps.key = EXCLUDED.key
-RETURNING *;
-
 -- name: CountPSPOpenObligations :many
 SELECT psp.id AS psp_id,
        ((SELECT count(*) FROM billing.subscriptions sub

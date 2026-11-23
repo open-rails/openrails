@@ -70,13 +70,22 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
-	w.alpha, err = w.engine.MerchantBySlug("alpha")
+	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)
-	w.beta, err = w.engine.MerchantBySlug("beta")
+	w.beta, err = declaredMerchant(w.engine, "beta")
 	require.NoError(t, err)
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
 	return w
+}
+
+// declaredMerchant is the handle of the merchant engine declares under slug.
+func declaredMerchant(engine *openrails.Engine, slug string) (*openrails.Client, error) {
+	id, err := engine.DeclaredMerchant(slug)
+	if err != nil {
+		return nil, err
+	}
+	return engine.Merchant(id)
 }
 
 // The only substituted dependency here is the external FX wire. Every known

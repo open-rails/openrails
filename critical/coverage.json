@@ -861,7 +861,7 @@
     {
       "id": "OR-J28-S06",
       "journey": "J28",
-      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused, by file or by declaration, and the owner's webhooks keep working"
+      "name": "Another merchant's claim of a PSP or custodian account in the other money class is refused by file, and the owner's webhooks keep working"
     },
     {
       "id": "OR-J28-S07",

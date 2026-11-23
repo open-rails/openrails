@@ -62,12 +62,12 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	}
 	var ids []billing.MerchantID
 	for _, slug := range []string{"acme", "globex"} {
-		handle, err := bill.MerchantBySlug(slug)
+		id, err := bill.DeclaredMerchant(slug)
 		if err != nil {
 			return fail(err)
 		}
-		s.merchants[slug] = handle.MerchantID()
-		ids = append(ids, handle.MerchantID())
+		s.merchants[slug] = id
+		ids = append(ids, id)
 	}
 
 	mux := http.NewServeMux()
