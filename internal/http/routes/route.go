@@ -15,13 +15,13 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/wireform"
 )
 
 const (
@@ -162,93 +162,6 @@ type Reply struct {
 // Stream is a body that is not JSON: an archive, a script.
 type Stream struct{ ContentType string }
 
-// Param is one query parameter.
-type Param struct {
-	Name string
-	// Kind is string, integer, boolean, date-time, ids or strings (a
-	// repeated parameter).
-	Kind string
-	// Checked: the mount refuses a value that is not a non-negative integer
-	// (400 invalid_query) before the handler reads it.
-	Checked bool
-	// Required: the route refuses a request without it.
-	Required bool
-}
-
-func text(name string) Param    { return Param{Name: name, Kind: "string"} }
-func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
-
-// repeated is a parameter given once per value, for values that may hold a
-// comma.
-func repeated(name string) Param { return Param{Name: name, Kind: "strings"} }
-
-// pageParams are a cursor-paged list's query: Request.Page reads them.
-var pageParams = []Param{text("cursor"), integer("limit")}
-
-// idsParam names up to billing.MaxBatchItems records of a list, comma
-// separated. The mount refuses a longer list, and any other parameter beside
-// it: the answer is the named records, whatever their state, in one page.
-var idsParam = Param{Name: "ids", Kind: "ids"}
-
-// params lists a route's query parameters, sorted by name.
-func params(parts ...any) []Param {
-	var out []Param
-	for _, part := range parts {
-		switch p := part.(type) {
-		case Param:
-			out = append(out, p)
-		case []Param:
-			out = append(out, p...)
-		default:
-			panic(fmt.Sprintf("routes: query part %T", part))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-// queryOf lists the parameters a handler binds from v's `form` tags
-// (Request.BindQuery), which refuses a malformed one itself.
-func queryOf(v any) []Param {
-	var out []Param
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		for t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() != reflect.Struct {
-			return
-		}
-		for i := range t.NumField() {
-			f := t.Field(i)
-			name, _, _ := strings.Cut(f.Tag.Get("form"), ",")
-			ft := f.Type
-			for ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-			if name == "" || name == "-" {
-				if ft.Kind() == reflect.Struct && ft.String() != "time.Time" {
-					walk(ft)
-				}
-				continue
-			}
-			kind := "string"
-			switch {
-			case ft.String() == "time.Time":
-				kind = "date-time"
-			case ft.Kind() == reflect.Bool:
-				kind = "boolean"
-			case ft.Kind() >= reflect.Int && ft.Kind() <= reflect.Uint64:
-				kind = "integer"
-			}
-			out = append(out, Param{Name: name, Kind: kind})
-		}
-	}
-	walk(reflect.TypeOf(v))
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
 // codes lists a route's error codes; each must be in billing's registry.
 func codes(list ...billing.ErrorCode) []billing.ErrorCode {
 	for _, code := range list {
@@ -305,9 +218,10 @@ type Route struct {
 	// checkout origin; none is not served there.
 	PayURL PayURLAccess
 
-	// Query lists the query parameters; Request is a zero value of the JSON
-	// body's type (nil for none); Responses is every success outcome.
-	Query     []Param
+	// Query is a zero value of the query's type, its parameters the type's
+	// `form` fields (wireform), nil for none; Request is a zero value of the
+	// JSON body's type (nil for none); Responses is every success outcome.
+	Query     any
 	Request   any
 	Responses []Reply
 	// Errors lists the codes the route's handler and the services it calls
@@ -318,6 +232,14 @@ type Route struct {
 	// when it needs more than the request. Exactly one is set.
 	Handler router.Handler
 	Bind    func(*Env) router.Handler
+}
+
+// QueryParams lists the route's query parameters, sorted by name.
+func (r Route) QueryParams() ([]wireform.Param, error) {
+	if r.Query == nil {
+		return nil, nil
+	}
+	return wireform.Params(reflect.TypeOf(r.Query))
 }
 
 // Key is the route's identity: "GET /v1/admin/payments/{id}".
@@ -374,6 +296,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			panic("routes: declared twice: " + r.Key())
 		}
 		if err := r.consoleOwnership(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
+		}
+		if _, err := r.QueryParams(); err != nil {
 			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		if (r.Handler == nil) == (r.Bind == nil) {
@@ -482,7 +407,7 @@ func sortedCodes(codes []billing.ErrorCode) []billing.ErrorCode {
 // where they apply. ErrorSet lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
-	if r.Request != nil || len(r.Query) > 0 {
+	if r.Request != nil || r.Query != nil {
 		sets = append(sets, "request")
 	}
 	return sets

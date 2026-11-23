@@ -298,21 +298,36 @@
             "name": "origin",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "customer",
+                "merchant",
+                "subscription",
+                "usage"
+              ]
             }
           },
           {
             "name": "overdue",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "boolean"
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "canceled",
+                "complete",
+                "expired",
+                "open",
+                "processing",
+                "uncollectible",
+                "void"
+              ]
             }
           },
           {
@@ -1114,14 +1129,20 @@
             "name": "origin",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "customer",
+                "merchant",
+                "subscription",
+                "usage"
+              ]
             }
           },
           {
             "name": "overdue",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "boolean"
             }
           },
           {
@@ -1135,7 +1156,16 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "canceled",
+                "complete",
+                "expired",
+                "open",
+                "processing",
+                "uncollectible",
+                "void"
+              ]
             }
           },
           {
@@ -2870,14 +2900,27 @@
             "name": "sort",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "canceled_at",
+                "created_at",
+                "current_period_ends_at"
+              ]
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "active",
+                "awaiting_method",
+                "canceled",
+                "past_due",
+                "pending",
+                "unverified"
+              ]
             }
           },
           {
@@ -4652,7 +4695,8 @@
             "name": "at",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -4723,7 +4767,8 @@
             "name": "at",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -4781,7 +4826,8 @@
             "name": "at",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -4794,8 +4840,14 @@
           {
             "name": "customer_id",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -4966,8 +5018,14 @@
           {
             "name": "customer_id",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -5001,8 +5059,14 @@
           {
             "name": "product_id",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -5210,7 +5274,8 @@
             "name": "at",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -6275,7 +6340,8 @@
             "name": "from",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -6289,14 +6355,21 @@
             "name": "state",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "captured",
+                "expired",
+                "open",
+                "released"
+              ]
             }
           },
           {
             "name": "to",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -6621,14 +6694,20 @@
             "name": "from",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
             "name": "group_by",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "event_type",
+                "invoker",
+                "meter"
+              ]
             }
           },
           {
@@ -6642,7 +6721,8 @@
             "name": "to",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           }
         ],
@@ -6785,7 +6865,11 @@
             "name": "state",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "running",
+                "stopped"
+              ]
             }
           },
           {
@@ -7564,7 +7648,13 @@
             "name": "kind",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "charge",
+                "chargeback",
+                "dispute_reversal",
+                "refund"
+              ]
             }
           },
           {
@@ -7592,7 +7682,14 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "failed",
+                "partially_refunded",
+                "pending",
+                "refunded",
+                "succeeded"
+              ]
             }
           },
           {
@@ -7833,22 +7930,40 @@
           {
             "name": "avs_result",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "card_entry",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "category",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7868,8 +7983,14 @@
           {
             "name": "cvv_result",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7896,8 +8017,14 @@
           {
             "name": "kind",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7910,8 +8037,14 @@
           {
             "name": "observed_via",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7924,8 +8057,14 @@
           {
             "name": "owner",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7945,29 +8084,48 @@
           {
             "name": "reason",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "response_code",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "since",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
             "name": "source",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -7981,7 +8139,8 @@
             "name": "until",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -8121,21 +8280,29 @@
             "name": "due_since",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
             "name": "due_until",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
             "name": "first_outcome",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -8162,22 +8329,40 @@
           {
             "name": "miss_reason",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "outcome",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
             "name": "owner",
             "in": "query",
+            "style": "form",
+            "explode": false,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -8331,7 +8516,13 @@
             "name": "kind",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "charge",
+                "chargeback",
+                "dispute_reversal",
+                "refund"
+              ]
             }
           },
           {
@@ -8359,7 +8550,14 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "failed",
+                "partially_refunded",
+                "pending",
+                "refunded",
+                "succeeded"
+              ]
             }
           },
           {
@@ -9291,7 +9489,13 @@
             "name": "rail",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "ccbill",
+                "nmi",
+                "solana",
+                "stripe"
+              ]
             }
           },
           {
@@ -10621,7 +10825,12 @@
             "name": "kind",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "customer",
+                "subscription",
+                "transaction"
+              ]
             }
           },
           {
@@ -10635,7 +10844,15 @@
             "name": "state",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "blocked",
+                "conflict",
+                "held",
+                "imported",
+                "linked",
+                "unmatched"
+              ]
             }
           },
           {
@@ -10922,7 +11139,11 @@
             "name": "kind",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "price",
+                "product"
+              ]
             }
           },
           {
@@ -11051,7 +11272,12 @@
             "name": "reason",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "customer_unlinked",
+                "price_unmapped",
+                "product_held"
+              ]
             }
           },
           {
@@ -11150,8 +11376,14 @@
           {
             "name": "type",
             "in": "query",
+            "style": "form",
+            "explode": true,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -11836,7 +12068,20 @@
             "name": "kind",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "adopt_subscription",
+                "cancel_provider_schedule",
+                "cancel_subscription",
+                "collect_skipped_renewal",
+                "correct_subscription",
+                "create_subscription",
+                "record_charge",
+                "record_refund",
+                "refund_charge_after_cancel",
+                "revoke_access",
+                "update_card"
+              ]
             }
           },
           {
@@ -11864,7 +12109,11 @@
             "name": "source",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "pull",
+                "verification"
+              ]
             }
           },
           {

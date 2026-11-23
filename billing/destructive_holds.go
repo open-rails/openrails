@@ -50,7 +50,7 @@ type DestructiveHold struct {
 // to MaxBatchItems named incidents in one page; unknown ones are absent.
 type DestructiveHoldListParams struct {
 	PageRequest
-	IDs []DestructiveHoldID
+	IDs []DestructiveHoldID `form:"ids,comma"`
 }
 
 // ClearDestructiveHoldParams records why an authorized operator cleared this episode.

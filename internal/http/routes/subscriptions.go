@@ -4,7 +4,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // priceMigrationErrors are a price migration's refusals, created or previewed.
@@ -15,11 +14,11 @@ var priceMigrationErrors = codes("invalid_param", "price_change_currency_mismatc
 // merchant's price migrations.
 var subscriptionsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/subscriptions", Group: Admin, Auth: AuthMerchant, Name: "ListSubscriptions", Level: LevelRead,
-		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
+		Query: billing.SubscriptionListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
 	{Method: GET, Path: "/v1/admin/subscriptions/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetSubscription", Level: LevelRead,
 		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("invalid_param", "subscription_not_found"), Handler: h(handlers.GetAdminSubscription)},
 	{Method: GET, Path: "/v1/admin/subscriptions/{id}/history", Group: Admin, Auth: AuthMerchant, Name: "GetSubscriptionHistory", Level: LevelRead,
-		Query: params(text("cursor"), integer("limit")), Responses: []Reply{{200, billing.SubscriptionHistory{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "subscription_not_found"), Handler: h(handlers.GetSubscriptionHistory)},
+		Query: billing.PageRequest{}, Responses: []Reply{{200, billing.SubscriptionHistory{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "subscription_not_found"), Handler: h(handlers.GetSubscriptionHistory)},
 	{Method: POST, Path: "/v1/admin/subscriptions/{id}/cancel", Group: Admin, Auth: AuthMerchant, Name: "CancelSubscription", Level: LevelUpdate,
 		Request: handlers.AdminCancelSubscriptionRequest{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("cancel_unsupported_on_rail", "invalid_param", "payment_in_progress", "provider_cancel_held", "resource_conflict", "subscription_not_active", "subscription_not_found"), Handler: h(handlers.AdminCancelSubscription)},
 	{Method: POST, Path: "/v1/admin/subscriptions/{id}/resume", Group: Admin, Auth: AuthMerchant, Name: "ResumeSubscription", Level: LevelUpdate,
@@ -37,7 +36,7 @@ var subscriptionsRoutes = []Route{
 	{Method: POST, Path: "/v1/catalog/price-migrations/preview", Group: CatalogAdmin, Auth: AuthMerchant, Name: "PreviewPriceMigration", Level: LevelRead,
 		Request: billing.CreatePriceMigrationParams{}, Responses: []Reply{{200, billing.PriceMigrationPreview{}}}, Errors: priceMigrationErrors, Handler: h(handlers.PreviewPriceMigration)},
 	{Method: GET, Path: "/v1/catalog/price-migrations", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPriceMigrations", Level: LevelRead,
-		Query: params(queryOf(handlers.PriceMigrationQuery{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.PriceMigration]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.ListPriceMigrations)},
+		Query: billing.PriceMigrationListParams{}, Responses: []Reply{{200, billing.ListPage[billing.PriceMigration]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.ListPriceMigrations)},
 	{Method: GET, Path: "/v1/catalog/price-migrations/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetPriceMigration", Level: LevelRead,
 		Responses: []Reply{{200, billing.PriceMigration{}}}, Errors: codes("invalid_param", "price_migration_not_found"), Handler: h(handlers.GetPriceMigration)},
 	{Method: POST, Path: "/v1/catalog/price-migrations/{id}/cancel", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CancelPriceMigration", Level: LevelUpdate,
@@ -49,7 +48,7 @@ var subscriptionsRoutes = []Route{
 	{Method: PUT, Path: "/v1/me/subscriptions/{id}/payment-method", Group: Customer, Auth: AuthCustomer,
 		Request: handlers.UpdateSubscriptionPaymentMethodBody{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "card_declined", "default_payment_method_required", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_method_stale", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.SetSubscriptionPaymentMethod)},
 	{Method: GET, Path: "/v1/me/subscriptions", Group: Customer, Auth: AuthCustomer,
-		Query: params(queryOf(handlers.MySubscriptionsQuery{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("authentication_required", "invalid_cursor", "invalid_query"), Handler: h(handlers.GetMySubscriptions)},
+		Query: handlers.MySubscriptionListQuery{}, Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("authentication_required", "invalid_cursor", "invalid_query"), Handler: h(handlers.GetMySubscriptions)},
 	{Method: GET, Path: "/v1/me/subscriptions/{id}", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "invalid_param", "resource_not_found", "subscription_not_found"), Handler: h(handlers.GetSubscription)},
 	{Method: POST, Path: "/v1/me/subscriptions/{id}/retry-now", Group: Customer, Auth: AuthCustomer,

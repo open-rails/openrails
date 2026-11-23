@@ -22,7 +22,11 @@ func provisioningTokens(r *httprequest.Request) (scim.Tokens, billing.MerchantID
 
 // ListProvisioningTokens handles GET /v1/merchant/provisioning-tokens.
 func ListProvisioningTokens(r *httprequest.Request) {
-	ids, ok := listIDs(r, billing.ParseProvisioningTokenID)
+	var query billing.ProvisioningTokenListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}

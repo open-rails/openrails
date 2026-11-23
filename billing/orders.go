@@ -369,12 +369,12 @@ type OrderLineRefusal struct {
 // customer's own list ignores CustomerID. IDs instead reads 1 to
 // MaxBatchItems named orders in one page; unknown ones are absent.
 type OrderListParams struct {
-	IDs            []OrderID
-	CustomerID     CustomerID
-	PriceID        PriceID
-	SubscriptionID SubscriptionID
-	Status         OrderStatus
-	Origin         OrderOrigin
-	Overdue        bool
+	IDs            []OrderID      `form:"ids,comma"`
+	CustomerID     CustomerID     `form:"customer_id"`
+	PriceID        PriceID        `form:"price_id"`
+	SubscriptionID SubscriptionID `form:"subscription_id"`
+	Status         OrderStatus    `form:"status"`
+	Origin         OrderOrigin    `form:"origin"`
+	Overdue        bool           `form:"overdue"`
 	PageRequest
 }

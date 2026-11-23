@@ -1,19 +1,15 @@
 package handlers
 
 import (
-	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -22,7 +18,11 @@ import (
 // separated), only ?entitlement= keys (repeated) and keys under ?prefix=.
 // Without customer_id, the one ?entitlement= key's holders.
 func ListEntitlements(r *httprequest.Request) {
-	customers, ok := queryCustomerIDs(r, "customer_id")
+	var params billing.EntitlementListParams
+	if !bindList(r, &params, &params.PageRequest) {
+		return
+	}
+	customers, ok := uniqueIDs(r, "customer_id", params.CustomerIDs)
 	if !ok {
 		return
 	}
@@ -34,7 +34,15 @@ func ListEntitlements(r *httprequest.Request) {
 	if len(customers) == 0 && !requireMerchantRoutePrincipal(r) {
 		return
 	}
-	listEntitlements(r, customers, r.Request.URL.Query()["entitlement"])
+	params.CustomerIDs = customers
+	listEntitlements(r, params)
+}
+
+// MyEntitlementListQuery is a customer's own keys' query.
+type MyEntitlementListQuery struct {
+	billing.PageRequest
+	Prefix string    `form:"prefix"`
+	At     time.Time `form:"at"`
 }
 
 // SelfListEntitlements is one page of the customer's own keys.
@@ -43,7 +51,11 @@ func SelfListEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listEntitlements(r, []billing.CustomerID{billing.CustomerID(payer)}, nil)
+	var query MyEntitlementListQuery
+	if !bindList(r, &query, &query.PageRequest) {
+		return
+	}
+	listEntitlements(r, billing.EntitlementListParams{PageRequest: query.PageRequest, CustomerIDs: []billing.CustomerID{billing.CustomerID(payer)}, Prefix: query.Prefix, At: query.At})
 }
 
 // entitlementCursor is the last row of a page of held keys.
@@ -52,15 +64,8 @@ type entitlementCursor struct {
 	Key      string    `json:"k"`
 }
 
-func listEntitlements(r *httprequest.Request, customers []billing.CustomerID, keys []string) {
-	at, ok := parseAtQuery(r)
-	if !ok {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
+func listEntitlements(r *httprequest.Request, params billing.EntitlementListParams) {
+	page := params.PageRequest
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		writeRefusal(r, err, "invalid page")
@@ -72,7 +77,7 @@ func listEntitlements(r *httprequest.Request, customers []billing.CustomerID, ke
 		return
 	}
 	rows, more, err := r.State.EntitlementService.List(r.Request.Context(), entitlements.Query{
-		Customers: uuidutil.Of(customers), Keys: keys, Prefix: r.Query("prefix"), At: at,
+		Customers: uuidutil.Of(params.CustomerIDs), Keys: params.Entitlements, Prefix: params.Prefix, At: params.At.UTC(),
 		After: entitlements.Held{Customer: after.Customer, Key: after.Key}, Limit: limit,
 	})
 	if err != nil {
@@ -88,34 +93,6 @@ func listEntitlements(r *httprequest.Request, customers []billing.CustomerID, ke
 		out.Next = pagination.Encode(entitlementCursor{Customer: last.Customer, Key: last.Key})
 	}
 	r.SuccessJSON(out)
-}
-
-// queryCustomerIDs reads a comma-separated customer id filter: 1 to
-// billing.MaxBatchItems distinct ids, or none when the request names none.
-func queryCustomerIDs(r *httprequest.Request, name string) ([]billing.CustomerID, bool) {
-	raw := strings.TrimSpace(r.Query(name))
-	if raw == "" {
-		return nil, true
-	}
-	parts := strings.Split(raw, ",")
-	if len(parts) > billing.MaxBatchItems {
-		r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s names at most %d customers", name, billing.MaxBatchItems)).WithParam(name))
-		return nil, false
-	}
-	out := make([]billing.CustomerID, 0, len(parts))
-	seen := make(map[billing.CustomerID]bool, len(parts))
-	for _, part := range parts {
-		id, err := billing.ParseCustomerID(strings.TrimSpace(part))
-		if err != nil || id.IsZero() {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s holds an invalid id %q", name, part)).WithParam(name))
-			return nil, false
-		}
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	return out, true
 }
 
 // AppCheckEntitlements answers an application's content gate: which of the
@@ -141,18 +118,3 @@ func AppCheckEntitlements(r *httprequest.Request) {
 
 // maxGrantHours is the longest hours value a time.Duration holds.
 const maxGrantHours = math.MaxInt64 / int64(time.Hour)
-
-// parseAtQuery reads an optional RFC3339 `at` query param. When absent, returns a
-// zero time (defaulted to now by the caller).
-func parseAtQuery(r *httprequest.Request) (time.Time, bool) {
-	atStr := strings.TrimSpace(r.Query("at"))
-	if atStr == "" {
-		return time.Time{}, true
-	}
-	parsed, err := timeutil.ParseRFC3339UTC(atStr)
-	if err != nil {
-		r.ErrorCode(billing.CodeInvalidParam, "invalid 'at' timestamp format; use RFC3339")
-		return time.Time{}, false
-	}
-	return parsed, true
-}

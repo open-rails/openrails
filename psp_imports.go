@@ -32,8 +32,8 @@ func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportLis
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}
-	if !params.PSP.IsZero() {
-		q.Set("psp", params.PSP.String())
+	if params.PSP != "" {
+		q.Set("psp", params.PSP)
 	}
 	var out billing.ListPage[billing.PSPImport]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out); err != nil {
@@ -156,11 +156,11 @@ func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSP
 // provider price mapping it. With Import it lists the plans that import's
 // subscriptions name: map each by creating a provider price.
 func (c *Client) ListProviderCatalog(ctx context.Context, params billing.ProviderCatalogListParams) (*billing.ListPage[billing.ProviderCatalogObject], error) {
-	if params.PSP.IsZero() {
+	if params.PSP == "" {
 		return nil, invalidErr("psp is required")
 	}
 	q := pageValues(nil, params.PageRequest)
-	q.Set("psp", params.PSP.String())
+	q.Set("psp", params.PSP)
 	if params.Kind != "" {
 		q.Set("kind", string(params.Kind))
 	}

@@ -93,10 +93,10 @@ type FindingRecommendation struct {
 // resolved; unknown ones are absent.
 type FindingListParams struct {
 	PageRequest
-	IDs      []FindingID
-	Status   FindingStatus
-	Severity string
-	Type     string
+	IDs      []FindingID   `form:"ids,comma"`
+	Status   FindingStatus `form:"status"`
+	Severity string        `form:"severity"`
+	Type     string        `form:"type"`
 }
 
 // ResolveFindingParams resolves one open finding.

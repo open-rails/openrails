@@ -53,9 +53,10 @@ type ProviderCatalogTerms struct {
 // plans to map.
 type ProviderCatalogListParams struct {
 	PageRequest
-	PSP     PSPRef
-	Kind    ProviderCatalogKind
-	Mapped  *bool
-	Retired *bool
-	Import  *PSPImportID
+	// PSP names the PSP by id (psp_…) or key.
+	PSP     string              `form:"psp"`
+	Kind    ProviderCatalogKind `form:"kind"`
+	Mapped  *bool               `form:"mapped"`
+	Retired *bool               `form:"retired"`
+	Import  *PSPImportID        `form:"import"`
 }

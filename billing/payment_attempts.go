@@ -65,16 +65,25 @@ type PaymentAttempt struct {
 // ones are absent.
 type PaymentAttemptListParams struct {
 	PageRequest
-	IDs                                                    []PaymentAttemptID
-	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
-	Source, ObservedVia, AVSResult, CVVResult              []string
-	PSPID                                                  PSPID
-	CustomerID                                             CustomerID
-	PaymentID                                              PaymentID
-	OrderID                                                OrderID
-	SubscriptionID                                         SubscriptionID
-	CycleID                                                RenewalID
-	Since, Until                                           time.Time
+	IDs            []PaymentAttemptID `form:"ids,comma"`
+	Kind           []string           `form:"kind,comma"`
+	Owner          []string           `form:"owner,comma"`
+	Category       []string           `form:"category,comma"`
+	Reason         []string           `form:"reason,comma"`
+	ResponseCode   []string           `form:"response_code,comma"`
+	CardEntry      []string           `form:"card_entry,comma"`
+	Source         []string           `form:"source,comma"`
+	ObservedVia    []string           `form:"observed_via,comma"`
+	AVSResult      []string           `form:"avs_result,comma"`
+	CVVResult      []string           `form:"cvv_result,comma"`
+	PSPID          PSPID              `form:"psp_id"`
+	CustomerID     CustomerID         `form:"customer_id"`
+	PaymentID      PaymentID          `form:"payment_id"`
+	OrderID        OrderID            `form:"order_id"`
+	SubscriptionID SubscriptionID     `form:"subscription_id"`
+	CycleID        RenewalID          `form:"cycle_id"`
+	Since          time.Time          `form:"since"`
+	Until          time.Time          `form:"until"`
 }
 
 // Renewal is one paid period that came due (#1111) and what its attempts
@@ -114,9 +123,13 @@ type Renewal struct {
 // are absent.
 type RenewalListParams struct {
 	PageRequest
-	IDs                                      []RenewalID
-	Owner, FirstOutcome, MissReason, Outcome []string
-	PSPID                                    PSPID
-	SubscriptionID                           SubscriptionID
-	DueSince, DueUntil                       time.Time
+	IDs            []RenewalID    `form:"ids,comma"`
+	Owner          []string       `form:"owner,comma"`
+	FirstOutcome   []string       `form:"first_outcome,comma"`
+	MissReason     []string       `form:"miss_reason,comma"`
+	Outcome        []string       `form:"outcome,comma"`
+	PSPID          PSPID          `form:"psp_id"`
+	SubscriptionID SubscriptionID `form:"subscription_id"`
+	DueSince       time.Time      `form:"due_since"`
+	DueUntil       time.Time      `form:"due_until"`
 }

@@ -99,9 +99,9 @@ type PSPCredential struct {
 // reads 1 to MaxBatchItems named PSPs in one page, in any state or
 // environment; unknown ones are absent.
 type PSPListParams struct {
-	IDs      []PSPID
-	Rail     Rail
-	Archived *bool
+	IDs      []PSPID `form:"ids,comma"`
+	Rail     Rail    `form:"rail"`
+	Archived *bool   `form:"archived"`
 	PageRequest
 }
 

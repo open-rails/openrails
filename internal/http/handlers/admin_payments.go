@@ -426,22 +426,26 @@ func adminRefundMetadata(idempotencyKey string, req RefundRequest, status string
 // ListPayments (GET /admin/payments) is one page of the merchant's
 // payments, newest first.
 func ListPayments(r *httprequest.Request) {
-	params, ok := paymentListParams(r)
-	if !ok {
+	var params billing.PaymentListParams
+	if !bindList(r, &params, &params.PageRequest) || !checkPaymentList(r, &params) {
 		return
 	}
-	if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
-		id, err := billing.ParseCustomerID(raw)
-		if err != nil || id.IsZero() {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "customer_id is invalid").WithParam("customer_id"))
-			return
-		}
-		params.CustomerID = id
-	}
-	if params.IDs, ok = listIDs(r, billing.ParsePaymentID); !ok {
+	var ok bool
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
 	writePaymentPage(r, params, true)
+}
+
+// MyPaymentListQuery is a customer's own payments' query.
+type MyPaymentListQuery struct {
+	billing.PageRequest
+	SubscriptionID billing.SubscriptionID `form:"subscription_id"`
+	OrderID        billing.OrderID        `form:"order_id"`
+	Status         billing.PaymentStatus  `form:"status"`
+	Rail           string                 `form:"rail"`
+	Kind           billing.PaymentKind    `form:"kind"`
+	TransactionID  string                 `form:"transaction_id"`
 }
 
 // ListMyPayments (GET /me/payments) is one page of the caller's payments,
@@ -451,51 +455,34 @@ func ListMyPayments(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	params, ok := paymentListParams(r)
-	if !ok {
+	var query MyPaymentListQuery
+	if !bindList(r, &query, &query.PageRequest) {
 		return
 	}
-	params.CustomerID = billing.CustomerID(customer)
+	params := billing.PaymentListParams{PageRequest: query.PageRequest, CustomerID: billing.CustomerID(customer), SubscriptionID: query.SubscriptionID,
+		OrderID: query.OrderID, Status: query.Status, Rail: query.Rail, Kind: query.Kind, TransactionID: query.TransactionID}
+	if !checkPaymentList(r, &params) {
+		return
+	}
 	writePaymentPage(r, params, false)
 }
 
-// paymentListParams reads the filters both payment lists share.
-func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool) {
-	page, ok := r.Page()
-	if !ok {
-		return billing.PaymentListParams{}, false
+// checkPaymentList refuses a filter naming no status or kind there is.
+func checkPaymentList(r *httprequest.Request, params *billing.PaymentListParams) bool {
+	params.Rail, params.TransactionID = strings.TrimSpace(params.Rail), strings.TrimSpace(params.TransactionID)
+	switch params.Status {
+	case "", billing.PaymentPending, billing.PaymentSucceeded, billing.PaymentFailed, billing.PaymentRefunded, billing.PaymentPartiallyRefunded:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
+		return false
 	}
-	params := billing.PaymentListParams{PageRequest: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
-	for name, parse := range map[string]func(string) error{
-		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
-		"order_id":        func(v string) (err error) { params.OrderID, err = billing.ParseOrderID(v); return },
-	} {
-		if raw := strings.TrimSpace(r.Query(name)); raw != "" {
-			if parse(raw) != nil {
-				r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
-				return billing.PaymentListParams{}, false
-			}
-		}
+	switch params.Kind {
+	case "", billing.PaymentCharge, billing.PaymentRefund, billing.PaymentChargeback, billing.PaymentDisputeReversal:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "kind is invalid").WithParam("kind"))
+		return false
 	}
-	if status := billing.PaymentStatus(strings.TrimSpace(r.Query("status"))); status != "" {
-		switch status {
-		case billing.PaymentPending, billing.PaymentSucceeded, billing.PaymentFailed, billing.PaymentRefunded, billing.PaymentPartiallyRefunded:
-			params.Status = status
-		default:
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
-			return billing.PaymentListParams{}, false
-		}
-	}
-	if kind := billing.PaymentKind(strings.TrimSpace(r.Query("kind"))); kind != "" {
-		switch kind {
-		case billing.PaymentCharge, billing.PaymentRefund, billing.PaymentChargeback, billing.PaymentDisputeReversal:
-			params.Kind = kind
-		default:
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "kind is invalid").WithParam("kind"))
-			return billing.PaymentListParams{}, false
-		}
-	}
-	return params, true
+	return true
 }
 
 // writePaymentPage answers one page of payments; a staff page names each

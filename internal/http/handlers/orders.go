@@ -520,14 +520,32 @@ func payURLPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
 	return true
 }
 
-// orderListQuery reads an order list's filters; customer_id, price_id and
-// ids are the merchant's.
+// MyOrderListQuery is a customer's own orders' query.
+type MyOrderListQuery struct {
+	billing.PageRequest
+	IDs            []billing.OrderID      `form:"ids,comma"`
+	SubscriptionID billing.SubscriptionID `form:"subscription_id"`
+	Status         billing.OrderStatus    `form:"status"`
+	Origin         billing.OrderOrigin    `form:"origin"`
+	Overdue        bool                   `form:"overdue"`
+}
+
+// orderListQuery reads an order list's filters: the merchant's, or a
+// customer's own.
 func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListParams, bool) {
-	page, ok := r.Page()
-	if !ok {
-		return billing.OrderListParams{}, false
+	var params billing.OrderListParams
+	if merchant {
+		if !bindList(r, &params, &params.PageRequest) {
+			return params, false
+		}
+	} else {
+		var query MyOrderListQuery
+		if !bindList(r, &query, &query.PageRequest) {
+			return params, false
+		}
+		params = billing.OrderListParams{PageRequest: query.PageRequest, IDs: query.IDs, SubscriptionID: query.SubscriptionID,
+			Status: query.Status, Origin: query.Origin, Overdue: query.Overdue}
 	}
-	params := billing.OrderListParams{PageRequest: page, Status: billing.OrderStatus(strings.TrimSpace(r.Query("status"))), Origin: billing.OrderOrigin(strings.TrimSpace(r.Query("origin")))}
 	switch params.Status {
 	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired, billing.OrderVoid, billing.OrderUncollectible:
 	default:
@@ -540,28 +558,8 @@ func orderListQuery(r *httprequest.Request, merchant bool) (billing.OrderListPar
 		r.APIError(api.Coded(billing.CodeInvalidQuery, "origin is invalid").WithParam("origin"))
 		return params, false
 	}
-	switch strings.TrimSpace(r.Query("overdue")) {
-	case "", "false":
-	case "true":
-		params.Overdue = true
-	default:
-		r.APIError(api.Coded(billing.CodeInvalidQuery, "overdue is true or false").WithParam("overdue"))
-		return params, false
-	}
-	parsers := map[string]func(string) error{
-		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
-	}
-	if merchant {
-		parsers["customer_id"] = func(v string) (err error) { params.CustomerID, err = billing.ParseCustomerID(v); return }
-		parsers["price_id"] = func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return }
-	}
-	for name, parse := range parsers {
-		if raw := strings.TrimSpace(r.Query(name)); raw != "" && parse(raw) != nil {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
-			return params, false
-		}
-	}
-	if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
+	var ok bool
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return params, false
 	}
 	return params, true

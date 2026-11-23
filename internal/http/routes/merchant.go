@@ -18,7 +18,7 @@ var merchantRoutes = []Route{
 
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListAlertWebhooks",
-		Query: params(idsParam), Responses: []Reply{{200, billing.ListPage[billing.AlertWebhook]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListAlertWebhooks)},
+		Query: billing.AlertWebhookListParams{}, Responses: []Reply{{200, billing.ListPage[billing.AlertWebhook]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListAlertWebhooks)},
 	{Method: POST, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreateAlertWebhook", When: FeatureMerchantConfigManages,
 		Request: billing.CreateAlertWebhookParams{}, Responses: []Reply{{201, billing.AlertWebhook{}}}, Errors: codes("service_unavailable", "webhook_invalid"), Handler: h(handlers.CreateAlertWebhook)},
 	{Method: DELETE, Path: "/v1/merchant/alert-webhooks/{id}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "DeleteAlertWebhook", When: FeatureMerchantConfigManages,
@@ -46,7 +46,7 @@ var merchantRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreatePSPImport",
 		Request: billing.CreatePSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_import_in_progress", "psp_not_found", "service_unavailable"), Handler: h(handlers.CreatePSPImport)},
 	{Method: GET, Path: "/v1/merchant/psp-imports", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPImports",
-		Query: params(queryOf(handlers.PSPImportQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImport]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImports)},
+		Query: billing.PSPImportListParams{}, Responses: []Reply{{200, billing.ListPage[billing.PSPImport]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImports)},
 	{Method: GET, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "GetPSPImport",
 		Responses: []Reply{{200, billing.PSPImport{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetPSPImport)},
 	{Method: PATCH, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdatePSPImport",
@@ -54,7 +54,7 @@ var merchantRoutes = []Route{
 	{Method: DELETE, Path: "/v1/merchant/psp-imports/{id}", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "DeletePSPImport",
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeletePSPImport)},
 	{Method: GET, Path: "/v1/merchant/psp-imports/{id}/records", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListPSPImportRecords",
-		Query: params(queryOf(handlers.PSPImportRecordQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.PSPImportRecord]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImportRecords)},
+		Query: billing.PSPImportRecordListParams{}, Responses: []Reply{{200, billing.ListPage[billing.PSPImportRecord]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListPSPImportRecords)},
 	{Method: POST, Path: "/v1/merchant/psp-imports/{id}/link", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "LinkPSPImport",
 		Request: billing.LinkPSPImportParams{}, Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.LinkPSPImport)},
 	{Method: POST, Path: "/v1/merchant/psp-imports/{id}/apply", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ApplyPSPImport", Person: true,
@@ -64,9 +64,9 @@ var merchantRoutes = []Route{
 	// What each PSP's own catalog says, as last observed: the import's plans
 	// to map, and which provider price maps each.
 	{Method: GET, Path: "/v1/merchant/provider-catalog", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListProviderCatalog",
-		Query: params(queryOf(handlers.ProviderCatalogQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.ProviderCatalogObject]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListProviderCatalog)},
+		Query: billing.ProviderCatalogListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ProviderCatalogObject]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListProviderCatalog)},
 	// Live provider subscriptions converge could not land (unmapped price,
 	// unlinked customer, product already held), open or closed.
 	{Method: GET, Path: "/v1/merchant/parked-subscriptions", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListParkedSubscriptions",
-		Query: params(queryOf(handlers.ParkedSubscriptionQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.ParkedSubscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListParkedSubscriptions)},
+		Query: billing.ParkedSubscriptionListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ParkedSubscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "psp_not_found", "service_unavailable"), Handler: h(handlers.ListParkedSubscriptions)},
 }

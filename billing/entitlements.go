@@ -88,10 +88,10 @@ type HeldEntitlements struct {
 // meaning; its last byte must be printable ASCII (0x21-0x7E).
 type EntitlementListParams struct {
 	PageRequest
-	CustomerIDs  []CustomerID
-	Entitlements []string
-	Prefix       string
-	At           time.Time
+	CustomerIDs  []CustomerID `form:"customer_id,comma"`
+	Entitlements []string     `form:"entitlement"`
+	Prefix       string       `form:"prefix"`
+	At           time.Time    `form:"at"`
 }
 
 // CustomerEntitlement is one key a customer holds: a key of a product they
@@ -194,8 +194,8 @@ type CreateProductAccessBatchResult struct {
 // windows in one page; unknown ones are absent.
 type ProductAccessListParams struct {
 	PageRequest
-	CustomerIDs []CustomerID
-	ProductIDs  []ProductID
-	LiveOnly    bool
-	IDs         []ProductAccessID
+	CustomerIDs []CustomerID      `form:"customer_id,comma"`
+	ProductIDs  []ProductID       `form:"product_id,comma"`
+	LiveOnly    bool              `form:"live"`
+	IDs         []ProductAccessID `form:"ids,comma"`
 }

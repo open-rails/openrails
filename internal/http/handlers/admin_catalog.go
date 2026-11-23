@@ -27,28 +27,6 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	writeRefusal(r, err, "catalog operation failed")
 }
 
-// ProductListQuery filters ListProducts.
-type ProductListQuery struct {
-	Archived  *bool  `form:"archived"`
-	TierGroup string `form:"tier_group"`
-	ForSale   *bool  `form:"for_sale"`
-}
-
-// PriceListQuery filters ListPrices.
-type PriceListQuery struct {
-	ProductID  billing.ProductID `form:"product_id"`
-	ProductKey string            `form:"product_key"`
-	Key        string            `form:"key"`
-	Currency   string            `form:"currency"`
-	Recurring  *bool             `form:"recurring"`
-	Archived   *bool             `form:"archived"`
-}
-
-// PriceQuery is GetPrice's query.
-type PriceQuery struct {
-	Verify bool `form:"verify"`
-}
-
 // -- Products ----------------------------------------------------------------
 
 func CreateProduct(r *httprequest.Request) {
@@ -69,25 +47,20 @@ func CreateProduct(r *httprequest.Request) {
 }
 
 func ListProducts(r *httprequest.Request) {
-	page, ok := r.Page()
-	if !ok {
+	var params billing.ProductListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
-	var query ProductListQuery
-	if !r.BindQuery(&query) {
-		return
-	}
-	ids, ok := listIDs(r, billing.ParseProductID)
-	if !ok {
+	var ok bool
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	values := r.Request.URL.Query()
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, IDs: ids, Keys: values["keys"], Archived: query.Archived,
-		TierGroup: strings.TrimSpace(query.TierGroup), Entitlements: values["entitlement"], ForSale: query.ForSale})
+	params.TierGroup = strings.TrimSpace(params.TierGroup)
+	out, err := svc.ListProducts(r.Request.Context(), params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -213,24 +186,19 @@ func CreateProviderPrice(r *httprequest.Request) {
 }
 
 func ListPrices(r *httprequest.Request) {
-	page, ok := r.Page()
-	if !ok {
+	var params billing.PriceListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
-	var query PriceListQuery
-	if !r.BindQuery(&query) {
-		return
-	}
-	ids, ok := listIDs(r, billing.ParsePriceID)
-	if !ok {
+	var ok bool
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, IDs: ids, ProductID: query.ProductID,
-		ProductKey: query.ProductKey, Key: query.Key, Currency: query.Currency, Recurring: query.Recurring, Archived: query.Archived})
+	out, err := svc.ListPrices(r.Request.Context(), params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -245,7 +213,7 @@ func GetPrice(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var query PriceQuery
+	var query billing.GetPriceParams
 	if !r.BindQuery(&query) {
 		return
 	}

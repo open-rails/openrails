@@ -69,6 +69,14 @@ func parseFilter(raw string) (filter, *Error) {
 	return f, nil
 }
 
+// ListQuery is GET /Users' query, as the client sent it: a malformed value
+// is the standard's own refusal (RFC 7644 section 3.12).
+type ListQuery struct {
+	Filter     string `form:"filter"`
+	StartIndex string `form:"startIndex"`
+	Count      string `form:"count"`
+}
+
 // ListUsers serves GET /Users: the Users a SCIM client holds, oldest first,
 // by startIndex (from 1) and count.
 func (s *Server) ListUsers() http.Handler {

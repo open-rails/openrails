@@ -3,8 +3,6 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -83,7 +81,11 @@ func productAccessCustomer(r *httprequest.Request) (billing.CustomerID, bool) {
 // separated, any when absent); ?live=true keeps those live now, ?ids reads
 // named ones.
 func ListProductAccess(r *httprequest.Request) {
-	ids, ok := listIDs(r, billing.ParseProductAccessID)
+	var params billing.ProductAccessListParams
+	if !bindList(r, &params, &params.PageRequest) {
+		return
+	}
+	ids, ok := listIDs(r, params.IDs)
 	if !ok {
 		return
 	}
@@ -109,7 +111,7 @@ func ListProductAccess(r *httprequest.Request) {
 		r.SuccessJSON(out)
 		return
 	}
-	customers, ok := queryCustomerIDs(r, "customer_id")
+	customers, ok := uniqueIDs(r, "customer_id", params.CustomerIDs)
 	if !ok {
 		return
 	}
@@ -121,28 +123,18 @@ func ListProductAccess(r *httprequest.Request) {
 	if len(customers) == 0 && !requireMerchantRoutePrincipal(r) {
 		return
 	}
-	products, ok := queryProductIDs(r, "product_id")
+	products, ok := uniqueIDs(r, "product_id", params.ProductIDs)
 	if !ok {
 		return
 	}
-	listProductAccess(r, productaccess.Filter{Customers: uuidutil.Of(customers), Products: uuidutil.Of(products)})
+	listProductAccess(r, params.PageRequest, productaccess.Filter{Customers: uuidutil.Of(customers), Products: uuidutil.Of(products), LiveOnly: params.LiveOnly})
 }
 
-func listProductAccess(r *httprequest.Request, filter productaccess.Filter) {
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
+func listProductAccess(r *httprequest.Request, page billing.PageRequest, filter productaccess.Filter) {
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		writeRefusal(r, err, "invalid page")
 		return
-	}
-	if raw := strings.TrimSpace(r.Query("live")); raw != "" {
-		if filter.LiveOnly, err = strconv.ParseBool(raw); err != nil {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "live must be true or false").WithParam("live"))
-			return
-		}
 	}
 	var after uuid.UUID
 	started, err := pagination.Decode(page.Cursor, &after)
@@ -173,32 +165,6 @@ func listProductAccess(r *httprequest.Request, filter productaccess.Filter) {
 		out.Next = pagination.Encode(rows[len(rows)-1].ID)
 	}
 	r.SuccessJSON(out)
-}
-
-// queryProductIDs reads a comma-separated product id filter: 1 to
-// billing.MaxBatchItems distinct ids, or none when the request names none.
-func queryProductIDs(r *httprequest.Request, name string) ([]billing.ProductID, bool) {
-	raw := strings.TrimSpace(r.Query(name))
-	if raw == "" {
-		return nil, true
-	}
-	parts := strings.Split(raw, ",")
-	if len(parts) > billing.MaxBatchItems {
-		r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s names at most %d products", name, billing.MaxBatchItems)).WithParam(name))
-		return nil, false
-	}
-	out := make([]billing.ProductID, 0, len(parts))
-	for _, part := range parts {
-		id, err := billing.ParseProductID(strings.TrimSpace(part))
-		if err != nil || id.IsZero() {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s holds an invalid id %q", name, part)).WithParam(name))
-			return nil, false
-		}
-		if !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-	}
-	return out, true
 }
 
 // CreateProductAccess grants a batch of products free, across any customers,

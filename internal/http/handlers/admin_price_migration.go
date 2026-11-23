@@ -57,27 +57,17 @@ func PreviewPriceMigration(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// PriceMigrationQuery filters GET /price-migrations.
-type PriceMigrationQuery struct {
-	ProductKey string `form:"product_key"`
-	PriceKey   string `form:"price_key"`
-}
-
 // ListPriceMigrations is one page of the merchant's migrations, newest first.
 func ListPriceMigrations(r *httprequest.Request) {
-	var query PriceMigrationQuery
-	if !r.BindQuery(&query) {
+	var params billing.PriceMigrationListParams
+	if !bindList(r, &params, &params.PageRequest) || !priceMigrationsReady(r) {
 		return
 	}
-	page, ok := r.Page()
-	if !ok || !priceMigrationsReady(r) {
+	var ok bool
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePriceMigrationID)
-	if !ok {
-		return
-	}
-	out, err := r.State.PriceMigrationService.List(r.Request.Context(), billing.PriceMigrationListParams{PageRequest: page, IDs: ids, ProductKey: query.ProductKey, PriceKey: query.PriceKey})
+	out, err := r.State.PriceMigrationService.List(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "price migration list failed")
 		return

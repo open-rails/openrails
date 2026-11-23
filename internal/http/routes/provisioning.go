@@ -33,7 +33,7 @@ var provisioningRoutes = []Route{
 	{Method: POST, Path: "/v1/app/scim/v2/Users", Group: App, Auth: AuthProvisioning, When: FeatureCustomerProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{201, scimBody}}, Bind: provision((*scim.Server).CreateUser)},
 	{Method: GET, Path: "/v1/app/scim/v2/Users", Group: App, Auth: AuthProvisioning, When: FeatureCustomerProvisioning, NoConn: true,
-		Query: params(text("filter"), text("startIndex"), text("count")), Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ListUsers)},
+		Query: scim.ListQuery{}, Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ListUsers)},
 	{Method: GET, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, When: FeatureCustomerProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).GetUser)},
 	{Method: PUT, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, When: FeatureCustomerProvisioning, NoConn: true,
@@ -47,7 +47,7 @@ var provisioningRoutes = []Route{
 
 	// The merchant's provisioning tokens.
 	{Method: GET, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelRead, Auth: AuthMerchant, Name: "ListProvisioningTokens",
-		Query: params(idsParam), Responses: []Reply{{200, billing.ListPage[billing.ProvisioningToken]{}}}, Handler: h(handlers.ListProvisioningTokens)},
+		Query: billing.ProvisioningTokenListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ProvisioningToken]{}}}, Handler: h(handlers.ListProvisioningTokens)},
 	{Method: POST, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreateProvisioningToken",
 		Request: billing.CreateProvisioningTokenParams{}, Responses: []Reply{{201, billing.CreatedProvisioningToken{}}}, Errors: codes("invalid_param"), Handler: h(handlers.CreateProvisioningToken)},
 	{Method: DELETE, Path: "/v1/merchant/provisioning-tokens/{id}", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "DeleteProvisioningToken",

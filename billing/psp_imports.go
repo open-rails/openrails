@@ -233,17 +233,18 @@ type PSPImportRecord struct {
 type PSPImportListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named imports in one page.
-	IDs []PSPImportID
-	PSP PSPRef
+	IDs []PSPImportID `form:"ids,comma"`
+	// PSP names one PSP by id (psp_…) or key.
+	PSP string `form:"psp"`
 }
 
 // PSPImportRecordListParams filters an import's records, in id order.
 type PSPImportRecordListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named records in one page.
-	IDs   []PSPImportRecordID
-	State PSPImportRecordState
-	Kind  PSPImportRecordKind
+	IDs   []PSPImportRecordID  `form:"ids,comma"`
+	State PSPImportRecordState `form:"state"`
+	Kind  PSPImportRecordKind  `form:"kind"`
 }
 
 // PSPImportLink links a record to a customer by hand; a null customer

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
@@ -41,6 +43,15 @@ func customerContacts(r *httprequest.Request, customers []billing.CustomerID) ma
 	return out
 }
 
+// instant is t, nil when zero.
+func instant(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	t = t.UTC()
+	return &t
+}
+
 type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
@@ -48,19 +59,21 @@ type adminSubscriptionPath struct {
 // GetAdminSubscriptions is one page of the merchant's subscriptions,
 // newest first.
 func GetAdminSubscriptions(r *httprequest.Request) {
-	var filters subscriptions.GetSubscriptionsFilters
-	if !r.BindQuery(&filters) {
+	var params billing.SubscriptionListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
-	page, ok := r.Page()
+	ids, ok := listIDs(r, params.IDs)
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseSubscriptionID)
-	if !ok {
-		return
+	page := params.PageRequest
+	filters := subscriptions.GetSubscriptionsFilters{
+		CustomerID: params.CustomerID, Status: string(params.Status), PriceID: params.PriceID, Rail: params.Rail,
+		CreatedAfter: instant(params.CreatedAfter), CreatedBefore: instant(params.CreatedBefore), CanceledAfter: instant(params.CanceledAfter),
+		CanceledBefore: instant(params.CanceledBefore), ExpiresBefore: instant(params.ExpiresBefore), Dunning: params.Dunning, Sort: params.Sort,
+		IDs: uuidutil.Of(ids),
 	}
-	filters.IDs = uuidutil.Of(ids)
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
 		r.ErrorCode(billing.CodeInternalError, "admin subscription service unavailable")

@@ -45,7 +45,7 @@ type ProvisioningToken struct {
 // ProvisioningTokenListParams lists every provisioning token, or reads the 1
 // to MaxBatchItems IDs names; unknown ones are absent.
 type ProvisioningTokenListParams struct {
-	IDs []ProvisioningTokenID
+	IDs []ProvisioningTokenID `form:"ids,comma"`
 }
 
 // CreateProvisioningTokenParams names a new provisioning token.

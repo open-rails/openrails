@@ -6,9 +6,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
-// page is a list route's paging parameters.
-var page = []Param{text("cursor"), integer("limit")}
-
 // Error codes of the catalog's nouns.
 var (
 	productErrors = []billing.ErrorCode{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
@@ -26,10 +23,10 @@ var (
 // object whose field an edit set differently.
 var catalogRoutes = []Route{
 	{Method: POST, Path: "/v1/catalog/apply", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate,
-		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
+		Request: catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,
-		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Meter]{}}}, Handler: h(handlers.ListMeters)},
+		Query: billing.PageRequest{}, Responses: []Reply{{200, billing.ListPage[billing.Meter]{}}}, Handler: h(handlers.ListMeters)},
 	{Method: GET, Path: "/v1/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetMeter", Level: LevelRead,
 		Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.GetMeter)},
 	{Method: PUT, Path: "/v1/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate,
@@ -43,7 +40,7 @@ var catalogRoutes = []Route{
 	{Method: POST, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProduct", Level: LevelUpdate,
 		Request: billing.CreateProductParams{}, Responses: []Reply{{201, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.CreateProduct)},
 	{Method: GET, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListProducts", Level: LevelRead,
-		Query: params(page, idsParam, queryOf(handlers.ProductListQuery{}), repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes(productErrors...), Handler: h(handlers.ListProducts)},
+		Query: billing.ProductListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes(productErrors...), Handler: h(handlers.ListProducts)},
 	{Method: GET, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetProduct", Level: LevelRead,
 		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
 	{Method: PATCH, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "UpdateProduct", Level: LevelUpdate,
@@ -55,11 +52,11 @@ var catalogRoutes = []Route{
 	{Method: POST, Path: "/v1/catalog/provider-prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProviderPrice", Level: LevelUpdate,
 		Request: billing.CreateProviderPriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]billing.ErrorCode{"provider_price_unreadable"}, priceErrors...)...), Handler: h(handlers.CreateProviderPrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,
-		Query: params(page, idsParam, queryOf(handlers.PriceListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
+		Query: billing.PriceListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetPrice", Level: LevelRead,
-		Query: queryOf(handlers.PriceQuery{}), Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
+		Query: billing.GetPriceParams{}, Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}/history", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPriceHistory", Level: LevelRead,
-		Query: page, Responses: []Reply{{200, billing.ListPage[billing.PriceKeyMovement]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPriceHistory)},
+		Query: billing.PageRequest{}, Responses: []Reply{{200, billing.ListPage[billing.PriceKeyMovement]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPriceHistory)},
 	{Method: PATCH, Path: "/v1/catalog/prices/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "UpdatePrice", Level: LevelUpdate,
 		Request: billing.UpdatePriceParams{}, Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.UpdatePrice)},
 }
