@@ -35,6 +35,26 @@ requests can pass during that interval, and a cutoff when the view exceeds its
 freshness bound can supply one. An eventually consistent counter by itself gives
 no fixed overshoot bound.
 
+### ClickHouse features that can make coordinated writes
+
+`KeeperMap` provides a Keeper or ZooKeeper-backed key-value store with
+linearizable writes and sequentially consistent reads. In strict mode it
+supports atomic fetch-and-update, including updates with a predicate. That
+makes it a candidate for testing a single-key conditional decrement. A
+production quota would still need to demonstrate that all applicable counters
+and the operation receipt commit together, including when the client retries
+after an ambiguous reply. The write path coordinates through Keeper and has a
+different latency profile from buffered MergeTree inserts.
+[KeeperMap engine](https://clickhouse.com/docs/reference/engines/table-engines/special/keepermap#updates).
+
+Lightweight MergeTree updates write patch parts and have an
+`update_sequential_consistency` setting for update visibility. ClickHouse
+classifies multi-statement transactions as experimental and documents them for
+non-replicated MergeTree. These are different mechanisms from the proposed
+balance read followed by a queued insert.
+[Lightweight updates](https://clickhouse.com/blog/updates-in-clickhouse-2-sql-style-updates#coordinating-concurrent-updates),
+[transaction requirements](https://clickhouse.com/docs/concepts/features/operations/insert/transactions#requirements).
+
 ## What production systems document
 
 | System | Documented behavior |
@@ -71,10 +91,10 @@ proposed quota mechanics for work that must stay within an allowance.
 - For a fixed window, serialize the refresh and decrement, then derive the
   generation from the authority's clock. On the first operation in a new
   window, initialize it to its configured capacity and apply the decrement
-  before commit.
-  This keeps a delayed scheduler or concurrent refresh from unlocking extra
-  capacity. An explicit top-up also needs a stable ID and an atomic balance
-  update. A rolling-window policy calls for accounting over the trailing interval.
+  before commit. A reset requested explicitly should identify the intended
+  generation so a retry cannot refill it twice. A funded top-up instead adds
+  units in an atomic operation with its own stable ID. A rolling-window policy
+  calls for accounting over the trailing interval.
 - When cost is known, consume the exact amount. When cost is estimated, hold an
   enforceable upper bound before starting, settle actual usage against the
   hold, and release any remainder. Keep the originating window on the hold so
@@ -129,7 +149,51 @@ the numerical invariant for spend rights. Applying it to prepaid credits also
 requires durable local consumption and a safe reclaim protocol that fences stale
 workers and reconciles spent rights before reallocating any remainder.
 [Doorman design](https://github.com/youtube/doorman/blob/master/doc/design.md),
-[Balegas et al., sections II.D and IV.D](https://arxiv.org/pdf/1503.09052).
+[Balegas et al., sections II.D and IV.D–E](https://arxiv.org/pdf/1503.09052).
+
+## Local storage measurements
+
+A Go 1.26.10 client with warmed connections and `GOMAXPROCS=4` used TCP loopback
+on an Intel Core i9-13950HX host. Each service had a two-CPU container limit.
+Redis 7.4.12 had snapshots and AOF disabled. PostgreSQL 18.6 used an NVMe-backed
+Docker volume with `synchronous_commit`, `fsync`, and `full_page_writes` on.
+These are different durability settings.
+
+The write-only test used `HINCRBY` on a customer field of a shared Redis hash
+and `EXPIRE` in one pipeline, an hourly counter upsert in PostgreSQL, and a
+PostgreSQL append with a primary key and an index on
+`(merchant_id, customer_id, occurred_at)`. Each cell summarizes three trials
+with 500 warmup and 3,000 timed operations each. All 27 trials verified the
+expected writes. Both tables give the median of per-trial p95 milliseconds and
+the median throughput in operations per second.
+
+| Workload | Redis counter | PostgreSQL upsert | PostgreSQL append |
+| --- | ---: | ---: | ---: |
+| 1 worker, 1,024 customers | 0.253 / 10,075 | 3.591 / 338 | 3.425 / 350 |
+| 16 workers, 1,024 customers | 0.342 / 107,583 | 5.188 / 3,457 | 5.068 / 3,542 |
+| 16 workers, 1 customer | 0.457 / 78,272 | 178.467 / 417 | 5.084 / 3,532 |
+
+The hot-key upsert illustrates contention when many writers serialize on one
+row. An append can avoid that row contention for telemetry. The append test
+measured event recording and has no capacity check.
+
+The conditional-decrement test used the same setup. Redis ran a cached Lua
+script to check a customer balance field and subtract one. PostgreSQL ran
+`UPDATE balances SET remaining = remaining - 1 WHERE customer_id = $1 AND remaining >= 1 RETURNING remaining`
+in one autocommitted statement. Each cell summarizes three trials with 500
+warmup and 1,500 timed operations each. All 18 trials reconciled the expected
+writes. In a separate last-unit test, each store allowed exactly one of 32
+concurrent contenders.
+
+| Workload | Redis Lua | PostgreSQL guarded update |
+| --- | ---: | ---: |
+| 1 worker, 1,024 customers | 0.2995 / 7,171 | 3.5830 / 341 |
+| 16 workers, 1,024 customers | 0.6970 / 50,195 | 5.3093 / 3,456 |
+| 16 workers, 1 customer | 0.3200 / 83,014 | 135.0207 / 407 |
+
+Timing covered the storage client call through its reply. The decrement test
+covered one counter per request. End-to-end admission, request deduplication,
+multiple-counter transactions, failover, and ClickHouse remain unmeasured.
 
 ## What this means for OpenRails
 
