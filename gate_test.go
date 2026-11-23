@@ -567,6 +567,34 @@ func TestGateDecidesWarmWhileUnreachableAndSpendsSafe(t *testing.T) {
 	})
 }
 
+func TestGateSpendsSafeOnMoneyNeverOnUnits(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		safe := int64(50_000)
+		f.money, f.balance, f.safe = true, 100_000, &safe
+		f.size = func(cost int64) int64 { return 2 * cost }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		stated := func(id string, amount int64) billing.AdmitParams {
+			return billing.AdmitParams{RequestID: id, CustomerID: customer, Invoker: customer.String(), Currency: "USD", EstimatedAmount: amount}
+		}
+		mustAdmit(t, g, work(customer, "warm-up", 2)).Release(t.Context())
+		f.set(func(f *fakeSync) { f.down = true })
+		mustAdmit(t, g, work(customer, "from-hold", 4))
+		if _, err := g.Admit(t.Context(), work(customer, "past-units", 1)); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("units past the hold with OpenRails down = %v, want ErrUnavailable", err)
+		}
+		mustAdmit(t, g, stated("money-from-safe", 3000))
+		time.Sleep(11 * time.Second)
+		if _, err := g.Admit(t.Context(), work(customer, "dead-lease-units", 1)); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("units on a dead lease = %v, want ErrUnavailable", err)
+		}
+		mustAdmit(t, g, stated("dead-lease-money", 3000))
+	})
+}
+
 func TestGateReturnsLeastRecentlyUsedHolds(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 10})
 	f.pool(t, 3)

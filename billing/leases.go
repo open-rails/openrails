@@ -164,8 +164,9 @@ type LeaseWantResult struct {
 
 // Hold is capacity set aside for one customer and limit set, in each limit's
 // window. RateCards count usage toward it and PriceBounds bound its money
-// price. Safe is what its gate may spend while OpenRails is unreachable,
-// null unless the merchant enables it.
+// price. Safe is money, the hold's balance size, that its gate may spend
+// unreserved while OpenRails is unreachable; null unless the merchant sets
+// usage_gate_safe_spend. It never covers unit limits.
 type Hold struct {
 	CustomerID  CustomerID     `json:"customer_id"`
 	LimitSet    string         `json:"limit_set"`

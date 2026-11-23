@@ -18,6 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -343,11 +344,14 @@ func (s *sharedGate) decide(ctx context.Context, gate *Gate, ns string, p billin
 			args[5] = strconv.FormatInt(money, 10)
 		}
 		for _, t := range takes {
-			mode := "0"
-			if t.overrun == "admit_while_positive" {
-				mode = "1"
+			mode := 0
+			if t.overrun == catalog.OverrunAdmitWhilePositive {
+				mode = 1
 			}
-			args = append(args, t.part, strconv.FormatInt(t.cost, 10), mode)
+			if !t.money {
+				mode += 2
+			}
+			args = append(args, t.part, strconv.FormatInt(t.cost, 10), strconv.Itoa(mode))
 		}
 		res, err := takeScript.Run(ctx, s.rdb, []string{s.h(ns, hold), s.h(ns, hold) + ":t"}, args...).Slice()
 		if s.redisFailed(err) {
@@ -1396,7 +1400,9 @@ local function costs(v) return string.match(v, '^[oc]|[^|]*|(.*)$') or '' end
 
 // takeScript: KEYS hold, tickets; ARGV lease, ver, ticket, process, live,
 // safe cost (empty: none), n, then n of (part, cost, mode 0 whole estimate | 1
-// while positive). Answers {1, low, takes...}, {0} not this lease's hold,
+// while positive, plus 2 for a unit limit). Short of a live hold, the safe
+// amount pays the money cost in full; units are taken only from a live hold
+// that fits them. Answers {1, low, takes...}, {0} not this lease's hold,
 // {-1} stale pricing, {-2} a part without a current window, {-3} short.
 var takeScript = redis.NewScript(`
 local h = KEYS[1]
@@ -1407,7 +1413,9 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local n = tonumber(ARGV[7])
 local takes = {}
-local short = ARGV[5] ~= '1'
+local live = ARGV[5] == '1'
+local short = not live
+local unitShort = false
 local low = 0
 for i = 0, n - 1 do
   local id, cost, mode = ARGV[8 + i * 3], tonumber(ARGV[9 + i * 3]), ARGV[10 + i * 3]
@@ -1416,21 +1424,29 @@ for i = 0, n - 1 do
   if f[4] and f[4] ~= '' and now >= tonumber(f[4]) then return {-2} end
   local avail = tonumber(f[1]) - tonumber(f[2] or '0') - tonumber(f[3] or '0')
   local take = cost
-  if mode == '1' then
-    if avail <= 0 then short = true elseif avail < cost then take = avail end
+  local fits = live
+  if mode == '1' or mode == '3' then
+    if avail <= 0 then fits = false elseif avail < cost then take = avail end
   elseif avail < cost then
+    fits = false
+  end
+  if not fits then
     short = true
+    if (mode == '2' or mode == '3') and cost > 0 then unitShort = true end
   end
   if avail - cost < cost then low = 1 end
   takes[i + 1] = take
 end
 if short then
-  if ARGV[6] == '' then return {-3} end
+  if ARGV[6] == '' or unitShort then return {-3} end
   local sv = redis.call('HMGET', h, 'safe', 'safe_spent')
   if not sv[1] or sv[1] == '' then return {-3} end
   if tonumber(sv[1]) - tonumber(sv[2] or '0') < tonumber(ARGV[6]) then return {-3} end
   redis.call('HINCRBY', h, 'safe_spent', ARGV[6])
-  for i = 0, n - 1 do takes[i + 1] = tonumber(ARGV[9 + i * 3]) end
+  for i = 0, n - 1 do
+    local mode = ARGV[10 + i * 3]
+    if mode == '0' or mode == '1' then takes[i + 1] = tonumber(ARGV[9 + i * 3]) end
+  end
   low = 1
 end
 local rec = {}

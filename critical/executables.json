@@ -445,6 +445,9 @@
     "OR-J23-S24": [
       "TestGate/OR-J23-S24/refusals-are-verdicts-and-openrails-down-is-unavailable"
     ],
+    "OR-J23-S25": [
+      "TestGate/OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],

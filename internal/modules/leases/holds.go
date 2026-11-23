@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -711,9 +712,14 @@ func (r *syncRun) answer() error {
 	return nil
 }
 
-// wire is a hold as its gate reads it; a released hold holds nothing.
+// wire is a hold as its gate reads it; a released hold holds nothing. With
+// the merchant's usage_gate_safe_spend, its safe amount is its money size.
 func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, error) {
 	cards, bounds, err := money.HoldCards(h.row.RateCards)
+	if err != nil {
+		return billing.Hold{}, err
+	}
+	safe, err := r.safeSpend()
 	if err != nil {
 		return billing.Hold{}, err
 	}
@@ -723,6 +729,10 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, error) {
 		line := billing.HoldLimit{Limit: p.key, Unit: p.unit, Held: p.answered, Overrun: cmp.Or(p.overrun, catalog.OverrunRequireEstimate)}
 		if h.released {
 			line.Held = 0
+		}
+		if safe && p.key == catalog.BalanceLimit {
+			amount := line.Held
+			out.Safe = &amount
 		}
 		if p.end != nil {
 			start, end := p.start, *p.end
@@ -742,6 +752,18 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, error) {
 		out.Limits = append(out.Limits, line)
 	}
 	return out, nil
+}
+
+// safeSpend reports the merchant's usage_gate_safe_spend, read once a sync.
+func (r *syncRun) safeSpend() (bool, error) {
+	if r.safe == nil {
+		cfg, _, err := merchantconfig.NewStore(r.d).Get(r.ctx)
+		if err != nil {
+			return false, err
+		}
+		r.safe = &cfg.UsageGateSafeSpend
+	}
+	return *r.safe, nil
 }
 
 func (r *syncRun) def(key string) (limits.Definition, bool) {

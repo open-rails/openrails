@@ -148,9 +148,9 @@ const (
 // decide takes r's cost from every limit r counts toward, or from none. A
 // limit admitting only whole estimates needs the whole cost available; one
 // admitting while positive needs any, and takes what is left. Without a live
-// lease, or short of capacity, only the hold's safe amount (when withSafe)
-// is spent, taking the full cost. low reports a hold the next such request
-// would not fit.
+// lease, or short of money, the hold's safe amount (when withSafe) pays the
+// money cost in full; units are taken only from a live hold that fits them.
+// low reports a hold the next such request would not fit.
 func (h *localHold) decide(now time.Time, r request, live, withSafe bool) (takes []take, low bool, out decision, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -165,31 +165,38 @@ func (h *localHold) decide(now time.Time, r request, live, withSafe bool) (takes
 		return nil, false, decideCold, err
 	}
 	full := slices.Clone(takes)
-	short := !live
-	for i := 0; live && i < len(takes); i++ {
-		t := takes[i]
+	short, unitsShort := false, false
+	for i, t := range takes {
 		p := h.parts[t.part]
-		if p == nil {
-			short = true
-			break
-		}
-		avail := p.avail()
-		if t.overrun == catalog.OverrunAdmitWhilePositive {
-			if avail <= 0 {
-				short = true
-			} else if avail < t.cost {
-				takes[i].cost = avail
+		fits := live && p != nil
+		if fits {
+			avail := p.avail()
+			if t.overrun == catalog.OverrunAdmitWhilePositive {
+				fits = avail > 0
+				if fits && avail < t.cost {
+					takes[i].cost = avail
+				}
+			} else {
+				fits = avail >= t.cost
 			}
-		} else if avail < t.cost {
-			short = true
+			low = low || avail-t.cost < t.cost
 		}
-		low = low || avail-t.cost < t.cost
+		if !fits {
+			short = true
+			unitsShort = unitsShort || (!t.money && t.cost > 0)
+		}
 	}
+	short = short || !live
 	if short {
-		if !withSafe || h.safe == nil || *h.safe-h.safeSpent < money {
+		if !withSafe || unitsShort || h.safe == nil || *h.safe-h.safeSpent < money {
 			return nil, false, decideShort, nil
 		}
-		takes, low = full, true
+		for i, t := range full {
+			if t.money {
+				takes[i] = t
+			}
+		}
+		low = true
 		h.safeSpent += money
 	}
 	for _, t := range takes {

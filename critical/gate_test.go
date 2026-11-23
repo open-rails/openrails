@@ -474,4 +474,88 @@ func TestGate(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrUnreachable)
 		wire.down.Store(false)
 	})
+
+	t.Run("OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units", func(t *testing.T) {
+		a := newAuthorityWorld(t, func(w *world) {
+			alpha := w.cfg.Merchants["alpha"]
+			alpha.UsageGateSafeSpend = ptr(true)
+			w.cfg.Merchants["alpha"] = alpha
+		})
+		cfg, err := a.alphaRemote.GetMerchantConfiguration(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, cfg.UsageGateSafeSpend)
+		require.True(t, *cfg.UsageGateSafeSpend)
+		paying := func(client *openrails.Client) billing.CustomerID {
+			customer := billing.CustomerID(uuid.New())
+			grantLimitProduct(t, client, customer, "plan", 48)
+			grantLimitProduct(t, client, customer, "metered", 48)
+			fund(t, client, customer, "safe", 1_000_000)
+			return customer
+		}
+		spend := func(customer billing.CustomerID, id string, units, amount int64) billing.AdmitParams {
+			p := gateWork(customer, id, units)
+			p.Usage.Amount = ptr(amount)
+			return p
+		}
+		want := func(customer billing.CustomerID) billing.LeaseWant {
+			p := spend(customer, "", 0, 100)
+			return billing.LeaseWant{CustomerID: customer, Invoker: p.Invoker, InvokerType: p.InvokerType, Currency: "USD", Usage: p.Usage}
+		}
+		holdOf := func(out *billing.SyncLeasesResult, customer billing.CustomerID, set string) billing.Hold {
+			for _, h := range out.Holds {
+				if h.CustomerID == customer && h.LimitSet == set {
+					return h
+				}
+			}
+			require.Failf(t, "hold not answered", "%+v", out.Holds)
+			return billing.Hold{}
+		}
+
+		// A merchant that enables it: every hold's safe is its money size.
+		applyLimits(t, a.alpha, gatePlan)
+		direct := paying(a.alpha)
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{want(direct)}})
+		set, refusal := wanted(t, out)
+		require.Nil(t, refusal)
+		held, _ := heldIn(out, direct, set, "balance")
+		require.EqualValues(t, 100, held)
+		safe := holdOf(out, direct, set).Safe
+		require.NotNil(t, safe)
+		require.Equal(t, held, *safe)
+		// One that does not: none.
+		applyLimits(t, a.beta, gatePlan)
+		plain := paying(a.beta)
+		out = syncLease(t, a.beta, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{want(plain)}})
+		set, refusal = wanted(t, out)
+		require.Nil(t, refusal)
+		require.Nil(t, holdOf(out, plain, set).Safe)
+
+		// A gate whose hold settled at one request's money spends it, then as
+		// much again from safe while OpenRails is unreachable, and no unit
+		// past its hold.
+		customer := paying(a.alpha)
+		client, wire := gateRemote(t, a)
+		g := newGate(t, client, openrails.GateConfig{})
+		require.NoError(t, gateAdmit(t, g, spend(customer, "warm", 0, 100)).Release(t.Context()))
+		require.Eventually(t, func() bool {
+			page, err := a.alpha.ListCustomerLimits(t.Context(), customer)
+			if err != nil {
+				return false
+			}
+			for _, line := range page.Items {
+				if line.Limit == "balance" {
+					return line.Held == 100
+				}
+			}
+			return false
+		}, 10*time.Second, 100*time.Millisecond, "an idle hold settles at one request")
+		wire.down.Store(true)
+		_, err = g.Admit(t.Context(), spend(customer, "units", 1, 0))
+		require.ErrorIs(t, err, openrails.ErrUnavailable, "safe never covers units")
+		gateAdmit(t, g, spend(customer, "from-hold", 0, 100))
+		gateAdmit(t, g, spend(customer, "from-safe", 0, 100))
+		_, err = g.Admit(t.Context(), spend(customer, "past-safe", 0, 100))
+		require.ErrorIs(t, err, openrails.ErrUnavailable)
+		wire.down.Store(false)
+	})
 }

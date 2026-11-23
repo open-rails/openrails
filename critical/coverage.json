@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 372,
+  "scenario_count": 373,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1092,6 +1092,11 @@
       "id": "OR-J23-S24",
       "journey": "J23",
       "name": "Gate refusals are verdicts (limit_reached with its reset, capacity_held waited out or refused); OpenRails down is ErrUnavailable"
+    },
+    {
+      "id": "OR-J23-S25",
+      "journey": "J23",
+      "name": "With usage_gate_safe_spend a hold's safe is its money size; a gate spends it only while OpenRails is unreachable, and never for units"
     },
     {
       "id": "OR-J29-S07",

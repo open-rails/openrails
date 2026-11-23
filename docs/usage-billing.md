@@ -264,6 +264,12 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
 - A refusal is a verdict on the ticket, never an error; `capacity_held` is
   waited out within the request's context first. The error is bad input or
   `ErrUnavailable`: OpenRails unreachable and no hold covering the request.
+- Safe spending is off unless the merchant sets `usage_gate_safe_spend: true`.
+  Each hold then names a `safe` amount, its money size, that the gate may spend
+  unreserved while OpenRails is unreachable, once the hold's own money is spent
+  or its lease has died. It covers money only: units are never taken past a
+  live hold, so a request that counts units waits for OpenRails. What safe
+  spending admits settles as late usage, owed past the balance.
 - Without Redis, state is in process memory: usage captured but not yet sent is
   lost if the process crashes, and never billed. `GateConfig.Outbox`
   (`UsageOutbox`, not with Redis) stores it before `Capture` returns; a restarted

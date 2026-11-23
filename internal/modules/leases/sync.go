@@ -180,6 +180,8 @@ type syncRun struct {
 	// moved are the customers of the lease's holds whose standing moved
 	// since its previous sync: their idle holds are sized again.
 	moved map[uuid.UUID]bool
+	// safe is the merchant's usage_gate_safe_spend once read.
+	safe *bool
 }
 
 type holdKey struct {
