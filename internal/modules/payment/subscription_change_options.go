@@ -27,7 +27,7 @@ func (s *PurchaseService) SubscriptionChangeOptions(ctx context.Context, subscri
 	}
 	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || sub.CustomerID != payer.UUID() {
-		return nil, &TierChangeError{Code: codeSubscriptionNotFound, Message: "subscription not found"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionNotFound, Message: "subscription not found"}
 	}
 	if err := validateTierChangeSubscriptionStatus(sub); err != nil {
 		return nil, err

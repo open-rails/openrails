@@ -411,7 +411,7 @@ type PSPIdentity struct {
 // are globally unique to one merchant (#650) and are never shared or moved; the
 // upsert rejects a cross-merchant claim, but with an opaque no-rows /
 // unique-violation error — this names the conflict instead.
-var ErrPSPOwnedByAnotherMerchant = apperr.New(http.StatusConflict, "psp_exists", "PSP is already owned by another merchant")
+var ErrPSPOwnedByAnotherMerchant = apperr.New(http.StatusConflict, billing.CodePSPExists, "PSP is already owned by another merchant")
 
 // PSPNaturalKey canonicalizes a PSP's GLOBAL natural key (rail, money class,
 // account_id) and derives its deterministic id from it (#662). It is the

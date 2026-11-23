@@ -134,13 +134,13 @@ func FromHTTP(h http.Handler) func(*Request) {
 
 // AbortCode stops the chain with a registered error code; an empty message
 // answers the code's meaning.
-func (r *Request) AbortCode(code, message string) {
+func (r *Request) AbortCode(code billing.ErrorCode, message string) {
 	r.AbortAPIError(api.Coded(code, message))
 }
 
 // ErrorCode answers a registered error code; an empty message answers the
 // code's meaning.
-func (r *Request) ErrorCode(code, message string) {
+func (r *Request) ErrorCode(code billing.ErrorCode, message string) {
 	r.APIError(api.Coded(code, message))
 }
 

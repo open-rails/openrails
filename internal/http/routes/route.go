@@ -250,13 +250,13 @@ func queryOf(v any) []Param {
 }
 
 // codes lists a route's error codes; each must be in billing's registry.
-func codes(list ...string) []string {
+func codes(list ...billing.ErrorCode) []billing.ErrorCode {
 	for _, code := range list {
 		if _, ok := billing.LookupErrorCode(code); !ok {
-			panic("routes: error code " + code + " is not registered in billing")
+			panic("routes: error code " + string(code) + " is not registered in billing")
 		}
 	}
-	sort.Strings(list)
+	slices.Sort(list)
 	return list
 }
 
@@ -312,7 +312,7 @@ type Route struct {
 	Responses []Reply
 	// Errors lists the codes the route's handler and the services it calls
 	// name; the codes every route of its kind answers are in ErrorSets.
-	Errors []string
+	Errors []billing.ErrorCode
 
 	// Handler serves the route; Bind builds the handler from the assembly
 	// when it needs more than the request. Exactly one is set.
@@ -437,32 +437,32 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 
 // requestShapeErrors are the codes any route with a JSON body or a query can
 // answer before its handler runs.
-var requestShapeErrors = []string{
+var requestShapeErrors = []billing.ErrorCode{
 	billing.CodeInvalidParam, billing.CodeInvalidQuery, billing.CodeInvalidRequestBody, billing.CodeRequestBodyTooLarge,
 	billing.CodeUnknownField, billing.CodeUnsupportedMediaType,
 }
 
 // TierErrors lists the codes a tier answers before any handler runs.
-func TierErrors(tier Tier) []string {
-	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
+func TierErrors(tier Tier) []billing.ErrorCode {
+	common := []billing.ErrorCode{billing.CodeInternalError, billing.CodeRateLimitExceeded, billing.CodeCaptchaRequired, billing.CodeCaptchaInvalid, billing.CodeDatabaseBusy}
 	// authenticated are the codes of asking who a request is: the host's
 	// answer, or the in-process host's.
-	authenticated := []string{
+	authenticated := []billing.ErrorCode{
 		billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
 		billing.CodePermissionRequired, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
 		billing.CodeMerchantUnresolved, billing.CodeMerchantMismatch, billing.CodeInvalidParam,
 	}
-	staff := []string{billing.CodeHostPrincipalInvalid}
-	var own []string
+	staff := []billing.ErrorCode{billing.CodeHostPrincipalInvalid}
+	var own []billing.ErrorCode
 	switch tier {
 	case AuthCustomer:
-		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeCustomerTenantMismatch}, authenticated...)
+		own = append([]billing.ErrorCode{billing.CodeInvokerScopedPrincipal, billing.CodeCustomerIssuerMismatch, billing.CodeCustomerTenantMismatch}, authenticated...)
 	case AuthMerchant:
 		own = append(staff, authenticated...)
 	case AuthSignedIn:
 		own = append(slices.Clone(staff), authenticated...)
 	case AuthApplication:
-		own = append(append([]string{billing.CodeApplicationRequired}, staff...), authenticated...)
+		own = append(append([]billing.ErrorCode{billing.CodeApplicationRequired}, staff...), authenticated...)
 	default:
 		// No credential: a public route names its own merchant, a provider's
 		// callback its PSP.
@@ -471,9 +471,9 @@ func TierErrors(tier Tier) []string {
 	return sortedCodes(append(common, own...))
 }
 
-func sortedCodes(codes []string) []string {
+func sortedCodes(codes []billing.ErrorCode) []billing.ErrorCode {
 	out := slices.Clone(codes)
-	sort.Strings(out)
+	slices.Sort(out)
 	return slices.Compact(out)
 }
 
@@ -489,7 +489,7 @@ func (r Route) ErrorSets() []string {
 }
 
 // ErrorSet lists the codes of a set ErrorSets names.
-func ErrorSet(name string) []string {
+func ErrorSet(name string) []billing.ErrorCode {
 	switch name {
 	case "request":
 		return requestShapeErrors

@@ -75,12 +75,12 @@ func authorizeSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID)
 	oldSub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			return nil, api.Coded(codeSubscriptionNotFound, "")
+			return nil, api.Coded(billing.CodeSubscriptionNotFound, "")
 		}
 		return nil, fmt.Errorf("load subscription: %w", err)
 	}
 	if oldSub.CustomerID != scope.Customer().UUID() {
-		return nil, api.Coded(codeSubscriptionNotFound, "")
+		return nil, api.Coded(billing.CodeSubscriptionNotFound, "")
 	}
 	if oldSub.Rail != models.RailSolana {
 		return nil, api.Coded(billing.CodeSubscriptionChangeUnsupportedOnRail, "subscription is not a Solana subscription")
@@ -104,7 +104,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 	}
 	newPrice, err := r.State.PriceService.GetByPublicID(r.Request.Context(), typedNewPriceID)
 	if err != nil || newPrice == nil {
-		return nil, api.Coded(codePriceNotFound, "target price not found")
+		return nil, api.Coded(billing.CodePriceNotFound, "target price not found")
 	}
 	if !newPrice.IsPurchasable() {
 		return nil, api.Coded(billing.CodeSubscriptionChangeTargetInactive, "target price is not available")
@@ -122,7 +122,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 	}
 	newProduct, err := r.State.ProductService.GetByID(r.Request.Context(), newPrice.ProductID)
 	if err != nil || newProduct == nil {
-		return nil, api.Coded(codeProductNotFound, "target product not found")
+		return nil, api.Coded(billing.CodeProductNotFound, "target product not found")
 	}
 	oldProduct, err := r.State.ProductService.GetByID(r.Request.Context(), oldPrice.ProductID)
 	if err != nil || oldProduct == nil {
@@ -173,12 +173,6 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 }
 
 var errNilRow = errors.New("no row")
-
-const (
-	codeSubscriptionNotFound = "subscription_not_found"
-	codePriceNotFound        = "price_not_found"
-	codeProductNotFound      = "product_not_found"
-)
 
 // solanaFailure is a transient outage's refusal, or err as an internal
 // failure.

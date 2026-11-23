@@ -36,7 +36,7 @@ func tokenHash(token string) []byte {
 type Tokens struct{ DB *db.DB }
 
 // ErrTokenNotFound is a token id the merchant does not hold.
-var ErrTokenNotFound = apperr.New(http.StatusNotFound, "resource_not_found", "provisioning token not found")
+var ErrTokenNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "provisioning token not found")
 
 func tokenOf(row gen.BillingProvisioningToken) billing.ProvisioningToken {
 	return billing.ProvisioningToken{

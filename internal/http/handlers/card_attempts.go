@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -45,7 +46,7 @@ func refuseBlockedCardAttempt(r *httprequest.Request, customerID string) bool {
 
 func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 	r.SetHeader("Retry-After", strconv.FormatInt(int64((wait+time.Second-1)/time.Second), 10))
-	r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, "card_attempts_blocked",
+	r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, billing.CodeCardAttemptsBlocked,
 		"Too many declined card attempts. Try again later."))
 }
 

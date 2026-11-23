@@ -57,7 +57,7 @@ func DunningViews(ctx context.Context, d *db.DB, postures writeposture.View, sub
 			view.Paused = true
 			view.PauseReason = "automatic_collection_paused"
 			if posture.ReadOnly() {
-				view.PauseReason = billing.CodeProviderWritesDisabled
+				view.PauseReason = string(billing.CodeProviderWritesDisabled)
 			}
 		}
 	}

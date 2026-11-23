@@ -71,7 +71,7 @@ func signedInPerson(r *httprequest.Request) bool {
 	bound, isBound := v.(auth.Bound)
 	if !scope.Present() || c.Credential.Kind != billingauth.CredentialSession && c.Credential.Kind != billingauth.CredentialDeviceKey ||
 		isBound && bound.BoundScope() != (billingauth.Scope{}) || !declared || own != scope.Merchant() {
-		r.ErrorCode("customer_session_required", "")
+		r.ErrorCode(billing.CodeCustomerSessionRequired, "")
 		return false
 	}
 	return true
@@ -82,7 +82,7 @@ func orderKey(r *httprequest.Request) string {
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
 	switch {
 	case key == "":
-		r.ErrorCode("idempotency_key_required", "")
+		r.ErrorCode(billing.CodeIdempotencyKeyRequired, "")
 	case len(key) > 255:
 		r.APIError(api.Coded(billing.CodeInvalidParam, "Idempotency-Key is 1 to 255 bytes").WithParam("Idempotency-Key"))
 	case cardguard.ContainsPAN(key):
@@ -514,7 +514,7 @@ func payURLPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
 		return false
 	}
 	if exhausted {
-		r.ErrorCode("pay_url_attempts_exhausted", "")
+		r.ErrorCode(billing.CodePayURLAttemptsExhausted, "")
 		return false
 	}
 	return true

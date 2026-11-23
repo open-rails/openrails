@@ -174,7 +174,7 @@ func TestPublicCatalog(t *testing.T) {
 		_, err = a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Stale name"), ExpectedRevision: &product.Revision})
 		var failure *billing.StatusError
 		require.ErrorAs(t, err, &failure)
-		require.Equal(t, "revision_mismatch", failure.Code)
+		require.Equal(t, billing.CodeRevisionMismatch, failure.Code)
 		declaration := document.Products["declared"]
 		declaration.DisplayName = catalog.Value("Reconciled name")
 		document.Products["declared"] = declaration

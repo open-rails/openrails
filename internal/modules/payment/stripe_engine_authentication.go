@@ -27,18 +27,18 @@ func (s *PurchaseService) ownedStripeEngineOperation(ctx context.Context, id uui
 		return empty, err
 	}
 	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid {
-		return empty, apperr.New(403, "customer_session_required", "payment authentication requires an interactive customer session")
+		return empty, apperr.New(403, billing.CodeCustomerSessionRequired, "payment authentication requires an interactive customer session")
 	}
 	if s == nil || s.SubscriptionService == nil {
 		return empty, errors.New("payment authentication unavailable")
 	}
 	in, err := intents.NewStore(s.SubscriptionService.Database()).Get(ctx, id)
 	if err != nil {
-		return empty, apperr.New(404, "payment_not_found", "payment not found")
+		return empty, apperr.New(404, billing.CodePaymentNotFound, "payment not found")
 	}
 	params, err := intents.StripeEngineParams(in)
 	if err != nil || in.MerchantID != mid.UUID() || params.CustomerID.String() != principal.SubjectID {
-		return empty, apperr.New(404, "payment_not_found", "payment not found")
+		return empty, apperr.New(404, billing.CodePaymentNotFound, "payment not found")
 	}
 	return in, nil
 }

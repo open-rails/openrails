@@ -6,7 +6,7 @@ import (
 )
 
 // pspWriteErrors are the refusals of a PSP write, beside the route's own.
-func pspWriteErrors(own ...string) []string {
+func pspWriteErrors(own ...billing.ErrorCode) []billing.ErrorCode {
 	return codes(append(own, "invalid_param", "psp_credentials_rejected", "revision_mismatch", "service_unavailable")...)
 }
 

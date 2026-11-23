@@ -209,7 +209,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		_, err := a.alphaRemote.CreateOrder(t.Context(), "while-held", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}}})
 		var refused *billing.StatusError
 		require.ErrorAs(t, err, &refused)
-		require.Equal(t, "already_owned", refused.Code, "before its expiry the open order holds the line")
+		require.Equal(t, billing.CodeAlreadyOwned, refused.Code, "before its expiry the open order holds the line")
 		a.clock.Advance(orderTTL)
 
 		preview, err := a.alpha.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}, {PriceID: forCart}}})

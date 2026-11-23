@@ -742,7 +742,7 @@ func TestProviderTrailing(t *testing.T) {
 		_, err = tw.alphaRemote.ListParkedSubscriptions(t.Context(), billing.ParkedSubscriptionListParams{PSP: "nope"})
 		status, code := refusalCode(t, err)
 		require.Equal(t, http.StatusNotFound, status)
-		require.Equal(t, "psp_not_found", code)
+		require.Equal(t, billing.CodePSPNotFound, code)
 		_, err = tw.alphaRemote.ListParkedSubscriptions(t.Context(), billing.ParkedSubscriptionListParams{Reason: "lost"})
 		status, _ = refusalCode(t, err)
 		require.Equal(t, http.StatusBadRequest, status)

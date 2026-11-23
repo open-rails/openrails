@@ -326,7 +326,7 @@ func validateBaseURL(baseURL string) error {
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
 // matches ErrInvalid identically to the embedded transport.
 func invalidErr(msg string) error {
-	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeInvalidParam, Message: msg}}
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeInvalidParam, Message: msg}}
 }
 
 // batchSize refuses an empty batch or one longer than limit before any I/O.

@@ -36,7 +36,7 @@ func pathID[T interface{ IsZero() bool }](r *httprequest.Request, parse func(str
 }
 
 func alertValidationError(r *httprequest.Request, verr *alerting.ValidationError) {
-	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_invalid", verr.Error()).
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeWebhookInvalid, verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 

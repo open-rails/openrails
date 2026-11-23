@@ -17,14 +17,14 @@ import (
 // Metadata carries what the code documents (revision_mismatch: revision).
 type Error struct {
 	Status   int
-	Code     string
+	Code     billing.ErrorCode
 	Message  string
 	Param    string
 	Metadata map[string]any
 }
 
 // New declares a refusal sentinel. Wrap it with %w to add call-site detail.
-func New(status int, code, message string) *Error {
+func New(status int, code billing.ErrorCode, message string) *Error {
 	return &Error{Status: status, Code: code, Message: message}
 }
 
@@ -59,11 +59,11 @@ func (e *Error) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
-	return e.Code
+	return string(e.Code)
 }
 
 // ErrorCode is the wire error code.
-func (e *Error) ErrorCode() string { return e.Code }
+func (e *Error) ErrorCode() billing.ErrorCode { return e.Code }
 
 // Is matches another refusal with the same status and code, and every root
 // openrails class sentinel (ErrInvalid, ErrNotFound, ErrConflict, ...) the

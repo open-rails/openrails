@@ -16,7 +16,7 @@ import (
 func customerParam(r *httprequest.Request) (billing.CustomerID, bool) {
 	id, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || id.IsZero() {
-		r.APIError(api.Coded("invalid_customer_id", "").WithParam("customer_id"))
+		r.APIError(api.Coded(billing.CodeInvalidCustomerID, "").WithParam("customer_id"))
 		return billing.CustomerID{}, false
 	}
 	return id, requireServiceCustomerScope(r, id)
@@ -79,11 +79,11 @@ func moneyRefusal(err error) *api.APIError {
 	case errors.Is(err, billing.ErrInsufficientCredits):
 		return api.Coded(billing.CodeInsufficientCredits, err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantNotFound):
-		return api.Coded("credit_grant_not_found", err.Error())
+		return api.Coded(billing.CodeCreditGrantNotFound, err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantHeld):
-		return api.Coded("credit_grant_held", err.Error())
+		return api.Coded(billing.CodeCreditGrantHeld, err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantUnavailable):
-		return api.Coded("credit_grant_unavailable", err.Error())
+		return api.Coded(billing.CodeCreditGrantUnavailable, err.Error())
 	case errors.Is(err, billingservice.ErrUsageOutsideIngestWindow):
 		return api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at")
 	}
@@ -139,7 +139,7 @@ func ListCreditGrants(r *httprequest.Request) {
 	if params.IDs == nil {
 		id, err := billing.ParseCustomerID(strings.TrimSpace(r.Query("customer_id")))
 		if err != nil || id.IsZero() {
-			r.APIError(api.Coded("invalid_customer_id", "customer_id is required").WithParam("customer_id"))
+			r.APIError(api.Coded(billing.CodeInvalidCustomerID, "customer_id is required").WithParam("customer_id"))
 			return
 		}
 		if !requireServiceCustomerScope(r, id) {

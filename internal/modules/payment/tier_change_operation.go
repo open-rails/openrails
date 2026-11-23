@@ -222,8 +222,8 @@ func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus
 	switch {
 	case providerStatus == http.StatusPaymentRequired:
 		return &TierChangeDeclinedError{Rail: rail, FailureCode: code, Message: message}
-	case providerStatus == http.StatusConflict && code == billing.CodePaymentDuplicateRefused:
-		return &TierChangeError{Code: code, Message: message}
+	case providerStatus == http.StatusConflict && code == string(billing.CodePaymentDuplicateRefused):
+		return &TierChangeError{Code: billing.CodePaymentDuplicateRefused, Message: message}
 	}
 	return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: message}
 }

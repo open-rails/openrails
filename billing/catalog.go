@@ -213,7 +213,7 @@ type DriftField struct {
 
 // ErrPriceKeyCadenceConflict refuses a price created without a key whose
 // default key is already held by a price on another cadence.
-var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict", ErrConflict)
+var ErrPriceKeyCadenceConflict error = newCodedError(CodePriceKeyCadenceConflict, ErrConflict)
 
 // CreatePriceParams creates a price on the product named by exactly one of
 // ProductID, ProductKey and ProductData.

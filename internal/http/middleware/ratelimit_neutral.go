@@ -303,7 +303,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitCaptchaRequired:
 		w.Header().Set("X-Captcha-Required", "true")
-		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_required", "Captcha verification required").
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, billing.CodeCaptchaRequired, "Captcha verification required").
 			WithMetadata(map[string]any{
 				"provider": config.CaptchaProvider(captchaCfg),
 				"site_key": strings.TrimSpace(captchaSiteKey(captchaCfg)),
@@ -316,7 +316,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		if msg == "" {
 			msg = "Captcha verification failed"
 		}
-		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_invalid", msg)
+		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, billing.CodeCaptchaInvalid, msg)
 		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitTooMany:
 		apiErr := api.Coded(billing.CodeRateLimitExceeded, "Rate limit exceeded")

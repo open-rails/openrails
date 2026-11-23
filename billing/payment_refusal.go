@@ -13,21 +13,21 @@ const (
 	// card_error, 402). Metadata: decline_reason is a DeclineReason (read it
 	// with DeclineReasonFrom); failure is the PaymentFailure to show the buyer
 	// (PaymentFailureFrom); failure_code is the provider's verbatim code.
-	CodeCardDeclined = "card_declined"
+	CodeCardDeclined ErrorCode = "card_declined"
 	// CodePaymentMethodStale means the saved payment method the request named
 	// can no longer be charged for this customer and processor (deleted, not
 	// theirs, vaulted elsewhere, or its collection token expired): collect the
 	// card again (type card_error, 402).
-	CodePaymentMethodStale = "payment_method_stale"
+	CodePaymentMethodStale ErrorCode = "payment_method_stale"
 	// CodePaymentProviderRejected means the provider refused to process the
 	// charge for a reason unrelated to the card — gateway or merchant account
 	// configuration (type api_error, 502). Nothing was charged; another card
 	// will not help.
-	CodePaymentProviderRejected = "payment_provider_rejected"
+	CodePaymentProviderRejected ErrorCode = "payment_provider_rejected"
 	// CodePaymentMethodRequired refuses a charge that names neither a saved
 	// payment method nor a new card token (type invalid_request_error, 400).
 	// OpenRails never charges an implied card such as the default one.
-	CodePaymentMethodRequired = "payment_method_required"
+	CodePaymentMethodRequired ErrorCode = "payment_method_required"
 )
 
 var (

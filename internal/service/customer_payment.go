@@ -212,7 +212,7 @@ func (s *Service) holdRecoveryForWritePosture(ctx context.Context, merchantID uu
 	}
 	if blocked, _ := intents.GateExecution(ctx, s.rt.Posture(), merchantID, intents.OriginUser); blocked {
 		out.Retryable = false
-		out.BlockedReason = billing.CodeProviderWritesDisabled
+		out.BlockedReason = string(billing.CodeProviderWritesDisabled)
 	}
 }
 

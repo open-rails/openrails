@@ -330,7 +330,7 @@ func (m *model) openAPI() ([]byte, error) {
 	sort.Strings(sets.keys)
 	codes := newObj()
 	for _, c := range errorCodes() {
-		codes.set(c.Code, newObj("status", c.Status, "type", c.Type, "meaning", c.Meaning))
+		codes.set(string(c.Code), newObj("status", c.Status, "type", c.Type, "meaning", c.Meaning))
 	}
 	doc := newObj(
 		"openapi", "3.1.0",

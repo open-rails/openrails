@@ -80,7 +80,7 @@ func TestPublicCart(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrInvalid)
 		var badQuantity *billing.StatusError
 		require.ErrorAs(t, err, &badQuantity)
-		require.Equal(t, "invalid_param", badQuantity.Code)
+		require.Equal(t, billing.CodeInvalidParam, badQuantity.Code)
 		require.Nil(t, preview)
 		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(1_000_000)), Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
 		status, raw := a.request(t, "POST", "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "stale-total"})

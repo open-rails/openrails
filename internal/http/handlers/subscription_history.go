@@ -37,7 +37,7 @@ func GetSubscriptionHistory(r *httprequest.Request) {
 	q := r.State.DB.Gen(ctx)
 	_, err = q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid, ID: id.UUID()})
 	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorCode("subscription_not_found", "subscription not found")
+		r.ErrorCode(billing.CodeSubscriptionNotFound, "subscription not found")
 		return
 	}
 	if err != nil {

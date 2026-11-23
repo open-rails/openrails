@@ -28,7 +28,7 @@ const poolAcquireTimeout = 5 * time.Second
 
 // ErrPoolExhausted is a request that could not get a database connection in
 // time. It is retryable.
-var ErrPoolExhausted = apperr.New(http.StatusServiceUnavailable, "database_busy", "no database connection is available; retry shortly")
+var ErrPoolExhausted = apperr.New(http.StatusServiceUnavailable, billing.CodeDatabaseBusy, "no database connection is available; retry shortly")
 
 // acquire takes a pooled connection, waiting at most poolAcquireTimeout.
 func acquire(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {

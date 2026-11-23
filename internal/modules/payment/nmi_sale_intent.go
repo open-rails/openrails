@@ -180,7 +180,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		if duplicate {
 			// NMI's duplicate check refused this unique order unprocessed.
 			evidence["duplicate_refused"] = true
-			evidence["failure_code"] = billing.CodePaymentDuplicateRefused
+			evidence["failure_code"] = string(billing.CodePaymentDuplicateRefused)
 			reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
@@ -243,7 +243,7 @@ func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingP
 		evidence, reason = map[string]any{"request_refused": true}, "the custodian refused the sale before sending it"
 	case errors.Is(err, nmi.ErrDuplicateTransaction):
 		// The gateway refused this unique order without processing it.
-		evidence = map[string]any{"request_refused": true, "duplicate_refused": true, "failure_code": billing.CodePaymentDuplicateRefused}
+		evidence = map[string]any{"request_refused": true, "duplicate_refused": true, "failure_code": string(billing.CodePaymentDuplicateRefused)}
 		reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
 	case err != nil:
 		return intents.Ambiguous("sale outcome requires provider verification")

@@ -33,8 +33,8 @@ type userActionRateEvidence struct {
 func (e *UserActionRateError) Error() string {
 	return "too many card removals or subscription cancellations; try again later"
 }
-func (e *UserActionRateError) Is(target error) bool { return target == billing.ErrDenied }
-func (e *UserActionRateError) ErrorCode() string    { return billing.CodeRateLimitExceeded }
+func (e *UserActionRateError) Is(target error) bool         { return target == billing.ErrDenied }
+func (e *UserActionRateError) ErrorCode() billing.ErrorCode { return billing.CodeRateLimitExceeded }
 
 // UserActionLimiter reserves one logical customer action across every process
 // serving the merchant. It is independent of optional IP/user HTTP limits.

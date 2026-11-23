@@ -208,7 +208,7 @@ func (im *Importer) psp(ctx context.Context, mid billing.MerchantID, ref billing
 		return scope, err
 	}
 	if !found {
-		return scope, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", ref.String())).WithParam("psp")
+		return scope, apperr.New(404, billing.CodePSPNotFound, fmt.Sprintf("PSP %s not found", ref.String())).WithParam("psp")
 	}
 	return scope, nil
 }

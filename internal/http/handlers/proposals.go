@@ -97,7 +97,7 @@ const approveOperation = "proposals.approve"
 func ApproveProposals(r *httprequest.Request) {
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
 	if key == "" {
-		r.ErrorCode("idempotency_key_required", "Idempotency-Key header is required")
+		r.ErrorCode(billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required")
 		return
 	}
 	if len(key) > 200 {

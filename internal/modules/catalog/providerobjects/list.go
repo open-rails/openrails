@@ -46,7 +46,7 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 	if err != nil {
 		return out, err
 	} else if !found {
-		return out, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", p.PSP)).WithParam("psp")
+		return out, apperr.New(404, billing.CodePSPNotFound, fmt.Sprintf("PSP %s not found", p.PSP)).WithParam("psp")
 	}
 	params := gen.ListProviderCatalogParams{MerchantID: mid.UUID(), PspID: scope.ID, Mapped: p.Mapped, Retired: p.Retired}
 	switch p.Kind {

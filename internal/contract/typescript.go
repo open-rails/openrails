@@ -146,7 +146,7 @@ export type OpenRailsRoute = {
 
 export const OPENRAILS_ROUTES = [
 `)
-	sets := map[string][]string{}
+	sets := map[string][]billing.ErrorCode{}
 	for _, r := range m.routes {
 		perm, when := "null", "null"
 		if pair := r.Needs(); pair != (routes.Pair{}) {
@@ -206,7 +206,7 @@ func errorCodesTS() []byte {
 	for _, c := range codes {
 		fmt.Fprintf(&b, "  | %q\n", c.Code)
 	}
-	types := map[string]bool{}
+	types := map[billing.ErrorType]bool{}
 	for _, c := range codes {
 		types[c.Type] = true
 	}
@@ -219,7 +219,7 @@ func errorCodesTS() []byte {
 	b.WriteString("\n// Each code's HTTP status, envelope type and meaning. A message on the wire is\n// diagnostic; classify by code.\nexport const OPENRAILS_ERROR_CODES: Readonly<\n  Record<OpenRailsErrorCode, { status: number; type: OpenRailsErrorType; meaning: string }>\n> = {\n")
 	for _, c := range codes {
 		meaning, _ := marshal(c.Meaning)
-		fmt.Fprintf(&b, "  %s: { status: %d, type: %q, meaning: %s },\n", tsKey(c.Code), c.Status, c.Type, meaning)
+		fmt.Fprintf(&b, "  %s: { status: %d, type: %q, meaning: %s },\n", tsKey(string(c.Code)), c.Status, c.Type, meaning)
 	}
 	b.WriteString("}\n")
 	return b.Bytes()
@@ -237,7 +237,7 @@ func currenciesTS() []byte {
 	return b.Bytes()
 }
 
-func quoted(list []string) string {
+func quoted[S ~string](list []S) string {
 	out := make([]string, len(list))
 	for i, s := range list {
 		out[i] = fmt.Sprintf("%q", s)

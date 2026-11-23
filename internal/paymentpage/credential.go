@@ -53,10 +53,10 @@ func ResolveHTTP(store *Store, now func() time.Time) func(http.Handler) http.Han
 			c, err := store.Resolve(r.Context(), bearer(r.Header.Get("Authorization")), now())
 			switch {
 			case errors.Is(err, ErrNotFound):
-				billingauth.WriteJSONError(w, http.StatusNotFound, "pay_url_not_found", "")
+				billingauth.WriteJSONError(w, http.StatusNotFound, billing.CodePayURLNotFound, "")
 				return
 			case errors.Is(err, ErrExpired):
-				billingauth.WriteJSONError(w, http.StatusGone, "pay_url_expired", "")
+				billingauth.WriteJSONError(w, http.StatusGone, billing.CodePayURLExpired, "")
 				return
 			case err != nil:
 				log.WithContext(r.Context()).WithError(err).Error("payment page: secret lookup failed")

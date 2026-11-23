@@ -3,10 +3,10 @@ package billing
 var (
 	// ErrRefundRailUnavailable: the payment's rail cannot currently accept a
 	// refund (account not armed or not configured). Nothing was reserved.
-	ErrRefundRailUnavailable error = newCodedError("refund_rail_unavailable", ErrConflict)
+	ErrRefundRailUnavailable error = newCodedError(CodeRefundRailUnavailable, ErrConflict)
 	// ErrRefundUnsupported: the payment's rail has no automatic refund (CCBill,
 	// off-rail channels). Refund it at the provider and record it there.
-	ErrRefundUnsupported error = newCodedError("refund_unsupported", ErrInvalid)
+	ErrRefundUnsupported error = newCodedError(CodeRefundUnsupported, ErrInvalid)
 )
 
 // RefundPaymentParams refunds one charge. Exactly one of Amount (native units

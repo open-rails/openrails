@@ -9,13 +9,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ErrInvalidPSPReference is a declaration that cannot identify one of the
 // selected merchant's provider accounts. Storage/read failures are distinct.
-var ErrInvalidPSPReference = apperr.New(http.StatusBadRequest, "invalid_psp_reference", "invalid PSP reference")
+var ErrInvalidPSPReference = apperr.New(http.StatusBadRequest, billing.CodeInvalidPSPReference, "invalid PSP reference")
 
 // pspResolver turns a declared PSPRef into a billing.psps id from the
 // merchant's own catalog. A row it cannot attribute is refused: unattributed,

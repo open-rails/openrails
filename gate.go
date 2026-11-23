@@ -305,7 +305,7 @@ func (t *Ticket) Capture(ctx context.Context, u billing.CaptureUsage) error {
 	t.mu.Lock()
 	if t.state != ticketOpen {
 		t.mu.Unlock()
-		return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceConflict, Message: "the ticket was already captured or released"}}
+		return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeResourceConflict, Message: "the ticket was already captured or released"}}
 	}
 	t.state = ticketCaptured
 	t.mu.Unlock()
@@ -625,7 +625,7 @@ func capacityHeld(retry int64) *billing.Refusal {
 }
 
 func errNotPriced(eventType string) error {
-	return &billing.StatusError{Status: http.StatusUnprocessableEntity, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeUsageNotPriced,
+	return &billing.StatusError{Status: http.StatusUnprocessableEntity, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeUsageNotPriced,
 		Message: fmt.Sprintf("the hold OpenRails issued does not price event type %q", eventType)}}
 }
 

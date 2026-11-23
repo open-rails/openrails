@@ -171,7 +171,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		require.Error(t, err)
 		var refusal *billing.StatusError
 		require.ErrorAs(t, err, &refusal)
-		require.Equal(t, "rebill_terms_committed", refusal.Code)
+		require.Equal(t, billing.CodeRebillTermsCommitted, refusal.Code)
 		gate.unblock()
 		renewalSettled(t, a, p, sub, due)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)

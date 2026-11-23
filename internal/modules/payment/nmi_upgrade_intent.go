@@ -206,7 +206,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingPro
 		if callErr != nil {
 			if errors.Is(callErr, nmi.ErrDuplicateTransaction) {
 				// NMI's duplicate check refused this unique order unprocessed.
-				progress.Proration.refuseUnexecuted(billing.CodePaymentDuplicateRefused, duplicateProrationRefusal)
+				progress.Proration.refuseUnexecuted(string(billing.CodePaymentDuplicateRefused), duplicateProrationRefusal)
 				if err = save("proration", progress.Proration); err != nil {
 					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 				}

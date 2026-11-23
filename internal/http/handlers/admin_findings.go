@@ -179,12 +179,6 @@ func AdminResolveFinding(r *httprequest.Request) {
 	r.SuccessJSON(billing.FindingResolution{Finding: findingView(updated), Execution: execution})
 }
 
-// Approve refusals; each fixes its status.
-const (
-	codeFindingNotActionable = "finding_not_actionable"
-	codeFindingActionFailed  = "finding_action_failed"
-)
-
 // resolveFindingOutcome ignores (notes required) or approves one open finding,
 // returning the completed execution effects; on a refusal it has answered.
 func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, finding reconcile.FindingRecord, outcome, notes string, overrideParams json.RawMessage) (map[string]any, bool) {
@@ -207,7 +201,7 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 	// approve: mechanical execution requires a structured recommendation.
 	rec, hasRec := recommend.FromEvidence(finding.Evidence)
 	if !hasRec {
-		r.ErrorCode(codeFindingNotActionable, "")
+		r.ErrorCode(billing.CodeFindingNotActionable, "")
 		return nil, false
 	}
 	overrides, err := recommend.DecodeParams(overrideParams)

@@ -46,7 +46,7 @@ func catalogCommand[T any](ctx context.Context, s *Service, target string, terms
 			return out, err
 		}
 		if attempt == maxCatalogSnapshotAttempts {
-			return out, apperr.New(409, "catalog_revision_conflict", "the catalog kept changing during this edit; retry")
+			return out, apperr.New(409, billing.CodeCatalogRevisionConflict, "the catalog kept changing during this edit; retry")
 		}
 	}
 }

@@ -53,22 +53,22 @@ import (
 var (
 	// ErrRebillTermsCommitted prevents a price change from revoking an accepted
 	// renewal whose provider preparation or money submission may have occurred.
-	ErrRebillTermsCommitted = apperr.New(http.StatusConflict, "rebill_terms_committed", "accepted recurring payment owns the pending price terms")
+	ErrRebillTermsCommitted = apperr.New(http.StatusConflict, billing.CodeRebillTermsCommitted, "accepted recurring payment owns the pending price terms")
 	// ErrMembershipSlotTaken: the customer already holds a subscription of the
 	// product or its tier group (or one whose provider stop is pending).
 	ErrMembershipSlotTaken = errors.New("membership slot taken")
 	// ErrRenewalInProgress refuses a cancel while an accepted renewal payment is
 	// unresolved; the cancel succeeds once the payment resolves.
-	ErrRenewalInProgress = apperr.New(http.StatusConflict, "payment_in_progress", "a renewal payment for this subscription is unresolved; cancel again once it resolves")
+	ErrRenewalInProgress = apperr.New(http.StatusConflict, billing.CodePaymentInProgress, "a renewal payment for this subscription is unresolved; cancel again once it resolves")
 
 	ErrPriceCurrencyMismatch       = apperr.New(http.StatusUnprocessableEntity, billing.CodePriceChangeCurrencyMismatch, "the target price must be in the subscription's currency")
 	ErrPriceTargetArchived         = apperr.New(http.StatusUnprocessableEntity, billing.CodePriceChangeTargetArchived, "the target price is archived")
 	ErrPriceIncreaseNoticeTooShort = apperr.New(http.StatusUnprocessableEntity, billing.CodePriceIncreaseNoticeTooShort, "effective_at is inside the merchant's notice window for a price increase")
 	ErrPriceMigrationNotFound      = apperr.New(http.StatusNotFound, billing.CodePriceMigrationNotFound, "price migration not found")
 
-	errMigrationPriceNotFound   = apperr.New(http.StatusNotFound, "price_not_found", "price not found")
-	errMigrationProductNotFound = apperr.New(http.StatusNotFound, "product_not_found", "product not found")
-	errMigrationKeyNotFound     = apperr.New(http.StatusNotFound, "price_key_not_found", "no price holds this key")
+	errMigrationPriceNotFound   = apperr.New(http.StatusNotFound, billing.CodePriceNotFound, "price not found")
+	errMigrationProductNotFound = apperr.New(http.StatusNotFound, billing.CodeProductNotFound, "product not found")
+	errMigrationKeyNotFound     = apperr.New(http.StatusNotFound, billing.CodePriceKeyNotFound, "no price holds this key")
 )
 
 // DefaultPriceIncreaseNoticeDays is the notice window for a price increase

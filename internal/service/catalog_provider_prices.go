@@ -27,7 +27,7 @@ import (
 
 // ErrProviderPriceUnreadable: the provider did not answer for a provider
 // price's terms.
-var ErrProviderPriceUnreadable = apperr.New(http.StatusBadGateway, "provider_price_unreadable", "the provider did not answer for the provider price's terms; retry")
+var ErrProviderPriceUnreadable = apperr.New(http.StatusBadGateway, billing.CodeProviderPriceUnreadable, "the provider did not answer for the provider price's terms; retry")
 
 // providerPrice is a provider price ready to write: its PSP, the provider's
 // object (the binding) and the terms the provider states, or CCBill declares.

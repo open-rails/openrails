@@ -501,4 +501,4 @@ func pathParams(p string) []string {
 }
 
 // errorCodes is the registry, sorted by code.
-func errorCodes() []billing.ErrorCode { return billing.ErrorCodes() }
+func errorCodes() []billing.ErrorCodeInfo { return billing.ErrorCodes() }

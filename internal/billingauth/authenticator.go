@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
 
 // WriteJSONError writes the OpenRails error envelope from a plain
 // http.ResponseWriter, for middleware that answers before a handler exists,
 // with the request id the request-log middleware set on the response.
-func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
+func WriteJSONError(w http.ResponseWriter, status int, code billing.ErrorCode, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	body := api.NewAPIError(status, api.TypeForCode(status, code), code, message)

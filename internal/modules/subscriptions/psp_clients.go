@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -21,7 +22,7 @@ var ErrPaymentMethodProviderAccountMismatch = errors.New("payment method belongs
 
 // A custody remap retains the old PSP vault reference for correlation only.
 // NMI's payment-source update cannot address a third-party custodian token.
-var ErrPaymentMethodNotPSPVaulted = apperr.New(http.StatusConflict, "payment_method_not_psp_vaulted", "payment method is not held in the provider vault; collect the replacement card on this provider account")
+var ErrPaymentMethodNotPSPVaulted = apperr.New(http.StatusConflict, billing.CodePaymentMethodNotPSPVaulted, "payment method is not held in the provider vault; collect the replacement card on this provider account")
 
 func ValidatePaymentMethodSourceCustody(pm *models.PaymentMethod) error {
 	if pm == nil || pm.Custodian != models.CustodianPSP || pm.CustodianID != nil {
