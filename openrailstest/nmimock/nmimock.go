@@ -29,12 +29,34 @@ import (
 // lack of funds.
 const InsufficientFunds = "202"
 
-// Card is a card as a browser tokenizes it and a vault stores it. Decline ""
-// approves; an NMI response code such as InsufficientFunds declines its sales.
-type Card = nmimock.Card
+// Card is a card as a browser tokenizes it and a vault stores it.
+type Card struct {
+	Brand, Last4 string
+	// Decline is the issuer's answer: "" approves, an NMI response code such
+	// as InsufficientFunds declines its sales, and "vault" refuses storing
+	// the card.
+	Decline string
+	// AVS and CVV are the verification letters every answer for this card
+	// carries (avsresponse, cvvresponse); CVV "N" is a security-code mismatch.
+	AVS, CVV string
+	// BIN is the card's first six digits; empty derives one from Brand.
+	BIN string
+	// NetworkToken: the network token stands in for the card number, and the
+	// Query API reports network_token_used on its charges.
+	NetworkToken bool
+	// Exp is the MMYY a card stored by number was given; empty reads as 1235.
+	Exp string
+	// VaultsDeclined: a declined sale that asked to save this card vaults it
+	// anyway and answers its customer_vault_id.
+	VaultsDeclined bool
+}
 
 // LedgerEntry is the money one approved sale moved, in cents, and its refunds.
-type LedgerEntry = nmimock.LedgerEntry
+type LedgerEntry struct {
+	TransactionID, OrderID, Vault string
+	Last4                         string
+	Cents, RefundedCents          int64
+}
 
 // Options configure a Mock.
 type Options struct {
@@ -67,7 +89,7 @@ func (g *Mock) URL() string { return g.m.URL() }
 func (g *Mock) Close() { g.m.Close() }
 
 // Tokenize is Collect.js: a payment token for c.
-func (g *Mock) Tokenize(c Card) string { return g.m.Tokenize(c) }
+func (g *Mock) Tokenize(c Card) string { return g.m.Tokenize(nmimock.Card(c)) }
 
 // SetDecline sets how the issuer answers for every stored card ending in
 // last4: "" approves, a code such as InsufficientFunds declines.
@@ -81,7 +103,13 @@ func (g *Mock) LastDecline() *Sale { return sale(g.m.LastDecline()) }
 
 // Ledger is the money approved, unvoided sales moved, for one vault or ("")
 // all.
-func (g *Mock) Ledger(vault string) []LedgerEntry { return g.m.Ledger(vault) }
+func (g *Mock) Ledger(vault string) []LedgerEntry {
+	var out []LedgerEntry
+	for _, e := range g.m.Ledger(vault) {
+		out = append(out, LedgerEntry(e))
+	}
+	return out
+}
 
 // Charged is the net cents moved for one vault ("" all), optionally of one
 // order ("" all).
@@ -93,22 +121,77 @@ func (g *Mock) Unexpected() []string { return g.m.Unexpected() }
 
 // Plan, Vault (with its further Billing entries) and Schedule are an
 // existing account's records: a legacy book a host imports.
-type (
-	Plan     = nmimock.Plan
-	Vault    = nmimock.Vault
-	Billing  = nmimock.Billing
-	Schedule = nmimock.Schedule
-)
+
+// Plan is a Recurring Plan. Months, when set, is the cadence; otherwise Days
+// (30 when zero).
+type Plan struct {
+	ID, Name, Amount string
+	Days, Months     int
+}
+
+// Vault is a Customer Vault record: its priority-1 billing entry, then Extra.
+type Vault struct {
+	ID, BillingID string
+	// Book is the merchant-defined field 20 the vault carries: the billing
+	// book that created it.
+	Book  string
+	Card  Card
+	Extra []Billing
+	// NoBrand omits card_type from reads, as some live accounts do.
+	NoBrand bool
+	// Email and the names are the billing entry's; ShippingID names the
+	// shipping entry (NMI generates one when empty).
+	Email, FirstName, LastName, ShippingID string
+	// Created is when the vault was stored.
+	Created time.Time
+}
+
+// Billing is a further billing entry (card) in a vault.
+type Billing struct {
+	ID   string
+	Card Card
+}
+
+// Schedule is an NMI recurring subscription. A deleted schedule stays
+// readable as a tombstone (delayed_condition=inactive) and leaves lists.
+type Schedule struct {
+	ID, Vault, Plan, Amount string
+	// Book is the merchant-defined field 20 the schedule carries. Created is
+	// when it was made (start_date); zero means now.
+	Book    string
+	Created time.Time
+	Order   string
+	// Email is the schedule's billing email; empty reads the vault's.
+	Email string
+	// Days or Months is the cadence (Days 30 when both are zero).
+	Days, Months int
+	// CalendarAnchor is the original provider billing day, retained when a
+	// shorter month clamps NextBilling. Zero keeps NextBilling's day.
+	CalendarAnchor  time.Time
+	NextBilling     time.Time
+	Deleted, Paused bool
+	// Custom is a custom-amount schedule: its plan shows an empty plan_name.
+	Custom bool
+}
 
 // AddPlan stores a recurring plan the account already has.
-func (g *Mock) AddPlan(p Plan) { g.m.AddPlan(p) }
+func (g *Mock) AddPlan(p Plan) { g.m.AddPlan(nmimock.Plan(p)) }
 
 // PutVault stores a vault as given (its ids, card, email and shipping id).
-func (g *Mock) PutVault(v Vault) { g.m.PutVault(v) }
+func (g *Mock) PutVault(v Vault) { g.m.PutVault(mockVault(v)) }
+
+func mockVault(v Vault) nmimock.Vault {
+	var extra []nmimock.Billing
+	for _, b := range v.Extra {
+		extra = append(extra, nmimock.Billing{ID: b.ID, Card: nmimock.Card(b.Card)})
+	}
+	return nmimock.Vault{ID: v.ID, BillingID: v.BillingID, Book: v.Book, Card: nmimock.Card(v.Card), Extra: extra, NoBrand: v.NoBrand,
+		Email: v.Email, FirstName: v.FirstName, LastName: v.LastName, ShippingID: v.ShippingID, Created: v.Created}
+}
 
 // AddSchedule stores a recurring subscription the account bills and returns
 // its id.
-func (g *Mock) AddSchedule(s Schedule) string { return g.m.AddSchedule(s) }
+func (g *Mock) AddSchedule(s Schedule) string { return g.m.AddSchedule(nmimock.Schedule(s)) }
 
 // AddScheduleSale records the approved charge NMI's recurring engine made
 // for a schedule at a time.
