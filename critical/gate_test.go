@@ -43,6 +43,27 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
+// safePlan is gatePlan with money priced per call: a dynamic card charges
+// its stated amount only for a positive quantity, so a request of calls and
+// no units spends money alone.
+const safePlan = `schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+  calls: {event_type: work, value_property: calls, aggregation: sum}
+limits:
+  hourly:
+    unit: units
+    reset: {kind: fixed, window_seconds: 3600, anchor: first_use}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  daily:
+    unit: units
+    reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+products:
+  plan: {display_name: Plan, limits: {hourly: "100", daily: "60"}}
+  metered: {display_name: Metered, rate_cards: [{meter: calls, price: {model: dynamic, currency: USD}}]}
+`
+
 // sessionPlan is tokenPlan with a session of 8 seconds, which ends within
 // one lease's life.
 const sessionPlan = `schema_version: 1
@@ -472,6 +493,12 @@ func TestGate(t *testing.T) {
 		for _, p := range append(others, first) {
 			p.wire.down.Store(false)
 		}
+		// A cold request answers ErrUnavailable for a sync interval after a
+		// sync that could not reach OpenRails: let the group sync again.
+		syncs := func() int64 { return first.wire.syncs.Load() + others[0].wire.syncs.Load() + others[1].wire.syncs.Load() }
+		synced := syncs()
+		require.Eventually(t, func() bool { return syncs() > synced }, 10*time.Second, 20*time.Millisecond)
+		time.Sleep(limits.SyncInterval)
 
 		// Killing the syncing process hands syncing over; no usage is lost or
 		// sent twice.
@@ -572,6 +599,9 @@ func TestGate(t *testing.T) {
 		spend := func(customer billing.CustomerID, id string, units, amount int64) billing.AdmitParams {
 			p := gateWork(customer, id, units)
 			p.Usage.Amount = ptr(amount)
+			if amount > 0 {
+				p.Usage.Dimensions["calls"] = 1
+			}
 			return p
 		}
 		want := func(customer billing.CustomerID) billing.LeaseWant {
@@ -589,7 +619,7 @@ func TestGate(t *testing.T) {
 		}
 
 		// A merchant that enables it: every hold's safe is its money size.
-		applyLimits(t, a.alpha, gatePlan)
+		applyLimits(t, a.alpha, safePlan)
 		direct := paying(a.alpha)
 		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{want(direct)}})
 		set, refusal := wanted(t, out)
@@ -600,7 +630,7 @@ func TestGate(t *testing.T) {
 		require.NotNil(t, safe)
 		require.Equal(t, held, *safe)
 		// One that does not: none.
-		applyLimits(t, a.beta, gatePlan)
+		applyLimits(t, a.beta, safePlan)
 		plain := paying(a.beta)
 		out = syncLease(t, a.beta, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{want(plain)}})
 		set, refusal = wanted(t, out)
