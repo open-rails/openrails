@@ -87,7 +87,6 @@ type Holder struct {
 	Now        time.Time
 }
 
-
 // Take checks every claim and, when all fit, sets aside what each takes:
 // all or nothing. require_estimate fits when settled + held + cost is at
 // most capacity; admit_while_positive while any capacity remains, holding
