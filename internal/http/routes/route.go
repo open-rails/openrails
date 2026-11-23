@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -152,6 +153,13 @@ const (
 	PayURLSavedCards PayURLAccess = "saved_cards"
 )
 
+// ClientSource is how a route's Go Client method is written.
+type ClientSource string
+
+// HandWritten: the method is client_handwritten.go's, not generated: a
+// stream, or a read the client answers from memory itself.
+const HandWritten ClientSource = "hand_written"
+
 // Reply is one success outcome of a route: its status and body. Body is a
 // zero value of the body's type; nil for none.
 type Reply struct {
@@ -187,6 +195,16 @@ type Route struct {
 	// Name is the route's Go client method. ConsoleOnly is the explicit
 	// exception for optional console assistance, not a merchant operation.
 	Name string
+	// Doc is a client route's method comment and OpenAPI description: a
+	// sentence beginning with Name.
+	Doc string
+	// Args holds a zero value of each path wildcard's type, in path order:
+	// the client method's arguments, each a string or a Stringer.
+	Args []any
+	// Cache is the read cache that may answer a client GET; empty reads live.
+	Cache config.Read
+	// Client is how the client method is written: generated, or HandWritten.
+	Client ClientSource
 	// ConsoleOnly marks optional catalog assistance owned by the console UI.
 	// It keeps its ordinary merchant auth, feature and rate-limit gates but
 	// is not a Go Client method; it does not require the bundled console UI.
@@ -260,6 +278,50 @@ func (r Route) ClientMethod() bool {
 	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Name == "GetPublicConfig"
 }
 
+// clientShape requires a client route's method to be declared whole, and
+// leaves the client fields of any other route empty.
+func (r Route) clientShape() error {
+	if !r.ClientMethod() {
+		if r.Doc != "" || r.Args != nil || r.Cache != "" || r.Client != "" {
+			return fmt.Errorf("Doc, Args, Cache and Client are a client route's")
+		}
+		return nil
+	}
+	if !strings.HasPrefix(r.Doc, r.Name+" ") {
+		return fmt.Errorf("a client route's Doc is a sentence beginning with its Name, %s", r.Name)
+	}
+	wildcards := strings.Count(r.Path, "{")
+	if len(r.Args) != wildcards {
+		return fmt.Errorf("Args holds %d values for %d path wildcards", len(r.Args), wildcards)
+	}
+	for _, arg := range r.Args {
+		if _, ok := arg.(fmt.Stringer); !ok && reflect.TypeOf(arg).Kind() != reflect.String {
+			return fmt.Errorf("Args: %T is neither a string nor a Stringer", arg)
+		}
+	}
+	if r.Cache != "" && r.Method != GET {
+		return fmt.Errorf("only a GET is cached")
+	}
+	switch r.Client {
+	case "", HandWritten:
+	default:
+		return fmt.Errorf("unknown Client %q", r.Client)
+	}
+	stream := false
+	if _, ok := r.Request.(Stream); ok {
+		stream = true
+	}
+	for _, reply := range r.Responses {
+		if _, ok := reply.Body.(Stream); ok {
+			stream = true
+		}
+	}
+	if stream && r.Client != HandWritten {
+		return fmt.Errorf("a streamed body's client method is HandWritten")
+	}
+	return nil
+}
+
 // consoleOwnership refuses exemptions that could hide ordinary SDK routes.
 func (r Route) consoleOwnership() error {
 	if r.ConsoleOnly != strings.HasPrefix(r.Path, "/v1/console/") {
@@ -299,6 +361,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		if _, err := r.QueryParams(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
+		}
+		if err := r.clientShape(); err != nil {
 			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		if (r.Handler == nil) == (r.Bind == nil) {

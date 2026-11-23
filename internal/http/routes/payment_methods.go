@@ -11,8 +11,14 @@ import (
 // confirmed after.
 var paymentMethodsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/payment-methods", Group: Admin, Auth: AuthMerchant, Name: "ListPaymentMethods", Level: LevelRead,
+		Args:  []any{billing.CustomerID{}},
+		Doc:   "ListPaymentMethods is one page of a customer's saved cards, newest first.",
 		Query: billing.PaymentMethodListParams{}, Responses: []Reply{{200, billing.ListPage[billing.PaymentMethod]{}}}, Errors: codes("invalid_cursor", "invalid_param"), Handler: h(handlers.ListCustomerPaymentMethods)},
 	{Method: DELETE, Path: "/v1/admin/customers/{customer_id}/payment-methods/{id}", Group: Admin, Auth: AuthMerchant, Name: "DeletePaymentMethod", Level: LevelUpdate,
+		Args: []any{billing.CustomerID{}, billing.PaymentMethodID{}},
+		Doc: "DeletePaymentMethod removes an owned unused card only after its holder confirms deletion. Existing " +
+			"subscriptions and accepted payments block removal; retries recover the same operation and financial " +
+			"records remain available.",
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeleteCustomerPaymentMethod)},
 	{Method: PUT, Path: "/v1/me/default-payment-methods/{currency}", Group: Customer, Auth: AuthCustomer,
 		Request: billing.SetDefaultPaymentMethodParams{}, Responses: []Reply{{200, billing.DefaultPaymentMethod{}}}, Errors: codes("authentication_required", "card_declined", "default_payment_method_invalid", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_method_stale", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.SetDefaultPaymentMethod)},

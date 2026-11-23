@@ -182,6 +182,10 @@ func (m *model) body(v any) *obj {
 
 func (m *model) operation(r routes.Route) *obj {
 	op := newObj("tags", []string{string(r.Group)})
+	if r.ClientMethod() {
+		op.set("operationId", r.Name)
+		op.set("description", r.Doc)
+	}
 	if r.ConsoleOnly {
 		op.set("x-openrails-console-only", true)
 	}

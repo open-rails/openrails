@@ -69,6 +69,8 @@
         "tags": [
           "meta"
         ],
+        "operationId": "GetPublicConfig",
+        "description": "GetPublicConfig reads the deployment's capabilities and public configuration. It sends no credential and does not invoke the handle's token provider. Over HTTP it is what a browser reads from the same server, ready for a host's page response (billing-ui's BillingProvider config); in process, Engine.PublicConfig names the mount the browser reads.",
         "responses": {
           "200": {
             "description": "OK",
@@ -813,6 +815,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "PreviewOrder",
+        "description": "PreviewOrder prices lines for one customer, as a merchant order would freeze them: per-line refusals, the total and what can pay it.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -877,6 +881,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "GetOrderPaymentAttempt",
+        "description": "GetOrderPaymentAttempt reads one retained purchase payment attempt by idempotencyKey, its original POST /me/orders/{id}/pay Idempotency-Key. It does not look up create-order-with-payment or renewal/usage keys, retry or perform a provider write.",
         "parameters": [
           {
             "name": "id",
@@ -944,6 +950,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "CreateOrder",
+        "description": "CreateOrder creates a merchant order: an unpaid order for one customer, which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges. idempotencyKey is required: a retry with it answers the same order.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -1030,6 +1038,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "CancelOrder",
+        "description": "CancelOrder withdraws an open order you created.",
         "parameters": [
           {
             "name": "id",
@@ -1089,6 +1099,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListOrders",
+        "description": "ListOrders is one page of the merchant's orders, newest first. Status complete with PriceID answers whether a customer bought a price.",
         "parameters": [
           {
             "name": "cursor",
@@ -1244,6 +1256,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetOrder",
+        "description": "GetOrder reads one order. Staff never pay, so it carries no next_action.",
         "parameters": [
           {
             "name": "id",
@@ -1302,6 +1316,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "WaiveOrderBalance",
+        "description": "WaiveOrderBalance forgives the unpaid balance of a usage order. Existing payments remain recorded. Repeating it changes nothing.",
         "parameters": [
           {
             "name": "id",
@@ -1361,6 +1377,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "MarkOrderUncollectible",
+        "description": "MarkOrderUncollectible stops scheduled collection while retaining the debt. A customer payment can reopen it. Repeating it changes nothing.",
         "parameters": [
           {
             "name": "id",
@@ -1535,6 +1553,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ApplyCatalog",
+        "description": "ApplyCatalog applies a catalog document as the apply manager. Each product, price key and meter in it applies whole, unless a field it names was set differently by an edit: that object is skipped and listed in the receipt's Conflicts, the rest applies, and the document is not recorded as applied, so applying it again retries the skipped objects. params.Force overwrites those fields instead. A document that applied whole is remembered by its canonical content hash: applying it again returns the original receipt even after later catalog edits. It is an operator action, never a side effect of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
         "parameters": [
           {
             "name": "force",
@@ -1609,6 +1629,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListMeters",
+        "description": "ListMeters returns one page of the merchant's meters, by key.",
         "parameters": [
           {
             "name": "cursor",
@@ -1689,6 +1711,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "GetMeter",
+        "description": "GetMeter reads one meter with its rate card.",
         "parameters": [
           {
             "name": "key",
@@ -1751,6 +1775,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "SetMeter",
+        "description": "SetMeter declares the meter under key, creating it or changing its definition, and with params.RateCard sets or (null) removes the rate card that prices its usage. A meter with recorded usage keeps its definition (billing.ErrConflict, code meter_in_use).",
         "parameters": [
           {
             "name": "key",
@@ -1879,6 +1905,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "CreateProduct",
+        "description": "CreateProduct creates a product.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -1942,6 +1970,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListProducts",
+        "description": "ListProducts returns one page of products, newest first, each with its current prices. params.Keys reads products by key.",
         "parameters": [
           {
             "name": "archived",
@@ -2090,6 +2120,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "GetProduct",
+        "description": "GetProduct reads a product with its current prices.",
         "parameters": [
           {
             "name": "id",
@@ -2150,6 +2182,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "UpdateProduct",
+        "description": "UpdateProduct changes a product's fields; omitted ones keep their values.",
         "parameters": [
           {
             "name": "id",
@@ -2221,6 +2255,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "DeleteProduct",
+        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead.",
         "parameters": [
           {
             "name": "id",
@@ -2273,6 +2309,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "CreatePrice",
+        "description": "CreatePrice creates a price on the product named by exactly one of ProductID, ProductKey and ProductData. A price's terms never change; selling on other terms means another price.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -2339,6 +2377,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListPrices",
+        "description": "ListPrices returns one page of prices, newest first. params.ProductKey and params.Key read prices by key: a key's current price is its one not archived.",
         "parameters": [
           {
             "name": "archived",
@@ -2485,6 +2525,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "CreateProviderPrice",
+        "description": "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill; nothing is written to the provider.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -2554,6 +2596,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "GetPrice",
+        "description": "GetPrice reads a price; params.Verify also reads a provider price's terms at its provider and reports their drift.",
         "parameters": [
           {
             "name": "id",
@@ -2625,6 +2669,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "UpdatePrice",
+        "description": "UpdatePrice archives or restores a price, or changes its PSP links. Omitted fields keep their values; the key and financial terms are immutable.",
         "parameters": [
           {
             "name": "id",
@@ -2701,6 +2747,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListPriceHistory",
+        "description": "ListPriceHistory returns one page of the history of a price's key, most recent first: when the key moved to which price, or was retired.",
         "parameters": [
           {
             "name": "id",
@@ -2799,6 +2847,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListSubscriptions",
+        "description": "ListSubscriptions returns one page of the merchant's subscriptions matching params, newest first.",
         "parameters": [
           {
             "name": "canceled_after",
@@ -2992,6 +3042,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetSubscription",
+        "description": "GetSubscription reads one subscription.",
         "parameters": [
           {
             "name": "id",
@@ -3050,6 +3102,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetSubscriptionHistory",
+        "description": "GetSubscriptionHistory reads retained subscription evidence, newest first. It uses the merchant's subscription read permission, including when embedded.",
         "parameters": [
           {
             "name": "id",
@@ -3125,6 +3179,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "CancelSubscription",
+        "description": "CancelSubscription cancels at the end of the paid period or, with RevokeAccess, immediately, and returns the subscription. Both stop provider billing.",
         "parameters": [
           {
             "name": "id",
@@ -3198,6 +3254,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ResumeSubscription",
+        "description": "ResumeSubscription undoes a scheduled cancel before the paid period ends and returns the subscription.",
         "parameters": [
           {
             "name": "id",
@@ -3260,6 +3318,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ChangeSubscription",
+        "description": "ChangeSubscription moves a subscription to another price of its tier group, to other seats of a per-seat price, or both. As staff it charges nothing: the change applies at the next renewal. idempotencyKey is required: reuse it until the change resolves; the same key replays it.",
         "parameters": [
           {
             "name": "id",
@@ -3376,6 +3436,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListSubscriptionChangeOptions",
+        "description": "ListSubscriptionChangeOptions lists the prices staff can change a subscription to, each with what the customer would pay from the next renewal. A target the change would refuse is left out.",
         "parameters": [
           {
             "name": "id",
@@ -3459,6 +3521,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "PreviewSubscriptionChange",
+        "description": "PreviewSubscriptionChange reports what changing a subscription's price or seats would charge and when it would take effect, without changing anything. A staff change charges nothing and waits for the next renewal.",
         "parameters": [
           {
             "name": "id",
@@ -3550,6 +3614,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "SetSubscriptionPaymentMethod",
+        "description": "SetSubscriptionPaymentMethod gives a subscription its own card, another of the customer's saved cards, or with a nil PaymentMethodID makes it follow the customer's default card for its currency, and returns the subscription. Staff selection preserves the retry schedule and does not resume stopped dunning; it is not an immediate collection request.",
         "parameters": [
           {
             "name": "id",
@@ -3628,6 +3694,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "CreatePriceMigration",
+        "description": "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to another price at each one's renewal.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -3691,6 +3759,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListPriceMigrations",
+        "description": "ListPriceMigrations lists the merchant's price migrations, newest first.",
         "parameters": [
           {
             "name": "cursor",
@@ -3803,6 +3873,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "PreviewPriceMigration",
+        "description": "PreviewPriceMigration answers what CreatePriceMigration would do, writing nothing.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -3867,6 +3939,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "GetPriceMigration",
+        "description": "GetPriceMigration reads one price migration with its moves counted.",
         "parameters": [
           {
             "name": "id",
@@ -3925,6 +3999,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "CancelPriceMigration",
+        "description": "CancelPriceMigration cancels the migration's still-scheduled moves.",
         "parameters": [
           {
             "name": "id",
@@ -4682,6 +4758,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetAccessTenure",
+        "description": "GetAccessTenure returns the customer's elapsed access to the requested entitlement keys, including past product access and retired keys. params.At must not be in the future; zero uses OpenRails' clock.",
         "parameters": [
           {
             "name": "customer_id",
@@ -4821,6 +4899,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListEntitlements",
+        "description": "ListEntitlements returns one page of the keys customers hold at params.At (zero: now), by customer then key in byte order: of params.CustomerIDs (1 to billing.MaxBatchItems), only params.Entitlements and keys under params.Prefix. A key absent from the answer is not held. Without customers, params.Entitlements names one key and the page is its holders.",
         "parameters": [
           {
             "name": "at",
@@ -4947,6 +5027,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "CheckEntitlements",
+        "description": "CheckEntitlements is the programmatic content gate: which of params.Entitlements params.CustomerID holds, and the keys they hold under each of params.Prefixes, at params.At (zero: now); every requested key and prefix is in the answer. One call checks at most billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes prefixes; more is refused with invalid_param, not split. It needs an application holding billing.MerchantEntitlementsRead or RootEntitlementsRead (RouteGroups.Programmatic). A remote client answers a current exact-key check from its entitlement cache when every key is allowed there (EntitlementCheckCacheOptions), unless the handle is Uncached; a denial always asks OpenRails.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5007,6 +5089,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListProductAccess",
+        "description": "ListProductAccess returns one page of product-access windows, newest first: bought, subscribed and granted, of params.CustomerIDs and params.ProductIDs (each 1 to billing.MaxBatchItems; none: any). params.LiveOnly keeps those live now. params.IDs instead reads named windows.",
         "parameters": [
           {
             "name": "cursor",
@@ -5137,6 +5221,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "CreateProductAccess",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. A retry with idempotencyKey replays the first answer; with none, OpenRails names the batch itself.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5208,6 +5294,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "RevokeProductAccess",
+        "description": "RevokeProductAccess takes back a product a customer holds, with params.Reason; a window not yet started is removed. Revoking again changes nothing.",
         "parameters": [
           {
             "name": "id",
@@ -5356,6 +5444,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListCustomers",
+        "description": "ListCustomers lists the merchant's customers, newest first.",
         "parameters": [
           {
             "name": "cursor",
@@ -5460,6 +5550,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetCustomer",
+        "description": "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card that pays its invoices.",
         "parameters": [
           {
             "name": "customer_id",
@@ -5518,6 +5610,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "UpdateCustomer",
+        "description": "UpdateCustomer changes one customer's settings, only the fields params names, and returns its ID and saved settings; a customer not billed yet is created.",
         "parameters": [
           {
             "name": "customer_id",
@@ -5592,6 +5686,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "CreateCreditGrants",
+        "description": "CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any customers, all or none; the answer is in request order. Each item's SourceID makes it idempotent per customer: an identical retry answers the existing grant with Replayed set, one with a different amount, currency or expiry refuses the batch with billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5663,6 +5759,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListCreditGrants",
+        "description": "ListCreditGrants lists params.CustomerID's credit grants, newest first, or the grants params.IDs names.",
         "parameters": [
           {
             "name": "currency",
@@ -5782,6 +5880,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetCreditGrant",
+        "description": "GetCreditGrant reads one credit grant.",
         "parameters": [
           {
             "name": "id",
@@ -5840,6 +5940,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "RevokeCreditGrant",
+        "description": "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with Replayed set.",
         "parameters": [
           {
             "name": "id",
@@ -5910,6 +6012,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListBalanceTransactions",
+        "description": "ListBalanceTransactions lists a customer's balance transactions in one currency, newest first, or the transactions params.IDs names.",
         "parameters": [
           {
             "name": "customer_id",
@@ -6024,6 +6128,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetBalance",
+        "description": "GetBalance reads a customer's balance, holds and owed amount in params.Currency.",
         "parameters": [
           {
             "name": "customer_id",
@@ -6255,6 +6361,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "GetAdmission",
+        "description": "GetAdmission reads an admitted request and its current hold state without replaying admission. Denied or no-longer-retained requests are not found.",
         "parameters": [
           {
             "name": "request_id",
@@ -6314,6 +6422,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ListAdmissions",
+        "description": "ListAdmissions reads a page of retained admitted requests, newest first.",
         "parameters": [
           {
             "name": "currency",
@@ -6439,6 +6549,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "Admit",
+        "description": "Admit decides admissions, one verdict per request in order. A refused request is a verdict, not an error.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -6498,6 +6610,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "CaptureAdmissions",
+        "description": "CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted requests, one result per item in order: each is captured or refused on its own. A capture that names its usage is priced by the admission's pinned rate cards; above the hold the rest is owed. An exact retry answers the first receipt; changed terms are billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -6557,6 +6671,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ReleaseAdmissions",
+        "description": "ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems admissions whose work failed, one result per request id in order: each is released or refused on its own. Releasing a released admission answers it.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -6616,6 +6732,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ExtendAdmissions",
+        "description": "ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds' deadlines later, one result per item in order. An item refused with hold_not_found was captured, released or lapsed. New work needs a new request ID; replaying the old request never reopens its hold.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -6762,6 +6880,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "StartRunningCharge",
+        "description": "StartRunningCharge starts charging a customer at a rate per hour, or answers the charge params.Reference already names. A changed term is billing.ErrIdempotencyKeyReused; a MinimumAmount the customer's capacity does not cover is billing.ErrInsufficientCredits, with nothing written.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -6832,6 +6952,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ListRunningCharges",
+        "description": "ListRunningCharges is one page of the merchant's running charges, newest first: of params.CustomerID and in params.State when set. With params.Depleted it lists only the running charges of customers whose capacity has run out, whether or not the watcher has looked yet: confirm with GetBalance, then stop what they pay for.",
         "parameters": [
           {
             "name": "cursor",
@@ -6940,6 +7062,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "StopRunningCharge",
+        "description": "StopRunningCharge stops the charge reference names and posts the rest of it to the ledger: ChargedAmount is final. Stopping it again at the same instant answers it; at another it is billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "reference",
@@ -7009,6 +7133,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "GetRunningCharge",
+        "description": "GetRunningCharge reads the charge reference names, with what it has charged as of now.",
         "parameters": [
           {
             "name": "reference",
@@ -7066,6 +7192,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "ListLimits",
+        "description": "ListLimits returns one page of the merchant's limits, by key.",
         "parameters": [
           {
             "name": "cursor",
@@ -7148,6 +7276,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "GetLimit",
+        "description": "GetLimit reads one limit with the products that give it capacity.",
         "parameters": [
           {
             "name": "key",
@@ -7203,6 +7333,8 @@
         "tags": [
           "catalog"
         ],
+        "operationId": "SetLimit",
+        "description": "SetLimit declares the limit under key whole, creating it or changing it. A limit with windows keeps its unit (billing.ErrConflict).",
         "parameters": [
           {
             "name": "key",
@@ -7275,6 +7407,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ListCustomerLimits",
+        "description": "ListCustomerLimits is where params.CustomerID stands on every limit in its current window, in one page.",
         "parameters": [
           {
             "name": "customer_id",
@@ -7401,6 +7535,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "SyncLeases",
+        "description": "SyncLeases syncs one gate's lease: it settles the lease's usage in order, answers each want with a hold or a refusal, and takes back the holds returned. The first sync under a new params.LeaseID creates the lease.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -7467,6 +7603,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "AdjustCustomerLimit",
+        "description": "AdjustCustomerLimit adds params.Amount to the capacity of the customer's current window of params.Limit only, and answers where it stands after. A retry with the same params.SourceID answers the line without adding again; other terms under it are billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "customer_id",
@@ -7539,6 +7677,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "RecordExternalPayment",
+        "description": "RecordExternalPayment records money the merchant received outside OpenRails for one order: part or all of what a usage order owes, or another order's total. Recording the same TransactionID again with the same terms answers the first payment; with other terms it is billing.ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -7615,6 +7755,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListPayments",
+        "description": "ListPayments is one page of the merchant's payments, newest first.",
         "parameters": [
           {
             "name": "cursor",
@@ -7773,6 +7915,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetPayment",
+        "description": "GetPayment reads one payment with its refunds.",
         "parameters": [
           {
             "name": "id",
@@ -7831,6 +7975,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "RefundPayment",
+        "description": "RefundPayment refunds a charge through its rail. The returned refund has Status \"succeeded\" once the provider confirmed it, or \"pending\" while the durable refund operation is parked (provider write gates) or reconciling an uncertain provider outcome; it settles without another call. A provider refusal is a StatusError and leaves no refund recorded. idempotencyKey is required: a retry with it returns the same refund and never refunds twice; the same key with other terms is ErrIdempotencyKeyReused.",
         "parameters": [
           {
             "name": "id",
@@ -7926,6 +8072,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListPaymentAttempts",
+        "description": "ListPaymentAttempts is one page of the merchant's payment attempts, newest first.",
         "parameters": [
           {
             "name": "avs_result",
@@ -8210,6 +8358,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetPaymentAttempt",
+        "description": "GetPaymentAttempt reads one payment attempt.",
         "parameters": [
           {
             "name": "id",
@@ -8268,6 +8418,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListRenewals",
+        "description": "ListRenewals is one page of the merchant's renewals, latest due first.",
         "parameters": [
           {
             "name": "cursor",
@@ -8446,6 +8598,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "GetRenewal",
+        "description": "GetRenewal reads one renewal with its attempts.",
         "parameters": [
           {
             "name": "id",
@@ -8628,6 +8782,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "ListPaymentMethods",
+        "description": "ListPaymentMethods is one page of a customer's saved cards, newest first.",
         "parameters": [
           {
             "name": "customer_id",
@@ -8733,6 +8889,8 @@
         "tags": [
           "admin"
         ],
+        "operationId": "DeletePaymentMethod",
+        "description": "DeletePaymentMethod removes an owned unused card only after its holder confirms deletion. Existing subscriptions and accepted payments block removal; retries recover the same operation and financial records remain available.",
         "parameters": [
           {
             "name": "customer_id",
@@ -9311,6 +9469,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "PutCustodian",
+        "description": "PutCustodian configures one merchant vault at its explicit revision.",
         "parameters": [
           {
             "name": "key",
@@ -9382,6 +9542,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListCustodians",
+        "description": "ListCustodians reads the merchant's declared vault accounts without secrets.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -9449,6 +9611,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListPSPs",
+        "description": "ListPSPs lists the merchant's PSPs, newest first. Credential values are never returned.",
         "parameters": [
           {
             "name": "archived",
@@ -9566,6 +9730,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "CreatePSP",
+        "description": "CreatePSP arms a PSP. Credentials are write-only and are checked with the provider before anything is stored. It needs merchant configuration held in Vault.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -9635,6 +9801,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "GetPSP",
+        "description": "GetPSP reads one PSP.",
         "parameters": [
           {
             "name": "id",
@@ -9692,6 +9860,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "UpdatePSP",
+        "description": "UpdatePSP changes a PSP's settings, rotates its credentials (checked with the provider first) or archives it. It needs merchant configuration held in Vault.",
         "parameters": [
           {
             "name": "id",
@@ -9765,6 +9935,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "PreviewPSPRouting",
+        "description": "PreviewPSPRouting reports which PSP a purchase for a price would use, and why each other PSP was passed over. Nothing is created.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -9893,6 +10065,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "GetMerchantConfiguration",
+        "description": "GetMerchantConfiguration reads the merchant's configuration, never its credentials, and its revision.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -9938,6 +10112,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "UpdateMerchantConfiguration",
+        "description": "UpdateMerchantConfiguration merges params into the merchant's configuration and returns it. It needs merchant configuration held in Vault: a configuration read from a file is read-only.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10007,6 +10183,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListAlertWebhooks",
+        "description": "ListAlertWebhooks returns where the merchant's operational alerts are posted.",
         "parameters": [
           {
             "name": "ids",
@@ -10087,6 +10265,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "CreateAlertWebhook",
+        "description": "CreateAlertWebhook adds a destination for the merchant's operational alerts.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10148,6 +10328,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "DeleteAlertWebhook",
+        "description": "DeleteAlertWebhook removes an alert webhook.",
         "parameters": [
           {
             "name": "id",
@@ -10199,6 +10381,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "UpdateAlertWebhook",
+        "description": "UpdateAlertWebhook changes an alert webhook; omitted fields keep their values.",
         "parameters": [
           {
             "name": "id",
@@ -10270,6 +10454,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ExportBillingArchive",
+        "description": "ExportBillingArchive writes the bound merchant's versioned billing archive. Stop source writers for the final cutover export. Authentication identities, provider credentials and live jobs are not portable billing records.\n\nThe writer may contain incomplete bytes when an error is returned; publish a file only after success. The Client verifies the archive's integrity footer, and uses the same credential, merchant binding and timeout as other methods.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10319,6 +10505,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ImportBillingArchive",
+        "description": "ImportBillingArchive atomically restores an archive into an empty destination with the same merchant UUID. Provision destination authority separately and keep destination workers stopped through restoration and reconfiguration. No provider call is made. A lost response can be retried with the same archive.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10385,6 +10573,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ImportBilling",
+        "description": "ImportBilling lands declared billing facts under the bound merchant.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10447,6 +10637,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "CreatePSPImport",
+        "description": "CreatePSPImport pulls a PSP: OpenRails observes its catalog, pulls its customers, saved cards, live subscriptions and transaction history (reads only), links what it does not hold to customers by the import's rules, and proposes every difference in what it holds (ListProposals with Pull). One import per PSP pulls or applies at a time. The pull runs in the background; GetPSPImport reports it. ListProviderCatalog with Import then lists the plans to map.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -10507,6 +10699,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListPSPImports",
+        "description": "ListPSPImports lists the merchant's PSP imports, newest first: one PSP's when set.",
         "parameters": [
           {
             "name": "cursor",
@@ -10614,6 +10808,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "GetPSPImport",
+        "description": "GetPSPImport reads one PSP import with its records counted.",
         "parameters": [
           {
             "name": "id",
@@ -10671,6 +10867,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "UpdatePSPImport",
+        "description": "UpdatePSPImport replaces the import's rules; LinkPSPImport applies them.",
         "parameters": [
           {
             "name": "id",
@@ -10738,6 +10936,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "DeletePSPImport",
+        "description": "DeletePSPImport deletes an import and its staged records; what it landed stays.",
         "parameters": [
           {
             "name": "id",
@@ -10791,6 +10991,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListPSPImportRecords",
+        "description": "ListPSPImportRecords lists an import's staged provider objects, by state or kind: the unmatched ones are what no rule linked.",
         "parameters": [
           {
             "name": "id",
@@ -10926,6 +11128,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "LinkPSPImport",
+        "description": "LinkPSPImport stores manual links and price picks, then relinks the import in the background: every staged record not yet imported is linked again by the import's rules and the merchant's mappings, and the ones OpenRails holds are marked held. The import is pulling until it has; GetPSPImport reports it.",
         "parameters": [
           {
             "name": "id",
@@ -10997,6 +11201,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ApplyPSPImport",
+        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
         "parameters": [
           {
             "name": "id",
@@ -11060,6 +11266,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "SetPSPImportMappings",
+        "description": "SetPSPImportMappings maps the merchant's own identifiers (a legacy user or order id) to customers, for import rules to read.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11120,6 +11328,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListProviderCatalog",
+        "description": "ListProviderCatalog lists one PSP's own catalog (Stripe products and prices, NMI plans) as OpenRails last observed it, each price with the provider price mapping it. With Import it lists the plans that import's subscriptions name: map each by creating a provider price.",
         "parameters": [
           {
             "name": "cursor",
@@ -11246,6 +11456,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListParkedSubscriptions",
+        "description": "ListParkedSubscriptions lists the live provider subscriptions OpenRails could not land, newest first: open parks, or closed ones with Released. Mapping a park's price or linking its customer lands it.",
         "parameters": [
           {
             "name": "cursor",
@@ -11358,6 +11570,8 @@
         "tags": [
           "app"
         ],
+        "operationId": "ListEvents",
+        "description": "ListEvents reads retained facts of the handle's merchant. Reading starts no worker and changes no delivery state. Persist NextCursor after processing.",
         "parameters": [
           {
             "name": "after",
@@ -11438,6 +11652,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListDestructiveHolds",
+        "description": "ListDestructiveHolds lists incident episodes that originated at this merchant.",
         "parameters": [
           {
             "name": "cursor",
@@ -11535,6 +11751,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ClearDestructiveHold",
+        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant configuration authority: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
         "parameters": [
           {
             "name": "id",
@@ -11606,6 +11824,8 @@
         "tags": [
           "access"
         ],
+        "operationId": "GetAdminAccess",
+        "description": "GetAdminAccess reports what the caller may use of each staff route group at the merchant and its effective programmatic permissions. An engine's handle is the merchant's owner and holds every group.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11649,6 +11869,8 @@
         "tags": [
           "metrics"
         ],
+        "operationId": "QueryMetrics",
+        "description": "QueryMetrics runs one metrics query.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11709,6 +11931,8 @@
         "tags": [
           "metrics"
         ],
+        "operationId": "GetMetricsSchema",
+        "description": "GetMetricsSchema lists every measure, dimension and grain a query may use.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11756,6 +11980,8 @@
         "tags": [
           "metrics"
         ],
+        "operationId": "GetDashboard",
+        "description": "GetDashboard returns the merchant's widget layout.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11805,6 +12031,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "SetDashboard",
+        "description": "SetDashboard replaces the merchant's widget layout.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11865,6 +12093,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListFindings",
+        "description": "ListFindings pages the findings queue: open findings unless params.Status names another, most severe first, then oldest. params.Type is one finding type or a prefix ending in \".*\" (\"pull.*\" lists the pull's proposals).",
         "parameters": [
           {
             "name": "cursor",
@@ -11983,6 +12213,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "GetFinding",
+        "description": "GetFinding returns one finding with its evidence and recommendation.",
         "parameters": [
           {
             "name": "id",
@@ -12042,6 +12274,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListProposals",
+        "description": "ListProposals lists the merchant's proposals: open pull.* findings unless Status is set, most severe first. Pull names the PSP import whose pull raised them.",
         "parameters": [
           {
             "name": "cursor",
@@ -12193,6 +12427,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ApproveProposals",
+        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. idempotencyKey is required: a retry with it answers the first call's results.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -12265,6 +12501,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "DismissProposals",
+        "description": "DismissProposals closes 1 to 100 proposals without applying them; notes are required. Only a person signed in, or the in-process host, dismisses.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -12327,6 +12565,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ResolveFinding",
+        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
         "parameters": [
           {
             "name": "id",
@@ -12408,6 +12648,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "ListProvisioningTokens",
+        "description": "ListProvisioningTokens lists the merchant's provisioning tokens, oldest first; their secrets are never read back.",
         "parameters": [
           {
             "name": "ids",
@@ -12487,6 +12729,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "CreateProvisioningToken",
+        "description": "CreateProvisioningToken mints a token the merchant's directory presents at /scim/v2 as its bearer. The answer holds the token, which is never shown again.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -12547,6 +12791,8 @@
         "tags": [
           "merchant_config"
         ],
+        "operationId": "DeleteProvisioningToken",
+        "description": "DeleteProvisioningToken revokes a provisioning token: the next request presenting it is refused.",
         "parameters": [
           {
             "name": "id",
