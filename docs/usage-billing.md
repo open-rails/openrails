@@ -12,18 +12,27 @@ the hour).
 ## Recording usage
 
 `POST /v1/app/leases/sync` (`SyncLeases`, `merchant:usage:manage`) is the only
-usage intake. The [gate](#the-gate) sends it for you, with the `wants`, `returns`
-and `committed` that ask for, give back and account for its holds; a batch job
-calls it directly with `usage` alone.
+usage intake. The [gate](#the-gate) sends it for you, with the `wants`, `returns`,
+`committed` and `applied` that ask for, give back and account for its holds; a
+batch job calls it directly with `usage` alone.
 
-- **Lease.** The client picks the `lease_id` (`lse_` and a UUID): a gate when it
-  starts, a batch job once for its whole stream. The first sync under a new id
-  creates the lease, so a lost first reply repeats harmlessly. A UUIDv7 id more
-  than 60 days old that names no lease is `404 lease_not_found`: start a new one.
-  A sync with `close: true` settles its usage, returns every hold of the lease
-  and ends it; a lease that stops syncing ends 10 seconds after its last sync.
-  An ended lease answers wants `409 lease_not_held`, and usage against it still
-  settles, in full.
+- **Lease.** The client picks the `lease_id` (`lse_` and a UUIDv7; any other
+  version is `400 invalid_param`): a gate when it starts, a batch job once for its
+  whole stream. The first sync under a new id creates the lease, so a lost first
+  reply repeats harmlessly. An id more than 60 days old that names no lease is
+  `404 lease_not_found`, so a forgotten lease's usage never posts twice: start a
+  new one. A sync renews its lease only within 10 seconds of its last one;
+  `lease.live: false` says it had already ended and the sync renewed nothing.
+  Its holds still count for 5 seconds more, longer than any sync runs. A sync
+  with `close: true` settles its usage, returns every hold of the lease and ends
+  it, a dead lease's too. An ended lease answers wants `409 lease_not_held`, and
+  usage against it still settles, in full.
+- **Holds.** A want states `usage` or a host-stated `estimated_amount`, not both.
+  Each hold an answer carries has a `version`, which rises whenever its size
+  changes; the next sync reports in `applied` the latest version applied of each
+  hold answered since. A smaller size stays set aside until then, and never
+  below what `committed` says open tickets took; an answer not reported applied
+  comes again. Every hold has a `balance` part.
 - **Items.** `usage` holds up to 1,000 items
   `{n, customer_id, limit_set, invoker, invoker_type, currency, source, source_id,
   outcome, event_type, dimensions, metadata, amount, occurred_at}`, numbered once
@@ -36,7 +45,7 @@ calls it directly with `usage` alone.
   `409 usage_out_of_order`. Any credential of the merchant may report on its
   leases, live or not, so a restarted process resends from an outbox. An item
   refused alone (`usage.refused`: `{n, status, error}`) posts nothing; the others
-  settle.
+  settle, and a resend answers its code again.
 
 Usage is never refused for money: the work happened, and admission is the gate
 before it. A priced meter that cannot price an item refuses it
@@ -57,7 +66,10 @@ customer's accrual for that currency, UTC day and pricing period
 (`usage_accruals`). An accrual posts once its day ends, in the hourly billing
 pass, or earlier, before any other movement of that balance (a top-up or staff
 grant, a credit lot's expiry, revocation or refund, a usage order): one `spend`
-per credit lot it draws and one `owed_accrual` for the rest. Until it posts,
+per credit lot it draws and one `owed_accrual` for the rest, owed as of its day
+(the day's end, or the posting if earlier), so the usage order of that period
+bills it. A sync expires the customer's lapsed credit lots before its usage
+accrues: usage never draws a lot that lapsed before it. Until it posts,
 `balance` holds it, so admissions refuse exactly as if it had posted.
 
 **Reading usage.** No usage event is stored. What settles is kept as aggregates
@@ -156,9 +168,9 @@ named-unit limit, and its capture counts there.
   server clock) keeps its settled units; held is the sum of its live holds. A hold
   is issued or grown only while settled + held + the increase fits the capacity.
   Settled alone may pass it: late usage and overruns settle in full, never
-  clamped, and nothing more is held until a refill or reset. A request counting
-  toward a limit none of the customer's products gives has capacity 0 and is
-  refused.
+  clamped, and nothing more is held until a refill or reset. A customer is
+  subject to a limit only when a live product or an override gives it capacity
+  there (an override of 0 included); one with neither is not limited by it.
 - **Overrun.** `require_estimate` admits a request only when its whole estimate
   fits. `admit_while_positive` admits while any capacity remains and holds what is
   left, so the crossing request finishes and the limit stays below zero.
@@ -178,7 +190,8 @@ named-unit limit, and its capture counts there.
 - **Reads.** `ListCustomerLimits` (`GET /v1/app/limits?customer_id=`,
   `merchant:usage:read`) and `GET /v1/me/limits` answer
   `{customer_id, limit, unit, capacity, used, held, remaining, window_starts_at,
-  resets_at}` for every declared limit by key, then a `balance` line per currency
+  resets_at}` for every limit the customer is subject to, by key, then a
+  `balance` line per currency
   (capacity the balance plus credit line, used what is owed, held the held total;
   no window).
 - **Staff.** `limits` on `UpdateCustomer` replaces a customer's capacity
@@ -224,7 +237,8 @@ and the current `state` (`open`, `expired`, `released`, `captured`). `allowed` o
 replay is not permission to start new work. A hold that sets anything aside needs
 `expires_at`. Past it, the hold reserves no money and nothing in a lifetime or
 rate limit, but still counts in windows that end until it is captured or
-released, and a late capture counts in its original windows. Expiry needs no
+released, or 30 days after admission, and a late capture counts in its original
+windows. Expiry needs no
 worker. A hold is kept 61 days (`limit_holds`, monthly partitions); after that
 it reads as never admitted and a late capture is `admission_not_found`.
 
