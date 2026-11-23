@@ -1,1 +1,2 @@
-.dev/
+# the customer-token signing key
+*.pem

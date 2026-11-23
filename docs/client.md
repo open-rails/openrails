@@ -129,22 +129,27 @@ application (standalone: the manifest's `remote_application`; SaaS:
 (about 15 minutes); `CustomerAssertion` only signs one, for the browser to redeem
 with its own DPoP key. An API key alone cannot mint customer tokens.
 
-```go guide:customer-token
-remote, err := openrails.NewRemote(apiURL, openrails.RemoteOptions{
-	Credentials: map[billing.MerchantID]openrails.RemoteCredential{merchant: {
-		APIKey:    apiKey,
-		Assertion: &openrails.AssertionKey{Issuer: issuer, KeyID: keyID, Signer: key, TokenURL: apiURL + "/oauth2/token"},
-	}},
+The [hosted example](../examples/hosted) files its key as
+`AssertionKey{Issuer, KeyID, Signer, TokenURL}` beside the API key and mints a
+token for the signed-in user on request:
+
+```go guide:hosted-token
+r.POST("/api/billing/token", authkitgin.Required(ak), func(c *gin.Context) {
+	claims, _ := verify.ClaimsFromContext(c.Request.Context())
+	customer, err := billing.ParseCustomerID(claims.UserID) // each user is their own customer
+	if err != nil {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	token, err := bill.CustomerToken(c, billing.CustomerTokenParams{
+		CustomerID: customer, Email: claims.Email, EmailVerified: claims.EmailVerified,
+	})
+	if err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "expires_in": int(time.Until(token.ExpiresAt).Seconds())})
 })
-if err != nil {
-	return nil, err
-}
-shop, err := remote.Merchant(merchant)
-if err != nil {
-	return nil, err
-}
-// An RFC 7523 assertion redeemed for an openrails:self token, about 15 minutes.
-return shop.CustomerToken(ctx, billing.CustomerTokenParams{CustomerID: user, Email: email, EmailVerified: true})
 ```
 
 In the browser, billing-ui's `tokenSource` keeps the token in memory, fetches the

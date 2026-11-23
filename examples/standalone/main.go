@@ -47,11 +47,10 @@ import (
 // settings are the app's deployment: where it and the OpenRails server are,
 // the secret its backend authenticates with, and its mail server.
 type settings struct {
-	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
-	OpenRailsURL string        // the server, and its resource identifier (auth.resource.id)
-	ClientSecret string        // the backend client's secret
-	SCIMInterval time.Duration // how often AuthKit pushes user changes to the server
-	SMTP         smtp.Server   // AuthKit's mail: the codes that prove each user's email
+	PublicURL    string      // this app: AuthKit's issuer and the browser's origin
+	OpenRailsURL string      // the server, and its resource identifier (auth.resource.id)
+	ClientSecret string      // the backend client's secret
+	SMTP         smtp.Server // AuthKit's mail: the codes that prove each user's email
 }
 
 // The OAuth clients this app registers in its AuthKit for OpenRails.
@@ -123,7 +122,6 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		// the server's AuthKit with the backend client's tokens, so receipts
 		// and the admin customer read have each email.
 		Provisioning: authkit.ProvisioningConfig{
-			Interval: s.SCIMInterval,
 			Targets: []authkit.ProvisioningTarget{{
 				Name:              "openrails",
 				URL:               s.OpenRailsURL + "/directory/scim/v2",
@@ -208,7 +206,6 @@ func run(ctx context.Context) error {
 		PublicURL:    cmp.Or(os.Getenv("PUBLIC_URL"), "http://localhost:8080"),
 		OpenRailsURL: cmp.Or(os.Getenv("OPENRAILS_URL"), "http://localhost:3053"),
 		ClientSecret: os.Getenv("OPENRAILS_CLIENT_SECRET"),
-		SCIMInterval: 30 * time.Second,
 		SMTP: smtp.Server{
 			Host: cmp.Or(os.Getenv("EMAIL_SMTP_HOST"), "localhost"),
 			Port: cmp.Or(atoi(os.Getenv("EMAIL_SMTP_PORT")), 1025),
