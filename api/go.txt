@@ -547,9 +547,6 @@ pkg openrails, type NotificationRecipient struct
 pkg openrails, type NotificationRecipient struct, CustomerID billing.CustomerID
 pkg openrails, type NotificationRecipient struct, Issuer string
 pkg openrails, type NotificationRecipient struct, MerchantID billing.MerchantID
-pkg openrails, type OutboxItem struct
-pkg openrails, type OutboxItem struct, LeaseID billing.LeaseID `json:"lease_id"`
-pkg openrails, type OutboxItem struct, Usage billing.LeaseUsage `json:"usage"`
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -660,8 +657,8 @@ pkg openrails, type SubjectKind = billingauth.SubjectKind
 pkg openrails, type Ticket struct
 pkg openrails, type UsageOutbox interface
 pkg openrails, type UsageOutbox interface, Ack(context.Context, []billing.LeaseUsageRef) error
-pkg openrails, type UsageOutbox interface, Pending(context.Context) ([]OutboxItem, error)
-pkg openrails, type UsageOutbox interface, Put(context.Context, []OutboxItem) error
+pkg openrails, type UsageOutbox interface, Pending(context.Context) ([]billing.OutboxItem, error)
+pkg openrails, type UsageOutbox interface, Put(context.Context, []billing.OutboxItem) error
 pkg openrails, type UserActionRateLimitConfig = config.UserActionRateLimitConfig
 pkg openrails, type UserActionRateLimitConfig struct
 pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
@@ -969,6 +966,7 @@ pkg openrails/billing, const MaxMerchantConfigurationBytes untyped int = 1048576
 pkg openrails/billing, const MaxOrderLines untyped int = 100
 pkg openrails/billing, const MaxPageLimit untyped int = 500
 pkg openrails/billing, const MaxRunningChargeRatePerHour untyped int = 1000000000000
+pkg openrails/billing, const MaxSyncApplied untyped int = 10000
 pkg openrails/billing, const MaxSyncCommitted untyped int = 10000
 pkg openrails/billing, const MaxSyncReturns untyped int = 1000
 pkg openrails/billing, const MaxSyncUsageItems untyped int = 1000
@@ -2391,6 +2389,11 @@ pkg openrails/billing, type Hold struct, Limits []HoldLimit `json:"limits"`
 pkg openrails/billing, type Hold struct, PriceBounds []PriceBound `json:"price_bounds"`
 pkg openrails/billing, type Hold struct, RateCards []HoldRateCard `json:"rate_cards"`
 pkg openrails/billing, type Hold struct, Safe *int64 `json:"safe,string"`
+pkg openrails/billing, type Hold struct, Version int64 `json:"version"`
+pkg openrails/billing, type HoldApplied struct
+pkg openrails/billing, type HoldApplied struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type HoldApplied struct, LimitSet string `json:"limit_set"`
+pkg openrails/billing, type HoldApplied struct, Version int64 `json:"version"`
 pkg openrails/billing, type HoldCommitment struct
 pkg openrails/billing, type HoldCommitment struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type HoldCommitment struct, LimitSet string `json:"limit_set"`
@@ -2444,6 +2447,7 @@ pkg openrails/billing, type InvokerType string
 pkg openrails/billing, type Lease struct
 pkg openrails/billing, type Lease struct, ExpiresAt time.Time `json:"expires_at"`
 pkg openrails/billing, type Lease struct, ID LeaseID `json:"id"`
+pkg openrails/billing, type Lease struct, Live bool `json:"live"`
 pkg openrails/billing, type LeaseID [16]byte
 pkg openrails/billing, type LeaseUsage struct
 pkg openrails/billing, type LeaseUsage struct, Amount *int64 `json:"amount,string"`
@@ -2473,6 +2477,7 @@ pkg openrails/billing, type LeaseUsageResult struct, ThroughN int64 `json:"throu
 pkg openrails/billing, type LeaseWant struct
 pkg openrails/billing, type LeaseWant struct, Currency string `json:"currency"`
 pkg openrails/billing, type LeaseWant struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type LeaseWant struct, EstimatedAmount *int64 `json:"estimated_amount,string"`
 pkg openrails/billing, type LeaseWant struct, Invoker string `json:"invoker"`
 pkg openrails/billing, type LeaseWant struct, InvokerType InvokerType `json:"invoker_type"`
 pkg openrails/billing, type LeaseWant struct, Resource *string `json:"resource"`
@@ -2981,6 +2986,9 @@ pkg openrails/billing, type OrderUsage struct, PONumber *string `json:"po_number
 pkg openrails/billing, type OrderUsage struct, PeriodEndsAt time.Time `json:"period_ends_at"`
 pkg openrails/billing, type OrderUsage struct, PeriodStartsAt time.Time `json:"period_starts_at"`
 pkg openrails/billing, type OrderUsage struct, Tax map[string]any `json:"tax"`
+pkg openrails/billing, type OutboxItem struct
+pkg openrails/billing, type OutboxItem struct, LeaseID LeaseID `json:"lease_id"`
+pkg openrails/billing, type OutboxItem struct, Usage LeaseUsage `json:"usage"`
 pkg openrails/billing, type PSP struct
 pkg openrails/billing, type PSP struct, Archived bool `json:"archived"`
 pkg openrails/billing, type PSP struct, CreatedAt time.Time `json:"created_at"`
@@ -3909,6 +3917,7 @@ pkg openrails/billing, type SubscriptionRetryNowResult struct, Subscription Subs
 pkg openrails/billing, type SubscriptionSort string
 pkg openrails/billing, type SubscriptionStatus string
 pkg openrails/billing, type SyncLeasesParams struct
+pkg openrails/billing, type SyncLeasesParams struct, Applied []HoldApplied `json:"applied"`
 pkg openrails/billing, type SyncLeasesParams struct, Close bool `json:"close,omitempty"`
 pkg openrails/billing, type SyncLeasesParams struct, Committed []HoldCommitment `json:"committed"`
 pkg openrails/billing, type SyncLeasesParams struct, LeaseID LeaseID `json:"lease_id"`
