@@ -163,8 +163,8 @@ func TestBalanceLooks(t *testing.T) {
 		captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("above-the-line", 400)})
 		require.NoError(t, err)
 		require.NoError(t, captured[0].Err())
-		require.Equal(t, 1, looks(t, fleet, customer), "its capture, a ledger debit to 600, crosses nothing")
-		balance(t, w.alpha, customer, 600, 0, 600)
+		require.Equal(t, 1, looks(t, fleet, customer), "its capture, an accrual leaving 600, crosses nothing")
+		balance(t, w.alpha, customer, 600, 400, 1000)
 		require.Zero(t, lowEvents(t, w, customer))
 	})
 	t.Run("OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass", func(t *testing.T) {

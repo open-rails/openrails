@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 356,
+  "scenario_count": 366,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -571,17 +571,17 @@
     {
       "id": "OR-J24-S01",
       "journey": "J24",
-      "name": "Duplicate usage event has one immutable quantity and attribution"
+      "name": "A resent usage item answers its receipt and a changed one conflicts"
     },
     {
       "id": "OR-J24-S02",
       "journey": "J24",
-      "name": "Late event and changed meter retain documented accepted pricing"
+      "name": "Late usage and a changed meter keep the accepted pricing"
     },
     {
       "id": "OR-J24-S03",
       "journey": "J24",
-      "name": "Batch boundary errors do not leak another customer item"
+      "name": "A refused item leaves its neighbours and another merchant's lease"
     },
     {
       "id": "OR-J24-S04",
@@ -591,7 +591,57 @@
     {
       "id": "OR-J24-S05",
       "journey": "J24",
-      "name": "Charged failed usage replayed past its key window is charged once"
+      "name": "Charged failed usage resent past its key window is charged once"
+    },
+    {
+      "id": "OR-J24-S06",
+      "journey": "J24",
+      "name": "A lost reply's resend settles once and a gap is refused"
+    },
+    {
+      "id": "OR-J24-S07",
+      "journey": "J24",
+      "name": "A dead lease's outbox resend settles each item once and renews nothing"
+    },
+    {
+      "id": "OR-J24-S08",
+      "journey": "J24",
+      "name": "A batch job's lost first reply posts its usage once"
+    },
+    {
+      "id": "OR-J24-S09",
+      "journey": "J24",
+      "name": "A thousand items are priced exactly on their total"
+    },
+    {
+      "id": "OR-J24-S10",
+      "journey": "J24",
+      "name": "Pricing periods and rate-card revisions are priced in separate groups"
+    },
+    {
+      "id": "OR-J24-S11",
+      "journey": "J24",
+      "name": "A day's usage posts once and once more before a top-up, held until then"
+    },
+    {
+      "id": "OR-J24-S12",
+      "journey": "J24",
+      "name": "Two leases drain one customer without holding past its balance"
+    },
+    {
+      "id": "OR-J24-S13",
+      "journey": "J24",
+      "name": "Capacity another lease holds is capacity_held, and its next syncs give it back"
+    },
+    {
+      "id": "OR-J24-S14",
+      "journey": "J24",
+      "name": "An occasional customer is decided locally and its idle holds come back near its limit"
+    },
+    {
+      "id": "OR-J24-S15",
+      "journey": "J24",
+      "name": "A hold grows with its traffic within a few syncs"
     },
     {
       "id": "OR-J25-S01",

@@ -136,7 +136,11 @@ func mixedPendingRefund(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, captured, 1)
 	require.NoError(t, captured[0].Err())
-	balance(t, a.alpha, m.customer, 0, 25_000_000, 25_000_000)
+	// The capture accrues; a top-up posts it first, while the refund is
+	// still pending.
+	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
+	require.NoError(t, err)
+	balance(t, a.alpha, m.customer, 1_000_000, 25_000_000, 26_000_000)
 
 	p.mu.Lock()
 	p.lostRefundResponse = false
@@ -156,7 +160,7 @@ func mixedPendingRefund(t *testing.T) {
 		return err == nil && read.AmountRefunded == 10_000_000
 	}, 20*time.Second, 20*time.Millisecond)
 	// The spend drew the goodwill credit; the refund withdrew the whole lot.
-	balance(t, a.alpha, m.customer, 0, 0, 0)
+	balance(t, a.alpha, m.customer, 1_000_000, 0, 1_000_000)
 	var losses int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND operation = 'purchased_credit_refund' AND source = 'consumed_credit'", a.alpha.MerchantID().UUID()).Scan(&losses))

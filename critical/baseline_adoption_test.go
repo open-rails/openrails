@@ -64,18 +64,17 @@ func TestBaselineAdoption(t *testing.T) {
 		spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("spent", 400)})
 		require.NoError(t, err)
 		require.NoError(t, spent[0].Err())
-		require.NotNil(t, spent[0].Receipt.UsageEventID)
-		balance(t, w.alpha, customer, 500, 100, 600)
+		balance(t, w.alpha, customer, 500, 500, 1000)
 		require.NoError(t, w.engine.Close(t.Context()))
 
 		// A database a few months old: it holds a month no fresh build makes
 		// and lacks one a fresh build does.
 		schema := pgx.Identifier{w.schema}.Sanitize()
 		var made int
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT "+schema+".ensure_month_partitions('usage_events', now() - interval '6 months', now() - interval '6 months')").Scan(&made))
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT "+schema+".ensure_month_partitions('limit_holds', now() - interval '6 months', now() - interval '6 months')").Scan(&made))
 		require.Equal(t, 1, made)
 		var old, ahead string
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('usage_events') m ORDER BY m.range_from LIMIT 1").Scan(&old))
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('limit_holds') m ORDER BY m.range_from LIMIT 1").Scan(&old))
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('limit_holds') m ORDER BY m.range_from DESC LIMIT 1").Scan(&ahead))
 		_, err = w.pool.Exec(t.Context(), "DROP TABLE "+pgx.Identifier{w.schema, ahead}.Sanitize())
 		require.NoError(t, err)
@@ -100,17 +99,18 @@ func TestBaselineAdoption(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, reopened.Close(context.Background())) })
 		client, err := reopened.Merchant(w.alpha.MerchantID())
 		require.NoError(t, err)
-		balance(t, client, customer, 500, 100, 600)
-		event, err := client.GetUsageEvent(t.Context(), *spent[0].Receipt.UsageEventID)
+		balance(t, client, customer, 500, 500, 1000)
+		captured, err := client.GetAdmission(t.Context(), "spent")
 		require.NoError(t, err)
-		require.EqualValues(t, 400, event.Amount)
+		require.NotNil(t, captured.CapturedAmount)
+		require.EqualValues(t, 400, *captured.CapturedAmount)
 		ledger, err := client.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
-		require.Len(t, ledger.Items, 2)
+		require.Len(t, ledger.Items, 1, "the capture's accrual is held until its day posts")
 		held, err := client.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("held", 100)})
 		require.NoError(t, err)
 		require.NoError(t, held[0].Err(), "the hold admitted before the migration step is still open")
-		balance(t, client, customer, 500, 0, 500)
+		balance(t, client, customer, 500, 500, 1000)
 	})
 
 	t.Run("OR-J31-S13/a-start-that-skips-migrations-is-refused-on-an-edited-baseline-until-the-migration-step-runs", func(t *testing.T) {

@@ -230,14 +230,15 @@ func TestLimitHolds(t *testing.T) {
 		require.NoError(t, released[0].Err())
 		balance(t, w.alpha, customer, 4000, 4000, 8000)
 
-		// The capture debits the balance and settles in the window, in full.
+		// The capture accrues against the balance and settles in the window,
+		// in full.
 		settled, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("a", 4500)})
 		require.NoError(t, err)
 		require.NoError(t, settled[0].Err())
 		require.EqualValues(t, 4500, settled[0].Receipt.Amount)
-		balance(t, w.alpha, customer, 3500, 0, 3500)
+		balance(t, w.alpha, customer, 3500, 4500, 8000)
 		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "d", 600)), "budget_exceeded")
-		balance(t, w.alpha, customer, 3500, 0, 3500)
+		balance(t, w.alpha, customer, 3500, 4500, 8000)
 		require.True(t, admitOne(t, w.alpha, reservation(w, customer, "e", 500)).Allowed(), "4500 settled leaves 500 in the window")
 
 		// The balance refuses while the window has room: the window takes nothing.
