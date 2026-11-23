@@ -313,15 +313,16 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
 - With `GateConfig.Redis`, your processes sharing that Redis are one gate: one
   lease and one hold per customer and limit set, decided by one Redis script, so a
   customer one process served is warm on all. Usage waits in a Redis stream and
-  one process at a time syncs. Redis keeps each usage write's key for a day: a
-  capture's by its ticket, a `Record`'s by its `source` and `source_id`. A
-  `Capture` or `Record` whose write may or may not have landed returns an
-  error, and retrying it in the same process within the day posts it once: the
-  retry goes to Redis only. A `Record` repeated within the day with the same
-  `source` and `source_id` posts once while Redis answers both. A process that
-  cannot reach Redis admits from its own lease meanwhile, and reports there
-  only usage it knows Redis never took; it closes that lease once Redis is back
-  and the lease is idle. Losing Redis, or a failover that drops recent writes,
+  one process at a time syncs. Redis keeps each usage write's key until 15
+  minutes after the usage settles: a capture's by its ticket, a `Record`'s by
+  its `source` and `source_id`. A `Capture` or `Record` whose write may or may
+  not have landed returns an error, and retrying it in the same process posts
+  it once: the retry goes to Redis only. A `Record` repeated with the same
+  `source` and `source_id` posts once while Redis answers both. A capture or
+  `Record` retried more than 15 minutes after such a write can bill twice. A
+  process that cannot reach Redis admits from its own lease meanwhile, and
+  reports there only usage it knows Redis never took; it closes that lease once
+  Redis is back and the lease is idle. Losing Redis, or a failover that drops recent writes,
   loses that unsent usage, never billed, and the lease's unused capacity comes
   back when the lease expires. `Close` leaves the group; the last process to
   close ends the group's lease.
