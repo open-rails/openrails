@@ -192,7 +192,9 @@ client, err := openrails.NewRemoteMerchant(billingURL,
 memory. If you supply your own go-redis client as `EntitlementCheckCache.Redis`,
 replicas using the same OpenRails endpoint, merchant, API key and cache age
 can share answers. Your backend owns that Redis client and its connection
-lifecycle.
+lifecycle. Use a trusted Redis 6.2+ instance with synchronized clocks across
+its failover nodes. A client created with `NewRemoteMerchant` learns its
+merchant in an authenticated response before it can reuse shared entries.
 
 An answer can be reused for up to `MaxAge` and expires by the next scheduled
 access change. A new purchase, early revocation or API key permission change
