@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,8 +94,9 @@ func TestLeaseSyncs(t *testing.T) {
 		set, _ := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{computeWant(customer, 1)}}))
 		settleUsage(t, w.alpha, lease, outbox[:2]...)
 		// The process dies with item 3 unsent and its lease's hold open; once
-		// the lease stops syncing the hold is released.
-		w.clock.Advance(11 * time.Second)
+		// the lease stops syncing, and readers' grace has passed, the hold is
+		// released.
+		w.clock.Advance(limits.LeaseLifetime + limits.LeaseGrace + time.Second)
 		balance(t, w.alpha, customer, 700, 300, 1000)
 		// Its successor resends the outbox against the dead lease: the first
 		// two answer their receipts, the third settles as late usage, and the
@@ -106,6 +108,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.NotNil(t, out.Wants[0].Error)
 		require.Equal(t, billing.CodeLeaseNotHeld, out.Wants[0].Error.Code)
 		require.True(t, out.Lease.ExpiresAt.Before(w.clock.Now()), "a dead lease is not renewed")
+		require.False(t, out.Lease.Live)
 		balance(t, w.alpha, customer, 400, 600, 1000)
 		again := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox})
 		require.Empty(t, again.Usage.Refused)

@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -35,9 +36,43 @@ func usageInput(customer billing.CustomerID, id string, units int64) billing.Lea
 		Dimensions: map[string]int64{"units": units}, Source: "critical", SourceID: id, Metadata: map[string]any{"source": "host work receipt"}}
 }
 
-// newLease is a fresh lease id, as a gate or a batch job picks one; random,
-// so the world's clock may run ahead of its own.
-func newLease() billing.LeaseID { return billing.LeaseID(uuid.New()) }
+// newLease is a fresh lease id, as a gate or a batch job picks one: a UUIDv7
+// of the real clock, which the world's clock may run ahead of or behind.
+func newLease() billing.LeaseID { return billing.LeaseID(uuid.Must(uuid.NewV7())) }
+
+// leaseMintedAt is a UUIDv7 lease id minted at an instant.
+func leaseMintedAt(at time.Time) billing.LeaseID {
+	id := uuid.Must(uuid.NewV7())
+	ms := uint64(at.UnixMilli())
+	for i := 0; i < 6; i++ {
+		id[i] = byte(ms >> (40 - 8*i))
+	}
+	return billing.LeaseID(id)
+}
+
+// applied is, per lease, what its gate applied of the last answer it got:
+// syncLease reports it on the lease's next sync, as a gate does.
+var applied sync.Map
+
+// appliedOf is every hold version an answer carried.
+func appliedOf(out *billing.SyncLeasesResult) []billing.HoldApplied {
+	latest := map[[2]string]billing.HoldApplied{}
+	var order [][2]string
+	for _, h := range out.Holds {
+		k := [2]string{h.CustomerID.String(), h.LimitSet}
+		if prev, ok := latest[k]; !ok {
+			order = append(order, k)
+		} else if prev.Version >= h.Version {
+			continue
+		}
+		latest[k] = billing.HoldApplied{CustomerID: h.CustomerID, LimitSet: h.LimitSet, Version: h.Version}
+	}
+	result := make([]billing.HoldApplied, 0, len(order))
+	for _, k := range order {
+		result = append(result, latest[k])
+	}
+	return result
+}
 
 // numbered numbers items from first on, in order. An item that names no
 // time occurred when it settles.
@@ -50,11 +85,28 @@ func numbered(first int64, items ...billing.LeaseUsage) []billing.LeaseUsage {
 	return out
 }
 
-// syncLease is one lease sync that must succeed as a call.
+// syncLease is one lease sync that must succeed as a call, made as a gate
+// makes it: with no Applied given, it reports the versions of the lease's
+// previous answer (a non-nil empty Applied is a lost reply). Every hold it
+// answers carries a balance part.
 func syncLease(t *testing.T, client *openrails.Client, params billing.SyncLeasesParams) *billing.SyncLeasesResult {
 	t.Helper()
+	if params.Applied == nil {
+		if prev, ok := applied.Load(params.LeaseID); ok {
+			params.Applied = prev.([]billing.HoldApplied)
+		}
+	}
 	out, err := client.SyncLeases(t.Context(), params)
 	require.NoError(t, err)
+	applied.Store(params.LeaseID, appliedOf(out))
+	for _, h := range out.Holds {
+		require.NotEmpty(t, h.Limits)
+		found := false
+		for _, l := range h.Limits {
+			found = found || l.Limit == "balance"
+		}
+		require.True(t, found, "every hold answered carries its balance: %+v", h)
+	}
 	return out
 }
 

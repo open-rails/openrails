@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 376,
+  "scenario_count": 390,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -649,6 +649,71 @@
       "name": "A sync with close settles its usage, returns every hold and ends the lease; later wants are lease_not_held and usage still settles"
     },
     {
+      "id": "OR-J24-S17",
+      "journey": "J24",
+      "name": "A smaller hold size is released only once its gate reports the version that carried it applied, never below what its tickets took, and a lost answer comes again"
+    },
+    {
+      "id": "OR-J24-S18",
+      "journey": "J24",
+      "name": "A sync past its lease's lifetime answers live false and renews nothing; readers count its holds through a grace that outlasts any sync"
+    },
+    {
+      "id": "OR-J24-S19",
+      "journey": "J24",
+      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close settles and ends an earlier lease"
+    },
+    {
+      "id": "OR-J24-S20",
+      "journey": "J24",
+      "name": "A renewed hold reads the rate cards in force: a price change issues it again at the new price"
+    },
+    {
+      "id": "OR-J24-S21",
+      "journey": "J24",
+      "name": "What a day's usage leaves owed is dated on its day, so the bill of the period that holds it bills it whenever it posted"
+    },
+    {
+      "id": "OR-J24-S22",
+      "journey": "J24",
+      "name": "Usage after a credit lot lapses never draws it: the lot pays for the usage before its lapse and expires with the rest"
+    },
+    {
+      "id": "OR-J24-S23",
+      "journey": "J24",
+      "name": "A lease keeps each refused item's number and code within a byte bound: a resend answers them and the lease keeps syncing"
+    },
+    {
+      "id": "OR-J24-S24",
+      "journey": "J24",
+      "name": "Wants are answered per customer and limit set, and a host-stated want holds its estimated_amount, never with usage"
+    },
+    {
+      "id": "OR-J24-S25",
+      "journey": "J24",
+      "name": "A trust level's policy is its own limit set, and its hold renews as the invoker it was resolved for"
+    },
+    {
+      "id": "OR-J24-S26",
+      "journey": "J24",
+      "name": "A renewal never opens a session: an ended session's hold with usage is answered empty, and only a want or a use opens the next"
+    },
+    {
+      "id": "OR-J24-S27",
+      "journey": "J24",
+      "name": "admit_while_positive wants only capacity free beyond their tickets; with none free, capacity other leases hold is capacity_held"
+    },
+    {
+      "id": "OR-J24-S28",
+      "journey": "J24",
+      "name": "No hold holds past the 30-day hold lifetime, an abandoned admission in a long window included"
+    },
+    {
+      "id": "OR-J24-S29",
+      "journey": "J24",
+      "name": "Concurrent syncs and admissions on the same customers never deadlock and never hold past capacity"
+    },
+    {
       "id": "OR-J25-S01",
       "journey": "J25",
       "name": "Start and stop charge account for the exact known elapsed segment"
@@ -859,6 +924,11 @@
       "name": "A start that skips migrations is refused on a baseline record of other content until the migration step has run"
     },
     {
+      "id": "OR-J31-S14",
+      "journey": "J31",
+      "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
+    },
+    {
       "id": "OR-J32-S01",
       "journey": "J32",
       "name": "Provision find list and rename merchant retain stable identity"
@@ -1016,7 +1086,7 @@
     {
       "id": "OR-J23-S08",
       "journey": "J23",
-      "name": "A customer's limit capacity is the sum over its live products"
+      "name": "A customer is subject only to the limits a live product or override gives it capacity in, and its capacity is their sum"
     },
     {
       "id": "OR-J23-S09",
