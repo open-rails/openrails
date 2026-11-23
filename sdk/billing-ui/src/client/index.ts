@@ -44,6 +44,7 @@ export type {
   CurrencyScales,
   CustomerConfig,
   CustomerEntitlement,
+  CustomerLimit,
   PaymentConfig,
   PaymentFailure,
   PublicConfig,

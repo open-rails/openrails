@@ -592,6 +592,26 @@ export const customerEntitlementSchema: z.ZodType<wire.CustomerEntitlement> =
 export type CustomerEntitlement = wire.CustomerEntitlement
 
 /**
+ * Where the customer stands on one limit in its current window, in `unit`:
+ * `capacity` (its products' sum or its override, plus adjustments), `used`,
+ * `held` by open holds and `remaining`, which may be negative. A window not
+ * yet open, a rate and a lifetime limit have no `window_starts_at`;
+ * `resets_at` is null when nothing refills it.
+ */
+export const customerLimitSchema: z.ZodType<wire.CustomerLimit> = z.object({
+  customer_id: z.string(),
+  limit: z.string(),
+  unit: z.string(),
+  capacity: amount,
+  used: amount,
+  held: amount,
+  remaining: amount,
+  window_starts_at: time.nullable(),
+  resets_at: time.nullable(),
+})
+export type CustomerLimit = wire.CustomerLimit
+
+/**
  * A customer's money in one currency, as of `as_of`. `accrued_amount` is what
  * its running charges have charged and the ledger does not hold yet, already
  * taken off `available_amount`; until `depletes_at` (null with no running
