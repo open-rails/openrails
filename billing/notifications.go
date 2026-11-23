@@ -151,11 +151,15 @@ type NotificationData struct {
 
 	// One-off purchase receipt (one_off_purchase_completed): what was bought,
 	// the amount paid, the payment and, for an order, the order and its
-	// number. Delivery addresses belong to the consuming application.
-	Amount        *int64    `json:"amount,omitempty,string"`
-	ProductName   string    `json:"product_name,omitempty"`
-	PaymentMethod string    `json:"payment_method,omitempty"`
-	PaymentID     PaymentID `json:"payment_id,omitzero"`
-	OrderID       OrderID   `json:"order_id,omitzero"`
-	OrderNumber   int64     `json:"order_number,omitempty"`
+	// number. A refund receipt (refund_completed) has the same fields:
+	// Amount is what was refunded, PaymentID the refund and
+	// RefundedPaymentID the charge it reverses. Delivery addresses belong to
+	// the consuming application.
+	Amount            *int64    `json:"amount,omitempty,string"`
+	ProductName       string    `json:"product_name,omitempty"`
+	PaymentMethod     string    `json:"payment_method,omitempty"`
+	PaymentID         PaymentID `json:"payment_id,omitzero"`
+	RefundedPaymentID PaymentID `json:"refunded_payment_id,omitzero"`
+	OrderID           OrderID   `json:"order_id,omitzero"`
+	OrderNumber       int64     `json:"order_number,omitempty"`
 }

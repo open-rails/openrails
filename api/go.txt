@@ -2613,6 +2613,7 @@ pkg openrails/billing, type NotificationData struct, Rail Rail `json:"rail,omite
 pkg openrails/billing, type NotificationData struct, RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 pkg openrails/billing, type NotificationData struct, Reason string `json:"reason,omitempty"`
 pkg openrails/billing, type NotificationData struct, RecoveryAction NotificationRecoveryAction `json:"recovery_action,omitempty"`
+pkg openrails/billing, type NotificationData struct, RefundedPaymentID PaymentID `json:"refunded_payment_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, RetryStatus NotificationRetryStatus `json:"retry_status,omitempty"`
 pkg openrails/billing, type NotificationData struct, RunwayEndsAt *time.Time `json:"runway_ends_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, Source string `json:"source,omitempty"`

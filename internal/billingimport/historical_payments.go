@@ -234,7 +234,7 @@ func recordHistoricalRefunds(ctx context.Context, d *db.DB, merchantID uuid.UUID
 		}
 	}
 	for _, r := range missing {
-		if _, err := svc.RecordObservedRefund(ctx, original.ID, r.TransactionID, r.Amount, payments.ReversalRefund, r.RefundedAt, nil); err != nil {
+		if _, err := svc.RecordImportedRefund(ctx, original.ID, r.TransactionID, r.Amount, r.RefundedAt); err != nil {
 			return false, err
 		}
 		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterAttempt, Kind: HistoricalPaymentFailpointKind}); err != nil {
