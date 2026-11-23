@@ -1204,6 +1204,13 @@ export type Hold = {
   rate_cards: HoldRateCard[]
   price_bounds: PriceBound[]
   safe: string | null
+  version: number
+}
+
+export type HoldApplied = {
+  customer_id?: string
+  limit_set?: string
+  version?: number
 }
 
 export type HoldCommitment = {
@@ -1255,6 +1262,7 @@ export type InvoiceProfile = {
 export type Lease = {
   id: string
   expires_at: string
+  live: boolean
 }
 
 export type LeaseUsage = {
@@ -1294,6 +1302,7 @@ export type LeaseWant = {
   resource?: string | null
   currency?: string
   usage?: UsageEstimate | null
+  estimated_amount?: string | null
 }
 
 export type LeaseWantResult = {
@@ -2700,6 +2709,7 @@ export type SyncLeasesParams = {
   returns?: HoldReturn[]
   close?: boolean
   committed?: HoldCommitment[]
+  applied?: HoldApplied[]
 }
 
 export type SyncLeasesResult = {

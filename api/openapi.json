@@ -17636,6 +17636,9 @@
                 "type": "null"
               }
             ]
+          },
+          "version": {
+            "type": "integer"
           }
         },
         "required": [
@@ -17645,8 +17648,23 @@
           "limits",
           "rate_cards",
           "price_bounds",
-          "safe"
+          "safe",
+          "version"
         ]
+      },
+      "HoldApplied": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
       },
       "HoldCommitment": {
         "type": "object",
@@ -17886,11 +17904,15 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "live": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "expires_at"
+          "expires_at",
+          "live"
         ]
       },
       "LeaseUsage": {
@@ -18075,6 +18097,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/UsageEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "estimated_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
               },
               {
                 "type": "null"
@@ -24936,6 +24969,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HoldCommitment"
+            }
+          },
+          "applied": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldApplied"
             }
           }
         }
