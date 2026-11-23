@@ -28,11 +28,13 @@ type holdPart struct {
 	end     *time.Time
 }
 
+// partID names a part by its window's start in Unix microseconds, the
+// server's precision: the server matches a commitment's window exactly.
 func partID(limit string, start *time.Time) string {
 	if start == nil {
 		return limit + "@"
 	}
-	return limit + "@" + strconv.FormatInt(start.Unix(), 10)
+	return limit + "@" + strconv.FormatInt(start.UnixMicro(), 10)
 }
 
 // partStart is the window start a part id names; nil without a window.
@@ -41,11 +43,11 @@ func partStart(id string) *time.Time {
 	if i < 0 || i+1 == len(id) {
 		return nil
 	}
-	sec, err := strconv.ParseInt(id[i+1:], 10, 64)
+	us, err := strconv.ParseInt(id[i+1:], 10, 64)
 	if err != nil {
 		return nil
 	}
-	start := time.Unix(sec, 0).UTC()
+	start := time.UnixMicro(us).UTC()
 	return &start
 }
 

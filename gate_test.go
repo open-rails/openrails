@@ -967,6 +967,21 @@ func heldOf(h billing.Hold) map[string]int64 {
 	return out
 }
 
+func TestGatePartIDNamesItsWindowToTheMicrosecond(t *testing.T) {
+	start := time.Date(2026, 11, 23, 12, 0, 0, 123456000, time.UTC)
+	later := start.Add(time.Microsecond)
+	id := partID("tick", &start)
+	if got := partStart(id); got == nil || !got.Equal(start) || partLimit(id) != "tick" {
+		t.Fatalf("part %q names %v of %q, want %v of tick", id, got, partLimit(id), start)
+	}
+	if id == partID("tick", &later) {
+		t.Fatalf("windows a microsecond apart share the part %q", id)
+	}
+	if got := partStart(partID("balance", nil)); got != nil {
+		t.Fatalf("an end-less part names the window %v", got)
+	}
+}
+
 func TestGateHoldSetMergesNextWindowHoldsByPartAndWindow(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	t0 := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)

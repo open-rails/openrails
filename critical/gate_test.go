@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -87,6 +89,25 @@ limits:
 products:
   pro: {display_name: Pro, limits: {session: "1000", weekly: "1500"}}
   chat: {display_name: Chat, rate_cards: [{meter: input-tokens, price: {model: dynamic, currency: USD}}]}
+`
+
+// anchoredPlan counts work units toward three-minute windows tiled from the
+// customer's subscription start, which carries microseconds.
+const anchoredPlan = `schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+limits:
+  tick:
+    unit: units
+    reset: {kind: fixed, window_seconds: 180, anchor: subscription}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+products:
+  member:
+    display_name: Member
+    limits: {tick: "100"}
+    prices:
+      bimonthly: {amount: 10 USD, billing_interval: 60 days}
+  metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
 // gateWire is a remote gate's transport to OpenRails: it counts lease
@@ -912,6 +933,112 @@ func TestGate(t *testing.T) {
 		gateFlush(t, g)
 		require.EqualValues(t, 12, customerLimit(t, a.alpha, customer, "daily").Used, "a repeated Record posts once")
 	})
+
+	t.Run("OR-J23-S32/a-redis-gates-commitment-keeps-its-microsecond-window-across-a-rollover", func(t *testing.T) {
+		// The server's clock stands a second behind real time, at a known
+		// microsecond: the subscription and the windows it anchors start there.
+		a, provider := newPaymentWorld(t, func(w *world) {
+			w.clock.Advance(-time.Second - time.Duration(w.clock.Now().Nanosecond()) + 123456*time.Microsecond)
+		})
+		applyLimits(t, a.alpha, anchoredPlan)
+		sub := buyAnchoredMembership(t, a, provider)
+		customer := sub.CustomerID
+		client, wire := gateRemote(t, a)
+		var mu sync.Mutex
+		var commitments []billing.LimitCommitment
+		wire.watch = func(p billing.SyncLeasesParams, _ *billing.SyncLeasesResult) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, c := range p.Committed {
+				for _, l := range c.Limits {
+					if c.CustomerID == customer && l.Limit == "tick" {
+						commitments = append(commitments, l)
+					}
+				}
+			}
+			return false
+		}
+		g := newGate(t, client, openrails.GateDeps{Redis: criticalRedis(t)})
+		open := gateAdmit(t, g, gateWork(customer, "open", 30))
+		tick := customerLimit(t, a.alpha, customer, "tick")
+		require.NotNil(t, tick.WindowStartsAt)
+		start := *tick.WindowStartsAt
+		require.True(t, start.Equal(sub.StartedAt), "the window %s tiles from the subscription's start %s", start, sub.StartedAt)
+		require.NotZero(t, start.Nanosecond(), "the window starts within a second")
+		end := start.Add(3 * time.Minute)
+
+		// The server's clock walks to the window's last second, the lease
+		// syncing on the way, then past its end; the gate's clock stays in
+		// it, and the ticket stays open across the rollover.
+		for last := end.Add(-time.Second); a.clock.Now().Before(last); {
+			a.clock.Advance(min(8*time.Second, last.Sub(a.clock.Now())))
+			gateFlush(t, g)
+		}
+		a.clock.Advance(2 * time.Second)
+		for i := range 3 {
+			gateFlush(t, g)
+			require.GreaterOrEqual(t, windowHeld(t, a, customer, "tick", start), int64(30),
+				"sync %d past the window's end: the open ticket's take stays held in its own window", i+1)
+		}
+		mu.Lock()
+		require.NotEmpty(t, commitments)
+		for _, c := range commitments {
+			require.NotNil(t, c.WindowStartsAt)
+			require.True(t, c.WindowStartsAt.Equal(start), "a commitment names %s; its window starts %s", c.WindowStartsAt, start)
+		}
+		mu.Unlock()
+
+		require.NoError(t, open.Capture(t.Context(), workUsage(30)))
+		gateFlush(t, g)
+		require.EqualValues(t, 30, windowSettled(t, a, customer, "tick", start), "the capture settles in the window its admission took from")
+		require.Zero(t, customerLimit(t, a.alpha, customer, "tick").Used, "the next window starts empty")
+	})
+}
+
+// buyAnchoredMembership is alice buying anchoredPlan's member price with a
+// kept card.
+func buyAnchoredMembership(t *testing.T, a *authorityWorld, provider *providerLedger) *billing.Subscription {
+	t.Helper()
+	products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"member"}})
+	require.NoError(t, err)
+	require.Len(t, products.Items, 1)
+	require.Len(t, products.Items[0].Prices, 1)
+	token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: products.Items[0].Prices[0].ID}}, ExpectedTotal: ptr(int64(10_000_000)),
+		Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "member-purchase"})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.Equal(t, billing.OrderComplete, order.Status)
+	require.Len(t, order.Lines, 1)
+	require.NotNil(t, order.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	require.NoError(t, err)
+	return sub
+}
+
+// windowHeld is what the customer's open holds set aside of the limit in
+// the window that starts at start.
+func windowHeld(t *testing.T, a *authorityWorld, customer billing.CustomerID, limit string, start time.Time) int64 {
+	t.Helper()
+	var held int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT coalesce(sum(p.held), 0)::bigint FROM "+pgx.Identifier{a.schema, "limit_hold_parts"}.Sanitize()+" p JOIN "+
+		pgx.Identifier{a.schema, "limit_holds"}.Sanitize()+" h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at"+
+		" WHERE p.merchant_id = $1 AND p.customer_id = $2 AND p.limit_key = $3 AND p.window_starts_at = $4 AND h.state = 'open'",
+		a.alpha.MerchantID().UUID(), customer.UUID(), limit, start).Scan(&held))
+	return held
+}
+
+// windowSettled is the usage settled in the customer's window of the limit
+// that starts at start.
+func windowSettled(t *testing.T, a *authorityWorld, customer billing.CustomerID, limit string, start time.Time) int64 {
+	t.Helper()
+	var settled int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT settled FROM "+pgx.Identifier{a.schema, "limit_windows"}.Sanitize()+
+		" WHERE merchant_id = $1 AND customer_id = $2 AND limit_key = $3 AND window_starts_at = $4",
+		a.alpha.MerchantID().UUID(), customer.UUID(), limit, start).Scan(&settled))
+	return settled
 }
 
 // loseUsageReplies lets a gate's usage writes run in Redis, then loses the

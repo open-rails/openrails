@@ -57,7 +57,8 @@ import (
 //	H          hash  lease ('-' retired: nothing takes from it), ver, p (the
 //	                 hold set), safe, safe_spent, used, ev:<event type>,
 //	                 h:<part> held, o:<part> taken by open tickets, u:<part>
-//	                 captured and unsettled, e:<part> end
+//	                 captured and unsettled, e:<part> end (unix µs); a part
+//	                 is <limit>@<window start, unix µs>
 //	H:t        hash  ticket -> o|<process>|<part>=<cost>;... or c|<n>|...;
 //	                 x|<process or n>|<lease>|<made, unix ms>|... an open or
 //	                 unsettled ticket of an earlier lease, which counts on
@@ -65,7 +66,9 @@ import (
 //	                 release, its usage's settlement or a reclaim forgets it
 //	                 (its process dead, or gateEarlierTicketTTL after made)
 const (
-	gateKeyPrefix = "openrails:gate:v2:"
+	// gateKeyPrefix versions the layout: processes of another version form
+	// their own group, with their own lease.
+	gateKeyPrefix = "openrails:gate:v3:"
 	// gateLockTTL is how long the syncing process keeps the group's lock
 	// without renewing it; past it another process syncs.
 	gateLockTTL = 3 * limits.SyncInterval
@@ -428,7 +431,9 @@ func (s *sharedGate) decide(ctx context.Context, gate *Gate, ns string, p billin
 		if sp == nil || sp.lease != holdLease || holdLease == "" || len(sp.pricing.parts) == 0 {
 			return nil, decideCold, nil
 		}
-		takes, money, err := sp.pricing.cost(time.Now(), r, withSafe)
+		// The script checks the windows chosen at now, by the same clock.
+		now := time.Now()
+		takes, money, err := sp.pricing.cost(now, r, withSafe)
 		if errors.Is(err, errUnpriced) || err == nil && len(takes) == 0 {
 			return nil, decideUnpriced, nil
 		}
@@ -436,7 +441,7 @@ func (s *sharedGate) decide(ctx context.Context, gate *Gate, ns string, p billin
 			return nil, decideCold, err
 		}
 		ticket := uuid.NewString()
-		args := []any{holdLease, sp.ver, ticket, s.proc, boolArg(holdLive), "", len(takes)}
+		args := []any{holdLease, sp.ver, ticket, s.proc, boolArg(holdLive), "", strconv.FormatInt(now.UnixMicro(), 10), len(takes)}
 		if withSafe {
 			args[5] = strconv.FormatInt(money, 10)
 		}
@@ -1665,7 +1670,7 @@ func settleArgs(lease, mode string, set *holdSet, tickets, events []string) []an
 	for _, l := range parts {
 		end := ""
 		if l.WindowEndsAt != nil {
-			end = strconv.FormatInt(l.WindowEndsAt.UnixMilli(), 10)
+			end = strconv.FormatInt(l.WindowEndsAt.UnixMicro(), 10)
 		}
 		args = append(args, partID(l.Limit, l.WindowStartsAt), strconv.FormatInt(l.Held, 10), end)
 	}
@@ -2212,18 +2217,21 @@ end
 `
 
 // takeScript: KEYS hold, tickets; ARGV lease, ver, ticket, process, live,
-// safe cost (empty: none), n, then n of (part, cost, mode 0 whole estimate | 1
-// while positive, plus 2 for a unit limit). Short of a live hold, the safe
-// amount pays the money cost in full; units are taken only from a live hold
-// that fits them. A zero take writes nothing. Answers {1, low, takes...}, {0}
-// not this lease's hold (or none to take from), {-1} stale pricing, {-2} a
-// part without a current window, {-3} short.
+// safe cost (empty: none), the decision's time (unix µs), n, then n of
+// (part, cost, mode 0 whole estimate | 1 while positive, plus 2 for a unit
+// limit). Short of a live hold, the safe amount pays the money cost in full;
+// units are taken only from a live hold that fits them. A zero take writes
+// nothing. Answers {1, low, takes...}, {0} not this lease's hold (or none to
+// take from), {-1} stale pricing, {-2} a part without a current window at the
+// decision's time, {-3} short.
 var takeScript = redis.NewScript(`
 local h = KEYS[1]
 local v = redis.call('HMGET', h, 'lease', 'ver')
 if v[1] ~= ARGV[1] then return {0} end
 if v[2] ~= ARGV[2] then return {-1} end
-local n = tonumber(ARGV[7])
+local at = tonumber(ARGV[7])
+if not at then return redis.error_reply('take: bad time') end
+local n = tonumber(ARGV[8])
 if not n or n < 1 then return {0} end
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -2233,12 +2241,12 @@ local short = not live
 local unitShort = false
 local low = 0
 for i = 0, n - 1 do
-  local id, cost, mode = ARGV[8 + i * 3], tonumber(ARGV[9 + i * 3]), ARGV[10 + i * 3]
+  local id, cost, mode = ARGV[9 + i * 3], tonumber(ARGV[10 + i * 3]), ARGV[11 + i * 3]
   if not cost or cost < 0 then return {-2} end
   local f = redis.call('HMGET', h, 'h:' .. id, 'o:' .. id, 'u:' .. id, 'e:' .. id)
   local held, open, unsent = tonumber(f[1]), tonumber(f[2] or '0'), tonumber(f[3] or '0')
   if not held or not open or not unsent then return {-2} end
-  if f[4] and f[4] ~= '' and now >= (tonumber(f[4]) or 0) then return {-2} end
+  if f[4] and f[4] ~= '' and at >= (tonumber(f[4]) or 0) then return {-2} end
   local avail = held - open - unsent
   local take = cost
   local fits = live
@@ -2262,8 +2270,8 @@ if short then
   local cap, spent = tonumber(sv[1] or ''), tonumber(sv[2] or '0')
   if not safe or not cap or not spent or cap - spent < safe then return {-3} end
   for i = 0, n - 1 do
-    local mode = ARGV[10 + i * 3]
-    if mode == '0' or mode == '1' then takes[i + 1] = tonumber(ARGV[9 + i * 3]) end
+    local mode = ARGV[11 + i * 3]
+    if mode == '0' or mode == '1' then takes[i + 1] = tonumber(ARGV[10 + i * 3]) end
   end
   low = 1
 end
@@ -2271,7 +2279,7 @@ if safe and safe ~= 0 then redis.call('HINCRBY', h, 'safe_spent', string.format(
 local rec = {}
 local out = {1, low}
 for i = 0, n - 1 do
-  local id = ARGV[8 + i * 3]
+  local id = ARGV[9 + i * 3]
   local c = string.format('%d', takes[i + 1])
   if takes[i + 1] ~= 0 then redis.call('HINCRBY', h, 'o:' .. id, c) end
   rec[i + 1] = id .. '=' .. c
@@ -2352,7 +2360,7 @@ return #lost + #earlier
 `)
 
 // settleScript: KEYS hold, tickets; ARGV lease, mode, hold set, safe, then
-// parts (count, then id, held, end ms), settled tickets (count, then ids),
+// parts (count, then id, held, end µs), settled tickets (count, then ids),
 // event types (count, then types). A settled ticket's cost leaves what it
 // counts in (open, or unsettled once captured) when the hold is the lease's.
 // Mode a writes an answered hold (its safe amount spent anew), w writes the
