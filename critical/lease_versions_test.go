@@ -760,6 +760,6 @@ products:
 		require.Equal(t, monthly, customerLimit(t, target, customer, "monthly"), "an open window moves with its adjustment")
 		retried, err := target.AdjustCustomerLimit(t.Context(), customer, billing.AdjustLimitParams{Limit: "ever", Amount: 500, SourceID: "ever-bonus"})
 		require.NoError(t, err)
-		require.Equal(t, ever, retried, "a staff adjustment's retry adds nothing at the destination")
+		require.Equal(t, ever, *retried, "a staff adjustment's retry adds nothing at the destination")
 	})
 }

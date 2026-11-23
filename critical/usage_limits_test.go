@@ -311,7 +311,7 @@ products:
 		require.ErrorIs(t, err, billing.ErrInvalid, "an adjustment names its source_id")
 		require.EqualValues(t, 130, customerLimit(t, w.alpha, customer, "hourly").Capacity, "neither changed the window")
 		w.clock.Advance(30 * time.Minute)
-		require.Equal(t, adjusted, customerLimit(t, w.alpha, customer, "hourly"), "the window keeps its adjustments")
+		require.Equal(t, *adjusted, customerLimit(t, w.alpha, customer, "hourly"), "the window keeps its adjustments")
 		w.clock.Advance(31 * time.Minute)
 		next := customerLimit(t, w.alpha, customer, "hourly")
 		require.EqualValues(t, 100, next.Capacity, "the next window starts from the products' capacity")
