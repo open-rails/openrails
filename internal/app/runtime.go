@@ -82,10 +82,7 @@ type Runtime struct {
 	// leaseDB is the small pool idempotency lease renewals use (#1099).
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient
-	// redisOwned marks a self-dialed client; injected clients are borrowed and
-	// must never be closed here (the host owns their lifecycle).
-	redisOwned bool
-	Config     *config.Config
+	Config      *config.Config
 
 	// declared are the merchants Config declares (DeclareMerchants).
 	declared atomic.Pointer[declaredMerchants]
@@ -161,6 +158,10 @@ type Runtime struct {
 	// MerchantConfig is every merchant's configuration, from a file or
 	// Vault, cached in memory.
 	MerchantConfig *merchantdocs.Cache
+	// hostDeps are the dependencies the host supervises (ReportDependency).
+	hostDepsMu sync.Mutex
+	hostDeps   []hostDependency
+
 	// configMu guards configReady and configServing (EnsureMerchantsService).
 	configMu      sync.Mutex
 	configReady   bool
@@ -372,14 +373,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.DB != nil {
 		if err := r.DB.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close db: %w", err))
-		}
-	}
-	if r.RedisClient != nil && r.redisOwned {
-		if err := r.RedisClient.Close(); err != nil {
-			// Make shutdown idempotent: Close can be called multiple times across layers.
-			if !errors.Is(err, redis.ErrClosed) {
-				errs = append(errs, fmt.Errorf("failed to close Redis client: %w", err))
-			}
 		}
 	}
 	if len(errs) == 0 {

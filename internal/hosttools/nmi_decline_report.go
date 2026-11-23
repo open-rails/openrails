@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"net/http"
 	"slices"
@@ -29,6 +30,7 @@ import (
 type NMIDeclineReportOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
+	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID
 	// PSP pins the NMI account by id or key; empty reads the merchant's armed one.
 	PSP string
@@ -64,7 +66,7 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 	if until.IsZero() {
 		until = time.Now().UTC()
 	}
-	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err

@@ -100,7 +100,7 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			d.Postgres = a.authPool
 			d.KeySource = keys.Static{Active: a.signer, Public: map[string]crypto.PublicKey{a.signer.KID(): a.signer.Public()}}
 		}))
-		w.cfg.Merchants["alpha"] = openrails.MerchantDeclaration{DisplayName: "Alpha", Issuer: authtest.Issuer}
+		setCfgMerchant(&w.cfg, "alpha", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Alpha"}, Issuer: authtest.Issuer})
 		w.deps.UserInfo = a.auth.UserInfo()
 		for _, change := range configure {
 			change(w)
@@ -144,12 +144,11 @@ func (a *authorityWorld) serve(t *testing.T) {
 func (a *authorityWorld) bindCustomers(t *testing.T, slug string) {
 	t.Helper()
 	require.NoError(t, a.engine.Close(context.Background()))
-	for name, declaration := range a.cfg.Merchants {
-		declaration.Issuer = ""
-		if name == slug {
-			declaration.Issuer = authtest.Issuer
+	for i := range a.cfg.Merchants {
+		a.cfg.Merchants[i].Issuer = ""
+		if a.cfg.Merchants[i].Slug == slug {
+			a.cfg.Merchants[i].Issuer = authtest.Issuer
 		}
-		a.cfg.Merchants[name] = declaration
 	}
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)

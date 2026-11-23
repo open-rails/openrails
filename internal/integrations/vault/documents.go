@@ -34,12 +34,11 @@ func (a *KVv2Adapter) documentPath(segment, rel string) string {
 // ReadDocument reads the current version of the document at rel, a path
 // under the mount.
 func (a *KVv2Adapter) ReadDocument(ctx context.Context, rel string) (Document, error) {
-	if err := a.sup.AuthState(); err != nil {
-		return Document{}, fmt.Errorf("vault kv read: %w", err)
+	if a.refused != nil {
+		return Document{}, fmt.Errorf("vault kv read: %w", a.refused)
 	}
 	sec, err := a.client.Logical().ReadWithDataWithContext(ctx, a.documentPath("data", rel), nil)
 	if err != nil {
-		a.notifyErr(err)
 		return Document{}, fmt.Errorf("vault kv read %s: %w", rel, credentialBackendError(err))
 	}
 	if sec == nil || sec.Data == nil {
@@ -66,13 +65,12 @@ func (a *KVv2Adapter) WriteDocument(ctx context.Context, rel string, data json.R
 	if err := json.Unmarshal(data, &object); err != nil || object == nil {
 		return Document{}, fmt.Errorf("vault kv write %s: the document must be a JSON object", rel)
 	}
-	if err := a.sup.AuthState(); err != nil {
-		return Document{}, fmt.Errorf("vault kv write: %w", err)
+	if a.refused != nil {
+		return Document{}, fmt.Errorf("vault kv write: %w", a.refused)
 	}
 	body := map[string]any{"data": object, "options": map[string]any{"cas": cas}}
 	sec, err := a.client.Logical().WriteWithContext(ctx, a.documentPath("data", rel), body)
 	if err != nil {
-		a.notifyErr(err)
 		var response *vaultapi.ResponseError
 		if errors.As(err, &response) && response.StatusCode == 400 {
 			for _, message := range response.Errors {
@@ -98,12 +96,11 @@ func (a *KVv2Adapter) WriteDocument(ctx context.Context, rel string, data json.R
 // ListDocuments lists the names one level under rel; a name ending in "/"
 // holds more. A path holding nothing lists nothing.
 func (a *KVv2Adapter) ListDocuments(ctx context.Context, rel string) ([]string, error) {
-	if err := a.sup.AuthState(); err != nil {
-		return nil, fmt.Errorf("vault kv list: %w", err)
+	if a.refused != nil {
+		return nil, fmt.Errorf("vault kv list: %w", a.refused)
 	}
 	sec, err := a.client.Logical().ListWithContext(ctx, a.documentPath("metadata", rel))
 	if err != nil {
-		a.notifyErr(err)
 		return nil, fmt.Errorf("vault kv list %s: %w", rel, credentialBackendError(err))
 	}
 	if sec == nil || sec.Data == nil {
@@ -121,11 +118,10 @@ func (a *KVv2Adapter) ListDocuments(ctx context.Context, rel string) ([]string, 
 
 // DeleteDocument removes every version of the document at rel.
 func (a *KVv2Adapter) DeleteDocument(ctx context.Context, rel string) error {
-	if err := a.sup.AuthState(); err != nil {
-		return fmt.Errorf("vault kv delete: %w", err)
+	if a.refused != nil {
+		return fmt.Errorf("vault kv delete: %w", a.refused)
 	}
 	if _, err := a.client.Logical().DeleteWithContext(ctx, a.documentPath("metadata", rel)); err != nil {
-		a.notifyErr(err)
 		return fmt.Errorf("vault kv delete %s: %w", rel, credentialBackendError(err))
 	}
 	return nil

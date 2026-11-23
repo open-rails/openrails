@@ -2,10 +2,10 @@ package migrate
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/open-rails/migratekit"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -13,19 +13,15 @@ import (
 
 // PostgresStatus reports the embedded chain against the database's ledger:
 // applied, pending, and every discrepancy, as migratekit reports them.
-func PostgresStatus(ctx context.Context, cfg *config.Config) (status migratekit.Status, err error) {
-	if cfg == nil || cfg.DB == nil {
-		return status, fmt.Errorf("missing database config")
+func PostgresStatus(ctx context.Context, pool *pgxpool.Pool, schema string) (status migratekit.Status, err error) {
+	if pool == nil {
+		return status, errors.New("migration status needs a pool")
 	}
-	schema := config.SchemaName(cfg)
 	migrations, err := loadMigrations(schema)
 	if err != nil {
 		return status, err
 	}
-	sqlDB, err := sql.Open("pgx", config.DBConnectionString(cfg.DB))
-	if err != nil {
-		return status, fmt.Errorf("open postgres: %w", err)
-	}
+	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { err = errors.Join(err, sqlDB.Close()) }()
 	return migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema).Status(ctx, migrations)
 }

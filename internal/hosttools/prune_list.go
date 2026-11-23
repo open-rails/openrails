@@ -46,7 +46,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 		limit = math.MaxInt32
 	}
 	lim := int32(limit)
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}

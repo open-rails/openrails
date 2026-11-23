@@ -54,8 +54,12 @@ func newPruneCmd() *cobra.Command {
 			if c.Flags().Changed("expect-rows") {
 				expect = &expectRows
 			}
+			pool, vault, err := cliDeps(c.Context())
+			if err != nil {
+				return err
+			}
 			return hosttools.Prune(c.Context(), hosttools.PruneOptions{
-				Config: cfg, MerchantID: mid, Rails: rails, PSP: psp, Since: since, Until: until,
+				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, Rails: rails, PSP: psp, Since: since, Until: until,
 				ExpectRows: expect, Actor: cliActor(), Format: format, LogDir: logDir,
 				MerchantManifest: manifest, Out: os.Stdout,
 			})
@@ -82,8 +86,12 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pool, err := cliPool(c.Context())
+			if err != nil {
+				return err
+			}
 			return hosttools.PruneList(c.Context(), hosttools.PruneListOptions{
-				Config: cfg, MerchantID: mid, Limit: limit, Format: listFormat, Out: os.Stdout,
+				Config: cfg, PGXPool: pool, MerchantID: mid, Limit: limit, Format: listFormat, Out: os.Stdout,
 			})
 		},
 	}

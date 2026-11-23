@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/open-rails/openrails/internal/stripemock"
-	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -258,13 +257,15 @@ func TestBillingArchive(t *testing.T) {
 		// File-owned deployments change credentials through their declaration.
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
-		cfg.Merchants = maps.Clone(target.cfg.Merchants)
-		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}
-		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
+		cfg.Merchants = slices.Clone(target.cfg.Merchants)
+		setCfgMerchant(&cfg, "restored-source", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Restored", PSPs: openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
+		deps := target.deps
+		page := declareCheckoutPage(t, &cfg, &deps)
+		target.engine, err = openrails.New(t.Context(), cfg, deps)
 		require.NoError(t, err)
 		client, err = target.engine.Merchant(source.alpha.MerchantID())
 		require.NoError(t, err)
-		page := hostCheckoutPage(t, target)
+		serveCheckoutPage(t, page, target.engine)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
 		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
 		_, err = client.CreateOrder(t.Context(), "destination-order", request)
@@ -425,8 +426,8 @@ func TestBillingArchive(t *testing.T) {
 		// The merchant's configuration names the same treasury.
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
-		cfg.Merchants = maps.Clone(target.cfg.Merchants)
-		cfg.Merchants["restored-source"] = openrails.MerchantDeclaration{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}
+		cfg.Merchants = slices.Clone(target.cfg.Merchants)
+		setCfgMerchant(&cfg, "restored-source", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
 		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
 		require.NoError(t, err)
 		client, err = target.engine.Merchant(s.alpha.MerchantID())

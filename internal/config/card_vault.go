@@ -18,12 +18,12 @@ import (
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type CardVaultConfig struct {
 	// Kind is the vault vendor: basis_theory.
-	Kind string `yaml:"kind" json:"kind"`
+	Kind string
 	// TenantID is the vendor's tenant id.
-	TenantID string `yaml:"tenant_id" json:"tenant_id"`
+	TenantID string
 	// KVMount holds the platform credential document. Empty uses vault.kv_mount.
 	// Setting this does not select Vault as the merchant configuration source.
-	KVMount string `yaml:"kv_mount" json:"kv_mount"`
+	KVMount string
 }
 
 // PlatformCustodianKey is the custodian key of a merchant's identity in the

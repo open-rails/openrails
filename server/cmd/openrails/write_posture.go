@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -21,7 +20,7 @@ func newBookCmd() *cobra.Command {
 		Short: "Report whether this database is the one the billing book was armed in",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			database, err := openCLIDB(cmd.Context(), cmd.Context().Value(config.ConfigContextKey).(*config.Config))
+			database, err := openCLIDB(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -46,7 +45,7 @@ func newBookCmd() *cobra.Command {
 			"the same provider credentials is stopped for good: two live copies bill the same customers twice.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			database, err := openCLIDB(cmd.Context(), cmd.Context().Value(config.ConfigContextKey).(*config.Config))
+			database, err := openCLIDB(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -70,8 +69,7 @@ func newMerchantCmd() *cobra.Command {
 	cmd.AddCommand(newMerchantPurgeCmd())
 	var slug, by, mode string
 	set := func(cmd *cobra.Command, m writeposture.Mode) error {
-		cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		database, err := openCLIDB(cmd.Context(), cfg)
+		database, err := openCLIDB(cmd.Context())
 		if err != nil {
 			return err
 		}

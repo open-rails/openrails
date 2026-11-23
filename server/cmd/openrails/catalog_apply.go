@@ -54,8 +54,14 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if err != nil {
 		return err
 	}
+	pool, vault, err := cliDeps(cmd.Context())
+	if err != nil {
+		return err
+	}
 	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), hosttools.CatalogApplyOptions{
 		Config:           cfg,
+		PGXPool:          pool,
+		Vault:            vault,
 		File:             file,
 		Merchant:         opts.merchant,
 		MerchantManifest: manifest,

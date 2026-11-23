@@ -41,10 +41,10 @@ func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*wo
 	changes := append([]func(*world){func(w *world) {
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
 		w.cfg.UsageBillingEnabled = enabled
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
 		m.ArrearsGraceDays, m.ArrearsDelinquencyFloor = ptr(0), ptr(int64(0))
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	}}, configure...)
 	a, p := newNMIWorld(t, changes...)
 	customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
@@ -463,10 +463,10 @@ func TestUsageBillingContracts(t *testing.T) {
 	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0))}}
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("strict")})
 		require.NoError(t, err)

@@ -43,7 +43,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		return nil, nil, nil, fmt.Errorf("catalog runtime configuration is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	database, err := openEmbeddedDB(ctx, cfg, opts.PGXPool)
+	database, err := openEmbeddedDB(cfg, opts.PGXPool)
 	if err != nil {
 		cancel()
 		return nil, nil, nil, err
@@ -70,7 +70,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	if err != nil {
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
 	if err != nil {
 		return fail(fmt.Errorf("catalog runtime merchant configuration: %w", err))
 	}

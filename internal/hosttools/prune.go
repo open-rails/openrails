@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 type PruneOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
+	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID
 	// Rails narrows the pass to these rails; empty is every armed rail.
 	Rails []string
@@ -83,7 +85,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 	if err != nil {
 		return err
 	}
-	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err

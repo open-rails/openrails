@@ -71,7 +71,7 @@ type SolanaConfig struct {
 	// and each pulls the renewals of the plans it owns, whose owner is fixed
 	// on-chain. A plan no listed cranker owns cannot be pulled. Empty turns
 	// Solana rebilling off; one-time payments still work.
-	Crankers []SolanaCrankerConfig `yaml:"crankers" json:"crankers"`
+	Crankers []SolanaCrankerConfig
 }
 
 // SolanaCrankerConfig is one cranker: a key that publishes and pulls plans and
@@ -80,11 +80,11 @@ type SolanaConfig struct {
 type SolanaCrankerConfig struct {
 	// Mode is vault_transit (the key never leaves Vault Transit) or
 	// local_keypair.
-	Mode string `yaml:"mode" json:"mode"`
+	Mode string
 	// Key names the Vault Transit key (vault_transit).
-	Key string `yaml:"key" json:"key"`
+	Key string
 	// PrivateKey is the base58 keypair (local_keypair). A secret.
-	PrivateKey string `yaml:"private_key" json:"private_key"`
+	PrivateKey string
 }
 
 // SolanaCrankerName names a cranker without its secret: its pin's key.
@@ -96,6 +96,16 @@ func SolanaCrankerName(c SolanaCrankerConfig) string {
 		return CrankerLocalKeypair + ":" + key.PublicKey().String()
 	}
 	return CrankerLocalKeypair
+}
+
+// SolanaTransitSigns reports whether a listed cranker signs in Vault Transit.
+func SolanaTransitSigns(cfg *Config) bool {
+	for _, c := range SolanaCrankers(cfg) {
+		if strings.TrimSpace(c.Mode) == CrankerVaultTransit {
+			return true
+		}
+	}
+	return false
 }
 
 // SolanaCrankers are cfg's crankers in order; none when it declares none.
@@ -113,9 +123,6 @@ func validateSolanaCranker(cfg *Config, listed []SolanaCrankerConfig, c SolanaCr
 	case CrankerVaultTransit:
 		if strings.TrimSpace(c.Key) == "" || c.PrivateKey != "" {
 			return errors.New("vault_transit names its Transit key and no private_key")
-		}
-		if cfg.Vault == nil {
-			return errors.New("vault_transit needs vault")
 		}
 	case CrankerLocalKeypair:
 		if c.Key != "" {

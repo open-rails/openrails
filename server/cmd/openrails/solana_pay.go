@@ -47,7 +47,7 @@ func newSolanaPayResolveCmd() *cobra.Command {
 }
 
 func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string, out io.Writer) error {
-	database, err := openCLIDB(ctx, cfg)
+	database, err := openCLIDB(ctx)
 	if err != nil {
 		return err
 	}

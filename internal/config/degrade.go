@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -22,8 +21,8 @@ func (d Degradation) Error() string { return d.Field + ": " + d.Err.Error() }
 // Degrade turns off each optional setting of cfg that would not validate, or
 // sets it back to its default, and returns what it changed. A list setting
 // keeps its valid entries, so a trust or allow list only ever shrinks. What
-// Degrade leaves is what Validate requires: the database and the provider
-// write mode.
+// Degrade leaves is what Validate requires: the database schema and the
+// provider write mode.
 func Degrade(cfg *Config) []Degradation {
 	if cfg == nil {
 		return nil
@@ -36,20 +35,14 @@ func Degrade(cfg *Config) []Degradation {
 		off("event_retention", fmt.Errorf("%w; the default 90 days applies", err))
 	}
 	if cfg.RateLimits != nil {
-		limits := maps.Clone(*cfg.RateLimits)
+		limits := maps.Clone(cfg.RateLimits)
 		for _, bucket := range slices.Sorted(maps.Keys(limits)) {
 			if !slices.Contains(RateLimitBuckets, bucket) {
 				delete(limits, bucket)
 				off("rate_limits."+bucket, fmt.Errorf("not a bucket (%s); a per-address ceiling belongs to the proxy in front of OpenRails; ignored", strings.Join(RateLimitBuckets, ", ")))
 			}
 		}
-		cfg.RateLimits = &limits
-	}
-	if cfg.Redis != nil {
-		if _, err := RedisOptions(cfg.Redis); err != nil {
-			cfg.Redis = nil
-			off("redis", fmt.Errorf("%w; abuse state is kept in this process's memory", err))
-		}
+		cfg.RateLimits = limits
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		cfg.Captcha = DefaultCaptcha()
@@ -86,8 +79,20 @@ func Degrade(cfg *Config) []Degradation {
 		cfg.CardVault = nil
 		off("card_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
 	}
+	keep := func(field string, list []string, check func(string) error) []string {
+		var kept []string
+		for _, raw := range list {
+			if err := check(raw); err != nil {
+				off(field, fmt.Errorf("%w; entry ignored", err))
+				continue
+			}
+			kept = append(kept, raw)
+		}
+		return kept
+	}
 	if s := cfg.ProviderSandbox; s != nil {
 		sandbox := *s
+		sandbox.CCBillWebhookSources = keep("provider_sandbox.ccbill_webhook_sources", sandbox.CCBillWebhookSources, validateSourceCIDR)
 		for _, gateway := range []struct {
 			key string
 			url *string
@@ -101,17 +106,6 @@ func Degrade(cfg *Config) []Degradation {
 		}
 		cfg.ProviderSandbox = &sandbox
 	}
-	keep := func(field string, list []string, check func(string) error) []string {
-		var kept []string
-		for _, raw := range list {
-			if err := check(raw); err != nil {
-				off(field, fmt.Errorf("%w; entry ignored", err))
-				continue
-			}
-			kept = append(kept, raw)
-		}
-		return kept
-	}
 	cfg.ReturnOrigins = keep("return_origins", cfg.ReturnOrigins, func(raw string) error {
 		if err := ValidatePublicURL(strings.TrimSpace(raw), true, true); err != nil {
 			return fmt.Errorf("%q %w", raw, err)
@@ -119,23 +113,5 @@ func Degrade(cfg *Config) []Degradation {
 		return nil
 	})
 	cfg.TrustedProxies = keep("trusted_proxies", cfg.TrustedProxies, validateSourceCIDR)
-	cfg.CloudflareProxies = keep("cloudflare_proxies", cfg.CloudflareProxies, validateSourceCIDR)
-	cfg.CCBillWebhookIPAllowlist = keep("ccbill_webhook_ip_allowlist", cfg.CCBillWebhookIPAllowlist, validateSourceCIDR)
 	return out
-}
-
-// DegradeEmail keeps one email sender: the host's when it lends one.
-func DegradeEmail(cfg *Config, hostSender bool) []Degradation {
-	if cfg == nil || cfg.SMTP == nil {
-		return nil
-	}
-	switch {
-	case hostSender:
-		cfg.SMTP = nil
-		return []Degradation{{Field: "smtp", Err: errors.New("Deps.Email sends OpenRails' email; Config.SMTP is ignored")}}
-	case strings.TrimSpace(cfg.SMTP.Host) == "":
-		cfg.SMTP = nil
-		return []Degradation{{Field: "smtp", Err: errors.New("Config.SMTP.Host is required; OpenRails sends no email")}}
-	}
-	return nil
 }

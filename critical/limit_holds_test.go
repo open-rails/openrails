@@ -127,10 +127,10 @@ func limitsReached(t *testing.T, client *openrails.Client, from, to time.Time) i
 
 func spendCap(windows ...billing.BudgetWindow) func(*world) {
 	return func(w *world) {
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.BillingPolicies = []billing.BillingPolicy{{Name: "capped", Kind: "window_spend_cap", SpendWindows: windows}}
 		m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "capped"}}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	}
 }
 
@@ -363,13 +363,13 @@ func TestLimitHolds(t *testing.T) {
 
 	t.Run("OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{
 				{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
 				{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 			}
 			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		meterForCapture(t, w)
 		customer := billing.CustomerID(uuid.New())

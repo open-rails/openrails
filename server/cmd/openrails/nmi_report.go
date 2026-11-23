@@ -29,8 +29,12 @@ func newNMICmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pool, vault, err := cliDeps(c.Context())
+			if err != nil {
+				return err
+			}
 			return hosttools.NMIDeclineReport(c.Context(), hosttools.NMIDeclineReportOptions{
-				Config: cfg, MerchantID: mid, PSP: psp, Since: since, Until: until, Format: format,
+				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, PSP: psp, Since: since, Until: until, Format: format,
 				MerchantManifest: manifest, Out: os.Stdout,
 			})
 		},

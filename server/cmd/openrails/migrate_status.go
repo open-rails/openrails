@@ -22,7 +22,11 @@ func newMigrateStatusCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			status, err := migrate.PostgresStatus(cmd.Context(), cfg)
+			pool, err := cliPool(cmd.Context())
+			if err != nil {
+				return err
+			}
+			status, err := migrate.PostgresStatus(cmd.Context(), pool, config.SchemaName(cfg))
 			if err != nil {
 				return fmt.Errorf("migration status failed: %w", err)
 			}

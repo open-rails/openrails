@@ -1022,9 +1022,9 @@ func deref(s *string) string {
 func TestDeclaredAdminGrantImport(t *testing.T) {
 	t.Run("OR-J27-S11/imported-grant-ownership-and-atomicity", func(t *testing.T) {
 		a := newAuthorityWorld(t, func(w *world) {
-			declaration := w.cfg.Merchants["alpha"]
+			declaration := cfgMerchant(w.cfg, "alpha")
 			declaration.PSPs = openrails.PSPs{"ccbill": importCCBillPSP("0001", "critical-password")}
-			w.cfg.Merchants["alpha"] = declaration
+			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
 		customer := customerOf(a.alice)
 		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:read"}})

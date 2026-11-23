@@ -100,9 +100,9 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old", "sk_test_new")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")
@@ -135,9 +135,9 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 	t.Helper()
 	a, accounts, sub := stripeMembership(t)
 	require.NoError(t, a.engine.Close(context.Background()))
-	m := a.cfg.Merchants["alpha"]
+	m := cfgMerchant(a.cfg, "alpha")
 	m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", true), "new": stripePSP("acct_new", "sk_test_new", false)}
-	a.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&a.cfg, "alpha", m)
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
@@ -242,9 +242,9 @@ func TestVerificationBinding(t *testing.T) {
 		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "old", PlanID: "weekly", Currency: "USD"})
 		require.NoError(t, err)
 		require.NoError(t, a.engine.Close(context.Background()))
-		m := a.cfg.Merchants["alpha"]
+		m := cfgMerchant(a.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
-		a.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&a.cfg, "alpha", m)
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
 		a.alpha, err = declaredMerchant(a.engine, "alpha")
@@ -405,9 +405,9 @@ func nmiAccountsWorld(t *testing.T) (*authorityWorld, *nmiAccounts) {
 		t.Cleanup(wire.CloseIdleConnections)
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": nmiPSP("old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	return a, accounts
 }

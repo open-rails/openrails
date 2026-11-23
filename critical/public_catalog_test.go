@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -231,10 +231,10 @@ func TestPublicCatalog(t *testing.T) {
 		// merchant API requires Vault; the supported edit here is a real
 		// restart with the revised declaration, preserving the same database.
 		cfg := a.cfg
-		cfg.Merchants = maps.Clone(a.cfg.Merchants)
-		declaration := cfg.Merchants["alpha"]
+		cfg.Merchants = slices.Clone(a.cfg.Merchants)
+		declaration := cfgMerchant(cfg, "alpha")
 		declaration.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
-		cfg.Merchants["alpha"] = declaration
+		setCfgMerchant(&cfg, "alpha", declaration)
 		a.server.Close()
 		require.NoError(t, a.engine.Close(t.Context()))
 		reopened, err := openrails.New(t.Context(), cfg, a.deps)

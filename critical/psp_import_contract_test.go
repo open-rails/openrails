@@ -115,14 +115,14 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 				continue
 			}
 		}
-		if sandbox != (openrails.ProviderSandboxConfig{}) {
+		if sandbox.NMIGatewayURL+sandbox.StripeAPIURL+sandbox.SolanaRPCURL+sandbox.CCBillDataLinkURL != "" {
 			w.cfg.ProviderSandbox = &sandbox
 		}
 		iw.declared = declared
 		if declare {
-			merchant := w.cfg.Merchants["alpha"]
+			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.PSPs = declared
-			w.cfg.Merchants["alpha"] = merchant
+			setCfgMerchant(&w.cfg, "alpha", merchant)
 		}
 		if configure != nil {
 			configure(w)
@@ -172,7 +172,7 @@ func (iw *importWorld) restart(t *testing.T, change func(openrails.PSPs)) {
 	require.NoError(t, iw.fleet.StopAndCancel(ctx))
 	require.NoError(t, iw.engine.Close(ctx))
 	if change != nil {
-		change(iw.cfg.Merchants["alpha"].PSPs)
+		change(cfgMerchant(iw.cfg, "alpha").PSPs)
 	}
 	var err error
 	iw.engine, err = openrails.New(t.Context(), iw.cfg, iw.deps)

@@ -199,7 +199,7 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	if strings.TrimSpace(opts.url) != "" {
 		return remoteMerchant(ctx, opts.url, opts.tokenFile, mid)
 	}
-	database, err := openCLIDB(ctx, cfg)
+	database, err := openCLIDB(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -367,9 +367,8 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			if unbound {
-				database, err := openCLIDB(ctx, cfg)
+				database, err := openCLIDB(ctx)
 				if err != nil {
 					return err
 				}

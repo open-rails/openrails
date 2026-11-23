@@ -42,12 +42,9 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if out == nil {
 		out = io.Discard
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
-	}
-	if opts.PGXPool == nil {
-		defer func() { _ = database.Close() }()
 	}
 	directory, err := merchants.NewDirectoryService(database.DataPool())
 	if err != nil {

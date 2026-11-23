@@ -30,9 +30,9 @@ type App struct {
 	Standalone bool
 }
 
-// BootstrapOptions controls optional overrides for embedded use. Embedded
-// hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
-// override was removed with the ORM (#334).
+// BootstrapOptions is what the application graph reaches outside its
+// process: PGXPool is required; the rest are the host's optional
+// dependencies and test seams.
 type BootstrapOptions struct {
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
@@ -46,7 +46,7 @@ type BootstrapOptions struct {
 	PostgresSession *pgxpool.Config
 	Redis           redis.UniversalClient
 	Clock           clockwork.Clock
-	// EmailSender replaces the sender Config.SMTP selects.
+	// EmailSender delivers OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
 	// UserInfo is the host's directory (Deps.UserInfo); nil keeps a copy.
 	UserInfo      userinfo.Lookup
@@ -54,14 +54,8 @@ type BootstrapOptions struct {
 	// Migrations replaces this build's migration files (test seam: an older
 	// build's chain).
 	Migrations fs.FS
-	// Vault is the host's authenticated client (Deps.Vault); nil logs in from
-	// Config.Vault.
+	// Vault is the host's authenticated client (Deps.Vault).
 	Vault *vaultapi.Client
-}
-
-// Bootstrap initialises core services and the auth verifier.
-func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
-	return BootstrapWithOptions(ctx, cfg, nil)
 }
 
 // BootstrapWithOptions initialises core services with optional overrides.
@@ -72,20 +66,20 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	// Programmatic standalone construction needs the same protective defaults
-	// as the file loader and embedded constructor. Omission never disables them.
-	if !cfg.RateLimitsDisabled {
-		if cfg.RateLimits == nil {
-			cfg.RateLimits = config.DefaultRateLimits()
-		}
-		if cfg.Captcha == nil {
-			cfg.Captcha = config.DefaultCaptcha()
-		}
+	if opts == nil || opts.PGXPool == nil {
+		return nil, fmt.Errorf("Deps.Postgres is required")
+	}
+	// Omission never disables the protective defaults; an empty RateLimits
+	// does.
+	if cfg.RateLimits == nil {
+		cfg.RateLimits = config.DefaultRateLimits()
+	}
+	if cfg.Captcha == nil {
+		cfg.Captcha = config.DefaultCaptcha()
 	}
 	// An optional setting that cannot be served is turned off and reported;
 	// only what the engine cannot serve without fails.
 	degraded := config.Degrade(cfg)
-	degraded = append(degraded, config.DegradeEmail(cfg, opts != nil && opts.EmailSender != nil)...)
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
@@ -101,83 +95,24 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		}
 	}
 
-	var dbOverride *db.DB
-	if opts != nil && opts.PGXPool != nil {
-		dbo, err := db.NewWithPGXPoolAndSessions(opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
-		if err != nil {
-			return nil, fmt.Errorf("use pgx pool: %w", err)
-		}
-		dbOverride = dbo
+	database, err := db.NewWithPGXPoolAndSessions(opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
+	if err != nil {
+		return nil, fmt.Errorf("use pgx pool: %w", err)
 	}
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
-		BasisTheoryTransport: func() http.RoundTripper {
-			if opts != nil {
-				return opts.BasisTheoryTransport
-			}
-			return nil
-		}(),
-		StripeTransport: func() http.RoundTripper {
-			if opts != nil {
-				return opts.StripeTransport
-			}
-			return nil
-		}(),
-		NMITransport: func() http.RoundTripper {
-			if opts != nil {
-				return opts.NMITransport
-			}
-			return nil
-		}(),
-		FXTransport: func() http.RoundTripper {
-			if opts != nil {
-				return opts.FXTransport
-			}
-			return nil
-		}(),
-		DB: dbOverride,
-		Vault: func() *vaultapi.Client {
-			if opts != nil {
-				return opts.Vault
-			}
-			return nil
-		}(),
-		Redis: func() redis.UniversalClient {
-			if opts != nil {
-				return opts.Redis
-			}
-			return nil
-		}(),
-		Clock: func() clockwork.Clock {
-			if opts != nil {
-				return opts.Clock
-			}
-			return nil
-		}(),
-		EmailSender: func() config.EmailSender {
-			if opts != nil {
-				return opts.EmailSender
-			}
-			return nil
-		}(),
-		UserInfo: func() userinfo.Lookup {
-			if opts != nil {
-				return opts.UserInfo
-			}
-			return nil
-		}(),
-		Notifications: func() *config.NotificationChannel {
-			if opts != nil {
-				return opts.Notifications
-			}
-			return nil
-		}(),
-		Migrations: func() fs.FS {
-			if opts != nil {
-				return opts.Migrations
-			}
-			return nil
-		}(),
+		BasisTheoryTransport: opts.BasisTheoryTransport,
+		StripeTransport:      opts.StripeTransport,
+		NMITransport:         opts.NMITransport,
+		FXTransport:          opts.FXTransport,
+		DB:                   database,
+		Vault:                opts.Vault,
+		Redis:                opts.Redis,
+		Clock:                opts.Clock,
+		EmailSender:          opts.EmailSender,
+		UserInfo:             opts.UserInfo,
+		Notifications:        opts.Notifications,
+		Migrations:           opts.Migrations,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)

@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/spf13/cobra"
 )
@@ -30,8 +29,7 @@ func newCatalogExportCmd() *cobra.Command {
 		}
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		database, err := openCLIDB(ctx, cfg)
+		database, err := openCLIDB(ctx)
 		if err != nil {
 			return err
 		}
@@ -63,8 +61,7 @@ func newCatalogImportCmd() *cobra.Command {
 		defer input.Close()
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-		database, err := openCLIDB(ctx, cfg)
+		database, err := openCLIDB(ctx)
 		if err != nil {
 			return err
 		}

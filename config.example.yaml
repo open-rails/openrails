@@ -191,13 +191,6 @@ user_action_rate_limit:
 # cloudflare_proxies:
 #   - 173.245.48.0/20
 
-# EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
-# CCBill signs nothing, so this list is authentication: entries are honored only
-# for a webhook naming a sandbox CCBill account. `/0` is refused. Empty
-# (default) accepts CCBill's ranges alone.
-# ccbill_webhook_ip_allowlist:
-#   - 127.0.0.1/32
-
 # Loopback-only provider gateway for sandbox qualification: every store-armed
 # NMI client (purchase sales, invoice collection, payment-method updates and
 # their verify reads) talks to nmi_gateway_url; Stripe requests use
@@ -207,11 +200,17 @@ user_action_rate_limit:
 # credentials are sent there, so the host must be a loopback IP literal
 # (127.0.0.0/8 or ::1; no hostnames, no userinfo) and the posture sandbox;
 # anything else refuses to boot. Process config only, never a merchant setting.
+# ccbill_webhook_sources are EXTRA CCBill webhook source CIDRs, on top of
+# CCBill's own documented ranges. CCBill signs nothing, so this list is
+# authentication: entries are honored only for a webhook naming a sandbox
+# CCBill account. `/0` is refused.
 # provider_sandbox:
 #   nmi_gateway_url: http://127.0.0.1:9091
 #   stripe_api_url: http://127.0.0.1:9092
 #   solana_rpc_url: http://127.0.0.1:9093
 #   ccbill_datalink_url: http://127.0.0.1:9094
+#   ccbill_webhook_sources:
+#     - 127.0.0.1/32
 
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha

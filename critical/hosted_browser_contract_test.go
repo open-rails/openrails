@@ -45,12 +45,14 @@ func TestHostedBrowser(t *testing.T) {
 		})
 		merchant := httptest.NewServer(mux)
 		t.Cleanup(merchant.Close)
+		var page *httptest.Server
 		a, p := newPaymentWorld(t, func(w *world) {
-			declaration := w.cfg.Merchants["alpha"]
+			declaration := cfgMerchant(w.cfg, "alpha")
 			declaration.Checkout = &billing.MerchantCheckoutSettings{EmbedOrigins: []string{merchant.URL}}
-			w.cfg.Merchants["alpha"] = declaration
+			setCfgMerchant(&w.cfg, "alpha", declaration)
+			page = declareCheckoutPage(t, &w.cfg, &w.deps)
 		})
-		page := hostCheckoutPage(t, a.world)
+		serveCheckoutPage(t, page, a.engine)
 		first, _ := hostPayOrder(t, a, "browser-first", true)
 		second, _ := hostPayOrder(t, a, "browser-second", true)
 		require.Contains(t, *first.PayURL, page.URL)

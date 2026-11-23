@@ -3,9 +3,12 @@
 package hostconfig
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"net/mail"
+	"net"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +18,23 @@ import (
 )
 
 // Config is the standalone server's configuration (server.Config): the
-// engine's, the server's AuthKit and the listener.
+// engine's, the server's AuthKit, the listener and the connections hostdeps
+// opens.
 type Config struct {
 	*billing.Config
+	// DB is the db section: the Postgres the server's pool connects to.
+	DB DBConfig
+	// Redis is the redis section; nil declares none.
+	Redis *RedisConfig
+	// SMTP is the email_smtp section; nil sends no email.
+	SMTP *SMTPConfig
+	// Vault is the vault section's login; nil logs in to no Vault. Its
+	// mounts are the engine's Config.Vault.
+	Vault *VaultLogin
+	// Proxies are trusted_proxies and cloudflare_proxies as written. The
+	// engine's TrustedProxies is both; AuthKit takes CF-Connecting-IP from
+	// Cloudflare's alone.
+	Proxies Proxies
 	// Auth is the auth section: AuthKit's configuration, by AuthKit's keys.
 	Auth authkit.Config
 	// SigningKey is AuthKit's inline signing key (AUTHKIT_ACTIVE_KEY_ID,
@@ -48,9 +65,6 @@ type Config struct {
 	// AdminConsole controls the optional console at /admin and its app sign-in.
 	// Nil keeps the console available with no declared app issuers.
 	AdminConsole *ConsoleConfig
-	// CheckoutOrigin is where the server serves the payment page
-	// (checkout_origin); empty serves none.
-	CheckoutOrigin string
 }
 
 type contextKey struct{}
@@ -86,19 +100,18 @@ type fileConfig struct {
 	EventRetention      string `koanf:"event_retention"`
 
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
-	DashboardBaseURL     string `koanf:"dashboard_base_url"`
 
-	Database                billing.DatabaseConfig                `koanf:"database"`
-	DB                      *billing.DBConfig                     `koanf:"db"`
-	Redis                   *billing.RedisConfig                  `koanf:"redis"`
+	Database                databaseFile                          `koanf:"database"`
+	DB                      *DBConfig                             `koanf:"db"`
+	Redis                   *RedisConfig                          `koanf:"redis"`
 	Logger                  *billing.LoggerConfig                 `koanf:"logger"`
-	EmailSMTP               *smtpFile                             `koanf:"email_smtp"`
-	RateLimits              *billing.RateLimitsConfig             `koanf:"rate_limits"`
+	EmailSMTP               *SMTPConfig                           `koanf:"email_smtp"`
+	RateLimits              billing.RateLimitsConfig              `koanf:"rate_limits"`
 	RateLimitsDisabled      bool                                  `koanf:"rate_limits_disabled"`
 	UserActionRateLimit     billing.UserActionRateLimitConfig     `koanf:"user_action_rate_limit"`
 	DestructiveActionLimits billing.DestructiveActionLimitsConfig `koanf:"destructive_action_limits"`
 	Captcha                 *billing.CaptchaConfig                `koanf:"captcha"`
-	Vault                   *billing.VaultConfig                  `koanf:"vault"`
+	Vault                   *vaultFile                            `koanf:"vault"`
 	AdminConsole            *ConsoleConfig                        `koanf:"admin_console"`
 	CheckoutOrigin          string                                `koanf:"checkout_origin"`
 	LLM                     *billing.LLMConfig                    `koanf:"llm"`
@@ -108,10 +121,9 @@ type fileConfig struct {
 
 	WebhookSecretOverlap string `koanf:"webhook_secret_overlap"`
 
-	ReturnOrigins            []string `koanf:"return_origins"`
-	TrustedProxies           []string `koanf:"trusted_proxies"`
-	CloudflareProxies        []string `koanf:"cloudflare_proxies"`
-	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist"`
+	ReturnOrigins     []string `koanf:"return_origins"`
+	TrustedProxies    []string `koanf:"trusted_proxies"`
+	CloudflareProxies []string `koanf:"cloudflare_proxies"`
 
 	ProviderSandbox     *billing.ProviderSandboxConfig `koanf:"provider_sandbox"`
 	Solana              *billing.SolanaConfig          `koanf:"solana"`
@@ -138,19 +150,135 @@ func defaults() *fileConfig {
 		// accepting; together within Kubernetes' default 30s grace period.
 		DrainDelay:      5 * time.Second,
 		ShutdownTimeout: 20 * time.Second,
-		DB:              &billing.DBConfig{},
-		Database:        billing.DatabaseConfig{Schema: billing.DefaultSchema},
+		DB:              &DBConfig{},
+		Database:        databaseFile{Schema: billing.DefaultSchema},
 		Logger:          &billing.LoggerConfig{Level: "info"},
 		RateLimits:      billing.DefaultRateLimits(),
 		Captcha:         billing.DefaultCaptcha(),
 	}
 }
 
+// databaseFile is the database section: the engine's schemas. The lease
+// pool's size is db.lease_conns.
+type databaseFile struct {
+	Schema         string `koanf:"schema"`
+	RiverSchema    string `koanf:"river_schema"`
+	SkipMigrations bool   `koanf:"skip_migrations"`
+}
+
+// DBConfig is the db section: a Postgres connection. URL takes precedence;
+// otherwise the connection string is built from the parts.
+type DBConfig struct {
+	URL      string `koanf:"url"`
+	Host     string `koanf:"host"`
+	Port     string `koanf:"port"`
+	Database string `koanf:"database"`
+	Username string `koanf:"username"`
+	Password string `koanf:"password"`
+	// SSLMode defaults to "require".
+	SSLMode string `koanf:"sslmode"`
+	// SQLTrace logs every query at debug level.
+	SQLTrace bool `koanf:"sql_trace"`
+	// LeaseConns is the engine's Database.LeaseConns.
+	LeaseConns int `koanf:"lease_conns"`
+}
+
+// ConnectionString is URL, or the URL the parts assemble; "" when they are
+// incomplete. Credentials and the database name are percent-encoded: a
+// password with '@' or '/' must not change the host.
+func (c DBConfig) ConnectionString() string {
+	if c.URL != "" {
+		return c.URL
+	}
+	if c.Host == "" || c.Port == "" || c.Database == "" || c.Username == "" {
+		return ""
+	}
+	sslMode := cmp.Or(c.SSLMode, "require")
+	u := url.URL{
+		Scheme:   "postgresql",
+		User:     url.UserPassword(c.Username, c.Password),
+		Host:     net.JoinHostPort(c.Host, c.Port),
+		Path:     "/" + c.Database,
+		RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
+	}
+	return u.String()
+}
+
+// RedisConfig is the redis section: Addr, or a redis:// or rediss:// URL.
+type RedisConfig struct {
+	// Addr is host:port.
+	Addr string `koanf:"addr"`
+	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
+	// TLS, in place of Addr, DB and TLS. Username and Password, when set, are
+	// used over the URL's.
+	URL string `koanf:"url"`
+	// Username is the ACL user; empty is the default user.
+	Username string `koanf:"username"`
+	Password string `koanf:"password"`
+	DB       int    `koanf:"db"`
+	// TLS connects over TLS, verifying the server against the system roots,
+	// or against CACert, which implies TLS.
+	TLS bool `koanf:"tls"`
+	// CACert is the PEM bundle of the CA that signed the server's certificate.
+	CACert string `koanf:"ca_cert"`
+}
+
+// SMTPConfig is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
+// every app uses; an empty host sends no email. From is one RFC 5322
+// mailbox: "Shop <noreply@shop.example>".
+type SMTPConfig struct {
+	Host     string `koanf:"host"`
+	Port     int    `koanf:"port"`
+	Username string `koanf:"username"`
+	Password string `koanf:"password"`
+	From     string `koanf:"from"`
+}
+
+// Proxies are the CIDRs whose forwarded client address is trusted.
+type Proxies struct {
+	Trusted []string
+	// Cloudflare are Cloudflare's egress CIDRs, set only where Cloudflare
+	// fronts this origin.
+	Cloudflare []string
+}
+
+// vaultFile is the vault section: the login and the engine's mounts.
+type vaultFile struct {
+	VaultLogin   `koanf:",squash"`
+	ScopePrefix  string `koanf:"scope_prefix"`
+	KVMount      string `koanf:"kv_mount"`
+	TransitMount string `koanf:"transit_mount"`
+}
+
+// VaultLogin is how the server logs in to Vault (helpers/vault).
+type VaultLogin struct {
+	// Address is the server URL (VAULT_ADDR); empty is Vault's default,
+	// https://127.0.0.1:8200.
+	Address   string `koanf:"address"`
+	Namespace string `koanf:"namespace"`
+	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is
+	// token.
+	AuthMethod string `koanf:"auth_method"`
+	// Token is a pre-issued Vault token.
+	Token    string `koanf:"token"`
+	RoleID   string `koanf:"role_id"`
+	SecretID string `koanf:"secret_id"`
+	// SecretsPath is a directory of operator-mounted secret files named after
+	// environment variables. Every approle login reads VAULT_SECRET_ID there,
+	// so a rotated secret is used; without one, SecretID.
+	SecretsPath string `koanf:"secrets_path"`
+	K8sRole     string `koanf:"k8s_role"`
+	// AuthMount is where the approle or kubernetes auth method is mounted:
+	// the -path of `vault auth enable`, without auth/. Empty is the method's
+	// name.
+	AuthMount string `koanf:"auth_mount"`
+}
+
 // databaseURL is db.url, or the URL db's parts assemble. A missing part
 // refuses boot: nothing stands in for it.
-func databaseURL(db *billing.DBConfig) (string, error) {
+func databaseURL(db *DBConfig) (string, error) {
 	if db == nil {
-		db = &billing.DBConfig{}
+		db = &DBConfig{}
 	}
 	if url := strings.TrimSpace(db.URL); url != "" {
 		return url, nil
@@ -166,7 +294,7 @@ func databaseURL(db *billing.DBConfig) (string, error) {
 	}
 	switch len(missing) {
 	case 0:
-		return billing.DBConnectionString(db), nil
+		return db.ConnectionString(), nil
 	case 4:
 		return "", fmt.Errorf("no database configured: set db.url (DB_URL), or db.host, db.port, db.database and db.username (DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME)")
 	default:
@@ -176,40 +304,29 @@ func databaseURL(db *billing.DBConfig) (string, error) {
 
 // redisSection is the redis section; one that sets nothing (a blank
 // REDIS_PASSWORD) declares no Redis.
-func redisSection(r *billing.RedisConfig) *billing.RedisConfig {
-	if r == nil || *r == (billing.RedisConfig{}) {
+func redisSection(r *RedisConfig) *RedisConfig {
+	if r == nil || *r == (RedisConfig{}) {
 		return nil
 	}
 	return r
 }
 
-// smtpFile is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
-// every app uses; an empty host sends no email. From is one RFC 5322 mailbox:
-// "Shop <noreply@shop.example>".
-type smtpFile struct {
-	Host     string `koanf:"host"`
-	Port     int    `koanf:"port"`
-	Username string `koanf:"username"`
-	Password string `koanf:"password"`
-	From     string `koanf:"from"`
+// smtpSection is the email_smtp section; an empty host declares none.
+func smtpSection(s *SMTPConfig) *SMTPConfig {
+	if s == nil || strings.TrimSpace(s.Host) == "" {
+		return nil
+	}
+	return s
 }
 
-func (s *smtpFile) config() (*billing.SMTPConfig, error) {
-	if s == nil {
+// vault splits the vault section into the server's login and the engine's
+// mounts.
+func (v *vaultFile) split() (*VaultLogin, *billing.VaultConfig) {
+	if v == nil {
 		return nil, nil
 	}
-	var from billing.EmailAddress
-	if raw := strings.TrimSpace(s.From); raw != "" {
-		a, err := mail.ParseAddress(raw)
-		if err != nil {
-			return nil, fmt.Errorf("email_smtp.from (EMAIL_SMTP_FROM) %q: %w", s.From, err)
-		}
-		from = billing.EmailAddress{Name: a.Name, Address: a.Address}
-	}
-	if strings.TrimSpace(s.Host) == "" {
-		return nil, nil
-	}
-	return &billing.SMTPConfig{Host: s.Host, Port: s.Port, Username: s.Username, Password: s.Password, From: from}, nil
+	login := v.VaultLogin
+	return &login, &billing.VaultConfig{KVMount: v.KVMount, ScopePrefix: v.ScopePrefix, TransitMount: v.TransitMount}
 }
 
 // config is the loaded file as the server's configuration.
@@ -218,40 +335,44 @@ func (f *fileConfig) config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	smtp, err := f.EmailSMTP.config()
-	if err != nil {
-		return nil, err
+	login, mounts := f.Vault.split()
+	db := DBConfig{}
+	if f.DB != nil {
+		db = *f.DB
 	}
 	return &Config{
 		Config: &billing.Config{
-			ProviderWriteMode:        f.ProviderWriteMode,
-			UsageBillingEnabled:      f.UsageBillingEnabled,
-			EventRetention:           f.EventRetention,
-			Database:                 f.Database,
-			PublicBillingBaseURL:     f.PublicBillingBaseURL,
-			DashboardBaseURL:         f.DashboardBaseURL,
-			DB:                       f.DB,
-			Redis:                    redisSection(f.Redis),
-			Logger:                   f.Logger,
-			SMTP:                     smtp,
-			RateLimits:               f.RateLimits,
-			RateLimitsDisabled:       f.RateLimitsDisabled,
-			UserActionRateLimit:      f.UserActionRateLimit,
-			DestructiveActionLimits:  f.DestructiveActionLimits,
-			Captcha:                  f.Captcha,
-			Vault:                    f.Vault,
-			LLM:                      f.LLM,
-			WebhookSecretOverlap:     f.WebhookSecretOverlap,
-			ReturnOrigins:            f.ReturnOrigins,
-			TrustedProxies:           f.TrustedProxies,
-			CloudflareProxies:        f.CloudflareProxies,
-			CCBillWebhookIPAllowlist: f.CCBillWebhookIPAllowlist,
-			ProviderSandbox:          f.ProviderSandbox,
-			Solana:                   f.Solana,
-			HyperSwitch:              f.HyperSwitch,
-			CardVault:                f.CardVault,
-			EngineAdmissionHold:      f.EngineAdmissionHold,
+			ProviderWriteMode:   f.ProviderWriteMode,
+			UsageBillingEnabled: f.UsageBillingEnabled,
+			EventRetention:      f.EventRetention,
+			Database: billing.DatabaseConfig{
+				Schema: f.Database.Schema, RiverSchema: f.Database.RiverSchema,
+				SkipMigrations: f.Database.SkipMigrations, LeaseConns: db.LeaseConns,
+			},
+			PublicBillingBaseURL:    f.PublicBillingBaseURL,
+			Logger:                  f.Logger,
+			RateLimits:              f.RateLimits,
+			UserActionRateLimit:     f.UserActionRateLimit,
+			DestructiveActionLimits: f.DestructiveActionLimits,
+			Captcha:                 f.Captcha,
+			Vault:                   mounts,
+			LLM:                     f.LLM,
+			WebhookSecretOverlap:    f.WebhookSecretOverlap,
+			ReturnOrigins:           f.ReturnOrigins,
+			// Cloudflare's egress is a proxy like any other to the engine.
+			TrustedProxies:      append(slices.Clone(f.TrustedProxies), f.CloudflareProxies...),
+			CheckoutOrigin:      strings.TrimSpace(f.CheckoutOrigin),
+			ProviderSandbox:     f.ProviderSandbox,
+			Solana:              f.Solana,
+			HyperSwitch:         f.HyperSwitch,
+			CardVault:           f.CardVault,
+			EngineAdmissionHold: f.EngineAdmissionHold,
 		},
+		DB:                       db,
+		Redis:                    redisSection(f.Redis),
+		SMTP:                     smtpSection(f.EmailSMTP),
+		Vault:                    login,
+		Proxies:                  Proxies{Trusted: f.TrustedProxies, Cloudflare: f.CloudflareProxies},
 		Auth:                     auth,
 		SigningKey:               f.SigningKey,
 		LocalSignIn:              f.LocalSignIn,
@@ -264,7 +385,6 @@ func (f *fileConfig) config() (*Config, error) {
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole,
-		CheckoutOrigin:           strings.TrimSpace(f.CheckoutOrigin),
 	}, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 
+	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
@@ -33,9 +34,9 @@ func Declarations(m *BillingConfig) *merchantbootstrap.BillingConfig {
 	if m == nil {
 		return nil
 	}
-	out := &merchantbootstrap.BillingConfig{Version: m.Version, Merchants: make(map[string]config.MerchantDeclaration, len(m.Merchants))}
+	out := &merchantbootstrap.BillingConfig{Version: m.Version, Merchants: make(map[string]config.MerchantDocument, len(m.Merchants))}
 	for slug, merchant := range m.Merchants {
-		out.Merchants[slug] = merchant.MerchantDeclaration
+		out.Merchants[slug] = merchant.MerchantDocument
 	}
 	return out
 }
@@ -53,8 +54,8 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 }
 
 type MerchantConfig struct {
-	config.MerchantDeclaration `yaml:",inline" koanf:",squash"`
-	RemoteApplication          *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
+	config.MerchantDocument `yaml:",inline" koanf:",squash"`
+	RemoteApplication       *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
 }
 
 // RemoteApplicationConfig declares the host-app remote_application trusted for a
@@ -103,8 +104,11 @@ type ReconcileOptions struct {
 	// Insert registers a merchant the manifest names that does not exist.
 	Insert bool
 	// Merchants is the merchants service over the configuration the manifest
-	// fills (a file) or reads (Vault); nil opens one for this call.
+	// fills (a file) or reads (Vault); nil opens one for this call, over
+	// Vault.
 	Merchants *merchants.Service
+	// Vault is the authenticated client Merchants is opened over.
+	Vault *vaultapi.Client
 	// Refuse, set by a serving process, takes what cannot be served: a
 	// merchant that cannot be provisioned is reported to it and the others
 	// proceed, and a document the merchant does not serve is refused alone.
@@ -148,12 +152,12 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	merchantsDeclared := maps.Clone(manifest.Merchants)
 	for _, slug := range slices.Sorted(maps.Keys(merchantsDeclared)) {
 		mt := merchantsDeclared[slug]
-		if err := config.RefuseDeclarationBesideVault(cfg, slug, mt.MerchantDeclaration); err != nil {
+		if err := config.RefuseDeclarationBesideVault(cfg, slug, mt.MerchantDocument); err != nil {
 			if opts.Refuse == nil {
 				return fmt.Errorf("merchant bootstrap: %w", err)
 			}
 			opts.Refuse("merchants."+slug+".declaration", fmt.Errorf("%w; Vault's configuration serves", err))
-			merchantsDeclared[slug] = MerchantConfig{MerchantDeclaration: config.MerchantDeclaration{Slug: mt.Slug}, RemoteApplication: mt.RemoteApplication}
+			merchantsDeclared[slug] = MerchantConfig{MerchantDocument: config.MerchantDocument{Slug: mt.Slug}, RemoteApplication: mt.RemoteApplication}
 		}
 	}
 	release, err := lockMerchantManifestBootstrap(ctx, cp)
@@ -172,7 +176,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	}
 	directory := opts.Merchants
 	if directory == nil {
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
+		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, opts.Vault)
 		if err != nil {
 			return fmt.Errorf("merchant bootstrap: %w", err)
 		}
@@ -206,7 +210,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if !req.Tolerate {
-		if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
+		if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDocument); err != nil {
 			return nil, err
 		}
 	}
@@ -232,7 +236,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 	}
 	tn, refused, err := merchantbootstrap.ProvisionMerchant(ctx, merchantbootstrap.ProvisionMerchantParams{
 		MerchantID: id, Config: req.Config, Database: req.Database, Merchants: req.Merchants,
-		Slug: slug, Merchant: mt.MerchantDeclaration,
+		Slug: slug, Merchant: mt.MerchantDocument,
 	})
 	if err != nil {
 		return nil, err

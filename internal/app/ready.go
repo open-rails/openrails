@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/open-rails/openrails/internal/retry"
@@ -72,6 +73,9 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	if r.UsesVault() {
 		add("vault", true, r.Vault.State())
 	}
+	for _, d := range r.hostDependencies() {
+		add(d.name, true, d.state())
+	}
 	add("psp_posture", true, r.postureState())
 	add("configuration", true, r.RefusalState())
 
@@ -83,18 +87,29 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	return deps, nil
 }
 
-// VaultProbe is the live Vault check for a host dependency supervisor; nil
-// when this runtime owns no Vault login.
-func (r *Runtime) VaultProbe(ctx context.Context) error {
-	if r == nil || r.Vault == nil {
-		return nil
-	}
-	return r.Vault.Probe(ctx)
+// UsesVault reports whether this runtime reads Vault.
+func (r *Runtime) UsesVault() bool {
+	return r != nil && r.Vault != nil && (r.Vault.KV != nil || r.Vault.PlatformKV != nil || r.Vault.Err != nil)
 }
 
-// UsesVault reports whether this runtime supervises its own Vault login.
-func (r *Runtime) UsesVault() bool {
-	return r != nil && r.Vault != nil && r.Vault.Auth != nil
+// hostDependency is a dependency the host supervises, reported by Ready.
+type hostDependency struct {
+	name  string
+	state func() error
+}
+
+// ReportDependency adds a host-supervised dependency to Ready, as optional:
+// state is its cached health, nil while usable, and never contacts it.
+func (r *Runtime) ReportDependency(name string, state func() error) {
+	r.hostDepsMu.Lock()
+	defer r.hostDepsMu.Unlock()
+	r.hostDeps = append(r.hostDeps, hostDependency{name: name, state: state})
+}
+
+func (r *Runtime) hostDependencies() []hostDependency {
+	r.hostDepsMu.Lock()
+	defer r.hostDepsMu.Unlock()
+	return slices.Clone(r.hostDeps)
 }
 
 // PostureState is the cached PSP posture: nil when every loaded PSP is

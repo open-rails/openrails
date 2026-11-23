@@ -109,11 +109,11 @@ func lotExpired(t *testing.T, client *openrails.Client, id billing.CreditGrantID
 // suspendHeld declares the built-in schedule with held renewals suspended at
 // their allowance.
 func suspendHeld(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.MerchantSettings.DunningPolicy = &billing.DunningPolicy{Tiers: []billing.DunningTier{
 		{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 96, 144, 216}},
 	}, AccessWhileRenewalHeld: billing.DunningAccessSuspend}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 func TestBillingPass(t *testing.T) {
@@ -188,9 +188,9 @@ func TestBillingPass(t *testing.T) {
 	})
 	t.Run("OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(1)
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		oneUsage(t, a.alpha, usageInput(customer, "owed-past-grace", 3))
 		fleet := quietFleet(t, a.world)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	vaultapi "github.com/hashicorp/vault/api"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
@@ -12,42 +14,23 @@ import (
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
-// openEmbeddedDB borrows the host pool or opens the configured database.
-// Callers provide explicit merchant scope; Close leaves borrowed pools open.
-func openEmbeddedDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
-	if ctx == nil {
-		ctx = context.Background()
+// openEmbeddedDB wraps the host's pool; Close leaves it open. Callers
+// provide explicit merchant scope.
+func openEmbeddedDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("a database pool is required")
 	}
-	var (
-		database *db.DB
-		err      error
-	)
-	if pool != nil {
-		schema := config.SchemaName(cfg)
-		database, err = db.NewWithPGXPool(pool, schema)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if cfg == nil || cfg.DB == nil {
-			return nil, fmt.Errorf("config database is required")
-		}
-		database, err = db.NewDB(ctx, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("open postgres: %w", err)
-		}
-	}
-	return database, nil
+	return db.NewWithPGXPool(pool, config.SchemaName(cfg))
 }
 
 // bindMerchantConfig binds the configuration database reads merchant settings
 // through: given (a running app's), else one this process opens.
-func bindMerchantConfig(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, given db.MerchantConfig) (func(), error) {
+func bindMerchantConfig(ctx context.Context, cfg *config.Config, database *db.DB, vault *vaultapi.Client, merchantID billing.MerchantID, given db.MerchantConfig) (func(), error) {
 	if given != nil {
 		database.SetMerchantConfig(given)
 		return func() {}, nil
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, merchantID, nil, "", nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, merchantID, nil, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("merchant configuration unavailable: %w", err)
 	}

@@ -208,7 +208,11 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 	}
 	defer resources.close()
 
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, resources.cp, opts.slug)
+	vault, err := cliVault(ctx)
+	if err != nil {
+		return err
+	}
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, vault, resources.cp, opts.slug)
 	if err != nil {
 		return err
 	}

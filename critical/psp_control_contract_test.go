@@ -144,9 +144,8 @@ func newPSPWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *psp
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
-		for slug, declaration := range w.cfg.Merchants {
-			declaration.DisplayName = ""
-			w.cfg.Merchants[slug] = declaration
+		for i := range w.cfg.Merchants {
+			w.cfg.Merchants[i].DisplayName = ""
 		}
 		for _, change := range configure {
 			change(w)
@@ -658,18 +657,18 @@ func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
 	t.Helper()
 	w := newWorld(t, func(w *world) {
 		declareCCBill(w, nil)
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.AlertEmail = ptr("ops@alpha.example")
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 		w.deps.Email = mail
 	})
 	importCCBillAttribution(t, w)
 	// The operator removes the account from the declaration while the
 	// provider still bills a membership on it.
 	require.NoError(t, w.engine.Close(t.Context()))
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.PSPs = nil
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 	var err error
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)

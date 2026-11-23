@@ -22,7 +22,7 @@ func checkManifestEntry(slug string, t MerchantConfig) error {
 			return err
 		}
 	}
-	return merchantbootstrap.CheckManifestDeclaration(slug, t.MerchantDeclaration)
+	return merchantbootstrap.CheckManifestDeclaration(slug, t.MerchantDocument)
 }
 
 // validateManifestRemoteApplication checks the per-merchant host-app

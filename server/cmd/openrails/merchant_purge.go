@@ -80,7 +80,11 @@ func withPurgeMerchants(cmd *cobra.Command, run func(context.Context, *db.DB, *m
 		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
 			return err
 		}
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
+		vault, err := cliVault(ctx)
+		if err != nil {
+			return err
+		}
+		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
 		if err != nil {
 			return err
 		}
