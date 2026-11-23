@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/open-rails/authkit"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/buildinfo"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -158,7 +158,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	log.Info(buildinfo.Get().String())
+	slog.Default().Info(buildinfo.Get().String())
 	config.LogStartupStatus(slog.Default(), cfg)
 
 	// The boot waits for the database as long as it takes (a failover, a slow
@@ -169,7 +169,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
-			log.WithError(err).Info("Shutdown requested while booting; exiting")
+			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
 			return nil
 		}
 		return err
@@ -203,7 +203,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Billing service shutdown complete")
+	slog.Default().InfoContext(ctx, "Billing service shutdown complete")
 	return nil
 }
 
@@ -222,7 +222,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
-			log.WithError(err).Info("Shutdown requested while booting; exiting")
+			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
 			return nil
 		}
 		return err
@@ -232,7 +232,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := srv.Close(closeCtx); err != nil {
-			log.WithError(err).Error("Application shutdown encountered issues")
+			slog.Default().ErrorContext(ctx, "Application shutdown encountered issues", logx.Err(err))
 		}
 	}()
 	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
@@ -243,7 +243,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	<-ctx.Done()
-	log.Info("Shutdown signal received, stopping workers...")
+	slog.Default().InfoContext(ctx, "Shutdown signal received, stopping workers...")
 	return nil
 }
 

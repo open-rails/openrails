@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -26,7 +27,7 @@ func withCLIDB(cmd *cobra.Command, run func(context.Context, *db.DB) error) erro
 // River schema: jobs a command commits wait there for the fleet.
 func bindCLIRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB) error {
 	schema := config.RiverSchemaName(cfg)
-	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
+	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true, Logger: slog.Default()})
 	if err != nil {
 		return fmt.Errorf("River producer: %w", err)
 	}

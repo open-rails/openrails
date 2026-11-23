@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,10 +25,11 @@ import (
 type EntitlementService struct {
 	db    *db.DB
 	clock clockwork.Clock
+	Log   *slog.Logger
 }
 
 func NewEntitlementService(db *db.DB, clocks ...clockwork.Clock) *EntitlementService {
-	return &EntitlementService{db: db, clock: timeutil.FirstClock(clocks...)}
+	return &EntitlementService{db: db, clock: timeutil.FirstClock(clocks...), Log: db.Log}
 }
 
 func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -51,6 +52,7 @@ type Handler struct {
 	// Gas checks the merchant's cranker wallets after a pull it signed paid
 	// its fee: a low one raises its finding, a funded one resolves it.
 	Gas func(context.Context, billing.MerchantID)
+	Log *slog.Logger
 }
 
 // NewHandler builds the pull handler with the default backoff.

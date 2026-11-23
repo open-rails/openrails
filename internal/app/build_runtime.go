@@ -216,7 +216,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	stripeClients := stripeapi.NewFactory(stripeTransport)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg}
+	nmiClients := &railresolve.NMIFactory{Config: cfg, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -228,6 +228,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DB:            database,
 		MerchantsFn:   merchantsFn,
 		NMIClients:    nmiClients,
+		Log:           logger,
 	}
 	if overrides != nil {
 		collectionResolver.BasisTheoryTransport = overrides.BasisTheoryTransport
@@ -238,6 +239,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Log:         logger,
 	}
 	solanaPriceProvider, err := createPythPriceProvider(logger, solanaRPCResolver.Network)
 	if err != nil {
@@ -266,7 +268,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		fxTransport = overrides.FXTransport
 	}
-	fxRates := fx.NewRates(fx.NewSource(fxTransport), clock.Now)
+	fxRates := fx.NewRates(logger, fx.NewSource(fxTransport), clock.Now)
 	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, fxRates, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
@@ -292,7 +294,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	captchaStore := captcha.NewChallengeStore(logger, abuseState)
 	var cardAbuseGuard *abuse.CardAbuseGuard
 	if config.CaptchaEnabled(cfg.Captcha) {
-		cardAbuseGuard = abuse.NewCardAbuseGuard(abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
+		cardAbuseGuard = abuse.NewCardAbuseGuard(logger, abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
 	}
 
 	// SEC-30: the card-testing ledger, in the abuse state.
@@ -353,7 +355,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DashboardService:    serviceInstances.DashboardService,
 		CopilotService:      serviceInstances.CopilotService,
 		AlertService:        alertService,
-		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock},
+		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
 		MoneyCharger:        moneyCharger,
 		RailCustomerService: serviceInstances.RailCustomerService,
 	}
@@ -649,11 +651,11 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService, err := idempotency.NewStore(database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
+	idempotencyService, err := idempotency.NewStore(database.Log, database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
 	if err != nil {
 		return nil, err
 	}
-	webhookClaims, err := idempotency.NewStore(database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
+	webhookClaims, err := idempotency.NewStore(database.Log, database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +686,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}
 
 	// #1099: deliveries are claimed in Postgres; webhook_events is the applied fact (#678).
-	deduplicationService, err := webhooks.NewDeduplicationService(webhookClaims, database)
+	deduplicationService, err := webhooks.NewDeduplicationService(database.Log, webhookClaims, database)
 	if err != nil {
 		return nil, err
 	}
@@ -709,7 +711,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	}
 
 	// Create purchase service for unified purchase endpoint
-	purchaseService := payment.NewPurchaseService(
+	purchaseService := payment.NewPurchaseService(database.Log,
 		subscriptionService,
 		productService,
 		priceService,

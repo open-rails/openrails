@@ -2,8 +2,6 @@ package server
 
 import (
 	"github.com/open-rails/openrails/internal/http/router"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // registerControlPlaneAuthRoutes mounts ControlPlane.AuthRoutes: the
@@ -18,9 +16,6 @@ func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	for _, route := range routes {
 		s.handle(mux, route.Pattern(), cp.AuthHandler())
 	}
-	log.WithFields(log.Fields{
-		"routes":       len(routes),
-		"registration": cp.Registration(),
-	}).Info("control plane: mounted selective AuthKit route groups")
+	s.Log.Info("control plane: mounted selective AuthKit route groups", "routes", len(routes), "registration", cp.Registration())
 	return nil
 }

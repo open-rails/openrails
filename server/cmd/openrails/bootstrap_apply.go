@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/internal/app"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -246,7 +245,7 @@ func applyStartupBootstrap(ctx context.Context, cp *controlplane.ControlPlane) e
 	if err != nil {
 		return err
 	}
-	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
+	slog.Default().InfoContext(ctx, "startup bootstrap: first run — applying AuthKit authority manifest", "file", path)
 	return applyAuthKitAuthorityManifest(ctx, cp, manifest, os.Stderr, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
 }
 

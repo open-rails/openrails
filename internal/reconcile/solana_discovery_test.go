@@ -54,7 +54,7 @@ func TestSolanaPlanDiscoveryOnBulkRead(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{PublicURL: server.URL, ReadOnly: true})
+	rpc := solanaint.NewRPCClientWithConfig(slog.Default(), solanaint.RPCClientConfig{PublicURL: server.URL, ReadOnly: true})
 	fetcher := NewSolanaFetcher(slog.Default(), rpc, func(context.Context) ([]SolanaSubscriptionRef, error) { return nil, nil })
 	fetcher.Plans = func(context.Context) ([]string, error) { return []string{first, second, first}, nil }
 

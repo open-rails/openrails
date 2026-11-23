@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -31,7 +33,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
-	log "github.com/sirupsen/logrus"
 )
 
 type RailPaymentMethodService struct {
@@ -53,6 +54,7 @@ type RailPaymentMethodService struct {
 	// CardVaults routes a card the server received through the durable
 	// nmi_card_vault provider intent (#1129); wired at runtime assembly.
 	CardVaults CardVaultExecutor
+	Log        *slog.Logger
 }
 
 type subscriptionReader interface {
@@ -170,6 +172,7 @@ func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReade
 		Config:               cfg,
 		DB:                   dbx,
 		clock:                timeutil.FirstClock(clocks...),
+		Log:                  dbx.Log,
 	}
 }
 
@@ -184,14 +187,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	var databaseDuration time.Duration
 	outcome := "failed"
 	defer func() {
-		log.WithFields(log.Fields{
-			"operation":            "payment_method_create",
-			"psp_id":               req.PSPID.String(),
-			"provider_duration_ms": providerDuration.Milliseconds(),
-			"database_duration_ms": databaseDuration.Milliseconds(),
-			"total_duration_ms":    time.Since(startedAt).Milliseconds(),
-			"outcome":              outcome,
-		}).Info("Payment method create timing")
+		s.Log.InfoContext(ctx, "Payment method create timing", "operation", "payment_method_create", "psp_id", req.PSPID.String(), "provider_duration_ms", providerDuration.Milliseconds(), "database_duration_ms", databaseDuration.Milliseconds(), "total_duration_ms", time.Since(startedAt).Milliseconds(), "outcome", outcome)
 	}()
 
 	if req.PSPID == uuid.Nil {
@@ -265,13 +261,13 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	providerDuration = time.Since(providerStartedAt)
 	if err != nil {
-		fields := log.Fields{"user_id": userID}
+		fields := []any{"user_id", userID}
 		var v5 *nmi.V5Error
 		if errors.As(err, &v5) {
-			fields["nmi_error_code"] = v5.Code
-			fields["nmi_error_message"] = v5.Message
+			fields = append(fields, "nmi_error_code", v5.Code)
+			fields = append(fields, "nmi_error_message", v5.Message)
 		}
-		log.WithError(err).WithFields(fields).Error("Failed to create vault in NMI")
+		s.Log.With(fields...).ErrorContext(ctx, "Failed to create vault in NMI", logx.Err(err))
 		var refusal *PaymentMethodError
 		if errors.As(err, &refusal) {
 			return nil, err
@@ -343,7 +339,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	databaseStartedAt := time.Now()
 	if err := s.PaymentMethodService.CreateStored(ctx, pm, charge.Mandate{Kind: charge.AgreementCardOnFile, InitialTransactionID: agreementRef}, s.now()); err != nil {
 		databaseDuration = time.Since(databaseStartedAt)
-		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store payment method locally")
+		s.Log.ErrorContext(ctx, "Failed to store payment method locally", logx.Err(err), "user_id", userID, "vault_id", nmiResponse.CustomerVaultID)
 		// Best-effort direct remote cleanup — deliberately NOT intent-routed
 		// (#674 tail): the vault was created milliseconds ago and is referenced
 		// nowhere; losing this delete leaves only an inert orphan entry at NMI.
@@ -355,7 +351,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Answer: decline.Evidence{CardBIN: nmi.BINOf(nmiResponse.Card.CardNumber), CardBrand: pm.Card.Brand, CardLast4: pm.Card.Last4}, TokenType: charge.TokenTypePSPToken})
 
 	outcome = "success"
-	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
+	s.Log.InfoContext(ctx, "Successfully created payment method", "user_id", userID, "vault_id", pm.RailCustomerRef)
 	return pm, nil
 }
 
@@ -574,7 +570,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 	}
 	factory := s.NMIClients
 	if factory == nil {
-		factory = &railresolve.NMIFactory{Config: s.Config}
+		factory = &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
 	}
 	return factory.Client(ctx, s.MerchantSecrets, mid, scope)
 }
@@ -686,7 +682,7 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	}
 	switch {
 	case out.Done:
-		log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment method")
+		s.Log.InfoContext(ctx, "Successfully deleted payment method", "vault_id", pm.RailCustomerRef)
 		return nil
 	case out.InUse:
 		return ErrPaymentMethodInUse
@@ -735,7 +731,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 
 	liveCount, err := s.countLiveSubscriptionsUsingPaymentMethod(ctx, pm)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for payment method")
+		s.Log.ErrorContext(ctx, "Failed to check subscriptions for payment method", logx.Err(err), "vault_id", pm.RailCustomerRef, "user_id", pm.CustomerID.String())
 		return false, nil, fmt.Errorf("failed to check payment method usage: %w", err)
 	}
 	if liveCount > 0 {
@@ -820,23 +816,23 @@ func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx 
 func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context, client *nmi.NMIClient, pm *models.PaymentMethod, shared bool) error {
 	if shared {
 		if err := client.DeleteCustomerBillingEntry(ctx, pm.RailCustomerRef, pm.RailMethodRef); err != nil {
-			log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "billing_id": pm.RailMethodRef}).Error("Failed to delete vault billing entry from NMI")
+			s.Log.ErrorContext(ctx, "Failed to delete vault billing entry from NMI", logx.Err(err), "vault_id", pm.RailCustomerRef, "billing_id", pm.RailMethodRef)
 			return fmt.Errorf("failed to delete payment method entry: %w", err)
 		}
 		return s.PaymentMethodService.Delete(ctx, pm.ID)
 	}
 
 	if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}); err != nil {
-		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault from NMI")
+		s.Log.ErrorContext(ctx, "Failed to delete vault from NMI", logx.Err(err), "vault_id", pm.RailCustomerRef)
 		return fmt.Errorf("failed to delete payment method: %w", err)
 	}
 
 	if err := s.PaymentMethodService.Delete(ctx, pm.ID); err != nil {
-		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to delete vault locally")
+		s.Log.ErrorContext(ctx, "Failed to delete vault locally", logx.Err(err), "vault_id", pm.RailCustomerRef)
 		return fmt.Errorf("failed to delete local vault record: %w", err)
 	}
 
-	log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment method")
+	s.Log.InfoContext(ctx, "Successfully deleted payment method", "vault_id", pm.RailCustomerRef)
 	return nil
 }
 
@@ -884,6 +880,6 @@ func (s *RailPaymentMethodService) recordVerification(ctx context.Context, userI
 		}
 	}
 	if err := attempts.Record(ctx, s.DB.Gen(ctx), a); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("user_id", userID).Error("record card verification attempt")
+		s.Log.ErrorContext(ctx, "record card verification attempt", logx.Err(err), "user_id", userID)
 	}
 }

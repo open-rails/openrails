@@ -13,7 +13,7 @@ import (
 )
 
 func (s *FulfillmentService) transactionBound(d *db.DB) *FulfillmentService {
-	out := NewFulfillmentService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
+	out := NewFulfillmentService(s.Log, catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
 	out.transactionDB = d
 	if s.SubscriptionService != nil {
 		out.SubscriptionService = subscriptions.NewSubscriptionService(d, out.PriceService, out.ProductService, nil, s.clock)

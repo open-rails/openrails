@@ -80,7 +80,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 	if refuseBlockedCardAttempt(r, payer.String()) {
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return

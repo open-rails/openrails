@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // TierChangeResponse represents the response from a tier change operation.
@@ -82,6 +82,7 @@ type PurchaseService struct {
 	// StripeEngines reads a Stripe engine payment's issuer challenge for the
 	// customer's next action.
 	StripeEngines intents.StripeEngineServiceResolver
+	Log           *slog.Logger
 }
 
 func (s *PurchaseService) SetSubscriptionLifecycleService(l *subscriptions.SubscriptionLifecycleService) {
@@ -108,7 +109,7 @@ func (s *PurchaseService) Clock() clockwork.Clock {
 }
 
 // NewPurchaseService creates a new PurchaseService
-func NewPurchaseService(
+func NewPurchaseService(logger *slog.Logger,
 	subscriptionService *subscriptions.SubscriptionService,
 	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
@@ -128,7 +129,7 @@ func NewPurchaseService(
 		PriceService:             priceService,
 		PaymentService:           paymentService,
 		EntitlementService:       entitlementService,
-		Fulfillment:              NewFulfillmentService(priceService, productService, paymentService, entitlementService, subscriptionService, clock),
+		Fulfillment:              NewFulfillmentService(logger, priceService, productService, paymentService, entitlementService, subscriptionService, clock),
 		PaymentMethodService:     paymentMethodService,
 		RailPaymentMethodService: railPMService,
 		RailCustomerService:      railCustomerService,
@@ -136,6 +137,7 @@ func NewPurchaseService(
 		clock:                    clock,
 		Config:                   cfg,
 		Rails:                    railSet,
+		Log:                      logger,
 	}
 	service.NMISaleService = NewNMISaleService(service.Fulfillment, railPMService)
 	// The scoped resolver is the only NMI client source; armed once
@@ -145,6 +147,7 @@ func NewPurchaseService(
 		Fulfillment: service.Fulfillment,
 		Rails:       railSet,
 		Config:      cfg,
+		Log:         logger,
 	}
 	if railPMService != nil {
 		service.CustodianSaleService.DB = railPMService.DB
@@ -217,13 +220,7 @@ func (s *PurchaseService) processCCBillUpgrade(
 		return nil, fmt.Errorf("failed to generate CCBill upgrade FlexForm URL: %w", err)
 	}
 
-	log.WithFields(log.Fields{
-		"user_id":              user.ID,
-		"subscription_id":      existingSub.ID,
-		"current_price_id":     existingSub.PriceID,
-		"target_price_id":      newPrice.ID,
-		"rail_subscription_id": existingSub.RailSubscriptionID,
-	}).Info("Generated CCBill upgrade FlexForm URL via purchase")
+	s.Log.InfoContext(ctx, "Generated CCBill upgrade FlexForm URL via purchase", "user_id", user.ID, "subscription_id", existingSub.ID, "current_price_id", existingSub.PriceID, "target_price_id", newPrice.ID, "rail_subscription_id", existingSub.RailSubscriptionID)
 
 	return &PurchaseResponse{
 		Status:         "redirect_required",

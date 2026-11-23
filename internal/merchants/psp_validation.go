@@ -39,7 +39,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if securityKey == "" {
 			return false, nil
 		}
-		client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
+		client, err := nmi.NewAccountClient(s.Log, id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
 		if err != nil {
 			return false, fmt.Errorf("merchants: build nmi credential probe: %w", err)
 		}
@@ -64,7 +64,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if err != nil {
 			return false, apperr.Invalidf("merchants: validate ccbill account id: %v", err)
 		}
-		client := ccbill.NewDataLinkClient(&config.CCBillConfig{
+		client := ccbill.NewDataLinkClient(s.Log, &config.CCBillConfig{
 			ClientAccNum:     clientAccNum,
 			ClientSubAcc:     clientSubAcc,
 			DataLinkUsername: username,

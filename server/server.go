@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/userinfo"
 	riverhelpers "github.com/open-rails/helpers/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -166,6 +166,7 @@ type Server struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	log       *slog.Logger
 }
 
 func init() {
@@ -206,7 +207,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	// Read once: the engine and the server log to the same logger.
 	logger := logx.New(deps.Engine.Logger)
 	deps.Engine.Logger = logger
-	s := &Server{cfg: cfg}
+	s := &Server{cfg: cfg, log: logger}
 	deps.Engine.UserInfo = customerDirectory{s}
 	eng, err := openrails.New(ctx, cfg.Engine, deps.Engine)
 	if err != nil {
@@ -375,7 +376,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	}
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
-	log.WithField("addr", ln.Addr().String()).Info("OpenRails serving")
+	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
 	var private *http.Server
 	if s.cfg.PrivateAddr != "" {
 		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.PrivateAddr)
@@ -385,7 +386,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		}
 		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 		go func() { served <- private.Serve(pln) }()
-		log.WithField("addr", pln.Addr().String()).Info("OpenRails private listener (metrics)")
+		s.log.InfoContext(ctx, "OpenRails private listener (metrics)", "addr", pln.Addr().String())
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -393,12 +394,12 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err == nil {
 		select {
 		case <-ctx.Done():
-			err = drain(s.surface.Drain, s.cfg.DrainDelay, served, hs)
+			err = drain(s.log, s.surface.Drain, s.cfg.DrainDelay, served, hs)
 		case err = <-served:
 		}
 	}
 	deadline = time.Now().Add(s.shutdownTimeout())
-	shutdown(deadline, hs, private)
+	shutdown(s.log, deadline, hs, private)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
@@ -408,7 +409,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 // drain marks the process unready and keeps serving for delay, with
 // keep-alives off so clients reconnect to another instance. A server failing
 // meanwhile ends it early.
-func drain(unready func(), delay time.Duration, served <-chan error, servers ...*http.Server) error {
+func drain(logger *slog.Logger, unready func(), delay time.Duration, served <-chan error, servers ...*http.Server) error {
 	if delay <= 0 {
 		return nil
 	}
@@ -416,7 +417,7 @@ func drain(unready func(), delay time.Duration, served <-chan error, servers ...
 	for _, hs := range servers {
 		hs.SetKeepAlivesEnabled(false)
 	}
-	log.WithField("delay", delay.String()).Info("server: draining")
+	logger.Info("server: draining", "delay", delay.String())
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -429,7 +430,7 @@ func drain(unready func(), delay time.Duration, served <-chan error, servers ...
 
 // shutdown stops the servers accepting and lets in-flight requests finish
 // by deadline, then closes whatever is left.
-func shutdown(deadline time.Time, servers ...*http.Server) {
+func shutdown(logger *slog.Logger, deadline time.Time, servers ...*http.Server) {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	for _, hs := range servers {
@@ -437,7 +438,7 @@ func shutdown(deadline time.Time, servers ...*http.Server) {
 			continue
 		}
 		if err := hs.Shutdown(ctx); err != nil {
-			log.WithError(err).Error("server: HTTP shutdown; closing the remaining connections")
+			logger.ErrorContext(ctx, "server: HTTP shutdown; closing the remaining connections", logx.Err(err))
 			_ = hs.Close()
 		}
 	}

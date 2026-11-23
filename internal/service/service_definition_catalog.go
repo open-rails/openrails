@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -525,7 +525,7 @@ func (s *Service) createPriceLinks(ctx context.Context, req billing.CreatePriceP
 		if solanaOnly {
 			return nil, fmt.Errorf("%w: it sells only on Solana, and its plan is not published: %v", ErrPriceNotSellable, err)
 		}
-		log.WithContext(ctx).WithError(err).WithField("price_key", req.Key).Warn("catalog: price is not sold on Solana; its plan is not published")
+		s.Log.WarnContext(ctx, "catalog: price is not sold on Solana; its plan is not published", logx.Err(err), "price_key", req.Key)
 		return links, nil
 	}
 	links[account.Key] = link

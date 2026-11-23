@@ -144,9 +144,9 @@ func parseProviderTime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func nmiClients(transport http.RoundTripper) *railresolve.NMIFactory {
+func nmiClients(logger *slog.Logger, transport http.RoundTripper) *railresolve.NMIFactory {
 	if transport == nil {
 		return nil
 	}
-	return &railresolve.NMIFactory{Transport: transport}
+	return &railresolve.NMIFactory{Transport: transport, Log: logger}
 }

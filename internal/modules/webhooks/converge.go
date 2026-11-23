@@ -3,10 +3,10 @@ package webhooks
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -42,7 +42,7 @@ type SubscriptionConvergeEnqueuer interface {
 // markSubscriptionDirty is the whole job of a slimmed webhook handler: attach
 // the merchant, enqueue the coalesced fetch. An unavailable enqueuer is a
 // RETRYABLE failure — the provider redelivers, nothing is lost.
-func markSubscriptionDirty(ctx context.Context, enq SubscriptionConvergeEnqueuer, rail, reference, eventType string, eventCreated int64) error {
+func markSubscriptionDirty(ctx context.Context, logger *slog.Logger, enq SubscriptionConvergeEnqueuer, rail, reference, eventType string, eventCreated int64) error {
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
 		return fmt.Errorf("mark subscription dirty: empty subscription reference")
@@ -68,8 +68,6 @@ func markSubscriptionDirty(ctx context.Context, enq SubscriptionConvergeEnqueuer
 	}); err != nil {
 		return fmt.Errorf("mark subscription dirty: enqueue converge: %w", err)
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail": rail, "subscription_reference": reference, "event_type": eventType,
-	}).Info("webhook marked subscription dirty; fetch-and-converge enqueued")
+	logger.InfoContext(ctx, "webhook marked subscription dirty; fetch-and-converge enqueued", "rail", rail, "subscription_reference", reference, "event_type", eventType)
 	return nil
 }

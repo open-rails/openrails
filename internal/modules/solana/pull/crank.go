@@ -11,7 +11,6 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -19,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -98,8 +98,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 	// Ghost-plan guard: the plan was deleted + recreated at the same PDA. The
 	// on-chain pull would fail PlanTermsMismatch; terminate this record.
 	if fingerprint != 0 && row.PlanCreatedAtFingerprint != 0 && fingerprint != row.PlanCreatedAtFingerprint {
-		log.WithContext(ctx).WithField("subscription_pda", row.SubscriptionPDA).
-			Warn("Solana cranker: plan created_at fingerprint mismatch (ghost plan); expiring")
+		h.Log.WarnContext(ctx, "Solana cranker: plan created_at fingerprint mismatch (ghost plan); expiring", "subscription_pda", row.SubscriptionPDA)
 		if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionExpired); err != nil {
 			return crankOutcome{}, err
 		}
@@ -141,25 +140,21 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 				chainAt = &at
 			}
 		}
-		llog := log.WithContext(ctx).WithError(crankErr).WithFields(log.Fields{
-			"subscription_pda": row.SubscriptionPDA,
-			"decline_code":     string(cf.Code),
-			"onchain_code":     cf.OnChainCode,
-		})
+		llog := h.Log.With(logx.Err(crankErr), "subscription_pda", row.SubscriptionPDA, "decline_code", string(cf.Code), "onchain_code", cf.OnChainCode)
 		switch cf.Category {
 		case recurring.Operational:
 			// RPC/network, the cranker wallet out of SOL gas, or a dropped
 			// transaction: retry next run, NEVER dun — a shared outage would
 			// wrongly past-due a merchant's whole book. Leave next_pull_at
 			// unchanged so it stays due.
-			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
+			llog.WarnContext(ctx, "Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankOutcome{}, crankErr
 		case recurring.AlreadyPaid:
 			if chainAt != nil && chainAt.Before(row.NextPullAt) {
 				// The chain's clock had not reached the period end: the paid
 				// period is the one recorded. Pull again once it has.
 				lag := row.NextPullAt.Sub(*chainAt)
-				llog.WithField("chain_lag", lag.String()).Warn("Solana cranker: pull reached the chain before its period end; retrying")
+				llog.WarnContext(ctx, "Solana cranker: pull reached the chain before its period end; retrying", "chain_lag", lag.String())
 				return crankOutcome{kind: crankNotDue, reason: fmt.Sprintf("the chain's clock was %s short of the period end", lag),
 					retryAt: h.now().Add(lag + solanasubs.PullMargin)}, nil
 			}
@@ -168,7 +163,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 			// agreement. Preserve uncertainty, expose it, and never invent cash
 			// or move the paid period from the current catalog/clock.
 			reason := "period already paid on-chain without a qualified accepted receipt; review the original episode"
-			llog.Warn(reason)
+			llog.WarnContext(ctx, reason)
 			sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, row.SubscriptionID)
 			if err != nil {
 				return crankOutcome{}, err
@@ -194,11 +189,11 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 				return crankOutcome{}, fmt.Errorf("solana crank: read pending plan changes: %w", err)
 			}
 			if len(changing) > 0 {
-				llog.Warn("Solana cranker: pull refused while a plan change is pending; waiting for its chain outcome")
+				llog.WarnContext(ctx, "Solana cranker: pull refused while a plan change is pending; waiting for its chain outcome")
 				return crankOutcome{kind: crankNotDue, reason: "a plan change of this subscription awaits its chain outcome",
 					retryAt: h.now().Add(pendingChangeRecheck)}, nil
 			}
-			llog.Warn("Solana cranker: terminal pull failure (canceled on-chain); cancelling subscription (no dunning)")
+			llog.WarnContext(ctx, "Solana cranker: terminal pull failure (canceled on-chain); cancelling subscription (no dunning)")
 			if err := h.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
 			}
@@ -225,7 +220,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 		default:
 			// Recoverable subscriber decline (insufficient USDC, etc.) ->
 			// dunning, on the membership's retry schedule.
-			llog.Warn("Solana cranker: recoverable pull failure; routing to dunning")
+			llog.WarnContext(ctx, "Solana cranker: recoverable pull failure; routing to dunning")
 			reason := crankErr.Error()
 			code := string(cf.Code)
 			subID := row.SubscriptionID

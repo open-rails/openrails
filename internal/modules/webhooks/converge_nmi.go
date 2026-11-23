@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"database/sql"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
@@ -109,7 +109,7 @@ func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub 
 	}
 	for _, remote := range snap.Subscriptions {
 		if err := observePrice(ctx, s.Objects, remote.PlanID, nil); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("plan", remote.PlanID).Warn("nmi converge: recording an unseen plan failed; the next read records it")
+			s.Log.WarnContext(ctx, "nmi converge: recording an unseen plan failed; the next read records it", logx.Err(err), "plan", remote.PlanID)
 		}
 	}
 
@@ -118,16 +118,7 @@ func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub 
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("nmi converge: %w", err)
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail":                 rail,
-		"rail_subscription_id": sub.RailSubscriptionID,
-		"transition":           res.Decision.Kind.String(),
-		"reason":               res.Decision.Reason,
-		"applied":              res.Applied,
-		"backfilled":           res.Backfilled,
-		"period_end":           periodEnd,
-		"fetched_transactions": fetched,
-	}).Info("nmi converge: decided from fetched truth")
+	s.Log.InfoContext(ctx, "nmi converge: decided from fetched truth", "rail", rail, "rail_subscription_id", sub.RailSubscriptionID, "transition", res.Decision.Kind.String(), "reason", res.Decision.Reason, "applied", res.Applied, "backfilled", res.Backfilled, "period_end", periodEnd, "fetched_transactions", fetched)
 
 	// Held now: a park left from before it landed is done.
 	return sub.CustomerID, closePark(ctx, s.DB, sub.RailSubscriptionID, billing.ParkConverged, now)
@@ -147,15 +138,13 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	if !found {
 		// One-time sale, order id, or a subscription NMI deleted: the purchase
 		// path and the import own those.
-		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference}).
-			Info("nmi converge: reference resolves to no local or live provider subscription; nothing to converge")
+		s.Log.InfoContext(ctx, "nmi converge: reference resolves to no local or live provider subscription; nothing to converge", "rail", rail, "subscription_reference", reference)
 		return uuid.Nil, closePark(ctx, s.DB, reference, billing.ParkGone, now)
 	}
 	if book := remote.BookID(); book != "" {
 		// An OpenRails book made it: this one (its purchase stamps it) or
 		// another sharing the gateway. Neither is adopted.
-		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference, "book": book}).
-			Info("nmi converge: unheld subscription carries a book id; an OpenRails purchase made it, nothing to adopt")
+		s.Log.InfoContext(ctx, "nmi converge: unheld subscription carries a book id; an OpenRails purchase made it, nothing to adopt", "rail", rail, "subscription_reference", reference, "book", book)
 		return uuid.Nil, nil
 	}
 	pspID, err := db.RequirePSPID(ctx)
@@ -203,8 +192,7 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	if owned, err := parking.ImportOwns(ctx, s.DB.Gen(ctx), pspID, reference); err != nil {
 		return uuid.Nil, err
 	} else if owned {
-		log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference}).
-			Info("nmi converge: unheld subscription is its PSP import's while it pulls or stages it")
+		s.Log.InfoContext(ctx, "nmi converge: unheld subscription is its PSP import's while it pulls or stages it", "rail", rail, "subscription_reference", reference)
 		return uuid.Nil, nil
 	}
 	if held, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndProductID(ctx, owners[0].String(), price.ProductID); err == nil && held != nil {
@@ -225,8 +213,7 @@ func (s *NMIConvergeService) convergeUnheld(ctx context.Context, rail, reference
 	} else if err != nil {
 		return uuid.Nil, fmt.Errorf("nmi converge: adopt %s: %w", reference, err)
 	}
-	log.WithContext(ctx).WithFields(log.Fields{"rail": rail, "subscription_reference": reference, "customer_id": owners[0]}).
-		Info("nmi converge: adopted a live subscription; converging it as held")
+	s.Log.InfoContext(ctx, "nmi converge: adopted a live subscription; converging it as held", "rail", rail, "subscription_reference", reference, "customer_id", owners[0])
 	sub, err := resolveNMISubscriptionByReference(ctx, rail, s.SubscriptionService, s.PaymentService, reference)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("nmi converge: load adopted %s: %w", reference, err)

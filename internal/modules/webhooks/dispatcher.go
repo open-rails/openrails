@@ -81,10 +81,10 @@ type WebhookDispatcher struct {
 // implementing WebhookHandler and registering it here.
 func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
-	reg.Register(StripeWebhookHandler{})
-	reg.Register(NMIWebhookHandler{})
+	reg.Register(StripeWebhookHandler{Log: d.Log})
+	reg.Register(NMIWebhookHandler{Log: d.Log})
 	reg.Register(CCBillWebhookHandler{Log: d.Log})
-	reg.Register(BasisTheoryWebhookHandler{})
+	reg.Register(BasisTheoryWebhookHandler{Log: d.Log})
 	return reg
 }
 
@@ -171,6 +171,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 		NMIResolver:                  d.NMIResolver,
 		Clock:                        d.Clock,
+		Log:                          h.Log,
 	}
 	return service.HandleNMIWebhook(ctx)
 }
@@ -216,6 +217,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ConvergeEnqueuer:     d.ConvergeEnqueuer,
 		ObserveEnqueuer:      d.ObserveEnqueuer,
 		StripePaymentState:   paymentState,
+		Log:                  h.Log,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -49,6 +49,7 @@ type Rates struct {
 	closed  bool
 	stop    context.CancelFunc
 	stopped chan struct{}
+	Log     *slog.Logger
 }
 
 type pair struct{ from, to string }
@@ -61,8 +62,8 @@ type rate struct {
 }
 
 // NewRates quotes from source's tables, judging freshness by now.
-func NewRates(source *Source, now func() time.Time) *Rates {
-	return &Rates{source: source, currencies: moneyutil.CurrencyCodes(), interval: RefreshInterval, now: now, flights: newFlights[rate](), rates: map[pair]rate{}, jumps: map[pair]rate{}}
+func NewRates(logger *slog.Logger, source *Source, now func() time.Time) *Rates {
+	return &Rates{source: source, currencies: moneyutil.CurrencyCodes(), interval: RefreshInterval, now: now, flights: newFlights[rate](), rates: map[pair]rate{}, jumps: map[pair]rate{}, Log: logger}
 }
 
 func (r *Rates) Quote(ctx context.Context, from, to string) (*Quote, error) {
@@ -166,7 +167,7 @@ func (r *Rates) refreshEvery(ctx context.Context, stopped chan<- struct{}) {
 			return
 		case <-tick.C:
 			if err := r.Refresh(ctx); err != nil && ctx.Err() == nil {
-				log.WithError(err).Warn("fx: refresh failed; held rates are quoted until 48 hours after publication")
+				r.Log.WarnContext(ctx, "fx: refresh failed; held rates are quoted until 48 hours after publication", logx.Err(err))
 			}
 		}
 	}

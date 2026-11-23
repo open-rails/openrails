@@ -64,7 +64,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveBasisTheoryNMICharge(ctx conte
 	if err != nil {
 		return nil, err
 	}
-	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}).WithSource(nmiproxy.Source{TokenID: token.ID}), nil
+	return nmiproxy.New(b.Log, bt, nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}).WithSource(nmiproxy.Source{TokenID: token.ID}), nil
 }
 
 // platformRenewalAccount selects an account for a new attempt, not a retry of

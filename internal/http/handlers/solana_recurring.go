@@ -154,7 +154,7 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 			return nil, solanaFailure(r.Log, err, "resolve token decimals")
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
-			ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
+			ctx, r.Log, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
 			return nil, solanaFailure(r.Log, err, "convert the first charge")

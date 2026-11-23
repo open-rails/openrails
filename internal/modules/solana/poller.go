@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -10,13 +11,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -76,10 +77,11 @@ type SolanaPayPoller struct {
 	mu      sync.Mutex
 	running bool
 	stopCh  chan struct{}
+	Log     *slog.Logger
 }
 
 func NewSolanaPayPoller(database *db.DB, settler OrderSettler, clocks ...clockwork.Clock) *SolanaPayPoller {
-	return &SolanaPayPoller{db: database, settler: settler, rpcBuilder: &MerchantRPCBuilder{}, clock: timeutil.FirstClock(clocks...)}
+	return &SolanaPayPoller{db: database, settler: settler, rpcBuilder: &MerchantRPCBuilder{Log: database.Log}, clock: timeutil.FirstClock(clocks...), Log: database.Log}
 }
 
 // SetMerchantRPC installs the store-aware per-merchant RPC builder.
@@ -120,7 +122,7 @@ func (p *SolanaPayPoller) Start(ctx context.Context) {
 	go p.listen(ctx, wake)
 	for ctx.Err() == nil {
 		if err := p.PollOnce(ctx); err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("Solana Pay poll failed")
+			p.Log.WarnContext(ctx, "Solana Pay poll failed", logx.Err(err))
 		}
 		var timer clockwork.Timer
 		var due <-chan time.Time
@@ -148,7 +150,7 @@ func (p *SolanaPayPoller) untilNext(ctx context.Context) (time.Duration, bool) {
 	}
 	if err != nil {
 		if ctx.Err() == nil {
-			log.WithError(err).Warn("Solana Pay: next poll unread; reading again later")
+			p.Log.WarnContext(ctx, "Solana Pay: next poll unread; reading again later", logx.Err(err))
 		}
 		return errorRecheck, true
 	}
@@ -187,7 +189,7 @@ func (p *SolanaPayPoller) listen(ctx context.Context, wake chan<- struct{}) {
 			}
 		}()
 		if err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("Solana Pay: wake notifications interrupted; reconnecting")
+			p.Log.WarnContext(ctx, "Solana Pay: wake notifications interrupted; reconnecting", logx.Err(err))
 			select {
 			case <-ctx.Done():
 			case <-time.After(time.Second):
@@ -230,7 +232,7 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 				p.release(mctx, group)
 				continue
 			}
-			log.WithError(err).WithField("merchant_id", mid.String()).Warn("Solana Pay merchant pass failed")
+			p.Log.WarnContext(ctx, "Solana Pay merchant pass failed", logx.Err(err), "merchant_id", mid.String())
 		}
 	}
 	return ctx.Err()
@@ -245,7 +247,7 @@ func (p *SolanaPayPoller) release(ctx context.Context, refs []gen.BillingSolanaP
 	now, q := p.clock.Now(), p.db.GenDirectory()
 	for _, r := range refs {
 		if err := q.ScheduleSolanaPayPoll(ctx, gen.ScheduleSolanaPayPollParams{MerchantID: r.MerchantID, Reference: r.Reference, NextPollAt: now}); err != nil {
-			log.WithError(err).WithField("reference", r.Reference).Warn("Solana Pay: a claimed reference waits out its lease")
+			p.Log.WarnContext(ctx, "Solana Pay: a claimed reference waits out its lease", logx.Err(err), "reference", r.Reference)
 		}
 	}
 }
@@ -263,11 +265,11 @@ func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.Merchant
 			return
 		}
 		if err != nil {
-			log.WithError(err).WithFields(log.Fields{"merchant_id": mid.String(), "reference": r.Reference}).Warn("Solana Pay reference check failed")
+			p.Log.WarnContext(ctx, "Solana Pay reference check failed", logx.Err(err), "merchant_id", mid.String(), "reference", r.Reference)
 			next = errorRecheck
 		}
 		if err := ledger.Schedule(ctx, r.Reference, p.clock.Now().Add(next)); err != nil {
-			log.WithError(err).WithField("reference", r.Reference).Warn("Solana Pay reschedule failed")
+			p.Log.WarnContext(ctx, "Solana Pay reschedule failed", logx.Err(err), "reference", r.Reference)
 		}
 	}
 }
@@ -467,8 +469,7 @@ func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RP
 		return err
 	}
 	if receipt.ReviewReason != "" {
-		log.WithFields(log.Fields{"reference": ref.Reference, "signature": signature, "disposition": receipt.Disposition, "reason": receipt.ReviewReason}).
-			Warn("Solana transfer recorded for review")
+		p.Log.WarnContext(ctx, "Solana transfer recorded for review", "reference", ref.Reference, "signature", signature, "disposition", receipt.Disposition, "reason", receipt.ReviewReason)
 	}
 	return nil
 }
@@ -488,7 +489,7 @@ func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, 
 			return true, nil
 		}
 		if err != nil {
-			log.WithError(err).WithFields(log.Fields{"reference": ref.Reference, "signature": sig.Signature}).Warn("Solana session mirror failed")
+			p.Log.WarnContext(ctx, "Solana session mirror failed", logx.Err(err), "reference", ref.Reference, "signature", sig.Signature)
 			continue
 		}
 		_, err = ledger.Confirm(ctx, ref.Reference, sig.Signature, p.clock.Now())

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -23,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 type purchaseSubscriptionAccess interface {
@@ -40,9 +41,10 @@ type FulfillmentService struct {
 	EntitlementService  *entitlements.EntitlementService
 	SubscriptionService purchaseSubscriptionAccess
 	clock               clockwork.Clock
+	Log                 *slog.Logger
 }
 
-func NewFulfillmentService(
+func NewFulfillmentService(logger *slog.Logger,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	paymentService *payments.PaymentService,
@@ -62,6 +64,7 @@ func NewFulfillmentService(
 		EntitlementService:  entitlementService,
 		SubscriptionService: subscriptionService,
 		clock:               timeutil.FirstClock(clocks...),
+		Log:                 logger,
 	}
 }
 
@@ -156,12 +159,7 @@ func (s *FulfillmentService) GetUserProductCoverage(ctx context.Context, userID 
 				return coverage, nil
 			}
 			if !sub.CurrentPeriodEndsAt.After(now) {
-				log.WithFields(log.Fields{
-					"subscription_id": sub.ID,
-					"user_id":         userID,
-					"product_id":      product.ID,
-					"period_end":      sub.CurrentPeriodEndsAt,
-				}).Warn("ignoring stale subscription coverage that has already ended")
+				s.Log.WarnContext(ctx, "ignoring stale subscription coverage that has already ended", "subscription_id", sub.ID, "user_id", userID, "product_id", product.ID, "period_end", sub.CurrentPeriodEndsAt)
 			} else {
 				coverage.HasCoverage = true
 				coverage.SourceType = "subscription"
@@ -249,7 +247,7 @@ func (s *FulfillmentService) RegisterPurchase(ctx context.Context, req *payments
 
 	eligibility, err := s.CheckPurchaseEligibility(ctx, req.UserID, req.PriceID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": req.UserID, "price_id": req.PriceID}).Warn("failed to check eligibility during RegisterPurchase")
+		s.Log.WarnContext(ctx, "failed to check eligibility during RegisterPurchase", logx.Err(err), "user_id", req.UserID, "price_id", req.PriceID)
 		eligibility = &EligibilityResult{Status: EligibilityAllowed}
 	}
 
@@ -419,16 +417,13 @@ func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.Re
 		if err := s.grantPurchasedCredits(ctx, existingPayment, product.ID); err != nil {
 			return nil, err
 		}
-		log.WithFields(log.Fields{
-			"payment_id": existingPayment.ID, "user_id": req.UserID, "price_id": req.PriceID,
-			"rail": req.Rail, "transaction_id": req.TransactionID,
-		}).Info("purchase already registered; repaired access if needed")
+		s.Log.InfoContext(ctx, "purchase already registered; repaired access if needed", "payment_id", existingPayment.ID, "user_id", req.UserID, "price_id", req.PriceID, "rail", req.Rail, "transaction_id", req.TransactionID)
 		return &payments.RegisterPurchaseResponse{PaymentID: existingPayment.ID, Entitlements: nonNilKeys(product.Entitlements), Eligibility: string(eligibility.Status)}, nil
 	}
 
 	sourceID := paymentID
 	if req.SubscriptionID != nil {
-		log.WithFields(log.Fields{"payment_id": paymentID, "user_id": req.UserID, "price_id": req.PriceID, "subscription_id": req.SubscriptionID}).Info("registered subscription payment")
+		s.Log.InfoContext(ctx, "registered subscription payment", "payment_id", paymentID, "user_id", req.UserID, "price_id", req.PriceID, "subscription_id", req.SubscriptionID)
 		sourceID = *req.SubscriptionID
 	}
 
@@ -440,7 +435,7 @@ func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.Re
 		}
 	default:
 		if err := s.grantPurchaseAccess(ctx, req.UserID, product.ID, paymentID, sourceID, coverage, req.SubscriptionID != nil, price.AccessDurationHours, acceptedAt); err != nil {
-			log.WithError(err).WithField("payment_id", sourceID).Error("failed to grant access after payment")
+			s.Log.ErrorContext(ctx, "failed to grant access after payment", logx.Err(err), "payment_id", sourceID)
 			return nil, fmt.Errorf("failed to grant access after payment: %w", err)
 		}
 	}
@@ -457,11 +452,7 @@ func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.Re
 		delayedStart = coverage.EndDate
 	}
 
-	log.WithFields(log.Fields{
-		"payment_id": paymentID, "user_id": req.UserID, "price_id": req.PriceID, "product_id": product.ID,
-		"rail": req.Rail, "transaction_id": req.TransactionID,
-		"delayed_start": delayedStart, "eligibility": eligibility.Status,
-	}).Info("registered purchase")
+	s.Log.InfoContext(ctx, "registered purchase", "payment_id", paymentID, "user_id", req.UserID, "price_id", req.PriceID, "product_id", product.ID, "rail", req.Rail, "transaction_id", req.TransactionID, "delayed_start", delayedStart, "eligibility", eligibility.Status)
 
 	return &payments.RegisterPurchaseResponse{PaymentID: paymentID, Entitlements: nonNilKeys(product.Entitlements), DelayedStart: delayedStart, Eligibility: string(eligibility.Status)}, nil
 }
@@ -500,7 +491,7 @@ func (s *FulfillmentService) grantPurchaseAccess(ctx context.Context, userID str
 		params.Indefinite = true
 	}
 	if _, err := s.EntitlementService.PushAccess(ctx, params); err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": userID, "product_id": productID, "payment_id": paymentID}).Error("failed to grant purchase access")
+		s.Log.ErrorContext(ctx, "failed to grant purchase access", logx.Err(err), "user_id", userID, "product_id", productID, "payment_id", paymentID)
 		return err
 	}
 	return nil

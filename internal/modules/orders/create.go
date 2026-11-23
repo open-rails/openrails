@@ -18,13 +18,13 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // Preview prices lines for customer without writing.
@@ -593,7 +593,7 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 	})
 	if err == nil && awaiting != nil && s.Abandon != nil {
 		if err := s.Abandon(ctx, *awaiting); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("order_id", id).Warn("closed order's challenged payment is closed by its verifier later")
+			s.Log.WarnContext(ctx, "closed order's challenged payment is closed by its verifier later", logx.Err(err), "order_id", id)
 		}
 	}
 	if err != nil {

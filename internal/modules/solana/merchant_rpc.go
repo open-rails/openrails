@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -27,6 +28,7 @@ type MerchantRPCBuilder struct {
 	// Endpoint replaces the network's public endpoint: a sandbox run's
 	// loopback node (provider_sandbox.solana_rpc_url).
 	Endpoint string
+	Log      *slog.Logger
 }
 
 func (b *MerchantRPCBuilder) merchants() *merchants.Service {
@@ -62,7 +64,7 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 	if err != nil {
 		return nil, fmt.Errorf("solana: merchant %s rpc_url: %w", mid.String(), err)
 	}
-	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
+	return solanarpc.NewRPCClientWithConfig(b.Log, solanarpc.RPCClientConfig{
 		Network:   scope.Environment,
 		URL:       rpcURL,
 		PublicURL: b.Endpoint,
@@ -88,7 +90,7 @@ func (b *MerchantRPCBuilder) ResolvePSP(ctx context.Context, mid billing.Merchan
 	if err != nil {
 		return nil, scope.Environment, err
 	}
-	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
+	return solanarpc.NewRPCClientWithConfig(b.Log, solanarpc.RPCClientConfig{
 		Network: scope.Environment, URL: rpcURL, PublicURL: b.Endpoint,
 		ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config),
 	}), scope.Environment, nil

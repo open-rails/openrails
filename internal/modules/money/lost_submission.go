@@ -10,9 +10,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	log "github.com/sirupsen/logrus"
 )
 
 // FindingSubmissionUnresolved is a submitted engine charge the provider's
@@ -114,7 +114,7 @@ func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.B
 			MerchantID: in.MerchantID, FindingType: FindingSubmissionUnresolved, SubjectKey: in.ID.String(),
 			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("operation_id", in.ID).Error("engine collection: could not record the unresolved-submission finding")
+			h.Log.ErrorContext(ctx, "engine collection: could not record the unresolved-submission finding", logx.Err(err), "operation_id", in.ID)
 		}
 	}
 	return intents.Ambiguous(reason)

@@ -354,7 +354,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 	if !ok {
 		return billing.Subscription{}, false
 	}
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return billing.Subscription{}, false

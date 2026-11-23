@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // registerUserRoutesAt mounts the buyer-facing purchase/catalog surface —
@@ -74,7 +73,7 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	req := httprequest.New(s.Log, w, r, nil)
 	if err != nil {
-		log.WithError(err).Warn("not ready")
+		s.Log.WarnContext(ctx, "not ready", logx.Err(err))
 		req.ErrorCode(billing.CodeServiceUnavailable, "not ready")
 		return
 	}

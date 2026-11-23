@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"html"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
 )
@@ -84,7 +83,7 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 // against path, so a request outside it is a mount mistake, answered 500 and
 // logged. Without a build
 // every request answers 503 naming the build step.
-func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
+func Handler(logger *slog.Logger, path string, cfg Config, assets fs.FS) (http.Handler, error) {
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
@@ -122,7 +121,7 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 		}
 		rel, ok := strings.CutPrefix(r.URL.Path, path+"/")
 		if !ok {
-			log.WithFields(log.Fields{"request_path": r.URL.Path, "console_path": path}).Error("admin console: request is outside its configured path; mount it on the root router without stripping the prefix")
+			logger.ErrorContext(r.Context(), "admin console: request is outside its configured path; mount it on the root router without stripping the prefix", "request_path", r.URL.Path, "console_path", path)
 			writeError(w, http.StatusInternalServerError, "admin console is mounted outside its configured path")
 			return
 		}

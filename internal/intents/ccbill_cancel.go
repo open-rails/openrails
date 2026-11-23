@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -66,10 +67,11 @@ type CCBillCancelHandler struct {
 	DataLinkBaseURL string
 	Clock           clockwork.Clock
 	Policy          BackoffPolicy
+	Log             *slog.Logger
 }
 
 func NewCCBillCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *CCBillCancelHandler {
-	return &CCBillCancelHandler{DB: d, Config: cfg, Rails: rails, Clock: clock, Policy: DefaultBackoff}
+	return &CCBillCancelHandler{DB: d, Config: cfg, Rails: rails, Clock: clock, Policy: DefaultBackoff, Log: d.Log}
 }
 
 func (h *CCBillCancelHandler) Type() string { return TypeCCBillCancelSubscription }
@@ -94,7 +96,7 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 }
 
 func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	client, err := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	client, err := ccbillDataLinkForMerchant(ctx, h.Log, h.Config, h.Rails, h.DataLinkBaseURL)
 	if err != nil {
 		return parkedBeforeEffect("ccbill rail not armable (fail closed): " + err.Error())
 	}
@@ -163,7 +165,7 @@ func (h *CCBillCancelHandler) stopped(ctx context.Context, intent gen.BillingPro
 // cancel (whenever it happened) is done; still-rebilling means it definitely
 // has not happened and the executor may retry.
 func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	client, cerr := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
+	client, cerr := ccbillDataLinkForMerchant(ctx, h.Log, h.Config, h.Rails, h.DataLinkBaseURL)
 	if cerr != nil {
 		return Ambiguous("ccbill rail not armable; cannot verify: " + cerr.Error())
 	}

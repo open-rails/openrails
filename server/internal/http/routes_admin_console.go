@@ -48,7 +48,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if cfg.LocalSignIn && s.resource != "" {
 		cfg.Exchange = &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: controlplane.ConsoleClientID, Resource: s.resource, Scope: billing.ScopeMerchant}
 	}
-	console, err := adminconsole.Handler(path, cfg, s.consoleAssets)
+	console, err := adminconsole.Handler(s.Log, path, cfg, s.consoleAssets)
 	if err != nil {
 		return err
 	}

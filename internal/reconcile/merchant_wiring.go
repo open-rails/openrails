@@ -248,7 +248,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config}
+	factory := &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}
@@ -279,7 +279,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 	if !ok {
 		return
 	}
-	dl := ccbill.NewDataLinkClient(&config.CCBillConfig{
+	dl := ccbill.NewDataLinkClient(b.Log, &config.CCBillConfig{
 		ClientAccNum:     strings.TrimSpace(acc),
 		ClientSubAcc:     strings.TrimSpace(sub),
 		DataLinkUsername: username,
@@ -323,7 +323,7 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 	}
 	// A sandbox run's loopback RPC replaces the public one here as it does
 	// for the runtime's own Solana clients (hermetic CI never reaches devnet).
-	rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
+	rpc := solanaint.NewRPCClientWithConfig(b.Log, solanaint.RPCClientConfig{
 		Network:   scope.Environment,
 		URL:       rpcURL,
 		PublicURL: config.SandboxSolanaRPCURL(b.Config),

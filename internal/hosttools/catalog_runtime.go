@@ -29,7 +29,7 @@ func catalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyO
 		if opts.App.Runtime == nil {
 			return nil, nil, nil, fmt.Errorf("catalog runtime is not initialized")
 		}
-		svc, err := service.New(opts.App.Runtime)
+		svc, err := service.New(logger, opts.App.Runtime)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -80,7 +80,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	rt.Merchants, rt.MerchantConfig = opened.Service, opened.Service.Config()
 	rt.Merchants.StripeClients = rt.StripeClients
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
-	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg)}
+	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg), Log: logger}
 	// Catalog application publishes recurring plans with the deployment's
 	// first cranker only when catalog provider writes are allowed; otherwise
 	// it can resolve the crankers but never sign. It never builds a
@@ -97,7 +97,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	if err := rt.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return fail(err)
 	}
-	svc, err := service.New(rt)
+	svc, err := service.New(logger, rt)
 	if err != nil {
 		return fail(err)
 	}

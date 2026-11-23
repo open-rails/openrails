@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +93,7 @@ type Observer struct {
 	// Stripe builds write-blocked Stripe clients.
 	Stripe *stripeapi.Factory
 	Clock  clockwork.Clock
+	Log    *slog.Logger
 }
 
 // Now is the observer's clock. A caller takes it before reading the provider
@@ -134,7 +136,7 @@ func (o *Observer) Reader(ctx context.Context, psp merchants.PSPScope) (Reader, 
 		if key == "" {
 			return nil, errors.New("secret secret_key is empty")
 		}
-		return newStripeReader(key, o.Stripe.ReadOnlyClient(30*time.Second)), nil
+		return newStripeReader(o.Log, key, o.Stripe.ReadOnlyClient(30*time.Second)), nil
 	}
 	return nil, ErrNoCatalog
 }

@@ -59,7 +59,7 @@ func (r *Runtime) ArmSolanaRecurringServices(transit solanaint.TransitClient) {
 	if r.OrderAttemptService == nil {
 		return
 	}
-	prepare := recurring.NewPrepareSubscribeService(submitter, chainReader, tokens)
+	prepare := recurring.NewPrepareSubscribeService(r.Log, submitter, chainReader, tokens)
 	r.OrderAttemptService.SetSolanaRecurring(prepare, enroll)
 }
 

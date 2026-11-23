@@ -3,18 +3,19 @@ package payment
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -37,6 +38,7 @@ type CustodianSaleService struct {
 	Fulfillment          *FulfillmentService
 	Rails                railresolve.Source
 	Config               *config.Config
+	Log                  *slog.Logger
 }
 
 // custodialPSP is the resolved arrangement one custodian sale charges through:
@@ -84,7 +86,7 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config}
+	return &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
 }
 
 func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
@@ -112,7 +114,7 @@ func (s *CustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Charger, er
 	if err != nil {
 		return nil, err
 	}
-	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: cfg.GatewaySecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}), nil
+	return nmiproxy.New(s.Log, bt, nmiproxy.GatewayConfig{SecurityKey: cfg.GatewaySecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}), nil
 }
 
 // basisTheory is the Basis Theory custody of the NMI PSP psp: its proxy
@@ -147,8 +149,7 @@ func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *ba
 		IdempotencyKey: "btnt:" + orderID,
 	})
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("bt_token_id", tokenID).
-			Warn("custodian sale: network token provisioning failed; instrument stays pan_proxy (never load-bearing)")
+		s.Log.WarnContext(ctx, "custodian sale: network token provisioning failed; instrument stays pan_proxy (never load-bearing)", logx.Err(err), "bt_token_id", tokenID)
 		return
 	}
 	if s.DB == nil {
@@ -162,7 +163,7 @@ func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *ba
 		return err
 	})
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("custodian sale: failed to persist network token on instrument")
+		s.Log.WarnContext(ctx, "custodian sale: failed to persist network token on instrument", logx.Err(err))
 	}
 }
 

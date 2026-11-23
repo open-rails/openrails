@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/booktag"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -32,7 +34,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 type stripePurchaseRegistrar interface {
@@ -62,6 +63,7 @@ type StripeWebhookService struct {
 	// ObserveEnqueuer queues the coalesced read of a catalog object a
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
+	Log             *slog.Logger
 }
 
 func (s *StripeWebhookService) now() time.Time {
@@ -269,12 +271,7 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 	// API version is pinned in the Stripe dashboard. Warn (don't reject: the
 	// parsers tolerate adjacent shapes) when it drifts from stripeapi.APIVersion.
 	if v := strings.TrimSpace(evt.APIVersion); v != "" && v != stripeapi.APIVersion {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"event_id":           eventID,
-			"event_type":         eventType,
-			"event_api_version":  v,
-			"pinned_api_version": stripeapi.APIVersion,
-		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
+		s.Log.WarnContext(ctx, "stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match", "event_id", eventID, "event_type", eventType, "event_api_version", v, "pinned_api_version", stripeapi.APIVersion)
 	}
 
 	if s.DeduplicationService != nil {
@@ -371,7 +368,7 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	case "price.created", "price.updated", "price.deleted":
 		return s.markCatalogObjectDirty(ctx, eventType, "price", obj)
 	default:
-		log.WithField("event_type", eventType).Info("stripe webhook ignored (not handled)")
+		s.Log.InfoContext(ctx, "stripe webhook ignored (not handled)", "event_type", eventType)
 		return nil
 	}
 }
@@ -386,12 +383,10 @@ func (s *StripeWebhookService) markDirtyFromInvoice(ctx context.Context, eventTy
 	}
 	railSubID := inv.railSubscriptionID()
 	if railSubID == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"event_type": eventType, "invoice_id": strings.TrimSpace(inv.ID),
-		}).Info("stripe invoice event without subscription id; nothing to converge")
+		s.Log.InfoContext(ctx, "stripe invoice event without subscription id; nothing to converge", "event_type", eventType, "invoice_id", strings.TrimSpace(inv.ID))
 		return nil
 	}
-	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, string(models.RailStripe), railSubID, eventType, evtCreated)
+	return markSubscriptionDirty(ctx, s.Log, s.ConvergeEnqueuer, string(models.RailStripe), railSubID, eventType, evtCreated)
 }
 
 // markDirtyFromSubscription extracts the subscription id from a
@@ -406,7 +401,7 @@ func (s *StripeWebhookService) markDirtyFromSubscription(ctx context.Context, ev
 	if strings.TrimSpace(data.ID) == "" {
 		return nil
 	}
-	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, string(models.RailStripe), data.ID, eventType, evtCreated)
+	return markSubscriptionDirty(ctx, s.Log, s.ConvergeEnqueuer, string(models.RailStripe), data.ID, eventType, evtCreated)
 }
 
 // handleChargeSucceeded snapshots the charged card onto the matching payment
@@ -631,8 +626,7 @@ func (s *StripeWebhookService) convergeStripeCustomerPaymentState(ctx context.Co
 		customerID,
 	)
 	if errors.Is(err, payments.ErrStripeObjectNotFound) {
-		log.WithContext(ctx).WithField("stripe_customer_id", customerID).
-			Info("stripe payment-method reconciliation skipped unknown customer")
+		s.Log.InfoContext(ctx, "stripe payment-method reconciliation skipped unknown customer", "stripe_customer_id", customerID)
 		return nil
 	}
 	if err != nil {
@@ -771,7 +765,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 	// Its subscription may have converged before the customer was linked.
 	if subscription := strings.TrimSpace(sess.Subscription); subscription != "" {
-		if err := markSubscriptionDirty(ctx, s.ConvergeEnqueuer, string(models.RailStripe), subscription, "checkout.session.completed", 0); err != nil {
+		if err := markSubscriptionDirty(ctx, s.Log, s.ConvergeEnqueuer, string(models.RailStripe), subscription, "checkout.session.completed", 0); err != nil {
 			return err
 		}
 	}
@@ -781,11 +775,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	paymentStatus := strings.TrimSpace(sess.PaymentStatus)
 	paymentSettled := paymentStatus == "paid" || (sess.AmountTotal == 0 && paymentStatus == "no_payment_required")
 	if !paymentSettled || strings.TrimSpace(sess.Status) != "complete" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"checkout_session_id": sess.ID,
-			"status":              sess.Status,
-			"payment_status":      sess.PaymentStatus,
-		}).Info("Stripe checkout session not paid; waiting for async payment success")
+		s.Log.InfoContext(ctx, "Stripe checkout session not paid; waiting for async payment success", "checkout_session_id", sess.ID, "status", sess.Status, "payment_status", sess.PaymentStatus)
 		return nil
 	}
 	if orderPayment(sess) {
@@ -878,10 +868,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		return fmt.Errorf("payment service is required for stripe refund")
 	}
 	if !stripeRefundSucceeded(refund.Status) {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"refund_id": refund.ID,
-			"status":    refund.Status,
-		}).Info("Stripe refund is not succeeded; skipping ledger and entitlement changes")
+		s.Log.InfoContext(ctx, "Stripe refund is not succeeded; skipping ledger and entitlement changes", "refund_id", refund.ID, "status", refund.Status)
 		return nil
 	}
 	refundID := strings.TrimSpace(refund.ID)
@@ -903,7 +890,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 	if original == nil {
 		var err error
 		original, err = s.lookupStripeOriginalPayment(ctx, refund.Charge, refund.PaymentIntent)
-		if errors.Is(err, errStripeOriginalUnknown) && quietUnknownObject(ctx, s.DB, refund.Metadata[booktag.StripeKey], refundID) {
+		if errors.Is(err, errStripeOriginalUnknown) && quietUnknownObject(ctx, s.Log, s.DB, refund.Metadata[booktag.StripeKey], refundID) {
 			return nil
 		}
 		if err != nil {
@@ -932,15 +919,11 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	if won, err := s.stripeDisputeAlreadyWon(ctx, dispute.ID); err != nil {
 		return err
 	} else if won {
-		log.WithContext(ctx).WithField("dispute_id", dispute.ID).Info("Stripe dispute already won; ignoring late dispute notice")
+		s.Log.InfoContext(ctx, "Stripe dispute already won; ignoring late dispute notice", "dispute_id", dispute.ID)
 		return nil
 	}
 	if !stripeDisputeShouldReverse(eventType, dispute.Status) {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"dispute_id": dispute.ID,
-			"event_type": eventType,
-			"status":     dispute.Status,
-		}).Info("Stripe dispute does not require reversal; skipping ledger and entitlement changes")
+		s.Log.InfoContext(ctx, "Stripe dispute does not require reversal; skipping ledger and entitlement changes", "dispute_id", dispute.ID, "event_type", eventType, "status", dispute.Status)
 		return nil
 	}
 	if s.PaymentService == nil {
@@ -971,10 +954,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, int64(moneyutil.CentsToMicros(moneyutil.Cents(dispute.Amount))), payments.ReversalChargeback); err != nil {
 			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
-			log.WithContext(ctx).WithError(ledgerErr).WithFields(log.Fields{
-				"dispute_id":          disputeID,
-				"original_payment_id": original.ID,
-			}).Error("Failed to record Stripe dispute reversal; continuing entitlement revocation")
+			s.Log.ErrorContext(ctx, "Failed to record Stripe dispute reversal; continuing entitlement revocation", logx.Err(ledgerErr), "dispute_id", disputeID, "original_payment_id", original.ID)
 		}
 	}
 	if s.SubscriptionLifecycleService != nil && s.DB != nil {
@@ -1096,10 +1076,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 		}
 	}
 	if original.SubscriptionID == nil && s.DB != nil {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"dispute_id":          disputeID,
-			"original_payment_id": original.ID,
-		}).Warn("Stripe dispute was won; nonrecurring access restoration requires manual review")
+		s.Log.WarnContext(ctx, "Stripe dispute was won; nonrecurring access restoration requires manual review", "dispute_id", disputeID, "original_payment_id", original.ID)
 	}
 	return nil
 }
@@ -1125,8 +1102,7 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	// other chargeback cancellation stays terminal.
 	if sub.CancelType == nil || *sub.CancelType != models.CancelTypeChargeback || sub.CancelFeedback == nil ||
 		!strings.HasPrefix(*sub.CancelFeedback, "STRIPE DISPUTE "+disputeID+":") {
-		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "dispute_id": disputeID}).
-			Info("Stripe dispute won; subscription was not canceled by this dispute and stays canceled")
+		s.Log.InfoContext(ctx, "Stripe dispute won; subscription was not canceled by this dispute and stays canceled", "subscription_id", sub.ID, "dispute_id", disputeID)
 		return nil
 	}
 	now := s.now().UTC()
@@ -1150,10 +1126,7 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		}
 	}
 	if !paidThrough.After(now) {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": sub.ID,
-			"payment_id":      original.ID,
-		}).Warn("Stripe dispute was won but no future paid-through date exists; subscription restoration requires manual review")
+		s.Log.WarnContext(ctx, "Stripe dispute was won but no future paid-through date exists; subscription restoration requires manual review", "subscription_id", sub.ID, "payment_id", original.ID)
 		return nil
 	}
 	_, err = s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{

@@ -12,8 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/http/router"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -281,7 +279,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		return middleware.WithRoutePath(entry.Path)(s.wrapHandler(entry.Handler, func(*http.Request) bool { return entry.Browser }))
 	})
 
-	log.Info("Billing service initialized successfully")
+	logger.Info("Billing service initialized successfully")
 	return s, nil
 }
 

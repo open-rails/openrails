@@ -194,7 +194,7 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 		pass.psp = psp.ID
 		publication := w.Merchants.StripeWebhookPublication(mid, psp.AccountID)
 		verdict := gate.CheckMerchant(ctx, mid.UUID())
-		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
+		res, err := catalog.ReconcileManagedStripeWebhook(ctx, w.Log, catalog.ManagedStripeWebhookParams{
 			Publication:         publication,
 			StripeClients:       w.StripeClients,
 			Config:              w.Config,

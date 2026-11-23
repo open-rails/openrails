@@ -154,7 +154,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		e.admit(m, id, false)
 	}
 	e.publishDeclared()
-	if e.svc, err = service.New(rt); err != nil {
+	if e.svc, err = service.New(logger, rt); err != nil {
 		return fail(err)
 	}
 	e.serveCheckout(cfg, declarations, deps.CheckoutAssets)

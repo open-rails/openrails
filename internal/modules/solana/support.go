@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"strconv"
@@ -12,11 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // stablecoinPegTolerance is the band around $1.00 within which a stablecoin's peg
@@ -28,20 +29,19 @@ const stablecoinPegTolerance = 0.01
 // holds. pegged=true: the caller converts by pure integer arithmetic. pegged=false
 // is the depeg failsafe: the live price is returned so the merchant still nets
 // the USD amount. A nil provider or a bad feed holds the peg.
-func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenPriceProvider) (priceUSD float64, pegged bool) {
+func stablecoinPriceUSD(ctx context.Context, logger *slog.Logger, symbol string, priceProvider TokenPriceProvider) (priceUSD float64, pegged bool) {
 	if priceProvider == nil {
 		return 1.0, true
 	}
 	p, err := priceProvider.PriceUSD(ctx, symbol)
 	if err != nil || p <= 0 {
-		log.WithField("token", symbol).WithError(err).Warn("stablecoin price feed unavailable; using $1.00 peg")
+		logger.WarnContext(ctx, "stablecoin price feed unavailable; using $1.00 peg", "token", symbol, logx.Err(err))
 		return 1.0, true
 	}
 	if math.Abs(p-1.0) <= stablecoinPegTolerance {
 		return 1.0, true
 	}
-	log.WithFields(log.Fields{"token": symbol, "price_usd": p}).
-		Warn("stablecoin depeg beyond tolerance; using live price (failsafe)")
+	logger.WarnContext(ctx, "stablecoin depeg beyond tolerance; using live price (failsafe)", "token", symbol, "price_usd", p)
 	return p, false
 }
 
@@ -141,14 +141,14 @@ func nativeToBaseUnitsAtRate(amount int64, nativeDecimals int, symbol string, de
 // $1-pegged token at the mint's on-chain decimals. At the peg it is an exact
 // integer rescale; the depeg failsafe rounds UP so a fractional base unit never
 // under-charges the merchant.
-func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micros, symbol string, decimals int, priceProvider TokenPriceProvider) (uint64, error) {
+func FiatMicrosToStablecoinBaseUnits(ctx context.Context, logger *slog.Logger, micros moneyutil.Micros, symbol string, decimals int, priceProvider TokenPriceProvider) (uint64, error) {
 	if err := config.ValidateTokenDecimals(symbol, decimals); err != nil {
 		return 0, err
 	}
 	if micros <= 0 {
 		return 0, nil
 	}
-	priceUSD, pegged := stablecoinPriceUSD(ctx, symbol, priceProvider)
+	priceUSD, pegged := stablecoinPriceUSD(ctx, logger, symbol, priceProvider)
 	if pegged {
 		return FiatMicrosToBaseUnitsAtPeg(micros, symbol, decimals)
 	}
@@ -208,7 +208,7 @@ type TokenPriceProvider interface {
 // units. Token-denominated prices pay exactly in that token; fiat prices use FX
 // and the token price. quotedAt comes from the owning purchase clock. decimals
 // is the mint's on-chain precision (MintDecimals.ForMint), never an assumed 6.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider *fx.Rates, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
+func CalculateTokenQuote(ctx context.Context, logger *slog.Logger, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider *fx.Rates, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
 	if quotedAt.IsZero() {
 		return nil, fmt.Errorf("token quote requires its creation time")
 	}
@@ -265,7 +265,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 	var tokenPriceUSD float64
 	atPeg := false
 	if solanatokens.IsUSDC(tokenSymbol, mint) {
-		tokenPriceUSD, atPeg = stablecoinPriceUSD(ctx, tokenSymbol, priceProvider)
+		tokenPriceUSD, atPeg = stablecoinPriceUSD(ctx, logger, tokenSymbol, priceProvider)
 	} else {
 		if priceProvider == nil {
 			return nil, fmt.Errorf("token price provider is not configured")

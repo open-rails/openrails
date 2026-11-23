@@ -537,7 +537,7 @@ func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, 
 	t.Helper()
 	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
 	require.NoError(t, err)
-	dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
+	dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 		DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})
 	dl.BaseURL = feed.URL
 	engine := reconcile.NewEngine(database, &w.cfg, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)

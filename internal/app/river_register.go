@@ -293,8 +293,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// Write-through kinds live with their domain services, which every
 		// worker runtime has (validateBillingWorkerRuntime): an accepted
 		// operation of an unregistered kind would never run.
-		payment.NewNMISaleIntentHandler(r.PurchaseService.NMISaleService),
-		payment.NewInitialMembershipIntentHandler(r.PurchaseService, r.CollectionResolver),
+		payment.NewNMISaleIntentHandler(r.Log, r.PurchaseService.NMISaleService),
+		payment.NewInitialMembershipIntentHandler(r.Log, r.PurchaseService, r.CollectionResolver),
 		payment.NewNMIUpgradeIntentHandler(r.PurchaseService),
 		payment.NewStripeTierChangeIntentHandler(r.PurchaseService),
 		// A price migration's moves carried to Stripe and NMI schedules.
@@ -313,7 +313,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Solana recurring pull: signature write-ahead before the send, chain-read
 	// verification after it. The verify leg reads the chain with the intent's
 	// merchant-armed client.
-	solanaPull := pull.Handler{DB: r.DB, Clock: clock, Lifecycle: r.SubscriptionLifecycleService, Store: intents.NewStore(r.DB)}
+	solanaPull := pull.Handler{DB: r.DB, Clock: clock, Lifecycle: r.SubscriptionLifecycleService, Store: intents.NewStore(r.DB), Log: r.Log}
 	if r.SolanaCranker != nil {
 		solanaPull.Cranker = r.SolanaCranker
 		solanaPull.Gas = r.checkSolanaCrankerGas

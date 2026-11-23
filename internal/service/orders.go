@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -751,7 +751,7 @@ func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, payer *O
 			// leaves the option without it rather than failing the read.
 			user := &payment.UserIdentity{ID: payer.Customer.String()}
 			if err := s.identify(ctx, *payer, user); err != nil {
-				log.WithContext(ctx).WithError(err).WithField("customer_id", payer.Customer.String()).Warn("ccbill option: cannot read the customer's identity")
+				s.Log.WarnContext(ctx, "ccbill option: cannot read the customer's identity", logx.Err(err), "customer_id", payer.Customer.String())
 			} else {
 				option.Requires = payment.CCBillIdentityMissing(user)
 			}
@@ -1016,7 +1016,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if mid, err := merchant.Require(ctx); err == nil {
 			s.rt.Go("payment domain registration", func(ctx context.Context) {
 				if err := s.rt.RegisterPaymentDomain(ctx, mid); err != nil && ctx.Err() == nil {
-					log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("payment domain: cannot queue its registration")
+					s.Log.WarnContext(ctx, "payment domain: cannot queue its registration", logx.Err(err), "merchant_id", mid.String())
 				}
 			})
 		}
@@ -1099,7 +1099,7 @@ func (s *Service) attachPayURL(ctx context.Context, rt *orderRuntime, actor Orde
 	}
 	s.rt.Go("payment domain registration", func(ctx context.Context) {
 		if err := s.rt.RegisterPaymentDomain(ctx, mid); err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("payment domain: cannot queue its registration")
+			s.Log.WarnContext(ctx, "payment domain: cannot queue its registration", logx.Err(err), "merchant_id", mid.String())
 		}
 	})
 	c.Show(&order, &url)

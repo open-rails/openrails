@@ -59,7 +59,7 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		if err != nil {
 			return nil, err
 		}
-		dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
+		dl := ccbill.NewDataLinkClient(im.Log, &config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
 			Sandbox: scope.Environment == config.EnvironmentSandbox})
 		dl.ReadOnly = true
 		if im.CCBillDataLinkURL != "" {
