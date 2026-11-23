@@ -6,13 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/open-rails/openrails/internal/stripemock"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/stripemock"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
@@ -258,7 +259,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Restored", PSPs: openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
 		deps := target.deps
 		page := declareCheckoutPage(t, &cfg, &deps)
 		target.engine, err = openrails.New(t.Context(), cfg, deps)
@@ -427,7 +428,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Restored", PSPs: openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
 		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
 		require.NoError(t, err)
 		client, err = target.engine.Merchant(s.alpha.MerchantID())

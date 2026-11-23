@@ -106,7 +106,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, c
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
 // else the file at manifestPath, else the conventional path when it exists.
-func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*config.MerchantDocument, error) {
+func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*billing.MerchantDocument, error) {
 	if manifest == nil {
 		path := strings.TrimSpace(manifestPath)
 		explicit := path != ""
@@ -129,10 +129,10 @@ func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchant
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}
-	var selected *config.MerchantDocument
+	var selected *billing.MerchantDocument
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
-		if errors.Is(err, merchants.ErrMerchantNotFound) {
+		if errors.Is(err, billing.ErrMerchantNotFound) {
 			continue
 		}
 		if err != nil {

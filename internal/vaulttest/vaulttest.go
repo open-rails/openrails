@@ -18,7 +18,7 @@ import (
 
 	vaultapi "github.com/hashicorp/vault/api"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails"
 )
 
 const (
@@ -89,8 +89,8 @@ func New(t testing.TB) *Vault {
 
 // Config names the test's mount as OpenRails' KV mount (Config.Vault); pass
 // Client as Deps.Vault.
-func (v *Vault) Config() *config.VaultConfig {
-	return &config.VaultConfig{KVMount: v.Mount}
+func (v *Vault) Config() *openrails.VaultConfig {
+	return &openrails.VaultConfig{KVMount: v.Mount}
 }
 
 // Client is a root client of this Vault (Deps.Vault, or a test's own calls).

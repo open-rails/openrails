@@ -167,9 +167,9 @@ func TestTransactionPooler(t *testing.T) {
 		cfg := openrails.Config{
 			Database:          openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
 			ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			Merchants: []openrails.MerchantDeclaration{
-				{MerchantDocument: openrails.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
-				{MerchantDocument: openrails.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
+			Merchants: []billing.MerchantDeclaration{
+				{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
+				{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
 			},
 		}
 		bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, PostgresSession: direct})

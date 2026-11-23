@@ -61,8 +61,8 @@ var plannedEnums = []string{
 
 // enumFields are string fields whose name does not spell their enum.
 var enumFields = []string{
-	"billing.PaymentFailure.Reason",       // DeclineReason
-	"openrails.AlertWebhookConfig.Format", // AlertWebhookFormat
+	"billing.PaymentFailure.Reason",     // DeclineReason
+	"billing.AlertWebhookConfig.Format", // AlertWebhookFormat
 }
 
 // An exception allows the findings of rule whose identifier matches pattern
@@ -81,6 +81,7 @@ var exceptions = []exception{
 	{"untyped-const", "adapters/fiber.RouteNamePrefix", "a prefix of Fiber's string route names"},
 	{"untyped-const", "openrailstest/nmimock.InsufficientFunds", "NMI's response code, a string on NMI's wire"},
 	{"enum-field", "openrails.LLMConfig.Model", "an LLM's model name, not a catalog.Model"},
+	{"enum-field", "billing.ChangeEvidence.Read", "how a provider record was read, not an openrails.Read"},
 	{"enum-field", "openrailstest/stripemock.*", "the mock serves Stripe's own objects and vocabulary"},
 	{"list-page", "openrails.Client.ListEvents", "the shared eventlog protocol's page, not a cursor list"},
 }

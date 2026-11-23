@@ -558,7 +558,7 @@ func (c *Client) send(ctx context.Context, call routeCall, out any) error {
 		}
 	}
 	if call.cache != "" {
-		return c.read(ctx, call.cache, path, out)
+		return c.read(ctx, Read(call.cache), path, out)
 	}
 	return c.doWithHeaders(ctx, call.method, path, call.body, out, idempotent(call.idempotencyKey))
 }

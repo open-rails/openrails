@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbinding"
 )
 
@@ -53,7 +54,7 @@ func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.Da
 	if err != nil {
 		return err
 	}
-	return merchantbinding.Bind(ctx, pool, database, binding, func(ctx context.Context, tx pgx.Tx) error {
+	return merchantbinding.Bind(ctx, pool, config.DatabaseConfig(database), binding, func(ctx context.Context, tx pgx.Tx) error {
 		group, err := view.CreateGroup(ctx, iam.NewGroup{
 			ID: binding.ID.String(), TenantID: tenant, Persona: persona,
 		}, native.InTx(tx))

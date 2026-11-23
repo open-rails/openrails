@@ -52,9 +52,6 @@ type ProvisionRequest struct {
 	PermissionGroupID string
 }
 
-// ErrMerchantNotFound indicates no billing.merchants row matched.
-var ErrMerchantNotFound = errors.New("merchants: merchant not found")
-
 // ErrPermissionGroupRequired indicates control-plane merchant provisioning
 // tried to create a merchant namespace without its authkit permission-group id.
 var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
@@ -245,10 +242,10 @@ func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// toMerchant maps a directory row read with err; no row is ErrMerchantNotFound.
+// toMerchant maps a directory row read with err; no row is billing.ErrMerchantNotFound.
 func toMerchant(id uuid.UUID, slug, status string, groupID *string, err error) (*Merchant, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrMerchantNotFound
+		return nil, billing.ErrMerchantNotFound
 	}
 	if err != nil {
 		return nil, err

@@ -35,7 +35,7 @@ func Declarations(m *BillingConfig) *merchantbootstrap.BillingConfig {
 	if m == nil {
 		return nil
 	}
-	out := &merchantbootstrap.BillingConfig{Version: m.Version, Merchants: make(map[string]config.MerchantDocument, len(m.Merchants))}
+	out := &merchantbootstrap.BillingConfig{Version: m.Version, Merchants: make(map[string]billing.MerchantDocument, len(m.Merchants))}
 	for slug, merchant := range m.Merchants {
 		out.Merchants[slug] = merchant.MerchantDocument
 	}
@@ -55,8 +55,8 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 }
 
 type MerchantConfig struct {
-	config.MerchantDocument `yaml:",inline" koanf:",squash"`
-	RemoteApplication       *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
+	billing.MerchantDocument `yaml:",inline" koanf:",squash"`
+	RemoteApplication        *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
 }
 
 // RemoteApplicationConfig declares the host-app remote_application trusted for a
@@ -158,7 +158,7 @@ func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg
 				return fmt.Errorf("merchant bootstrap: %w", err)
 			}
 			opts.Refuse("merchants."+slug+".declaration", fmt.Errorf("%w; Vault's configuration serves", err))
-			merchantsDeclared[slug] = MerchantConfig{MerchantDocument: config.MerchantDocument{Slug: mt.Slug}, RemoteApplication: mt.RemoteApplication}
+			merchantsDeclared[slug] = MerchantConfig{MerchantDocument: billing.MerchantDocument{Slug: mt.Slug}, RemoteApplication: mt.RemoteApplication}
 		}
 	}
 	release, err := lockMerchantManifestBootstrap(ctx, cp)
@@ -224,7 +224,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 		switch {
 		case err == nil:
 			id = tn.ID
-		case !errors.Is(err, merchants.ErrMerchantNotFound):
+		case !errors.Is(err, billing.ErrMerchantNotFound):
 			return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 		case !req.Insert:
 			return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
@@ -359,5 +359,5 @@ func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 const merchantManifestAdvisoryLock = int64(734252042137424)
 const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfigManifestPath
 
-type PSPConfig = config.PSPConfig
-type CustodianConfig = config.CustodianConfig
+type PSPConfig = billing.PSPConfig
+type CustodianConfig = billing.CustodianConfig

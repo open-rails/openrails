@@ -82,7 +82,7 @@ func newNMIWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *nmi
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		merchant := cfgMerchant(w.cfg, "alpha")
-		merchant.PSPs = openrails.PSPs{"nmi": openrails.NMIPSP{GatewayID: "critical-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "critical-nmi-key", WebhookSigningSecret: "critical-nmi-webhook", TokenizationKey: "critical-collect-key"}.PSPConfig()}
+		merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{GatewayID: "critical-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "critical-nmi-key", WebhookSigningSecret: "critical-nmi-webhook", TokenizationKey: "critical-collect-key"}.PSPConfig()}
 		merchant.CardVault = "nmi"
 		setCfgMerchant(&w.cfg, "alpha", merchant)
 		for _, change := range configure {

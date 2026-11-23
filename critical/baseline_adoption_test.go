@@ -127,7 +127,7 @@ func TestBaselineAdoption(t *testing.T) {
 		if err == nil {
 			require.NoError(t, refused.Close(t.Context()))
 		}
-		require.ErrorIs(t, err, openrails.ErrMigrationsRequired, "a recorded name is not enough: the content is another baseline's")
+		require.ErrorIs(t, err, billing.ErrMigrationsRequired, "a recorded name is not enough: the content is another baseline's")
 		require.ErrorContains(t, err, "run openrails.Migrate before application startup")
 		require.ErrorContains(t, err, "0001_schema.up.sql")
 		require.NotContains(t, err.Error(), "\n")

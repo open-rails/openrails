@@ -8,7 +8,9 @@ import (
 	"strconv"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -23,8 +25,8 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 		return server.Config{}, fmt.Errorf("config not loaded")
 	}
 	cfg := server.Config{
-		Engine: *h.Config, Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: h.Naming,
-		RouteGroups: h.RouteGroups, AdminConsole: h.AdminConsole,
+		Engine: hostconfig.EngineConfig(h.Config), Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: serverNaming(h.Naming),
+		RouteGroups: openrails.RouteGroups(h.RouteGroups), AdminConsole: serverConsole(h.AdminConsole),
 		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
 	}
@@ -43,6 +45,27 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 		cfg.PrivateAddr = net.JoinHostPort(h.Host, strconv.Itoa(h.PrivatePort))
 	}
 	return cfg, nil
+}
+
+// serverNaming is the loaded naming section as server.Config's.
+func serverNaming(c config.NamingConfig) server.NamingConfig {
+	return server.NamingConfig{Enabled: c.Enabled, RenameInterval: c.RenameInterval,
+		FormerNames: server.FormerNamesConfig{Mode: server.FormerNamesMode(c.FormerNames.Mode), Duration: c.FormerNames.Duration}}
+}
+
+// serverConsole is the loaded admin_console section as server.Config's.
+func serverConsole(c *hostconfig.ConsoleConfig) *server.AdminConsole {
+	if c == nil {
+		return nil
+	}
+	out := &server.AdminConsole{Disabled: c.Disabled}
+	if c.Issuers != nil {
+		out.Issuers = make(map[string]server.ConsoleIssuer, len(c.Issuers))
+		for key, issuer := range c.Issuers {
+			out.Issuers[key] = server.ConsoleIssuer(issuer)
+		}
+	}
+	return out
 }
 
 // openServer builds the standalone server over the connections hostdeps

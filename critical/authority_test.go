@@ -100,7 +100,7 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			d.Postgres = a.authPool
 			d.KeySource = keys.Static{Active: a.signer, Public: map[string]crypto.PublicKey{a.signer.KID(): a.signer.Public()}}
 		}))
-		setCfgMerchant(&w.cfg, "alpha", openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{DisplayName: "Alpha"}, Issuer: authtest.Issuer})
+		setCfgMerchant(&w.cfg, "alpha", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Alpha"}, Issuer: authtest.Issuer})
 		w.deps.UserInfo = a.auth.UserInfo()
 		for _, change := range configure {
 			change(w)

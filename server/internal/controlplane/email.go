@@ -8,7 +8,7 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails"
 )
 
 // product names the product in the control plane's messages: its users sign in to
@@ -18,7 +18,7 @@ const product = "OpenRails"
 // AuthKitSender hands the standalone server's AuthKit messages, rendered, to
 // the engine's email sender. A host with its own templates gives the server an
 // authkit.EmailSender instead.
-type AuthKitSender struct{ Sender config.EmailSender }
+type AuthKitSender struct{ Sender openrails.EmailSender }
 
 // Send renders msg and delivers it from the deployment's own address.
 func (a AuthKitSender) Send(ctx context.Context, msg iam.EmailMessage) error {
@@ -26,7 +26,7 @@ func (a AuthKitSender) Send(ctx context.Context, msg iam.EmailMessage) error {
 	if err != nil {
 		return err
 	}
-	return a.Sender.Send(ctx, config.Email{To: msg.To, Subject: subject, Text: text, HTML: htmlOf(text)})
+	return a.Sender.Send(ctx, openrails.Email{To: msg.To, Subject: subject, Text: text, HTML: htmlOf(text)})
 }
 
 // CheckHealth is the sender's.

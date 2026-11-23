@@ -69,7 +69,7 @@ func (s *Service) ListDirectory(ctx context.Context, params billing.MerchantList
 	return out, nil
 }
 
-// DirectoryEntry is one merchant in any status; ErrMerchantNotFound, which
+// DirectoryEntry is one merchant in any status; billing.ErrMerchantNotFound, which
 // is also billing.ErrNotFound, when none.
 func (s *Service) DirectoryEntry(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error) {
 	row, err := s.database.GenDirectory().GetPlatformMerchant(ctx, id.UUID())
@@ -148,7 +148,7 @@ func directoryError(id billing.MerchantID, err error) error {
 	var pg *pgconn.PgError
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return fmt.Errorf("%w: %s (%w)", ErrMerchantNotFound, id, billing.ErrNotFound)
+		return fmt.Errorf("%w: %s (%w)", billing.ErrMerchantNotFound, id, billing.ErrNotFound)
 	case errors.As(err, &pg) && pg.Code == "23514":
 		return fmt.Errorf("%w: a retired or purged merchant cannot be restored", billing.ErrConflict)
 	case errors.As(err, &pg) && pg.Code == "23505":

@@ -24,5 +24,5 @@ func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticat
 		info, _ := billing.LookupErrorCode(refusal.Code)
 		err = errors.Join(&billing.StatusError{Status: refusal.Status, ErrorDetails: billing.ErrorDetails{Code: refusal.Code, Type: info.Type, Message: refusal.Message, Metadata: refusal.Metadata}}, refusal.Err)
 	}
-	return binding, err
+	return CustomerProof(binding), err
 }

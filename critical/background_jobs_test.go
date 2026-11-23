@@ -523,7 +523,7 @@ func declareCCBill(w *world, feed *httptest.Server) {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: feed.URL}
 	}
-	m.PSPs = openrails.PSPs{"ccbill": psp.PSPConfig()}
+	m.PSPs = billing.PSPs{"ccbill": psp.PSPConfig()}
 	setCfgMerchant(&w.cfg, "alpha", m)
 }
 

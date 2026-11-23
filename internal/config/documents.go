@@ -120,11 +120,8 @@ func (d PSPDocument) Fields() map[string]any {
 	return out
 }
 
-// PSPs are a merchant's declared PSPs by key.
-type PSPs map[string]PSPConfig
-
 // The PSP and custodian types are flat documents in YAML: functions
-// registered with the decoder, not methods on types the public API aliases.
+// registered with the decoder, not methods on billing's types.
 func init() {
 	yaml.RegisterCustomUnmarshaler(decodePSPs)
 	yaml.RegisterCustomUnmarshaler(decodeCustodians)
@@ -136,12 +133,12 @@ func init() {
 
 // decodePSPs reads each PSP's flat document, naming the PSP a refusal is
 // about.
-func decodePSPs(p *PSPs, raw []byte) error {
+func decodePSPs(p *billing.PSPs, raw []byte) error {
 	var docs map[string]map[string]any
 	if err := yaml.Unmarshal(raw, &docs); err != nil {
 		return err
 	}
-	out := make(PSPs, len(docs))
+	out := make(billing.PSPs, len(docs))
 	for _, key := range slices.Sorted(maps.Keys(docs)) {
 		psp, err := pspFromDocument(docs[key])
 		if err != nil {
@@ -153,38 +150,35 @@ func decodePSPs(p *PSPs, raw []byte) error {
 	return nil
 }
 
-// Custodians are a merchant's declared custodians by key.
-type Custodians map[string]CustodianConfig
-
 // decodeCustodians reads each custodian's flat document, naming the custodian
 // a refusal is about.
-func decodeCustodians(c *Custodians, raw []byte) error {
+func decodeCustodians(c *billing.Custodians, raw []byte) error {
 	var docs map[string]map[string]any
 	if err := yaml.Unmarshal(raw, &docs); err != nil {
 		return err
 	}
-	out := make(Custodians, len(docs))
+	out := make(billing.Custodians, len(docs))
 	for _, key := range slices.Sorted(maps.Keys(docs)) {
 		d, err := DecodeCustodianDocument(docs[key])
 		if err != nil {
 			return fmt.Errorf("custodians.%s: %w", key, err)
 		}
-		out[key] = CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+		out[key] = billing.CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	}
 	*c = out
 	return nil
 }
 
-func pspFromDocument(fields map[string]any) (PSPConfig, error) {
+func pspFromDocument(fields map[string]any) (billing.PSPConfig, error) {
 	d, err := DecodePSPDocument(fields)
 	if err != nil {
-		return PSPConfig{}, err
+		return billing.PSPConfig{}, err
 	}
-	return PSPConfig{Rail: billing.Rail(d.Rail), Environment: d.Environment, AccountID: d.AccountID, Custodian: d.Custodian, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}, nil
+	return billing.PSPConfig{Rail: billing.Rail(d.Rail), Environment: d.Environment, AccountID: d.AccountID, Custodian: d.Custodian, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}, nil
 }
 
 // decodePSPConfig reads a PSP's flat document.
-func decodePSPConfig(p *PSPConfig, raw []byte) error {
+func decodePSPConfig(p *billing.PSPConfig, raw []byte) error {
 	var fields map[string]any
 	if err := yaml.Unmarshal(raw, &fields); err != nil {
 		return err
@@ -198,7 +192,7 @@ func decodePSPConfig(p *PSPConfig, raw []byte) error {
 }
 
 // encodePSPConfig writes a PSP's flat document.
-func encodePSPConfig(p PSPConfig) ([]byte, error) {
+func encodePSPConfig(p billing.PSPConfig) ([]byte, error) {
 	first := append([]string{"rail", "environment"}, rails.AccountFields(models.Rail(p.Rail))...)
 	return yaml.Marshal(orderedFields(PSPDocument{Rail: string(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Custodian: p.Custodian, Archived: p.Archived, Settings: p.Settings, Secrets: p.Secrets}.Fields(), first...))
 }
@@ -289,7 +283,7 @@ func (d CustodianDocument) Fields() map[string]any {
 }
 
 // decodeCustodianConfig reads a custodian's flat document.
-func decodeCustodianConfig(c *CustodianConfig, raw []byte) error {
+func decodeCustodianConfig(c *billing.CustodianConfig, raw []byte) error {
 	var fields map[string]any
 	if err := yaml.Unmarshal(raw, &fields); err != nil {
 		return err
@@ -298,12 +292,12 @@ func decodeCustodianConfig(c *CustodianConfig, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	*c = CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
+	*c = billing.CustodianConfig{Kind: d.Kind, Environment: d.Environment, AccountID: d.AccountID, Archived: d.Archived, Settings: d.Settings, Secrets: d.Secrets}
 	return nil
 }
 
 // encodeCustodianConfig writes a custodian's flat document.
-func encodeCustodianConfig(c CustodianConfig) ([]byte, error) {
+func encodeCustodianConfig(c billing.CustodianConfig) ([]byte, error) {
 	return yaml.Marshal(orderedFields(CustodianDocument{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: c.Settings, Secrets: c.Secrets}.Fields(), "kind", "environment", "account_id"))
 }
 

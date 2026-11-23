@@ -12,6 +12,7 @@ package engine
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"slices"
@@ -33,6 +34,16 @@ import (
 	"github.com/open-rails/openrails/internal/service"
 )
 
+// Deps is what New reaches outside the process: the application graph's
+// connections and seams, and what the engine itself reads.
+type Deps struct {
+	app.BootstrapOptions
+	// MerchantGroups reads the live ownership of declared bindings.
+	MerchantGroups billing.MerchantGroupReader
+	// CheckoutAssets is the built payment page; nil serves none.
+	CheckoutAssets fs.FS
+}
+
 // Engine is one embedded engine.
 type Engine struct {
 	App *app.App
@@ -44,7 +55,7 @@ type Engine struct {
 	// declared are Config.Merchants' provisioned ids, by slug.
 	declared       map[string]billing.MerchantID
 	issuers        map[string]billing.MerchantID
-	bySlug         map[billing.MerchantID]config.MerchantDeclaration
+	bySlug         map[billing.MerchantID]billing.MerchantDeclaration
 	merchantGroups billing.MerchantGroupReader
 
 	mu          sync.Mutex
@@ -95,11 +106,11 @@ func Graph(client any) *app.App {
 // one of its documents, the checkout origin. PSP posture and Redis recover in
 // the background. It never changes a catalog: a catalog document applies by
 // an explicit ApplyCatalog.
-func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
+func New(ctx context.Context, cfg config.Config, deps Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if deps.Postgres == nil {
+	if deps.PGXPool == nil {
 		return nil, fmt.Errorf("openrails: Deps.Postgres is required")
 	}
 	logger := logx.New(deps.Logger)
@@ -107,26 +118,13 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
-	bootstrap := &app.BootstrapOptions{
-		Logger:               logger,
-		PGXPool:              deps.Postgres,
-		PostgresSession:      deps.PostgresSession,
-		Redis:                deps.Redis,
-		StripeTransport:      deps.StripeTransport,
-		BasisTheoryTransport: deps.BasisTheoryTransport,
-		NMITransport:         deps.NMITransport,
-		FXTransport:          deps.FXTransport,
-		Clock:                deps.Clock,
-		EmailSender:          deps.Email,
-		UserInfo:             deps.UserInfo,
-		Notifications:        deps.Notifications,
-		Vault:                deps.Vault,
-	}
-	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
+	bootstrap := deps.BootstrapOptions
+	bootstrap.Logger = logger
+	application, err := app.BootstrapWithOptions(ctx, &cfg, &bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}, Log: logger}
+	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]billing.MerchantDeclaration{}, Log: logger}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -168,7 +166,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 // admit records a provisioned declared merchant. late is a merchant a
 // background retry provisioned after New: it is published and verified at
 // once.
-func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, late bool) {
+func (e *Engine) admit(m billing.MerchantDeclaration, id billing.MerchantID, late bool) {
 	rt := e.App.Runtime
 	e.declMu.Lock()
 	e.declared[m.Slug], e.bySlug[id] = id, m
@@ -187,7 +185,7 @@ func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, late
 
 // provisionLater refuses a declared merchant whose provisioning failed and
 // retries it in the background with capped backoff until it succeeds.
-func (e *Engine) provisionLater(m config.MerchantDeclaration, err error) {
+func (e *Engine) provisionLater(m billing.MerchantDeclaration, err error) {
 	rt := e.App.Runtime
 	rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 	rt.Go("provision merchant "+m.Slug, func(ctx context.Context) {
@@ -228,7 +226,7 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
-func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, []config.Degradation, error) {
+func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
@@ -253,7 +251,7 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 	for i, m := range declarations {
 		if err := config.RefuseDeclarationBesideVault(cfg, m.Slug, m.MerchantDocument); err != nil {
 			refused = append(refused, config.Degradation{Field: merchantSubject(m.Slug) + ".declaration", Err: fmt.Errorf("%w; Vault's configuration serves", err)})
-			declarations[i] = config.MerchantDeclaration{MerchantDocument: config.MerchantDocument{Slug: m.Slug}, Issuer: m.Issuer, Binding: m.Binding}
+			declarations[i] = billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: m.Slug}, Issuer: m.Issuer, Binding: m.Binding}
 		}
 	}
 	return declarations, refused, nil
@@ -261,14 +259,14 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
 // no live PSP is declared beside them.
-func fakeProviders(cfg *config.Config, deps config.Deps) []string {
+func fakeProviders(cfg *config.Config, deps Deps) []string {
 	out := append(config.FakeProviders(cfg), seams(deps)...)
 	slices.Sort(out)
 	return out
 }
 
 // seams names the Deps test seams wired.
-func seams(deps config.Deps) []string {
+func seams(deps Deps) []string {
 	var out []string
 	for name, set := range map[string]bool{
 		"Deps.BasisTheoryTransport": deps.BasisTheoryTransport != nil, "Deps.StripeTransport": deps.StripeTransport != nil, "Deps.NMITransport": deps.NMITransport != nil, "Deps.FXTransport": deps.FXTransport != nil,
@@ -283,7 +281,7 @@ func seams(deps config.Deps) []string {
 }
 
 // declaredLive names a live PSP the declarations declare, or "".
-func declaredLive(declarations []config.MerchantDeclaration) string {
+func declaredLive(declarations []billing.MerchantDeclaration) string {
 	for _, m := range declarations {
 		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
 			if p := m.PSPs[key]; config.LiveEnvironment(string(p.Rail), p.Environment) {

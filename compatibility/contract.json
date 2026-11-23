@@ -1,8 +1,10 @@
 {
   "go_api": {
     ".": [
-      "const (\n\tEnvironmentLive = config.EnvironmentLive\n\n\tEnvironmentTest = config.EnvironmentTest\n\n\tEnvironmentSandbox = config.EnvironmentSandbox\n\n\tEnvironmentMainnet = config.EnvironmentMainnet\n\n\tEnvironmentDevnet = config.EnvironmentDevnet\n\n\tEnvironmentTestnet = config.EnvironmentTestnet\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n\n\tReadCatalog = config.ReadCatalog\n\n\tReadMeters = config.ReadMeters\n\n\tReadPublicConfig = config.ReadPublicConfig\n\n\tReadMerchantConfiguration = config.ReadMerchantConfiguration\n)",
-      "const (\n\tQueueBilling   = riverjobs.QueueBilling\n\tQueuePSPImport = riverjobs.QueuePSPImport\n)",
+      "const (\n\tEnvironmentLive = \"live\"\n\n\tEnvironmentTest = \"test\"\n\n\tEnvironmentSandbox = \"sandbox\"\n\n\tEnvironmentMainnet = \"mainnet\"\n\n\tEnvironmentDevnet = \"devnet\"\n\n\tEnvironmentTestnet = \"testnet\"\n)",
+      "const (\n\tProviderWritesFull = \"full\"\n\n\tProviderWritesLimited = \"limited\"\n\n\tProviderWritesReadOnly = \"readonly\"\n)",
+      "const (\n\tQueueBilling   = \"billing\"\n\tQueuePSPImport = \"psp_import\"\n)",
+      "const (\n\tReadCatalog Read = \"catalog\"\n\n\tReadMeters Read = \"meters\"\n\n\tReadPublicConfig Read = \"public_config\"\n\n\tReadMerchantConfiguration Read = \"merchant_configuration\"\n)",
       "const DefaultEntitlementCheckMaxAge = 2 * time.Minute",
       "func (c *Client) ActingFor(invoker auth.Invoker) (*Client, error)",
       "func (c *Client) AdjustCustomerLimit(ctx context.Context, customerID billing.CustomerID, params billing.AdjustLimitParams) (*billing.CustomerLimit, error)",
@@ -163,10 +165,10 @@
       "func (g *Gate) Flush(ctx context.Context) error",
       "func (g *Gate) ListCustomerLimits(ctx context.Context, customer billing.CustomerID) ([]billing.CustomerLimit, error)",
       "func (g *Gate) Record(ctx context.Context, u billing.UsageParams) error",
-      "func (p CCBillPSP) PSPConfig() PSPConfig",
-      "func (p NMIPSP) PSPConfig() PSPConfig",
-      "func (p SolanaPSP) PSPConfig() PSPConfig",
-      "func (p StripePSP) PSPConfig() PSPConfig",
+      "func (p CCBillPSP) PSPConfig() billing.PSPConfig",
+      "func (p NMIPSP) PSPConfig() billing.PSPConfig",
+      "func (p SolanaPSP) PSPConfig() billing.PSPConfig",
+      "func (p StripePSP) PSPConfig() billing.PSPConfig",
       "func (r *Remote) Close(context.Context) error",
       "func (r *Remote) Merchant(id billing.MerchantID) (*Client, error)",
       "func (r *Remote) Ready(ctx context.Context) error",
@@ -178,74 +180,57 @@
       "func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error)",
       "func NewGate(c *Client, deps GateDeps) (*Gate, error)",
       "func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error)",
-      "func ParseMerchantDocument(raw []byte) (MerchantDocument, error)",
+      "func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error)",
       "func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption",
-      "type AlertWebhookConfig = config.AlertWebhookConfig",
       "type AssertionKey struct {\n\tIssuer string\n\n\tKeyID string\n\n\tSigner crypto.Signer\n\n\tTokenURL string\n}",
-      "type Authenticator = billingauth.Authenticator",
       "type BoundMerchantError struct {\n\tMerchant billing.MerchantID\n\n\tBound billing.MerchantID\n}",
       "type CCBillPSP struct {\n\tClientAccnum string `psp:\"client_accnum\"`\n\tClientSubacc string `psp:\"client_subacc\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
-      "type CaptchaConfig = config.CaptchaConfig",
-      "type CardVaultConfig = config.CardVaultConfig",
+      "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
+      "type CardVaultConfig struct {\n\tKind string\n\n\tTenantID string\n\n\tKVMount string\n}",
       "type Client struct {\n}",
-      "type Config = config.Config",
-      "type Credential = billingauth.Credential",
-      "type CredentialKind = billingauth.CredentialKind",
-      "type CustodianConfig = config.CustodianConfig",
-      "type Custodians = config.Custodians",
-      "type CustomerBinding = config.CustomerBinding",
-      "type CustomerProof = config.CustomerProof",
-      "type CustomerRoutes = config.CustomerRoutes",
-      "type DatabaseConfig = config.DatabaseConfig",
-      "type Deps = config.Deps",
-      "type DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig",
-      "type Email = config.Email",
-      "type EmailAddress = config.EmailAddress",
-      "type EmailSender = config.EmailSender",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tMerchants []billing.MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
+      "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
+      "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
+      "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth auth.Authenticator\n\n\tResolve func(*http.Request, auth.Verified) (CustomerBinding, error)\n}",
+      "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n\n\tSkipMigrations bool\n\n\tLeaseConns int\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tLogger *slog.Logger\n\n\tUserInfo userinfo.Lookup\n\n\tNotifications *NotificationChannel\n\n\tCheckoutAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
+      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n}",
+      "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
+      "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
+      "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
       "type Engine struct {\n}",
       "type EntitlementCheckCacheOptions struct {\n\tMaxAge time.Duration\n\n\tDisabled bool\n\n\tRedis redis.UniversalClient\n}",
       "type Gate struct {\n}",
       "type GateDeps struct {\n\tRedis redis.UniversalClient\n\n\tOutbox UsageOutbox\n}",
-      "type HyperSwitchConfig = config.HyperSwitchConfig",
-      "type Identity = billingauth.Identity",
-      "type Invoker = billingauth.Invoker",
-      "type LLMConfig = config.LLMConfig",
+      "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
+      "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LocalClient struct{}",
-      "type MerchantDeclaration = config.MerchantDeclaration",
-      "type MerchantDocument = config.MerchantDocument",
-      "type MerchantSecrets = config.MerchantSecrets",
       "type NMIPSP struct {\n\tGatewayID string `psp:\"gateway_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"tokenization_key\"`\n\n\tTokenizationURL string `psp:\"tokenization_url\"`\n\n\tCardEntry string `psp:\"card_entry\"`\n}",
-      "type NotificationChannel = config.NotificationChannel",
-      "type NotificationRecipient = config.NotificationRecipient",
-      "type PSPConfig = config.PSPConfig",
-      "type PSPs = config.PSPs",
+      "type NotificationChannel struct {\n\tSink      notify.Publisher\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
+      "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
-      "type ProviderSandboxConfig = config.ProviderSandboxConfig",
-      "type RateLimit = config.RateLimit",
-      "type RateLimitsConfig = config.RateLimitsConfig",
-      "type Read = config.Read",
-      "type ReadCache = config.ReadCache",
-      "type ReadPolicy = config.ReadPolicy",
+      "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n\n\tCCBillWebhookSources []string\n}",
+      "type RateLimit struct {\n\tRequestsPerMinute int\n}",
+      "type RateLimitsConfig map[string]*RateLimit",
+      "type Read string",
+      "type ReadCache map[Read]ReadPolicy",
+      "type ReadPolicy struct {\n\tRefreshAfter time.Duration\n\tMaxStale     time.Duration\n}",
       "type Remote struct {\n}",
       "type RemoteCredential struct {\n\tAPIKey string\n\n\tToken func(context.Context) (string, error)\n\n\tAssertion *AssertionKey\n}",
       "type RemoteOptions struct {\n\tCredentials map[billing.MerchantID]RemoteCredential\n\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n\n\tReadCache ReadCache\n\n\tEntitlementCheckCache EntitlementCheckCacheOptions\n\n\tLogger *slog.Logger\n}",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
-      "type RouteGroups = config.RouteGroups",
-      "type Routes = config.Routes",
-      "type SolanaConfig = config.SolanaConfig",
-      "type SolanaCrankerConfig = config.SolanaCrankerConfig",
+      "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
+      "type Routes struct {\n\tAuth auth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n}",
+      "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig\n}",
+      "type SolanaCrankerConfig struct {\n\tMode string\n\n\tKey string\n\n\tPrivateKey string\n}",
       "type SolanaPSP struct {\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tTreasury string `psp:\"treasury\"`\n\n\tRPCURL string `psp:\"secrets.rpc_url\"`\n}",
       "type StartOption func(*startOptions)",
       "type StripePSP struct {\n\tAccountID string `psp:\"account_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tSecretKey            string `psp:\"secrets.secret_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretThin string `psp:\"secrets.webhook_signing_secret_thin\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tPublishableKey string `psp:\"publishable_key\"`\n}",
-      "type SubjectKind = billingauth.SubjectKind",
       "type Ticket struct {\n}",
       "type UsageOutbox interface {\n\tPut(ctx context.Context, items []billing.OutboxItem) error\n\tPending(ctx context.Context) ([]billing.OutboxItem, error)\n\tAck(ctx context.Context, items []billing.LeaseUsageRef) error\n}",
-      "type UserActionRateLimitConfig = config.UserActionRateLimitConfig",
-      "type UserInfo = config.UserInfo",
-      "type VaultConfig = config.VaultConfig",
+      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64\n\tPaidCustomersPerHourlyCustomer int64\n\tMinimumCustomersPerDay         int64\n\tPaidCustomersPerDailyCustomer  int64\n}",
+      "type VaultConfig struct {\n\tKVMount string\n\n\tScopePrefix string\n\n\tTransitMount string\n}",
       "type startOptions struct {\n}",
-      "var ErrMigrationsRequired = migrate.ErrMigrationsRequired",
-      "var ErrUnauthenticated = billingauth.ErrUnauthenticated",
       "var ErrUnavailable = fmt.Errorf(\"openrails: gate: OpenRails is unavailable: %w\", billing.ErrUnreachable)"
     ],
     "adapters/authkit": [
@@ -390,11 +375,25 @@
       "const ProvisioningTokenIDPrefix = \"ptk_\"",
       "const RunIDPrefix = \"run_\"",
       "const RunningChargeIDPrefix = \"rch_\"",
+      "func (Card) Format(f fmt.State, _ rune)",
+      "func (Card) GoString() string",
+      "func (Card) LogValue() slog.Value",
+      "func (Card) MarshalBinary() ([]byte, error)",
+      "func (Card) MarshalJSON() ([]byte, error)",
+      "func (Card) MarshalText() ([]byte, error)",
+      "func (Card) String() string",
       "func (CustodianCaptureReference) GoString() string",
       "func (CustodianCaptureReference) String() string",
       "func (a *Admission) Active() bool",
       "func (a *Admission) Refusal() *Refusal",
       "func (a PSPAccount) Fields() map[string]string",
+      "func (c *Card) BIN() string",
+      "func (c *Card) Brand() string",
+      "func (c *Card) Expiry() string",
+      "func (c *Card) ExpiryMonthYear() (month, year int)",
+      "func (c *Card) LastFour() string",
+      "func (c *Card) UnmarshalJSON(data []byte) error",
+      "func (c *Card) Zero()",
       "func (c CatalogConflict) String() string",
       "func (c CurrencyUnits) NativeShift() int",
       "func (e *MerchantRenameTooSoonError) Error() string",
@@ -643,6 +642,7 @@
       "type AgreementSubscription struct {\n\tID                    SubscriptionID `json:\"id\"`\n\tProduct               string         `json:\"product\"`\n\tAmount                int64          `json:\"amount,string\"`\n\tBillingIntervalHours  *int           `json:\"billing_interval_hours\"`\n\tBillingIntervalMonths *int           `json:\"billing_interval_months\"`\n\tNextChargeAt          *time.Time     `json:\"next_charge_at\"`\n}",
       "type AlertSeverity string",
       "type AlertWebhook struct {\n\tID              AlertWebhookID     `json:\"id\"`\n\tName            *string            `json:\"name\"`\n\tDestinationHost string             `json:\"destination_host\"`\n\tFormat          AlertWebhookFormat `json:\"format\"`\n\tEnabled         bool               `json:\"enabled\"`\n\tCreatedAt       time.Time          `json:\"created_at\"`\n\tUpdatedAt       time.Time          `json:\"updated_at\"`\n}",
+      "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type AlertWebhookFormat string",
       "type AlertWebhookID uuid.UUID",
       "type AlertWebhookListParams struct {\n\tIDs []AlertWebhookID `form:\"ids,comma\"`\n}",
@@ -675,7 +675,7 @@
       "type CaptureReceipt struct {\n\tRequestID            string                `json:\"request_id\"`\n\tCustomerID           CustomerID            `json:\"customer_id\"`\n\tCurrency             string                `json:\"currency\"`\n\tEstimatedAmount      int64                 `json:\"estimated_amount,string\"`\n\tAmount               int64                 `json:\"amount,string\"`\n\tCharges              []UsageCharge         `json:\"charges\"`\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
       "type CaptureResult struct {\n\tStatus  int             `json:\"status\"`\n\tReceipt *CaptureReceipt `json:\"receipt\"`\n\tError   *ErrorDetails   `json:\"error\"`\n}",
       "type CaptureUsage struct {\n\tEventType  string           `json:\"event_type\"`\n\tResource   string           `json:\"resource,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n\tSource     string           `json:\"source,omitempty\"`\n\tSourceID   string           `json:\"source_id,omitempty\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n}",
-      "type Card = cardguard.Card",
+      "type Card cardguard.Card",
       "type CardDetails struct {\n\tBrand    *string `json:\"brand\"`\n\tLast4    *string `json:\"last4\"`\n\tExpMonth *int    `json:\"exp_month\"`\n\tExpYear  *int    `json:\"exp_year\"`\n}",
       "type CardExpiryStatus string",
       "type Cart struct {\n\tCurrency       string               `json:\"currency\"`\n\tTotal          int64                `json:\"total,string\"`\n\tLines          []OrderPreviewLine   `json:\"lines\"`\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n\n\tLastChangedAt *time.Time `json:\"last_changed_at\"`\n\tExpiresAt     *time.Time `json:\"expires_at\"`\n}",
@@ -729,6 +729,8 @@
       "type CurrencyUnits struct {\n\tCode          string `json:\"code\"`\n\tDecimals      int    `json:\"decimals\"`\n\tMinorDecimals int    `json:\"minor_decimals\"`\n}",
       "type Custodian struct {\n\tKey         string                   `json:\"key\"`\n\tKind        string                   `json:\"kind\"`\n\tEnvironment string                   `json:\"environment\"`\n\tAccountID   string                   `json:\"account_id\"`\n\tSettings    map[string]any           `json:\"settings\"`\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\tArchived    bool                     `json:\"archived\"`\n\tRevision    int64                    `json:\"revision\"`\n}",
       "type CustodianCaptureReference struct {\n\tCustodianID string `json:\"custodian_id\"`\n\tSessionID   string `json:\"session_id\"`\n\tToken       string `json:\"token\"`\n}",
+      "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
+      "type Custodians map[string]CustodianConfig",
       "type Customer struct {\n\tID         CustomerID       `json:\"id\"`\n\tContact    *CustomerContact `json:\"contact\"`\n\tCreatedAt  time.Time        `json:\"created_at\"`\n\tLastSeenAt time.Time        `json:\"last_seen_at\"`\n\tSettings   CustomerSettings `json:\"settings\"`\n\n\tBalances []Balance `json:\"balances\"`\n\n\tDefaultPaymentMethods []DefaultPaymentMethod `json:\"default_payment_methods\"`\n}",
       "type CustomerAccount struct {\n\tID                    CustomerID                `json:\"id\"`\n\tBalances              []Balance                 `json:\"balances\"`\n\tDefaultPaymentMethods []DefaultPaymentMethod    `json:\"default_payment_methods\"`\n\tLowBalanceLines       []EffectiveLowBalanceLine `json:\"low_balance_lines\"`\n}",
       "type CustomerConfig struct {\n\tPayment PaymentConfig `json:\"payment\"`\n\n\tMerchant PublicMerchant `json:\"merchant\"`\n\n\tClientCountry string `json:\"client_country\"`\n}",
@@ -848,6 +850,8 @@
       "type MerchantBinding struct {\n\tID       MerchantID\n\tTenantID string\n}",
       "type MerchantCheckoutSettings struct {\n\tEmbedOrigins []string `json:\"embed_origins,omitempty\"`\n}",
       "type MerchantConfigurationState struct {\n\tRevision    int64  `json:\"revision\"`\n\tDisplayName string `json:\"display_name\"`\n\tMerchantSettings\n\n\tPlatformVault PlatformVaultState `json:\"platform_vault\"`\n}",
+      "type MerchantDeclaration struct {\n\tMerchantDocument `yaml:\",inline\"`\n\n\tIssuer string `yaml:\"-\"`\n\n\tBinding *MerchantBinding `yaml:\"-\"`\n}",
+      "type MerchantDocument struct {\n\tSlug        string `yaml:\"slug,omitempty\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tMerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantGroup struct {\n\tID       string\n\tTenantID string\n\tPersona  string\n\tDeleted  bool\n}",
       "type MerchantGroupReader interface {\n\tLookupMerchantGroup(context.Context, MerchantBinding) (MerchantGroup, error)\n}",
       "type MerchantID uuid.UUID",
@@ -864,6 +868,7 @@
       "type MerchantRetirementCandidatePage struct {\n\tCandidates []MerchantRetirementCandidate\n\tNext       *MerchantRetirementCursor\n}",
       "type MerchantRetirementCursor struct {\n\tCreatedAt  time.Time\n\tMerchantID MerchantID\n}",
       "type MerchantRetirementRefusal string",
+      "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type MerchantSettings struct {\n\tUsageBilling            *UsageBillingSettings `json:\"usage_billing,omitempty\"`\n\tProfile                 *MerchantProfile      `json:\"profile,omitempty\"`\n\tCollectionThreshold     *int64                `json:\"collection_threshold,omitempty,string\"`\n\tMonthlyFloor            *int64                `json:\"monthly_floor,omitempty,string\"`\n\tBillingPeriodBoundary   string                `json:\"billing_period_boundary,omitempty\"`\n\tAlertEmail              *string               `json:\"alert_email,omitempty\"`\n\tRepriceNoticeWindowDays *int                  `json:\"reprice_notice_window_days,omitempty\"`\n\n\tProviderRefundAccess    *string           `json:\"provider_refund_access,omitempty\"`\n\tArrearsGraceDays        *int              `json:\"arrears_grace_days,omitempty\"`\n\tArrearsDelinquencyFloor *int64            `json:\"arrears_delinquency_floor,omitempty,string\"`\n\tPSPRouting              *[]PSPRoutingRule `json:\"psp_routing,omitempty\"`\n\n\tDunningPolicy *DunningPolicy `json:\"dunning_policy,omitempty\"`\n\n\tCheckout *MerchantCheckoutSettings `json:\"checkout,omitempty\"`\n\n\tBalanceNotices *BalanceNoticeSettings `json:\"balance_notices,omitempty\"`\n\n\tUsageGateSafeSpend *bool `json:\"usage_gate_safe_spend,omitempty\"`\n\n\tCardVault string `json:\"card_vault,omitempty\"`\n\n\tChargePSPs                        []string               `json:\"charge_psps,omitempty\"`\n\tBillingPolicies                   []BillingPolicy        `json:\"billing_policies,omitempty\"`\n\tBillingPolicyBindings             []BillingPolicyBinding `json:\"billing_policy_bindings,omitempty\"`\n\tDelegatedInvokerWastedSpendLimits []BudgetWindow         `json:\"delegated_invoker_wasted_spend_limits,omitempty\"`\n}",
       "type MerchantStatus string",
       "type Meter struct {\n\tKey           string              `json:\"key\"`\n\tEventType     string              `json:\"event_type\"`\n\tValueProperty string              `json:\"value_property\"`\n\tAggregation   catalog.Aggregation `json:\"aggregation\"`\n\tUnit          string              `json:\"unit\"`\n\tGroupBy       map[string]string   `json:\"group_by\"`\n\n\tBillingSupported bool           `json:\"billing_supported\"`\n\tRateCard         *MeterRateCard `json:\"rate_card\"`\n\n\tRevision    int64      `json:\"revision\"`\n\tHasActivity bool       `json:\"has_activity\"`\n\tLastEventAt *time.Time `json:\"last_event_at\"`\n\tCreatedAt   time.Time  `json:\"created_at\"`\n\tUpdatedAt   time.Time  `json:\"updated_at\"`\n}",
@@ -918,6 +923,7 @@
       "type OutboxItem struct {\n\tLeaseID LeaseID    `json:\"lease_id\"`\n\tUsage   LeaseUsage `json:\"usage\"`\n}",
       "type PSP struct {\n\tID PSPID `json:\"id\"`\n\n\tKey  string `json:\"key\"`\n\tRail Rail   `json:\"rail\"`\n\n\tEnvironment string `json:\"environment\"`\n\n\tArchived bool `json:\"archived\"`\n\n\tOpenObligations int64 `json:\"open_obligations\"`\n\tPSPFields\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\n\tRevision  int64     `json:\"revision\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
       "type PSPAccount struct {\n\tGatewayID string `json:\"gateway_id,omitempty\"`\n\n\tAccountID string `json:\"account_id,omitempty\"`\n\n\tClientAccnum string `json:\"client_accnum,omitempty\"`\n\tClientSubacc string `json:\"client_subacc,omitempty\"`\n\n\tTreasury string `json:\"treasury,omitempty\"`\n}",
+      "type PSPConfig struct {\n\tRail Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPCredential struct {\n\tConfigured bool `json:\"configured\"`\n\n\tValidatedAt *time.Time `json:\"validated_at\"`\n}",
       "type PSPFields struct {\n\tPSPAccount\n\n\tCustodian string `json:\"custodian,omitempty\"`\n\n\tTokenizationKey string `json:\"tokenization_key,omitempty\"`\n\tTokenizationURL string `json:\"tokenization_url,omitempty\"`\n\n\tCardEntry string `json:\"card_entry,omitempty\"`\n\n\tPublishableKey string `json:\"publishable_key,omitempty\"`\n\n\tWebhookOverlapExpiresAt *time.Time `json:\"webhook_overlap_expires_at,omitempty\"`\n}",
       "type PSPID uuid.UUID",
@@ -947,6 +953,7 @@
       "type PSPRoutingMatch struct {\n\tCurrency string `json:\"currency,omitempty\"`\n\tProduct  string `json:\"product,omitempty\"`\n\tPrice    string `json:\"price,omitempty\"`\n\tMode     string `json:\"mode,omitempty\"`\n\tCountry  string `json:\"country,omitempty\"`\n}",
       "type PSPRoutingPreview struct {\n\tPolicy string `json:\"policy\"`\n\n\tRule *int `json:\"rule\"`\n\n\tPSP        *string               `json:\"psp\"`\n\tRail       *Rail                 `json:\"rail\"`\n\tMode       *string               `json:\"mode\"`\n\tCandidates []PSPRoutingCandidate `json:\"candidates\"`\n}",
       "type PSPRoutingRule struct {\n\tMatch PSPRoutingMatch `json:\"match,omitempty\"`\n\n\tPrefer []string `json:\"prefer\"`\n}",
+      "type PSPs map[string]PSPConfig",
       "type PageRequest struct {\n\tLimit  int    `form:\"limit\"`\n\tCursor string `form:\"cursor\"`\n}",
       "type ParkReason string",
       "type ParkRelease string",
@@ -1111,14 +1118,17 @@
       "var ErrInsufficientCredits = errors.New(\"insufficient_credits\")",
       "var ErrInternal = errors.New(\"openrails: internal error\")",
       "var ErrInvalid = errors.New(\"openrails: invalid request\")",
+      "var ErrInvalidMerchantName = errors.New(\"merchants: invalid merchant name\")",
       "var ErrInvalidMerchantSlug = errors.New(\"control plane provision: invalid slug\")",
       "var ErrMerchantCreationEmailUnverified = errors.New(\"merchant creation requires a verified email\")",
       "var ErrMerchantCreationPaymentMethodRequired = errors.New(\"merchant creation beyond the free allowance requires a payment method on file\")",
       "var ErrMerchantCreationRefused = errors.New(\"controlplane: merchant creation refused\")",
       "var ErrMerchantGroupReleasePending = errors.New(\"merchants: retired merchant group release pending\")",
       "var ErrMerchantNameTaken = errors.New(\"merchants: merchant name is taken\")",
+      "var ErrMerchantNotFound = errors.New(\"merchants: merchant not found\")",
       "var ErrMerchantSlugReserved = errors.New(\"controlplane: merchant slug is reserved\")",
       "var ErrMerchantUnresolved = errors.New(\"merchant identity unresolved\")",
+      "var ErrMigrationsRequired = errors.New(\"openrails: database migrations are required\")",
       "var ErrNotFound = errors.New(\"openrails: not found\")",
       "var ErrPSPImportInProgress error = newCodedError(CodePSPImportInProgress, ErrConflict)",
       "var ErrPaymentMethodPSPMismatch error = newCodedError(CodePaymentMethodPSPMismatch, ErrConflict)",
@@ -1130,6 +1140,7 @@
       "var ErrPriceKeyCadenceConflict error = newCodedError(CodePriceKeyCadenceConflict, ErrConflict)",
       "var ErrRefundRailUnavailable error = newCodedError(CodeRefundRailUnavailable, ErrConflict)",
       "var ErrRefundUnsupported error = newCodedError(CodeRefundUnsupported, ErrInvalid)",
+      "var ErrRenamesDisabled = errors.New(\"merchants: merchant renames are disabled\")",
       "var ErrRequestBodyTooLarge error = newCodedError(CodeRequestBodyTooLarge, ErrInvalid)",
       "var ErrUnauthorized = errors.New(\"openrails: unauthorized\")",
       "var ErrUnreachable = errors.New(\"openrails: unreachable\")",
@@ -1228,15 +1239,6 @@
       "type TierMode string",
       "type TieredPrice struct {\n\tMode  TierMode   `json:\"mode,omitempty\"`\n\tTiers []RateTier `json:\"tiers,omitempty\"`\n}"
     ],
-    "internal/billingauth": [
-      "type Authenticator = auth.Authenticator",
-      "type Credential = auth.Credential",
-      "type CredentialKind = auth.CredentialKind",
-      "type Identity = auth.Identity",
-      "type Invoker = auth.Invoker",
-      "type SubjectKind = auth.SubjectKind",
-      "type Verified = auth.Verified"
-    ],
     "internal/cardguard": [
       "func (Card) Format(f fmt.State, _ rune)",
       "func (Card) GoString() string",
@@ -1253,60 +1255,6 @@
       "func (c *Card) UnmarshalJSON(data []byte) error",
       "func (c *Card) Zero()",
       "type Card struct{}"
-    ],
-    "internal/config": [
-      "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
-      "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
-      "type CardVaultConfig struct {\n\tKind string\n\n\tTenantID string\n\n\tKVMount string\n}",
-      "type Config struct {\n\tProviderWriteMode string\n\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tMerchants []MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
-      "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
-      "type Custodians map[string]CustodianConfig",
-      "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
-      "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
-      "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth billingauth.Authenticator\n\n\tResolve func(*http.Request, billingauth.Verified) (CustomerBinding, error)\n}",
-      "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n\n\tSkipMigrations bool\n\n\tLeaseConns int\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tLogger *slog.Logger\n\n\tUserInfo UserInfo\n\n\tNotifications *NotificationChannel\n\n\tCheckoutAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
-      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n}",
-      "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
-      "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
-      "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
-      "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
-      "type FormerNamesMode string",
-      "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
-      "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
-      "type MerchantDeclaration struct {\n\tMerchantDocument `yaml:\",inline\"`\n\n\tIssuer string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\"`\n}",
-      "type MerchantDocument struct {\n\tSlug        string `yaml:\"slug,omitempty\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
-      "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
-      "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
-      "type NotificationChannel struct {\n\tSink      notify.Publisher\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
-      "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
-      "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
-      "type PSPs map[string]PSPConfig",
-      "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n\n\tCCBillWebhookSources []string\n}",
-      "type RateLimit struct {\n\tRequestsPerMinute int\n}",
-      "type RateLimitsConfig map[string]*RateLimit",
-      "type Read string",
-      "type ReadCache map[Read]ReadPolicy",
-      "type ReadPolicy struct {\n\tRefreshAfter time.Duration\n\tMaxStale     time.Duration\n}",
-      "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
-      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n}",
-      "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig\n}",
-      "type SolanaCrankerConfig struct {\n\tMode string\n\n\tKey string\n\n\tPrivateKey string\n}",
-      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64\n\tPaidCustomersPerHourlyCustomer int64\n\tMinimumCustomersPerDay         int64\n\tPaidCustomersPerDailyCustomer  int64\n}",
-      "type UserInfo = userinfo.Lookup",
-      "type VaultConfig struct {\n\tKVMount string\n\n\tScopePrefix string\n\n\tTransitMount string\n}"
-    ],
-    "internal/nmimock": [
-      "type Billing struct {\n\tID   string\n\tCard Card\n}",
-      "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n\n\tVaultsDeclined bool\n}",
-      "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}",
-      "type Plan struct {\n\tID, Name, Amount string\n\tDays, Months     int\n}",
-      "type Schedule struct {\n\tID, Vault, Plan, Amount string\n\n\tBook    string\n\tCreated time.Time\n\tOrder   string\n\n\tEmail string\n\n\tDays, Months int\n\n\tCalendarAnchor  time.Time\n\tNextBilling     time.Time\n\tDeleted, Paused bool\n\n\tCustom bool\n}",
-      "type Vault struct {\n\tID, BillingID string\n\n\tBook  string\n\tCard  Card\n\tExtra []Billing\n\n\tNoBrand bool\n\n\tEmail, FirstName, LastName, ShippingID string\n\n\tCreated time.Time\n}"
-    ],
-    "internal/stripemock": [
-      "type Card struct {\n\tBrand, Last4, Decline string\n}",
-      "type LedgerEntry struct {\n\tPaymentIntent, Charge, PaymentMethod string\n\tAmount, Refunded                     int64\n}"
     ],
     "openrailstest": [
       "func (d *UserInfo) Delete(id string)",
@@ -1333,15 +1281,15 @@
       "func (g *Mock) URL() string",
       "func (g *Mock) Unexpected() []string",
       "func New(opts Options) *Mock",
-      "type Billing = nmimock.Billing",
-      "type Card = nmimock.Card",
-      "type LedgerEntry = nmimock.LedgerEntry",
+      "type Billing struct {\n\tID   string\n\tCard Card\n}",
+      "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n\n\tVaultsDeclined bool\n}",
+      "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}",
       "type Mock struct{}",
       "type Options struct {\n\tClock func() time.Time\n}",
-      "type Plan = nmimock.Plan",
+      "type Plan struct {\n\tID, Name, Amount string\n\tDays, Months     int\n}",
       "type Sale struct {\n\tTransactionID, OrderID, Vault, Last4 string\n\n\tAmount, Currency string\n\n\tDeclined string\n\tAt       time.Time\n}",
-      "type Schedule = nmimock.Schedule",
-      "type Vault = nmimock.Vault"
+      "type Schedule struct {\n\tID, Vault, Plan, Amount string\n\n\tBook    string\n\tCreated time.Time\n\tOrder   string\n\n\tEmail string\n\n\tDays, Months int\n\n\tCalendarAnchor  time.Time\n\tNextBilling     time.Time\n\tDeleted, Paused bool\n\n\tCustom bool\n}",
+      "type Vault struct {\n\tID, BillingID string\n\n\tBook  string\n\tCard  Card\n\tExtra []Billing\n\n\tNoBrand bool\n\n\tEmail, FirstName, LastName, ShippingID string\n\n\tCreated time.Time\n}"
     ],
     "openrailstest/stripemock": [
       "func (s *Mock) Authenticate(paymentIntent string) bool",
@@ -1360,16 +1308,16 @@
       "func (s *Mock) URL() string",
       "func (s *Mock) Unexpected() []string",
       "func New(opts Options) *Mock",
-      "type Card = stripemock.Card",
+      "type Card struct {\n\tBrand, Last4, Decline string\n}",
       "type CheckoutSession struct {\n\tID, URL string\n\n\tStatus, PaymentStatus string\n\n\tAmountTotal int64\n\tCurrency    string\n\n\tPaymentIntent string\n\tMetadata      map[string]string\n}",
-      "type LedgerEntry = stripemock.LedgerEntry",
+      "type LedgerEntry struct {\n\tPaymentIntent, Charge, PaymentMethod string\n\tAmount, Refunded                     int64\n}",
       "type Mock struct{}",
       "type Options struct {\n\tClock func() time.Time\n}"
     ],
     "server": [
-      "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
+      "const (\n\tFormerNamesFinite FormerNamesMode = \"finite\"\n\n\tFormerNamesForever FormerNamesMode = \"forever\"\n\n\tFormerNamesImmediate FormerNamesMode = \"immediate\"\n)",
       "const (\n\tMerchantRolesRead   = \"merchant:roles:read\"\n\tMerchantRolesManage = \"merchant:roles:manage\"\n)",
-      "const ConsoleClientID = controlplane.ConsoleClientID",
+      "const ConsoleClientID = \"openrails-console\"",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) CheckoutPage() (origin string, handler http.Handler)",
       "func (s *Server) Close(ctx context.Context) error",
@@ -1408,23 +1356,15 @@
       "func MerchantRole(name string) (iam.Role, bool)",
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
-      "type AdminConsole = hostconfig.ConsoleConfig",
+      "type AdminConsole struct {\n\tDisabled bool\n\n\tIssuers map[string]ConsoleIssuer\n}",
       "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
-      "type ConsoleIssuer = hostconfig.ConsoleIssuer",
-      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
-      "type FormerNamesConfig = config.FormerNamesConfig",
-      "type FormerNamesMode = config.FormerNamesMode",
-      "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
-      "type NamingConfig = config.NamingConfig",
-      "type Server struct {\n}",
-      "var ErrInvalidMerchantName = merchants.ErrInvalidName",
-      "var ErrMerchantNotFound = merchants.ErrMerchantNotFound",
-      "var ErrRenamesDisabled = merchants.ErrRenamesDisabled"
-    ],
-    "server/internal/hostconfig": [
-      "type ConsoleConfig struct {\n\tDisabled bool `koanf:\"disabled\"`\n\n\tIssuers map[string]ConsoleIssuer `koanf:\"issuers\"`\n}",
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
-      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}"
+      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
+      "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
+      "type FormerNamesMode string",
+      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
+      "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
+      "type Server struct {\n}"
     ],
     "server/web/console": [
       "func FS() fs.FS"
@@ -1435,6 +1375,9 @@
   },
   "wire_types": {
     "billing": [
+      "func (Card) MarshalJSON() ([]byte, error) { return []byte(`\"` + cardguard.Redacted + `\"`), nil }",
+      "func (Card) MarshalText() ([]byte, error) { return []byte(cardguard.Redacted), nil }",
+      "func (c *Card) UnmarshalJSON(data []byte) error { return (*cardguard.Card)(c).UnmarshalJSON(data) }",
       "func (id *AlertWebhookID) UnmarshalText(b []byte) error {\n\tv, err := ParseAlertWebhookID(string(b))\n\t*id = v\n\treturn err\n}",
       "func (id *BalanceTransactionID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseBalanceTransactionID(string(text))\n\t*id = parsed\n\treturn err\n}",
       "func (id *CreditGrantID) UnmarshalText(text []byte) error {\n\tparsed, err := ParseCreditGrantID(string(text))\n\t*id = parsed\n\treturn err\n}",
@@ -2004,6 +1947,7 @@
   "declaring_file_imports": {
     "adapters/authkit/merchant_groups.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "errors": "errors",
       "iam": "github.com/open-rails/authkit/iam",
@@ -2073,7 +2017,10 @@
       "time": "time"
     },
     "billing/card.go": {
-      "cardguard": "github.com/open-rails/openrails/internal/cardguard"
+      "cardguard": "github.com/open-rails/openrails/internal/cardguard",
+      "fmt": "fmt",
+      "io": "io",
+      "slog": "log/slog"
     },
     "billing/carts.go": {
       "time": "time"
@@ -2194,6 +2141,9 @@
     },
     "billing/metrics.go": {
       "time": "time"
+    },
+    "billing/migrations.go": {
+      "errors": "errors"
     },
     "billing/notification_adoption.go": {
       "notify": "github.com/open-rails/authkit/notify",
@@ -2375,7 +2325,7 @@
       "wireform": "github.com/open-rails/openrails/internal/http/wireform"
     },
     "config.go": {
-      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "billing": "github.com/open-rails/openrails/billing",
       "config": "github.com/open-rails/openrails/internal/config"
     },
     "customer_proof.go": {
@@ -2389,6 +2339,22 @@
     "customer_routes.go": {
       "fmt": "fmt"
     },
+    "deps.go": {
+      "app": "github.com/open-rails/openrails/internal/app",
+      "billing": "github.com/open-rails/openrails/billing",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "engine": "github.com/open-rails/openrails/internal/engine",
+      "fs": "io/fs",
+      "http": "net/http",
+      "notify": "github.com/open-rails/authkit/notify",
+      "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
+      "slog": "log/slog",
+      "userinfo": "github.com/open-rails/authkit/userinfo",
+      "v9": "github.com/redis/go-redis/v9",
+      "vaultapi": "github.com/hashicorp/vault/api"
+    },
     "embedded.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "config": "github.com/open-rails/openrails/internal/config",
@@ -2400,7 +2366,6 @@
       "json": "encoding/json",
       "river": "github.com/riverqueue/river",
       "riverhelpers": "github.com/open-rails/helpers/river",
-      "riverjobs": "github.com/open-rails/openrails/internal/river",
       "v5": "github.com/jackc/pgx/v5"
     },
     "entitlement_check_cache.go": {
@@ -2461,11 +2426,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/billingauth/contract.go": {
-      "auth": "github.com/open-rails/authkit/auth",
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context"
-    },
     "internal/cardguard/card.go": {
       "context": "context",
       "fmt": "fmt",
@@ -2473,16 +2433,8 @@
       "json": "encoding/json",
       "slog": "log/slog"
     },
-    "internal/config/card_vault.go": {
-      "fmt": "fmt",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "path": "path",
-      "slices": "slices",
-      "strings": "strings",
-      "unicode": "unicode",
-      "uuid": "github.com/google/uuid"
-    },
     "internal/config/config.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "errors": "errors",
       "fmt": "fmt",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -2499,69 +2451,8 @@
     },
     "internal/config/deps.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
-      "fs": "io/fs",
-      "http": "net/http",
-      "notify": "github.com/open-rails/authkit/notify",
-      "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
-      "slog": "log/slog",
-      "userinfo": "github.com/open-rails/authkit/userinfo",
-      "v9": "github.com/redis/go-redis/v9",
-      "vaultapi": "github.com/hashicorp/vault/api"
-    },
-    "internal/config/documents.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "custodians": "github.com/open-rails/openrails/internal/custodians",
-      "fmt": "fmt",
-      "go-yaml": "github.com/goccy/go-yaml",
-      "maps": "maps",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
-      "slices": "slices",
-      "strconv": "strconv",
-      "strings": "strings"
-    },
-    "internal/config/embedding.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
-      "http": "net/http"
-    },
-    "internal/config/hyperswitch.go": {
-      "fmt": "fmt",
-      "net": "net",
-      "strings": "strings",
-      "url": "net/url"
-    },
-    "internal/config/merchant_declaration.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "errors": "errors",
-      "fmt": "fmt",
-      "go-yaml": "github.com/goccy/go-yaml",
-      "maps": "maps",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "net": "net",
-      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
-      "reflect": "reflect",
-      "slices": "slices",
-      "strconv": "strconv",
-      "strings": "strings",
-      "url": "net/url"
-    },
-    "internal/config/naming.go": {
-      "fmt": "fmt",
-      "time": "time"
-    },
-    "internal/config/read_cache.go": {
-      "time": "time"
-    },
-    "internal/config/solana_settings.go": {
-      "errors": "errors",
-      "fmt": "fmt",
-      "net": "net",
-      "solanago": "github.com/gagliardetto/solana-go",
-      "strings": "strings",
-      "url": "net/url"
+      "notify": "github.com/open-rails/authkit/notify"
     },
     "internal/contract/model.go": {
       "ast": "go/ast",
@@ -4416,14 +4307,6 @@
       "strconv": "strconv",
       "strings": "strings"
     },
-    "internal/nmimock/types.go": {
-      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
-      "fmt": "fmt",
-      "strconv": "strconv",
-      "strings": "strings",
-      "time": "time",
-      "url": "net/url"
-    },
     "internal/nmimock/v5.go": {
       "http": "net/http",
       "httptest": "net/http/httptest",
@@ -5023,28 +4906,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/stripemock/inspect.go": {
-      "fmt": "fmt",
-      "sort": "sort",
-      "strings": "strings"
-    },
-    "internal/stripemock/mock.go": {
-      "atomic": "sync/atomic",
-      "bytes": "bytes",
-      "errors": "errors",
-      "fmt": "fmt",
-      "http": "net/http",
-      "httptest": "net/http/httptest",
-      "io": "io",
-      "json": "encoding/json",
-      "regexp": "regexp",
-      "sort": "sort",
-      "strconv": "strconv",
-      "strings": "strings",
-      "sync": "sync",
-      "time": "time",
-      "url": "net/url"
-    },
     "internal/wakejobs/wakejobs.go": {
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -5064,9 +4925,9 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "migrate.go": {
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "engine": "github.com/open-rails/openrails/internal/engine",
-      "migrate": "github.com/open-rails/openrails/internal/migrate",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
     },
     "notification_adoption.go": {
@@ -5076,6 +4937,7 @@
     },
     "openrailstest/auth.go": {
       "authtest": "github.com/open-rails/authkit/auth/authtest",
+      "config": "github.com/open-rails/openrails/internal/config",
       "http": "net/http",
       "httproutes": "github.com/open-rails/openrails/internal/http/routes",
       "openrails": "github.com/open-rails/openrails",
@@ -5095,7 +4957,6 @@
     },
     "openrailstest/userinfo.go": {
       "context": "context",
-      "openrails": "github.com/open-rails/openrails",
       "sort": "sort",
       "strings": "strings",
       "sync": "sync",
@@ -5109,6 +4970,28 @@
       "models": "github.com/open-rails/openrails/internal/db/models",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "time": "time"
+    },
+    "read_cache.go": {
+      "atomic": "sync/atomic",
+      "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "cache": "github.com/open-rails/helpers/cache",
+      "cmp": "cmp",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "maps": "maps",
+      "slices": "slices",
+      "strconv": "strconv",
+      "strings": "strings",
+      "sync": "sync",
+      "time": "time",
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "remote.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -5132,6 +5015,12 @@
       "url": "net/url",
       "utf8": "unicode/utf8",
       "wireform": "github.com/open-rails/openrails/internal/http/wireform"
+    },
+    "routes.go": {
+      "auth": "github.com/open-rails/authkit/auth",
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "http": "net/http"
     },
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -5169,9 +5058,6 @@
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "uuid": "github.com/google/uuid"
     },
-    "server/errors.go": {
-      "merchants": "github.com/open-rails/openrails/internal/merchants"
-    },
     "server/event_log.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
@@ -5205,10 +5091,6 @@
       "strings": "strings",
       "time": "time",
       "url": "net/url"
-    },
-    "server/internal/hostconfig/server.go": {
-      "fmt": "fmt",
-      "strings": "strings"
     },
     "server/internal/http/console_merchants.go": {
       "adminconsole": "github.com/open-rails/openrails/server/internal/adminconsole",

@@ -55,7 +55,7 @@ func newVaultCards(t *testing.T, platform, armed bool) *vaultCards {
 		t.Cleanup(wire.CloseIdleConnections)
 		w.deps.BasisTheoryTransport = custodianProbeWire{loopback: loopbackWire{target: target, wire: wire}, wire: wire}
 		for i := range w.cfg.Merchants {
-			w.cfg.Merchants[i].MerchantDocument = openrails.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
+			w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
 		}
 	})
 	v := &vaultCards{authorityWorld: a, vendor: vendor, journal: journal, platform: platform, vault: vault}

@@ -58,7 +58,7 @@ func TestHostDeps(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.cfg.Vault = &openrails.VaultConfig{KVMount: "secret"}
 			for i := range w.cfg.Merchants {
-				w.cfg.Merchants[i].MerchantDocument = openrails.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
+				w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
 			}
 		})
 		state := configurationState(t, w.engine)
@@ -73,8 +73,8 @@ func TestHostDeps(t *testing.T) {
 	t.Run("OR-J04-S74/a-slug-declared-twice-provisions-neither-entry", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.cfg.Merchants = append(w.cfg.Merchants,
-				openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{Slug: "gamma", DisplayName: "First"}},
-				openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{Slug: "Gamma", DisplayName: "Second"}},
+				billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: "gamma", DisplayName: "First"}},
+				billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: "Gamma", DisplayName: "Second"}},
 			)
 		})
 		require.ErrorContains(t, configurationState(t, w.engine), "merchants.gamma: declared by merchants[2], merchants[3]")

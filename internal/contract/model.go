@@ -68,7 +68,7 @@ type CardEntry struct {
 func wireForm(t reflect.Type) (reflect.Type, bool) {
 	name := t.String()
 	switch {
-	case name == "cardguard.Card":
+	case name == "billing.Card":
 		return reflect.TypeFor[CardEntry](), true
 	case name == "catalog.Capacity":
 		return reflect.TypeFor[string](), true

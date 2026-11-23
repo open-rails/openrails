@@ -22,6 +22,12 @@ var (
 	ErrPermissionRequired = errors.New("merchant permission required")
 	// ErrMerchantUnresolved: no merchant answers to the reference.
 	ErrMerchantUnresolved = errors.New("merchant identity unresolved")
+	// ErrMerchantNotFound: no merchant has the id.
+	ErrMerchantNotFound = errors.New("merchants: merchant not found")
+	// ErrInvalidMerchantName: the name breaks the merchant name rule.
+	ErrInvalidMerchantName = errors.New("merchants: invalid merchant name")
+	// ErrRenamesDisabled: the server's naming policy forbids renames.
+	ErrRenamesDisabled = errors.New("merchants: merchant renames are disabled")
 	// ErrInvalidMerchantSlug wraps the slug validation detail.
 	ErrInvalidMerchantSlug = errors.New("control plane provision: invalid slug")
 	// ErrMerchantNameTaken: another live merchant holds the name, or holds it

@@ -60,25 +60,25 @@ func DumpMerchantConfig(ctx context.Context, logger *slog.Logger, cfg *config.Co
 
 // dumpDeclaration is a configuration as its manifest declares it: its
 // documents, without credentials.
-func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDocument {
+func dumpDeclaration(set merchantdocs.Set, slug string) billing.MerchantDocument {
 	doc := set.Merchant.Value
-	out := config.MerchantDocument{DisplayName: doc.DisplayName, MerchantSettings: doc.MerchantSettings}
+	out := billing.MerchantDocument{DisplayName: doc.DisplayName, MerchantSettings: doc.MerchantSettings}
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}
 	for _, key := range set.CustodianKeys() {
 		c := set.Custodians[key].Value
 		if out.Custodians == nil {
-			out.Custodians = map[string]config.CustodianConfig{}
+			out.Custodians = map[string]billing.CustodianConfig{}
 		}
-		out.Custodians[key] = config.CustodianConfig{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
+		out.Custodians[key] = billing.CustodianConfig{Kind: c.Kind, Environment: c.Environment, AccountID: c.AccountID, Archived: c.Archived, Settings: maps.Clone(c.Settings)}
 	}
 	for _, key := range set.PSPKeys() {
 		p := set.PSPs[key].Value
 		if out.PSPs == nil {
-			out.PSPs = map[string]config.PSPConfig{}
+			out.PSPs = map[string]billing.PSPConfig{}
 		}
-		out.PSPs[key] = config.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
+		out.PSPs[key] = billing.PSPConfig{Rail: billing.Rail(p.Rail), Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived, Custodian: p.Custodian, Settings: maps.Clone(p.Settings)}
 	}
 	return out
 }

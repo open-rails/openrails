@@ -74,7 +74,7 @@ func MerchantCreationAdmission(logger *slog.Logger, controlPlane func() *control
 			if slices.Contains(ownedGroups, claimed.PermissionGroupID) {
 				return nil
 			}
-		case !errors.Is(err, merchants.ErrMerchantNotFound):
+		case !errors.Is(err, billing.ErrMerchantNotFound):
 			return fmt.Errorf("resolve claimed merchant: %w", err)
 		}
 		owned, err := directory.ListByGroups(ctx, ownedGroups)

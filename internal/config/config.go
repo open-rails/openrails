@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -48,7 +49,7 @@ type Config struct {
 	// configuration, read-only; with one it seeds Vault once, when Vault
 	// holds nothing for the merchant. A request acts on the merchant its
 	// credential is bound to: see MerchantDeclaration.Issuer.
-	Merchants []MerchantDeclaration
+	Merchants []billing.MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
@@ -96,9 +97,6 @@ type Config struct {
 	// LLM is the model behind the console's catalog questions.
 	// Without an API key those features are off.
 	LLM *LLMConfig
-	// ReadCache overrides how long the engine's handles serve catalog and
-	// configuration reads from memory; nil keeps the defaults.
-	ReadCache ReadCache
 
 	// ProviderSandbox points non-live PSPs' provider clients at loopback
 	// gateways, to qualify a process against fake providers, and accepts
@@ -327,7 +325,7 @@ type DatabaseConfig struct {
 	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
 	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is ErrMigrationsRequired. Call
+	// or was applied with other content, is billing.ErrMigrationsRequired. Call
 	// openrails.Migrate first.
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool

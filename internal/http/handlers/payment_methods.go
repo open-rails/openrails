@@ -222,7 +222,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 	create := &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: strings.TrimSpace(req.Token),
-		Card:         req.Card,
+		Card:         (*cardguard.Card)(req.Card),
 		PSPID:        pspID,
 		NameOnCard:   details.Name,
 		Address1:     details.Line1,
