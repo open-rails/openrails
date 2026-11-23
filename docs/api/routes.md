@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (177), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (183), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -64,6 +64,7 @@ A customer acting on its own account.
 | PUT | `/v1/me/low-balance-lines/{currency}` | customer | — | `SetLowBalanceLineParams` | 200 `EffectiveLowBalanceLine` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
+| GET | `/v1/me/limits` | customer | — | — | 200 `ListPage<CustomerLimit>` |  |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
 | PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
@@ -108,6 +109,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
+| POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustLimitParams` | 200 `CustomerLimit` | limit `grant` |
 | POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
@@ -146,6 +148,9 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceMigration>` |  |
 | GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `PriceMigration` |  |
 | POST | `/v1/catalog/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | catalog update |
+| GET | `/v1/catalog/limits` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Limit>` |  |
+| GET | `/v1/catalog/limits/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Limit` |  |
+| PUT | `/v1/catalog/limits/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetLimitParams` | 200 `Limit` | catalog update |
 
 ## Merchant configuration
 
@@ -235,6 +240,7 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<RunningCharge>` |  |
+| GET | `/v1/app/limits` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<CustomerLimit>` |  |
 | GET | `/v1/app/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `EventPage` |  |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |

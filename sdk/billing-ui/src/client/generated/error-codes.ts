@@ -74,6 +74,7 @@ export type OpenRailsErrorCode =
   | "invalid_request_body"
   | "invalid_settlement_status_request"
   | "invoker_scoped_principal"
+  | "limit_not_found"
   | "merchant_config_read_only"
   | "merchant_mismatch"
   | "merchant_unresolved"
@@ -276,6 +277,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
+  limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },
   merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential is bound to no merchant here." },

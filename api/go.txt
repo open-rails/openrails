@@ -33,6 +33,7 @@ pkg openrails, func WithInvoker(context.Context, Invoker) context.Context
 pkg openrails, func WithRiverClient(*river.Client[pgx.Tx]) StartOption
 pkg openrails, func WriteCatalogReceipt(io.Writer, *billing.CatalogApplicationReceipt) error
 pkg openrails, method (*BoundMerchantError) Error() string
+pkg openrails, method (*Client) AdjustCustomerLimit(context.Context, billing.CustomerID, billing.AdjustLimitParams, ...RequestOption) (*billing.CustomerLimit, error)
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*Client) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*Client) ApplyPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
@@ -74,6 +75,7 @@ pkg openrails, method (*Client) GetCreditGrant(context.Context, billing.CreditGr
 pkg openrails, method (*Client) GetCustomer(context.Context, billing.CustomerID, ...RequestOption) (*billing.Customer, error)
 pkg openrails, method (*Client) GetDashboard(context.Context, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (*Client) GetFinding(context.Context, billing.FindingID, ...RequestOption) (*billing.Finding, error)
+pkg openrails, method (*Client) GetLimit(context.Context, string, ...RequestOption) (*billing.Limit, error)
 pkg openrails, method (*Client) GetMerchantConfiguration(context.Context, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (*Client) GetMeter(context.Context, string, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
@@ -100,11 +102,13 @@ pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.Alert
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
 pkg openrails, method (*Client) ListCustodians(context.Context, ...RequestOption) (*billing.ListPage[billing.Custodian], error)
+pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.CustomerLimit], error)
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams, ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
 pkg openrails, method (*Client) ListEvents(context.Context, billing.EventQuery, ...RequestOption) (*billing.EventPage, error)
 pkg openrails, method (*Client) ListFindings(context.Context, billing.FindingListParams, ...RequestOption) (*billing.ListPage[billing.Finding], error)
+pkg openrails, method (*Client) ListLimits(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Limit], error)
 pkg openrails, method (*Client) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
 pkg openrails, method (*Client) ListOrders(context.Context, billing.OrderListParams, ...RequestOption) (*billing.ListPage[billing.Order], error)
 pkg openrails, method (*Client) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
@@ -144,6 +148,7 @@ pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.Subs
 pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.CreditGrantID, billing.RevokeCreditGrantParams, ...RequestOption) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams, ...RequestOption) error
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
+pkg openrails, method (*Client) SetLimit(context.Context, string, billing.SetLimitParams, ...RequestOption) (*billing.Limit, error)
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) SetPSPImportMappings(context.Context, billing.SetPSPImportMappingsParams, ...RequestOption) (*billing.PSPImportMappingsResult, error)
 pkg openrails, method (*Client) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
@@ -186,6 +191,7 @@ pkg openrails, method (*Remote) Close(context.Context) error
 pkg openrails, method (*Remote) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Remote) Ready(context.Context) error
 pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
+pkg openrails, method (LocalClient) AdjustCustomerLimit(context.Context, billing.CustomerID, billing.AdjustLimitParams, ...RequestOption) (*billing.CustomerLimit, error)
 pkg openrails, method (LocalClient) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (LocalClient) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (LocalClient) ApplyPSPImport(context.Context, billing.PSPImportID, ...RequestOption) (*billing.PSPImport, error)
@@ -227,6 +233,7 @@ pkg openrails, method (LocalClient) GetCreditGrant(context.Context, billing.Cred
 pkg openrails, method (LocalClient) GetCustomer(context.Context, billing.CustomerID, ...RequestOption) (*billing.Customer, error)
 pkg openrails, method (LocalClient) GetDashboard(context.Context, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (LocalClient) GetFinding(context.Context, billing.FindingID, ...RequestOption) (*billing.Finding, error)
+pkg openrails, method (LocalClient) GetLimit(context.Context, string, ...RequestOption) (*billing.Limit, error)
 pkg openrails, method (LocalClient) GetMerchantConfiguration(context.Context, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (LocalClient) GetMeter(context.Context, string, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (LocalClient) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
@@ -253,11 +260,13 @@ pkg openrails, method (LocalClient) ListAlertWebhooks(context.Context, billing.A
 pkg openrails, method (LocalClient) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (LocalClient) ListCreditGrants(context.Context, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
 pkg openrails, method (LocalClient) ListCustodians(context.Context, ...RequestOption) (*billing.ListPage[billing.Custodian], error)
+pkg openrails, method (LocalClient) ListCustomerLimits(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.CustomerLimit], error)
 pkg openrails, method (LocalClient) ListCustomers(context.Context, billing.CustomerListParams, ...RequestOption) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (LocalClient) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams, ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (LocalClient) ListEntitlements(context.Context, billing.EntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
 pkg openrails, method (LocalClient) ListEvents(context.Context, billing.EventQuery, ...RequestOption) (*billing.EventPage, error)
 pkg openrails, method (LocalClient) ListFindings(context.Context, billing.FindingListParams, ...RequestOption) (*billing.ListPage[billing.Finding], error)
+pkg openrails, method (LocalClient) ListLimits(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Limit], error)
 pkg openrails, method (LocalClient) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
 pkg openrails, method (LocalClient) ListOrders(context.Context, billing.OrderListParams, ...RequestOption) (*billing.ListPage[billing.Order], error)
 pkg openrails, method (LocalClient) ListPSPImportRecords(context.Context, billing.PSPImportID, billing.PSPImportRecordListParams, ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error)
@@ -297,6 +306,7 @@ pkg openrails, method (LocalClient) ResumeSubscription(context.Context, billing.
 pkg openrails, method (LocalClient) RevokeCreditGrant(context.Context, billing.CreditGrantID, billing.RevokeCreditGrantParams, ...RequestOption) (*billing.CreditGrant, error)
 pkg openrails, method (LocalClient) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams, ...RequestOption) error
 pkg openrails, method (LocalClient) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
+pkg openrails, method (LocalClient) SetLimit(context.Context, string, billing.SetLimitParams, ...RequestOption) (*billing.Limit, error)
 pkg openrails, method (LocalClient) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (LocalClient) SetPSPImportMappings(context.Context, billing.SetPSPImportMappingsParams, ...RequestOption) (*billing.PSPImportMappingsResult, error)
 pkg openrails, method (LocalClient) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
@@ -699,6 +709,7 @@ pkg openrails/billing, const CardVaultPlatform untyped string = "platform"
 pkg openrails/billing, const CatalogDraftNewPrice CatalogDraftKind = "new_price"
 pkg openrails/billing, const CatalogDraftPriceChange CatalogDraftKind = "price_change"
 pkg openrails/billing, const CatalogDraftRefused CatalogDraftKind = "refused"
+pkg openrails/billing, const CatalogObjectLimit CatalogObjectKind = "limit"
 pkg openrails/billing, const CatalogObjectMeter CatalogObjectKind = "meter"
 pkg openrails/billing, const CatalogObjectPrice CatalogObjectKind = "price"
 pkg openrails/billing, const CatalogObjectProduct CatalogObjectKind = "product"
@@ -746,6 +757,7 @@ pkg openrails/billing, const CodeInvalidParam untyped string = "invalid_param"
 pkg openrails/billing, const CodeInvalidQuery untyped string = "invalid_query"
 pkg openrails/billing, const CodeInvalidRequestBody untyped string = "invalid_request_body"
 pkg openrails/billing, const CodeInvokerScopedPrincipal untyped string = "invoker_scoped_principal"
+pkg openrails/billing, const CodeLimitNotFound untyped string = "limit_not_found"
 pkg openrails/billing, const CodeMerchantMismatch untyped string = "merchant_mismatch"
 pkg openrails/billing, const CodeMerchantUnresolved untyped string = "merchant_unresolved"
 pkg openrails/billing, const CodeMethodNotAllowed untyped string = "method_not_allowed"
@@ -1374,6 +1386,9 @@ pkg openrails/billing, type AccessTenureParams struct
 pkg openrails/billing, type AccessTenureParams struct, At time.Time
 pkg openrails/billing, type AccessTenureParams struct, CustomerID CustomerID
 pkg openrails/billing, type AccessTenureParams struct, Entitlements []string
+pkg openrails/billing, type AdjustLimitParams struct
+pkg openrails/billing, type AdjustLimitParams struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type AdjustLimitParams struct, Limit string `json:"limit"`
 pkg openrails/billing, type AdminAccess struct
 pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
 pkg openrails/billing, type AdminAccess struct, ApplicationPermissions []Permission `json:"application_permissions"`
@@ -1918,6 +1933,16 @@ pkg openrails/billing, type CustomerEntitlement struct, CustomerID CustomerID `j
 pkg openrails/billing, type CustomerEntitlement struct, Entitlement string `json:"entitlement"`
 pkg openrails/billing, type CustomerEntitlement struct, Quantity *int `json:"quantity"`
 pkg openrails/billing, type CustomerID [16]byte
+pkg openrails/billing, type CustomerLimit struct
+pkg openrails/billing, type CustomerLimit struct, Capacity int64 `json:"capacity,string"`
+pkg openrails/billing, type CustomerLimit struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type CustomerLimit struct, Held int64 `json:"held,string"`
+pkg openrails/billing, type CustomerLimit struct, Limit string `json:"limit"`
+pkg openrails/billing, type CustomerLimit struct, Remaining int64 `json:"remaining,string"`
+pkg openrails/billing, type CustomerLimit struct, ResetsAt *time.Time `json:"resets_at"`
+pkg openrails/billing, type CustomerLimit struct, Unit string `json:"unit"`
+pkg openrails/billing, type CustomerLimit struct, Used int64 `json:"used,string"`
+pkg openrails/billing, type CustomerLimit struct, WindowStartsAt *time.Time `json:"window_starts_at"`
 pkg openrails/billing, type CustomerListParams struct
 pkg openrails/billing, type CustomerListParams struct, IDs []CustomerID `form:"-"`
 pkg openrails/billing, type CustomerListParams struct, Search string `form:"search"`
@@ -1926,6 +1951,7 @@ pkg openrails/billing, type CustomerSettings struct
 pkg openrails/billing, type CustomerSettings struct, BillingPolicy *string `json:"billing_policy"`
 pkg openrails/billing, type CustomerSettings struct, CreditLimits []CreditLimit `json:"credit_limits"`
 pkg openrails/billing, type CustomerSettings struct, InvoiceProfile *InvoiceProfile `json:"invoice_profile"`
+pkg openrails/billing, type CustomerSettings struct, Limits []LimitOverride `json:"limits"`
 pkg openrails/billing, type CustomerSettings struct, LowBalanceLines []LowBalanceLine `json:"low_balance_lines"`
 pkg openrails/billing, type CustomerSettings struct, TrustLevels []TrustLevel `json:"trust_levels"`
 pkg openrails/billing, type CustomerSettings struct, UsageBilling []UsageBillingAccount `json:"usage_billing,omitempty"`
@@ -2342,6 +2368,24 @@ pkg openrails/billing, type InvoiceProfile struct, NetTermsDays int `json:"net_t
 pkg openrails/billing, type InvoiceProfile struct, PONumber string `json:"po_number"`
 pkg openrails/billing, type InvoiceProfile struct, Tax map[string]any `json:"tax"`
 pkg openrails/billing, type InvokerType string
+pkg openrails/billing, type Limit struct
+pkg openrails/billing, type Limit struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type Limit struct, Key string `json:"key"`
+pkg openrails/billing, type Limit struct, Overrun catalog.Overrun `json:"overrun"`
+pkg openrails/billing, type Limit struct, Products []LimitProduct `json:"products"`
+pkg openrails/billing, type Limit struct, RateCards []catalog.LimitRateCard `json:"rate_cards"`
+pkg openrails/billing, type Limit struct, Reset catalog.LimitReset `json:"reset"`
+pkg openrails/billing, type Limit struct, Revision int64 `json:"revision"`
+pkg openrails/billing, type Limit struct, Unit string `json:"unit"`
+pkg openrails/billing, type Limit struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type LimitOverride struct
+pkg openrails/billing, type LimitOverride struct, Capacity int64 `json:"capacity,string"`
+pkg openrails/billing, type LimitOverride struct, Inherit bool `json:"inherit,omitempty"`
+pkg openrails/billing, type LimitOverride struct, Limit string `json:"limit"`
+pkg openrails/billing, type LimitProduct struct
+pkg openrails/billing, type LimitProduct struct, Capacity int64 `json:"capacity,string"`
+pkg openrails/billing, type LimitProduct struct, ProductID ProductID `json:"product_id"`
+pkg openrails/billing, type LimitProduct struct, ProductKey string `json:"product_key"`
 pkg openrails/billing, type LinkPSPImportParams struct
 pkg openrails/billing, type LinkPSPImportParams struct, Links []PSPImportLink `json:"links,omitempty"`
 pkg openrails/billing, type LinkPSPImportParams struct, Prices []PSPImportPriceLink `json:"prices,omitempty"`
@@ -3539,6 +3583,12 @@ pkg openrails/billing, type SetDashboardParams struct
 pkg openrails/billing, type SetDashboardParams struct, Widgets []DashboardWidget `json:"widgets"`
 pkg openrails/billing, type SetDefaultPaymentMethodParams struct
 pkg openrails/billing, type SetDefaultPaymentMethodParams struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+pkg openrails/billing, type SetLimitParams struct
+pkg openrails/billing, type SetLimitParams struct, ExpectedRevision *int64 `json:"expected_revision,omitempty"`
+pkg openrails/billing, type SetLimitParams struct, Overrun catalog.Overrun `json:"overrun,omitempty"`
+pkg openrails/billing, type SetLimitParams struct, RateCards []catalog.LimitRateCard `json:"rate_cards,omitempty"`
+pkg openrails/billing, type SetLimitParams struct, Reset catalog.LimitReset `json:"reset"`
+pkg openrails/billing, type SetLimitParams struct, Unit string `json:"unit"`
 pkg openrails/billing, type SetLowBalanceLineParams struct
 pkg openrails/billing, type SetLowBalanceLineParams struct, Amount *int64 `json:"amount,string"`
 pkg openrails/billing, type SetLowBalanceLineParams struct, RunwayHours *int `json:"runway_hours"`
@@ -3760,6 +3810,7 @@ pkg openrails/billing, type UpdateCustomerParams struct
 pkg openrails/billing, type UpdateCustomerParams struct, BillingPolicy catalog.Field[string] `json:"billing_policy,omitzero"`
 pkg openrails/billing, type UpdateCustomerParams struct, CreditLimits []CreditLimit `json:"credit_limits,omitempty"`
 pkg openrails/billing, type UpdateCustomerParams struct, InvoiceProfile catalog.Field[InvoiceProfile] `json:"invoice_profile,omitzero"`
+pkg openrails/billing, type UpdateCustomerParams struct, Limits []LimitOverride `json:"limits,omitempty"`
 pkg openrails/billing, type UpdateCustomerParams struct, LowBalanceLines []LowBalanceLine `json:"low_balance_lines,omitempty"`
 pkg openrails/billing, type UpdateCustomerParams struct, TrustLevels []TrustLevel `json:"trust_levels,omitempty"`
 pkg openrails/billing, type UpdateCustomerParams struct, UsageBilling []UsageBillingAccountUpdate `json:"usage_billing,omitempty"`
@@ -3929,12 +3980,16 @@ pkg openrails/catalog, const AggregationMax Aggregation = "max"
 pkg openrails/catalog, const AggregationMin Aggregation = "min"
 pkg openrails/catalog, const AggregationSum Aggregation = "sum"
 pkg openrails/catalog, const AggregationUniqueCount Aggregation = "unique_count"
+pkg openrails/catalog, const AnchorFirstUse ResetAnchor = "first_use"
+pkg openrails/catalog, const AnchorSubscription ResetAnchor = "subscription"
 pkg openrails/catalog, const ApplicationSchemaVersion untyped int = 1
+pkg openrails/catalog, const BalanceLimit untyped string = "balance"
 pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
 pkg openrails/catalog, const MaxDurationHours int = 2562047
 pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
 pkg openrails/catalog, const MaxEntitlementReplacements untyped int = 100
+pkg openrails/catalog, const MaxLimitWindowSeconds untyped int = 31622400
 pkg openrails/catalog, const MaxProductEntitlements untyped int = 10000
 pkg openrails/catalog, const MaxQuantity untyped int = 10000
 pkg openrails/catalog, const MaxRequiredEntitlements untyped int = 100
@@ -3943,11 +3998,19 @@ pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
 pkg openrails/catalog, const ModelPerUnit Model = "per_unit"
 pkg openrails/catalog, const ModelTiered Model = "tiered"
+pkg openrails/catalog, const OverrunAdmitWhilePositive Overrun = "admit_while_positive"
+pkg openrails/catalog, const OverrunRequireEstimate Overrun = "require_estimate"
 pkg openrails/catalog, const OwnershipConsumable Ownership = "consumable"
 pkg openrails/catalog, const OwnershipExtend Ownership = "extend"
 pkg openrails/catalog, const OwnershipUnique Ownership = "unique"
 pkg openrails/catalog, const PaymentInAdvance PaymentTerm = "in_advance"
 pkg openrails/catalog, const PaymentInArrears PaymentTerm = "in_arrears"
+pkg openrails/catalog, const ResetBillingPeriod ResetKind = "billing_period"
+pkg openrails/catalog, const ResetFixed ResetKind = "fixed"
+pkg openrails/catalog, const ResetLifetime ResetKind = "lifetime"
+pkg openrails/catalog, const ResetRate ResetKind = "rate"
+pkg openrails/catalog, const ResetRolling ResetKind = "rolling"
+pkg openrails/catalog, const ResetSession ResetKind = "session"
 pkg openrails/catalog, const RoundDown Round = "down"
 pkg openrails/catalog, const RoundHalfUp Round = "half_up"
 pkg openrails/catalog, const RoundUp Round = "up"
@@ -3956,6 +4019,7 @@ pkg openrails/catalog, const SellViaSolana untyped string = "solana"
 pkg openrails/catalog, const TierModeGraduated TierMode = "graduated"
 pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func DeriveOwnership(Ownership, bool, []OwnershipPrice) Ownership
+pkg openrails/catalog, func LimitUnitCurrency(string) bool
 pkg openrails/catalog, func NormalizeEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func NormalizeProductEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func NormalizeRequiredEntitlements([]string) ([]string, error)
@@ -3965,10 +4029,13 @@ pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
 pkg openrails/catalog, func ParseBillingInterval(string) (int, int, error)
 pkg openrails/catalog, func ParseDurationHours(string) (int, error)
 pkg openrails/catalog, func ReadFile(string) (*Application, error)
+pkg openrails/catalog, func ValidateLimitKey(string) error
+pkg openrails/catalog, func ValidateLimitUnit(string) error
 pkg openrails/catalog, func ValidateSellVia([]string) error
 pkg openrails/catalog, func Value[T any](T) Field[T]
 pkg openrails/catalog, method (*ApplyPrice) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*ApplyProviderPrice) UnmarshalJSON([]byte) error
+pkg openrails/catalog, method (*Capacity) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*CreditGrantSpec) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*CustomerAmount) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*Field[T]) UnmarshalJSON([]byte) error
@@ -3978,20 +4045,30 @@ pkg openrails/catalog, method (Application) Validate() error
 pkg openrails/catalog, method (ApplyProviderPrice) DeclaresTerms() bool
 pkg openrails/catalog, method (ApplyProviderPrice) References() map[string]string
 pkg openrails/catalog, method (ApplyProviderPrice) Validate() error
+pkg openrails/catalog, method (Capacity) MarshalJSON() ([]byte, error)
 pkg openrails/catalog, method (Field[T]) IsZero() bool
 pkg openrails/catalog, method (Field[T]) MarshalJSON() ([]byte, error)
+pkg openrails/catalog, method (LimitReset) Validate() error
+pkg openrails/catalog, method (Overrun) Validate() error
 pkg openrails/catalog, method (Ownership) Validate() error
 pkg openrails/catalog, method (Quantity) Allows(int) bool
 pkg openrails/catalog, method (Quantity) Validate() error
+pkg openrails/catalog, method (ResetKind) Windowed() bool
 pkg openrails/catalog, type Aggregation string
 pkg openrails/catalog, type Allowance struct
 pkg openrails/catalog, type Allowance struct, Included int64 `json:"included,omitempty"`
 pkg openrails/catalog, type Application struct
 pkg openrails/catalog, type Application struct, EntitlementReplacements []EntitlementReplacement `json:"entitlement_replacements,omitempty"`
+pkg openrails/catalog, type Application struct, Limits map[string]ApplyLimit `json:"limits,omitempty"`
 pkg openrails/catalog, type Application struct, Meters map[string]ApplyMeter `json:"meters,omitempty"`
 pkg openrails/catalog, type Application struct, Products map[string]ApplyProduct `json:"products,omitempty"`
 pkg openrails/catalog, type Application struct, Prune bool `json:"prune,omitempty"`
 pkg openrails/catalog, type Application struct, SchemaVersion int `json:"schema_version"`
+pkg openrails/catalog, type ApplyLimit struct
+pkg openrails/catalog, type ApplyLimit struct, Overrun Field[Overrun] `json:"overrun,omitzero"`
+pkg openrails/catalog, type ApplyLimit struct, RateCards Field[[]LimitRateCard] `json:"rate_cards,omitzero"`
+pkg openrails/catalog, type ApplyLimit struct, Reset Field[LimitReset] `json:"reset,omitzero"`
+pkg openrails/catalog, type ApplyLimit struct, Unit Field[string] `json:"unit,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct
 pkg openrails/catalog, type ApplyMeter struct, Aggregation Field[Aggregation] `json:"aggregation,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, EventType Field[string] `json:"event_type,omitzero"`
@@ -4017,6 +4094,7 @@ pkg openrails/catalog, type ApplyProduct struct, CreditGrant Field[CreditGrantSp
 pkg openrails/catalog, type ApplyProduct struct, Description Field[string] `json:"description,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, DisplayName Field[string] `json:"display_name,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Entitlements Field[[]string] `json:"entitlements,omitzero"`
+pkg openrails/catalog, type ApplyProduct struct, Limits Field[map[string]Capacity] `json:"limits,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Ownership Field[Ownership] `json:"ownership,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Prices map[string]ApplyPrice `json:"prices,omitempty"`
 pkg openrails/catalog, type ApplyProduct struct, ProviderPrices map[string]ApplyProviderPrice `json:"provider_prices,omitempty"`
@@ -4038,6 +4116,7 @@ pkg openrails/catalog, type ApplyProviderPrice struct, RecurringBillingOptionID 
 pkg openrails/catalog, type ApplyProviderPrice struct, TrialDurationHours *int `json:"trial_duration_hours,omitempty"`
 pkg openrails/catalog, type ApplyProviderPrice struct, TrialUnitAmount *int64 `json:"trial_unit_amount,omitempty,string"`
 pkg openrails/catalog, type ApplyProviderPrice struct, UnitAmount *int64 `json:"unit_amount,omitempty,string"`
+pkg openrails/catalog, type Capacity int64
 pkg openrails/catalog, type CreditGrantSpec struct
 pkg openrails/catalog, type CreditGrantSpec struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/catalog, type CreditGrantSpec struct, Currency string `json:"currency"`
@@ -4055,6 +4134,14 @@ pkg openrails/catalog, type Field struct, Value T
 pkg openrails/catalog, type Field[T any] struct
 pkg openrails/catalog, type FlatPrice struct
 pkg openrails/catalog, type FlatPrice struct, Amount int64 `json:"amount,omitempty,string"`
+pkg openrails/catalog, type LimitRateCard struct
+pkg openrails/catalog, type LimitRateCard struct, Filter map[string][]string `json:"filter,omitempty"`
+pkg openrails/catalog, type LimitRateCard struct, Meter string `json:"meter"`
+pkg openrails/catalog, type LimitRateCard struct, Price RatePrice `json:"price"`
+pkg openrails/catalog, type LimitReset struct
+pkg openrails/catalog, type LimitReset struct, Anchor ResetAnchor `json:"anchor,omitempty"`
+pkg openrails/catalog, type LimitReset struct, Kind ResetKind `json:"kind"`
+pkg openrails/catalog, type LimitReset struct, WindowSeconds int `json:"window_seconds,omitempty"`
 pkg openrails/catalog, type Matrix struct
 pkg openrails/catalog, type Matrix struct, Cells map[string]MatrixCell `json:"cells"`
 pkg openrails/catalog, type Matrix struct, Dimension string `json:"dimension"`
@@ -4062,6 +4149,7 @@ pkg openrails/catalog, type MatrixCell struct
 pkg openrails/catalog, type MatrixCell struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string"`
 pkg openrails/catalog, type MatrixCell struct, UnitAmount int64 `json:"unit_amount,string"`
 pkg openrails/catalog, type Model string
+pkg openrails/catalog, type Overrun string
 pkg openrails/catalog, type Ownership string
 pkg openrails/catalog, type OwnershipPrice struct
 pkg openrails/catalog, type OwnershipPrice struct, AccessDuration bool
@@ -4098,6 +4186,8 @@ pkg openrails/catalog, type RateTier struct
 pkg openrails/catalog, type RateTier struct, FlatAmount int64 `json:"flat_amount,omitempty,string"`
 pkg openrails/catalog, type RateTier struct, UnitAmount int64 `json:"unit_amount,omitempty,string"`
 pkg openrails/catalog, type RateTier struct, UpTo *int64 `json:"up_to"`
+pkg openrails/catalog, type ResetAnchor string
+pkg openrails/catalog, type ResetKind string
 pkg openrails/catalog, type Round string
 pkg openrails/catalog, type TierMode string
 pkg openrails/catalog, type TieredPrice struct

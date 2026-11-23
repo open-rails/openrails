@@ -11,6 +11,11 @@ export type AccessTenure = {
   seconds: Record<string, number> | null
 }
 
+export type AdjustLimitParams = {
+  limit?: string
+  amount?: string
+}
+
 export type AdminAccess = {
   admin: "none" | "read" | "update"
   catalog: "none" | "read" | "update"
@@ -129,6 +134,14 @@ export type Application = {
   entitlement_replacements?: EntitlementReplacement[]
   products?: Record<string, ApplyProduct>
   meters?: Record<string, ApplyMeter>
+  limits?: Record<string, ApplyLimit>
+}
+
+export type ApplyLimit = {
+  unit?: string | null
+  reset?: LimitReset | null
+  overrun?: "admit_while_positive" | "require_estimate" | null
+  rate_cards?: LimitRateCard[] | null
 }
 
 export type ApplyMeter = {
@@ -171,6 +184,7 @@ export type ApplyProduct = {
   prices?: Record<string, ApplyPrice>
   provider_prices?: Record<string, ApplyProviderPrice>
   rate_cards?: RateCard[] | null
+  limits?: Record<string, string> | null
 }
 
 export type ApplyProviderPrice = {
@@ -402,7 +416,7 @@ export type CatalogApplicationReceipt = {
 }
 
 export type CatalogChange = {
-  object: "meter" | "price" | "product"
+  object: "limit" | "meter" | "price" | "product"
   key: string
   product_key: string | null
   fields: string[]
@@ -410,7 +424,7 @@ export type CatalogChange = {
 }
 
 export type CatalogConflict = {
-  object: "meter" | "price" | "product"
+  object: "limit" | "meter" | "price" | "product"
   key: string
   product_key: string | null
   currency: string | null
@@ -778,11 +792,24 @@ export type CustomerEntitlement = {
   quantity: number | null
 }
 
+export type CustomerLimit = {
+  customer_id: string
+  limit: string
+  unit: string
+  capacity: string
+  used: string
+  held: string
+  remaining: string
+  window_starts_at: string | null
+  resets_at: string | null
+}
+
 export type CustomerSettings = {
   usage_billing?: UsageBillingAccount[]
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
   low_balance_lines: LowBalanceLine[]
+  limits: LimitOverride[]
   billing_policy: string | null
   invoice_profile: InvoiceProfile | null
 }
@@ -1175,6 +1202,42 @@ export type InvoiceProfile = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string
+}
+
+export type Limit = {
+  key: string
+  unit: string
+  reset: LimitReset
+  overrun: "admit_while_positive" | "require_estimate"
+  rate_cards: LimitRateCard[]
+  products: LimitProduct[]
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export type LimitOverride = {
+  inherit?: boolean
+  limit: string
+  capacity: string
+}
+
+export type LimitProduct = {
+  product_id: string
+  product_key: string
+  capacity: string
+}
+
+export type LimitRateCard = {
+  meter: string
+  filter?: Record<string, string[]>
+  price: RatePrice
+}
+
+export type LimitReset = {
+  kind: "billing_period" | "fixed" | "lifetime" | "rate" | "rolling" | "session"
+  window_seconds?: number
+  anchor?: "first_use" | "subscription"
 }
 
 export type LinkPSPImportParams = {
@@ -2270,6 +2333,14 @@ export type SetDefaultPaymentMethodParams = {
   payment_method_id?: string
 }
 
+export type SetLimitParams = {
+  unit?: string
+  reset?: LimitReset
+  overrun?: "admit_while_positive" | "require_estimate"
+  rate_cards?: LimitRateCard[]
+  expected_revision?: number
+}
+
 export type SetLowBalanceLineParams = {
   amount?: string | null
   runway_hours?: number | null
@@ -2548,6 +2619,7 @@ export type UpdateCustomerParams = {
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
   low_balance_lines?: LowBalanceLine[]
+  limits?: LimitOverride[]
   billing_policy?: string | null
   invoice_profile?: InvoiceProfile | null
 }

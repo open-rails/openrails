@@ -5512,6 +5512,7 @@
           "currency_unsupported",
           "invalid_customer_id",
           "invalid_param",
+          "limit_not_found",
           "service_credential_customer_scope_denied",
           "service_unavailable"
         ],
@@ -7228,6 +7229,412 @@
         ],
         "x-openrails-error-sets": [
           "tier:application"
+        ]
+      }
+    },
+    "/v1/catalog/limits": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Limit"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/catalog/limits/{key}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limit"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
+        },
+        "x-openrails-errors": [
+          "limit_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      },
+      "put": {
+        "tags": [
+          "catalog"
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLimitParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Limit"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:manage",
+          "root": "root:catalog:manage"
+        },
+        "x-openrails-catalog-update": true,
+        "x-openrails-errors": [
+          "catalog_revision_conflict",
+          "invalid_param",
+          "limit_not_found",
+          "resource_conflict",
+          "revision_mismatch"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/limits": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomerLimit"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:read",
+          "root": "root:usage:read"
+        },
+        "x-openrails-errors": [
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/me/limits": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomerLimit"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": null,
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/limit-adjustments": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustLimitParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerLimit"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:manage",
+          "root": "root:customer:manage"
+        },
+        "x-openrails-operation-limit": "grant",
+        "x-openrails-errors": [
+          "invalid_customer_id",
+          "invalid_param",
+          "limit_not_found",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -12155,6 +12562,18 @@
           "seconds"
         ]
       },
+      "AdjustLimitParams": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
+      },
       "AdminAccess": {
         "type": "object",
         "properties": {
@@ -12785,6 +13204,64 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ApplyMeter"
             }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ApplyLimit"
+            }
+          }
+        }
+      },
+      "ApplyLimit": {
+        "type": "object",
+        "properties": {
+          "unit": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LimitReset"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrun": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admit_while_positive",
+                  "require_estimate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate_cards": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LimitRateCard"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -13184,6 +13661,19 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/RateCard"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
                 }
               },
               {
@@ -14210,6 +14700,7 @@
           "object": {
             "type": "string",
             "enum": [
+              "limit",
               "meter",
               "price",
               "product"
@@ -14252,6 +14743,7 @@
           "object": {
             "type": "string",
             "enum": [
+              "limit",
               "meter",
               "price",
               "product"
@@ -15686,6 +16178,69 @@
           "quantity"
         ]
       },
+      "CustomerLimit": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "used": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "held": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "remaining": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "window_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resets_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id",
+          "limit",
+          "unit",
+          "capacity",
+          "used",
+          "held",
+          "remaining",
+          "window_starts_at",
+          "resets_at"
+        ]
+      },
       "CustomerSettings": {
         "type": "object",
         "properties": {
@@ -15713,6 +16268,12 @@
               "$ref": "#/components/schemas/LowBalanceLine"
             }
           },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitOverride"
+            }
+          },
           "billing_policy": {
             "oneOf": [
               {
@@ -15738,6 +16299,7 @@
           "credit_limits",
           "trust_levels",
           "low_balance_lines",
+          "limits",
           "billing_policy",
           "invoice_profile"
         ]
@@ -17228,6 +17790,153 @@
           "tax",
           "billing_contacts",
           "memo"
+        ]
+      },
+      "Limit": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/LimitReset"
+          },
+          "overrun": {
+            "type": "string",
+            "enum": [
+              "admit_while_positive",
+              "require_estimate"
+            ]
+          },
+          "rate_cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitRateCard"
+            }
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitProduct"
+            }
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "key",
+          "unit",
+          "reset",
+          "overrun",
+          "rate_cards",
+          "products",
+          "revision",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "LimitOverride": {
+        "type": "object",
+        "properties": {
+          "inherit": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "limit",
+          "capacity"
+        ]
+      },
+      "LimitProduct": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "product_id",
+          "product_key",
+          "capacity"
+        ]
+      },
+      "LimitRateCard": {
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "price": {
+            "$ref": "#/components/schemas/RatePrice"
+          }
+        },
+        "required": [
+          "meter",
+          "price"
+        ]
+      },
+      "LimitReset": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "billing_period",
+              "fixed",
+              "lifetime",
+              "rate",
+              "rolling",
+              "session"
+            ]
+          },
+          "window_seconds": {
+            "type": "integer"
+          },
+          "anchor": {
+            "type": "string",
+            "enum": [
+              "first_use",
+              "subscription"
+            ]
+          }
+        },
+        "required": [
+          "kind"
         ]
       },
       "LinkPSPImportParams": {
@@ -22691,6 +23400,33 @@
           }
         }
       },
+      "SetLimitParams": {
+        "type": "object",
+        "properties": {
+          "unit": {
+            "type": "string"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/LimitReset"
+          },
+          "overrun": {
+            "type": "string",
+            "enum": [
+              "admit_while_positive",
+              "require_estimate"
+            ]
+          },
+          "rate_cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitRateCard"
+            }
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        }
+      },
       "SetLowBalanceLineParams": {
         "type": "object",
         "properties": {
@@ -23922,6 +24658,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LowBalanceLine"
+            }
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitOverride"
             }
           },
           "billing_policy": {
@@ -25229,6 +25971,11 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "An invoker-scoped credential spends a customer's balance but may not manage the account."
+    },
+    "limit_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The catalog declares no limit under this key."
     },
     "merchant_config_read_only": {
       "status": 409,
