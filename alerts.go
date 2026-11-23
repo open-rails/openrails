@@ -22,22 +22,22 @@ func cursorQuery(page billing.PageRequest) url.Values {
 }
 
 // ListAlertWebhooks returns where the merchant's operational alerts are posted.
-func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error) {
+func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams) (*billing.ListPage[billing.AlertWebhook], error) {
 	q := url.Values{}
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}
 	var out billing.ListPage[billing.AlertWebhook]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/alert-webhooks", q), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/alert-webhooks", q), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // CreateAlertWebhook adds a destination for the merchant's operational alerts.
-func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error) {
+func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error) {
 	var out billing.AlertWebhook
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/alert-webhooks", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/alert-webhooks", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -45,21 +45,21 @@ func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlert
 
 // UpdateAlertWebhook changes an alert webhook; omitted fields keep their
 // values.
-func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error) {
+func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams) (*billing.AlertWebhook, error) {
 	if id.IsZero() {
 		return nil, invalidErr("alert webhook id is required")
 	}
 	var out billing.AlertWebhook
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/alert-webhooks/"+id.String(), req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/alert-webhooks/"+id.String(), req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // DeleteAlertWebhook removes an alert webhook.
-func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID, options ...RequestOption) error {
+func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID) error {
 	if id.IsZero() {
 		return invalidErr("alert webhook id is required")
 	}
-	return c.do(ctx, http.MethodDelete, "/v1/merchant/alert-webhooks/"+id.String(), nil, nil, options...)
+	return c.do(ctx, http.MethodDelete, "/v1/merchant/alert-webhooks/"+id.String(), nil, nil)
 }

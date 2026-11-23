@@ -14,12 +14,12 @@ import (
 // Pull). One import per PSP pulls or applies at a time. The pull runs in the
 // background; GetPSPImport reports it. ListProviderCatalog with Import then
 // lists the plans to map.
-func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
+func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPImportParams) (*billing.PSPImport, error) {
 	if params.PSP.IsZero() {
 		return nil, invalidErr("psp is required")
 	}
 	var out billing.PSPImport
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -27,7 +27,7 @@ func (c *Client) CreatePSPImport(ctx context.Context, params billing.CreatePSPIm
 
 // ListPSPImports lists the merchant's PSP imports, newest first: one PSP's
 // when set.
-func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImport], error) {
+func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams) (*billing.ListPage[billing.PSPImport], error) {
 	q := pageValues(nil, params.PageRequest)
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
@@ -36,33 +36,33 @@ func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportLis
 		q.Set("psp", params.PSP.String())
 	}
 	var out billing.ListPage[billing.PSPImport]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // GetPSPImport reads one PSP import with its records counted.
-func (c *Client) GetPSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) (*billing.PSPImport, error) {
+func (c *Client) GetPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSPImport
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports/"+path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports/"+path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // UpdatePSPImport replaces the import's rules; LinkPSPImport applies them.
-func (c *Client) UpdatePSPImport(ctx context.Context, id billing.PSPImportID, params billing.UpdatePSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
+func (c *Client) UpdatePSPImport(ctx context.Context, id billing.PSPImportID, params billing.UpdatePSPImportParams) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSPImport
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/psp-imports/"+path, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/psp-imports/"+path, params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -70,17 +70,17 @@ func (c *Client) UpdatePSPImport(ctx context.Context, id billing.PSPImportID, pa
 
 // DeletePSPImport deletes an import and its staged records; what it landed
 // stays.
-func (c *Client) DeletePSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) error {
+func (c *Client) DeletePSPImport(ctx context.Context, id billing.PSPImportID) error {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodDelete, "/v1/merchant/psp-imports/"+path, nil, nil, requestOptions...)
+	return c.do(ctx, http.MethodDelete, "/v1/merchant/psp-imports/"+path, nil, nil)
 }
 
 // ListPSPImportRecords lists an import's staged provider objects, by state
 // or kind: the unmatched ones are what no rule linked.
-func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportID, params billing.PSPImportRecordListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSPImportRecord], error) {
+func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportID, params billing.PSPImportRecordListParams) (*billing.ListPage[billing.PSPImportRecord], error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportI
 		q.Set("kind", string(params.Kind))
 	}
 	var out billing.ListPage[billing.PSPImportRecord]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports/"+path+"/records?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/psp-imports/"+path+"/records?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -107,13 +107,13 @@ func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportI
 // the import's rules and the merchant's mappings, and the ones OpenRails
 // holds are marked held. The import is pulling until it has; GetPSPImport
 // reports it.
-func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, params billing.LinkPSPImportParams, requestOptions ...RequestOption) (*billing.PSPImport, error) {
+func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, params billing.LinkPSPImportParams) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSPImport
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports/"+path+"/link", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports/"+path+"/link", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -126,13 +126,13 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 // subscription lands on the provider price mapping its plan; one whose plan
 // is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
 // and applied again.
-func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID, requestOptions ...RequestOption) (*billing.PSPImport, error) {
+func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	path, err := requireTypedID("psp_import_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSPImport
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports/"+path+"/apply", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-imports/"+path+"/apply", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -140,12 +140,12 @@ func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID, req
 
 // SetPSPImportMappings maps the merchant's own identifiers (a legacy user or
 // order id) to customers, for import rules to read.
-func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSPImportMappingsParams, requestOptions ...RequestOption) (*billing.PSPImportMappingsResult, error) {
+func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSPImportMappingsParams) (*billing.PSPImportMappingsResult, error) {
 	if len(params.Mappings) == 0 || len(params.Mappings) > billing.MaxBatchItems {
 		return nil, invalidErr("mappings holds 1 to 100 items")
 	}
 	var out billing.PSPImportMappingsResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-import-mappings", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psp-import-mappings", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -155,7 +155,7 @@ func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSP
 // prices, NMI plans) as OpenRails last observed it, each price with the
 // provider price mapping it. With Import it lists the plans that import's
 // subscriptions name: map each by creating a provider price.
-func (c *Client) ListProviderCatalog(ctx context.Context, params billing.ProviderCatalogListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProviderCatalogObject], error) {
+func (c *Client) ListProviderCatalog(ctx context.Context, params billing.ProviderCatalogListParams) (*billing.ListPage[billing.ProviderCatalogObject], error) {
 	if params.PSP.IsZero() {
 		return nil, invalidErr("psp is required")
 	}
@@ -170,7 +170,7 @@ func (c *Client) ListProviderCatalog(ctx context.Context, params billing.Provide
 		q.Set("import", params.Import.String())
 	}
 	var out billing.ListPage[billing.ProviderCatalogObject]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/provider-catalog?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/provider-catalog?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -179,7 +179,7 @@ func (c *Client) ListProviderCatalog(ctx context.Context, params billing.Provide
 // ListParkedSubscriptions lists the live provider subscriptions OpenRails
 // could not land, newest first: open parks, or closed ones with Released.
 // Mapping a park's price or linking its customer lands it.
-func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ParkedSubscription], error) {
+func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams) (*billing.ListPage[billing.ParkedSubscription], error) {
 	q := pageValues(nil, params.PageRequest)
 	if params.PSP != "" {
 		q.Set("psp", params.PSP)
@@ -191,7 +191,7 @@ func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.Par
 		q.Set("released", "true")
 	}
 	var out billing.ListPage[billing.ParkedSubscription]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/parked-subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/parked-subscriptions?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

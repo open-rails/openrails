@@ -182,17 +182,16 @@ func (r *reads) cacheOf(read Read) *cache.Cache[readKey, answer] {
 	return r.answers[read]
 }
 
-// read is a GET of path that read's policy may answer from memory. Cached,
-// requestOptions are not sent: no read takes one.
-func (c *Client) read(ctx context.Context, read Read, path string, out any, requestOptions ...RequestOption) error {
+// read is a GET of path that read's policy may answer from memory.
+func (c *Client) read(ctx context.Context, read Read, path string, out any) error {
 	if c.engine != nil {
 		if err := c.engine.CheckOpen(); err != nil {
 			return err
 		}
 	}
 	answers := c.reads.cacheOf(read)
-	if answers == nil || ctx.Err() != nil {
-		return c.do(ctx, http.MethodGet, path, nil, out, requestOptions...)
+	if answers == nil || c.uncached || ctx.Err() != nil {
+		return c.do(ctx, http.MethodGet, path, nil, out)
 	}
 	key := readKey{merchant: c.merchantID, gen: c.reads.gen(c.merchantID), path: path}
 	got, err := answers.Get(ctx, []readKey{key})

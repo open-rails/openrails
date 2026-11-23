@@ -10,7 +10,7 @@ import (
 // SyncLeases syncs one gate's lease: it settles the lease's usage in order,
 // answers each want with a hold or a refusal, and takes back the holds
 // returned. The first sync under a new params.LeaseID creates the lease.
-func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams, requestOptions ...RequestOption) (*billing.SyncLeasesResult, error) {
+func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	switch {
 	case params.LeaseID.IsZero():
 		return nil, invalidErr("lease_id is required")
@@ -28,7 +28,7 @@ func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams
 		return nil, invalidErr("a sync carries at most 10000 applied versions")
 	}
 	var out billing.SyncLeasesResult
-	if err := c.do(ctx, http.MethodPost, "/v1/app/leases/sync", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/leases/sync", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

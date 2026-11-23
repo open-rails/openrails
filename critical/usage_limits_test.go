@@ -62,8 +62,7 @@ func limitProduct(t *testing.T, client *openrails.Client, key string) billing.Pr
 
 func grantLimitProduct(t *testing.T, client *openrails.Client, customer billing.CustomerID, key string, hours int) billing.ProductAccessGrant {
 	t.Helper()
-	granted, err := client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: uuid.NewString(),
-		Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: limitProduct(t, client, key), Hours: ptr(hours), Reason: billing.GrantReasonComp}}})
+	granted, err := client.CreateProductAccess(t.Context(), uuid.NewString(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: limitProduct(t, client, key), Hours: ptr(hours), Reason: billing.GrantReasonComp}}})
 	require.NoError(t, err)
 	require.Len(t, granted, 1)
 	return granted[0]

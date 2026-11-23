@@ -10,13 +10,13 @@ import (
 )
 
 // ListDestructiveHolds lists incident episodes that originated at this merchant.
-func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams, options ...RequestOption) (*billing.ListPage[billing.DestructiveHold], error) {
+func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams) (*billing.ListPage[billing.DestructiveHold], error) {
 	q := pageValues(nil, params.PageRequest)
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}
 	var out billing.ListPage[billing.DestructiveHold]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/destructive-holds", q), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/destructive-holds", q), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -25,12 +25,12 @@ func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.Destru
 // ClearDestructiveHold requires an interactive, self-acting operator credential
 // with root:admin-rate-limits:unlock as well as merchant configuration authority.
 // Embedded operators use Engine.ClearDestructiveHold instead of a host Client.
-func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, req billing.ClearDestructiveHoldParams, options ...RequestOption) (*billing.DestructiveHold, error) {
+func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, req billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
 	if id.IsZero() {
 		return nil, invalidErr("destructive hold id is required")
 	}
 	var out billing.DestructiveHold
-	err := c.do(ctx, http.MethodPost, "/v1/merchant/destructive-holds/"+id.String()+"/clear", req, &out, options...)
+	err := c.do(ctx, http.MethodPost, "/v1/merchant/destructive-holds/"+id.String()+"/clear", req, &out)
 	return &out, err
 }
 

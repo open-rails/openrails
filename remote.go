@@ -50,6 +50,8 @@ type Client struct {
 	reads                 *reads
 	entitlementChecks     *entitlementCheckCache
 	entitlementCacheScope string
+	// uncached reads everything live (Uncached).
+	uncached bool
 }
 
 // MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
@@ -59,6 +61,26 @@ func (c *Client) MerchantID() billing.MerchantID {
 		return *adopted
 	}
 	return c.merchantID
+}
+
+// Uncached is the handle reading everything from OpenRails: no catalog or
+// configuration read and no entitlement check is answered from memory. Its
+// answers still refresh the entitlement cache (CheckEntitlementsLive), and its
+// writes drop what the shared caches hold for the merchant.
+func (c *Client) Uncached() *Client {
+	if c == nil {
+		return nil
+	}
+	d := c.derive()
+	d.uncached = true
+	return d
+}
+
+// derive is a copy of the handle, sharing its transport and caches.
+func (c *Client) derive() *Client {
+	return &Client{engine: c.engine, inprocess: c.inprocess, baseURL: c.baseURL, client: c.client, timeout: c.timeout,
+		merchantID: c.MerchantID(), token: c.token, assertion: c.assertion, reads: c.reads,
+		entitlementChecks: c.entitlementChecks, entitlementCacheScope: c.entitlementCacheScope, uncached: c.uncached}
 }
 
 // RemoteCredential is how a remote handle proves itself: exactly one of
@@ -447,7 +469,7 @@ func (c *Client) bearer(ctx context.Context) (string, error) {
 // to billing.MaxBatchItems), only params.Entitlements and keys under
 // params.Prefix. A key absent from the answer is not held. Without
 // customers, params.Entitlements names one key and the page is its holders.
-func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
+func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error) {
 	switch {
 	case len(params.CustomerIDs) > billing.MaxBatchItems:
 		return nil, invalidErr(fmt.Sprintf("at most %d customers per read", billing.MaxBatchItems))
@@ -480,7 +502,7 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.ListPage[billing.CustomerEntitlement]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements?"+query.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements?"+query.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -495,9 +517,10 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 // application holding billing.MerchantEntitlementsRead or RootEntitlementsRead
 // (RouteGroups.Programmatic). A remote client answers a current exact-key
 // check from its entitlement cache when every key is allowed there
-// (EntitlementCheckCacheOptions); a denial always asks OpenRails.
-func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
-	return c.checkEntitlements(ctx, params, true, requestOptions)
+// (EntitlementCheckCacheOptions), unless the handle is Uncached; a denial
+// always asks OpenRails.
+func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
+	return c.checkEntitlements(ctx, params, c == nil || !c.uncached)
 }
 
 // CheckEntitlementsLive checks access against OpenRails, never answering from
@@ -506,11 +529,11 @@ func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEnti
 // client's own memory at once, or the shared Redis within a bounded wait; if
 // Redis fails, other replicas may serve the old answer for up to MaxAge. Use
 // it when a revocation or credential change must be visible immediately.
-func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
-	return c.checkEntitlements(ctx, params, false, requestOptions)
+func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
+	return c.checkEntitlements(ctx, params, false)
 }
 
-func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, useCache bool, options []RequestOption) (*billing.EntitlementCheck, error) {
+func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, useCache bool) (*billing.EntitlementCheck, error) {
 	switch {
 	case params.CustomerID.IsZero():
 		return nil, invalidErr("customer_id is required")
@@ -529,13 +552,13 @@ func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEnti
 	if params.Entitlements == nil {
 		params.Entitlements = []string{}
 	}
-	if c != nil && c.entitlementChecks != nil && len(options) == 0 {
+	if c != nil && c.entitlementChecks != nil {
 		if keys := cacheableEntitlementKeys(params); keys != nil {
 			return c.checkEntitlementsCached(ctx, params, keys, !useCache)
 		}
 	}
 	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, entitlementCheckPath, params, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, entitlementCheckPath, params, &out); err != nil {
 		return nil, err
 	}
 	return normalizeEntitlementCheck(&out), nil
@@ -632,7 +655,7 @@ type clientResponse struct {
 // doRaw issues a single authed request and returns (response, body) for 2xx and
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
-func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header, requestOptions ...RequestOption) (*clientResponse, error) {
+func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
 	var rdr io.Reader
 	var raw []byte
 	headers = headers.Clone()
@@ -646,14 +669,6 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 		}
 		rdr = bytes.NewReader(raw)
 		headers.Set("Content-Type", "application/json")
-	}
-	// Header-based operations and body-identified operations own their replay.
-	// Never generate another identity or cache their changing resource state.
-	if key := idempotencyKey(requestOptions); key != "" {
-		if existing := strings.TrimSpace(headers.Get("Idempotency-Key")); existing != "" && existing != key {
-			return nil, invalidErr("Idempotency-Key differs between params and request option")
-		}
-		headers.Set("Idempotency-Key", key)
 	}
 	var response *clientResponse
 	err := c.withHTTPResponse(ctx, method, path, rdr, headers, func(resp *http.Response) error {
@@ -744,14 +759,23 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	return nil
 }
 
-// do issues a single authed request, mapping any non-2xx onto the canonical
-// StatusError. out may be nil when no body is expected.
-func (c *Client) do(ctx context.Context, method, path string, body, out any, requestOptions ...RequestOption) error {
-	return c.doWithHeaders(ctx, method, path, body, out, nil, requestOptions...)
+// idempotent is the header carrying key; none for an empty key, which a
+// route that requires one refuses.
+func idempotent(key string) http.Header {
+	if key = strings.TrimSpace(key); key == "" {
+		return nil
+	}
+	return http.Header{"Idempotency-Key": {key}}
 }
 
-func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header, requestOptions ...RequestOption) error {
-	response, err := c.doResponse(ctx, method, path, body, headers, requestOptions...)
+// do issues a single authed request, mapping any non-2xx onto the canonical
+// StatusError. out may be nil when no body is expected.
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	return c.doWithHeaders(ctx, method, path, body, out, nil)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header) error {
+	response, err := c.doResponse(ctx, method, path, body, headers)
 	if err != nil || out == nil {
 		return err
 	}
@@ -760,8 +784,8 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 
 // doResponse preserves the complete typed error contract for operations whose
 // successful status distinguishes durable acceptance from final completion.
-func (c *Client) doResponse(ctx context.Context, method, path string, body any, headers http.Header, requestOptions ...RequestOption) (*clientResponse, error) {
-	response, err := c.doRaw(ctx, method, path, body, headers, requestOptions...)
+func (c *Client) doResponse(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
+	response, err := c.doRaw(ctx, method, path, body, headers)
 	if err != nil {
 		return nil, err
 	}

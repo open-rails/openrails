@@ -60,7 +60,7 @@ func hostPageRequest(t *testing.T, server *httptest.Server, method, path, token 
 func hostPayOrder(t *testing.T, a *authorityWorld, key string, embedded bool) (*billing.Order, string) {
 	t.Helper()
 	price := hostProduct(t, a.alpha, key)
-	order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: key, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done?order={ORDER_ID}", Embedded: embedded}})
+	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done?order={ORDER_ID}", Embedded: embedded}})
 	require.NoError(t, err)
 	require.NotNil(t, order.PayURL)
 	address, err := url.Parse(*order.PayURL)

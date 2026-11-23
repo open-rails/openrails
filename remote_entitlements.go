@@ -14,7 +14,7 @@ import (
 // params.ProductIDs (each 1 to billing.MaxBatchItems; none: any).
 // params.LiveOnly keeps those live now. params.IDs instead reads named
 // windows.
-func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAccessListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error) {
+func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAccessListParams) (*billing.ListPage[billing.ProductAccessGrant], error) {
 	query := pageValues(nil, params.PageRequest)
 	if err := setIDs(query, params.IDs); err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAc
 		query.Set("live", "true")
 	}
 	var out billing.ListPage[billing.ProductAccessGrant]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/product-access?"+query.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/product-access?"+query.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -55,8 +55,9 @@ func setIDList[T wireID](q url.Values, name string, ids []T) error {
 // CreateProductAccess grants 1 to billing.MaxBatchItems products free, across
 // any customers, all or none; the answer is in request order. Each grant is a
 // window of its product: the customer holds the product's current keys while
-// it is live. With params.IdempotencyKey, a retry replays the first answer.
-func (c *Client) CreateProductAccess(ctx context.Context, params billing.CreateProductAccessBatchParams, requestOptions ...RequestOption) ([]billing.ProductAccessGrant, error) {
+// it is live. A retry with idempotencyKey replays the first answer; with
+// none, OpenRails names the batch itself.
+func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, params billing.CreateProductAccessBatchParams) ([]billing.ProductAccessGrant, error) {
 	if err := batchSize(len(params.Items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
@@ -68,12 +69,8 @@ func (c *Client) CreateProductAccess(ctx context.Context, params billing.CreateP
 			return nil, invalidErr("product_id is required")
 		}
 	}
-	var headers http.Header
-	if key := strings.TrimSpace(params.IdempotencyKey); key != "" {
-		headers = http.Header{"Idempotency-Key": {key}}
-	}
 	var out billing.CreateProductAccessBatchResult
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/product-access", params, &out, headers, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/product-access", params, &out, idempotent(idempotencyKey)); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -82,10 +79,10 @@ func (c *Client) CreateProductAccess(ctx context.Context, params billing.CreateP
 // RevokeProductAccess takes back a product a customer holds, with
 // params.Reason; a window not yet started is removed. Revoking again changes
 // nothing.
-func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams, requestOptions ...RequestOption) error {
+func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams) error {
 	grant, err := requireTypedID("product_access_id", id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, "/v1/admin/product-access/"+grant+"/revoke", params, nil, requestOptions...)
+	return c.do(ctx, http.MethodPost, "/v1/admin/product-access/"+grant+"/revoke", params, nil)
 }

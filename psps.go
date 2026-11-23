@@ -11,7 +11,7 @@ import (
 
 // ListPSPs lists the merchant's PSPs, newest first. Credential values are
 // never returned.
-func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PSP], error) {
+func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams) (*billing.ListPage[billing.PSP], error) {
 	query := url.Values{}
 	if params.Rail != "" {
 		query.Set("rail", string(params.Rail))
@@ -33,20 +33,20 @@ func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, req
 		path += "?" + query.Encode()
 	}
 	var out billing.ListPage[billing.PSP]
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // GetPSP reads one PSP.
-func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ...RequestOption) (*billing.PSP, error) {
+func (c *Client) GetPSP(ctx context.Context, id billing.PSPID) (*billing.PSP, error) {
 	path, err := pspPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSP
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -55,9 +55,9 @@ func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ..
 // CreatePSP arms a PSP. Credentials are write-only and are checked with the
 // provider before anything is stored. It needs merchant configuration held in
 // Vault.
-func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
+func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams) (*billing.PSP, error) {
 	var out billing.PSP
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -66,13 +66,13 @@ func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, 
 // UpdatePSP changes a PSP's settings, rotates its credentials (checked with
 // the provider first) or archives it. It needs merchant configuration held in
 // Vault.
-func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
+func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams) (*billing.PSP, error) {
 	path, err := pspPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.PSP
-	if err := c.do(ctx, http.MethodPatch, path, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, path, params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -80,9 +80,9 @@ func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing
 
 // PreviewPSPRouting reports which PSP a purchase for a price would use, and
 // why each other PSP was passed over. Nothing is created.
-func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
+func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams) (*billing.PSPRoutingPreview, error) {
 	var out billing.PSPRoutingPreview
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/routing-preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/routing-preview", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

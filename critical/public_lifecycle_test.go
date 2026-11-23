@@ -130,7 +130,7 @@ func TestPublicLifecycle(t *testing.T) {
 	t.Run("OR-J04-S06/adapters-preserve-credential-and-encoded-path-boundaries", func(t *testing.T) {
 		a, _ := newPaymentWorld(t)
 		_, price := publicSale(t, a, "adapter-control", 9_990_000, nil)
-		order, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "adapter-owned-order"})
+		order, err := a.alpha.CreateOrder(t.Context(), "adapter-owned-order", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		selection := openrails.Routes{Prefix: "/billing", Auth: a.auth.Authenticator()}
 		missing := selection

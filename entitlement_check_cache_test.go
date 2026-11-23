@@ -218,7 +218,7 @@ func TestEntitlementCheckCachesAllowedKeysOnly(t *testing.T) {
 	if _, err := client.CheckEntitlements(t.Context(), prefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CheckEntitlements(t.Context(), params, WithIdempotencyKey("test-idempotency")); err != nil {
+	if _, err := client.Uncached().CheckEntitlements(t.Context(), params); err != nil {
 		t.Fatal(err)
 	}
 	invalid := params

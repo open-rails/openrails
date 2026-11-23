@@ -23,7 +23,7 @@ import (
 // after later catalog edits. It is an operator action, never a side effect
 // of starting: run it from a command (openrails catalog apply, or the host's
 // own) or the console.
-func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
+func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	if document == nil {
 		return nil, invalidErr("catalog document is required")
 	}
@@ -35,7 +35,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 		path = withQuery(path, url.Values{"force": {"true"}})
 	}
 	var out billing.CatalogApplicationReceipt
-	if err := c.do(ctx, http.MethodPost, path, document, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, document, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

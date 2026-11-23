@@ -26,7 +26,7 @@ func TestRefunds(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &order))
 		require.NotNil(t, order.Payment.PaymentID)
 		paymentID := *order.Payment.PaymentID
-		first, err := a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund", IdempotencyKey: "partial-refund"})
+		first, err := a.alpha.RefundPayment(t.Context(), "partial-refund", paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, first.Status)
 		require.Equal(t, billing.PaymentRefund, first.Kind)
@@ -35,7 +35,7 @@ func TestRefunds(t *testing.T) {
 		require.NotNil(t, first.Card, "a refund names the card it returns money to")
 		require.Equal(t, "visa", *first.Card.Brand)
 		require.Equal(t, "4242", *first.Card.Last4)
-		replay, err := a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund", IdempotencyKey: "partial-refund"})
+		replay, err := a.alpha.RefundPayment(t.Context(), "partial-refund", paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund"})
 		require.NoError(t, err)
 		require.Equal(t, first.ID, replay.ID)
 		// A charge whose card Stripe has not named yet: its refund learns the
@@ -44,7 +44,7 @@ func TestRefunds(t *testing.T) {
 		require.NoError(t, err)
 		_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "payments"}.Sanitize()+" SET card_brand = NULL, card_last4 = NULL WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), paymentID.UUID())
 		require.NoError(t, err)
-		final, err := a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Full: true, Reason: "Refund remaining balance", IdempotencyKey: "final-refund"})
+		final, err := a.alpha.RefundPayment(t.Context(), "final-refund", paymentID, billing.RefundPaymentParams{Full: true, Reason: "Refund remaining balance"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, final.Status)
 		require.EqualValues(t, -20_000_000, final.Amount)
@@ -79,7 +79,7 @@ func TestRefunds(t *testing.T) {
 		}
 		require.Equal(t, []int64{3000}, debits)
 		require.ElementsMatch(t, []int64{1000, 2000}, refunds)
-		_, err = a.alpha.RefundPayment(t.Context(), paymentID, billing.RefundPaymentParams{Amount: 1_000_000, Reason: "Cannot exceed settled value", IdempotencyKey: "excess-refund"})
+		_, err = a.alpha.RefundPayment(t.Context(), "excess-refund", paymentID, billing.RefundPaymentParams{Amount: 1_000_000, Reason: "Cannot exceed settled value"})
 		require.Error(t, err)
 		require.Len(t, p.effects(t), 3, "over-refund creates no provider economic effect")
 	})

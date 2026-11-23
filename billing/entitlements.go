@@ -177,12 +177,10 @@ type CreateProductAccessParams struct {
 }
 
 // CreateProductAccessBatchParams grants 1 to MaxBatchItems products, across
-// any customers, in one transaction. IdempotencyKey (the Idempotency-Key
-// header) makes a retry replay the first answer; reusing it for other items
-// is ErrIdempotencyKeyReused.
+// any customers, in one transaction. Reusing an Idempotency-Key for other
+// items is ErrIdempotencyKeyReused.
 type CreateProductAccessBatchParams struct {
-	IdempotencyKey string                      `json:"-"`
-	Items          []CreateProductAccessParams `json:"items"`
+	Items []CreateProductAccessParams `json:"items"`
 }
 
 // CreateProductAccessBatchResult is every grant, in request order.

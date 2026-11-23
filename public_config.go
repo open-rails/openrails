@@ -11,9 +11,9 @@ import (
 // Over HTTP it is what a browser reads from the same server, ready for a
 // host's page response (billing-ui's BillingProvider config); in process,
 // Engine.PublicConfig names the mount the browser reads.
-func (c *Client) GetPublicConfig(ctx context.Context, options ...RequestOption) (*billing.PublicConfig, error) {
+func (c *Client) GetPublicConfig(ctx context.Context) (*billing.PublicConfig, error) {
 	var out billing.PublicConfig
-	if err := c.read(ctx, ReadPublicConfig, "/v1/config", &out, options...); err != nil {
+	if err := c.read(ctx, ReadPublicConfig, "/v1/config", &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

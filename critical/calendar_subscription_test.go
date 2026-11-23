@@ -172,7 +172,7 @@ products:
 		require.Equal(t, 1, *copyOrder.Lines[0].BillingIntervalMonths)
 		require.Nil(t, copyOrder.Lines[0].BillingIntervalHours)
 		require.Len(t, provider.effects(t), 3, "archive transfer never collects a payment")
-		refund, err := a.alpha.RefundPayment(t.Context(), *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the initial calendar period", IdempotencyKey: "calendar-first-refund"})
+		refund, err := a.alpha.RefundPayment(t.Context(), "calendar-first-refund", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the initial calendar period"})
 		require.NoError(t, err)
 		require.EqualValues(t, -10_000_000, refund.Amount)
 		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.refund_access"})

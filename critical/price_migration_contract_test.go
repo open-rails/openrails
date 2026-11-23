@@ -89,7 +89,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 				bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "ineligible-membership")
 				target := migrationPrice(t, a, alice, "cancelable-migration", 30_000_000)
 				reserved := upgradePrice(t, a, alice)
-				_, err := a.alpha.ChangeSubscription(t.Context(), bob.ID, billing.ChangeSubscriptionParams{PriceID: &reserved.ID, Reason: "Retain this accepted change", IdempotencyKey: "ineligible-change"})
+				_, err := a.alpha.ChangeSubscription(t.Context(), "ineligible-change", bob.ID, billing.ChangeSubscriptionParams{PriceID: &reserved.ID, Reason: "Retain this accepted change"})
 				require.NoError(t, err)
 				migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
 				require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestPriceMigrationContracts(t *testing.T) {
 		bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "bob-membership")
 		target := migrationPrice(t, a, alice, "migration-thirty", 30_000_000)
 		reserved := upgradePrice(t, a, alice)
-		_, err := a.alpha.ChangeSubscription(t.Context(), bob.ID, billing.ChangeSubscriptionParams{PriceID: &reserved.ID, Reason: "Already accepted customer change", IdempotencyKey: "bob-reserved-change"})
+		_, err := a.alpha.ChangeSubscription(t.Context(), "bob-reserved-change", bob.ID, billing.ChangeSubscriptionParams{PriceID: &reserved.ID, Reason: "Already accepted customer change"})
 		require.NoError(t, err)
 		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, EffectiveAt: *alice.CurrentPeriodEndsAt, AcknowledgeShortNotice: true}
 		preview, err := a.alpha.PreviewPriceMigration(t.Context(), params)

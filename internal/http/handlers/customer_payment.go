@@ -77,7 +77,6 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInvalidParam, "invalid payment_method_id")
 		return
 	}
-	body.SubscriptionID, body.IdempotencyKey = id, key
 	if refuseBlockedCardAttempt(r, payer.String()) {
 		return
 	}
@@ -87,7 +86,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
-	result, err := svc.RetrySubscriptionNow(ctx, payer, body, verifiedPrincipal(r))
+	result, err := svc.RetrySubscriptionNow(ctx, payer, id, key, body, verifiedPrincipal(r))
 	if err != nil {
 		var refusal *billingservice.CustomerPaymentRefusal
 		if errors.As(err, &refusal) {
