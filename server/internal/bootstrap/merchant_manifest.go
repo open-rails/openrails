@@ -224,7 +224,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 		switch {
 		case err == nil:
 			id = tn.ID
-		case !errors.Is(err, merchants.ErrMerchantNotFound):
+		case !errors.Is(err, billing.ErrMerchantNotFound):
 			return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 		case !req.Insert:
 			return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)

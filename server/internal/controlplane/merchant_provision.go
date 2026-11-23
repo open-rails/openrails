@@ -66,7 +66,7 @@ func (c *ControlPlane) ProvisionMerchant(ctx context.Context, name, ownerUserID 
 		return nil, false, err
 	}
 	m, err := directory.GetBySlug(ctx, name)
-	if !errors.Is(err, merchants.ErrMerchantNotFound) {
+	if !errors.Is(err, billing.ErrMerchantNotFound) {
 		return m, false, err
 	}
 	m, err = c.CreateMerchant(ctx, name, ownerUserID, nil)

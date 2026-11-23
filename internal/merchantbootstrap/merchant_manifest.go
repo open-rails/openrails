@@ -281,7 +281,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *mer
 		tn, err = directory.GetBySlug(ctx, slug)
 	}
 	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero() && req.Insert:
+	case errors.Is(err, billing.ErrMerchantNotFound) && req.MerchantID.IsZero() && req.Insert:
 		id, err := db.RegisterUnboundMerchant(ctx, req.Database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug})
 		if err != nil {
 			return nil, nil, err
@@ -289,7 +289,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (_ *mer
 		if tn, err = directory.Get(ctx, id); err != nil {
 			return nil, nil, err
 		}
-	case errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero():
+	case errors.Is(err, billing.ErrMerchantNotFound) && req.MerchantID.IsZero():
 		return nil, nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
 	case err != nil:
 		return nil, nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)

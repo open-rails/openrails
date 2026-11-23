@@ -54,7 +54,7 @@ func (s *Service) configurationState(ctx context.Context, mid billing.MerchantID
 	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.rt.DB.Gen(ctx).GetMerchantDirectoryByID(ctx, mid.UUID())
 		if errors.Is(err, pgx.ErrNoRows) {
-			return merchants.ErrMerchantNotFound
+			return billing.ErrMerchantNotFound
 		}
 		return err
 	})

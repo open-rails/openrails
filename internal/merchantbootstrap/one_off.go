@@ -132,7 +132,7 @@ func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchant
 	var selected *billing.MerchantDocument
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
-		if errors.Is(err, merchants.ErrMerchantNotFound) {
+		if errors.Is(err, billing.ErrMerchantNotFound) {
 			continue
 		}
 		if err != nil {

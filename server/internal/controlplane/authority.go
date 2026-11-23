@@ -59,7 +59,7 @@ func (c *ControlPlane) liveMerchant(ctx context.Context, mid billing.MerchantID)
 	}
 	m, err := directory.Get(ctx, mid)
 	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound):
+	case errors.Is(err, billing.ErrMerchantNotFound):
 		return nil, billing.ErrMerchantUnresolved
 	case err != nil:
 		return nil, err
@@ -114,7 +114,7 @@ func (c *ControlPlane) MerchantByName(ctx context.Context, name string) (billing
 	}
 	m, err := directory.GetBySlug(ctx, name)
 	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound):
+	case errors.Is(err, billing.ErrMerchantNotFound):
 		return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
 	case err != nil:
 		return billing.MerchantID{}, "", err

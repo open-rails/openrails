@@ -62,7 +62,7 @@ func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merc
 	}
 	m, err := directory.Get(ctx, id)
 	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound):
+	case errors.Is(err, billing.ErrMerchantNotFound):
 		return nil, billing.ErrMerchantUnresolved
 	case err != nil:
 		return nil, err
