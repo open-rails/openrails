@@ -300,6 +300,13 @@ func (u usageQuantity) price(before int64) (int64, error) {
 	return marginalPrice(u.card, u.cell, before, u.quantity)
 }
 
+// priceable refuses a quantity its card cannot price alone (volume tiers, a
+// matrix without its cell); every model prices through price.
+func (u usageQuantity) priceable() error {
+	_, err := u.price(0)
+	return err
+}
+
 // usagePeriodStart is the billing period an event dated occurred belongs
 // to: the one usage orders close, under the merchant's boundary and anchored
 // on the customer's first activity.

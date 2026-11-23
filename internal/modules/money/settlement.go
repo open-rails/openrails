@@ -337,9 +337,9 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 			continue
 		}
 		for _, u := range quantities {
-			// A card that cannot price any quantity refuses the item before
-			// anything is written.
-			if _, err := periodPrice(u.card, u.cell, 0); err != nil {
+			// A card that cannot price the item refuses it before anything
+			// is written.
+			if err := u.priceable(); err != nil {
 				b.Results[i].Err = apperr.New(http.StatusUnprocessableEntity, billing.CodeUsageNotPriced, err.Error()).WithParam("event_type")
 				break
 			}
