@@ -214,11 +214,14 @@ jobs:
           echo "SQLC_DATABASE_URL=$SQLC_DATABASE_URL" >> "$GITHUB_ENV"
           "$sqlc_bin" generate
           "$sqlc_bin" vet
+          # Intent to add: a binding file new to the tree counts as drift too.
+          git add -N -- internal/db/gen
           git diff --exit-code -- internal/db/gen
       # Bindings are generated against a database; a drifted run offers them as a patch to review and commit.
+      # Intent-to-add entries stay out of the contracts patch's cached diff.
       - name: Save the regenerated SQL bindings as a patch
         if: ${{ failure() }}
-        run: git diff --binary -- internal/db/gen > "$RUNNER_TEMP/regenerated-sqlc.patch"
+        run: git add -N -- internal/db/gen && git diff --binary -- internal/db/gen > "$RUNNER_TEMP/regenerated-sqlc.patch"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:
