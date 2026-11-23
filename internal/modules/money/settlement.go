@@ -763,8 +763,11 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 						if def.Unit != it.Currency {
 							units = priced.units[def.Key]
 						}
-						c := current[def.Key]
-						settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: w, Capacity: c.Capacity, KeepCapacity: c.Ungranted, Units: units, Ungranted: c.Ungranted})
+						// A grant that lapsed since the hold leaves the limit out of
+						// current: the hold's window counts only if its row exists.
+						c, ok := current[def.Key]
+						ungranted := !ok || c.Ungranted
+						settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: w, Capacity: c.Capacity, KeepCapacity: ungranted, Units: units, Ungranted: ungranted})
 					default:
 						continue
 					}
@@ -775,7 +778,7 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 				}
 			}
 			// A limit the hold does not name takes the usage in its current
-			// window, granted or not.
+			// window: a granted one's, or an ungranted one's row that exists.
 			for _, def := range defs {
 				c, ok := current[def.Key]
 				if held[def.Key] || !ok {

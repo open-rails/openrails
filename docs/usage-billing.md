@@ -174,8 +174,10 @@ named-unit limit, and its capture counts there.
   clamped, and nothing more is held until a refill or reset. A customer is
   subject to a limit only when a live product or an override gives it capacity
   there (an override of 0 included); one with neither is not limited by it.
-  Its usage still counts in the limit's windows, so a grant that lapses and
-  returns finds what the window used meanwhile.
+  Its usage never opens a window: it counts only in a window a grant or a
+  staff adjustment opened, while that window lasts. A customer who buys
+  mid-window starts with the plan's whole capacity, and a grant that lapses
+  and returns within a window finds what the window used meanwhile.
 - **Overrun.** `require_estimate` admits a request only when its whole estimate
   fits. `admit_while_positive` admits while any capacity remains and holds what is
   left, so the crossing request finishes and the limit stays below zero.

@@ -46,7 +46,8 @@ const SpendKeyPrefix = "spend:"
 // Capacity (the products' sum, an override, or a spend window's limit,
 // before adjustments). Opens is a session or first-use window the hold opens.
 // Ungranted is a limit no product or override gives the customer: usage
-// still counts in its windows, and nothing enforces it.
+// still counts in a window row a grant or an adjustment made, and nothing
+// enforces it.
 type Claim struct {
 	Key       string
 	Unit      string
@@ -275,7 +276,8 @@ func (h Holder) TakeBack(ctx context.Context, r Returnable) error {
 // Settlement is units a capture or report settles into one limit's window:
 // the window its hold was issued in, or the current one. KeepCapacity keeps
 // the capacity the window last stored (a spend window's). An ungranted
-// limit's window counts the units and is never reached.
+// limit counts the units only in a window row that exists, and is never
+// reached.
 type Settlement struct {
 	Key          string
 	Reset        catalog.LimitReset
@@ -304,12 +306,17 @@ func (h Holder) Settle(ctx context.Context, settlements []Settlement) error {
 	})
 	for _, i := range order {
 		s := settlements[i]
-		if err := h.ensure(ctx, s.Key, s.Window, s.Capacity); err != nil {
-			return err
+		if !s.Ungranted {
+			if err := h.ensure(ctx, s.Key, s.Window, s.Capacity); err != nil {
+				return err
+			}
 		}
 		row, err := h.lock(ctx, s.Key, s.Window.StartsAt)
 		if err != nil {
 			return err
+		}
+		if row == nil && s.Ungranted {
+			continue
 		}
 		if row == nil {
 			return errors.New("limit window vanished under its lock")

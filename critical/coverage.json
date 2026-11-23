@@ -731,7 +731,7 @@
     {
       "id": "OR-J24-S33",
       "journey": "J24",
-      "name": "Usage while a limit's grant has lapsed is not enforced but counts in its window, which the returning grant reads; usage before any grant never counts toward a lifetime allowance"
+      "name": "Usage without a grant opens no window of any reset kind, so a late buyer gets the whole capacity and unpaid use starts no session; usage while a grant has lapsed is not enforced but counts in the windows the grant opened while they last, which the returning grant reads"
     },
     {
       "id": "OR-J25-S01",

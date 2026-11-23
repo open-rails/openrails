@@ -78,8 +78,9 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
-// lapsePlan counts work units toward a daily first-use quota and a
-// lifetime allowance.
+// lapsePlan counts work units toward a limit of each reset kind a window
+// row stands for: a daily first-use quota, a week tiled from the epoch, a
+// rolling hour, an hour's session and a lifetime allowance.
 const lapsePlan = `schema_version: 1
 meters:
   work: {event_type: work, value_property: units, aggregation: sum}
@@ -88,12 +89,24 @@ limits:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
     rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  weekly:
+    unit: units
+    reset: {kind: fixed, window_seconds: 604800, anchor: subscription}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  recent:
+    unit: units
+    reset: {kind: rolling, window_seconds: 3600}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  visit:
+    unit: units
+    reset: {kind: session, window_seconds: 3600}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
   ever:
     unit: units
     reset: {kind: lifetime}
     rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
 products:
-  plan: {display_name: Plan, limits: {quota: "100", ever: "1000"}}
+  plan: {display_name: Plan, limits: {quota: "100", weekly: "500", recent: "100", visit: "100", ever: "1000"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
@@ -700,35 +713,44 @@ func TestLeaseVersions(t *testing.T) {
 		require.Nil(t, out.Wants[1].Refusal, "and within the gold month's 5,000")
 	})
 
-	t.Run("OR-J24-S33/usage-while-a-grant-lapsed-counts-once-it-returns", func(t *testing.T) {
+	t.Run("OR-J24-S33/usage-without-a-grant-opens-no-window-and-a-lapsed-grants-windows-keep-counting", func(t *testing.T) {
 		w := newWorld(t)
 		applyLimits(t, w.alpha, lapsePlan)
 		customer := billing.CustomerID(uuid.New())
-		// Before any grant the usage counts in the quota's window, which
-		// tiles the clock, but never in a lifetime allowance no grant opened:
-		// a late buyer does not start exhausted.
-		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "before", 5))...)
+		every := []string{"quota", "weekly", "recent", "visit", "ever"}
+		// A free customer's heavy use opens no window of any kind: buying the
+		// plan mid-week gives its whole capacity, and unpaid use starts no
+		// session.
+		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "free", 500))...)
 		grantLimitProduct(t, w.alpha, customer, "plan", 1)
-		require.EqualValues(t, 5, customerLimit(t, w.alpha, customer, "quota").Used)
-		require.Zero(t, customerLimit(t, w.alpha, customer, "ever").Used)
+		for _, key := range every {
+			line := customerLimit(t, w.alpha, customer, key)
+			require.Zero(t, line.Used, "%s counted usage from before any grant", key)
+			require.Equal(t, line.Capacity, line.Remaining, key)
+		}
+		require.Nil(t, customerLimit(t, w.alpha, customer, "visit").WindowStartsAt, "unpaid use started no session")
 		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "granted", 10))...)
-		require.EqualValues(t, 15, customerLimit(t, w.alpha, customer, "quota").Used)
-		require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, "ever").Used)
+		for _, key := range every {
+			require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, key).Used, "granted usage opens and counts in %s", key)
+		}
 		w.clock.Advance(2 * time.Hour)
 		page, err := w.alpha.ListCustomerLimits(t.Context(), customer)
 		require.NoError(t, err)
 		require.NotContains(t, limitKeys(page.Items), "quota", "a customer reads only the limits it is granted")
 		require.NotContains(t, limitKeys(page.Items), "ever")
-		// While the grant has lapsed nothing enforces the limits, and their
-		// windows still count the usage.
+		// While the grant has lapsed nothing enforces the limits; usage counts
+		// in the windows the grant opened while they last, and opens none.
 		_, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{workWant(customer, 500)}}))
 		require.Nil(t, refusal)
 		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "lapsed", 30))...)
 		grantLimitProduct(t, w.alpha, customer, "plan", 24)
 		quota := customerLimit(t, w.alpha, customer, "quota")
 		require.EqualValues(t, 100, quota.Capacity)
-		require.EqualValues(t, 45, quota.Used, "the window kept counting while the grant lapsed")
+		require.EqualValues(t, 40, quota.Used, "the day's window kept counting while the grant lapsed")
 		require.EqualValues(t, 40, customerLimit(t, w.alpha, customer, "ever").Used, "so did the lifetime row the first grant opened")
+		visit := customerLimit(t, w.alpha, customer, "visit")
+		require.Zero(t, visit.Used, "the session ended with its hour, and lapsed use started none")
+		require.Nil(t, visit.WindowStartsAt)
 	})
 }
 

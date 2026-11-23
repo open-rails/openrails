@@ -404,11 +404,10 @@ func (c Customer) claims(ctx context.Context, defs []Definition, meters map[stri
 // Windows are the current window and base capacity of each declared limit,
 // by key: a session or first-use window not yet open is the one a use now
 // would open (Opens). A limit the customer is not subject to is Ungranted
-// with no capacity: settled usage counts there whether or not a grant gives
-// capacity, so a grant that lapses and returns finds the window's usage. A
-// lifetime or rate limit has one row that never resets, so an ungranted one
-// counts only in the row an earlier grant left (a rate limit draining at
-// the capacity it stored): usage before any grant never exhausts it.
+// with no capacity, and only when its current window is open and has a row
+// a grant or an adjustment made: usage without a grant never opens or
+// creates a window, so a late buyer starts with the plan's whole capacity,
+// and a grant that lapses and returns within a window finds its usage.
 func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Claim, error) {
 	c.Now = c.Now.UTC()
 	capacities, err := c.capacities(ctx)
@@ -426,12 +425,24 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 		if s, ok := latest[def.Key]; ok {
 			newest = &s
 		}
-		if !granted && (def.Reset.Kind == catalog.ResetRate || def.Reset.Kind == catalog.ResetLifetime) && newest == nil {
+		if !granted && newest == nil {
 			continue
 		}
 		w, err := c.window(ctx, def, newest)
 		if err != nil {
 			return nil, err
+		}
+		if !granted {
+			if !w.Open {
+				continue
+			}
+			row, err := c.stored(ctx, def.Key, w, newest)
+			if err != nil {
+				return nil, err
+			}
+			if row == nil {
+				continue
+			}
 		}
 		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacity, Overrun: def.Overrun, Ungranted: !granted}
 		if !w.Open {
