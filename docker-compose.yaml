@@ -137,43 +137,6 @@ services:
     networks:
       - local-openrails
 
-  # ---------------------------------------------------------------------------
-  # E2E SANDBOX: Local AuthKit issuer for minting JWTs (optional)
-  # ---------------------------------------------------------------------------
-  # This is used for end-to-end sandbox testing where OpenRails needs a real issuer
-  # that serves JWKS and can mint JWTs on demand.
-  #
-  # Start with:
-  #   docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox up -d
-  #
-  # Then mint tokens:
-  #   curl -fsS http://localhost:8081/api/v1/dev/mint ...
-  issuer:
-    profiles: ["e2e-sandbox"]
-    image: "${AUTHKIT_DEVSERVER_IMAGE:-authkit-devserver:local}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-
-      DEVSERVER_LISTEN_ADDR: ":8080"
-      DEVSERVER_ISSUER: "http://issuer:8080"
-      DEVSERVER_ISSUED_AUDIENCES: "openrails-app"
-      DEVSERVER_EXPECTED_AUDIENCES: "openrails-app"
-      # The AuthKit devserver runs its own migrations. It is a dev-sandbox
-      # issuer, not OpenRails.
-      DB_URL: "postgres://${DB_USERNAME:-app}:${DB_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
-      DEVSERVER_DEV_MODE: "true"
-      DEVSERVER_DEV_MINT_SECRET: "${AUTHKIT_DEV_MINT_SECRET:-dev-mint-secret-localhost-only}"
-      DEVSERVER_REGISTRATION_VERIFICATION: "none"
-    ports:
-      - "127.0.0.1:${AUTHKIT_ISSUER_HOST_PORT:-8081}:8080"
-    volumes:
-      - issuer_postgres_data:/var/lib/postgresql
-      - issuer_runtime_keys:/.runtime/authkit
-    networks:
-      - local-openrails
-
 volumes:
   postgres_data:
   redis_data:
@@ -181,8 +144,6 @@ volumes:
     external: true
     name: go_mod_cache_persistent
   openrails_auth_keys:
-  issuer_postgres_data:
-  issuer_runtime_keys:
 
 networks:
   local-openrails:

@@ -106,10 +106,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: python3 scripts/check-ci-policy.py
-      # Migration numbers are claimed on the branch this PR merges into.
       - run: bash scripts/check.sh guards
-        env:
-          MIGRATION_PREFIX_BRANCH: ${{ github.event.pull_request.base.ref || 'master' }}
       - run: bash scripts/scan-injected-code.sh --self-test
       - name: Workflow lint
         run: |
