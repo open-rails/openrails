@@ -15,7 +15,7 @@ and resume, plan and seat changes, and price migrations. Retries are in
   source of price, seats and cadence.
 - **Scheduled change** (`scheduled_changes`): the one change awaiting renewal.
 - **Price migration** (`price_migrations`): moves a price's subscribers to
-  another price at each one's first renewal after `effective_at`.
+  another price at each one's first renewal on or after `effective_at`.
 - **Engine renewal grace** (`EngineRenewalGrace`): access past the boundary
   while the renewal decides, `min(24h, max(2h, period/10))`.
 
@@ -58,19 +58,22 @@ and reported as `life.renewal.held`.
 
 **Provider-owned renewal.** Webhooks wake `openrails.subscription_converge`,
 which applies the provider's state. `openrails.rebill_watch` reads NMI schedules
-past `NMIRebillDeadline` and collects a proven skip (`CollectSkippedRenewal`);
-an overdue renewal with no fact becomes `unverified` and is read by id. Solana
-renewals are the cranker's pulls ([payment providers](payment-providers.md)).
+past `NMIRebillDeadline` and collects a proven skip (`CollectSkippedRenewal`).
+The due pass moves a provider-billed renewal still unpaid 48 hours
+(`reconcile.PeriodGrace`) past its period to `unverified` and reads it by id
+(`AskProviderOverdueRenewal`). Solana renewals are the cranker's pulls
+([payment providers](payment-providers.md)).
 
 **Cancel and resume.** Customers cancel at period end with a 4–500 character
 reason (`Service.CancelSubscriptionForCustomer`); staff use
 `AdminSubscriptionService.CancelSubscription` (`revoke_access`,
 `account_deletion`). Access runs to the boundary unless immediate or a
 chargeback; any provider stop is an operation. An NMI delete waits until 48
-hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours
-(`SystemDeleteCoolingOff`); one during an unresolved renewal is refused
-(`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel
-(engine, Solana: the customer's own) on a reversible rail in the paid period.
+hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never
+later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an
+unresolved renewal is refused (`payment_in_progress`). `Resumable` allows
+undoing a non-merchant cancel (engine, Solana: the customer's own) on a
+reversible rail in the paid period.
 
 **Plan and seat changes.** `PurchaseService.ChangeSubscription` routes by owner:
 
@@ -79,28 +82,27 @@ hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours
 - Engine seat increase, now: added seats to period end (`QuoteSeatIncrease`).
 - Engine seat decrease, downgrade or staff change: a `scheduled_changes` row the
   renewal applies, charging and refunding nothing.
-- Provider-billed: Stripe (`stripe_tier_change`), NMI (`nmi_upgrade`), no staff
-  upgrade; CCBill and Solana by the customer only.
+- Other rails: Stripe (`stripe_tier_change`) and NMI schedules (`nmi_upgrade`),
+  with no staff upgrade; CCBill and Solana change only by the customer's own step.
 - Seats exist only on engine NMI and Stripe rows; calendar prices refuse
   changes. One unresolved change owns a subscription: its `Idempotency-Key`
-  replays it, an unresolved one answers 202, `/confirm` finishes it.
+  replays it; an unresolved provider outcome answers 202 `processing`, and one
+  awaiting the customer `requires_action` (`next_action`), which `/confirm` finishes.
 
 **Price migrations.** `PriceMigrationService.Create` reads the cohort
 (`ListMigratableSubscriptionsByPriceIDs`), classifies it, admits the command and
 records one `scheduled_changes` move each. A move is skipped (change pending,
 other currency, a rise inside `reprice_notice_window_days` without
-`acknowledge_short_notice`) or blocked (CCBill, Solana, unreachable NMI:
-`rail_requires_user_action`). Engine moves apply at renewal; Stripe and NMI
-moves push (`price_migration_push`). Cancel lists Stripe schedules to release
-(`RailReleaseRequired`); an admitted renewal keeps its terms.
+`acknowledge_short_notice`) or blocked: CCBill, Solana or an unreachable NMI
+schedule (`rail_requires_user_action`), an engine calendar price, an NMI cycle or
+sub-cent mismatch, or an unmapped Stripe price. Engine moves apply at renewal;
+Stripe and NMI moves push (`price_migration_push`). Cancel lists Stripe
+schedules to release (`RailReleaseRequired`); an admitted renewal keeps its terms.
 
 ## Interfaces
 
-- Go: `ListSubscriptions`, `GetSubscription`, `GetSubscriptionHistory`,
-  `CancelSubscription`, `ResumeSubscription`, `SetSubscriptionPaymentMethod`,
-  `ListSubscriptionChangeOptions`, `PreviewSubscriptionChange`,
-  `ChangeSubscription`, `CreatePriceMigration`, `PreviewPriceMigration`,
-  `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration`.
+- Go: one `Client` method per staff and migration route below
+  (`ListSubscriptions`, `ChangeSubscription`, `CreatePriceMigration`, …).
 - `/v1/admin/subscriptions`: `GET`, `GET /{id}`, `GET /{id}/history`,
   `GET /{id}/change/options`, `PUT /{id}/payment-method`, `POST` on
   `/{id}/cancel`, `/{id}/resume`, `/{id}/change`, `/{id}/change/preview`.
@@ -135,8 +137,9 @@ Checks:
 ### 2. Agreement with providers
 
 Webhooks only wake a converge that reads the provider. A decline for a paid or
-canceled period is ignored, a payment on a canceled row goes to refund review
-(`lifecycle.ErrTerminal`), and missing facts lead only to `unverified`. A Stripe
+canceled period is ignored, a payment on a row canceled by decision goes to
+refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores
+it, and missing facts lead only to `unverified`. A Stripe
 price move settles from Stripe's record (`ProviderMovedPrice`).
 
 Checks:
@@ -147,11 +150,11 @@ Checks:
 
 ### 3. Exact money
 
-Terms are integer micros; `RenewalTerms.Validate` requires
-`NativeToRailMinorExact`, which `AmountMinor` must equal; `SeatAmount` refuses
-overflow. Proration rounds once to a rail minor unit for the customer, in one
-currency; migrations skip other currencies and block NMI amounts finer than
-cents.
+Terms are integer micros; `RenewalTerms.Validate` requires an exact rail-minor
+amount (`NativeToRailMinorExact`), and `DecodeSubscriptionCollectionPayload`
+requires `AmountMinor` to equal it; `SeatAmount` refuses overflow. Proration
+rounds once to a rail minor unit for the customer, in one currency; migrations
+skip other currencies and block NMI amounts finer than cents.
 
 Checks:
 - `prorateCredit` and `QuoteSeatIncrease` in `proration.go`.
@@ -188,19 +191,17 @@ Checks:
 State: `subscriptions`, `subscription_verifications`. Permanent:
 `scheduled_changes`, `price_migrations`, `mandates`, `provider_schedules`. Rows
 (25 months): `subscription_status_transitions`, `subscription_billing_changes`,
-`rebill_cycles`. Calendar cadence is `0002_calendar_billing_intervals`;
-subscriptions soft-delete (`deleted_at`); no partitioned table is read.
+`rebill_cycles`. `0002_calendar_billing_intervals` changes the calendar cadence
+check on `prices` and adds it to `order_lines`; subscriptions soft-delete
+(`deleted_at`); no partitioned table is read.
 
 Checks:
-- Table comments carry the `Retention:` rule `internal/retention/tables.go`
-  gives; nothing enforces that map.
+- Table comments carry the `Retention:` rule in `internal/retention/tables.go`.
 - Each table is in `internal/merchantarchive/owned_tables.go`.
 
 ### 7. Work scales with activity
 
-The due pass reads partial indexes on due instants
-(`subscriptions_current_period_ends_at_engine_due_global_idx`,
-`subscriptions_next_retry_at_rail_idx`, `subscriptions_grace_ends_at_idx`),
+The due pass reads partial indexes on due instants ([dunning](dunning.md)),
 pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations
 wake at `next_attempt_at`; webhooks coalesce. A migration's cohort is one
 unpaged read, bounded over HTTP by the destructive ceiling.
@@ -212,9 +213,9 @@ Checks:
 ### 8. Abuse protection
 
 `/v1/me/subscriptions` writes share the `subscribe` bucket (20 per minute, 64
-KiB, captcha; [limits](../limits.md)). Customer cancels spend the merchant-wide
-budget (`destructive.NewUserActionLimiter`). `retry-now` passes the card-testing
-ledger; staff changes are capped by `AdminOperationOffChannel`.
+KiB, captcha when configured; [limits](../limits.md)). Customer cancels spend
+the merchant-wide budget (`destructive.NewUserActionLimiter`). `retry-now` passes
+the card-testing ledger; `AdminOperationOffChannel` caps staff changes.
 
 Checks:
 - `ClassifyBucket` maps POST/PUT/DELETE `/v1/me/subscriptions*` there.
@@ -230,7 +231,9 @@ provider stop while destructive actions are disarmed is refused
 `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
 
 Checks:
-- `RequireProviderCancelArmed`, `admitMigration`.
+- `RequireProviderCancelArmed` refuses a disarmed provider stop with
+  `provider_cancel_held`, except an account deletion; `admitMigration` admits one
+  unit per moved subscription and archived source.
 - OR-J17-S03: a held provider delete survives process death; OR-J34-S06: a held
   webhook cancel keeps access.
 
@@ -250,6 +253,7 @@ Other tests: none; `internal/lifecycle`, `internal/modules/subscriptions` and
 
 Gaps:
 - No table test of `lifecycle.Apply`; rare transitions run only in scenarios.
+- Nothing checks the `Retention:` table comments against `internal/retention/tables.go`.
 - OR-J18-S03 checks a seat increase's payment and card, not its amount.
 - No scenario migrates a cohort large enough to show the unpaged read.
 - No scenario covers a local failure after Stripe accepted a resume.

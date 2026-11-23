@@ -92,13 +92,14 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
 
 ### Webhook routing
 
-Callbacks land on `POST /v1/webhooks/{rail}/{account_id}`. For NMI and CCBill the
+Callbacks land on `POST /v1/webhooks/{rail}/{account_id}`; for NMI and CCBill the
 payload's account must equal the path's. `Service.ResolvePSPsByAccount` finds every
-PSP declaring the account, across merchants, and `routeSignedWebhook` checks the
-signature with each one's secret. Exactly one must verify: none is refused, and two (a
-live and a non-live PSP of one account) are refused as unattributable. The winner's
-merchant connection is pinned (`pinWebhookMerchantConn`). Configuration that cannot
-load answers `503`, so the provider retries.
+PSP declaring the account, across merchants, and `routeSignedWebhook` checks each
+one's secret (CCBill signs nothing; its source-IP check stands in). Exactly one must
+verify: of a live and a non-live PSP of one account, Stripe keeps the one matching
+the event's `livemode`; any other tie, or none, is refused. The winner's merchant
+connection is pinned (`pinWebhookMerchantConn`); configuration that cannot load
+answers `503`, so the provider retries.
 
 ### Archive and restore
 
@@ -142,7 +143,8 @@ work. Export fences the source and refuses an unresolved operation; restore land
 `readonly` and queues retained operations instead of running them.
 
 Checks:
-- `internal/merchantarchive` imports no provider integration package.
+- `internal/merchantarchive` imports no `internal/integrations` package; `Restore`
+  only inserts rows and queues wakes (`queueWakes`).
 - `fenceExport` commits before the snapshot opens; its `undo` runs only on failure.
 - OR-J31-S03 (no charge before arming) and OR-J31-S04 (unresolved operation refuses).
 
@@ -155,7 +157,8 @@ verified signature, and archives keep the identities restored references name.
 Checks:
 - `undeclaredBilling` (`internal/merchants/sync.go`) keeps accounts that hold billing
   but no document declares.
-- `routeSignedWebhook` writes nothing unless exactly one candidate verifies.
+- `routeSignedWebhook` dispatches nothing unless exactly one candidate verifies; a
+  refusal only counts in webhook health (`WebhookHealth.Rejected`).
 - OR-J06-S02 and OR-J06-S08: wrong-environment, unarmed or stale-posture credentials
   make no write.
 

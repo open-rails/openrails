@@ -2,10 +2,10 @@
 
 How OpenRails writes to NMI, Stripe, CCBill and Solana and stays in agreement
 with them. Every provider write is a durable operation recorded before it is
-sent; every callback is verified, deduplicated and, where the provider can be
-read, treated as a reason to read it. Checkout, dunning and refunds decide what
-to charge; this system decides whether a write may reach the provider and what
-the provider's answer proves.
+sent; every callback is verified and deduplicated, and a subscription or charge
+event is treated as a reason to read the provider. Checkout, dunning and refunds
+decide what to charge; this system decides whether a write may reach the
+provider and what the provider's answer proves.
 
 ## Concepts
 
@@ -32,8 +32,9 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    Its `openrails.provider_operation` wake commits in the same transaction.
 2. The `Runner` claims it (`in_flight`, a lease, `attempts` bumped as a fencing
    token) and checks the handler, `CheckRelevance`, `GateExecution`, the
-   destructive switch and the `VolumeBreaker`. A refusal parks it without
-   spending an attempt, retried after `ParkRetryInterval` (5 minutes).
+   destructive switch and the `VolumeBreaker`. A refusal parks it, refunding the
+   attempt, for `ParkRetryInterval` (5 minutes); one no longer relevant is
+   superseded, and a collection held by write posture goes unknown and is read back.
 3. It appends an `attempting` row to `provider_mutation_logs` and calls
    `Execute`. A charge first calls `Store.RequireClaim` on its own connection:
    the claim must still hold a lease beyond `ProviderCallHold` (30 s).
@@ -74,18 +75,19 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   path's account must equal the payload's. `routeSignedWebhook` accepts a
   delivery only when exactly one PSP on that account verifies it (Stripe's
   `livemode` breaks a live/test tie).
-- NMI and Stripe are HMAC-signed with a 5-minute window
-  (`NMISignatureTolerance`); a thin Stripe event is read back from Stripe first.
-  CCBill signs nothing: its source address (`webhookauth.CCBillIPAllowed`) and
-  the payload's account authenticate it.
+- NMI and Stripe are HMAC-signed with a 5-minute window (`NMISignatureTolerance`
+  for NMI, a literal in the Stripe path of `handlers/webhook.go`); a thin Stripe
+  event is read back first. CCBill signs nothing: its source address
+  (`webhookauth.CCBillIPAllowed`) and the payload's account authenticate it.
 - A rotated secret verifies for `webhook_secret_overlap` (default 24 h);
   `retire_webhook_overlap` ends it at once. A delivery is claimed in
   `idempotency_keys` and recorded in `webhook_events`, in the handler's
   transaction where possible (`MarkWebhookProcessedInTx`).
 - Stripe and NMI subscription events only queue `openrails.subscription_converge`,
   which fetches the subscription; Stripe catalog events queue
-  `openrails.provider_object_observe`. CCBill has no read API, so its payload
-  goes through the lifecycle machine, one event at a time on the locked row.
+  `openrails.provider_object_observe`. CCBill callbacks are not read back (its
+  DataLink status read serves cancels and probes), so its payload goes through
+  the lifecycle machine, one event at a time on the locked row.
 
 ### Staying in sync
 
@@ -110,7 +112,8 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   holding the product parks the subscription (`price_unmapped`,
   `customer_unlinked`, `product_held`) with a finding. Fixing the cause wakes
   converge in the same transaction (`parking.Wake`); a trigger closes the park
-  when the subscription lands by any path. A pulling or staging import owns it.
+  when the subscription lands by any path. While the PSP's import is pulling or
+  staging the subscription, the park raises no finding.
 - **Customer convergence**: `openrails.customer_converge` commits with the
   mutation that changed the customer (`internal/convergejob`).
 
@@ -124,9 +127,12 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   (`ErrProviderReadOnly` in `stripeapi` and the NMI client).
 - **Provider posture** (`providerposture.Registry`): a verdict keyed by rail,
   merchant, PSP, account, endpoint and credential fingerprint. Only `Live` or
-  `Simulated`, as the environment expects, arms; it is proven again at the first
-  write after `VerdictTTL` (one hour). Otherwise writes fail with `ErrDisarmed`
-  before any bytes are sent; reads work. A sandbox CCBill PSP never arms.
+  `Simulated`, as the environment expects, arms. NMI, Solana and Stripe test keys
+  are proven at load and again at the first write after `VerdictTTL` (one hour);
+  a live Stripe key's verdict is its prefix, and the transport refuses it only
+  toward a fake provider (`stripeapi` `guardTransport`). An unarmed PSP's writes
+  fail with `ErrDisarmed` before any bytes are sent; reads work. A sandbox CCBill
+  PSP never arms.
 - A second live PSP with another's key (`psps.credential_fingerprint`) stays
   disarmed (`consistency.duplicate_gateway_account`). Objects OpenRails creates
   at NMI and Stripe carry the book id (`internal/booktag`).
@@ -140,12 +146,8 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **Go** (`*Client`): `ListPSPs`, `GetPSP`, `CreatePSP`, `UpdatePSP`,
   `PreviewPSPRouting`, `ListFindings`, `GetFinding`, `ResolveFinding`,
   `ListProposals`, `ApproveProposals`, `DismissProposals`, `ListParkedSubscriptions`.
-- **HTTP**: `/v1/merchant/psps`, `/v1/merchant/psps/{id}`,
-  `POST /v1/merchant/psps/routing-preview`, `/v1/merchant/findings`,
-  `/v1/merchant/findings/{id}`, `POST /v1/merchant/findings/{id}/resolve`,
-  `GET /v1/merchant/proposals`, `POST /v1/merchant/proposals/approve`,
-  `POST /v1/merchant/proposals/dismiss`, `GET /v1/merchant/parked-subscriptions`,
-  `POST /v1/webhooks/{rail}/{account_id}`.
+- **HTTP**: one `/v1/merchant` route per method above (under `psps`, `findings`,
+  `proposals`, `parked-subscriptions`) and `POST /v1/webhooks/{rail}/{account_id}`.
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant hold`, `openrails undo-run`,
   `openrails solana-pay resolve`.
@@ -174,12 +176,14 @@ Checks:
 
 ### 2. Agreement with providers
 
-Stripe and NMI callbacks only wake a fetch, so a late, repeated or reordered
-callback cannot write stale state. Missing callbacks are caught by reads driven
-by evidence (the rebill watch, verification, attributions, refreshes). A
-subscription ends only on the provider's own terminal answer (Stripe
-`resource_missing`, NMI `E_NOT_FOUND`); no evidence keeps it `unverified` with
-access, and what converge cannot land parks for a person.
+Stripe and NMI subscription and charge events only wake a fetch, so a late,
+repeated or reordered one cannot write stale state; refund, void, dispute and
+chargeback notices are applied from the verified payload, once per event id.
+Missing callbacks are caught by reads driven by evidence (the rebill watch,
+verification, attributions, refreshes). A subscription ends only on the
+provider's own terminal answer (Stripe `resource_missing`, NMI `E_NOT_FOUND`);
+no evidence keeps it `unverified` with access, and what converge cannot land
+parks for a person.
 
 Checks:
 - `markSubscriptionDirty` (`internal/modules/webhooks/converge.go`) only enqueues; state changes go through `ApplyDecision`.
@@ -221,11 +225,11 @@ Checks:
 
 ### 5. Stable contracts
 
-Routes are declared once (`internal/http/routes/psps.go`, `ops.go`) and
-snapshotted in `api/openapi.json`, `Client` methods in `api/go.txt`, tables in
-`api/schema.txt`; `Engine.Merchant` and `NewRemoteMerchant` return the same
-`*Client`. `stripeapi.APIVersion` pins the outbound `Stripe-Version` and the
-registered endpoint alike.
+Routes are declared once (`internal/http/routes/psps.go`, `ops.go`,
+`merchant.go`) and snapshotted in `api/openapi.json`, `Client` methods in
+`api/go.txt`, tables in `api/schema.txt`; `Engine.Merchant` and `Remote.Merchant`
+return the same `*Client`. `stripeapi.APIVersion` pins the outbound
+`Stripe-Version` and the registered endpoint alike.
 
 Checks:
 - `go run ./scripts/contracts` reports no change under `api/`; `intent_type` is free text, so a new operation type is additive.
@@ -251,8 +255,8 @@ An operation's wake is queued by the write that leaves it live, at its due
 time; `openrails.operation_wakes` only requeues operations an hour overdue, 500
 at a time. Wake jobs coalesce per object. The `Verifier` reads queued ids; the
 rebill watch reads only overdue NMI schedules without an attempt
-(`ListOverdueRebills`). Provider posture is proven per credential set and at
-the first write after an hour, never by sweep. Daily reads are per PSP.
+(`ListOverdueRebills`). Provider posture is proven per credential set at load
+and at the first write after an hour (a live Stripe key: its prefix), never by sweep.
 
 Checks:
 - `OperationWakes.Pass` uses `ListOverdueProviderOperations` past `OperationWakeGrace`; OR-J04-S60 requeues a lost wake.
@@ -275,14 +279,15 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Destructive types (`IsDestructiveIntentType`: subscription deletes, CCBill
-cancels, card deletes) pass the kill switch (`destructive.Gate`, off by
-default), the producer `RateCeiling` (`PerActorHourlyCeiling` 5,
-`PerMerchantHourlyCeiling` 15) and the `VolumeBreaker`; a held one parks
-unsent. Every convergence cancel passes `GateCancelPass` (the switch, then the
-cancel budget); a held cancel leaves the row `unverified` with access.
-Operations record `actor`, `subject` and `credential`; uncertainty never
-triggers a compensating cancel or refund.
+Destructive types (`IsDestructiveIntentType`: NMI subscription deletes, CCBill
+cancels, card deletes) pass the kill switch (`destructive.Gate`; it starts off,
+so nothing destructive runs until an operator turns it on), the producer
+`RateCeiling` (`PerActorHourlyCeiling` 5; per merchant `PerMerchantHourlyCeiling`
+15 for user and admin origins, `PerMerchantSystemHourlyCeiling` 50 for system)
+and the `VolumeBreaker`; a held one parks unsent. Every convergence cancel
+passes `GateCancelPass` (the switch, then the cancel budget); a held cancel
+leaves the row `unverified` with access. Operations record `actor`, `subject`
+and `credential`; uncertainty never triggers a compensating cancel or refund.
 
 Checks:
 - `Runner.executeOne` checks `AllowDestructive` and `Breaker.Check` before `Execute`.

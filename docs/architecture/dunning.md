@@ -4,7 +4,8 @@ Collection decides what happens when a customer's card refuses money OpenRails
 asked for. The decline table maps every rail code to one reason and action; the
 retry schedule collects money owed (renewals OpenRails collects, usage orders);
 arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the
-schedule and grace periods. Renewal admission and the state machine are in
+renewal schedule and the arrears grace periods; usage orders retry on the
+built-in schedule. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [metering](metering.md).
 Guides: [dunning](../dunning.md), [spend limits](../spend-limits.md).
 
@@ -50,12 +51,14 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
 - `Retry` bumps `transient_retries` or `retry_attempts` and sets
   `next_retry_at`. A spent schedule is `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
-  `payment_method_update_required` and sets `grace_ends_at` to the window's end;
+  `payment_method_update_required` (`payment_method_failed` when it queues a
+  refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
   an expired card may queue a refresh ([payment methods](payment-methods.md)).
 - `NonRecoverable` or a spent schedule cancels, ends access and queues the
-  provider cancel, given a certainty leg and an open `destructive.Gate`.
-  Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes
-  NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`.
+  provider cancel, given a certainty leg and an open `destructive.Gate` (a
+  Solana pull checks no gate). Otherwise `lifecycle.TerminalHeld` keeps engine
+  members `past_due`, makes NMI-schedule members `unverified`, and raises
+  `life.terminal_outcome.held`.
 - Access while dunning is a grace grant (`dunningAccess`), unless
   `access_during_dunning` is `suspend`.
 
@@ -64,11 +67,12 @@ hourly `openrails.billing_pass`. It reads merchant ids
 (`ListDueDunningMerchants`), then pages `ListDueDunningSubscriptions` inside
 each merchant's `RunInMerchantScope`. A due row gets one action: an NMI retry
 is enqueued (`ManualRebillHandler.EnqueueScheduled`); an engine renewal is
-admitted (`MoneyService.AdmitDueSubscriptionCollection`), or its order opened
-when the card is unusable; an expired wait ends (`ExpireAwaitingMethod`); a
-stale row parks `unverified` (`ApplyLocalUnknown`); or the provider is asked by
-id (`AskProviderPastGrace`, `AskProviderOverdueRenewal`). A refused row raises
-`life.due_pass.refused`, and `deferDue` sets its `due_recheck_at`.
+admitted ([subscriptions](subscriptions.md)); an expired wait ends
+(`ExpireAwaitingMethod`); a stale row parks `unverified` (`ApplyLocalUnknown`);
+or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
+provider-billed renewals 48 hours overdue (`AskProviderOverdueRenewal`). A row
+whose processing fails raises `life.due_pass.refused`; every row left unchanged
+gets `due_recheck_at` from `deferDue`.
 
 **Customer retries.** `POST /v1/me/subscriptions/{id}/retry-now` (NMI
 schedules) and paying an engine renewal order with the subscription's card pass
@@ -106,10 +110,9 @@ Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
   `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`,
   and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`,
   `ArrearsDelinquencyFloor`, `MonthlyFloor`).
-- **Staff:** `GET /v1/admin/subscriptions?dunning=true`,
-  `GET /v1/admin/renewals`, `GET /v1/admin/payment-attempts`,
-  `GET /v1/admin/orders?overdue=true`, `POST /v1/admin/orders/{id}/waive-balance`,
-  `POST /v1/admin/orders/{id}/mark-uncollectible`,
+- **Staff:** `GET /v1/admin/subscriptions?dunning=true`, `GET /v1/admin/renewals`,
+  `GET /v1/admin/payment-attempts`, `GET /v1/admin/orders?overdue=true`,
+  `POST /v1/admin/orders/{id}/waive-balance`, `…/mark-uncollectible`,
   `PATCH /v1/merchant/configuration`.
 - **Customer:** `POST /v1/me/subscriptions/{id}/retry-now`,
   `POST /v1/me/orders/{id}/pay` ([checkout](checkout.md)).
@@ -131,20 +134,20 @@ an `Idempotency-Key` (reused elsewhere: `payment_idempotency_conflict`).
 Checks:
 - The due queries skip a row whose intent is `pending`, `in_flight`,
   `unknown_needs_verify` or `failed_retryable`.
-- `DunningWorker.processSubscription` only enqueues (OR-J16-S32, OR-J26-S53).
+- `DunningWorker.processSubscription` calls no provider: it enqueues, admits or
+  applies a local transition (OR-J16-S32); the usage pass only enqueues (OR-J26-S53).
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
 `lifecycle.RenewalDeclined` ignores a decline for a canceled row or another
 period. The completion handlers also require an unchanged failure count. A
 provider-run subscription is mirrored, not retried. A row past its window is
-never charged: it parks `unverified`, or the provider is asked by id.
+never charged: an NMI row parks `unverified`, a provider-billed row is asked by
+id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
 - `manual_rebill_completion.go` and `subscription_collection_intent.go` check
   the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
-- `reconcile.DefaultDunningWindow` is the built-in longest window; converge
-  callers pass 0, so a merchant's `dunning_policy` is not consulted there.
 
 ### 3. Exact money
 A retry charges its payload's frozen renewal terms through
@@ -155,8 +158,6 @@ collection freezes its amount in `OrderCollectionPayload`. Delinquency sums
 
 Checks:
 - The NMI and engine admissions convert with `NativeToRailMinorExact`.
-- `arrears_delinquency_floor`, `monthly_floor` and `DefaultAmountFloor` are one
-  number across currencies. Confirm it for scales other than 6 decimals.
 
 ### 4. Access control and tenant isolation
 Staff reads need `merchant:customer:read`, write-offs
@@ -167,9 +168,9 @@ Staff reads need `merchant:customer:read`, write-offs
 
 Checks:
 - `ListDueDunningMerchants`, `ListOverdueRenewalMerchants`, `ListDueDelinquency`
-  and `ListDueUsageCollections` return ids; work runs in `RunInMerchantScope`.
-- `GetCycleCardStanding` and `GetOverdueOrderAggregate` name `merchant_id`
+  and `ListDueUsageCollections` return ids; work runs in `RunInMerchantScope`
   (OR-J16-S05).
+- `GetCycleCardStanding` and `GetOverdueOrderAggregate` name `merchant_id`.
 
 ### 5. Stable contracts
 `billing.DunningPolicy`, `SubscriptionDunning`, `DeclineReason` and
@@ -178,8 +179,8 @@ Checks:
 policy, so a changed default never alters an open case.
 
 Checks:
-- `DeclaredOf` writes every field; `RecordedPolicyOf` reads a missing transient
-  list as none (OR-J16-S53).
+- `DeclaredOf` writes every field, the transient ladder included (OR-J16-S53);
+  `RecordedPolicyOf` reads a missing transient list as none.
 - `internal/merchantarchive/contract/dunning_policy.go` validates them on restore.
 
 ### 6. Migrations and retention
@@ -204,8 +205,8 @@ Checks:
 - Scenarios: OR-J26-S02, OR-J26-S40 and OR-J04-S45.
 
 ### 8. Abuse protection
-`retry-now` is in the `subscriptions` rate-limit bucket (`subscribe`, 20 rpm,
-with captcha). It checks the card-testing ledger before charging
+`retry-now` is in the `subscriptions` rate-limit bucket (`subscribe` limit, 20
+rpm, captcha when configured). It checks the card-testing ledger before charging
 (`refuseBlockedCardAttempt`) and counts a refusal (`noteCardDecline`).
 
 Checks:
@@ -213,16 +214,16 @@ Checks:
 - OR-J16-S51 and S52: the retry caps hold the networks' reattempt limits.
 
 ### 9. Destructive-action safeguards
-A terminal outcome needs a certainty leg and an open `destructive.Gate`. Under
-`limited`, the due pass holds the end of an `awaiting_method` case. A held
-outcome keeps access and raises `life.terminal_outcome.held`. Waiving and
-marking uncollectible run through `destructive.RunLocal` (`waive_order`,
-`mark_uncollectible`). `subscription_status_transitions` records the actor of
-each status change.
+A terminal outcome needs a certainty leg and an open `destructive.Gate` (a
+Solana pull checks no gate). Under `limited`, the due pass holds the end of an
+`awaiting_method` case. A held outcome keeps access and raises
+`life.terminal_outcome.held`. Waiving and marking uncollectible run through
+`destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
+`subscription_status_transitions` records the actor of each status change.
 
 Checks:
-- Every terminal-capable `FailMembership` caller passes `TerminalBlocked`.
-  Compare `internal/modules/solana/pull/crank.go`.
+- The engine, NMI and converge callers pass `TerminalBlocked` from
+  `destructive.Gate`; the Solana crank (`solana/pull/crank.go`) passes none.
 - `ExpireAwaitingMethod` keeps a blocked row (OR-J16-S31).
 
 ## Tests
@@ -244,7 +245,10 @@ Gaps:
 - No scenario declines a usage-order collection; that path uses
   `decline.Classify` (no advice) and the built-in schedule, not `dunning_policy`.
 - Untested: `access_during_dunning: suspend`; the `life.decline.unmapped` and
-  `life.cadence.unknown` findings; a Solana schedule spent with the destructive
-  switch off; delinquency outside 6-decimal currencies.
+  `life.cadence.unknown` findings; a Solana schedule spent with the switch off.
+- The floors (`arrears_delinquency_floor`, `monthly_floor`, `DefaultAmountFloor`
+  1,000,000) are one number across currencies, one unit only at 6 decimals.
+- Converge judges a failed renewal against the built-in window
+  (`reconcile.DefaultDunningWindow`), not the merchant's `dunning_policy`.
 - Nothing checks that `decline`'s `reasons` covers every
   `billing.DeclineReasons()` entry.

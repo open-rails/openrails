@@ -82,16 +82,15 @@ Checks:
 - `GetDashboardConfig`, `UpsertDashboardConfig` and `HasUsageActivity` all bind `merchant_id`.
 
 ### 5. Stable contracts
-`GetDashboard` and `SetDashboard` are in `api/go.txt` for `Client` and
-`LocalClient`, and both routes are declared once in the catalog. A widget is a
-metrics query, so the metrics vocabulary is part of this contract: a measure
-removed from the registry leaves saved widgets whose queries answer
-`metrics_query_invalid`.
+`GetDashboard` and `SetDashboard` are in `api/go.txt` for `*Client`, and both
+routes are declared once in the catalog. A widget is a metrics query, so the
+metrics vocabulary is part of this contract: a measure removed from the registry
+leaves saved widgets whose queries answer `metrics_query_invalid`.
 
 Checks:
 - `wire.ts` carries `Dashboard`, `DashboardWidget` and `SetDashboardParams`.
 - `DecodePut` decodes into `billing.DashboardWidget` with unknown fields refused, like the metrics API.
-- The console's own `Dashboard` type (`sdk/billing-ui/src/admin/lib/api/metrics.ts`) matches the generated one.
+- Compare the console's hand-written `Dashboard` and `Widget` (`sdk/billing-ui/src/admin/lib/api/metrics.ts`) with `wire.ts`: `updated_at` and `updated_by` are optional there but `string | null` on the wire.
 
 ### 6. Migrations and retention
 `dashboard_configs` is in the baseline with retention class state; a row lives as

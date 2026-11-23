@@ -10,7 +10,7 @@ agreement, and keeps each card true to its vault.
 ## Concepts
 
 - **Payment method** (`payment_methods`): one stored card, with `rail`, `custodian`, and `psp_id` when the PSP holds it.
-- **Custodian**: who holds the card: `psp` (the processor itself), `basis_theory`, `hyperswitch`, or `platform` (the deployment's vault, one partition per merchant). A merchant-declared kind is a `custodians.Descriptor`.
+- **Custodian**: who holds the card: `psp` (the processor itself), `basis_theory`, `hyperswitch`, or `platform` (the deployment's vault, one partition per merchant). Each kind is a `custodians.Descriptor` in code; a merchant declares custodians of a kind.
 - **`card_vault`, `charge_psps`**: merchant settings: where new cards are held, and which PSPs charge them.
 - **`card_entry`**: an NMI PSP setting: `browser` (a Collect.js token, the default) or `server` (the card is posted to OpenRails).
 - **Status**: `requires_action`, `active`, then `closed`, `replaced` or `removed`; chargeable when `active` with no `park_reason` (`paymentmethods.Chargeable`).
@@ -36,9 +36,10 @@ agreement, and keeps each card true to its vault.
 - **Basis Theory or platform vault** (`SaveBasisTheoryCard`), **HyperSwitch**
   (`SaveCustodianCard`, then confirm with `ConfirmCustodianCard`).
 
-A custodian's card has no `psp_id`: each charge goes to the one live PSP that
-reaches the custodian (`charge.RoutePSP`; none or two is `ErrNoRoute`). A save
-left in `requires_action` is removed after 24 hours (`payment.SetupAbandonAfter`).
+A custodian's card has no `psp_id`: a charge no obligation binds to a PSP goes to
+the one live PSP of its rail that reaches the custodian (`charge.RoutePSP`; none
+or two is `ErrNoRoute`). A save left in `requires_action` is removed after 24
+hours (`payment.SetupAbandonAfter`).
 
 ### Charging under a mandate
 
@@ -89,9 +90,10 @@ grouping, Luhn-valid and in an issued range. Unknown request fields are
 refused, and named fields are scanned: billing details on custodian saves and
 server-entered cards, tokens, idempotency keys, external transaction ids and
 declared books. The typed `card` field (`cardguard.Card`) is admitted only on a
-`card_entry: server` PSP over HTTPS (`cardFieldAdmitted`); it prints as
-`[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and
-only brand, last four and expiry are kept.
+`card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the
+merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is
+read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last
+four and expiry are kept.
 
 Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 `custodians`, `psp_customers`, `stored_card_checks`.
@@ -191,14 +193,15 @@ Checks:
 ### 8. Abuse protection
 
 `/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute)
-with captcha escalation. Card saves and order payments check the card-testing
-ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`) before any provider
-call; see [limits](../limits.md). The firewall above refuses card numbers.
+with captcha escalation. NMI, Stripe and Basis Theory saves and order payments
+check the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`)
+before any provider call; a HyperSwitch save does not ([limits](../limits.md)).
+The firewall above refuses card numbers.
 
 Checks:
 - OR-J12-S12 and OR-J38-S36: the detector's ranges, and numeric references that are not cards.
 - OR-J12-S05: no card number, security code or secret in outputs or logs.
-- `refuseBlockedCardAttempt` call sites in `internal/http/handlers/payment_methods.go`.
+- `CreatePaymentMethod` calls `refuseBlockedCardAttempt` before every provider call except in its HyperSwitch branch (the gap below).
 
 ### 9. Destructive-action safeguards
 
@@ -225,5 +228,5 @@ Gaps:
 
 - No scenario covers HyperSwitch, `card_entry: server` (`nmi_card_vault`), NMI Account Updater notices, Stripe card-updater events, re-consent after a brand change, or card edits.
 - No test asserts the stored-credential fields NMI receives (`initiated_by`, `stored_credential_indicator`, `initial_transaction_id`), though `nmimock` records them.
-- The card-testing ledger, the `payment` bucket and the customer-action budget have no scenario here.
+- A HyperSwitch save skips the card-testing ledger; the ledger, the `payment` bucket and the customer-action budget have no scenario here.
 - OR-J12-S05 sends an unknown field, which strict decoding refuses before any scan, so a card number in a declared field such as billing details is untested.

@@ -30,9 +30,8 @@ pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
 **The source is chosen once.** `internal/app/build_runtime.go` builds
 `identity.Live` when `Deps.UserInfo` is set, else `identity.Kept`, and records the
 choice as `Runtime.HostUserInfo`. The SCIM and provisioning-token routes mount
-only for the kept copy (`FeatureCustomerProvisioning` in
-`internal/http/routes/mount.go`): no `HostUserInfo`, and `RouteGroups.Programmatic`
-or an in-process handler.
+only for the kept copy with `RouteGroups.Programmatic` on
+(`FeatureCustomerProvisioning` in `internal/http/routes/mount.go`).
 
 | Deployment | Directory | Copy |
 |---|---|---|
@@ -60,9 +59,9 @@ and updates go through `write` (`UpdateCustomerContact`).
 - Newest wins: `directory_updated_at` holds the directory's date
   (`meta.lastModified`, else arrival). A POST or PUT older than it keeps the stored
   values (`newer`). A PATCH is dated by its arrival.
-- `DELETE /Users/{id}` clears the values and `provisioned_at` but keeps the row and
-  its date, so an older report cannot restore them. It also erases the customer's
-  notification events (`EraseCustomerNotificationEvents`). Billing stays.
+- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and
+  dates it by its arrival, so an older report cannot restore them. It also erases
+  the customer's notification events (`EraseCustomerNotificationEvents`); billing stays.
 - `userName` is unique per merchant, ignoring case, among provisioned rows
   (`customer_contacts_user_name_key`); a clash is `409 uniqueness`.
 - Bulk applies each operation alone, in order, up to `MaxOperations` (1000) and
@@ -74,11 +73,9 @@ and updates go through `write` (`UpdateCustomerContact`).
 provisioning token, resolved by its SHA-256 (`scim.Tokens.Resolve`) and bound to
 its row's merchant, or else what the programmatic gates admit: an application
 bound to the merchant, never a person. Both pass `boundMerchant`, which requires a
-live merchant. `scimMerchant` takes the merchant from the token, the application's
-binding or the in-process handler, never from the request. A refusal before the
-SCIM server runs is rewritten as a SCIM error (`scimRefusals`).
-`LocalClient.SCIMHandler` mounts the same catalog routes for one merchant with no
-credential (`RegisterSCIMRoutes`): holding the engine is the authority.
+live merchant. `scimMerchant` takes the merchant from the token or the
+application's binding, never from the request. A refusal before the SCIM server
+runs is rewritten as a SCIM error (`scimRefusals`).
 
 **Tokens.** `Tokens.Create` mints `TokenPrefix` plus 32 random bytes and answers it
 once; `Tokens.Delete` revokes. A declaration's `secrets.scim_token` (at least
@@ -103,7 +100,7 @@ minute.
 
 - Go: `Deps.UserInfo`; `Client.GetCustomer` and `Client.ListCustomers` answer
   `Contact`; `Client.CreateProvisioningToken`, `ListProvisioningTokens`,
-  `DeleteProvisioningToken`; `LocalClient.SCIMHandler`.
+  `DeleteProvisioningToken`.
 - HTTP: `{Prefix}/v1/app/scim/v2` (`/Users`, `/Users/{id}`, `/Bulk`,
   `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`) and
   `/v1/merchant/provisioning-tokens` (`merchant:config:read`,
@@ -153,13 +150,11 @@ Checks:
 ### 5. Stable contracts
 The routes are in the route catalog (`provisioningRoutes`); their bodies are the
 RFC's (`scimBody`), so `api/openapi.json` leaves them out and `docs/api/routes.md`
-lists them. The in-process handler mounts the same catalog entries.
+lists them.
 
 Checks:
-- `api/go.txt` lists the token methods on `*Client` and `LocalClient`, and
-  `LocalClient.SCIMHandler`.
-- `RegisterSCIMRoutes` selects `AuthProvisioning` routes from `Catalog()`; no
-  second route table exists.
+- `api/go.txt` lists the three token methods on `*Client`.
+- `Catalog()` includes `provisioningRoutes`; no second route table exists.
 - `api/openapi.json` has no `/v1/app/scim` path.
 
 ### 6. Migrations and retention
@@ -221,7 +216,6 @@ Checks:
   `404`.
 - OR-J07-S05: customer reads keep their contact and billing without hosted
   link storage.
-- OR-J04-S05 calls `LocalClient.SCIMHandler` and checks it is `503` after `Close`.
 - OR-J38-S41 (console, live directory): staff lists name the customer, still list
   by id with the directory down, and find a customer by name.
 - Gaps: no scenario covers `internal/scim`'s newest-wins dating, PUT, PATCH,

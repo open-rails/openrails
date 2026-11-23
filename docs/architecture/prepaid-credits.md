@@ -3,7 +3,7 @@
 A customer's prepaid balance in a currency is a set of credit lots: staff grants,
 credit packs and deposits a customer buys, and the credit a recurring plan
 delivers each paid cycle. Usage, admissions and running charges spend the lots
-first-in first-out by expiry; a lot can lapse, be revoked, or be reversed by a
+soonest expiry first; a lot can lapse, be revoked, or be reversed by a
 refund or chargeback of the payment that bought it. Each lot is a `grants` row;
 every movement of its value is a [ledger](ledger.md) transfer carrying its
 `grant_id`.
@@ -76,17 +76,17 @@ A lot with `ends_at` is watched (`ledger.WatchLapsingCredit`). Spending stops at
 `grants.Ledger.ExpireLapsedBy` then posts the remainder as `credit_expire` at
 (`credit_expire`, `credit_expiry`, lot id), after settling what accrued up to the
 lapse. Callers include the balance watch (`MoneyService.WatchBalanceInTx`),
-admission capacity (`AdmissionCapacityTx`), a reversal, a released refund
-(`MarkFailed`) and a running charge's stop.
+admission capacity (`AdmissionCapacityTx`), usage settlement (`PriceUsageTx`), a
+reversal, a released refund (`MarkFailed`) and a running charge's stop.
 
 ### Revocation
 
 `MoneyService.RevokeCreditGrant` runs inside `destructive.RunLocal`
 (`destructive.RevokeCredit`) under the customer lock. It posts accrued running
-charges, refuses `credit_grant_held` when holds or a pending refund need the
-remainder and `credit_grant_unavailable` when nothing remains, appends a `revoke`
-event, and `clawbackRevokedCredit` moves the remainder to `revoked_credits`.
-Revoking a revoked lot replays.
+charges and usage, refuses `credit_grant_held` when holds or a pending refund
+need the remainder and `credit_grant_unavailable` when nothing remains, appends a
+`revoke` event, and `clawbackRevokedCredit` moves the remainder to
+`revoked_credits`. Revoking a revoked lot replays.
 
 ### Refunds and chargebacks
 
@@ -114,8 +114,8 @@ re-arms them) and sets the next look.
 
 - Go: `Client.CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`,
   `RevokeCreditGrant`, `GetBalance`, `ListBalanceTransactions`; spending through
-  `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions` and their
-  `LocalClient` `…Tx` forms.
+  `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, and
+  `LocalClient.AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx`.
 - HTTP: `POST /v1/admin/credit-grants`, `POST /v1/admin/credit-grants/{id}/revoke`
   (`merchant:customer:manage`); `GET /v1/admin/credit-grants`,
   `GET /v1/admin/credit-grants/{id}` (`merchant:customer:read`); the customer's
@@ -146,8 +146,8 @@ expires the lot if it lapsed meanwhile.
 Checks:
 - `Fund` refuses a payment that is not `succeeded`, is a reversal, or differs in
   customer or currency.
-- `recordRefund`, `CompleteRefundReservation` and `LinkRefundedPayment` call
-  `syncPurchasedCreditRefund` in their transaction.
+- `recordRefund`, `CompleteRefundReservation`, `LinkRefundedPayment` and
+  `PaymentService.Create` call `syncPurchasedCreditRefund` in their transaction.
 - OR-J22-S07: a pending credit-line refund holds the whole lot until it settles.
 
 ### 3. Exact money
@@ -212,15 +212,15 @@ Lot reads are per customer and currency; a remainder reads its lot's transfers
 Checks:
 - `ListDueBalanceWatches` and `ListDueUsageAccruals` filter on the due instant and
   page in key order.
-- A spent lot with no expiry stays in every `ListSpendableCreditLots` read of its
-  customer (the remainder is computed, then skipped in Go): spend reads grow with
-  that customer's lifetime lots.
 
 ### 8. Abuse protection
 Customers buy credit only through checkout (`POST /v1/me/orders`: the `purchase`
-bucket and card-testing checks). Staff grants are limited to 10 a minute
-(`middleware.AdminOperationGrant`). Admission routes are server-to-server; they,
-the customer's balance reads and its low-balance line are in no bucket.
+bucket and card-testing checks). `middleware.AdminOperationGrant` meters each
+invoker by item: 10 a minute, shared by `UpdateCustomer`, `AdjustCustomerLimit`,
+`CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out
+for an hour. An application acting as itself is not metered. Admission routes
+are server-to-server; they, the customer's balance reads and its low-balance line
+are in no bucket.
 
 Checks:
 - `CreateCreditGrants` carries `Limit: middleware.AdminOperationGrant` in
@@ -256,4 +256,7 @@ Checks:
 Gaps:
 - No scenario buys a customer-chosen deposit (`customer_amount`, `from_payment`).
 - Credit refunds are tested only on Stripe; no NMI-funded lot is reversed.
-- `credit_reinstate` and `BalanceTransactionReinstate` have no writer, so no test.
+- `credit_reinstate` has no writer; `BalanceTransactionReinstate`, which a won
+  dispute's `credit_refund_restore` reads as, is asserted by no test.
+- Spend reads grow with a customer's lifetime lots: a spent lot with no expiry
+  stays in every `ListSpendableCreditLots` read.

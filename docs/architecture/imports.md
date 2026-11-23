@@ -72,9 +72,9 @@ An unheld live NMI schedule seen by webhook lands through
 
 1. Refuse card numbers in declared references (`rejectDeclaredPANs`), then, in
    one merchant transaction: customers, payment methods, PSP customers,
-   transactions (NMI and CCBill ids must be digits; one without an amount
-   becomes a `provider_charge_attributions` row), subscriptions
-   (`reconcile.ImportDeclaredSubscriptions`), mandates and admin grants.
+   transactions (a charge whose NMI or CCBill id is not digits becomes a finding,
+   not a payment; an approved one without an amount, a `provider_charge_attributions`
+   row), subscriptions (`reconcile.ImportDeclaredSubscriptions`), mandates, admin grants.
 2. After commit, each in a short transaction: provider bill history
    (`reconcile.RecordDeclaredHistory`; `provider_pre_schedule` for a charge
    before the first accepted cycle), purchases, historical payments.
@@ -163,9 +163,10 @@ Checks:
 
 ### 6. Migrations and retention
 
-All tables are in `0001_schema.up.sql`. The import tables and
-`provider_catalog_objects` are `State` in `internal/retention/tables.go`, kept
-until a person deletes the import; `provider_charge_attributions` is
+All tables are in `0001_schema.up.sql`. `psp_imports`, `psp_import_records` and
+`psp_import_basis` are `State` and go when a person deletes the import;
+`psp_import_mappings` (until replaced) and `provider_catalog_objects` (the latest
+observation) are `State` and outlive it; `provider_charge_attributions` is
 `Permanent`. None is partitioned.
 
 Checks:

@@ -57,12 +57,13 @@ required. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`
 ### Boot merchants
 
 `serverboot.ReconcileBootMerchantManifest` runs on `run-server` and `run-worker`. It
-loads the manifest and overlays (`bootstrap.LoadMerchantConfigManifestFiles`), creates
-each missing merchant with its AuthKit group and `remote_application` (a trusted
-issuer), and puts file declarations in place (`merchantbootstrap.ProvisionMerchant`).
-Only PostgreSQL or an unreadable manifest fails boot. A merchant it cannot provision
-is refused alone and retried in the background (`retry.Forever`). Without the default
-manifest the server boots control-plane only.
+loads the manifest and overlays (`bootstrap.LoadMerchantConfigManifestWithOverlays`),
+creates each missing merchant with its AuthKit group and `remote_application` (a
+trusted issuer), and puts file declarations in place
+(`merchantbootstrap.ProvisionMerchant`). Only PostgreSQL or an unreadable manifest
+fails boot. A merchant it cannot provision is refused alone, and `retry.Forever`
+re-runs the whole manifest in the background until every one is provisioned.
+Without the default manifest the server boots control-plane only.
 
 ### Control plane
 
@@ -127,8 +128,8 @@ credential's permissions reach. The SPA calls `/v1` with the staff token.
 
 - Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`,
   `PrivateHandler`, `Engine`, `AuthKit`, and the control-plane methods
-  ([server package](../server-package.md)), including `ListOpenDestructiveHolds` and
-  `ClearDestructiveHold`; `admin.FS`.
+  ([server package](../server-package.md)), including `ListOpenDestructiveHolds`;
+  `admin.FS`.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
   issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` privately.
 - Configuration: `config.yaml` keys ([configuration](../configuration.md)), the
@@ -144,7 +145,7 @@ Does not apply: callbacks reach the engine's webhook route unchanged (`RegisterW
 
 ### 3. Exact money
 The server keeps no balances. Its one money output, fleet analytics, stays per
-currency in `int64` micros and never sums across currencies.
+currency in `int64` native units and never sums across currencies.
 
 Checks:
 - `FleetRevenueByCurrency` and `FleetMRRByCurrency` group by currency.
@@ -153,10 +154,11 @@ Checks:
 
 ### 4. Access control and tenant isolation
 AuthKit's Authenticator decides who every request is, and a merchant's authority is
-its group: a credential acts only in the group it is bound to. No route provisions,
-deletes or lists merchants or manages teams and keys; those are Go methods whose
-caller authorizes and audits (`server/merchants.go`). Fleet analytics read across
-merchants by design and are Go-only.
+its group: a credential acts only in the group it is bound to. No route provisions or
+deletes merchants or manages teams and keys; those are Go methods whose caller
+authorizes and audits (`server/merchants.go`). The console's `GET /admin/merchants`
+lists only the merchants a credential reaches. Fleet analytics read across merchants
+by design and are Go-only.
 
 Checks:
 - `server.New` refuses `Engine.Merchants[…].Issuer` and `Engine.UserInfo`.
@@ -173,9 +175,10 @@ version.
 
 Checks:
 - `go run ./scripts/contracts` covers the server module's API.
-- Every engine route is mounted from `internal/http/routes` (`RegisterUserRoutes`,
-  `RegisterCustomerRoutes`, `RegisterWebhookRoutes`, `RegisterMetaRoutes`), never
-  copied; `Routes` passes `embedhttp.ValidateRouteTable`.
+- Every engine route is mounted from `internal/http/routes` (`RegisterMetaRoutes`,
+  `RegisterUserRoutes`, `RegisterCustomerRoutes`, `RegisterStaffRoutes`,
+  `RegisterAppRoutes`, `RegisterWebhookRoutes`), never copied; `Routes` passes
+  `embedhttp.ValidateRouteTable`.
 - `hostconfig` names each retired key in its refusal.
 
 ### 6. Migrations and retention
@@ -188,21 +191,21 @@ Checks:
 - `controlplane.AuthKit` copies `Database.SkipMigrations` to AuthKit.
 
 ### 7. Work scales with activity
-The server schedules nothing of its own: the boot manifest is reconciled once per
-declared merchant, and only unprovisioned ones retry, with backoff. Retirement
+The server schedules nothing of its own: the boot manifest is reconciled once, and
+while a merchant is unprovisioned `retry.Forever` re-runs it with backoff. Retirement
 recovery and fleet analytics run when the operator calls them.
 
 Checks:
 - `server/` registers no periodic job; `RiverJobs` is the engine's contribution.
-- `ReconcileBootMerchantManifest` starts its retry only for unprovisioned merchants.
+- `ReconcileBootMerchantManifest` starts a background retry only while a merchant is unprovisioned, and it stops once all are.
 - `CompletePendingMerchantRetirements` takes a bounded limit.
 
 ### 8. Abuse protection
 Every native route passes the engine's rate limiter and the 1 MiB body cap, and
 AuthKit applies its own buckets (`auth.http.rate_limits`). Listener timeouts bound
-slow peers. Self-registration is invite-only by default; open registration needs
-`MerchantCreation`, whose admission asks for a verified email and, past the free
-allowance, a vaulted payment method.
+slow peers. Native registration is closed by default and invite-only with
+`LocalSignIn`; open registration needs `MerchantCreation`, whose admission asks for a
+verified email and, past the free allowance, a vaulted payment method.
 
 Checks:
 - `wrapHandler` chains `RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)` and
@@ -213,7 +216,8 @@ Checks:
 
 ### 9. Destructive-action safeguards
 `PurgeMerchant` uses the engine's gated purge, `RetireUnusedMerchant` refuses any
-activity, and `ClearDestructiveHold` takes an operator and a reason. Gap:
+activity, and the merchant handle's `ClearDestructiveHold` (`ActingFor` the
+operator in process) needs a reason and a person other than the hold's opener. Gap:
 `DeleteMerchant`, `RestoreMerchant` and an operator's `RenameMerchant` record no
 actor; the caller audits them.
 
@@ -231,15 +235,13 @@ Checks:
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
   OR-J38-S72, and the archive tests' `billing prepare-target`.
-- **Playwright.** `sdk/billing-ui`'s `playwright.hosted.config.ts` (OR-J03-S04) and
-  `playwright.admin.config.ts` (OR-J38-S30 to S34, S41), started by critical tests
-  against embedded engines.
 - **Image smoke** (`smoke-image` in `.github/workflows/docker-publish.yaml`): CVE scan,
   arm64 build, `version`, `migrate pg`, then `run-server` from environment only until
   `/health/ready` passes and `/admin/` serves the console.
 - **Chart.** `scripts/check.sh chart` lints and renders it with `values.yaml` and
   `ci/full-values.yaml`.
 - Gaps: no test runs `run-server` with a merchant manifest or overlays, or
-  `hostconfig.Load` beyond the smoke's environment; the console's `config.json` and
+  `hostconfig.Load` beyond the smoke's environment; no browser test drives the
+  console (the smoke only fetches `/admin/`), and its `config.json` and
   `/admin/merchants` have no scenario; `server/ci/paymentpage` is run by no script or
   workflow.

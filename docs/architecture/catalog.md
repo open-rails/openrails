@@ -23,15 +23,16 @@ never applies one (`internal/engine/engine.go`). Guides:
 **One write path.** Every edit and application is a catalog command
 (`catalogCommand`, `internal/service/catalog_admission.go`):
 
-1. Plan under the read lock (`catalogReadLocked`, `readCatalogState`): list the
-   existing objects it changes.
-2. Admit them as one destructive command (`destructive.CatalogChange`).
+1. Plan under the catalog lock, writing nothing (`catalogReadLocked`,
+   `readCatalogState`): list the existing objects it changes.
+2. Admit them, if any, as one destructive command (`destructive.CatalogChange`).
 3. Commit in one merchant transaction (`catalogMutation`): lock the revision
-   (`LockCatalogRevision`), refuse a changed object that was not admitted,
-   record edit ownership (`recordCatalogEdit`), refuse a new recurring benefit
-   overlap (`catalog_benefit_overlap`), finish the admission.
-4. If the catalog moved since planning, release the admission as no-effect and
-   plan again, up to three times, then answer `409 catalog_revision_conflict`.
+   (`LockCatalogRevision`), record edit ownership (`recordCatalogEdit`), refuse
+   a new recurring benefit overlap (`catalog_benefit_overlap`), finish the
+   admission.
+4. If the catalog moved since planning, or a changed object was not admitted
+   (`errCatalogSnapshotMoved`), release the admission as no-effect and plan
+   again, up to three times, then answer `409 catalog_revision_conflict`.
 
 The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
 row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
@@ -50,27 +51,29 @@ nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else
 
 1. Validate (1 MiB, 2000 items), normalize through the JSON wire form, and hash
    (`CanonicalDigest`, plus the Solana PSPs in `treasuryDigest`).
-2. Prepare with no transaction open (`prepareCatalogApplication`): return the
-   stored receipt if the hash applied before (`catalogApplicationGate`), read
-   provider prices' terms, find or publish Solana plans, collect warnings.
+2. Prepare (`prepareCatalogApplication`): under the lock, return the stored
+   receipt if the hash applied before (`catalogApplicationGate`); then, with no
+   transaction open, read provider terms, find or publish Solana plans, collect warnings.
 3. Commit: plan against `catalog_field_owners` (`planCatalogApplication`), apply
    products, prices, meters, rate cards and limits, prune, take ownership of the
    named fields (`recordCatalogApply`). Only a document that skipped and warned
-   nothing is stored in `catalog_applications`; otherwise
-   `life.catalog.conflicts` stays open and a re-apply retries.
+   nothing is stored in `catalog_applications`; any other runs again when
+   re-applied. A skip also raises `life.catalog.conflicts`, which the next apply
+   that skips nothing resolves.
 
 An object is skipped whole when a field it names has a live value an edit set
 differently (`fieldConflicts`), unless `Force`. `prune: true` deletes an omitted
-object only documents set and nothing refers to, else archives it, and leaves
-one an edit touched (`pruneCatalogObjects`). The stored receipt keeps ids,
-revisions and counts, not the change list.
+product or price only documents set and nothing refers to, archives it when
+something does, and releases one an edit touched to the edit
+(`pruneCatalogObjects`); meters and limits are never pruned. The stored receipt
+keeps ids, revisions and counts, not the change list.
 
 **Provider prices.** NMI and Stripe terms come from `provider_catalog_objects`
 via `providerobjects.Observer`, read by id when absent (`readProviderPriceTerms`,
 `observedTerms`); CCBill declares its terms. The row is `provider_owned` with a
 `provider_snapshot`, its id salted with the provider object (`providerPriceID`).
 A provider that does not answer refuses a new provider price and leaves an
-existing one on cached terms, with a warning. Stripe price events queue
+existing one on cached terms, with a warning. Stripe product and price events queue
 `ProviderObjectObserveWorker`, which syncs the unmapped-price finding.
 
 **Solana plans.** A recurring USD price of ours that sells on Solana gets an
@@ -97,12 +100,10 @@ read-only here, `provider_catalog_objects`.
 
 ## Interfaces
 
-- Go (`*Client`): `CreateProduct`, `GetProduct`, `ListProducts`,
-  `UpdateProduct`, `DeleteProduct`, `CreatePrice`, `CreateProviderPrice`,
-  `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, the meter and
-  limit methods, `ApplyCatalog`; `openrails.WriteCatalogReceipt`,
-  `catalog.ReadFile`, `billing.BuyerPrices`. Reads are cached per handle
-  (`ReadCatalog`, `ReadMeters`).
+- Go (`*Client`): the product, price (`CreateProviderPrice`, `ListPriceHistory`
+  included), meter and limit methods and `ApplyCatalog`;
+  `CatalogApplicationReceipt.String`, `catalog.ReadFile`, `billing.BuyerPrices`.
+  Reads are cached per handle (`ReadCatalog`, `ReadMeters`).
 - HTTP: `POST /v1/catalog/apply`, `/v1/catalog/products`, `/v1/catalog/prices`,
   `POST /v1/catalog/provider-prices`, `/v1/catalog/meters`,
   `/v1/catalog/limits`, console-only `POST /v1/console/catalog/ask`; reads need
@@ -181,21 +182,23 @@ Checks:
 
 ### 6. Migrations and retention
 
-`0002_calendar_billing_intervals` and `0003_usage_limits` changed the baseline's
-catalog tables. `products`, `product_entitlements`, `prices`,
-`price_key_movements`, `catalog_applications` and `catalog_restore_receipts` are
-permanent, the rest state; none is partitioned. Products and prices soft-delete.
+`0002` changed the cadence check on `prices`; `0003` added `catalog_limits` and
+`catalog_product_limits` and widened `catalog_field_owners`. `products`,
+`product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`
+and `catalog_restore_receipts` are permanent, the rest state; none is
+partitioned. Products and prices soft-delete.
 
 Checks:
-- `internal/retention/tables.go` lists every catalog table; nothing checks it
-  against the schema.
+- `internal/retention/tables.go` lists every catalog table (by hand: nothing
+  checks it against the schema).
 - `no_product_delete`, `immutable_price_terms` and
   `immutable_catalog_application_receipt` triggers exist.
 
 ### 7. Work scales with activity
 
 No catalog job is periodic (`internal/river/periodic.go`); the only background
-work is one `ProviderObjectObserveWorker` job per Stripe event. But each command
+work is a `ProviderObjectObserveWorker` job per Stripe product or price an event
+names, unique per object and debounced, so a burst is one read. But each command
 reads the merchant's whole catalog up to four times under the merchant's lock.
 
 Checks:
@@ -244,11 +247,12 @@ Journeys:
 - OR-J15-S08, OR-J15-S12, OR-J29-S05, OR-J01-S05, OR-J01-S07, OR-J04-S02.
 
 Other tests: `TestBillingIntervalUnits`; rate cards in
-`internal/modules/money/rating_test.go`, OR-J24-S09, OR-J24-S10; Solana plan
-publishing in `TestSolanaPlanChanges`.
+`internal/modules/money/rating_test.go`, OR-J24-S09, OR-J24-S10; Solana plans
+are published only as setup (`CreatePrice` in `TestSolanaPlanChanges`).
 
 Gaps:
 - Nothing covers `prune: true`, entitlement replacements or a warned document.
 - Nothing tests the catalog assistant or its drafting tools.
 - No scenario shows a catalog edit spending a unit or held by an incident.
-- No scenario crashes between a Solana plan publish and the commit.
+- No scenario crashes between a Solana plan publish and the commit, or asserts
+  the re-publish guard or the `limited`/`readonly` attach.

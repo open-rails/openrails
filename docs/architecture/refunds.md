@@ -34,10 +34,10 @@ against an order with no provider call.
 
 1. `POST /v1/admin/payments/{id}/refunds` takes an `Idempotency-Key` and exactly
    one of `amount` or `full`.
-2. `adminRefundCommand` checks the rail (`checkAdminRefundRail`: an armed Stripe or
-   NMI account; CCBill and anything else is `refund_unsupported`), refundability
-   and an exact minor amount; `destructive.AdmitCommand` admits a
-   `destructive.Refund`.
+2. `adminRefundCommand` checks the rail (`checkAdminRefundRail`: a configured
+   Stripe rail or an armed NMI account; CCBill and other rails are
+   `refund_unsupported`), refundability and an exact minor amount;
+   `destructive.AdmitCommand` admits a `destructive.Refund`.
 3. One transaction under `LockAdminRefund` (an advisory lock per payment):
    `ReserveRefund` takes the customer and payment locks, runs
    `purchasedcredits.Service.ValidateRefund` and inserts the pending row, and the
@@ -47,10 +47,11 @@ against an order with no provider call.
    completed, `202` while the intent is parked, ambiguous or retryable. A terminal
    refusal releases the reservation and answers `refund_failed`.
 5. On success `finalize` stores the provider receipt first
-   (`RecordRefundProviderReceipt`), then completes the reservation
-   (`CompleteRefundReservation`), revokes the payment's access when asked
-   (`RevokeRefundedPaymentAccess`) and ends a fully refunded membership OpenRails
-   renews (`endRefundedMembership`).
+   (`RecordRefundProviderReceipt`). Then, in one transaction, it revokes the
+   payment's access when asked (`RevokeRefundedPaymentAccess`) and completes the
+   reservation (`CompleteRefundReservation`), or releases it if a provider notice
+   already booked the refund. When access was revoked and the charge is fully
+   refunded, it also ends a membership OpenRails renews (`endRefundedMembership`).
 
 A retry with the same key reuses the reservation and intent
 (`preparedRefundReplay`); other terms are `idempotency_key_reused`.
@@ -79,15 +80,17 @@ System refunds use the same reservation and intents with `OriginSystem`
   id with the same facts and refuses one with other facts, defers while an
   OpenRails refund of the payment is pending (`ErrRefundReservationPending`), and
   applies the merchant's `provider_refund_access` (`ApplyRefundAccessPolicy`).
-- Chargebacks (`ReversalChargeback`) come from Stripe `charge.dispute.created`,
-  NMI chargeback reports and CCBill `Chargeback` notices. Each records the
-  reversal, then cancels the subscription (`CancelTypeChargeback`) or ends a
-  one-off purchase's access. A reversal it cannot book (no matching charge, more
-  than remains) raises `consistency.ledger.unbooked`; access still ends.
+- Chargebacks (`ReversalChargeback`) come from Stripe `charge.dispute.created`
+  (or `charge.dispute.closed` as lost), NMI chargeback reports and CCBill
+  `Chargeback` notices. Each records the reversal, then cancels the subscription
+  (`CancelTypeChargeback`) or ends a one-off purchase's access. A reversal it
+  cannot book (no matching charge, more than remains) raises
+  `consistency.ledger.unbooked`; access still ends.
 - A won Stripe dispute (`handleStripeDisputeWon`) records a positive
   `dispute_reversal` whose `metadata.reverses_payment_id` names the chargeback,
-  and reactivates the subscription. A one-off purchase's access is not restored;
-  it is only logged for review.
+  and reactivates a provider-managed subscription this dispute canceled. An
+  engine-collected one stays canceled, and a one-off purchase's access is not
+  restored; it is only logged for review.
 
 After any reversal of a charge that funded a lot, `syncPurchasedCreditRefund` runs
 `purchasedcredits.Service.ApplyReversal` per reversal, negatives oldest first and
@@ -112,8 +115,7 @@ never refundable through OpenRails.
   `billing.ErrRefundRailUnavailable`.
 - HTTP: `POST /v1/admin/payments/{id}/refunds` and `POST /v1/admin/payments`
   (`merchant:customer:manage`); `GET /v1/admin/payments` and
-  `GET /v1/admin/payments/{id}` (`merchant:customer:read`); the customer's
-  `GET /v1/me/payments`.
+  `GET /v1/admin/payments/{id}` (`merchant:customer:read`); `GET /v1/me/payments`.
 - Error codes: `idempotency_key_required`, `idempotency_key_reused`,
   `invalid_param`, `payment_not_found`, `payment_not_refundable`,
   `refund_unsupported`, `refund_rail_unavailable`, `refund_failed`,
@@ -140,8 +142,8 @@ Checks:
 - `NMIRefundHandler.Execute` calls `recoverReceipt`, never `client.Refund`, when
   `intent.Attempts > 1`.
 - `StripeRefundHandler.Execute` passes `intent.IdempotencyKey` as the Stripe key.
-- `finalize` writes the receipt under `LedgerWriteContext` before its local
-  transaction; OR-J20-S03 converges a lost response once.
+- `finalize` writes the receipt under `LedgerWriteContext` before its transaction.
+- OR-J20-S03: a lost Stripe refund response is found by its key and booked once.
 
 ### 2. Agreement with providers
 Every provider fact is keyed by its transaction id
@@ -153,8 +155,8 @@ even when the full read fails (OR-J20-S70).
 
 Checks:
 - `refundLocked` returns the existing row for a known transaction id and errors
-  when its facts differ, and returns `ErrRefundReservationPending` while a pending
-  reversal exists.
+  when its facts differ, and, for a refund fact, returns
+  `ErrRefundReservationPending` while a pending refund reservation exists.
 - Chargeback handlers call `alerting.RecordLedgerRepair` when `Refund` fails.
 - OR-J20-S05: CCBill partial refunds book once each; an excess books nothing and
   raises one finding.
@@ -172,8 +174,8 @@ Checks:
 - OR-J20-S01 pins the provider effects: 3000 charged, 1000 and 2000 refunded.
 - `GetRefundTotalByPaymentID` nets reversals and `ValidateRefund` keeps the total
   within the charge, also under concurrency (OR-J20-S02).
-- The Stripe dispute path converts with `CentsToMicros` without reading the
-  dispute's currency: confirm it must equal the charge's.
+- The Stripe refund and dispute paths convert with `CentsToMicros` without
+  reading the object's currency: confirm it must equal the charge's.
 
 ### 4. Access control and tenant isolation
 Refund and external-payment routes need `merchant:customer:manage`, reads
@@ -202,8 +204,8 @@ are permanent (they moved or refused money); `provider_mutation_logs` rows go af
 25 months, `webhook_events` 90 days after completion. Nothing here is partitioned.
 
 Checks:
-- `internal/retention/tables.go` gives `payments`, `provider_intents` and
-  `provider_mutation_logs` those classes.
+- `internal/retention/tables.go`: `payments` `Permanent`, `provider_mutation_logs`
+  `Rows`, `provider_intents` `Rows` but kept when it moved or refused money.
 - Reads filter `deleted_at IS NULL` (`ListRefundsForPayment`,
   `ListRefundRowsForTotal`).
 
@@ -224,7 +226,8 @@ admission, external payments by `middleware.AdminOperationOffChannel` (10 a
 minute).
 
 Checks:
-- No customer route reaches `ReserveRefund` or `RecordPayment`.
+- No customer route reaches `PaymentService.ReserveRefund` or
+  `service.Service.RecordPayment`.
 - `RecordExternalPayment` refuses a `transaction_id` containing card data
   (`cardguard.ContainsPAN`).
 
@@ -250,15 +253,17 @@ Checks:
   (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds
   (`TestCCBillRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
-  imported refund allowance (`TestImportedReceipt`); OR-J21-S05 and OR-J21-S60
-  CCBill charge attribution (`TestBackgroundJobs`).
-- Chargebacks and disputes: OR-J22-S07 to S09 (`TestMixedOrderCreditRefunds`);
-  OR-J27-S04 refund access policy and OR-J27-S07 repair after a chargeback;
-  OR-J38-S37 (CCBill chargeback), OR-J38-S35, OR-J38-S43.
+  imported refund allowance (`TestImportedReceipt`).
+- Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
+  refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
+- OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends
+  the membership; OR-J27-S07 repair after a chargeback; OR-J38-S37 (CCBill
+  chargeback); OR-J38-S43 (a late CCBill sale held for refund).
 - No Go package test covers this system; `sqlc vet` prepares its queries.
 
 Gaps:
 - No scenario sends an NMI refund through `RefundPayment`: `NMIRefundHandler`'s
   execute, verify and resolve paths are untested end to end.
 - No scenario ingests an NMI chargeback.
+- No scenario sets `provider_refund_access`: `ApplyRefundAccessPolicy` is untested.
 - No scenario reads `AmountRefunded` or the charge's status after a won dispute.

@@ -4,7 +4,7 @@ The metrics engine answers a merchant's analytics questions (revenue, subscripti
 churn, declines, rebills, usage, credit, webhook health, findings) from OpenRails'
 own tables. An in-code registry of measures and dimensions validates a JSON query
 and compiles it to parameterized SQL, so no client string ever becomes SQL. It
-serves the console's [dashboard](dashboard.md) and findings bell, hosts through the
+serves the console's [dashboard](dashboard.md), reports and findings bell, hosts through the
 Go client, and any agent holding a metrics credential. Integration guide:
 [metrics for LLMs](../metrics-for-llms.md).
 
@@ -50,13 +50,12 @@ The engine owns no table and runs no job. It reads `payments`, `order_lines`,
 `prices`, `subscriptions`, `subscription_status_transitions`, `grants`,
 `usage_daily`, `limit_windows`, `product_access`, `product_entitlements`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
-`payment_attempts`, `rebill_cycles`, `nmi_history_months` and
+`psps`, `custodians`, `payment_attempts`, `payment_method_versions`,
+`provider_intents`, `rebill_cycles`, `nmi_history_months` and
 `reconciliation_findings`. A measure sees only what those tables still retain:
-payment attempts and NMI history 25 months, webhook health days 13 months,
-resolved findings 12 months.
-
-Users inside OpenRails: dashboard widgets, the console bell (`open_findings` with
-`finding_status: requires_review`) and the console's report pages.
+payment attempts, status transitions, rebill cycles and NMI history 25 months;
+daily usage 24 months after billing; webhook health days 13 months; resolved
+findings 12 months.
 
 ## Interfaces
 
@@ -91,10 +90,10 @@ Checks:
 ### 4. Access control and tenant isolation
 Over HTTP both routes check `needMetrics`; the in-process `Client` checks no
 permission, as everywhere. The merchant comes from the credential or handle
-(`merchant.Require`), never the query. Every statement's first predicate is the
-family's `merchantCols` entry `= $1`, its joins match `merchant_id`, and all run in
-one `MerchantTx`. Results are aggregates; the `customer` dimension groups by
-customer UUID and returns nothing else about the customer.
+(`merchant.Require`), never the query. Every statement's first predicate binds the
+merchant id to the family's `merchantCols` column, its joins match `merchant_id`,
+and all run in one `MerchantTx`. Results are aggregates; the `customer` dimension
+groups by customer UUID and returns nothing else about the customer.
 
 Checks:
 - `merchantCols` names a column for every family but `FamDepletion`, whose SQL binds `$1` in both subqueries.
@@ -102,10 +101,10 @@ Checks:
 - OR-J01-S02 refuses both routes without a valid credential.
 
 ### 5. Stable contracts
-`QueryMetrics` and `GetMetricsSchema` are in `api/go.txt` for `Client` and
-`LocalClient`; both routes are declared once in `internal/http/routes/ops.go`, and
-the in-process client calls the same handlers. The vocabulary itself (measure and
-dimension names) is in no generated snapshot.
+`QueryMetrics` and `GetMetricsSchema` are in `api/go.txt` for `*Client`; both routes
+are declared once in `internal/http/routes/ops.go`, and the in-process client calls
+the same handlers. The vocabulary itself (measure and dimension names) is in no
+generated snapshot.
 
 Checks:
 - `api/openapi.json` and `wire.ts` carry `MetricsQuery` and `MetricsResult`.

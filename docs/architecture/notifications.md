@@ -93,7 +93,7 @@ id derived from the crossing); low and depleted in one look are one
 `balance_depleted`. `low_notified_at` and `depleted_at` hold a notice until a
 funding (`funded_at`) re-arms it. A change that crosses a line queues an
 `openrails.balance_look` job (`balancelook.Args`, unique per balance and instant)
-in its own transaction; a look schedules the next; a failed look is taken by the
+in the change's transaction; a look schedules the next; a failed look is taken by the
 `openrails.balance_watch` scan (`ListDueBalanceWatches`). Balance facts are not
 published to the inbox.
 

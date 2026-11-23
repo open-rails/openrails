@@ -4,16 +4,17 @@ Checkout turns the lines a customer picks into an order and takes its payment:
 carts and previews, orders and their frozen lines, one-off purchases (saved or new
 card, a provider's hosted page, a Solana wallet) and the payment page a pay URL
 opens. Customers buy through `/v1/me` (billing-ui), a merchant's backend creates
-unpaid orders for them (`/v1/app/orders`), and staff read them. Enrollment by a
-recurring line, renewals and usage orders are in [subscriptions.md](subscriptions.md)
-and [dunning.md](dunning.md).
+unpaid orders for them (`/v1/app/orders`), and staff read them. Recurring
+lines, renewals and usage orders: [subscriptions.md](subscriptions.md),
+[dunning.md](dunning.md).
 
 ## Concepts
 
 - **Order** (`ord_`, `orders`): frozen lines and a total in one currency for one
   customer; `origin` `customer`, `merchant`, `subscription` (a renewal) or `usage`.
   Status `open`, `processing`, `complete`, or closed unpaid as `canceled` or
-  `expired`. Only `collection_owner = engine` orders are charged here
+  `expired`; a renewal or usage order can also end `void` or `uncollectible`.
+  Only `collection_owner = engine` orders are charged here
   ([provider-managed orders](../provider-managed-orders.md)).
 - **Line** (`order_lines`): price, product, quantity, amounts, ownership rule and
   cadence as sold; later catalog edits never reprice it.
@@ -39,12 +40,13 @@ already owned or claimed (`refuseOwned`), or missing required entitlements
 **Create.** `Create` and `FindOrCreate` (`create.go`) run in one `MerchantTx`
 under `LockCustomerForSpend`, so a customer's orders are made one at a time. They
 quote, refuse a total other than `expected_total` (`order_total_changed`), insert
-the order and lines and take each unique line's claim (`ClaimOwnership`). Asking
-again for the same lines answers the open order (`lines_digest`,
-`orders_open_lines_key`); an unpaid order of another price of the product is
-canceled for the new one. A cart order empties the cart in the same transaction
-(`takeCart`). A zero total completes at once. Lifetimes: `orders.CustomerTTL`
-24 h; merchant orders `MerchantTTL` 30 days, at most `MaxMerchantTTL` 120 days.
+the order and lines and take each unique line's claim (`ClaimOwnership`). A
+customer asking again for the same lines (not from a cart) gets the open order
+back (`FindOrCreate`, `lines_digest`, `orders_open_lines_key`); their own unpaid
+one-line order of another price of the product is canceled for the new one. A
+cart order empties the cart in the same transaction (`takeCart`). A zero total
+completes at once. Lifetimes: `orders.CustomerTTL` 24 h; merchant orders
+`MerchantTTL` 30 days, at most `MaxMerchantTTL` 120 days.
 
 **Pay.** `payment.OrderAttemptService.PayOrder` (`internal/modules/payment/order_pay.go`)
 takes exactly one payment:
@@ -74,8 +76,9 @@ abandons a challenged attempt at the provider (`AbandonOrderAttempt`). An order
 past `expires_at` reads expired at once (`Order.AsOf`); the `openrails.order_expiry`
 scan of the hourly billing pass (`OrderExpiryWorker`) writes it. Money landing on
 a closed order revives it while its claims are free; otherwise it is recorded,
-refunded and raises `life.order.late_payment` (`intents.RefundLateOrderPayment`),
-as is a second payment of a complete order (`PaidAgain`). `RecordExternalPayment`
+its full refund is queued (`intents.RefundLateOrderPayment`; CCBill's is left to a
+person) and a critical `life.order.late_payment` is raised, as for a second
+payment of a complete order (`PaidAgain`). `RecordExternalPayment`
 (`RecordRemittance`) pays an open order with money received elsewhere: exactly the
 total, no recurring line, replayed by `transaction_id`.
 
@@ -112,16 +115,19 @@ pins `{id}` to the secret's order. Framing follows `checkout.embed_origins`.
 A card sale is a `provider_intents` row (`nmi_sale`, `NMISaleIdempotencyKey`)
 committed with its order attempt before any provider call. `fenceSale` sets the
 `sale_submitted` fence (`RecordProgressIfAbsent`) so one execution submits; after
-it only `Verify` runs, which never sends money. A replayed key must match the
-stored order, attempt, customer and request (`owns`), else `idempotency_key_reused`.
-A Checkout Session moves no money; it opens after the attempt commits, with Stripe
-idempotency key `order:<attempt>`. CCBill and Solana pages take no OpenRails write.
+it only a read-back runs (`Verify`, or `recoverStripeSale` on Stripe), which never
+resends. A replayed key must match the stored order, attempt, customer and
+request (`owns`), else `idempotency_key_reused`. A Checkout Session moves no
+money; it opens after the attempt commits, with Stripe idempotency key
+`order:<attempt>`. CCBill and Solana get no OpenRails write: the customer pays on
+CCBill's page or signs in a wallet.
 
 Checks:
 - `payOrder` enqueues the intent and `CreateOrderAttempt` in one `MerchantTx`; a
   unique violation answers `order_payment_in_progress`.
 - `Verify` returns `Retryable` for an unsubmitted sale and never calls `RunSale`.
-- OR-J10-S01, OR-J10-S03 (one debit per key) and OR-J29-S02 (death after acceptance).
+- OR-J10-S01 (one debit per key), OR-J10-S03 (key reused for another request),
+  OR-J29-S02 (death after acceptance).
 
 ### 2. Agreement with providers
 `ConfirmOrder` reads the provider, never trusting the browser. A lost sale answer
@@ -136,12 +142,13 @@ different one on a complete order (`errLateApprovalDup`).
 Checks:
 - OR-J09-S05 (lost NMI answer) and OR-J09-S06 (partial approval).
 - OR-J28-S04 and OR-J28-S08: duplicate, old and thin Stripe events settle once.
-- OR-J38-S43 and OR-J37-S70: money after a close is held for refund or review.
+- OR-J38-S43 (a second payment of a paid order) and OR-J37-S70 (a transfer after
+  expiry): money the order no longer takes is held for refund or review.
 
 ### 3. Exact money
 Totals and line amounts are `int64` micros (`orders.total`, `CHECK (total >= 0)`);
 `quote` refuses overflow and mixed currencies, and `Paid` a charge whose amount or
-currency differs from the order. NMI and Stripe Checkout get
+currency differs from the order. NMI sales, Stripe sales and Stripe Checkout get
 `moneyutil.NativeToRailMinorExact`, which refuses a sub-minor remainder. An
 off-channel payment must equal the total (`payment_exceeds_due`).
 
@@ -195,8 +202,9 @@ Checks:
 Payment runs in the request; settlement comes from intents and webhooks. The only
 scan is order expiry: `ListOrderExpiryMerchants` and `ListExpiredOrders` read the
 partial indexes `orders_expires_at_live_idx` and `order_attempts_expires_at_expirable_idx`,
-200 at a time (`orderExpiryBatch`), and `DueBy` skips an idle pass. Reads apply
-expiry themselves. Cleanup uses `orders_closed_at_unpaid_idx` and `carts_last_changed_at_idx`.
+200 at a time (`orderExpiryBatch`); an idle pass costs one indexed read, and
+`DueBy` reports expiry a day overdue. Reads apply expiry themselves. Cleanup uses
+`orders_closed_at_unpaid_idx` and `carts_last_changed_at_idx`.
 
 Checks:
 - OR-J04-S37: an expiry backlog past one batch drains in one pass.
@@ -206,8 +214,8 @@ Checks:
 The `purchase` bucket ([limits.md](../limits.md)) covers `POST /v1/me/orders`,
 `…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and
 its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay
-URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10 failed
-attempts (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`).
+URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10
+declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`).
 `GuardCardAttempt` checks the card-testing ledger before any provider call
 (`card_attempts_blocked`); an Idempotency-Key holding a card number is refused
 (`cardguard.ContainsPAN`). Previews, carts, cancels and reads are not limited here,
@@ -221,10 +229,9 @@ Checks:
 ### 9. Destructive-action safeguards
 Nothing here is irreversible or bulk. Canceling or expiring an order moves no
 money, and money that lands later is still settled or refunded (`Paid`). The one
-staff write, `RecordExternalPayment`, is limited per staff member
+checkout staff write, `RecordExternalPayment`, is limited per staff member
 (`AdminOperationOffChannel`, 10 a minute, logged as an `AdminRateLimitEvent`) and
-idempotent by `transaction_id`. Waiving and writing off usage orders are in
-[dunning.md](dunning.md).
+idempotent by `transaction_id`; waivers and write-offs are in [dunning.md](dunning.md).
 
 Checks:
 - The `RecordExternalPayment` route declares `Limit: middleware.AdminOperationOffChannel`.
@@ -251,5 +258,5 @@ Gaps:
   registration, or cart expiry.
 - No scenario for `pay_url_attempts_exhausted`, the pay URL rate limits, or
   `card_attempts_blocked` on an order.
-- A late card payment refunded by `RefundLateOrderPayment` is untested; only
-  CCBill's is (OR-J38-S43).
+- No scenario covers the refund `RefundLateOrderPayment` queues for a late NMI or
+  Stripe payment; OR-J38-S43 covers only CCBill's, held for a person.

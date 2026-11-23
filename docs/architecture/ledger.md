@@ -75,10 +75,11 @@ customer row (`LockCustomerForSpend`, taken by `MoneyService.lockBalance` and
 | Usage order voided | `platform_revenue` → `arrears_liability` | `owed_writeoff` | `Ledger.WriteOffOwed` |
 | Purchased credit reversed or restored | through `credit_refund_clearing` | `credit_refund*` | `purchasedcredits.Service.ApplyReversal` |
 
-Usage reaches the ledger as one posting per customer, currency and UTC day
-(`usage_accruals`, `MoneyService.postUsageAccrualsTx`) at
-(`usage_accrual`, `usage_accrual:<id>`, posting number): balance first, the rest
-owed. A payment that settles owed points at its transfer
+Usage reaches the ledger through one accrual per customer, currency, UTC day and
+pricing period (`usage_accruals`, `MoneyService.postUsageAccrualsTx`). It posts
+when its day ends, or earlier, before any other movement of that balance, each
+time at (`usage_accrual`, `usage_accrual:<id>`, next posting number): balance
+first, the rest owed. A payment that settles owed points at its transfer
 (`payments.ledger_transfer_id`).
 
 No FX: a transfer's currency must equal both accounts'. Rates
@@ -144,7 +145,8 @@ path id.
 Checks:
 - `ledger_transfers_debit_account_id_fkey` and
   `ledger_transfers_credit_account_id_fkey` reference `(merchant_id, id)`.
-- Every query in `internal/db/queries/ledger.sql` filters `merchant_id`.
+- Every query on `ledger_accounts` or `ledger_transfers` in `internal/db/queries/`
+  filters `merchant_id`.
 - The counter trigger does not compare `ledger_transfers.customer_id` with the
   accounts' `customer_id` (only `check_billing_restore_ledger` does): confirm each
   writer sets `Transfer.Customer` from the customer whose accounts it names.
@@ -198,7 +200,7 @@ carry their own limits. Its customer reads (`GET /v1/me`,
 leaves a per-address ceiling to the proxy. Pages are capped by `pagination.Limit`.
 
 Checks:
-- No route in `internal/http/routes/credits.go` writes a transfer directly.
+- No package under `internal/http` imports `internal/modules/money/ledger`.
 - The customer reads take the payer from the signed-in identity
   (`selfAccountPayer`) and a bounded page.
 
@@ -221,8 +223,8 @@ Checks:
 
 Journeys J05 (money arithmetic) and J22 (credits), plus restore in J31.
 
-- OR-J05-S01, OR-J05-S02: exact price arithmetic; rounding, overflow, wrong
-  currency and bad quantity refused (`TestPublicCatalog`).
+- OR-J05-S01 pins price-to-provider arithmetic; OR-J05-S02 refuses a malformed
+  price (`TestPublicCatalog`).
 - OR-J22-S01: grant, hold, capture and release conserve native units; the day's
   deduction posts once; another merchant reads nothing (`TestCredits`).
 - OR-J22-S02: concurrent capture and revocation cannot go negative
