@@ -25,6 +25,7 @@ alias openrails.Invoker
 alias openrails.LLMConfig
 alias openrails.LoggerConfig
 alias openrails.MerchantDeclaration
+alias openrails.MerchantDocument
 alias openrails.MerchantSecrets
 alias openrails.NotificationChannel
 alias openrails.NotificationRecipient
@@ -388,6 +389,11 @@ internal openrails.Deps.Notifications
 internal openrails.Deps.UserInfo
 internal openrails.Email.From
 internal openrails.EmailSender.Send
+internal openrails.MerchantDeclaration.MerchantDocument
+internal openrails.MerchantDocument.AlertWebhooks
+internal openrails.MerchantDocument.Custodians
+internal openrails.MerchantDocument.PSPs
+internal openrails.MerchantDocument.Secrets
 internal openrails.NotificationChannel.Recipient
 internal openrails.PSPs
 internal openrails.RateLimitsConfig
