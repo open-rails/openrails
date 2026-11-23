@@ -7567,6 +7567,70 @@
         ]
       }
     },
+    "/v1/app/leases/sync": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncLeasesParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncLeasesResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": {
+          "merchant": "merchant:usage:manage",
+          "root": "root:usage:manage"
+        },
+        "x-openrails-errors": [
+          "idempotency_key_reused",
+          "invalid_param",
+          "lease_not_found",
+          "lease_not_held",
+          "not_implemented",
+          "usage_out_of_order"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
     "/v1/admin/customers/{customer_id}/limit-adjustments": {
       "post": {
         "tags": [
@@ -7627,6 +7691,7 @@
         },
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
+          "idempotency_key_reused",
           "invalid_customer_id",
           "invalid_param",
           "limit_not_found",
@@ -12571,6 +12636,9 @@
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "source_id": {
+            "type": "string"
           }
         }
       },
@@ -12694,6 +12762,7 @@
                 "enum": [
                   "abuse",
                   "budget",
+                  "limit",
                   "money"
                 ]
               },
@@ -12716,6 +12785,27 @@
             "oneOf": [
               {
                 "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resets_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -12782,6 +12872,8 @@
           "blocked_by",
           "deny_code",
           "retry_after_seconds",
+          "limit",
+          "resets_at",
           "currency",
           "estimated_amount",
           "start_capacity_amount",
@@ -17731,6 +17823,209 @@
           "truncated"
         ]
       },
+      "Hold": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldLimit"
+            }
+          },
+          "rate_cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldRateCard"
+            }
+          },
+          "price_bounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceBound"
+            }
+          },
+          "safe": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id",
+          "limit_set",
+          "currency",
+          "limits",
+          "rate_cards",
+          "price_bounds",
+          "safe"
+        ]
+      },
+      "HoldLimit": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "held": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "overrun": {
+            "type": "string",
+            "enum": [
+              "admit_while_positive",
+              "require_estimate"
+            ]
+          },
+          "window_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "window_ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "limit",
+          "unit",
+          "held",
+          "overrun",
+          "window_starts_at",
+          "window_ends_at"
+        ]
+      },
+      "HoldRateCard": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meter": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "value_property": {
+            "type": "string"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
+          },
+          "group_by": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowance": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Allowance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "$ref": "#/components/schemas/RatePrice"
+          }
+        },
+        "required": [
+          "limit",
+          "meter",
+          "event_type",
+          "value_property",
+          "aggregation",
+          "group_by",
+          "filter",
+          "allowance",
+          "price"
+        ]
+      },
+      "HoldReturn": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "type": "string"
+          }
+        }
+      },
       "InvoiceContact": {
         "type": "object",
         "properties": {
@@ -17790,6 +18085,256 @@
           "tax",
           "billing_contacts",
           "memo"
+        ]
+      },
+      "Lease": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "expires_at"
+        ]
+      },
+      "LeaseUsage": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LeaseUsageRefusal": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "n",
+          "status",
+          "error"
+        ]
+      },
+      "LeaseUsageResult": {
+        "type": "object",
+        "properties": {
+          "through_n": {
+            "type": "integer"
+          },
+          "refused": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaseUsageRefusal"
+            }
+          }
+        },
+        "required": [
+          "through_n",
+          "refused"
+        ]
+      },
+      "LeaseWant": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
+          "trust_level": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UsageEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "LeaseWantResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "limit_set": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "limit_set",
+          "error",
+          "refusal"
         ]
       },
       "Limit": {
@@ -21678,6 +22223,38 @@
           "updated_at"
         ]
       },
+      "PriceBound": {
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "divide_by": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "meter",
+          "cell",
+          "unit_amount",
+          "divide_by"
+        ]
+      },
       "PriceChangeDraft": {
         "type": "object",
         "properties": {
@@ -22975,7 +23552,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RecordUsageParams"
+              "$ref": "#/components/schemas/UsageParams"
             }
           }
         }
@@ -22994,64 +23571,6 @@
           "items"
         ]
       },
-      "RecordUsageParams": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
-            ]
-          },
-          "currency": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "failed",
-              "succeeded"
-            ]
-          },
-          "resource": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "occurred_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "RefundPaymentParams": {
         "type": "object",
         "properties": {
@@ -23069,6 +23588,51 @@
             "type": "boolean"
           }
         }
+      },
+      "Refusal": {
+        "type": "object",
+        "properties": {
+          "deny_code": {
+            "type": "string"
+          },
+          "limit": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resets_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_after_seconds": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "deny_code",
+          "limit",
+          "resets_at",
+          "retry_after_seconds"
+        ]
       },
       "ReleaseAdmissionBatchParams": {
         "type": "object",
@@ -24550,6 +25114,68 @@
           "replayed"
         ]
       },
+      "SyncLeasesParams": {
+        "type": "object",
+        "properties": {
+          "lease_id": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaseUsage"
+            }
+          },
+          "wants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaseWant"
+            }
+          },
+          "returns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldReturn"
+            }
+          }
+        }
+      },
+      "SyncLeasesResult": {
+        "type": "object",
+        "properties": {
+          "lease": {
+            "$ref": "#/components/schemas/Lease"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/LeaseUsageResult"
+          },
+          "wants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaseWantResult"
+            }
+          },
+          "holds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Hold"
+            }
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomerLimit"
+            }
+          }
+        },
+        "required": [
+          "lease",
+          "usage",
+          "wants",
+          "holds",
+          "limits"
+        ]
+      },
       "TieredPrice": {
         "type": "object",
         "properties": {
@@ -25368,6 +25994,64 @@
           "error"
         ]
       },
+      "UsageParams": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
+          },
+          "resource": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "UsageRow": {
         "type": "object",
         "properties": {
@@ -25972,6 +26656,16 @@
       "type": "authorization_error",
       "meaning": "An invoker-scoped credential spends a customer's balance but may not manage the account."
     },
+    "lease_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "No lease of the merchant has this id."
+    },
+    "lease_not_held": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease."
+    },
     "limit_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -26016,6 +26710,11 @@
       "status": 502,
       "type": "api_error",
       "meaning": "The language model did not answer; retry, or ask a narrower question."
+    },
+    "not_implemented": {
+      "status": 501,
+      "type": "api_error",
+      "meaning": "The route is declared and this build does not serve it yet."
     },
     "order_action_not_allowed": {
       "status": 409,
@@ -26566,6 +27265,11 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."
+    },
+    "usage_out_of_order": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A usage item skips a number the lease has not settled; send the items in order."
     },
     "usage_rate_card_invalid": {
       "status": 400,

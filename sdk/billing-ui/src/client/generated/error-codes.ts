@@ -74,6 +74,8 @@ export type OpenRailsErrorCode =
   | "invalid_request_body"
   | "invalid_settlement_status_request"
   | "invoker_scoped_principal"
+  | "lease_not_found"
+  | "lease_not_held"
   | "limit_not_found"
   | "merchant_config_read_only"
   | "merchant_mismatch"
@@ -83,6 +85,7 @@ export type OpenRailsErrorCode =
   | "method_not_allowed"
   | "metrics_query_invalid"
   | "model_unavailable"
+  | "not_implemented"
   | "order_action_not_allowed"
   | "order_attempt_closed"
   | "order_attempt_expired"
@@ -193,6 +196,7 @@ export type OpenRailsErrorCode =
   | "usage_meter_invalid"
   | "usage_meter_not_found"
   | "usage_not_priced"
+  | "usage_out_of_order"
   | "usage_rate_card_invalid"
   | "webhook_account_mismatch"
   | "webhook_invalid"
@@ -277,6 +281,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
+  lease_not_found: { status: 404, type: "invalid_request_error", meaning: "No lease of the merchant has this id." },
+  lease_not_held: { status: 409, type: "invalid_request_error", meaning: "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease." },
   limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },
@@ -286,6 +292,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
   metrics_query_invalid: { status: 400, type: "invalid_request_error", meaning: "The metrics query is invalid; metadata.errors lists why." },
   model_unavailable: { status: 502, type: "api_error", meaning: "The language model did not answer; retry, or ask a narrower question." },
+  not_implemented: { status: 501, type: "api_error", meaning: "The route is declared and this build does not serve it yet." },
   order_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The order's origin or status does not allow this action." },
   order_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The order attempt already completed or was canceled." },
   order_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The order attempt expired before it was paid." },
@@ -396,6 +403,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
   usage_not_priced: { status: 422, type: "invalid_request_error", meaning: "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field." },
+  usage_out_of_order: { status: 409, type: "invalid_request_error", meaning: "A usage item skips a number the lease has not settled; send the items in order." },
   usage_rate_card_invalid: { status: 400, type: "invalid_request_error", meaning: "The usage rate card is invalid." },
   webhook_account_mismatch: { status: 400, type: "invalid_request_error", meaning: "The webhook's account does not match its payload." },
   webhook_invalid: { status: 400, type: "invalid_request_error", meaning: "The outbound webhook is invalid." },
