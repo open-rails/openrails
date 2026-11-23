@@ -35,7 +35,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // below (#334: each table has a STATIC generated count/purge query — no runtime
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
-	"notification_events",
+	"notification_events", "customer_messages",
 	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"provider_mutation_logs", "provider_intents",
@@ -54,6 +54,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 	switch table {
 	case "notification_events":
 		return q.CountMerchantNotificationEvents(ctx, id)
+	case "customer_messages":
+		return q.CountMerchantCustomerMessages(ctx, id)
 	case "customer_entitlement_cache":
 		return q.CountMerchantRowsEntitlementCache(ctx, id)
 	case "customer_entitlement_cache_stamps":
@@ -100,6 +102,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 	switch table {
 	case "notification_events":
 		return q.PurgeMerchantNotificationEvents(ctx, id)
+	case "customer_messages":
+		return q.PurgeMerchantCustomerMessages(ctx, id)
 	case "customer_entitlement_cache":
 		return q.PurgeMerchantRowsEntitlementCache(ctx, id)
 	case "customer_entitlement_cache_stamps":

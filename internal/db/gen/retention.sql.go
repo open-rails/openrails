@@ -65,6 +65,32 @@ func (q *Queries) DeleteAbandonedOrderAttemptsBefore(ctx context.Context, arg De
 	return result.RowsAffected(), nil
 }
 
+const deleteCustomerMessagesBefore = `-- name: DeleteCustomerMessagesBefore :execrows
+DELETE FROM billing.customer_messages m
+WHERE (m.merchant_id, m.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.customer_messages e
+    WHERE e.merchant_id = $1::uuid AND e.created_at < $2::timestamptz
+    ORDER BY e.created_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteCustomerMessagesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteCustomerMessagesBefore(ctx context.Context, arg DeleteCustomerMessagesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCustomerMessagesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteEndedFailedUsageWindows = `-- name: DeleteEndedFailedUsageWindows :execrows
 DELETE FROM billing.failed_usage_windows w
 WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
@@ -666,6 +692,12 @@ FROM (
       WHERE ($1::uuid IS NULL OR um.merchant_id > $1::uuid)
         AND um.minute_at < $18::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT cm.merchant_id AS mid
+       FROM billing.customer_messages cm
+      WHERE ($1::uuid IS NULL OR cm.merchant_id > $1::uuid)
+        AND cm.created_at < $19::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -690,6 +722,7 @@ type ListRetentionWorkMerchantsParams struct {
 	ReplayCutoff        time.Time
 	UsageCutoff         time.Time
 	UsageMinuteCutoff   time.Time
+	MessageCutoff       time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -716,6 +749,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.ReplayCutoff,
 		arg.UsageCutoff,
 		arg.UsageMinuteCutoff,
+		arg.MessageCutoff,
 	)
 	if err != nil {
 		return nil, err
