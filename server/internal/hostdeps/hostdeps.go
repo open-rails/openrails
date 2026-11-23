@@ -168,7 +168,7 @@ func pingUntil(ctx context.Context, ping func(context.Context) error) error {
 			return nil
 		}
 		waited := time.Since(started).Round(time.Second)
-		log.WithError(err).WithField("waiting_for", waited.String()).Warnf("database ping failed; retrying in %s", delay)
+		log.WithError(err).WithFields(log.Fields{"waiting_for": waited.String(), "retry_in": delay.String()}).Warn("database ping failed; retrying")
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

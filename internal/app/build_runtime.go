@@ -2,6 +2,7 @@ package app
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -76,6 +77,7 @@ const (
 )
 
 type runtimeOverrides struct {
+	Logger          *slog.Logger
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
 	BasisTheoryTransport http.RoundTripper
@@ -146,6 +148,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	logger := overrides.Logger
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
@@ -169,15 +172,14 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, fmt.Errorf("the database is required")
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
-	prepare := migrate.Apply
-	if cfg.Database.SkipMigrations {
-		prepare = migrate.Validate
-	}
 	migrationPool, releaseMigrationPool, err := database.MigrationPool(ctx)
 	if err == nil {
-		err = prepare(ctx, migrationPool, migrate.Options{
-			Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
-		})
+		opts := migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger}
+		if cfg.Database.SkipMigrations {
+			err = migrate.Validate(ctx, migrationPool, opts)
+		} else {
+			err = migrate.Apply(ctx, migrationPool, opts)
+		}
 		releaseMigrationPool()
 	}
 	if err != nil {
@@ -302,6 +304,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	moneyCharger := money.NewScopedCharger(database, nil)
 
 	runtime := &Runtime{
+		Log:           logger,
 		StripeClients: stripeClients,
 		DB:            database,
 		leaseDB:       leaseDB,

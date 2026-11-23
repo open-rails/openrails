@@ -246,7 +246,7 @@ func applyStartupBootstrap(ctx context.Context, cp *controlplane.ControlPlane) e
 		return err
 	}
 	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
-	return applyAuthKitAuthorityManifest(ctx, cp, manifest, log.StandardLogger().Out, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
+	return applyAuthKitAuthorityManifest(ctx, cp, manifest, os.Stderr, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
 }
 
 // resolveBootstrapManifestPath returns the conventional bootstrap manifest

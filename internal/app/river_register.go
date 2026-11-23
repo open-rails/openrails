@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -236,7 +238,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 }
 
 // addWorker registers an OpenRails worker. Its timeout is its kind's budget,
-// which job health reads; the client's JobTimeout is the host's.
+// which job health reads; the client's JobTimeout is the host's. A worker
+// that reaches a nil logger is refused.
 func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) error {
 	var args T
 	want := riverjobs.Timeout(args.Kind())
@@ -246,7 +249,17 @@ func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) 
 	if got := worker.Timeout(&river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}}); got != want {
 		return fmt.Errorf("%s: timeout %s is not its kind's budget %s", args.Kind(), got, want)
 	}
-	return river.AddWorkerSafely(workers, worker)
+	if unset := logx.Unset(worker); len(unset) > 0 {
+		return fmt.Errorf("%s: no logger at %s", args.Kind(), strings.Join(unset, ", "))
+	}
+	return river.AddWorkerSafely(workers, jobLogged[T]{worker})
+}
+
+// jobLogged logs its worker's job with the job's kind, id and attempt.
+type jobLogged[T river.JobArgs] struct{ river.Worker[T] }
+
+func (w jobLogged[T]) Work(ctx context.Context, job *river.Job[T]) error {
+	return w.Worker.Work(logx.With(ctx, "job_kind", job.Kind, "job_id", job.ID, "attempt", job.Attempt), job)
 }
 
 // buildIntentRegistry registers the handler of every provider intent type.

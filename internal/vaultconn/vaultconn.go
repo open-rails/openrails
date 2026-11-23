@@ -105,7 +105,7 @@ func verifyCapabilities(ctx context.Context, client *vaultapi.Client, kvMount, s
 			return err
 		}
 		if !caps.KVRead {
-			log.Errorf("vault: the token cannot read the KV mount %q; merchant configuration is unavailable", kvMount)
+			log.WithField("kv_mount", kvMount).Error("vault: the token cannot read the KV mount; merchant configuration is unavailable")
 		} else if !caps.KVWrite {
 			log.Warn("vault: read-only KV capability; merchant configuration edits fail")
 		}

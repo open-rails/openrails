@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -125,7 +126,7 @@ func Capture(ctx context.Context, dsn string) ([]byte, error) {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}
 	defer pool.Close()
-	if err := migrate.Apply(ctx, pool, migrate.Options{}); err != nil {
+	if err := migrate.Apply(ctx, pool, migrate.Options{Logger: slog.New(slog.DiscardHandler)}); err != nil {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}
 

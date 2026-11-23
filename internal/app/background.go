@@ -35,7 +35,7 @@ func (r *Runtime) Go(name string, fn func(context.Context)) {
 		defer b.wg.Done()
 		defer func() {
 			if p := recover(); p != nil {
-				log.WithField("task", name).WithField("stack", string(debug.Stack())).Error(fmt.Sprintf("background task panicked: %v", p))
+				log.WithField("task", name).WithField("stack", string(debug.Stack())).WithError(fmt.Errorf("panic: %v", p)).Error("background task panicked")
 			}
 		}()
 		fn(ctx)

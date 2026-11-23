@@ -68,10 +68,6 @@ type AdminRateLimitEvent struct {
 	RequestID  string
 }
 
-// AdminRateLimitEventSink receives audit/alert records synchronously and must
-// return quickly; external notification delivery belongs behind an async sink.
-type AdminRateLimitEventSink func(context.Context, AdminRateLimitEvent)
-
 type adminRateLimitDecision struct {
 	allowed    bool
 	wasLocked  bool
@@ -84,13 +80,12 @@ type adminRateLimitDecision struct {
 // counted in the process's abuse state.
 type AdminOperationLimiter struct {
 	state *abusestate.Store
-	sink  AdminRateLimitEventSink
 }
 
 // NewAdminOperationLimiter builds the shared limiter used by both merchant
 // action middleware and the root-only unlock endpoint.
 func NewAdminOperationLimiter(state *abusestate.Store) *AdminOperationLimiter {
-	return &AdminOperationLimiter{state: state, sink: logAdminRateLimitEvent}
+	return &AdminOperationLimiter{state: state}
 }
 
 // AdminRateLimitMW applies one operation policy after the route gate has
@@ -232,13 +227,11 @@ func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, ope
 	return decision
 }
 
+// emit logs an audit or alert record of the limiter.
 func (l *AdminOperationLimiter) emit(ctx context.Context, event AdminRateLimitEvent) {
-	if l != nil && l.sink != nil {
-		l.sink(ctx, event)
+	if l == nil {
+		return
 	}
-}
-
-func logAdminRateLimitEvent(ctx context.Context, event AdminRateLimitEvent) {
 	entry := log.WithContext(ctx).WithFields(log.Fields{
 		"audit_event":   "admin_rate_limit." + event.Kind,
 		"admin_user_id": event.UserID,

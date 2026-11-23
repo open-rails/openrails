@@ -216,7 +216,8 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 			log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: skipped")
 			return nil
 		}
-		fields["action"], fields["endpoint_id"] = res.Result.Action, res.Result.EndpointID
+		fields["action"] = res.Result.Action
+		fields["endpoint_id"] = res.Result.EndpointID
 		if len(res.Retired) > 0 {
 			fields["retired"] = res.Retired
 		}

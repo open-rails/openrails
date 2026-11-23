@@ -148,7 +148,7 @@ func (r *Request) ErrorCode(code billing.ErrorCode, message string) {
 func (r *Request) AbortAPIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
 	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}, err.Message)
-	r.writeJSON(err.HTTPStatus, err.ToResponse())
+	r.writeAPIError(err)
 }
 
 // paramValue logs a refusal's param, not its pointer.
@@ -166,6 +166,14 @@ func (r *Request) APIError(err *api.APIError) {
 		fields[logrus.ErrorKey] = cause
 	}
 	r.logRefusal(err.HTTPStatus, fields, err.Message)
+	r.writeAPIError(err)
+}
+
+// writeAPIError answers err, logging how it departs from the error registry.
+func (r *Request) writeAPIError(err *api.APIError) {
+	if violation := err.Violation(); violation != "" {
+		logrus.WithField("request_id", r.RequestID()).Error(violation)
+	}
 	r.writeJSON(err.HTTPStatus, err.ToResponse())
 }
 

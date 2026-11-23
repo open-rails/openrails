@@ -173,7 +173,8 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: PSP unavailable")
 		return false
 	}
-	fields["rail"], fields["account_id"] = scope.Rail, scope.AccountID
+	fields["rail"] = scope.Rail
+	fields["account_id"] = scope.AccountID
 	var status providerposture.Status
 	var check providerposture.Check
 	switch scope.Rail {

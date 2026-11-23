@@ -60,8 +60,6 @@ type (
 	// upgrades or validates when SkipMigrations is enabled, and the lease
 	// pool's size.
 	DatabaseConfig = config.DatabaseConfig
-	// LoggerConfig is Config.Logger: the log level.
-	LoggerConfig = config.LoggerConfig
 	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
 	RateLimitsConfig = config.RateLimitsConfig
 	// RateLimit is one bucket's requests per minute.

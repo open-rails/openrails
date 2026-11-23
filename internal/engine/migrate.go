@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
@@ -26,5 +27,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 	if err := validRiverSchema(riverSchema); err != nil {
 		return err
 	}
-	return migrate.Apply(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema})
+	// Migrate takes no Deps: it logs to slog.Default().
+	return migrate.Apply(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, Logger: logx.New(nil)})
 }

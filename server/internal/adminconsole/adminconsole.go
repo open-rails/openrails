@@ -122,7 +122,7 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 		}
 		rel, ok := strings.CutPrefix(r.URL.Path, path+"/")
 		if !ok {
-			log.Errorf("admin console: request %q is outside its configured path %q; mount it on the root router without stripping the prefix", r.URL.Path, path)
+			log.WithFields(log.Fields{"request_path": r.URL.Path, "console_path": path}).Error("admin console: request is outside its configured path; mount it on the root router without stripping the prefix")
 			writeError(w, http.StatusInternalServerError, "admin console is mounted outside its configured path")
 			return
 		}

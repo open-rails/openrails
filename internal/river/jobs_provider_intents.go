@@ -50,7 +50,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[wake.A
 	// active without spending its finite infrastructure-crash rescue attempts.
 	defer func() {
 		if p := recover(); p != nil {
-			log.WithContext(ctx).WithField("panic", p).Error("provider operation panicked; retained for retry")
+			log.WithContext(ctx).WithError(fmt.Errorf("panic: %v", p)).Error("provider operation panicked; retained for retry")
 			if successorCommitted {
 				result = nil
 			} else {

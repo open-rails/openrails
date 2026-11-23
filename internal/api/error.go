@@ -3,9 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"sync"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -56,6 +53,8 @@ type APIError struct {
 	// Order is the order a failed payment left open.
 	Order *billing.Order
 	cause error
+	// unregistered is the code Coded refused to answer.
+	unregistered billing.ErrorCode
 }
 
 // Error implements the error interface
@@ -68,7 +67,6 @@ func (e *APIError) Error() string {
 
 // ToResponse converts an APIError to an ErrorResponse for JSON serialization
 func (e *APIError) ToResponse() ErrorResponse {
-	observe(e.HTTPStatus, e.Code)
 	return ErrorResponse{
 		Error: ErrorDetails{
 			Type:      e.Type,
@@ -88,8 +86,9 @@ func (e *APIError) ToResponse() ErrorResponse {
 func Coded(code billing.ErrorCode, message string) *APIError {
 	info, ok := billing.LookupErrorCode(code)
 	if !ok {
-		observe(0, code)
-		return NewAPIError(http.StatusInternalServerError, ErrorTypeAPI, CodeInternalError, "internal error")
+		e := NewAPIError(http.StatusInternalServerError, ErrorTypeAPI, CodeInternalError, "internal error")
+		e.unregistered = code
+		return e
 	}
 	if message == "" {
 		message = info.Meaning
@@ -191,25 +190,21 @@ func (e *APIError) WithMetadata(metadata map[string]any) *APIError {
 	return e
 }
 
-// violations are the answered codes billing's registry does not hold, by code.
-var violations sync.Map
-
-// observe records a code answered outside the registry: unregistered, or
-// under another status than the registry's. It is logged once.
-func observe(status int, code billing.ErrorCode) {
-	if code == "" {
-		return
+// Violation is how this answer departs from billing.ErrorCodes: a code it
+// does not register, or another status than it registers; empty when none.
+// It is a programming error, for the writer of the answer to log.
+func (e *APIError) Violation() string {
+	if e.unregistered != "" {
+		return "error code " + string(e.unregistered) + " is not registered in billing.ErrorCodes"
 	}
-	problem := ""
-	switch info, ok := billing.LookupErrorCode(code); {
+	if e.Code == "" {
+		return ""
+	}
+	switch info, ok := billing.LookupErrorCode(e.Code); {
 	case !ok:
-		problem = "error code " + string(code) + " is not registered in billing.ErrorCodes"
-	case status != 0 && info.Status != status:
-		problem = fmt.Sprintf("error code %s answered %d; billing.ErrorCodes registers %d", code, status, info.Status)
-	default:
-		return
+		return "error code " + string(e.Code) + " is not registered in billing.ErrorCodes"
+	case e.HTTPStatus != 0 && info.Status != e.HTTPStatus:
+		return fmt.Sprintf("error code %s answered %d; billing.ErrorCodes registers %d", e.Code, e.HTTPStatus, info.Status)
 	}
-	if _, seen := violations.LoadOrStore(problem, struct{}{}); !seen {
-		log.Error(problem)
-	}
+	return ""
 }

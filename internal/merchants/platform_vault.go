@@ -150,7 +150,7 @@ func platformAccountUpdater(ctx context.Context, doc []byte) (bool, int) {
 		return false, custodians.DefaultAccountUpdaterLookaheadDays
 	}
 	if len(raw.Lookahead) != 0 && (json.Unmarshal(raw.Lookahead, &lookahead) != nil || lookahead < 1 || lookahead > custodians.MaxAccountUpdaterLookaheadDays) {
-		log.WithContext(ctx).Warnf("platform vault: account_updater_lookahead_days must be a whole number from 1 to %d; the Account Updater stays unarmed", custodians.MaxAccountUpdaterLookaheadDays)
+		log.WithContext(ctx).WithField("max", custodians.MaxAccountUpdaterLookaheadDays).Warn("platform vault: account_updater_lookahead_days must be a whole number from 1 to max; the Account Updater stays unarmed")
 		return false, custodians.DefaultAccountUpdaterLookaheadDays
 	}
 	return armed, custodians.Settings{AccountUpdaterLookaheadDays: lookahead}.LookaheadDays()

@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
@@ -202,6 +203,9 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if deps.Engine.UserInfo != nil {
 		return nil, errors.New("server: Engine.UserInfo reads one embedded host's directory; a standalone server's merchants' customers are AuthKit's, pushed by their issuers over SCIM")
 	}
+	// Read once: the engine and the server log to the same logger.
+	logger := logx.New(deps.Engine.Logger)
+	deps.Engine.Logger = logger
 	s := &Server{cfg: cfg}
 	deps.Engine.UserInfo = customerDirectory{s}
 	eng, err := openrails.New(ctx, cfg.Engine, deps.Engine)
@@ -371,7 +375,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	}
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
-	log.Infof("OpenRails serving on %s", ln.Addr())
+	log.WithField("addr", ln.Addr().String()).Info("OpenRails serving")
 	var private *http.Server
 	if s.cfg.PrivateAddr != "" {
 		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.PrivateAddr)
@@ -381,7 +385,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		}
 		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 		go func() { served <- private.Serve(pln) }()
-		log.Infof("OpenRails private listener (metrics) on %s", pln.Addr())
+		log.WithField("addr", pln.Addr().String()).Info("OpenRails private listener (metrics)")
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -412,7 +416,7 @@ func drain(unready func(), delay time.Duration, served <-chan error, servers ...
 	for _, hs := range servers {
 		hs.SetKeepAlivesEnabled(false)
 	}
-	log.Infof("server: draining for %s", delay)
+	log.WithField("delay", delay.String()).Info("server: draining")
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {

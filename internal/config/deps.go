@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -43,6 +44,10 @@ type Deps struct {
 	// Email delivers OpenRails' email: billing receipts and alerts. Nil
 	// sends none.
 	Email EmailSender
+
+	// Logger receives everything OpenRails logs. Nil is slog.Default(), read
+	// once by New; OpenRails never changes the default.
+	Logger *slog.Logger
 
 	// UserInfo is the host's directory (authkit/userinfo.Lookup, AuthKit's
 	// Client.UserInfo()): who each customer is, asked whenever OpenRails emails

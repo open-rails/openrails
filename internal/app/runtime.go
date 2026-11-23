@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -60,6 +61,8 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	// Log receives everything the graph logs.
+	Log            *slog.Logger
 	solanaBalances solanaint.BalanceCache
 	// DestructiveAdmissions owns logical command limits and persistent incidents.
 	DestructiveAdmissions *destructive.Admissions

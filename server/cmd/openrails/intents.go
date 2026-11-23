@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -105,7 +106,7 @@ func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug str
 	if err != nil {
 		return err
 	}
-	application, err := app.BootstrapWithOptions(ctx, cfg, &app.BootstrapOptions{PGXPool: pool, Vault: vault})
+	application, err := app.BootstrapWithOptions(ctx, cfg, &app.BootstrapOptions{Logger: slog.Default(), PGXPool: pool, Vault: vault})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}

@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -206,7 +207,7 @@ func RecoverHTTP() HTTPMiddleware {
 					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 						panic(rec)
 					}
-					log.WithField("panic", rec).Error("http handler panicked")
+					log.WithError(fmt.Errorf("panic: %v", rec)).Error("http handler panicked")
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = w.Write([]byte(`{"error":{"type":"api_error","code":"internal_error","message":"internal server error"}}`))

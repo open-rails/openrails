@@ -3,15 +3,16 @@ package app
 import (
 	"context"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
+	"log/slog"
 	"net/http"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/config"
@@ -31,9 +32,11 @@ type App struct {
 }
 
 // BootstrapOptions is what the application graph reaches outside its
-// process: PGXPool is required; the rest are the host's optional
+// process: Logger and PGXPool are required; the rest are the host's optional
 // dependencies and test seams.
 type BootstrapOptions struct {
+	// Logger receives everything the graph logs.
+	Logger          *slog.Logger
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
 	BasisTheoryTransport http.RoundTripper
@@ -69,6 +72,10 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	if opts == nil || opts.PGXPool == nil {
 		return nil, fmt.Errorf("Deps.Postgres is required")
 	}
+	if opts.Logger == nil {
+		return nil, fmt.Errorf("a logger is required")
+	}
+	logger := opts.Logger
 	// Omission never disables the protective defaults; an empty RateLimits
 	// does.
 	if cfg.RateLimits == nil {
@@ -84,23 +91,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Configure logger level
-	if cfg.Logger != nil && cfg.Logger.Level != "" {
-		level, err := log.ParseLevel(cfg.Logger.Level)
-		if err != nil {
-			log.WithError(err).Warnf("Invalid log level '%s', using default", cfg.Logger.Level)
-		} else {
-			log.SetLevel(level)
-			log.Infof("Log level set to: %s", level)
-		}
-	}
-
 	database, err := db.NewWithPGXPoolAndSessions(opts.PGXPool, config.SchemaName(cfg), opts.PostgresSession)
 	if err != nil {
 		return nil, fmt.Errorf("use pgx pool: %w", err)
 	}
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
+		Logger:               logger,
 		BasisTheoryTransport: opts.BasisTheoryTransport,
 		StripeTransport:      opts.StripeTransport,
 		NMITransport:         opts.NMITransport,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -363,18 +365,31 @@ type errRow struct{ err error }
 
 func (r errRow) Scan(...interface{}) error { return r.err }
 
-// newSQLTracer is the debug-level pgx query tracer, enabled by db.sql_trace.
 // NewSQLTracer logs every query at debug level, for a pool a host opens
-// with sql_trace on.
+// with sql_trace on. It logs each statement, never its arguments: they carry
+// customer data.
 func NewSQLTracer() *tracelog.TraceLog {
 	return &tracelog.TraceLog{
-		Logger:   tracelog.LoggerFunc(logPGX),
+		Logger: tracelog.LoggerFunc(func(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
+			logPGX(ctx, level, msg, data)
+		}),
 		LogLevel: tracelog.LogLevelDebug,
 	}
 }
 
-func logPGX(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]interface{}) {
-	entry := logrus.WithContext(ctx).WithFields(logrus.Fields(data))
+func logPGX(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
+	fields := logrus.Fields{}
+	for _, k := range slices.Sorted(maps.Keys(data)) {
+		switch v := data[k].(type) {
+		case error:
+			fields[logrus.ErrorKey] = v
+		default:
+			if k != "args" {
+				fields[k] = v
+			}
+		}
+	}
+	entry := logrus.WithContext(ctx).WithFields(fields)
 	switch level {
 	case tracelog.LogLevelTrace, tracelog.LogLevelDebug:
 		entry.Debug(msg)

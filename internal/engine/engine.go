@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/service"
 )
@@ -99,11 +100,13 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if deps.Postgres == nil {
 		return nil, fmt.Errorf("openrails: Deps.Postgres is required")
 	}
+	logger := logx.New(deps.Logger)
 	declarations, refused, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
 	}
 	bootstrap := &app.BootstrapOptions{
+		Logger:               logger,
 		PGXPool:              deps.Postgres,
 		PostgresSession:      deps.PostgresSession,
 		Redis:                deps.Redis,

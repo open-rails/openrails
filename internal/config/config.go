@@ -113,8 +113,6 @@ type Config struct {
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string
 
-	// Logger sets the log level.
-	Logger *LoggerConfig
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -775,11 +773,6 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeFull:     true,
 	ProviderWriteModeLimited:  true,
 	ProviderWriteModeReadOnly: true,
-}
-
-// LoggerConfig sets the log level: debug, info, warn or error.
-type LoggerConfig struct {
-	Level string `yaml:"level" json:"level"`
 }
 
 // RateLimit is one bucket's limit over a fixed one-minute window.

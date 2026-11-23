@@ -268,7 +268,8 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		fields := log.Fields{"user_id": userID}
 		var v5 *nmi.V5Error
 		if errors.As(err, &v5) {
-			fields["nmi_error_code"], fields["nmi_error_message"] = v5.Code, v5.Message
+			fields["nmi_error_code"] = v5.Code
+			fields["nmi_error_message"] = v5.Message
 		}
 		log.WithError(err).WithFields(fields).Error("Failed to create vault in NMI")
 		var refusal *PaymentMethodError

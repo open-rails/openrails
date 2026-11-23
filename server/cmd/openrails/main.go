@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -67,6 +68,14 @@ func newRootCmd() *cobra.Command {
 			cfg, err := load(configPath, loadOpts...)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
+			}
+			handler, err := cfg.Logger.Handler(os.Stderr)
+			if err != nil {
+				return err
+			}
+			slog.SetDefault(slog.New(handler))
+			if cfg.EnvFile != "" {
+				slog.Info("config: loaded environment overrides", "path", cfg.EnvFile)
 			}
 
 			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
