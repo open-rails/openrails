@@ -317,6 +317,7 @@ func (q *Queries) ListUsageAccrualsByIDs(ctx context.Context, arg ListUsageAccru
 }
 
 const lockUsageAccrual = `-- name: LockUsageAccrual :one
+
 SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND day_at = $4::timestamptz
@@ -332,6 +333,8 @@ type LockUsageAccrualParams struct {
 	PeriodStartsAt time.Time
 }
 
+// Usage settles in batches: each customer's daily accrual, its daily rollups
+// and its per-minute spend. Nothing keeps a row per event.
 func (q *Queries) LockUsageAccrual(ctx context.Context, arg LockUsageAccrualParams) (BillingUsageAccrual, error) {
 	row := q.db.QueryRow(ctx, lockUsageAccrual,
 		arg.MerchantID,
@@ -634,11 +637,7 @@ func (q *Queries) UsageDailyReport(ctx context.Context, arg UsageDailyReportPara
 	var items []UsageDailyReportRow
 	for rows.Next() {
 		var i UsageDailyReportRow
-		if err := rows.Scan(
-			&i.Key,
-			&i.EventCount,
-			&i.TotalAmount,
-		); err != nil {
+		if err := rows.Scan(&i.Key, &i.EventCount, &i.TotalAmount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

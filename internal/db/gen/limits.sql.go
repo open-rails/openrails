@@ -32,6 +32,8 @@ type AdjustLimitWindowParams struct {
 	Amount         int64
 }
 
+// An adjustment adds to one window's capacity; the window opens if it has
+// no row yet.
 func (q *Queries) AdjustLimitWindow(ctx context.Context, arg AdjustLimitWindowParams) error {
 	_, err := q.db.Exec(ctx, adjustLimitWindow,
 		arg.MerchantID,
@@ -228,6 +230,8 @@ type GetLimitSubscriptionAnchorParams struct {
 	CustomerID uuid.UUID
 }
 
+// The start of the customer's earliest live subscription to a product that
+// gives the limit capacity: what a subscription-anchored window tiles from.
 func (q *Queries) GetLimitSubscriptionAnchor(ctx context.Context, arg GetLimitSubscriptionAnchorParams) (time.Time, error) {
 	row := q.db.QueryRow(ctx, getLimitSubscriptionAnchor, arg.LimitKey, arg.MerchantID, arg.CustomerID)
 	var started_at time.Time
@@ -259,7 +263,12 @@ type GetLimitWindowRow struct {
 }
 
 func (q *Queries) GetLimitWindow(ctx context.Context, arg GetLimitWindowParams) (GetLimitWindowRow, error) {
-	row := q.db.QueryRow(ctx, getLimitWindow, arg.MerchantID, arg.CustomerID, arg.LimitKey, arg.WindowStartsAt)
+	row := q.db.QueryRow(ctx, getLimitWindow,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+	)
 	var i GetLimitWindowRow
 	err := row.Scan(
 		&i.LimitKey,
@@ -517,11 +526,7 @@ func (q *Queries) ListCustomerLimitOverrides(ctx context.Context, arg ListCustom
 	var items []ListCustomerLimitOverridesRow
 	for rows.Next() {
 		var i ListCustomerLimitOverridesRow
-		if err := rows.Scan(
-			&i.CustomerID,
-			&i.LimitKey,
-			&i.Capacity,
-		); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.LimitKey, &i.Capacity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -557,6 +562,7 @@ type ListCustomerProductLimitCapacitiesRow struct {
 	Capacity int64
 }
 
+// A customer's capacity per limit: the sum over its distinct live products.
 func (q *Queries) ListCustomerProductLimitCapacities(ctx context.Context, arg ListCustomerProductLimitCapacitiesParams) ([]ListCustomerProductLimitCapacitiesRow, error) {
 	rows, err := q.db.Query(ctx, listCustomerProductLimitCapacities, arg.MerchantID, arg.CustomerID, arg.At)
 	if err != nil {
@@ -566,10 +572,7 @@ func (q *Queries) ListCustomerProductLimitCapacities(ctx context.Context, arg Li
 	var items []ListCustomerProductLimitCapacitiesRow
 	for rows.Next() {
 		var i ListCustomerProductLimitCapacitiesRow
-		if err := rows.Scan(
-			&i.LimitKey,
-			&i.Capacity,
-		); err != nil {
+		if err := rows.Scan(&i.LimitKey, &i.Capacity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -601,6 +604,7 @@ type ListLatestLimitWindowsRow struct {
 	UpdatedAt      time.Time
 }
 
+// Each limit's newest window of the customer.
 func (q *Queries) ListLatestLimitWindows(ctx context.Context, arg ListLatestLimitWindowsParams) ([]ListLatestLimitWindowsRow, error) {
 	rows, err := q.db.Query(ctx, listLatestLimitWindows, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -652,8 +656,14 @@ type ListLimitWindowsFromRow struct {
 	UpdatedAt      time.Time
 }
 
+// A rolling limit's buckets from a start.
 func (q *Queries) ListLimitWindowsFrom(ctx context.Context, arg ListLimitWindowsFromParams) ([]ListLimitWindowsFromRow, error) {
-	rows, err := q.db.Query(ctx, listLimitWindowsFrom, arg.MerchantID, arg.CustomerID, arg.LimitKey, arg.WindowStartsAt)
+	rows, err := q.db.Query(ctx, listLimitWindowsFrom,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +832,12 @@ type UpsertCatalogProductLimitParams struct {
 }
 
 func (q *Queries) UpsertCatalogProductLimit(ctx context.Context, arg UpsertCatalogProductLimitParams) error {
-	_, err := q.db.Exec(ctx, upsertCatalogProductLimit, arg.MerchantID, arg.ProductID, arg.LimitKey, arg.Capacity)
+	_, err := q.db.Exec(ctx, upsertCatalogProductLimit,
+		arg.MerchantID,
+		arg.ProductID,
+		arg.LimitKey,
+		arg.Capacity,
+	)
 	return err
 }
 
@@ -840,7 +855,12 @@ type UpsertCustomerLimitOverrideParams struct {
 }
 
 func (q *Queries) UpsertCustomerLimitOverride(ctx context.Context, arg UpsertCustomerLimitOverrideParams) error {
-	_, err := q.db.Exec(ctx, upsertCustomerLimitOverride, arg.MerchantID, arg.CustomerID, arg.LimitKey, arg.Capacity)
+	_, err := q.db.Exec(ctx, upsertCustomerLimitOverride,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.Capacity,
+	)
 	return err
 }
 

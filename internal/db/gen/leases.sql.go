@@ -375,6 +375,7 @@ func (q *Queries) ListLeaseHolds(ctx context.Context, arg ListLeaseHoldsParams) 
 }
 
 const lockLease = `-- name: LockLease :one
+
 SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts, hold_version FROM billing.leases
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
@@ -385,6 +386,7 @@ type LockLeaseParams struct {
 	ID         uuid.UUID
 }
 
+// A gate's lease and the holds it owns. Every statement names the merchant.
 func (q *Queries) LockLease(ctx context.Context, arg LockLeaseParams) (BillingLease, error) {
 	row := q.db.QueryRow(ctx, lockLease, arg.MerchantID, arg.ID)
 	var i BillingLease

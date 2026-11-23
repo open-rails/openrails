@@ -38,9 +38,9 @@ type BillingBalanceWatch struct {
 	UpdatedAt  time.Time
 	// When the customer was funded (a deposit, a credit grant, a reinstatement or a payment of what it owes) since its last notice; only funding re-arms a notice, and a notice clears it.
 	FundedAt *time.Time
-	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the usage events dated since rate_sampled_at.
+	// Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the per-minute spend (usage_minutes) of the minutes ended since rate_sampled_at.
 	UsageRatePerHour int64
-	// The instant usage_rate_per_hour was sampled at; usage events dated before it are not read again.
+	// The instant usage_rate_per_hour was sampled at; minutes before it are not read again.
 	RateSampledAt *time.Time
 	// The available amount (balance less held) at or under which the balance is low, as the last look found the line; null with no line.
 	LowLineAmount *int64
@@ -550,7 +550,8 @@ type BillingLease struct {
 	LastSyncAt time.Time
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
-	ClosedAt        *time.Time
+	// When a sync with close ended the lease and returned its holds. A closed lease takes no want; usage against it still settles.
+	ClosedAt *time.Time
 	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the numbers and codes of the items it refused.
 	Receipts []byte
 	// The latest version the lease's hold answers carry: each sync that answers a hold a new size takes the next one.
@@ -809,7 +810,7 @@ type BillingMerchantWritePosture struct {
 	SetAt      time.Time
 }
 
-// A customer's quantity of one meter (and matrix cell) in one billing period, as priced so far: an event is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.
+// A customer's quantity of one meter (and matrix cell) in one billing period, as priced so far: a settled group of usage is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.
 type BillingMeterPeriodQuantity struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID

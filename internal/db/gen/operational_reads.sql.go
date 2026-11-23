@@ -41,7 +41,7 @@ type ListRequestHoldsParams struct {
 	RowLimit       int32
 }
 
-// Direct, read-only inspection of the existing durable admission and usage
+// Direct, read-only inspection of the existing durable admission
 // records. Each query bounds its partition key and binds its merchant.
 // Admitted requests: request holds.
 func (q *Queries) ListRequestHolds(ctx context.Context, arg ListRequestHoldsParams) ([]BillingLimitHold, error) {
