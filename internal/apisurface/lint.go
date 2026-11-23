@@ -81,6 +81,7 @@ var exceptions = []exception{
 	{"untyped-const", "adapters/fiber.RouteNamePrefix", "a prefix of Fiber's string route names"},
 	{"untyped-const", "openrailstest/nmimock.InsufficientFunds", "NMI's response code, a string on NMI's wire"},
 	{"enum-field", "openrails.LLMConfig.Model", "an LLM's model name, not a catalog.Model"},
+	{"enum-field", "billing.ChangeEvidence.Read", "how a provider record was read, not an openrails.Read"},
 	{"enum-field", "openrailstest/stripemock.*", "the mock serves Stripe's own objects and vocabulary"},
 	{"list-page", "openrails.Client.ListEvents", "the shared eventlog protocol's page, not a cursor list"},
 }
