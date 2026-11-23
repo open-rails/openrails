@@ -1,0 +1,10 @@
+{{if eq .Event.Reason "user_cancel"}}This confirms that you canceled your subscription{{with .Event.ProductName}} to {{.}}{{end}}.{{else if eq .Event.Reason "admin"}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} was canceled by {{default "us" .Merchant.Name}}.{{else}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} is canceled.{{end}}
+
+{{with .Event.EndedAt}}You keep your access until {{.}}. {{end}}You won't be charged again.
+{{if eq .Event.Reason "user_cancel"}}{{with .Links.ManageBilling}}
+Changed your mind? You can resume it before it ends: {{.}}
+{{end}}{{else if eq .Event.Reason "admin"}}{{with .Merchant.SupportURL}}
+If you didn't expect this, please contact us: {{.}}
+{{end}}{{else}}{{with .Links.Resubscribe}}
+You can subscribe again any time: {{.}}
+{{end}}{{end}}

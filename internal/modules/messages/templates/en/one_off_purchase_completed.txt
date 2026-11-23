@@ -1,0 +1,11 @@
+Thank you for your purchase.
+
+{{with .Event.ProductName}}Purchased: {{.}}
+{{end}}{{with .Event.Amount}}Amount paid: {{.}}
+{{end}}{{with .Event.OrderNumber}}Order: {{.}}
+{{end}}Date: {{.Event.OccurredAt}}
+{{with .Merchant.StatementDescriptor}}
+The charge appears on your statement as {{.}}.
+{{end}}{{with .Links.ManageBilling}}
+Your account: {{.}}
+{{end}}

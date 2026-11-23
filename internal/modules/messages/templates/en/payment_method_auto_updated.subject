@@ -1,0 +1,1 @@
+Your card on file{{with .Merchant.Name}} with {{.}}{{end}} was updated

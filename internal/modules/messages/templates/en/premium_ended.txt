@@ -1,0 +1,6 @@
+{{if eq .Event.Reason "expired"}}We couldn't take your renewal payment, so your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended.{{else if eq .Event.Reason "user_cancel"}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended, as you asked.{{else}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended.{{end}}
+{{with .Event.EndedAt}}
+Your access ended on {{.}}.
+{{end}}{{with .Links.Resubscribe}}
+We'd love to have you back. Subscribe again any time: {{.}}
+{{end}}

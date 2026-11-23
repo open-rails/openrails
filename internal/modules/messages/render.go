@@ -1,204 +1,288 @@
 package messages
 
 import (
-	"context"
-	"strconv"
+	"embed"
+	"errors"
+	"fmt"
+	htemplate "html/template"
+	"io/fs"
+	"path"
+	"regexp"
+	"slices"
 	"strings"
-	"time"
+	ttemplate "text/template"
+	"text/template/parse"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Message is one fact a customer is told about, and who tells them.
-type Message struct {
-	EventType  string
-	Data       billing.NotificationData
-	OccurredAt time.Time
-	// Customer is the name the message greets; empty greets no one by name.
-	Customer string
-	Merchant Merchant
+// builtinLanguage is the language of the built-in templates, and the last
+// a message falls back to.
+const builtinLanguage = "en"
+
+//go:embed templates
+var templateFiles embed.FS
+
+// builtin is the built-in messages, as a messages document: for each event
+// type <type>.subject, <type>.txt and <type>.html, and layout.txt and
+// layout.html, under templates/<language>.
+var builtin = mustLoadBuiltin()
+
+func mustLoadBuiltin() billing.MessageSettings {
+	out := billing.MessageSettings{Events: map[string]billing.MessageEventSettings{}, Layouts: map[string]billing.MessageLayout{}}
+	err := fs.WalkDir(templateFiles, "templates", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := templateFiles.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		lang, file := path.Base(path.Dir(name)), path.Base(name)
+		base, ext := strings.TrimSuffix(file, path.Ext(file)), path.Ext(file)
+		if base == "layout" {
+			l := out.Layouts[lang]
+			switch ext {
+			case ".html":
+				l.HTML = string(raw)
+			case ".txt":
+				l.Text = string(raw)
+			default:
+				return fmt.Errorf("%s: unknown layout part", name)
+			}
+			out.Layouts[lang] = l
+			return nil
+		}
+		e := out.Events[base]
+		if e.Templates == nil {
+			e.Templates = map[string]billing.MessageTemplate{}
+		}
+		t := e.Templates[lang]
+		switch ext {
+		case ".subject":
+			t.Subject = strings.TrimSpace(string(raw))
+		case ".txt":
+			t.Text = string(raw)
+		case ".html":
+			t.HTML = string(raw)
+		default:
+			return fmt.Errorf("%s: unknown template part", name)
+		}
+		e.Templates[lang] = t
+		out.Events[base] = e
+		return nil
+	})
+	if err != nil {
+		panic("messages: built-in templates: " + err.Error())
+	}
+	return out
 }
 
-// Merchant is the sender as a message names it; an empty field is left out.
-type Merchant struct {
-	Name         string
-	SupportURL   string
-	BillingURL   string
-	SubscribeURL string
+// funcs is the fixed set of functions templates call beside Go's built-in
+// template functions.
+var funcs = map[string]any{
+	// default is v, or fallback when v is empty: {{default "there" .Customer.Name}}.
+	"default": func(fallback, v string) string {
+		if strings.TrimSpace(v) == "" {
+			return fallback
+		}
+		return v
+	},
+	"upper": strings.ToUpper,
+	"lower": strings.ToLower,
 }
 
-// Content is a rendered message: a subject and a text or HTML body.
-type Content struct {
-	Subject string
-	Text    string
-	HTML    string
+// languages is the order a message's parts are looked for in: the
+// customer's language, the merchant's default, then the built-in one.
+// Customers carry no language yet, so customer is always empty.
+func languages(s billing.MessageSettings, customer string) []string {
+	out := make([]string, 0, 3)
+	for _, lang := range []string{customer, s.DefaultLanguage, builtinLanguage} {
+		if lang != "" && !slices.Contains(out, lang) {
+			out = append(out, lang)
+		}
+	}
+	return out
 }
 
-// Renderer renders a message; ok is false for an event type it has nothing
-// for.
-type Renderer interface {
-	Render(ctx context.Context, m Message) (c Content, ok bool, err error)
+// resolve picks eventType's template and layout for a customer whose
+// language is customer: each part is the merchant's in the first language
+// that has it, else the built-in one. lang is the template's language.
+func resolve(s billing.MessageSettings, eventType, customer string) (t billing.MessageTemplate, layout billing.MessageLayout, lang string, ok bool) {
+	chain := languages(s, customer)
+	for _, l := range chain {
+		if c, found := s.Events[eventType].Templates[l]; found {
+			t, lang, ok = c, l, true
+			break
+		}
+		if b, found := builtin.Events[eventType].Templates[l]; found {
+			t, lang, ok = b, l, true
+			break
+		}
+	}
+	for _, sets := range []billing.MessageSettings{s, builtin} {
+		for _, l := range chain {
+			if layout.HTML == "" {
+				layout.HTML = sets.Layouts[l].HTML
+			}
+			if layout.Text == "" {
+				layout.Text = sets.Layouts[l].Text
+			}
+		}
+	}
+	return t, layout, lang, ok
 }
 
-// Plain is the built-in renderer: a subject and plain text for each event
-// type that sends by default.
-type Plain struct{}
-
-func (Plain) Render(_ context.Context, m Message) (Content, bool, error) {
-	render, ok := plain[models.NotificationEventType(m.EventType)]
+// Render renders data's message in s, for a customer whose language is
+// customer. data.Language is set to the language it is written in.
+func Render(s billing.MessageSettings, customer string, data billing.MessageData) (billing.MessageContent, error) {
+	t, layout, lang, ok := resolve(s, data.EventType, customer)
 	if !ok {
-		return Content{}, false, nil
+		return billing.MessageContent{}, fmt.Errorf("%s has no template", data.EventType)
 	}
-	subject, body := render(m)
-	return Content{Subject: subject, Text: letter(m, body...)}, true, nil
+	m, err := compile(t, layout)
+	if err != nil {
+		return billing.MessageContent{}, err
+	}
+	data.Language = lang
+	return m.render(data)
 }
 
-var plain = map[models.NotificationEventType]func(Message) (string, []string){
-	models.NotificationOneOffPurchaseCompleted: func(m Message) (string, []string) {
-		lines := []string{}
-		if d := m.Data; d.ProductName != "" {
-			lines = append(lines, "Purchased: "+d.ProductName)
-		}
-		if a := amount(m.Data.Amount, m.Data.Currency); a != "" {
-			lines = append(lines, "Amount paid: "+a)
-		}
-		if m.Data.OrderNumber > 0 {
-			lines = append(lines, "Order: "+strconv.FormatInt(m.Data.OrderNumber, 10))
-		}
-		lines = append(lines, "Date: "+day(m.OccurredAt))
-		return "Your receipt" + from(m), []string{"Thank you for your purchase.", strings.Join(lines, "\n")}
-	},
-	models.NotificationPremiumStarted: func(m Message) (string, []string) {
-		return "Your subscription" + to(m) + " has started", []string{"Thank you for subscribing. Your subscription is active.", manage(m)}
-	},
-	models.NotificationPaymentMethodFailed: func(m Message) (string, []string) {
-		first := "We could not take your payment"
-		if a := amount(m.Data.Amount, m.Data.Currency); a != "" {
-			first += " of " + a
-		}
-		first += "."
-		if m.Data.NextAttemptAt != nil {
-			first += " We will try again on " + day(*m.Data.NextAttemptAt) + "."
-		}
-		return "Your payment" + to(m) + " did not go through", []string{first, update(m)}
-	},
-	models.NotificationPaymentAuthenticationRequired: func(m Message) (string, []string) {
-		first := "Your bank asks you to confirm a payment"
-		if a := amount(m.Data.Amount, m.Data.Currency); a != "" {
-			first = "Your bank asks you to confirm your payment of " + a
-		}
-		if m.Data.ProductName != "" {
-			first += " for " + m.Data.ProductName
-		}
-		first += " before it goes through."
-		return "Confirm your payment" + to(m), []string{first, "Confirm it from your account" + at(m.Merchant.BillingURL) + "."}
-	},
-	models.NotificationPaymentMethodUpdateRequired: func(m Message) (string, []string) {
-		return "Update your payment method" + forMerchant(m), []string{
-			"Your bank declined the card on file, and it will not work for future payments.", update(m)}
-	},
-	models.NotificationSubscriptionCanceled: func(m Message) (string, []string) {
-		first := "Your subscription was canceled."
-		switch m.Data.Reason {
-		case "user_cancel":
-			first = "You canceled your subscription."
-		case "admin":
-			first = "Your subscription was canceled by " + name(m, "us") + "."
-		}
-		lines := []string{first}
-		if m.Data.EndedAt != nil {
-			lines = append(lines, "You keep access until "+day(*m.Data.EndedAt)+".")
-		}
-		lines = append(lines, "No further payments will be taken.")
-		return "Your subscription" + to(m) + " is canceled", []string{strings.Join(lines, " "), manage(m)}
-	},
-	models.NotificationOrderCollectionStopped: func(m Message) (string, []string) {
-		first := "We could not collect your payment"
-		if a := amount(m.Data.AmountDue, m.Data.Currency); a != "" {
-			first += " of " + a
-		}
-		first += " and have stopped trying. The amount is still owed."
-		return "We stopped collecting your payment" + to(m), []string{first, "Pay it or update your payment method" + at(m.Merchant.BillingURL) + "."}
-	},
-	models.NotificationSubscriptionRepriceScheduled: func(m Message) (string, []string) {
-		first := "The price of your subscription is changing"
-		if m.Data.EffectiveAt != nil {
-			first += " on " + day(*m.Data.EffectiveAt)
-		}
-		old, next := amount(m.Data.OldAmount, m.Data.Currency), amount(m.Data.NewAmount, m.Data.Currency)
-		if old != "" && next != "" {
-			first += ", from " + old + " to " + next
-		}
-		first += "."
-		return "Your subscription" + to(m) + " is changing price", []string{first, "To cancel before then, visit your account" + at(m.Merchant.BillingURL) + "."}
-	},
+// message is one template, compiled with its layout.
+type message struct {
+	subject *ttemplate.Template
+	// text and html run "layout"; nil is no such part.
+	text *ttemplate.Template
+	html *htemplate.Template
 }
 
-// letter frames a body: the greeting, its paragraphs, the merchant's name
-// and where to ask.
-func letter(m Message, paragraphs ...string) string {
-	greeting := "Hello,"
-	if m.Customer != "" {
-		greeting = "Hi " + m.Customer + ","
+func compile(t billing.MessageTemplate, layout billing.MessageLayout) (*message, error) {
+	if strings.TrimSpace(t.Subject) == "" {
+		return nil, errors.New("subject is required")
 	}
-	parts := []string{greeting}
-	for _, p := range paragraphs {
-		if p != "" {
-			parts = append(parts, p)
+	if strings.TrimSpace(t.Text) == "" && strings.TrimSpace(t.HTML) == "" {
+		return nil, errors.New("a text or html body is required")
+	}
+	m := &message{}
+	var err error
+	if m.subject, err = ttemplate.New("subject").Funcs(funcs).Option("missingkey=error").Parse(t.Subject); err != nil {
+		return nil, fmt.Errorf("subject: %w", err)
+	}
+	if strings.TrimSpace(t.Text) != "" {
+		if m.text, err = compileText(layout.Text, t.Text); err != nil {
+			return nil, fmt.Errorf("text: %w", err)
 		}
 	}
-	if m.Merchant.SupportURL != "" {
-		parts = append(parts, "Questions? "+m.Merchant.SupportURL)
+	if strings.TrimSpace(t.HTML) != "" {
+		if m.html, err = compileHTML(layout.HTML, t.HTML); err != nil {
+			return nil, fmt.Errorf("html: %w", err)
+		}
 	}
-	if m.Merchant.Name != "" {
-		parts = append(parts, m.Merchant.Name)
-	}
-	return strings.Join(parts, "\n\n") + "\n"
+	return m, nil
 }
 
-func manage(m Message) string {
-	if m.Merchant.BillingURL == "" {
+func compileText(layout, body string) (*ttemplate.Template, error) {
+	t, err := ttemplate.New("layout").Funcs(funcs).Option("missingkey=error").Parse(layout)
+	if err != nil {
+		return nil, fmt.Errorf("layout: %w", err)
+	}
+	if !callsBody(t.Tree) {
+		return nil, errNoBody
+	}
+	if _, err := t.New("body").Parse(body); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func compileHTML(layout, body string) (*htemplate.Template, error) {
+	t, err := htemplate.New("layout").Funcs(funcs).Option("missingkey=error").Parse(layout)
+	if err != nil {
+		return nil, fmt.Errorf("layout: %w", err)
+	}
+	if !callsBody(t.Tree) {
+		return nil, errNoBody
+	}
+	if _, err := t.New("body").Parse(body); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+var errNoBody = errors.New(`layout: it never runs {{template "body" .}}`)
+
+// callsBody reports whether the tree runs the body template.
+func callsBody(t *parse.Tree) bool {
+	if t == nil {
+		return false
+	}
+	var walk func(parse.Node) bool
+	walk = func(n parse.Node) bool {
+		switch n := n.(type) {
+		case *parse.ListNode:
+			if n == nil {
+				return false
+			}
+			for _, c := range n.Nodes {
+				if walk(c) {
+					return true
+				}
+			}
+		case *parse.TemplateNode:
+			return n.Name == "body"
+		case *parse.IfNode:
+			return walk(n.List) || walk(n.ElseList)
+		case *parse.RangeNode:
+			return walk(n.List) || walk(n.ElseList)
+		case *parse.WithNode:
+			return walk(n.List) || walk(n.ElseList)
+		}
+		return false
+	}
+	return walk(t.Root)
+}
+
+func (m *message) render(data billing.MessageData) (billing.MessageContent, error) {
+	var out billing.MessageContent
+	var b strings.Builder
+	if err := m.subject.Execute(&b, data); err != nil {
+		return out, fmt.Errorf("subject: %w", err)
+	}
+	if out.Subject = strings.Join(strings.Fields(b.String()), " "); out.Subject == "" {
+		return out, errors.New("subject: renders empty")
+	}
+	if m.text != nil {
+		b.Reset()
+		if err := m.text.ExecuteTemplate(&b, "layout", data); err != nil {
+			return out, fmt.Errorf("text: %w", err)
+		}
+		out.Text = tidy(b.String())
+	}
+	if m.html != nil {
+		b.Reset()
+		if err := m.html.ExecuteTemplate(&b, "layout", data); err != nil {
+			return out, fmt.Errorf("html: %w", err)
+		}
+		out.HTML = strings.TrimSpace(b.String()) + "\n"
+	}
+	if strings.TrimSpace(out.Text) == "" && strings.TrimSpace(out.HTML) == "" {
+		return out, errors.New("the body renders empty")
+	}
+	return out, nil
+}
+
+var (
+	trailingSpace = regexp.MustCompile(`[ \t]+\n`)
+	blankLines    = regexp.MustCompile(`\n{3,}`)
+)
+
+// tidy keeps a text body readable whatever its conditionals left: no
+// trailing spaces, no run of blank lines, one final newline.
+func tidy(text string) string {
+	text = trailingSpace.ReplaceAllString(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	text = blankLines.ReplaceAllString(text, "\n\n")
+	if text = strings.TrimSpace(text); text == "" {
 		return ""
 	}
-	return "Manage your subscription: " + m.Merchant.BillingURL
+	return text + "\n"
 }
-
-func update(m Message) string {
-	return "Update your payment method" + at(m.Merchant.BillingURL) + " to keep your access."
-}
-
-func at(url string) string {
-	if url == "" {
-		return " in your account"
-	}
-	return " at " + url
-}
-
-func name(m Message, otherwise string) string {
-	if m.Merchant.Name == "" {
-		return otherwise
-	}
-	return m.Merchant.Name
-}
-
-func from(m Message) string        { return phrase(" from ", m) }
-func to(m Message) string          { return phrase(" to ", m) }
-func forMerchant(m Message) string { return phrase(" for ", m) }
-
-func phrase(prefix string, m Message) string {
-	if m.Merchant.Name == "" {
-		return ""
-	}
-	return prefix + m.Merchant.Name
-}
-
-func amount(v *int64, currency string) string {
-	if v == nil || currency == "" {
-		return ""
-	}
-	return moneyutil.FormatAmount(*v, currency)
-}
-
-func day(t time.Time) string { return t.UTC().Format("January 2, 2006") }

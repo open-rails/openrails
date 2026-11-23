@@ -1,84 +1,182 @@
 package messages
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-func TestPlainRendersEveryTypeSentByDefault(t *testing.T) {
-	for kind, on := range defaults {
-		_, rendered := plain[kind]
-		if on != rendered {
-			t.Errorf("%s: sent by default %v, rendered %v", kind, on, rendered)
+func TestBuiltinTemplatesCoverEveryEventType(t *testing.T) {
+	if got := slices.Sorted(maps.Keys(builtin.Events)); !slices.Equal(got, EventTypes()) {
+		t.Fatalf("built-in templates %v, event types %v", got, EventTypes())
+	}
+	for kind, e := range builtin.Events {
+		tmpl := e.Templates[builtinLanguage]
+		if tmpl.Subject == "" || tmpl.Text == "" || tmpl.HTML == "" {
+			t.Errorf("%s: subject, text and html are each required", kind)
 		}
+	}
+	if l := builtin.Layouts[builtinLanguage]; l.HTML == "" || l.Text == "" {
+		t.Fatal("the built-in layout has a text and an html part")
 	}
 }
 
-func TestPlain(t *testing.T) {
-	at := time.Date(2026, 11, 23, 15, 4, 0, 0, time.UTC)
-	later := at.AddDate(0, 1, 0)
-	amount := func(v int64) *int64 { return &v }
-	merchant := Merchant{Name: "Alpha", SupportURL: "https://alpha.example/help", BillingURL: "https://alpha.example/billing"}
-	cases := []struct {
-		kind    models.NotificationEventType
-		data    billing.NotificationData
-		subject string
-		text    []string
-	}{
-		{models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(12_500_000), Currency: "USD", ProductName: "Guide", OrderNumber: 7},
-			"Your receipt from Alpha", []string{"Hi Ada,", "Purchased: Guide\nAmount paid: 12.50 USD\nOrder: 7\nDate: November 23, 2026", "Questions? https://alpha.example/help", "\n\nAlpha\n"}},
-		{models.NotificationPremiumStarted, billing.NotificationData{},
-			"Your subscription to Alpha has started", []string{"Manage your subscription: https://alpha.example/billing"}},
-		{models.NotificationPaymentMethodFailed, billing.NotificationData{Amount: amount(5_000_000), Currency: "JPY", NextAttemptAt: &later},
-			"Your payment to Alpha did not go through", []string{"payment of 500 JPY. We will try again on December 23, 2026.", "at https://alpha.example/billing"}},
-		{models.NotificationPaymentAuthenticationRequired, billing.NotificationData{Amount: amount(9_990_000), Currency: "EUR", ProductName: "Pro"},
-			"Confirm your payment to Alpha", []string{"payment of 9.99 EUR for Pro before it goes through."}},
-		{models.NotificationPaymentMethodUpdateRequired, billing.NotificationData{},
-			"Update your payment method for Alpha", []string{"will not work for future payments"}},
-		{models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "user_cancel", EndedAt: &later},
-			"Your subscription to Alpha is canceled", []string{"You canceled your subscription. You keep access until December 23, 2026."}},
-		{models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "admin"},
-			"Your subscription to Alpha is canceled", []string{"Your subscription was canceled by Alpha. No further payments will be taken."}},
-		{models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "expired"},
-			"Your subscription to Alpha is canceled", []string{"Your subscription was canceled. No further payments will be taken."}},
-		{models.NotificationOrderCollectionStopped, billing.NotificationData{AmountDue: amount(3_000_000), Currency: "USD"},
-			"We stopped collecting your payment to Alpha", []string{"of 3.00 USD and have stopped trying"}},
-		{models.NotificationSubscriptionRepriceScheduled, billing.NotificationData{OldAmount: amount(10_000_000), NewAmount: amount(12_000_000), Currency: "USD", EffectiveAt: &later},
-			"Your subscription to Alpha is changing price", []string{"changing on December 23, 2026, from 10.00 USD to 12.00 USD."}},
-	}
-	for _, c := range cases {
-		got, ok, err := Plain{}.Render(t.Context(), Message{EventType: string(c.kind), Data: c.data, OccurredAt: at, Customer: "Ada", Merchant: merchant})
-		if err != nil || !ok {
-			t.Fatalf("%s: ok %v, %v", c.kind, ok, err)
+func TestEveryBuiltinRendersItsSample(t *testing.T) {
+	for _, kind := range EventTypes() {
+		got, err := Render(billing.MessageSettings{}, "", Sample(kind))
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
 		}
-		if got.Subject != c.subject {
-			t.Errorf("%s: subject %q", c.kind, got.Subject)
+		if got.Subject == "" || !strings.HasPrefix(got.Text, "Hi Ada Lovelace,\n\n") || !strings.Contains(got.HTML, "Hi Ada Lovelace,") {
+			t.Errorf("%s: subject %q, text %q", kind, got.Subject, got.Text)
 		}
-		for _, want := range c.text {
-			if !strings.Contains(got.Text, want) {
-				t.Errorf("%s: text lacks %q:\n%s", c.kind, want, got.Text)
+		for _, part := range []string{got.Subject, got.Text, got.HTML} {
+			if strings.Contains(part, "<no value>") || strings.Contains(part, "{{") {
+				t.Errorf("%s: unrendered field in %q", kind, part)
 			}
 		}
+		if !strings.Contains(got.Text, "Example Store") || !strings.Contains(got.HTML, `lang="en"`) {
+			t.Errorf("%s: no merchant footer or language:\n%s", kind, got.Text)
+		}
 	}
 }
 
-func TestPlainWithoutAProfile(t *testing.T) {
-	got, ok, err := Plain{}.Render(t.Context(), Message{EventType: string(models.NotificationPaymentMethodUpdateRequired)})
-	if err != nil || !ok {
-		t.Fatalf("ok %v, %v", ok, err)
-	}
-	want := "Hello,\n\nYour bank declined the card on file, and it will not work for future payments.\n\nUpdate your payment method in your account to keep your access.\n"
-	if got.Subject != "Update your payment method" || got.Text != want {
-		t.Errorf("subject %q, text %q", got.Subject, got.Text)
+func TestEveryBuiltinRendersWithoutAProfile(t *testing.T) {
+	for _, kind := range EventTypes() {
+		data := Sample(kind)
+		data.Customer, data.Merchant, data.Links = billing.MessageCustomer{}, billing.MessageMerchant{}, billing.MessageLinks{}
+		got, err := Render(billing.MessageSettings{}, "", data)
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if !strings.HasPrefix(got.Text, "Hello,\n\n") || strings.Contains(got.Subject, " to .") || strings.HasSuffix(got.Subject, " ") {
+			t.Errorf("%s: subject %q, text %q", kind, got.Subject, got.Text)
+		}
 	}
 }
 
-func TestPlainRendersNoOtherType(t *testing.T) {
-	if _, ok, err := (Plain{}).Render(t.Context(), Message{EventType: string(models.NotificationPremiumRenewed)}); ok || err != nil {
-		t.Errorf("ok %v, %v", ok, err)
+// alpha renders kind's built-in message for Ada from Alpha.
+func alpha(t *testing.T, kind models.NotificationEventType, d billing.NotificationData) billing.MessageContent {
+	t.Helper()
+	got, err := Render(billing.MessageSettings{}, "", messageData(fact{
+		EventType: string(kind), Data: d, OccurredAt: time.Date(2026, 11, 23, 15, 4, 0, 0, time.UTC), CustomerID: uuid.New(), Customer: "Ada",
+		Profile: models.MerchantProfileConfiguration{DisplayName: "Alpha", SupportURL: "https://alpha.example/help", BillingURL: "https://alpha.example/billing", SubscribeURL: "https://alpha.example/plans"},
+	}))
+	if err != nil {
+		t.Fatalf("%s: %v", kind, err)
+	}
+	return got
+}
+
+func requireText(t *testing.T, got billing.MessageContent, subject string, text ...string) {
+	t.Helper()
+	if got.Subject != subject {
+		t.Errorf("subject %q, want %q", got.Subject, subject)
+	}
+	for _, want := range text {
+		if !strings.Contains(got.Text, want) {
+			t.Errorf("text lacks %q:\n%s", want, got.Text)
+		}
+	}
+}
+
+func amount(v int64) *int64 { return &v }
+
+func TestReceipts(t *testing.T) {
+	purchase := alpha(t, models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(12_500_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
+	requireText(t, purchase, "Your receipt from Alpha", "Purchased: Guide\nAmount paid: 12.50 USD\nOrder: 1001\nDate: November 23, 2026", "Questions? https://alpha.example/help\nAlpha\n")
+	jpy := alpha(t, models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(5_000_000), Currency: "JPY", ProductName: "Guide"})
+	requireText(t, jpy, "Your receipt from Alpha", "Amount paid: 500 JPY")
+	refund := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
+	requireText(t, refund, "Your refund from Alpha", "We refunded 4.00 USD for Guide.", "Order: 1001\nRefunded: 4.00 USD\nDate: November 23, 2026")
+}
+
+func TestCancellationsSayTheirCause(t *testing.T) {
+	ends := time.Date(2026, 12, 23, 0, 0, 0, 0, time.UTC)
+	customer := alpha(t, models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "user_cancel", EndedAt: &ends, ProductName: "Pro"})
+	requireText(t, customer, "You canceled your subscription to Alpha",
+		"This confirms that you canceled your subscription to Pro.", "You keep your access until December 23, 2026. You won't be charged again.",
+		"You can resume it before it ends: https://alpha.example/billing")
+	staff := alpha(t, models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "admin", EndedAt: &ends, ProductName: "Pro"})
+	requireText(t, staff, "Your subscription to Alpha was canceled",
+		"Your subscription to Pro was canceled by Alpha.", "If you didn't expect this, please contact us: https://alpha.example/help")
+	other := alpha(t, models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "rail_cancel"})
+	requireText(t, other, "Your subscription to Alpha is canceled", "Your subscription is canceled.", "You won't be charged again.", "You can subscribe again any time: https://alpha.example/plans")
+	failed := alpha(t, models.NotificationOrderCollectionStopped, billing.NotificationData{Reason: "schedule_exhausted", AmountDue: amount(30_000_000), Currency: "USD"})
+	requireText(t, failed, "We stopped charging your card for Alpha",
+		"Your payments failed several times, so we have stopped trying to collect the 30.00 USD you owe.", "Pay it or add another payment method: https://alpha.example/billing")
+	dead := alpha(t, models.NotificationOrderCollectionStopped, billing.NotificationData{Reason: "non_recoverable", AmountDue: amount(30_000_000), Currency: "USD"})
+	requireText(t, dead, "We stopped charging your card for Alpha", "Your bank told us your card can no longer be charged")
+	if customer.Text == staff.Text || staff.Text == failed.Text || customer.Text == failed.Text {
+		t.Error("each cause has its own wording")
+	}
+}
+
+func TestPriceChangeNotice(t *testing.T) {
+	from := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := alpha(t, models.NotificationSubscriptionRepriceScheduled, billing.NotificationData{OldAmount: amount(10_000_000), NewAmount: amount(12_000_000), Currency: "USD", EffectiveAt: &from})
+	requireText(t, got, "The price of your subscription to Alpha is changing",
+		"is changing from 10.00 USD to 12.00 USD, starting January 1, 2027.", "you can cancel before then: https://alpha.example/billing")
+	if !strings.Contains(got.HTML, "<strong>10.00 USD</strong> to <strong>12.00 USD</strong>") || !strings.Contains(got.HTML, `href="https://alpha.example/billing"`) {
+		t.Errorf("html:\n%s", got.HTML)
+	}
+}
+
+func TestHTMLEscapesWhatItIsGiven(t *testing.T) {
+	data := Sample(string(models.NotificationOneOffPurchaseCompleted))
+	data.Customer.Name, data.Event.ProductName, data.Links.ManageBilling = "<b>Ada</b>", `"><script>x()</script>`, "javascript:alert(1)"
+	got, err := Render(billing.MessageSettings{}, "", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.HTML, "<script>") || strings.Contains(got.HTML, "<b>Ada") || strings.Contains(got.HTML, "javascript:") {
+		t.Fatalf("html:\n%s", got.HTML)
+	}
+	if !strings.Contains(got.Text, "Hi <b>Ada</b>,") {
+		t.Fatalf("text is plain:\n%s", got.Text)
+	}
+}
+
+func TestMerchantTemplatesComeFirstByLanguage(t *testing.T) {
+	receipt := string(models.NotificationOneOffPurchaseCompleted)
+	s := billing.MessageSettings{
+		DefaultLanguage: "fr",
+		Events: map[string]billing.MessageEventSettings{
+			receipt: {Templates: map[string]billing.MessageTemplate{"fr": {Subject: "Votre reçu {{.Merchant.Name}}", Text: "Merci {{upper .Customer.Name}} ({{.Event.Amount}})."}}},
+		},
+		Layouts: map[string]billing.MessageLayout{"fr": {Text: "Bonjour,\n{{template \"body\" .}}\n-- {{.Merchant.Name}}"}},
+	}
+	got, err := Render(s, "", Sample(receipt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Subject != "Votre reçu Example Store" || got.Text != "Bonjour,\nMerci ADA LOVELACE (12.50 USD).\n-- Example Store\n" || got.HTML != "" {
+		t.Fatalf("%+v", got)
+	}
+	// An event type with no French template is the built-in English one, in
+	// the merchant's French layout; its HTML layout is the built-in one.
+	refund := Sample(string(models.NotificationRefundCompleted))
+	got, err = Render(s, "", refund)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.Text, "Bonjour,\nWe refunded 12.50 USD") || !strings.Contains(got.HTML, `lang="en"`) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTidy(t *testing.T) {
+	if got := tidy("a  \r\n\n\n\nb\t\n\n"); got != "a\n\nb\n" {
+		t.Fatalf("%q", got)
+	}
+	if got := tidy(" \n\n "); got != "" {
+		t.Fatalf("%q", got)
 	}
 }

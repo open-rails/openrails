@@ -1,0 +1,2 @@
+<p style="margin:0 0 16px;">Your bank asks you to confirm your payment{{with .Event.Amount}} of <strong>{{.}}</strong>{{end}}{{with .Event.ProductName}} for {{.}}{{end}} before it goes through.</p>
+{{with .Links.Pay}}<p style="margin:0 0 16px;"><a href="{{.}}" style="display:inline-block;padding:10px 18px;background:#1f2933;color:#ffffff;text-decoration:none;border-radius:6px;">Confirm payment</a></p>{{else}}<p style="margin:0 0 16px;">Confirm it from your account.</p>{{end}}

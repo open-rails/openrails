@@ -1,0 +1,3 @@
+Your bank asks you to confirm your payment{{with .Event.Amount}} of {{.}}{{end}}{{with .Event.ProductName}} for {{.}}{{end}} before it goes through.
+
+{{with .Links.Pay}}Confirm it here: {{.}}{{else}}Confirm it from your account.{{end}}

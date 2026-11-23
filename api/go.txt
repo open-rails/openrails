@@ -256,6 +256,7 @@ pkg openrails, type Deps struct, Email EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, Logger *slog.Logger
 pkg openrails, type Deps struct, MerchantGroups billing.MerchantGroupReader
+pkg openrails, type Deps struct, MessageRenderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Notifications *NotificationChannel
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
@@ -825,6 +826,7 @@ pkg openrails/billing, const MerchantRetirementRefusedNotLive MerchantRetirement
 pkg openrails/billing, const MerchantRetirementRefusedReserved MerchantRetirementRefusal = "reserved"
 pkg openrails/billing, const MerchantUsageManage Permission = "merchant:usage:manage"
 pkg openrails/billing, const MerchantUsageRead Permission = "merchant:usage:read"
+pkg openrails/billing, const MessageDataVersion untyped int = 1
 pkg openrails/billing, const MigrationBlocked PriceMigrationDisposition = "blocked"
 pkg openrails/billing, const MigrationCancelAtPeriodEnd MigrationFallback = "cancel_at_period_end"
 pkg openrails/billing, const MigrationKeepGrandfathered MigrationFallback = "keep_grandfathered"
@@ -2477,6 +2479,83 @@ pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *in
 pkg openrails/billing, type MerchantSettings struct, UsageBilling *UsageBillingSettings `json:"usage_billing,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 pkg openrails/billing, type MerchantStatus string
+pkg openrails/billing, type MessageContent struct
+pkg openrails/billing, type MessageContent struct, HTML string
+pkg openrails/billing, type MessageContent struct, Subject string
+pkg openrails/billing, type MessageContent struct, Text string
+pkg openrails/billing, type MessageCustomer struct
+pkg openrails/billing, type MessageCustomer struct, ID string
+pkg openrails/billing, type MessageCustomer struct, Name string
+pkg openrails/billing, type MessageData struct
+pkg openrails/billing, type MessageData struct, Customer MessageCustomer
+pkg openrails/billing, type MessageData struct, Event MessageEvent
+pkg openrails/billing, type MessageData struct, EventType string
+pkg openrails/billing, type MessageData struct, Language string
+pkg openrails/billing, type MessageData struct, Links MessageLinks
+pkg openrails/billing, type MessageData struct, Merchant MessageMerchant
+pkg openrails/billing, type MessageData struct, Version int
+pkg openrails/billing, type MessageEvent struct
+pkg openrails/billing, type MessageEvent struct, AccessEnded bool
+pkg openrails/billing, type MessageEvent struct, Amount string
+pkg openrails/billing, type MessageEvent struct, AmountDue string
+pkg openrails/billing, type MessageEvent struct, AvailableAmount string
+pkg openrails/billing, type MessageEvent struct, CollectionMethod InvoiceCollectionMethod
+pkg openrails/billing, type MessageEvent struct, DowngradeApplied bool
+pkg openrails/billing, type MessageEvent struct, DueAt string
+pkg openrails/billing, type MessageEvent struct, EffectiveAt string
+pkg openrails/billing, type MessageEvent struct, EndedAt string
+pkg openrails/billing, type MessageEvent struct, FromProductName string
+pkg openrails/billing, type MessageEvent struct, LowBalanceAmount string
+pkg openrails/billing, type MessageEvent struct, NewAmount string
+pkg openrails/billing, type MessageEvent struct, NextAttemptAt string
+pkg openrails/billing, type MessageEvent struct, OccurredAt string
+pkg openrails/billing, type MessageEvent struct, OldAmount string
+pkg openrails/billing, type MessageEvent struct, OrderID string
+pkg openrails/billing, type MessageEvent struct, OrderNumber string
+pkg openrails/billing, type MessageEvent struct, OverdueAmount string
+pkg openrails/billing, type MessageEvent struct, OverdueOrders string
+pkg openrails/billing, type MessageEvent struct, OverdueStartedAt string
+pkg openrails/billing, type MessageEvent struct, OwedAmount string
+pkg openrails/billing, type MessageEvent struct, PaymentID string
+pkg openrails/billing, type MessageEvent struct, PeriodEndsAt string
+pkg openrails/billing, type MessageEvent struct, PeriodStartsAt string
+pkg openrails/billing, type MessageEvent struct, ProductName string
+pkg openrails/billing, type MessageEvent struct, Quantity string
+pkg openrails/billing, type MessageEvent struct, Reason string
+pkg openrails/billing, type MessageEvent struct, RecoveryAction NotificationRecoveryAction
+pkg openrails/billing, type MessageEvent struct, RefundedPaymentID string
+pkg openrails/billing, type MessageEvent struct, RetryStatus NotificationRetryStatus
+pkg openrails/billing, type MessageEvent struct, RunwayEndsAt string
+pkg openrails/billing, type MessageEvent struct, SubscriptionID string
+pkg openrails/billing, type MessageEvent struct, ToProductName string
+pkg openrails/billing, type MessageEventSettings struct
+pkg openrails/billing, type MessageEventSettings struct, Enabled *bool `json:"enabled,omitempty"`
+pkg openrails/billing, type MessageEventSettings struct, Templates map[string]MessageTemplate `json:"templates,omitempty"`
+pkg openrails/billing, type MessageLayout struct
+pkg openrails/billing, type MessageLayout struct, HTML string `json:"html,omitempty"`
+pkg openrails/billing, type MessageLayout struct, Text string `json:"text,omitempty"`
+pkg openrails/billing, type MessageLinks struct
+pkg openrails/billing, type MessageLinks struct, ManageBilling string
+pkg openrails/billing, type MessageLinks struct, Pay string
+pkg openrails/billing, type MessageLinks struct, Resubscribe string
+pkg openrails/billing, type MessageLinks struct, UpdatePaymentMethod string
+pkg openrails/billing, type MessageMerchant struct
+pkg openrails/billing, type MessageMerchant struct, BillingURL string
+pkg openrails/billing, type MessageMerchant struct, LogoURL string
+pkg openrails/billing, type MessageMerchant struct, Name string
+pkg openrails/billing, type MessageMerchant struct, PrivacyURL string
+pkg openrails/billing, type MessageMerchant struct, StatementDescriptor string
+pkg openrails/billing, type MessageMerchant struct, SubscribeURL string
+pkg openrails/billing, type MessageMerchant struct, SupportURL string
+pkg openrails/billing, type MessageMerchant struct, TermsURL string
+pkg openrails/billing, type MessageSettings struct
+pkg openrails/billing, type MessageSettings struct, DefaultLanguage string `json:"default_language,omitempty"`
+pkg openrails/billing, type MessageSettings struct, Events map[string]MessageEventSettings `json:"events,omitempty"`
+pkg openrails/billing, type MessageSettings struct, Layouts map[string]MessageLayout `json:"layouts,omitempty"`
+pkg openrails/billing, type MessageTemplate struct
+pkg openrails/billing, type MessageTemplate struct, HTML string `json:"html,omitempty"`
+pkg openrails/billing, type MessageTemplate struct, Subject string `json:"subject"`
+pkg openrails/billing, type MessageTemplate struct, Text string `json:"text,omitempty"`
 pkg openrails/billing, type Meter struct
 pkg openrails/billing, type Meter struct, Aggregation catalog.Aggregation `json:"aggregation"`
 pkg openrails/billing, type Meter struct, BillingSupported bool `json:"billing_supported"`

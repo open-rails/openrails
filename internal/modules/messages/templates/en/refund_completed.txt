@@ -1,0 +1,7 @@
+We refunded {{.Event.Amount}}{{with .Event.ProductName}} for {{.}}{{end}}.
+
+{{with .Event.OrderNumber}}Order: {{.}}
+{{end}}Refunded: {{.Event.Amount}}
+Date: {{.Event.OccurredAt}}
+
+It can take a few days to reach your account{{with .Merchant.StatementDescriptor}}, and it shows on your statement as {{.}}{{end}}.

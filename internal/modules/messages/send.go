@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/mail"
 	"net/textproto"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,7 +59,11 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	end := func(status, code string) error {
 		return s.settle(ctx, m, settled{status: status, attempts: m.Attempts, code: code})
 	}
-	if !Enabled(m.EventType) {
+	settings, err := s.settings(ctx)
+	if err != nil {
+		return err
+	}
+	if !Enabled(settings, m.EventType) {
 		return end(statusDisabled, "")
 	}
 	if m.Data == nil || m.OccurredAt == nil {
@@ -101,11 +106,19 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	if greet == "" {
 		greet = contact.Username
 	}
-	content, ok, err := s.Renderer.Render(ctx, Message{
-		EventType: m.EventType, Data: data, OccurredAt: *m.OccurredAt, Customer: greet,
-		Merchant: Merchant{Name: profile.DisplayName, SupportURL: profile.SupportURL, BillingURL: profile.BillingURL, SubscribeURL: profile.SubscribeURL},
-	})
-	if err != nil || !ok {
+	product, err := s.productName(ctx, m.MerchantID, data)
+	if err != nil {
+		return err
+	}
+	content, err := s.render(ctx, settings, messageData(fact{
+		EventType: m.EventType, Data: data, OccurredAt: *m.OccurredAt, CustomerID: m.CustomerID,
+		Customer: greet, ProductName: product, Profile: profile,
+	}))
+	var retry hostError
+	switch {
+	case errors.As(err, &retry) && !last:
+		return err
+	case err != nil:
 		return end(statusFailed, errRenderFailed)
 	}
 	claimed, err := s.claim(ctx, m, to.Address)
@@ -191,6 +204,68 @@ func (v settled) params(m gen.GetCustomerMessageRow, now time.Time) gen.SettleCu
 func (s *Service) settle(ctx context.Context, m gen.GetCustomerMessageRow, v settled) error {
 	_, err := s.DB.Gen(ctx).SettleCustomerMessage(ctx, v.params(m, s.Clock.Now().UTC()))
 	return err
+}
+
+// settings are the merchant's messages document; none is the defaults.
+func (s *Service) settings(context.Context) (billing.MessageSettings, error) {
+	return billing.MessageSettings{}, nil
+}
+
+// hostError is a failure of the host's renderer: retried like a send.
+type hostError struct{ error }
+
+// render renders data's message: the host's renderer's when it takes it, else
+// the merchant's templates over the built-in ones. Contacts carry no
+// language, so it is written in the merchant's default.
+func (s *Service) render(ctx context.Context, settings billing.MessageSettings, data billing.MessageData) (billing.MessageContent, error) {
+	if s.Renderer != nil {
+		data.Language = languages(settings, "")[0]
+		content, ok, err := s.Renderer(ctx, data)
+		if err != nil {
+			return content, hostError{err}
+		}
+		if ok {
+			if strings.TrimSpace(content.Subject) == "" || strings.TrimSpace(content.Text) == "" && strings.TrimSpace(content.HTML) == "" {
+				return content, errors.New("the host's renderer returned no subject or body")
+			}
+			return content, nil
+		}
+	}
+	return Render(settings, "", data)
+}
+
+// productName is what a subscription fact is about when it names nothing:
+// its product's display name, else its key.
+func (s *Service) productName(ctx context.Context, merchantID uuid.UUID, data billing.NotificationData) (string, error) {
+	if data.ProductName != "" {
+		return "", nil
+	}
+	q := s.DB.Gen(ctx)
+	product := data.ProductID.UUID()
+	if product == uuid.Nil && !data.SubscriptionID.IsZero() {
+		sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: merchantID, ID: data.SubscriptionID.UUID()})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		product = sub.ProductID
+	}
+	if product == uuid.Nil {
+		return "", nil
+	}
+	p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: merchantID, ID: product})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if name := strings.TrimSpace(p.DisplayName); name != "" {
+		return name, nil
+	}
+	return p.Key, nil
 }
 
 // profile is the merchant's profile: its name, links and from address.
