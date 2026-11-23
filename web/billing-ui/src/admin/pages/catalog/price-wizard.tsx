@@ -40,7 +40,9 @@ import {
   type MigrationMode,
 } from "#orck/admin/pages/catalog/price-wizard-logic"
 
+// A date input's value is a UTC day.
 const toDateInputValue = (d: Date) => d.toISOString().slice(0, 10)
+const fromDateInputValue = (value: string) => new Date(`${value}T00:00:00Z`)
 
 const priceChangeFormValues = (price: Price, draft?: PriceChangeDraft) => ({
   amountInput: nativeAmountToInput(
@@ -124,7 +126,9 @@ export function PriceChangeWizard({
               ? {
                   productKey,
                   priceKey: price.key,
-                  effectiveAt: new Date(value.effectiveAt).toISOString(),
+                  effectiveAt: fromDateInputValue(
+                    value.effectiveAt
+                  ).toISOString(),
                 }
               : undefined,
         })
@@ -234,7 +238,7 @@ export function PriceChangeWizard({
                 (!!values.effectiveAt &&
                   isEffectiveDateValid(
                     direction,
-                    new Date(values.effectiveAt),
+                    fromDateInputValue(values.effectiveAt),
                     now,
                     noticeWindowDays
                   ))
@@ -476,7 +480,9 @@ export function PriceChangeWizard({
                             mode: values.mode,
                             effectiveAt:
                               values.mode === "migrate"
-                                ? new Date(values.effectiveAt).toISOString()
+                                ? fromDateInputValue(
+                                    values.effectiveAt
+                                  ).toISOString()
                                 : "",
                           },
                           now,

@@ -28,17 +28,23 @@ export function defaultMigrationMode(direction: PriceDirection): MigrationMode {
   return direction === "decrease" ? "migrate" : "grandfather"
 }
 
-// minEffectiveDate is the earliest allowed migration date, or null when there
-// is no minimum (a decrease needs no notice).
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// utcDay is the UTC midnight that starts at's day: the instant a date names.
+const utcDay = (at: Date) => Math.floor(at.getTime() / DAY_MS) * DAY_MS
+
+// minEffectiveDate is the earliest allowed migration date, as its UTC
+// midnight, or null when there is no minimum (a decrease needs no notice).
+// The server measures the window from the instant sent, a date's UTC
+// midnight, so it is the first date whose midnight is the whole window away.
 export function minEffectiveDate(
   direction: PriceDirection,
   now: Date,
   noticeWindowDays: number
 ): Date | null {
   if (direction !== "increase") return null
-  const min = new Date(now)
-  min.setUTCDate(min.getUTCDate() + noticeWindowDays)
-  return min
+  const floor = now.getTime() + noticeWindowDays * DAY_MS
+  return new Date(Math.ceil(floor / DAY_MS) * DAY_MS)
 }
 
 // defaultEffectiveDate is Step 2's pre-filled migration date: the notice
@@ -52,7 +58,8 @@ export function defaultEffectiveDate(
 }
 
 // isEffectiveDateValid enforces the console-side notice-window gate: an
-// increase+migrate plan may not pick a date inside the notice window.
+// increase+migrate plan may not pick a date inside the notice window. It
+// compares whole UTC days.
 export function isEffectiveDateValid(
   direction: PriceDirection,
   effectiveAt: Date,
@@ -60,7 +67,7 @@ export function isEffectiveDateValid(
   noticeWindowDays: number
 ): boolean {
   const min = minEffectiveDate(direction, now, noticeWindowDays)
-  return !min || effectiveAt.getTime() >= min.getTime()
+  return !min || utcDay(effectiveAt) >= min.getTime()
 }
 
 export interface MigrationPlan {
@@ -74,6 +81,7 @@ const dateLabel = (iso: string) =>
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   })
 
 // buildReviewText renders Step 3's plan in words, e.g. "New subscribers pay $12
