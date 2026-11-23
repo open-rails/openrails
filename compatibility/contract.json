@@ -3,6 +3,7 @@
     ".": [
       "const (\n\tEnvironmentLive = config.EnvironmentLive\n\n\tEnvironmentTest = config.EnvironmentTest\n\n\tEnvironmentSandbox = config.EnvironmentSandbox\n\n\tEnvironmentMainnet = config.EnvironmentMainnet\n\n\tEnvironmentDevnet = config.EnvironmentDevnet\n\n\tEnvironmentTestnet = config.EnvironmentTestnet\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n\n\tReadCatalog = config.ReadCatalog\n\n\tReadMeters = config.ReadMeters\n\n\tReadPublicConfig = config.ReadPublicConfig\n\n\tReadMerchantConfiguration = config.ReadMerchantConfiguration\n)",
       "const (\n\tQueueBilling   = riverjobs.QueueBilling\n\tQueuePSPImport = riverjobs.QueuePSPImport\n)",
+      "const DefaultEntitlementCheckMaxAge = 2 * time.Minute",
       "func (c *Client) AdjustCustomerLimit(ctx context.Context, customer billing.CustomerID, params billing.AdjustLimitParams, requestOptions ...RequestOption) (*billing.CustomerLimit, error)",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
       "func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error)",
@@ -212,7 +213,7 @@
       "type EmailAddress = config.EmailAddress",
       "type EmailSender = config.EmailSender",
       "type Engine struct {\n}",
-      "type EntitlementCheckCacheOptions struct {\n\tMaxAge time.Duration\n\n\tRedis redis.UniversalClient\n}",
+      "type EntitlementCheckCacheOptions struct {\n\tMaxAge time.Duration\n\n\tDisabled bool\n\n\tRedis redis.UniversalClient\n}",
       "type Gate struct {\n}",
       "type GateConfig struct {\n\tRedis redis.UniversalClient\n\n\tOutbox UsageOutbox\n}",
       "type HyperSwitchConfig = config.HyperSwitchConfig",
@@ -2517,6 +2518,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "entitlement_check_cache.go": {
+      "atomic": "sync/atomic",
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/catalog",
       "context": "context",
@@ -2526,6 +2528,7 @@
       "json": "encoding/json",
       "list": "container/list",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "rand": "crypto/rand",
       "sha256": "crypto/sha256",
       "slices": "slices",
       "strings": "strings",

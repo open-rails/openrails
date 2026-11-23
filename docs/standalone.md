@@ -174,37 +174,55 @@ status and code ([errors](api/errors.md)). For admission, honor every clean deny
 decide per endpoint whether `ErrUnreachable` fails open or closed; keep the
 deadline short.
 
-**Cache entitlement checks.** For a backend using a merchant API key, set
-`RemoteMerchantOptions.EntitlementCheckCache` (or the same field on
-`RemoteOptions`) to opt in:
+**Cache entitlement checks.** A client using a merchant API key caches
+`CheckEntitlements` by default. It keeps each allowed key's answer, never a
+denial: a check is answered from the cache only when every requested key is
+allowed there, and otherwise asks OpenRails for the whole set. A newly held key
+is therefore visible at once. A change to a held key, such as its seats or a
+revocation, can take up to `MaxAge` (2 minutes by default,
+`DefaultEntitlementCheckMaxAge`) unless `CheckEntitlementsLive` sees it, and so
+can an API key permission change. An allowed answer also expires at the next
+scheduled access change, such as a rental's end.
+
+`CheckEntitlementsLive` always asks OpenRails. Its answer replaces allowed
+keys' entries and drops denied ones, and an ordinary check already in flight
+cannot restore a dropped entry. In process, only that client's own memory is
+affected: other processes keep their entries for up to `MaxAge`. With Redis,
+every replica sees the drop once it is written. The write has 250 ms; the live
+check waits for it no longer than its own deadline. If Redis fails, replicas
+may serve the old answer for up to `MaxAge`.
+
+Configure the cache on `RemoteMerchantOptions.EntitlementCheckCache` (or the
+same field on `RemoteOptions`); `Disabled: true` makes every check ask
+OpenRails:
 
 ```go
 client, err := openrails.NewRemoteMerchant(billingURL,
     openrails.RemoteCredential{APIKey: apiKey},
     openrails.RemoteMerchantOptions{
         EntitlementCheckCache: openrails.EntitlementCheckCacheOptions{
-            MaxAge: 30 * time.Second,
+            MaxAge: 30 * time.Second, // or Disabled: true
+            Redis:  redisClient,      // optional, shared by replicas
         },
     })
 ```
 
-`CheckEntitlements` caches exact-key checks for the present in bounded process
-memory. If you supply your own go-redis client as `EntitlementCheckCache.Redis`,
-replicas using the same OpenRails endpoint, merchant, API key and cache age
-can share answers. Your backend owns that Redis client and its connection
+Entries live in bounded process memory. If you supply your own go-redis client
+as `Redis`, replicas using the same OpenRails endpoint, merchant, API key and
+`MaxAge` share them. Your backend owns that Redis client and its connection
 lifecycle. Use a trusted Redis 6.2+ instance with synchronized clocks across
 its failover nodes. Set short socket timeouts and `ContextTimeoutEnabled` on
 the Redis client so timed-out lookups release connections promptly. A client
 created with `NewRemoteMerchant` learns its merchant in an authenticated
-response before it can reuse shared entries.
+response before it can fill or reuse entries. Prefix or historical requests,
+calls with request options and token-backed credentials always ask OpenRails,
+as does any check when Redis fails. See
+[entitlement windows](entitlements_timeline.md#reading-access).
 
-An answer can be reused for up to `MaxAge` and expires by the next scheduled
-access change. A new purchase, early revocation or API key permission change
-can take up to `MaxAge` to appear. Call `CheckEntitlementsLive` when you require a
-fresh decision; its answer also replaces the cached one, so the next
-`CheckEntitlements` sees it too. Prefix or historical requests and token-backed
-credentials use live checks. Redis failures also fall back to OpenRails. The
-cache needs a server of the same release. See [entitlement windows](entitlements_timeline.md#reading-access).
+**Deploy the server before the SDK.** The cache sends `include_validity`,
+which an older server refuses: every exact-key check from an API-key client,
+`CheckEntitlementsLive` included, then fails with 400 `unknown_field`. Until
+the server is upgraded, set `Disabled: true`.
 
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application sets `RemoteCredential.Assertion` (issuer, `kid`, a `crypto.Signer`,

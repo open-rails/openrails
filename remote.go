@@ -111,7 +111,8 @@ type RemoteOptions struct {
 	// ReadCache overrides how long catalog and configuration reads are
 	// served from memory; nil keeps the defaults.
 	ReadCache ReadCache
-	// EntitlementCheckCache opts in to caching current exact-key checks.
+	// EntitlementCheckCache configures the entitlement check cache, on by
+	// default for APIKey credentials.
 	EntitlementCheckCache EntitlementCheckCacheOptions
 }
 
@@ -172,7 +173,8 @@ type RemoteMerchantOptions struct {
 	// ReadCache overrides how long catalog and configuration reads are
 	// served from memory; nil keeps the defaults.
 	ReadCache ReadCache
-	// EntitlementCheckCache opts in to caching current exact-key checks.
+	// EntitlementCheckCache configures the entitlement check cache, on by
+	// default for APIKey credentials.
 	EntitlementCheckCache EntitlementCheckCacheOptions
 }
 
@@ -491,16 +493,19 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 // billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
 // prefixes; more is refused with invalid_param, not split. It needs an
 // application holding billing.MerchantEntitlementsRead or RootEntitlementsRead
-// (RouteGroups.Programmatic). If configured, a remote client may serve a
-// current exact-key check from its entitlement cache.
+// (RouteGroups.Programmatic). A remote client answers a current exact-key
+// check from its entitlement cache when every key is allowed there
+// (EntitlementCheckCacheOptions); a denial always asks OpenRails.
 func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	return c.checkEntitlements(ctx, params, true, requestOptions)
 }
 
 // CheckEntitlementsLive checks access against OpenRails, never answering from
-// the SDK cache; with a cache configured its answer replaces the cached one.
-// Use it when a recent grant, revocation or credential change must be visible
-// immediately.
+// the SDK cache. Its answer replaces allowed keys' entries and drops denied
+// ones; a fill begun before it cannot restore them. The drop reaches this
+// client's own memory at once, or the shared Redis within a bounded wait; if
+// Redis fails, other replicas may serve the old answer for up to MaxAge. Use
+// it when a revocation or credential change must be visible immediately.
 func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	return c.checkEntitlements(ctx, params, false, requestOptions)
 }

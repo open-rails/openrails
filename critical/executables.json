@@ -1182,6 +1182,9 @@
     "OR-J27-S13": [
       "TestRemoteEntitlementCache/OR-J27-S13/merchant-cache-reuses-only-current-scoped-access"
     ],
+    "OR-J27-S14": [
+      "TestRemoteEntitlementCache/OR-J27-S14/a-purchase-after-a-cached-check-is-visible-on-the-next-check"
+    ],
     "OR-J04-S42": [
       "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
     ],

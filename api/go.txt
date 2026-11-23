@@ -3,6 +3,7 @@ pkg openrails, const CredentialAccessToken auth.CredentialKind = "access_token"
 pkg openrails, const CredentialDeviceKey auth.CredentialKind = "device_key"
 pkg openrails, const CredentialSession auth.CredentialKind = "session"
 pkg openrails, const CredentialSignedToken auth.CredentialKind = "signed_token"
+pkg openrails, const DefaultEntitlementCheckMaxAge time.Duration = 120000000000
 pkg openrails, const EnvironmentDevnet untyped string = "devnet"
 pkg openrails, const EnvironmentLive untyped string = "live"
 pkg openrails, const EnvironmentMainnet untyped string = "mainnet"
@@ -486,6 +487,7 @@ pkg openrails, type EmailSender interface, CheckHealth(context.Context) error
 pkg openrails, type EmailSender interface, Send(context.Context, config.Email) error
 pkg openrails, type Engine struct
 pkg openrails, type EntitlementCheckCacheOptions struct
+pkg openrails, type EntitlementCheckCacheOptions struct, Disabled bool
 pkg openrails, type EntitlementCheckCacheOptions struct, MaxAge time.Duration
 pkg openrails, type EntitlementCheckCacheOptions struct, Redis redis.UniversalClient
 pkg openrails, type Gate struct
