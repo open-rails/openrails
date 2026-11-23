@@ -16,7 +16,7 @@ response; [every error code](error-codes.md); shapes in
   (`null` on the last page). `?limit=` 1–500, default 50. No offset, no total.
   Merchant lists of records take `?ids=a,b,c` (1–100, alone): one page in the
   list's order, unknown or foreign ids absent.
-- **Batches.** 1–100 items (usage events and admissions: 1,000). A batch either
+- **Batches.** 1–100 items (a lease sync's usage and admissions: 1,000). A batch either
   applies all or none, naming the offending `items[i].field`, or answers one
   `{status, …, error}` per item.
 - **Statuses.** `200` result, `201` created, `202` accepted and unresolved, `204`
@@ -29,8 +29,10 @@ response; [every error code](error-codes.md); shapes in
   terms are `422 idempotency_key_reused`. Generate one when the buyer decides to
   buy, store it with the order and resend it on every retry; a new key is a new
   purchase (a duplicate subscription or permanent product is refused, a timed pass
-  or credit pack sells again). Admissions use `request_id`, usage events
-  `(source, source_id)`, running charges `reference`. There is no response cache.
+  or credit pack sells again). Admissions use `request_id`, running charges
+  `reference`; lease usage is deduplicated by its lease and `n`, never by
+  `source_id` ([usage billing](../usage-billing.md#recording-usage)). There is no
+  response cache.
 - **Discovery.** A route the deployment does not serve is not registered
   (`404 route_not_found`).
 

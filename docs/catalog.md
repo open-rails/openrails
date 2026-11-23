@@ -105,6 +105,9 @@ limits:
   weekly:
     unit: usage_units
     reset: {kind: fixed, window_seconds: 604800, anchor: subscription}
+    rate_cards:
+    - meter: input-tokens
+      price: {model: per_unit, per_unit: {divide_by: 1000, unit_amount: "1"}}
 products:
   pro: {display_name: Pro, limits: {five_hour: "1000", weekly: "5000"}}
 ```
