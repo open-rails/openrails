@@ -263,7 +263,7 @@ func load() (settings, error) {
 
 // readSigner reads a PKCS #8 PEM private key: ECDSA, Ed25519 or RSA.
 func readSigner(path string) (crypto.Signer, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G703 -- the operator's own key file (OPENRAILS_SIGNING_KEY)
 	if err != nil {
 		return nil, err
 	}
