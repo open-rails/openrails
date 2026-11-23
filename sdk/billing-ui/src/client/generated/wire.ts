@@ -1206,6 +1206,12 @@ export type Hold = {
   safe: string | null
 }
 
+export type HoldCommitment = {
+  customer_id?: string
+  limit_set?: string
+  limits?: LimitCommitment[]
+}
+
 export type HoldLimit = {
   limit: string
   unit: string
@@ -1307,6 +1313,12 @@ export type Limit = {
   revision: number
   created_at: string
   updated_at: string
+}
+
+export type LimitCommitment = {
+  limit?: string
+  window_starts_at?: string | null
+  committed?: string
 }
 
 export type LimitOverride = {
@@ -2693,6 +2705,7 @@ export type SyncLeasesParams = {
   usage?: LeaseUsage[]
   wants?: LeaseWant[]
   returns?: HoldReturn[]
+  committed?: HoldCommitment[]
 }
 
 export type SyncLeasesResult = {

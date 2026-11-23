@@ -17902,6 +17902,23 @@
           "safe"
         ]
       },
+      "HoldCommitment": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitCommitment"
+            }
+          }
+        }
+      },
       "HoldLimit": {
         "type": "object",
         "properties": {
@@ -18418,6 +18435,29 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "LimitCommitment": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "window_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
       },
       "LimitOverride": {
         "type": "object",
@@ -25163,6 +25203,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HoldReturn"
+            }
+          },
+          "committed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldCommitment"
             }
           }
         }
