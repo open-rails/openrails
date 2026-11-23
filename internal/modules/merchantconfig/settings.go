@@ -35,11 +35,14 @@ func NormalizeBillingBoundary(boundary string) string {
 	}
 }
 
-// oneAddress reports whether s is one bare email address: not a list, not a
-// named mailbox, at most 320 bytes.
-func oneAddress(s string) bool {
+// mailbox is the address of s, one mailbox, named ("Ops <ops@x.example>")
+// or bare; false for a list or anything else.
+func mailbox(s string) (string, bool) {
 	a, err := mail.ParseAddress(s)
-	return err == nil && a.Name == "" && a.Address == s && len(s) <= 320
+	if err != nil || len(a.Address) > 320 {
+		return "", false
+	}
+	return a.Address, true
 }
 
 // Settings is a merchant's settings, validated: the configuration readers
@@ -73,9 +76,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 				return Settings{}, fmt.Errorf("profile.%s must be an http or https URL", field)
 			}
 		}
-		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
-		if cfg.Profile.FromEmail != "" && !oneAddress(cfg.Profile.FromEmail) {
-			return Settings{}, fmt.Errorf("profile.from_email must be one email address")
+		cfg.Profile.LogoURL = strings.TrimSpace(p.LogoURL)
+		if from := strings.TrimSpace(p.FromEmail); from != "" {
+			address, ok := mailbox(from)
+			if !ok {
+				return Settings{}, fmt.Errorf("profile.from_email must be one email address")
+			}
+			cfg.Profile.FromEmail = address
 		}
 		cfg.Profile.SupportURL, cfg.Profile.SubscribeURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SubscribeURL)
 		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
@@ -104,9 +111,12 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.BillingPeriodBoundary = in.BillingPeriodBoundary
 	}
 	if in.AlertEmail != nil {
-		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
-		if cfg.AlertEmail != "" && !oneAddress(cfg.AlertEmail) {
-			return Settings{}, fmt.Errorf("alert_email must be one email address")
+		if alert := strings.TrimSpace(*in.AlertEmail); alert != "" {
+			address, ok := mailbox(alert)
+			if !ok {
+				return Settings{}, fmt.Errorf("alert_email must be one email address")
+			}
+			cfg.AlertEmail = address
 		}
 	}
 	if in.UsageGateSafeSpend != nil {

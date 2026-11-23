@@ -292,7 +292,7 @@ the inbox. Outbound alert webhooks are SSRF-guarded: `httpx.Policy` validates ea
 URL on write, before each delivery, and at the dialer on every redirect hop. A
 customer is sent at most ten messages an hour. A test message goes only to the
 merchant's `alert_email`: its request has no address, and a merchant sends ten an
-hour. `alert_email` and `from_email` are one bare address. Templates escape every
+hour. `alert_email` and `from_email` are one mailbox each, stored as its address. Templates escape every
 value in HTML, call a fixed set of functions and render in time and size linear
 in their source.
 
