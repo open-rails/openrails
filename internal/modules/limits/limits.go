@@ -130,6 +130,20 @@ func (c Customer) capacities(ctx context.Context) (map[string]int64, error) {
 	return out, nil
 }
 
+// Granted are the limits some live product or override gives the customer
+// capacity in: the ones it is subject to.
+func (c Customer) Granted(ctx context.Context) (map[string]bool, error) {
+	capacities, err := c.capacities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(capacities))
+	for key := range capacities {
+		out[key] = true
+	}
+	return out, nil
+}
+
 // latest is each limit's newest window.
 func (c Customer) latest(ctx context.Context) (map[string]Stored, error) {
 	rows, err := c.Q.ListLatestLimitWindows(ctx, gen.ListLatestLimitWindowsParams{MerchantID: c.MerchantID, CustomerID: c.CustomerID})
@@ -143,25 +157,29 @@ func (c Customer) latest(ctx context.Context) (map[string]Stored, error) {
 	return out, nil
 }
 
-// List is the customer's standing on every declared limit, by key.
+// List is the customer's standing on every declared limit it is subject
+// to, by key.
 func (c Customer) List(ctx context.Context) ([]billing.CustomerLimit, error) {
 	defs, err := Definitions(ctx, c.Q, c.MerchantID)
 	if err != nil {
 		return nil, err
 	}
-	return c.read(ctx, defs)
+	return c.read(ctx, defs, true)
 }
 
-// One is the customer's standing on one limit.
+// One is the customer's standing on one limit, capacity 0 when no product
+// or override gives it one.
 func (c Customer) One(ctx context.Context, def Definition) (billing.CustomerLimit, error) {
-	out, err := c.read(ctx, []Definition{def})
+	out, err := c.read(ctx, []Definition{def}, false)
 	if err != nil {
 		return billing.CustomerLimit{}, err
 	}
 	return out[0], nil
 }
 
-func (c Customer) read(ctx context.Context, defs []Definition) ([]billing.CustomerLimit, error) {
+// read is the customer's lines for defs; subject keeps only the limits a
+// product or override gives it capacity in.
+func (c Customer) read(ctx context.Context, defs []Definition, subject bool) ([]billing.CustomerLimit, error) {
 	c.Now = c.Now.UTC()
 	capacities, err := c.capacities(ctx)
 	if err != nil {
@@ -173,11 +191,15 @@ func (c Customer) read(ctx context.Context, defs []Definition) ([]billing.Custom
 	}
 	out := make([]billing.CustomerLimit, 0, len(defs))
 	for _, def := range defs {
+		capacity, granted := capacities[def.Key]
+		if subject && !granted {
+			continue
+		}
 		var newest *Stored
 		if s, ok := latest[def.Key]; ok {
 			newest = &s
 		}
-		line, err := c.standing(ctx, def, capacities[def.Key], newest)
+		line, err := c.standing(ctx, def, capacity, newest)
 		if err != nil {
 			return nil, err
 		}
@@ -294,15 +316,54 @@ func (c Customer) holder() Holder {
 	return Holder{Q: c.Q, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now}
 }
 
-// Claims are what a request makes of the customer's declared limits: every
-// limit in its currency claims amount, and every limit whose rate cards read
-// its usage claims the units the usage counts. A host-stated request with no
-// usage claims no named-unit limit; its capture counts there.
+// Applies reports whether def counts a request in currency of eventType
+// ("" for a host-stated request): a limit in the currency counts every one,
+// a named-unit limit those its rate cards read. Only a customer some product
+// or override gives capacity in is subject to it.
+func Applies(def Definition, meters map[string]Meter, currency, eventType string) bool {
+	if catalog.LimitUnitCurrency(def.Unit) {
+		return def.Unit == currency
+	}
+	return eventType != "" && Counts(def, meters, eventType)
+}
+
+// Claims are what a request makes of the declared limits the customer is
+// subject to: every limit in its currency claims amount, and every limit
+// whose rate cards read its usage claims the units the usage counts. A
+// host-stated request with no usage claims no named-unit limit; its capture
+// counts there.
 func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage *Usage) ([]Claim, error) {
+	eventType := ""
+	if usage != nil {
+		eventType = usage.EventType
+	}
+	claims, err := c.claims(ctx, defs, meters, currency, eventType)
+	if err != nil {
+		return nil, err
+	}
+	for i := range claims {
+		claims[i].Cost = amount
+		if claims[i].Unit != currency {
+			def, _ := find(defs, claims[i].Key)
+			if claims[i].Cost, err = Units(def, meters, *usage); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return claims, nil
+}
+
+// ClaimsFor are the claims a request of eventType in currency makes, with
+// no cost: a hold renewed for its invokers counts what it counted.
+func (c Customer) ClaimsFor(ctx context.Context, defs []Definition, meters map[string]Meter, currency, eventType string) ([]Claim, error) {
+	return c.claims(ctx, defs, meters, currency, eventType)
+}
+
+func (c Customer) claims(ctx context.Context, defs []Definition, meters map[string]Meter, currency, eventType string) ([]Claim, error) {
 	c.Now = c.Now.UTC()
 	var applicable []Definition
 	for _, def := range defs {
-		if def.Unit == currency || (usage != nil && !catalog.LimitUnitCurrency(def.Unit) && Counts(def, meters, usage.EventType)) {
+		if Applies(def, meters, currency, eventType) {
 			applicable = append(applicable, def)
 		}
 	}
@@ -319,11 +380,9 @@ func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[stri
 	}
 	out := make([]Claim, 0, len(applicable))
 	for _, def := range applicable {
-		cost := amount
-		if def.Unit != currency {
-			if cost, err = Units(def, meters, *usage); err != nil {
-				return nil, err
-			}
+		capacity, granted := capacities[def.Key]
+		if !granted {
+			continue
 		}
 		var newest *Stored
 		if s, ok := latest[def.Key]; ok {
@@ -333,7 +392,7 @@ func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[stri
 		if err != nil {
 			return nil, err
 		}
-		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacities[def.Key], Cost: cost, Overrun: def.Overrun}
+		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacity, Overrun: def.Overrun}
 		if !w.Open {
 			claim.Window, claim.Opens = Opening(def.Reset, c.Now), true
 		}
@@ -342,9 +401,9 @@ func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[stri
 	return out, nil
 }
 
-// Windows are each declared limit's current window and the customer's base
-// capacity there, by key: a session or first-use window not yet open opens
-// now.
+// Windows are the current window and base capacity of each declared limit
+// the customer is subject to, by key: a session or first-use window not yet
+// open is the one a use now would open (Opens).
 func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Claim, error) {
 	c.Now = c.Now.UTC()
 	capacities, err := c.capacities(ctx)
@@ -357,6 +416,10 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 	}
 	out := make(map[string]Claim, len(defs))
 	for _, def := range defs {
+		capacity, granted := capacities[def.Key]
+		if !granted {
+			continue
+		}
 		var newest *Stored
 		if s, ok := latest[def.Key]; ok {
 			newest = &s
@@ -365,13 +428,22 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 		if err != nil {
 			return nil, err
 		}
-		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacities[def.Key], Overrun: def.Overrun}
+		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacity, Overrun: def.Overrun}
 		if !w.Open {
 			claim.Window, claim.Opens = Opening(def.Reset, c.Now), true
 		}
 		out[def.Key] = claim
 	}
 	return out, nil
+}
+
+func find(defs []Definition, key string) (Definition, bool) {
+	for _, d := range defs {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return Definition{}, false
 }
 
 // MaxAdjustment bounds one adjustment's units.

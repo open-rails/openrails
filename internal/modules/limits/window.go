@@ -8,6 +8,8 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
+
 	"github.com/open-rails/openrails/catalog"
 )
 
@@ -116,11 +118,11 @@ func RateLevel(level, capacity int64, windowSeconds int, at, now time.Time) int6
 	if elapsed >= window {
 		return max(level-capacity, 0)
 	}
-	drained := mulDiv(uint64(capacity), uint64(elapsed), uint64(window))
-	if drained >= uint64(level) {
+	drained := mulDiv(unsigned(capacity), unsigned(int64(elapsed)), unsigned(int64(window)))
+	if drained >= unsigned(level) {
 		return 0
 	}
-	return level - int64(drained)
+	return level - signed(drained)
 }
 
 // RateRefilledAt is when a rate limit at level drains to zero.
@@ -128,10 +130,16 @@ func RateRefilledAt(level, capacity int64, windowSeconds int, now time.Time) *ti
 	if level <= 0 || capacity <= 0 {
 		return nil
 	}
-	window := uint64(windowSeconds) * uint64(time.Second)
-	seconds := (mulDiv(uint64(level), window, uint64(capacity)) + uint64(time.Second) - 1) / uint64(time.Second)
-	return ptr(now.UTC().Truncate(time.Second).Add(time.Duration(min(seconds, uint64(1)<<32)) * time.Second))
+	window := unsigned(int64(windowSeconds)) * uint64(time.Second)
+	seconds := (mulDiv(unsigned(level), window, unsigned(capacity)) + uint64(time.Second) - 1) / uint64(time.Second)
+	return ptr(now.UTC().Truncate(time.Second).Add(time.Duration(signed(min(seconds, uint64(1)<<32))) * time.Second))
 }
+
+// unsigned is a nonnegative int64 as uint64, zero below it.
+func unsigned(v int64) uint64 { return safecast.MustConvert[uint64](max(v, 0)) }
+
+// signed is a uint64 as int64, saturating.
+func signed(v uint64) int64 { return safecast.MustConvert[int64](min(v, uint64(maxInt64))) }
 
 // tile is the start of the width-wide tile from anchor that now falls in.
 func tile(anchor, now time.Time, width time.Duration) time.Time {

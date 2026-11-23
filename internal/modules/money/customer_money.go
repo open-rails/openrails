@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/retention"
 )
 
 // CustomerMoney is a customer's money per currency: its balance in every
@@ -129,7 +128,7 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 			continue
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
-			AsOf: now, HeldSince: now.Add(-retention.AdmissionMaxHold), LeaseLiveSince: now.Add(-limits.LeaseLifetime)})
+			AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
 		if err != nil {
 			return nil, err
 		}

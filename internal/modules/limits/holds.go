@@ -14,14 +14,29 @@ import (
 	"github.com/open-rails/openrails/internal/retention"
 )
 
-// Lease timing. Neither is a setting: correctness holds for any value, and
+// Lease timing. None is a setting: correctness holds for any value, and
 // only speed depends on them.
 const (
 	// SyncInterval is how often a live gate syncs its lease.
 	SyncInterval = time.Second
-	// LeaseLifetime is how long a lease lives without a sync.
+	// LeaseLifetime is how long a lease lives without a sync: a sync renews
+	// it only within this of its last one.
 	LeaseLifetime = 10 * time.Second
+	// SyncTimeout bounds one sync's transaction.
+	SyncTimeout = 5 * time.Second
+	// LeaseGrace is how much longer readers count a lease's holds: at least
+	// SyncTimeout, so a renewal that commits never revives holds a reader
+	// already counted dead.
+	LeaseGrace = SyncTimeout
 )
+
+// LeaseLiveSince is the oldest last sync of a lease readers count live at
+// now.
+func LeaseLiveSince(now time.Time) time.Time { return now.Add(-(LeaseLifetime + LeaseGrace)) }
+
+// HeldSince is the oldest hold row that still holds at now: no hold lives
+// past the hold lifetime, a request's deadline included.
+func HeldSince(now time.Time) time.Time { return now.Add(-retention.AdmissionMaxHold) }
 
 // SpendKeyPrefix names a billing policy's spend window among limit windows:
 // spend: and its hashed identity.
@@ -72,8 +87,6 @@ type Holder struct {
 	Now        time.Time
 }
 
-// heldSince bounds the holds a window sum reads to the retained months.
-func (h Holder) heldSince() time.Time { return retention.AdmissionsDropBefore(h.Now) }
 
 // Take checks every claim and, when all fit, sets aside what each takes:
 // all or nothing. require_estimate fits when settled + held + cost is at
@@ -247,13 +260,14 @@ func BalanceReturnable(currency string, except uuid.UUID) Returnable {
 // never returned, so they do not count.
 func (h Holder) LeaseHeld(ctx context.Context, r Returnable) (int64, error) {
 	return h.Q.SumOtherLeaseHeld(ctx, gen.SumOtherLeaseHeldParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
-		FromWindow: r.From, ToWindow: r.To, HeldSince: h.Now.Add(-retention.AdmissionMaxHold), LeaseID: r.Except, LeaseLiveSince: h.Now.Add(-LeaseLifetime)})
+		FromWindow: r.From, ToWindow: r.To, HeldSince: HeldSince(h.Now), LeaseID: r.Except, LeaseLiveSince: LeaseLiveSince(h.Now)})
 }
 
-// TakeBack marks those holds to shrink at their leases' next sync.
+// TakeBack marks those holds to shrink at their leases' next sync. The
+// caller holds the customer's lock, as every writer of a lease's parts does.
 func (h Holder) TakeBack(ctx context.Context, r Returnable) error {
 	return h.Q.MarkLeaseHoldsContended(ctx, gen.MarkLeaseHoldsContendedParams{Now: h.Now, MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
-		FromWindow: r.From, ToWindow: r.To, HeldSince: h.Now.Add(-retention.AdmissionMaxHold), LeaseID: r.Except, LeaseLiveSince: h.Now.Add(-LeaseLifetime)})
+		FromWindow: r.From, ToWindow: r.To, HeldSince: HeldSince(h.Now), LeaseID: r.Except, LeaseLiveSince: LeaseLiveSince(h.Now)})
 }
 
 // Settlement is units a capture or report settles into one limit's window:
@@ -324,7 +338,7 @@ func (h Holder) Settle(ctx context.Context, settlements []Settlement) error {
 func (h Holder) Held(ctx context.Context, key string, from, to time.Time, countsExpired bool) (int64, error) {
 	return h.Q.SumWindowHeld(ctx, gen.SumWindowHeldParams{
 		MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, FromWindow: from, ToWindow: to,
-		HeldSince: h.heldSince(), CountsExpired: countsExpired, AsOf: h.Now, LeaseLiveSince: h.Now.Add(-LeaseLifetime),
+		HeldSince: HeldSince(h.Now), CountsExpired: countsExpired, AsOf: h.Now, LeaseLiveSince: LeaseLiveSince(h.Now),
 	})
 }
 

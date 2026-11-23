@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -168,6 +167,6 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 		return 0, 0, err
 	}
 	now := s.now()
-	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: now.Add(-retention.AdmissionMaxHold), LeaseLiveSince: now.Add(-limits.LeaseLifetime)})
+	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
 	return balance, held.Held, err
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/limits"
-	"github.com/open-rails/openrails/internal/retention"
 )
 
 // WatchChange is told, in its transaction, of a change to what a customer may
@@ -91,7 +90,7 @@ func availableNow(ctx context.Context, q *gen.Queries, merchant, customer uuid.U
 		return 0, err
 	}
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-		MerchantID: merchant, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: now.Add(-retention.AdmissionMaxHold), LeaseLiveSince: now.Add(-limits.LeaseLifetime),
+		MerchantID: merchant, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ledger: held amount: %w", err)
