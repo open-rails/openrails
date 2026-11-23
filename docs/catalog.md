@@ -113,12 +113,16 @@ products:
 subscription or `first_use`), `billing_period` (the pricing period), `session`
 (opens at the first use after the last one ended), `rolling` (the last
 `window_seconds`), `rate` (refills continuously over `window_seconds`) or
-`lifetime`. Rate cards take the rate-card price shapes without a currency; a
-currency limit has none. A customer's capacity is the sum over its live products'
-`limits`; `limits` on `UpdateCustomer` overrides it, and
-`AdjustCustomerLimit` adds to the current window only. `balance` is reserved.
-`ListCustomerLimits` (`GET /v1/app/limits?customer_id=`) and `GET /v1/me/limits`
-read `{capacity, used, held, remaining, window_starts_at, resets_at}` per limit.
+`lifetime`. `overrun: require_estimate` admits only a request whose estimate fits;
+`admit_while_positive` lets the request that crosses the limit finish. A limit's
+rate cards are usage prices without a currency (never `flat`, volume-tiered or
+`dynamic`) on declared `sum` or `count` meters, with their filter and matrix
+dimensions in the meter's `group_by`; a currency limit has none and counts the
+rated amount. Product `limits` give capacity: a customer's is the sum over its
+live products. `balance` is reserved. A limit with windows keeps its unit, and a
+meter a limit counts cannot be removed (`meter_in_use`). Limits are also declared
+with `PUT /v1/catalog/limits/{key}` (`SetLimit`). How they hold and refuse:
+[usage billing](usage-billing.md#limits).
 
 ### Provider prices
 

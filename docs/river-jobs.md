@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 17 core River job kinds. Five have recurring schedules.
+OpenRails registers 16 core River job kinds. Four have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -8,14 +8,12 @@ contain AuthKit or host application jobs. [Worker registrations](../internal/app
 
 ## Recurring jobs
 
-River attempts startup catch-up for all five declarations. Shared database
-leases coordinate the four database-wide passes. Each fleet with Redis runs
-its own admission denial flush. [Periodic declarations](../internal/river/periodic.go) ·
+River attempts startup catch-up for all four declarations. Shared database
+leases coordinate them. [Periodic declarations](../internal/river/periodic.go) ·
 [Startup and leases](../internal/app/river_periodic.go)
 
 | Kind | Queue | When it runs | What it does |
 | --- | --- | --- | --- |
-| `openrails.admission_denial_flush` | `billing` | Every hour when Redis is configured | Moves closed-hour admission denial counters from Redis to PostgreSQL. [Worker](../internal/river/jobs_admission_denials.go) |
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
@@ -48,6 +46,7 @@ continuations. The other scan names label work inside the pass.
 
 | Scan | What it looks for |
 | --- | --- |
+| `openrails.usage_accruals` | Customers' days of usage that ended unposted; each posts as one deduction. The read is indexed on the day. [Source](../internal/river/jobs_usage_accruals.go) |
 | `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |

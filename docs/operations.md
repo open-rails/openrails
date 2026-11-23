@@ -11,7 +11,7 @@ their own pages.
 | Service | Needed | Holds | Losing it |
 |---|---|---|---|
 | PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. It can share an instance with the host app; OpenRails owns one schema (`billing`) and its River schema (`billing_river`). | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
-| Redis (or Garnet) | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, spent DPoP proofs and admission-denial counters | without it these live in each process's memory, right for one instance only. No money path needs Redis. |
+| Redis (or Garnet) | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines and spent DPoP proofs | without it these live in each process's memory, right for one instance only. No money path needs Redis; an SDK gate's Redis is the host's own. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana | without a KV mount the merchant manifest is the configuration, read-only. With one, startup needs Vault; afterwards each replica rides out an outage from its cache. |
 
 The standalone server's signing keys are `keys.json` in `auth.keys.path`
@@ -530,8 +530,8 @@ catches up at start when its last retained run is older than its interval.
 
 | Job | When |
 |---|---|
-| `openrails.billing_pass` runs the [billing scans](river-jobs.md#hourly-billing-scans), including targeted subscription verification retries. | Top of each UTC hour and on startup. |
-| retention cleanup; merchant health; admission-denial flush (with Redis) | hourly |
+| `openrails.billing_pass` runs the [billing scans](river-jobs.md#hourly-billing-scans), including the posting of each customer's finished days of usage and targeted subscription verification retries. | Top of each UTC hour and on startup. |
+| retention cleanup; merchant health | hourly |
 | provider refresh (`openrails.provider_refresh_requested`) | An operator requests a refresh for one merchant. |
 | Stripe webhook endpoint backstop | 24 h |
 | a provider operation (`openrails.provider_operation`) | queued with its intent, sleeping to each attempt |
@@ -576,9 +576,9 @@ new job.
   analytics ([metrics](metrics-for-llms.md)).
 - `openrails workers` and the `openrails_job_progress` probe read River's tables:
   the probe fails with no leader, an overrunning job, or a billing pass that has
-  not finished within a day or left critical work (renewals and retries, balance
-  watches, delinquency, order expiry, usage billing) due since before the start
-  of yesterday (UTC).
+  not finished within a day or left critical work (usage postings, renewals and
+  retries, balance watches, delinquency, order expiry, usage billing) due since
+  before the start of yesterday (UTC).
 - Logs are structured to stdout (`logger.level`). Healthy is a near-empty
   `openrails intents`, no open findings and no overrunning or discarded jobs.
 
@@ -614,16 +614,16 @@ headers.
 
 Periods are constants in `internal/retention`, the same for every merchant,
 except the event log's `event_retention`. Each table's comment states its class:
-**permanent** (the ledger, grants, payments, owed usage, receipts, operation
-authorizations, refusals, running charges, maintenance runs and the before-images of
-destructive runs),
+**permanent** (the ledger, grants, payments, owed usage, usage accruals, receipts,
+operation authorizations, refusals, running charges, maintenance runs and the
+before-images of destructive runs),
 **partitioned** (monthly partitions dropped whole), **rows** (deleted by the
 hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
-| `usage_events` (by `occurred_at`) | partition dropped 24 months after its usage was billed, about 26 months after the month began |
-| `admission_operations` (by `admitted_at`) | partition dropped after 61 days |
+| `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
+| `usage_daily` | 24 months after its usage was billed, about 26 months after the month began |
 | `subscription_status_transitions`, `subscription_billing_changes`, `provider_mutation_logs`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents (cancel, payment-method and source update, card vault, network token, catalog archive, account-updater request) 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
@@ -637,7 +637,9 @@ hourly cleanup) or **state** (one row per thing that exists).
 | `failed_usage_windows` | when the window ends |
 | `meter_period_quantities` | 100 days after `period_starts_at` |
 | `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
-| `admission_denials_hourly`, `webhook_health_daily` | 13 months |
+| `leases` (with their holds), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
+| `usage_minutes` | 25 hours |
+| `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
 An order attempt that reached a provider is permanent, and so is a cost
@@ -647,11 +649,10 @@ a long reader), then deletes 1,000 rows per statement and at most 50,000 per
 merchant per pass. `subscription_status_transitions` refuses other deletes (`billing.guard_retention_delete`, keyed on the
 `openrails.retention_table` setting).
 
-What integrators see: a usage event may be up to 35 days old, and its `source` /
-`source_id` key holds for those 35 days (a charged failed event's key holds for
-good: its ledger debit carries it, and a later retry charges nothing); a hold lasts at most 30 days and a spend
-window 31; after 61 days a request id reads as never admitted; usage reports reach
-back about 26 months.
+What integrators see: usage may be dated up to 35 days back; a lease answers
+resends for 61 days after its last sync; a request hold lasts at most 30 days and a
+spend window 31; after 61 days a request id reads as never admitted; usage reports
+reach back about 26 months.
 
 ## Backup and recovery
 

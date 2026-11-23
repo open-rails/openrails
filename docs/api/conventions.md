@@ -56,7 +56,7 @@ lists `[]`.
 Ids are prefixed text, accepted only in their own spelling (a bare UUID or another
 prefix is `400 invalid_param`): `prod_`, `sub_`, `pay_`, `pm_`, `ord_`, `psp_`,
 `oat_` (order attempt), `att_` (payment attempt), `cyc_` (rebill cycle), `cgr_`,
-`txn_`, `ent_`, `pa_`, `pmig_`, `uev_`, `hev_`, `ntf_`, `fnd_`, `awh_`. Customer and
+`txn_`, `ent_`, `pa_`, `pmig_`, `lse_` (lease), `hev_`, `ntf_`, `fnd_`, `awh_`. Customer and
 merchant ids are UUIDs. A price id is `product-key:price-key:v1` (versions start at
 one; reserved bytes percent-encoded, `:` as `%3A`); URL-encode it as a path
 segment. A product or price *key* is a separate handle, never accepted where an id

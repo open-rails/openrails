@@ -49,7 +49,7 @@ own file into it); `openrails.Deps` is everything outside the process.
 |---|---|
 | `Postgres` | Your pool. A nil value opens a pool from `Config.DB`. Idempotency lease renewals use a separate pool with the main pool's connection settings and a cap of `Config.DB.LeaseConns` (default 4). Include this cap in the host's connection budget. |
 | `PostgresSession` | Optional direct PostgreSQL configuration when `Postgres` goes through a transaction pooler. |
-| `Redis` | abuse state shared across instances; without it, one instance only |
+| `Redis` | abuse state shared across instances; without it, one instance only. A gate takes its own (`GateConfig.Redis`) |
 | `Vault` | a borrowed Vault client instead of `Config.Vault` |
 | `Email` | your own sender, replacing `Config.SMTP` |
 | `UserInfo` | your directory (`ak.UserInfo()` or your own): customer contacts and staff search ([customer contacts](customer-contacts.md)) |
@@ -227,10 +227,10 @@ The handle's methods, by job:
 | Group | Methods |
 |---|---|
 | Admission | `Admit`, `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions` |
-| Usage | `RecordUsage`, `QueryMetrics` |
+| Usage and limits | `SyncLeases`, `ListCustomerLimits`, `AdjustCustomerLimit`, `QueryMetrics` |
 | Customers and access | `ListCustomers`, `GetCustomer`, `UpdateCustomer`, `CheckEntitlements`, `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
-| Catalog | `ApplyCatalog`, products, prices, meters, price migrations |
+| Catalog | `ApplyCatalog`, products, prices, meters, limits, price migrations |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod` |
 | Orders and payments | `CreateOrder`, `PreviewOrder`, `CancelOrder`, `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `GetPayment`, `RecordExternalPayment`, `RefundPayment`, `ListPaymentAttempts`, `ListRenewals`, `ListPaymentMethods` |
 | Running charges | `StartRunningCharge`, `StopRunningCharge`, `GetRunningCharge`, `ListRunningCharges` |
@@ -248,6 +248,10 @@ an error. Deny verdicts are `(Allowed=false, nil)`. An in-process call runs as
 long as its context allows. `Merchant(id)` reads the directory on each call, so a
 merchant provisioned while running is served at once and a deleted one is
 `403 merchant_unresolved`.
+
+`openrails.NewGate(shop, openrails.GateConfig{})` admits against usage limits in
+your process over the same handle, as it does over a remote one
+([the gate](usage-billing.md#the-gate)).
 
 `engine.LocalMerchant(id)` returns a `*LocalClient` for what only the local engine
 can do: `DeclarePSP`, `SCIMHandler`, and the transaction methods (`AdmitTx`,
