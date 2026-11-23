@@ -251,7 +251,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 ## Tests
 - The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis and
   Vault (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`, all owned
-  and disposable; `--suite browser` runs the browser cases). `critical/coverage.json` lists the scenarios and
+  and disposable). `critical/coverage.json` lists the scenarios and
   `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
   registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
   disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.
