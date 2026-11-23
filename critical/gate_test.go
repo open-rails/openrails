@@ -495,7 +495,9 @@ func TestGate(t *testing.T) {
 		}
 		// A cold request answers ErrUnavailable for a sync interval after a
 		// sync that could not reach OpenRails: let the group sync again.
-		syncs := func() int64 { return first.wire.syncs.Load() + others[0].wire.syncs.Load() + others[1].wire.syncs.Load() }
+		syncs := func() int64 {
+			return first.wire.syncs.Load() + others[0].wire.syncs.Load() + others[1].wire.syncs.Load()
+		}
 		synced := syncs()
 		require.Eventually(t, func() bool { return syncs() > synced }, 10*time.Second, 20*time.Millisecond)
 		time.Sleep(limits.SyncInterval)
