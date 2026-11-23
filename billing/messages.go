@@ -70,10 +70,13 @@ type MessageLinks struct {
 type MessageEvent struct {
 	// OccurredAt is when the fact happened.
 	OccurredAt string
-	// Reason qualifies the fact as NotificationData.Reason does: on
-	// subscription_canceled and premium_ended, user_cancel (the customer
-	// canceled), admin (staff did), expired (payments failed) and others; on
-	// order_collection_stopped, schedule_exhausted or non_recoverable.
+	// Reason qualifies the fact as NotificationData.Reason does. On
+	// subscription_canceled and premium_ended: user_cancel (the customer
+	// canceled), admin (staff did), expired (payments failed past dunning),
+	// non_recoverable (the card can no longer be charged), refund,
+	// chargeback, rail_cancel (the provider or a system action), access_ended
+	// (access reached its end, no cause recorded) or unknown. On
+	// order_collection_stopped: schedule_exhausted or non_recoverable.
 	Reason string
 	// ProductName is what the fact is about: what an order bought, else the
 	// subscription's product.

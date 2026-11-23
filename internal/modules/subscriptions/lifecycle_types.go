@@ -132,6 +132,8 @@ type CancelMembershipParams struct {
 	CancelType         models.CancelType
 	CancelFeedback     *string
 	RevokeAccess       bool
+	// EndedReason is the premium_ended fact's reason; empty is CancelType's.
+	EndedReason PremiumEndReason
 	// RefuseOwnedRenewal refuses a customer or merchant cancel of an engine
 	// membership while an accepted renewal payment is unresolved.
 	RefuseOwnedRenewal bool

@@ -1395,14 +1395,20 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}
 	s.Log.InfoContext(ctx, "Updated subscription record during cancellation", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "ended_at", subscription.EndedAt, "period_end", subscription.CurrentPeriodEndsAt)
 
-	reason := PremiumEndReasonAdmin
-	switch params.CancelType {
-	case models.CancelTypeUser:
-		reason = PremiumEndReasonUserCancel
-	case models.CancelTypeExpired:
-		reason = PremiumEndReasonExpired
-	case models.CancelTypeMerchant:
-		reason = PremiumEndReasonRail
+	reason := params.EndedReason
+	if reason == "" {
+		switch params.CancelType {
+		case models.CancelTypeUser:
+			reason = PremiumEndReasonUserCancel
+		case models.CancelTypeExpired:
+			reason = PremiumEndReasonExpired
+		case models.CancelTypeChargeback:
+			reason = PremiumEndReasonChargeback
+		case models.CancelTypeMerchant:
+			reason = PremiumEndReasonRail
+		default:
+			reason = PremiumEndReasonUnknown
+		}
 	}
 	// The committed revision identifies this cancellation, including retries
 	// after rollback and a later revoke of a period-end cancellation.
@@ -2108,6 +2114,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					return fmt.Errorf("revoke grace access to %s for failed subscription %s: %w", product, subscription.ID, err)
 				}
 			}
+		}
+		// The ending is its own fact, naming its cause: failed payments. It
+		// is the customer's confirmation.
+		if subscription.Status == models.StatusCanceled {
+			reason := PremiumEndReasonExpired
+			if params.Decline == decline.NonRecoverable {
+				reason = PremiumEndReasonNonRecoverable
+			}
+			ended, err := s.queueNotice(ctx, db, subscription, lifecycle.NoticeEnded, nil, EffectOptions{EndedReason: reason}, s.now())
+			if err != nil {
+				return err
+			}
+			notifications = append(notifications, ended)
 		}
 
 		// A collection failure is a payment fact even when retries stop. The

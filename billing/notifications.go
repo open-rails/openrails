@@ -74,9 +74,10 @@ func CustomerNotificationOptional(kind string, data NotificationData) bool {
 // timestamps are RFC3339 instants — the same rules as every other wire shape,
 // so the JSONB round-trip never touches a float.
 type NotificationData struct {
-	// Reason qualifies premium_ended (user_cancel, admin, expired, refund,
-	// chargeback, non_recoverable, access_ended) and
-	// order_collection_stopped (schedule_exhausted, non_recoverable).
+	// Reason qualifies premium_ended and subscription_canceled (user_cancel,
+	// admin, expired, non_recoverable, refund, chargeback, rail_cancel,
+	// access_ended, unknown) and order_collection_stopped
+	// (schedule_exhausted, non_recoverable).
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself

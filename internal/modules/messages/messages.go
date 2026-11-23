@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 const (
@@ -54,6 +55,7 @@ const (
 // defaults is whether each event type sends an email until the merchant
 // says otherwise; every type listed has a built-in template. A type not
 // listed sends none unless the merchant turns it on with a template.
+// byDefault refines two of them by the fact.
 var defaults = map[models.NotificationEventType]bool{
 	models.NotificationOneOffPurchaseCompleted:       true,
 	models.NotificationRefundCompleted:               true,
@@ -97,13 +99,35 @@ func EventTypes() []string {
 	return out
 }
 
-// Enabled reports whether s sends eventType's message: its setting, else the
-// default.
-func Enabled(s billing.MessageSettings, eventType string) bool {
+// confirmedEndings are the reasons whose premium_ended confirms a
+// cancellation: the customer's, failed payments' or staff's. An ending
+// caused by a refund, a chargeback, the provider or the end of the paid term
+// sends none by default.
+var confirmedEndings = []subscriptions.PremiumEndReason{
+	subscriptions.PremiumEndReasonUserCancel, subscriptions.PremiumEndReasonAdmin,
+	subscriptions.PremiumEndReasonExpired, subscriptions.PremiumEndReasonNonRecoverable,
+}
+
+// byDefault is whether a fact of eventType with data sends its message when
+// the merchant does not say.
+func byDefault(eventType string, data billing.NotificationData) bool {
+	switch models.NotificationEventType(eventType) {
+	case models.NotificationPremiumEnded:
+		return slices.Contains(confirmedEndings, subscriptions.PremiumEndReason(data.Reason))
+	case models.NotificationPaymentMethodFailed:
+		// The failure that ended a subscription: its ending confirms it.
+		return data.RecoveryAction != billing.NotificationRecoveryResubscribe
+	}
+	return defaults[models.NotificationEventType(eventType)]
+}
+
+// Enabled reports whether s sends the message of a fact of eventType with
+// data: the merchant's enabled, else the default.
+func Enabled(s billing.MessageSettings, eventType string, data billing.NotificationData) bool {
 	if e, ok := s.Events[eventType]; ok && e.Enabled != nil {
 		return *e.Enabled
 	}
-	return defaults[models.NotificationEventType(eventType)]
+	return byDefault(eventType, data)
 }
 
 // Service dispatches and sends customer messages.

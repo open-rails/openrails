@@ -57,8 +57,34 @@ func TestEnabled(t *testing.T) {
 		"one_off_purchase_completed": false, "premium_renewed": true, "refund_completed": true,
 		"subscription_canceled": true, "usage_charged": false, "not_a_type": false,
 	} {
-		if got := Enabled(s, kind); got != want {
+		if got := Enabled(s, kind, billing.NotificationData{}); got != want {
 			t.Errorf("%s: %v", kind, got)
 		}
+	}
+}
+
+func TestAnEndingConfirmsTheCancellationsItWasCausedBy(t *testing.T) {
+	for reason, want := range map[string]bool{
+		"user_cancel": true, "admin": true, "expired": true, "non_recoverable": true,
+		"refund": false, "chargeback": false, "rail_cancel": false, "access_ended": false, "unknown": false, "": false,
+	} {
+		if got := Enabled(billing.MessageSettings{}, "premium_ended", billing.NotificationData{Reason: reason}); got != want {
+			t.Errorf("premium_ended %q: %v", reason, got)
+		}
+	}
+	off, on := false, true
+	refund := billing.NotificationData{Reason: "refund"}
+	if !Enabled(billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"premium_ended": {Enabled: &on}}}, "premium_ended", refund) {
+		t.Error("the merchant's enabled overrides the default")
+	}
+	if Enabled(billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"premium_ended": {Enabled: &off}}}, "premium_ended", billing.NotificationData{Reason: "admin"}) {
+		t.Error("the merchant's enabled overrides the default")
+	}
+	ended := billing.NotificationData{RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryResubscribe}
+	if Enabled(billing.MessageSettings{}, "payment_method_failed", ended) {
+		t.Error("the failure that ended a subscription is confirmed by the ending")
+	}
+	if !Enabled(billing.MessageSettings{}, "payment_method_failed", billing.NotificationData{RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod}) {
+		t.Error("a failure the customer can fix is sent")
 	}
 }

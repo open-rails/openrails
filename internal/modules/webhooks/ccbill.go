@@ -1630,7 +1630,8 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 // handleExpiration mirrors CCBill expiring a membership. Under the row lock, a
 // period a renewal already extended cannot expire; a renewal that lands after
-// the expiry restores it through RenewalSuccess.
+// the expiry restores it through RenewalSuccess. An expiry names no cause, so
+// its notice is access_ended: a failed rebill is the earlier failedRB cancel.
 func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	var data CCBillExpirationEvent
 	if err := json.Unmarshal(s.Data.EventBody, &data); err != nil {
@@ -1643,5 +1644,5 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			return nil
 		}
 		return lifecycle.ProviderCanceled{At: now}
-	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
+	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonAccessEnded})
 }

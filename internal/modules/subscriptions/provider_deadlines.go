@@ -20,7 +20,7 @@ import (
 // at or before now with no retry scheduled. Reports whether it moved.
 func (s *SubscriptionLifecycleService) AskProviderPastGrace(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) (bool, error) {
 	period := sub.CurrentPeriodEndsAt
-	return s.Decide(ctx, d, sub.ID, lifecycle.DunningStale{}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
+	return s.Decide(ctx, d, sub.ID, lifecycle.DunningStale{}, EffectOptions{}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
 		return locked.Status == models.StatusPastDue && locked.CollectionPolicy != models.CollectionPolicyEngine && locked.NextRetryAt == nil &&
 			locked.GraceEndsAt != nil && !locked.GraceEndsAt.After(now) && samePeriodEnd(period, locked.CurrentPeriodEndsAt), nil
 	})
@@ -30,7 +30,7 @@ func (s *SubscriptionLifecycleService) AskProviderPastGrace(ctx context.Context,
 // period that ended at periodEnd with no payment since. Reports whether it
 // moved.
 func (s *SubscriptionLifecycleService) AskProviderOverdueRenewal(ctx context.Context, d *db.DB, id uuid.UUID, periodEnd time.Time) (bool, error) {
-	return s.Decide(ctx, d, id, lifecycle.RenewalOverdue{}, func(ctx context.Context, d *db.DB, locked *models.Subscription) (bool, error) {
+	return s.Decide(ctx, d, id, lifecycle.RenewalOverdue{}, EffectOptions{}, func(ctx context.Context, d *db.DB, locked *models.Subscription) (bool, error) {
 		if locked.Status != models.StatusActive || locked.CollectionPolicy == models.CollectionPolicyEngine || !samePeriodEnd(&periodEnd, locked.CurrentPeriodEndsAt) {
 			return false, nil
 		}

@@ -119,6 +119,31 @@ func TestCancellationsSayTheirCause(t *testing.T) {
 	}
 }
 
+func TestEndingsSayTheirCause(t *testing.T) {
+	ended := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	end := func(reason string) billing.MessageContent {
+		return alpha(t, models.NotificationPremiumEnded, billing.NotificationData{Reason: reason, EndedAt: &ended, AccessEnded: true, ProductName: "Pro"})
+	}
+	requireText(t, end("expired"), "Your subscription to Alpha has ended",
+		"We couldn't take your renewal payment, so your subscription to Pro has ended.", "Your access ended on November 23, 2026. You won't be charged again.",
+		"Subscribe again any time: https://alpha.example/plans")
+	requireText(t, end("non_recoverable"), "Your subscription to Alpha has ended", "Your bank told us your card can no longer be charged, so your subscription to Pro has ended.")
+	staff := end("admin")
+	requireText(t, staff, "Your subscription to Alpha was canceled", "Your subscription to Pro was canceled by Alpha.", "You won't be charged again.",
+		"If you didn't expect this, please contact us: https://alpha.example/help")
+	if strings.Contains(staff.Text, "Subscribe again") {
+		t.Errorf("staff's ending points to support:\n%s", staff.Text)
+	}
+	requireText(t, end("user_cancel"), "You canceled your subscription to Alpha", "This confirms that you canceled your subscription to Pro.", "You won't be charged again.")
+	neutral := end("access_ended")
+	requireText(t, neutral, "Your subscription to Alpha has ended", "Your subscription to Pro has ended.", "Your access ended on November 23, 2026.")
+	if strings.Contains(neutral.Text, "charged") {
+		t.Errorf("an ending with no cause makes no promise about charges:\n%s", neutral.Text)
+	}
+	failed := alpha(t, models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "expired", EndedAt: &ended, ProductName: "Pro"})
+	requireText(t, failed, "Your subscription to Alpha is canceled", "We couldn't take your renewal payment, so your subscription to Pro is canceled.")
+}
+
 func TestPriceChangeNotice(t *testing.T) {
 	from := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	got := alpha(t, models.NotificationSubscriptionRepriceScheduled, billing.NotificationData{OldAmount: amount(10_000_000), NewAmount: amount(12_000_000), Currency: "USD", EffectiveAt: &from})

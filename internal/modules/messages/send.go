@@ -63,14 +63,15 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	if err != nil {
 		return err
 	}
-	if !Enabled(settings, m.EventType) {
+	var data billing.NotificationData
+	unreadable := m.Data != nil && json.Unmarshal(m.Data, &data) != nil
+	if !Enabled(settings, m.EventType, data) {
 		return end(statusDisabled, "")
 	}
 	if m.Data == nil || m.OccurredAt == nil {
 		return end(statusFailed, errEventMissing)
 	}
-	var data billing.NotificationData
-	if err := json.Unmarshal(m.Data, &data); err != nil {
+	if unreadable {
 		return end(statusFailed, errEventUnreadable)
 	}
 	test, err := s.DB.Gen(ctx).CustomerMessageOnTestPSP(ctx, gen.CustomerMessageOnTestPSPParams{
