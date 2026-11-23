@@ -31,7 +31,7 @@ func TestCheck(t *testing.T) {
 		want string
 	}{
 		{receipt(billing.MessageTemplate{Subject: "{{.Event.Amount", Text: "x"}), "events.one_off_purchase_completed: subject: template: subject:1: unclosed action"},
-		{receipt(billing.MessageTemplate{Subject: "x", Text: "{{.Event.Total}}"}), `events.one_off_purchase_completed: text: template: body:1:8: executing "body" at <.Event.Total>: can't evaluate field Total`},
+		{receipt(billing.MessageTemplate{Subject: "x", Text: "{{.Event.Total}}"}), `events.one_off_purchase_completed: text: template: body:1:8: at <.Event.Total>: can't evaluate field Total in type billing.MessageEvent`},
 		{receipt(billing.MessageTemplate{Subject: "x", HTML: "{{money .Event.Amount}}"}), `events.one_off_purchase_completed: html: template: body:1: function "money" not defined`},
 		{receipt(billing.MessageTemplate{Subject: "x"}), "events.one_off_purchase_completed: a text or html body is required"},
 		{receipt(billing.MessageTemplate{Text: "x"}), "events.one_off_purchase_completed: subject is required"},
@@ -39,7 +39,7 @@ func TestCheck(t *testing.T) {
 		{billing.MessageSettings{DefaultLanguage: "French"}, "default_language"},
 		{billing.MessageSettings{Layouts: map[string]billing.MessageLayout{"en": {HTML: "<p>no body</p>"}}}, `layouts.en: html: layout: it never runs {{template "body" .}}`},
 		{billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"refund_completed": {Templates: map[string]billing.MessageTemplate{"de": {Subject: "{{.Nope}}", Text: "x"}}}}},
-			`events.refund_completed (de): subject: template: subject:1:2: executing "subject" at <.Nope>`},
+			`events.refund_completed (de): subject: template: subject:1:2: at <.Nope>: can't evaluate field Nope`},
 	} {
 		err := Check(c.s)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

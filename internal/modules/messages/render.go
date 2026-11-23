@@ -165,7 +165,7 @@ func compile(t billing.MessageTemplate, layout billing.MessageLayout) (*message,
 	}
 	m := &message{}
 	var err error
-	if m.subject, err = ttemplate.New("subject").Funcs(funcs).Option("missingkey=error").Parse(t.Subject); err != nil {
+	if m.subject, err = compileSubject(t.Subject); err != nil {
 		return nil, fmt.Errorf("subject: %w", err)
 	}
 	if strings.TrimSpace(t.Text) != "" {
@@ -181,70 +181,99 @@ func compile(t billing.MessageTemplate, layout billing.MessageLayout) (*message,
 	return m, nil
 }
 
+func compileSubject(src string) (*ttemplate.Template, error) {
+	t, err := parseText("subject", src)
+	if err != nil {
+		return nil, err
+	}
+	if err := vet(t.Tree, false); err != nil {
+		return nil, err
+	}
+	return t, typecheck(t.Tree, nil)
+}
+
+// parseText parses one part on its own, so it defines nothing another part
+// runs.
+func parseText(name, src string) (*ttemplate.Template, error) {
+	if err := sized(src); err != nil {
+		return nil, err
+	}
+	t, err := ttemplate.New(name).Funcs(funcs).Option("missingkey=error").Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Templates()) != 1 {
+		return nil, errDefined
+	}
+	return t, nil
+}
+
+func parseHTML(name, src string) (*htemplate.Template, error) {
+	if err := sized(src); err != nil {
+		return nil, err
+	}
+	t, err := htemplate.New(name).Funcs(funcs).Option("missingkey=error").Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.Templates()) != 1 {
+		return nil, errDefined
+	}
+	return t, nil
+}
+
+// checkParts vets a layout and the body it runs, and checks both against
+// MessageData.
+func checkParts(layout, body *parse.Tree) error {
+	if err := vet(layout, true); err != nil {
+		return err
+	}
+	if err := vet(body, false); err != nil {
+		return err
+	}
+	return typecheck(layout, body)
+}
+
 func compileText(layout, body string) (*ttemplate.Template, error) {
-	t, err := ttemplate.New("layout").Funcs(funcs).Option("missingkey=error").Parse(layout)
+	l, err := parseText("layout", layout)
 	if err != nil {
 		return nil, fmt.Errorf("layout: %w", err)
 	}
-	if !callsBody(t.Tree) {
-		return nil, errNoBody
-	}
-	if _, err := t.New("body").Parse(body); err != nil {
+	b, err := parseText("body", body)
+	if err != nil {
 		return nil, err
 	}
-	return t, nil
+	if err := checkParts(l.Tree, b.Tree); err != nil {
+		return nil, err
+	}
+	if _, err := l.AddParseTree("body", b.Tree); err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 func compileHTML(layout, body string) (*htemplate.Template, error) {
-	t, err := htemplate.New("layout").Funcs(funcs).Option("missingkey=error").Parse(layout)
+	l, err := parseHTML("layout", layout)
 	if err != nil {
 		return nil, fmt.Errorf("layout: %w", err)
 	}
-	if !callsBody(t.Tree) {
-		return nil, errNoBody
-	}
-	if _, err := t.New("body").Parse(body); err != nil {
+	b, err := parseHTML("body", body)
+	if err != nil {
 		return nil, err
 	}
-	return t, nil
+	if err := checkParts(l.Tree, b.Tree); err != nil {
+		return nil, err
+	}
+	if _, err := l.AddParseTree("body", b.Tree); err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
-var errNoBody = errors.New(`layout: it never runs {{template "body" .}}`)
-
-// callsBody reports whether the tree runs the body template.
-func callsBody(t *parse.Tree) bool {
-	if t == nil {
-		return false
-	}
-	var walk func(parse.Node) bool
-	walk = func(n parse.Node) bool {
-		switch n := n.(type) {
-		case *parse.ListNode:
-			if n == nil {
-				return false
-			}
-			for _, c := range n.Nodes {
-				if walk(c) {
-					return true
-				}
-			}
-		case *parse.TemplateNode:
-			return n.Name == "body"
-		case *parse.IfNode:
-			return walk(n.List) || walk(n.ElseList)
-		case *parse.RangeNode:
-			return walk(n.List) || walk(n.ElseList)
-		case *parse.WithNode:
-			return walk(n.List) || walk(n.ElseList)
-		}
-		return false
-	}
-	return walk(t.Root)
-}
-
+// render renders each part through a writer that fails past maxOutput.
 func (m *message) render(data billing.MessageData) (billing.MessageContent, error) {
 	var out billing.MessageContent
-	var b strings.Builder
+	var b capped
 	if err := m.subject.Execute(&b, data); err != nil {
 		return out, fmt.Errorf("subject: %w", err)
 	}

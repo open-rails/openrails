@@ -120,20 +120,27 @@ Each link falls back to `support_url`.
 ## Functions
 
 Subjects and text bodies are Go `text/template`, HTML bodies `html/template`,
-which escapes every value for where it is used. Templates have Go's built-in
-functions (`and`, `or`, `not`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `len`,
-`index`, `slice`, `print`, `printf`, `println`, `html`, `js`, `urlquery`,
-`call`) and three more: `default FALLBACK VALUE` (`{{default "there" .Customer.Name}}`),
+which escapes every value for where it is used. A template may call `and`,
+`or`, `not`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `len`, `index`, `slice` and
+three more: `default FALLBACK VALUE` (`{{default "there" .Customer.Name}}`),
 `upper` and `lower`. Options are `missingkey=error`. A text body's runs of
 blank lines collapse to one; a subject's whitespace to single spaces.
+
+A message renders in time and size linear in its template:
+
+- no `range`, `define`, `block` or variable (`with` and `$` reach the data);
+- no `template` but the layout's one `{{template "body" .}}`;
+- no `print`, `printf`, `println`, `html`, `js`, `urlquery` or `call`;
+- each part's source is at most 64 KiB, and a part rendering past 256 KiB fails.
 
 ## Validation
 
 A messages document is checked as it loads (a file at startup, Vault on each
-change): its languages are tags, each event type is one listed above, and every
-message renders against its event type's sample data for a customer of each
-language the document names. One that fails is refused alone, naming the event
-type or layout and the error (`events.one_off_purchase_completed: text: …
+change): its languages are tags, each event type is one listed above, every
+field a template names, in any branch, is one of `billing.MessageData`, and
+every message renders against its event type's sample data for a customer of
+each language the document names. One that fails is refused alone, naming the
+event type or layout and the error (`events.one_off_purchase_completed: text: …
 can't evaluate field Total`). The version before it keeps serving (none: the
 defaults), and a `consistency.merchant_config.not_served` finding stays open
 until it serves.
