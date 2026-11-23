@@ -557,7 +557,7 @@
       "TestLeaseVersions/OR-J24-S30/a-window-closing-for-every-customer-renews-a-bounded-few-holds-per-sync"
     ],
     "OR-J24-S31": [
-      "TestLeaseVersions/OR-J24-S31/a-sync-that-ran-past-its-timeout-commits-nothing"
+      "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
     ],
     "OR-J24-S32": [
       "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-hold-apart"

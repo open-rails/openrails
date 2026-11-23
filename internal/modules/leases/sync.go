@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -73,6 +74,13 @@ const (
 	// or a renewal, well inside the commit guard: a want it has no time for
 	// is answered 503 service_unavailable and sent again, the renewals wait.
 	workBudget = 2500 * time.Millisecond
+	// lockBudget is how far into its transaction a sync may still wait for
+	// a lock, just under the work budget: lock_timeout bounds every wait by
+	// what is left of it, so a sync that cannot take its locks in time is
+	// answered a retryable 503 long before the commit guard. Past
+	// lockTimeoutStep of drift the timeout is cut to what is left.
+	lockBudget      = workBudget - 500*time.Millisecond
+	lockTimeoutStep = 250 * time.Millisecond
 	// A sync settles a prefix of its new usage: the items of at most
 	// maxSettleCustomers customers, in chunks of settleChunk customers, and
 	// no chunk after the first once settleBudget of real transaction time
@@ -202,15 +210,19 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	s.DB.EnsurePartitions(ctx, s.Now().UTC())
 	var out *billing.SyncLeasesResult
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		began := time.Now()
 		q := gen.New(tx)
 		// A sync's transaction is bounded: readers count a lease live for
 		// this much longer than its lifetime.
 		if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "transaction_timeout", Value: strconv.Itoa(int(limits.SyncTimeout / time.Millisecond)), IsLocal: true}); err != nil {
 			return err
 		}
+		if err := setLockTimeout(ctx, q, lockBudget); err != nil {
+			return err
+		}
 		now := s.Now().UTC().Truncate(time.Microsecond)
 		d := s.DB.NewWithPgxTx(tx)
-		run := &syncRun{Syncer: s, ctx: ctx, q: q, d: d, merchant: mid.UUID(), now: now, p: p,
+		run := &syncRun{Syncer: s, ctx: ctx, q: q, d: d, merchant: mid.UUID(), now: now, p: p, began: began, lockTimeout: lockBudget,
 			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d, func() time.Time { return now }), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
 				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(u.Currency)}]
 			}}
@@ -220,7 +232,56 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 		}
 		return run.withinTimeout()
 	})
+	if lockTimedOut(err) {
+		return nil, errLockBudget
+	}
 	return out, err
+}
+
+// errLockBudget answers a sync that could not take its locks within
+// lockBudget: it committed nothing and is sent again.
+var errLockBudget = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
+
+// lockTimedOut reports a statement that waited out lock_timeout.
+func lockTimedOut(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "55P03"
+}
+
+func setLockTimeout(ctx context.Context, q *gen.Queries, d time.Duration) error {
+	_, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "lock_timeout", Value: strconv.FormatInt(max(d.Milliseconds(), 1), 10), IsLocal: true})
+	return err
+}
+
+// lockWaiting takes the customer locks a sync waits for, in the order
+// given, within lockBudget of the transaction's real time: before a wait,
+// lock_timeout is cut to what is left once that has drifted lockTimeoutStep
+// below it, and set back after, so later statements are not held to the
+// remainder.
+func (r *syncRun) lockWaiting(ids []uuid.UUID) error {
+	for _, id := range ids {
+		left := lockBudget - time.Since(r.began)
+		if left <= 0 {
+			return errLockBudget
+		}
+		if left < r.lockTimeout-lockTimeoutStep {
+			if err := setLockTimeout(r.ctx, r.q, left); err != nil {
+				return err
+			}
+			r.lockTimeout = left
+		}
+		if err := db.EnsureCustomerRowQ(r.ctx, r.q, r.merchant, id); err != nil {
+			return err
+		}
+		if _, err := r.q.LockCustomerForSpend(r.ctx, gen.LockCustomerForSpendParams{MerchantID: r.merchant, ID: id}); err != nil {
+			return err
+		}
+	}
+	if r.lockTimeout == lockBudget {
+		return nil
+	}
+	r.lockTimeout = lockBudget
+	return setLockTimeout(r.ctx, r.q, lockBudget)
 }
 
 // pastBudget reports a sync past budget, by the transaction's real elapsed
@@ -266,6 +327,10 @@ type syncRun struct {
 	money    *money.MoneyService
 	admitter *admission.Admitter
 	failed   func(billing.LeaseUsage) []money.FailedUsageWindow
+	// began is the transaction's start by the real clock, and lockTimeout
+	// the lock_timeout in force.
+	began       time.Time
+	lockTimeout time.Duration
 
 	lease    gen.BillingLease
 	live     bool
@@ -690,13 +755,8 @@ func (r *syncRun) lockCustomers() error {
 		}
 	}
 	slices.SortFunc(ids, compareUUID)
-	for _, id := range ids {
-		if err := db.EnsureCustomerRowQ(r.ctx, r.q, r.merchant, id); err != nil {
-			return err
-		}
-		if _, err := r.q.LockCustomerForSpend(r.ctx, gen.LockCustomerForSpendParams{MerchantID: r.merchant, ID: id}); err != nil {
-			return err
-		}
+	if err := r.lockWaiting(ids); err != nil {
+		return err
 	}
 	slices.SortFunc(extra, compareUUID)
 	for _, id := range extra {

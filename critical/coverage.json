@@ -721,7 +721,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync held past its timeout commits nothing and renews nothing, and answers a retryable error whether the transaction timeout or the commit guard stopped it; its retry settles once"
+      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",

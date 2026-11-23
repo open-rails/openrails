@@ -5,7 +5,6 @@ package critical_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -649,7 +648,7 @@ func TestLeaseVersions(t *testing.T) {
 		require.Len(t, retired, len(customers), "the next syncs renew the rest")
 	})
 
-	t.Run("OR-J24-S31/a-sync-that-ran-past-its-timeout-commits-nothing", func(t *testing.T) {
+	t.Run("OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
@@ -664,8 +663,8 @@ func TestLeaseVersions(t *testing.T) {
 		before := lastSync()
 		w.clock.Advance(time.Second)
 		// Another transaction holds the customer's spend lock past the sync's
-		// timeout: the server's transaction_timeout stops the sync waiting for
-		// it, or, were that not enforced, the commit guard refuses it after.
+		// timeout: the sync gives up waiting well inside its work budget,
+		// before the commit guard, and is answered a retryable 503.
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(context.Background()) }()
@@ -673,6 +672,7 @@ func TestLeaseVersions(t *testing.T) {
 			w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		unlocked := make(chan struct{})
+		started := time.Now()
 		unlock := time.AfterFunc(limits.SyncTimeout+time.Second, func() {
 			_ = tx.Rollback(context.Background())
 			close(unlocked)
@@ -680,12 +680,11 @@ func TestLeaseVersions(t *testing.T) {
 		defer unlock.Stop()
 		items := numbered(1, usageInput(customer, "slow", 1))
 		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
-		require.Error(t, err, "the sync never commits")
+		require.Less(t, time.Since(started), limits.SyncTimeout-time.Second, "the sync failed fast, before the commit guard")
 		var failure *billing.StatusError
-		if errors.As(err, &failure) {
-			require.True(t, failure.Status >= http.StatusInternalServerError || failure.Status == http.StatusTooManyRequests,
-				"a gate takes the answer as OpenRails unreachable and syncs again: %v", err)
-		}
+		require.ErrorAs(t, err, &failure, "the sync never commits")
+		require.Equal(t, http.StatusServiceUnavailable, failure.Status, "a gate takes the answer as OpenRails unreachable and sends the usage again")
+		require.Equal(t, billing.CodeServiceUnavailable, failure.Code)
 		<-unlocked
 		require.Equal(t, before, lastSync(), "the lease was not renewed")
 		balance(t, w.alpha, customer, 1000, 0, 1000)

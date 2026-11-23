@@ -166,7 +166,12 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	f.calls++
 	if f.reject != 0 {
-		writeFakeError(w, f.reject, "fake_rejected", "rejected")
+		code := "fake_rejected"
+		if f.reject == http.StatusServiceUnavailable {
+			// As a sync that could not take its locks, or commit, in time.
+			code = billing.CodeServiceUnavailable
+		}
+		writeFakeError(w, f.reject, code, "rejected")
 		return
 	}
 	f.applied = append(f.applied, p.Applied)

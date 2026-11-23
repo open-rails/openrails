@@ -3760,6 +3760,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "pgconn": "github.com/jackc/pgx/v5/pgconn",
       "reflect": "reflect",
       "retention": "github.com/open-rails/openrails/internal/retention",
       "sha256": "crypto/sha256",

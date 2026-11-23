@@ -24,11 +24,11 @@ batch job calls it directly with `usage` alone.
   new one. A sync renews its lease only within 10 seconds of its last one;
   `lease.live: false` says it had already ended and the sync renewed nothing.
   Its holds still count for 5 seconds more, longer than any sync runs: a sync
-  that would commit later is refused `503 service_unavailable` and changes
-  nothing, so retry it. A sync
-  with `close: true` settles its usage, returns every hold of the lease and ends
-  it, a dead lease's too. An ended lease answers wants `409 lease_not_held`, and
-  usage against it still settles, in full.
+  that would commit later, or cannot take its customers' locks within 2
+  seconds, is refused `503 service_unavailable` and changes nothing, so retry
+  it. A sync with `close: true` settles its usage, returns every hold of the
+  lease and ends it, a dead lease's too. An ended lease answers wants
+  `409 lease_not_held`, and usage against it still settles, in full.
 - **Holds.** A want states `usage` or a host-stated `estimated_amount`, not both.
   Each hold an answer carries has a `version`, which rises whenever its size
   changes; the next sync reports in `applied` the latest version applied of each
