@@ -1338,6 +1338,8 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 			case wr.Error != nil && wr.Error.Code == billing.CodeLeaseNotHeld:
 				a.Retry = true
 				newValid = 1
+			case wantDeferred(wr):
+				a.Retry = true
 			case wr.Error != nil:
 				a = storedFailure(gen, wr.Status, *wr.Error)
 			case wr.LimitSet == nil:

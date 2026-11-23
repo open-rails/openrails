@@ -721,7 +721,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync that reaches its commit past its timeout less a margin commits nothing and answers service_unavailable; its retry settles once"
+      "name": "A sync held past its timeout commits nothing and renews nothing, and answers a retryable error whether the transaction timeout or the commit guard stopped it; its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -731,7 +731,7 @@
     {
       "id": "OR-J24-S33",
       "journey": "J24",
-      "name": "Usage while a limit's grant has lapsed is not enforced but counts in the limit's window, which the returning grant reads"
+      "name": "Usage while a limit's grant has lapsed is not enforced but counts in its window, which the returning grant reads; usage before any grant never counts toward a lifetime allowance"
     },
     {
       "id": "OR-J25-S01",

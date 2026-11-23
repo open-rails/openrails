@@ -406,8 +406,9 @@ func (c Customer) claims(ctx context.Context, defs []Definition, meters map[stri
 // would open (Opens). A limit the customer is not subject to is Ungranted
 // with no capacity: settled usage counts there whether or not a grant gives
 // capacity, so a grant that lapses and returns finds the window's usage. A
-// rate limit drains at a capacity, so an ungranted one counts only in the
-// row a grant left, at the capacity it stored.
+// lifetime or rate limit has one row that never resets, so an ungranted one
+// counts only in the row an earlier grant left (a rate limit draining at
+// the capacity it stored): usage before any grant never exhausts it.
 func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Claim, error) {
 	c.Now = c.Now.UTC()
 	capacities, err := c.capacities(ctx)
@@ -425,7 +426,7 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 		if s, ok := latest[def.Key]; ok {
 			newest = &s
 		}
-		if !granted && def.Reset.Kind == catalog.ResetRate && newest == nil {
+		if !granted && (def.Reset.Kind == catalog.ResetRate || def.Reset.Kind == catalog.ResetLifetime) && newest == nil {
 			continue
 		}
 		w, err := c.window(ctx, def, newest)

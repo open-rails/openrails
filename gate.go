@@ -575,6 +575,12 @@ func overloaded(status int) bool {
 	return status >= 500 || status == http.StatusTooManyRequests
 }
 
+// wantDeferred reports a want the sync had no time for: it is sent again
+// with the next sync, neither a refusal nor OpenRails unreachable.
+func wantDeferred(wr billing.LeaseWantResult) bool {
+	return wr.Error != nil && wr.Status == http.StatusServiceUnavailable && wr.Error.Code == billing.CodeServiceUnavailable
+}
+
 // wantFailure is a want's own error as its requests see it.
 func wantFailure(status int, details billing.ErrorDetails) wantAnswer {
 	err := &billing.StatusError{Status: status, ErrorDetails: details}

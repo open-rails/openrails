@@ -43,6 +43,7 @@ type fakeSync struct {
 	noHolds   bool
 	block     chan struct{}
 	capHeld   int
+	deferred  int // wants answered 503 service_unavailable, as by a sync out of time
 	dead      map[billing.LeaseID]bool
 	calls     int
 	wants     int
@@ -233,6 +234,12 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, want := range p.Wants {
 		f.wants++
+		if f.deferred > 0 {
+			f.deferred--
+			res.Wants = append(res.Wants, billing.LeaseWantResult{Status: http.StatusServiceUnavailable,
+				Error: &billing.ErrorDetails{Code: billing.CodeServiceUnavailable, Message: "out of time"}})
+			continue
+		}
 		touched[want.CustomerID] = true
 		res.Wants = append(res.Wants, f.want(p.LeaseID, want, committed))
 	}
@@ -553,6 +560,27 @@ func TestGateWaitsOutCapacityHeld(t *testing.T) {
 		}
 		if ticket.Allowed() || ticket.Refusal().DenyCode != billing.DenyCapacityHeld {
 			t.Fatalf("a request whose context ends is refused capacity_held: %+v", ticket.Refusal())
+		}
+	})
+}
+
+func TestGateSendsADeferredWantAgain(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 10})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		f.deferred = 2
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		lease := leaseOf(g)
+		mustAdmit(t, g, work(billing.CustomerID(uuid.New()), "deferred", 1))
+		f.mu.Lock()
+		wants := f.wants
+		f.mu.Unlock()
+		if wants != 3 {
+			t.Fatalf("a want the sync deferred is sent again until answered: %d sent", wants)
+		}
+		if leaseOf(g) != lease {
+			t.Fatal("a deferred want is no reason to start a new lease")
 		}
 	})
 }

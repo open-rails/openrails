@@ -888,7 +888,7 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 	for i, wr := range res.Wants {
 		e := entries[i]
 		e.answer = g.wantResultLocked(e, wr, live)
-		roll = roll || current && !params.Close && e.answer.retry && wr.Error != nil
+		roll = roll || current && !params.Close && wr.Error != nil && wr.Error.Code == billing.CodeLeaseNotHeld
 	}
 	if params.Close && current {
 		// The closed lease returned every hold.
@@ -914,7 +914,7 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 // be one the answer applied: a gate never makes a hold of its own.
 func (g *localGate) wantResultLocked(e *pendingWant, wr billing.LeaseWantResult, live bool) wantAnswer {
 	switch {
-	case wr.Error != nil && wr.Error.Code == billing.CodeLeaseNotHeld:
+	case wr.Error != nil && wr.Error.Code == billing.CodeLeaseNotHeld, wantDeferred(wr):
 		return wantAnswer{retry: true}
 	case wr.Error != nil:
 		return wantFailure(wr.Status, *wr.Error)

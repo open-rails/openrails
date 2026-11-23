@@ -508,7 +508,8 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 // shrinks, and an idle one shrinks toward one request. Before a fixed window
 // closes, an active hold gets its next window's hold. Only the holds of
 // customers the sync locked are touched, and at most maxRenewals of them,
-// most urgent first; the rest wait for later syncs.
+// most urgent first, while the sync is within its work budget; the rest wait
+// for later syncs.
 func (r *syncRun) renew() error {
 	tasks, err := r.rank(func(k holdKey) bool { return r.locked[k.customer] })
 	if err != nil {
@@ -520,6 +521,9 @@ func (r *syncRun) renew() error {
 		return cmp.Or(compareUUID(a.key.customer, b.key.customer), strings.Compare(a.key.limitSet, b.key.limitSet), compareTasks(a, b))
 	})
 	for _, t := range tasks {
+		if over, err := r.pastBudget(); err != nil || over {
+			return err
+		}
 		if t.hold == nil {
 			if err := r.rollAhead(t.key); err != nil {
 				return err

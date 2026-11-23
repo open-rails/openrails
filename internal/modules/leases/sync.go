@@ -69,6 +69,10 @@ const (
 	// commitMargin is how far inside limits.SyncTimeout a sync must reach its
 	// commit; one that ran longer is refused and retried.
 	commitMargin = time.Second
+	// workBudget is how far into its transaction a sync still starts a want
+	// or a renewal, well inside the commit guard: a want it has no time for
+	// is answered 503 service_unavailable and sent again, the renewals wait.
+	workBudget = 2500 * time.Millisecond
 )
 
 // Syncer syncs leases of the context's merchant.
@@ -209,6 +213,22 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 		return run.withinTimeout()
 	})
 	return out, err
+}
+
+// pastBudget reports a sync past its work budget, by the transaction's real
+// elapsed time.
+func (r *syncRun) pastBudget() (bool, error) {
+	elapsed, err := r.q.SyncElapsed(r.ctx)
+	return time.Duration(elapsed)*time.Microsecond > workBudget, err
+}
+
+// deferWant answers a want the sync had no time for: retryable, it comes
+// again with the next sync.
+func (r *syncRun) deferWant(i int) {
+	param := fmt.Sprintf("wants[%d]", i)
+	r.result.Wants[i] = billing.LeaseWantResult{Status: http.StatusServiceUnavailable, Error: &billing.ErrorDetails{
+		Type: api.TypeForCode(http.StatusServiceUnavailable, billing.CodeServiceUnavailable), Code: billing.CodeServiceUnavailable, Param: &param,
+		Message: "the sync ran out of time before this want; send it with the next sync"}}
 }
 
 // withinTimeout is a sync's last statement: one that ran past its timeout
@@ -435,6 +455,14 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		return nil, err
 	}
 	for i := range r.p.Wants {
+		over, err := r.pastBudget()
+		if err != nil {
+			return nil, err
+		}
+		if over {
+			r.deferWant(i)
+			continue
+		}
 		if err := r.want(i); err != nil {
 			return nil, err
 		}

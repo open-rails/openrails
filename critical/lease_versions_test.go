@@ -5,6 +5,7 @@ package critical_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -74,6 +75,25 @@ limits:
     reset: {kind: fixed, window_seconds: 60, anchor: subscription}
     rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
 products:
+  metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
+`
+
+// lapsePlan counts work units toward a daily first-use quota and a
+// lifetime allowance.
+const lapsePlan = `schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+limits:
+  quota:
+    unit: units
+    reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  ever:
+    unit: units
+    reset: {kind: lifetime}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+products:
+  plan: {display_name: Plan, limits: {quota: "100", ever: "1000"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
@@ -622,21 +642,39 @@ func TestLeaseVersions(t *testing.T) {
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
 		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
-		// Another transaction holds the customer's spend lock until the sync,
-		// waiting for it, would commit inside its timeout but past its margin
-		// (one second).
+		lastSync := func() time.Time {
+			var at time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT last_sync_at FROM "+pgx.Identifier{w.schema, "leases"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
+				w.alpha.MerchantID().UUID(), lease.UUID()).Scan(&at))
+			return at
+		}
+		before := lastSync()
+		w.clock.Advance(time.Second)
+		// Another transaction holds the customer's spend lock past the sync's
+		// timeout: the server's transaction_timeout stops the sync waiting for
+		// it, or, were that not enforced, the commit guard refuses it after.
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
 			w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
-		unlock := time.AfterFunc(limits.SyncTimeout-700*time.Millisecond, func() { _ = tx.Rollback(context.Background()) })
+		unlocked := make(chan struct{})
+		unlock := time.AfterFunc(limits.SyncTimeout+time.Second, func() {
+			_ = tx.Rollback(context.Background())
+			close(unlocked)
+		})
 		defer unlock.Stop()
 		items := numbered(1, usageInput(customer, "slow", 1))
 		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
-		failure := requireCode(t, err, billing.CodeServiceUnavailable)
-		require.Equal(t, http.StatusServiceUnavailable, failure.Status)
+		require.Error(t, err, "the sync never commits")
+		var failure *billing.StatusError
+		if errors.As(err, &failure) {
+			require.True(t, failure.Status >= http.StatusInternalServerError || failure.Status == http.StatusTooManyRequests,
+				"a gate takes the answer as OpenRails unreachable and syncs again: %v", err)
+		}
+		<-unlocked
+		require.Equal(t, before, lastSync(), "the lease was not renewed")
 		balance(t, w.alpha, customer, 1000, 0, 1000)
 		out := settleUsage(t, w.alpha, lease, items...)
 		require.EqualValues(t, 1, out.Usage.ThroughN, "the retry settles what the refused sync rolled back")
@@ -664,24 +702,33 @@ func TestLeaseVersions(t *testing.T) {
 
 	t.Run("OR-J24-S33/usage-while-a-grant-lapsed-counts-once-it-returns", func(t *testing.T) {
 		w := newWorld(t)
-		applyLimits(t, w.alpha, unitPlan)
+		applyLimits(t, w.alpha, lapsePlan)
 		customer := billing.CustomerID(uuid.New())
+		// Before any grant the usage counts in the quota's window, which
+		// tiles the clock, but never in a lifetime allowance no grant opened:
+		// a late buyer does not start exhausted.
+		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "before", 5))...)
 		grantLimitProduct(t, w.alpha, customer, "plan", 1)
+		require.EqualValues(t, 5, customerLimit(t, w.alpha, customer, "quota").Used)
+		require.Zero(t, customerLimit(t, w.alpha, customer, "ever").Used)
 		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "granted", 10))...)
-		require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, "quota").Used)
+		require.EqualValues(t, 15, customerLimit(t, w.alpha, customer, "quota").Used)
+		require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, "ever").Used)
 		w.clock.Advance(2 * time.Hour)
 		page, err := w.alpha.ListCustomerLimits(t.Context(), customer)
 		require.NoError(t, err)
 		require.NotContains(t, limitKeys(page.Items), "quota", "a customer reads only the limits it is granted")
-		// While the grant has lapsed nothing enforces the limit, and its
-		// window still counts the usage.
+		require.NotContains(t, limitKeys(page.Items), "ever")
+		// While the grant has lapsed nothing enforces the limits, and their
+		// windows still count the usage.
 		_, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{workWant(customer, 500)}}))
 		require.Nil(t, refusal)
 		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "lapsed", 30))...)
 		grantLimitProduct(t, w.alpha, customer, "plan", 24)
 		quota := customerLimit(t, w.alpha, customer, "quota")
 		require.EqualValues(t, 100, quota.Capacity)
-		require.EqualValues(t, 40, quota.Used, "the window kept counting while the grant lapsed")
+		require.EqualValues(t, 45, quota.Used, "the window kept counting while the grant lapsed")
+		require.EqualValues(t, 40, customerLimit(t, w.alpha, customer, "ever").Used, "so did the lifetime row the first grant opened")
 	})
 }
 
