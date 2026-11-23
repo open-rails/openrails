@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	httpserver "github.com/open-rails/openrails/server/internal/http"
 	"github.com/open-rails/openrails/server/internal/operator"
 	admin "github.com/open-rails/openrails/server/web/console"
+	paypage "github.com/open-rails/openrails/web/pay"
 )
 
 // The configuration family of a standalone server, defined in internal/config
@@ -69,7 +71,9 @@ type Config struct {
 	// Engine is the engine's configuration, as any host passes to
 	// openrails.New. The server's merchants are provisioned at run time, each
 	// with its AuthKit group, and manage their catalogs through the API or
-	// openrails catalog apply: a declared merchant's Issuer is refused.
+	// openrails catalog apply: a declared merchant's Issuer is refused. Its
+	// CheckoutOrigin is served by Host, and must also be apart from AuthKit's
+	// issuer and public URLs.
 	Engine openrails.Config
 
 	// Auth is the server's AuthKit, as AuthKit documents its configuration:
@@ -84,8 +88,8 @@ type Config struct {
 	// resource's scopes, the enabled console's OAuth client (openrails-console),
 	// a 15-minute access-token lifetime unless
 	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
-	// (the engine's) and its HTTP mount. An empty client-IP posture takes the engine's TrustedProxies
-	// and CloudflareProxies. Hosted account policy belongs to the host.
+	// (the engine's) and its HTTP mount. An empty client-IP posture takes the
+	// engine's TrustedProxies. Hosted account policy belongs to the host.
 	Auth authkit.Config
 	// LocalSignIn serves sign-in to the server's own accounts (password,
 	// passwordless, registration). Off, the default, people sign in at a
@@ -108,11 +112,8 @@ type Config struct {
 	RouteGroups openrails.RouteGroups
 	// AdminConsole controls the console at /admin and declares app sign-in
 	// methods. Nil keeps it on; Disabled omits it. LocalSignIn is independent.
+	// Alert links point at it.
 	AdminConsole *AdminConsole
-	// CheckoutOrigin is the origin (https://pay.example.com) the server
-	// serves its payment page on, by Host; orders then take a pay URL. It
-	// must be an origin of its own. Empty serves none.
-	CheckoutOrigin string
 
 	// Addr is where Run and Serve listen; empty is ":3053".
 	Addr string
@@ -131,7 +132,8 @@ type Config struct {
 // Deps is everything a standalone server reaches outside its process.
 type Deps struct {
 	// Engine is what openrails.New takes. AuthKit's tables live in the same
-	// database.
+	// database. Nil CheckoutAssets serves the payment page build embedded in
+	// this module, when the binary was built with one.
 	Engine openrails.Deps
 	// Auth is what the server's AuthKit reaches: its email and SMS senders,
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
@@ -147,10 +149,6 @@ type Deps struct {
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
-	// PaymentPageAssets is a host-built payment page (web/pay's
-	// Vite build, rooted at index.html). Nil uses the build embedded in this
-	// module, when the binary was built with one.
-	PaymentPageAssets fs.FS
 	// ConsoleAssets is a built admin console rooted at index.html. Nil uses
 	// the console build embedded in the binary. Ignored when the console is disabled.
 	ConsoleAssets fs.FS
@@ -190,14 +188,16 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err := controlplane.RequireDefaultTenant(cfg.Auth); err != nil {
 		return nil, err
 	}
-	for slug, m := range cfg.Engine.Merchants {
+	for _, m := range cfg.Engine.Merchants {
 		if m.Issuer != "" {
-			return nil, fmt.Errorf("server: Engine.Merchants[%q].Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", slug)
+			return nil, fmt.Errorf("server: Engine.Merchants %q's Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", m.Slug)
 		}
 	}
-	origin, err := checkoutOrigin(cfg)
-	if err != nil {
+	if err := checkCheckoutOrigin(cfg); err != nil {
 		return nil, err
+	}
+	if cfg.Engine.CheckoutOrigin != "" && deps.Engine.CheckoutAssets == nil {
+		deps.Engine.CheckoutAssets = paypage.FS()
 	}
 	if deps.Engine.UserInfo != nil {
 		return nil, errors.New("server: Engine.UserInfo reads one embedded host's directory; a standalone server's merchants' customers are AuthKit's, pushed by their issuers over SCIM")
@@ -267,12 +267,16 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if consoleEnabled && consoleAssets == nil {
 		consoleAssets = admin.FS()
 	}
+	checkout, page := eng.CheckoutPage()
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
 		CustomerAdmissionPolicy: deps.CustomerAdmissionPolicy,
-		CheckoutOrigin:          origin, PaymentPageAssets: paymentPageAssets(deps.PaymentPageAssets), ConsoleAssets: consoleAssets,
+		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
+	}
+	if consoleEnabled {
+		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicBillingBaseURL, "/") + hostconfig.ConsolePath)
 	}
 	return s, nil
 }

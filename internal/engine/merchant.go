@@ -19,9 +19,6 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDecl
 		return billing.MerchantID{}, fmt.Errorf("openrails: app database not initialized")
 	}
 	conf := a.Config
-	if conf == nil || conf.DB == nil {
-		return billing.MerchantID{}, fmt.Errorf("openrails: config/db is required")
-	}
 	directory := a.Runtime.Merchants
 	if directory == nil {
 		return billing.MerchantID{}, fmt.Errorf("openrails: merchant configuration is not wired")
@@ -41,7 +38,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDecl
 		Database:   a.Runtime.DB,
 		Merchants:  directory,
 		Slug:       m.Slug,
-		Merchant:   m,
+		Merchant:   m.MerchantDocument,
 		Insert:     m.Binding == nil,
 	})
 	if err != nil {

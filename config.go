@@ -33,39 +33,35 @@ type (
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
 	RouteGroups = config.RouteGroups
 	// MerchantDeclaration is one entry of Config.Merchants: a merchant the
-	// engine provisions on start, its catalog, and the issuer whose
+	// engine provisions on start, its document, and the issuer whose
 	// credentials are bound to it.
 	MerchantDeclaration = config.MerchantDeclaration
-	// MerchantSecrets is MerchantDeclaration.Secrets: the merchant's own
+	// MerchantDocument is MerchantDeclaration's document: the merchant's slug
+	// and configuration, as ParseMerchantDocument reads it.
+	MerchantDocument = config.MerchantDocument
+	// MerchantSecrets is MerchantDocument.Secrets: the merchant's own
 	// credentials (secrets.scim_token).
 	MerchantSecrets = config.MerchantSecrets
-	// AlertWebhookConfig is one of MerchantDeclaration.AlertWebhooks: where
+	// AlertWebhookConfig is one of MerchantDocument.AlertWebhooks: where
 	// the merchant's operational alerts are posted.
 	AlertWebhookConfig = config.AlertWebhookConfig
-	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
+	// PSPConfig is one PSP of MerchantDocument.PSPs: the merchant's account
 	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
-	// PSPs is MerchantDeclaration.PSPs: the merchant's PSPs by key.
+	// PSPs is MerchantDocument.PSPs: the merchant's PSPs by key.
 	PSPs = config.PSPs
-	// Custodians is MerchantDeclaration.Custodians: its custodians by key.
+	// Custodians is MerchantDocument.Custodians: its custodians by key.
 	Custodians = config.Custodians
-	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: the
+	// CustodianConfig is one custodian of MerchantDocument.Custodians: the
 	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
 
 	// DatabaseConfig is Config.Database: the Postgres schemas New creates,
-	// upgrades or validates when SkipMigrations is enabled.
+	// upgrades or validates when SkipMigrations is enabled, and the lease
+	// pool's size.
 	DatabaseConfig = config.DatabaseConfig
-	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
-	// Deps.Postgres is nil.
-	DBConfig = config.DBConfig
-	// RedisConfig is Config.Redis: the Redis connection OpenRails opens when
-	// Deps.Redis is nil.
-	RedisConfig = config.RedisConfig
 	// LoggerConfig is Config.Logger: the log level.
 	LoggerConfig = config.LoggerConfig
-	// SMTPConfig is Config.SMTP: the built-in SMTP sender.
-	SMTPConfig = config.SMTPConfig
 	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
 	RateLimitsConfig = config.RateLimitsConfig
 	// RateLimit is one bucket's requests per minute.
@@ -76,8 +72,7 @@ type (
 	DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig
 	// CaptchaConfig is Config.Captcha: the captcha account.
 	CaptchaConfig = config.CaptchaConfig
-	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails
-	// opens when Deps.Vault is nil.
+	// VaultConfig is Config.Vault: the mounts OpenRails uses on Deps.Vault.
 	VaultConfig = config.VaultConfig
 	// SolanaConfig is Config.Solana: the deployment's Solana crankers.
 	SolanaConfig = config.SolanaConfig
@@ -192,9 +187,9 @@ const (
 // authkit/auth sentinel.
 var ErrUnauthenticated = billingauth.ErrUnauthenticated
 
-// ParseMerchantDeclaration reads an entry of Config.Merchants from one YAML
-// document that names its merchant with a required slug, the entry's key,
-// refusing unknown fields. Issuer is set in code.
-func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
-	return config.ParseMerchantDeclaration(raw)
+// ParseMerchantDocument reads a merchant's document from YAML: a required
+// slug and the configuration beside it, refusing unknown fields. A
+// MerchantDeclaration's Issuer and Binding are set in code.
+func ParseMerchantDocument(raw []byte) (MerchantDocument, error) {
+	return config.ParseMerchantDocument(raw)
 }

@@ -1290,6 +1290,15 @@
     "OR-J04-S71": [
       "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
     ],
+    "OR-J04-S72": [
+      "TestHostDeps/OR-J04-S72/boots-on-a-pool-without-a-connection-string"
+    ],
+    "OR-J04-S73": [
+      "TestHostDeps/OR-J04-S73/a-kv-mount-without-a-vault-client-is-refused-and-reported"
+    ],
+    "OR-J04-S74": [
+      "TestHostDeps/OR-J04-S74/a-slug-declared-twice-provisions-neither-entry"
+    ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
     ],

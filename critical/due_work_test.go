@@ -44,9 +44,9 @@ func stripePastDueMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *b
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")
@@ -388,12 +388,12 @@ func TestDueWork(t *testing.T) {
 	t.Run("OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-			m := w.cfg.Merchants["alpha"]
+			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs = openrails.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
 				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			}
-			w.cfg.Merchants["alpha"] = m
+			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		listed, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)

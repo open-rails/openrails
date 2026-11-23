@@ -14,6 +14,7 @@ guards() {
   bash scripts/migration-prefix-collision.sh
   bash scripts/check_business_time.sh
   bash scripts/check-one-pull-entry.sh
+  bash scripts/check-borrowed-connections.sh
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   gofmt_clean

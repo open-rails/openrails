@@ -583,9 +583,9 @@ func TestGate(t *testing.T) {
 
 	t.Run("OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units", func(t *testing.T) {
 		a := newAuthorityWorld(t, func(w *world) {
-			alpha := w.cfg.Merchants["alpha"]
+			alpha := cfgMerchant(w.cfg, "alpha")
 			alpha.UsageGateSafeSpend = ptr(true)
-			w.cfg.Merchants["alpha"] = alpha
+			setCfgMerchant(&w.cfg, "alpha", alpha)
 		})
 		cfg, err := a.alphaRemote.GetMerchantConfiguration(t.Context())
 		require.NoError(t, err)

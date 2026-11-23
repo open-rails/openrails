@@ -13,7 +13,7 @@ const BootstrapManifestVersion = 1
 
 // CheckManifestDeclaration vets one manifest declaration as the
 // configuration API would and normalizes its PSPs in place.
-func CheckManifestDeclaration(slug string, t config.MerchantDeclaration) error {
+func CheckManifestDeclaration(slug string, t config.MerchantDocument) error {
 	// The configuration API's own validator: a manifest cannot declare
 	// settings the API would refuse.
 	if _, err := merchantconfig.Normalize(t.DisplayName, t.MerchantSettings); err != nil {

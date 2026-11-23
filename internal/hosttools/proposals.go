@@ -62,7 +62,7 @@ func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx conte
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}

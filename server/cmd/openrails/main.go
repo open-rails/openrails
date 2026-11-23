@@ -14,7 +14,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/buildinfo"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
@@ -25,7 +24,9 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	err := newRootCmd().Execute()
+	closeCLI()
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -156,7 +157,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// listening, which is what "not ready" means to a probe.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
+	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
@@ -164,6 +165,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+	defer closeDeps()
 	closeOnError := func(err error) error {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -208,7 +210,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 	// The same server as run-server, without a listener: AuthKit's jobs run
 	// in the same fleet.
-	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
+	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
@@ -216,6 +218,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
+	defer closeDeps()
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -245,7 +248,7 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	if err := controlplane.RequireDefaultTenant(host.Auth); err != nil {
 		return err
 	}
-	database, err := openCLIDB(ctx, host.Config)
+	database, err := openCLIDB(ctx)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}

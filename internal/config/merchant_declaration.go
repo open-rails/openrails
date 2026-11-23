@@ -18,29 +18,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// MerchantDeclaration declares one merchant: an entry of Config.Merchants or
-// of a standalone merchant manifest.
-type MerchantDeclaration struct {
-	// Slug is the merchant's name: slug: in a single-merchant file, the
-	// entry's key in Config.Merchants and in a manifest, which refuses the
-	// field.
-	Slug string `yaml:"-"`
-	// Binding selects an already adopted merchant by immutable ID and tenant.
-	// Only trusted host code sets this; merchant documents cannot claim it.
-	// Nil retains the unbound configuration mode.
-	Binding *billing.MerchantBinding `yaml:"-" json:"-"`
-	// Issuer binds the credentials of one issuer to this merchant: every
-	// request whose Identity names it as issuer, and whose credential is
-	// bound to no scope, acts on this merchant, as its customer or its
-	// staff. It is the host's own auth's issuer (AuthKit's Token.Issuer)
-	// where the host serves this one merchant with it: an absolute https URL
-	// (http on a loopback host), declared by one merchant of an engine at
-	// most. Its users are the merchant's own customers. Set it in the host's
-	// own code or configuration, per engine; a merchant file never carries
-	// it, since several hosts with their own issuers may share one. Empty
-	// binds by scope only: a credential must be bound to the merchant's
-	// group (authkit/auth Bound), whose id is the merchant's.
-	Issuer      string `yaml:"-"`
+// MerchantDocument is a merchant's configuration as a file or a manifest
+// entry holds it: its slug and the configuration beside it.
+type MerchantDocument struct {
+	// Slug is the merchant's name. A manifest entry's is its key, and it
+	// refuses the field.
+	Slug        string `yaml:"slug,omitempty"`
 	DisplayName string `yaml:"display_name"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
@@ -59,6 +42,26 @@ type MerchantDeclaration struct {
 	AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 	// Secrets are the merchant's own credentials.
 	Secrets MerchantSecrets `yaml:"secrets,omitempty"`
+}
+
+// MerchantDeclaration declares one merchant of Config.Merchants: its
+// document and what only the host's code sets.
+type MerchantDeclaration struct {
+	MerchantDocument `yaml:",inline"`
+	// Issuer binds the credentials of one issuer to this merchant: every
+	// request whose Identity names it as issuer, and whose credential is
+	// bound to no scope, acts on this merchant, as its customer or its
+	// staff. It is the host's own auth's issuer (AuthKit's Token.Issuer)
+	// where the host serves this one merchant with it: an absolute https URL
+	// (http on a loopback host), declared by one merchant of an engine at
+	// most. Its users are the merchant's own customers. A document never
+	// carries it, since several hosts with their own issuers may share one.
+	// Empty binds by scope only: a credential must be bound to the merchant's
+	// group (authkit/auth Bound), whose id is the merchant's.
+	Issuer string `yaml:"-"`
+	// Binding selects an already adopted merchant by immutable ID and tenant.
+	// Nil provisions the merchant by its slug.
+	Binding *billing.MerchantBinding `yaml:"-"`
 }
 
 // AlertWebhookConfig is one destination for the merchant's operational
@@ -220,12 +223,6 @@ type CustodianConfig struct {
 	Secrets map[string]string `yaml:"secrets,omitempty"`
 }
 
-// merchantFile is the single-merchant document: the declaration and its slug.
-type merchantFile struct {
-	Slug                string `yaml:"slug"`
-	MerchantDeclaration `yaml:",inline"`
-}
-
 // retiredDeclarationKeys are the keys a merchant declaration no longer takes
 // and what became of each.
 var retiredDeclarationKeys = []struct{ key, fate string }{
@@ -246,44 +243,43 @@ func RetiredDeclarationKey(doc map[string]any) (string, bool) {
 	return "", false
 }
 
-// ParseMerchantDeclaration parses one merchant YAML document, which names its
+// ParseMerchantDocument parses one merchant YAML document, which names its
 // merchant with a required slug. Unknown fields are refused, so a typo fails
 // loudly instead of declaring a merchant with no PSPs.
-func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
+func ParseMerchantDocument(raw []byte) (MerchantDocument, error) {
 	var probe map[string]any
 	if yaml.Unmarshal(raw, &probe) == nil {
 		if retired, ok := RetiredDeclarationKey(probe); ok {
-			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %s", retired)
+			return MerchantDocument{}, fmt.Errorf("parse merchant document: %s", retired)
 		}
 		if _, ok := probe["issuer"]; ok {
-			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: issuer is not a merchant file's: each host sets MerchantDeclaration.Issuer in its own configuration")
+			return MerchantDocument{}, fmt.Errorf("parse merchant document: issuer is not a document's: each host sets MerchantDeclaration.Issuer in its own code")
 		}
 	}
-	var f merchantFile
-	if err := yaml.UnmarshalWithOptions(raw, &f, yaml.DisallowUnknownField()); err != nil {
-		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+	var m MerchantDocument
+	if err := yaml.UnmarshalWithOptions(raw, &m, yaml.DisallowUnknownField()); err != nil {
+		return MerchantDocument{}, fmt.Errorf("parse merchant document: %w", err)
 	}
-	if strings.TrimSpace(f.Slug) == "" {
-		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: slug is required")
+	if strings.TrimSpace(m.Slug) == "" {
+		return MerchantDocument{}, fmt.Errorf("parse merchant document: slug is required")
 	}
-	if err := billing.ValidateMerchantSlug(f.Slug); err != nil {
-		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+	if err := billing.ValidateMerchantSlug(m.Slug); err != nil {
+		return MerchantDocument{}, fmt.Errorf("parse merchant document: %w", err)
 	}
-	m := f.MerchantDeclaration
 	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
 		p, err := NormalizePSPDeclaration(key, m.PSPs[key])
 		if err != nil {
-			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+			return MerchantDocument{}, fmt.Errorf("parse merchant document: %w", err)
 		}
 		m.PSPs[key] = p
 	}
-	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
+	m.Slug = billing.NormalizeMerchantSlug(m.Slug)
 	return m, nil
 }
 
 // ConfigurationFields names what m sets beyond its merchant's slug: what
 // Vault holds when it is the source.
-func ConfigurationFields(m MerchantDeclaration) []string {
+func ConfigurationFields(m MerchantDocument) []string {
 	var out []string
 	if strings.TrimSpace(m.DisplayName) != "" {
 		out = append(out, "display_name")
@@ -316,7 +312,7 @@ var ErrDeclarationBesideVault = errors.New("Vault holds merchant configuration (
 
 // RefuseDeclarationBesideVault refuses m when Vault is the source and m
 // declares configuration, naming its fields.
-func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaration) error {
+func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDocument) error {
 	if MerchantConfigKVMount(cfg) == "" {
 		return nil
 	}
@@ -326,33 +322,41 @@ func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaratio
 	return nil
 }
 
-// DeclaredMerchants is cfg.Merchants in slug order, each named by its key,
-// after the checks that need no database. One entry's mistake refuses that
-// entry alone, reported in refused: a key that is not a slug, or a Slug that
-// is not its key, refuses the merchant; an Issuer that is not an absolute
+// DeclaredMerchants is cfg.Merchants in slug order, after the checks that
+// need no database. One entry's mistake refuses that entry alone, reported in
+// refused: a slug that is not one refuses the merchant, and a slug declared
+// twice refuses every entry declaring it; an Issuer that is not an absolute
 // https URL (http on a loopback host), or that another entry declares too, is
 // bound to no merchant. Each PSP is checked as its merchant is provisioned.
-func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degradation, err error) {
+func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degradation) {
+	bySlug := map[string][]int{}
+	for i, m := range cfg.Merchants {
+		if err := billing.ValidateMerchantSlug(m.Slug); err != nil {
+			refused = append(refused, Degradation{Field: fmt.Sprintf("merchants[%d]", i), Err: fmt.Errorf("%w; the merchant is not provisioned", err)})
+			continue
+		}
+		slug := billing.NormalizeMerchantSlug(m.Slug)
+		bySlug[slug] = append(bySlug[slug], i)
+	}
 	byIssuer := map[string][]string{}
-	for _, key := range slices.Sorted(maps.Keys(cfg.Merchants)) {
-		m := cfg.Merchants[key]
+	for _, slug := range slices.Sorted(maps.Keys(bySlug)) {
+		if entries := bySlug[slug]; len(entries) > 1 {
+			names := make([]string, len(entries))
+			for k, i := range entries {
+				names[k] = strconv.Itoa(i)
+			}
+			refused = append(refused, Degradation{Field: "merchants." + slug, Err: fmt.Errorf("declared by merchants[%s]: a slug names one merchant, so none is provisioned", strings.Join(names, "], merchants["))})
+			continue
+		}
+		m := cfg.Merchants[bySlug[slug][0]]
 		if m.Binding != nil {
 			binding := *m.Binding
 			m.Binding = &binding
 		}
-		slug := billing.NormalizeMerchantSlug(key)
-		if err := billing.ValidateMerchantSlug(key); err != nil {
-			refused = append(refused, Degradation{Field: "merchants." + key, Err: fmt.Errorf("%w; the merchant is not provisioned", err)})
-			continue
-		}
-		if m.Slug != "" && billing.NormalizeMerchantSlug(m.Slug) != slug {
-			refused = append(refused, Degradation{Field: "merchants." + key, Err: fmt.Errorf("Slug %q is not its key; the merchant is not provisioned", m.Slug)})
-			continue
-		}
 		m.Slug = slug
 		if m.Issuer = strings.TrimSpace(m.Issuer); m.Issuer != "" {
 			if err := validateIssuer(m.Issuer); err != nil {
-				refused = append(refused, Degradation{Field: "merchants." + key + ".issuer", Err: fmt.Errorf("%w; no credential is bound to the merchant by issuer", err)})
+				refused = append(refused, Degradation{Field: "merchants." + slug + ".issuer", Err: fmt.Errorf("%w; no credential is bound to the merchant by issuer", err)})
 				m.Issuer = ""
 			} else {
 				byIssuer[m.Issuer] = append(byIssuer[m.Issuer], slug)
@@ -360,15 +364,15 @@ func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degrad
 		}
 		// A PSP's omitted environment is its rail's real-money one. One that
 		// does not check is refused alone as its merchant is provisioned.
-		psps := make(map[string]PSPConfig, len(m.PSPs))
-		for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
-			p := m.PSPs[psp]
-			if normalized, err := NormalizePSPDeclaration(psp, p); err == nil {
-				p = normalized
-			}
-			psps[psp] = p
-		}
 		if m.PSPs != nil {
+			psps := make(map[string]PSPConfig, len(m.PSPs))
+			for _, psp := range slices.Sorted(maps.Keys(m.PSPs)) {
+				p := m.PSPs[psp]
+				if normalized, err := NormalizePSPDeclaration(psp, p); err == nil {
+					p = normalized
+				}
+				psps[psp] = p
+			}
 			m.PSPs = psps
 		}
 		out = append(out, m)
@@ -379,7 +383,7 @@ func DeclaredMerchants(cfg *Config) (out []MerchantDeclaration, refused []Degrad
 			out[i].Issuer = ""
 		}
 	}
-	return out, refused, nil
+	return out, refused
 }
 
 // validateIssuer accepts an issuer identifier as tokens carry it (RFC 8414

@@ -20,9 +20,9 @@ import (
 // lowAt600 is a merchant amount line of 6.00 USD-units and no runway line:
 // a balance is low at or under 599.
 func lowAt600(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.MerchantSettings.BalanceNotices = &billing.BalanceNoticeSettings{RunwayHours: ptr(0), LowAmounts: []billing.BalanceNoticeAmount{{Currency: "USD", Amount: 600}}}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // looks are the balance looks queued for customer.

@@ -9,11 +9,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
+	"github.com/open-rails/openrails/server/internal/hostdeps"
 	"github.com/open-rails/openrails/server/internal/operator"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +47,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 			c.close()
 		}
 	}()
-	c.db, err = openCLIDB(ctx, h.Config)
+	c.db, err = openCLIDB(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	c.cleanups = append(c.cleanups, pool.Close)
 	deps := authkit.Deps{Postgres: pool, KeySource: key}
 	if h.SMTP != nil {
-		sender, err := email.NewSMTP(*h.SMTP)
+		sender, err := hostdeps.NewEmailSender(*h.SMTP)
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +98,11 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 
 func (c *commandControlPlane) loadMerchants(ctx context.Context) error {
 	h := hostconfig.FromContext(ctx)
-	opened, err := merchantbootstrap.OpenMerchants(ctx, h.Config, c.db)
+	vault, err := cliVault(ctx)
+	if err != nil {
+		return err
+	}
+	opened, err := merchantbootstrap.OpenMerchants(ctx, h.Config, c.db, vault)
 	if err != nil {
 		return err
 	}
@@ -142,7 +146,11 @@ func (c *commandControlPlane) RestoreMerchant(ctx context.Context, id billing.Me
 func withCLIDirectory(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
 		cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
-		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
+		vault, err := cliVault(ctx)
+		if err != nil {
+			return err
+		}
+		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
 		if err != nil {
 			return err
 		}

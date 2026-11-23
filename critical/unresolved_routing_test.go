@@ -40,11 +40,11 @@ func armAlternateStripe(t *testing.T, w *world) *providerLedger {
 	wire := http.DefaultTransport.(*http.Transport).Clone()
 	t.Cleanup(wire.CloseIdleConnections)
 	w.deps.StripeTransport = accountWire{primary: w.deps.StripeTransport, alternate: loopbackWire{target: target, wire: wire}}
-	declaration := w.cfg.Merchants["alpha"]
+	declaration := cfgMerchant(w.cfg, "alpha")
 	declaration.CardVault = ""
 	declaration.PSPRouting = &[]billing.PSPRoutingRule{{Prefer: []string{"stripe", "alternate"}}}
 	declaration.PSPs["alternate"] = openrails.StripePSP{AccountID: "acct_other", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_alternate", WebhookSigningSecret: "whsec_alternate", PublishableKey: "pk_test_alternate"}.PSPConfig()
-	w.cfg.Merchants["alpha"] = declaration
+	setCfgMerchant(&w.cfg, "alpha", declaration)
 	return alternate
 }
 

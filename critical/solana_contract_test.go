@@ -200,9 +200,9 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		if option.fx != nil {
 			w.deps.FXTransport = option.fx
 		}
-		m := w.cfg.Merchants["alpha"]
+		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = openrails.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}
-		w.cfg.Merchants["alpha"] = m
+		setCfgMerchant(&w.cfg, "alpha", m)
 		if recurring {
 			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
 		}

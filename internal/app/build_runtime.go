@@ -31,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -156,10 +155,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		err         error
 	)
 	leaseConns := idempotencyLeaseConns
-	if cfg.DB != nil && cfg.DB.LeaseConns > 0 {
-		leaseConns, err = safecast.Convert[int32](cfg.DB.LeaseConns)
+	if cfg.Database.LeaseConns > 0 {
+		leaseConns, err = safecast.Convert[int32](cfg.Database.LeaseConns)
 		if err != nil {
-			return nil, fmt.Errorf("db.lease_conns %d exceeds the pool connection range: %w", cfg.DB.LeaseConns, err)
+			return nil, fmt.Errorf("database.lease_conns %d exceeds the pool connection range: %w", cfg.Database.LeaseConns, err)
 		}
 	}
 	var chain fs.FS
@@ -167,9 +166,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		database, chain = overrides.DB, overrides.Migrations
 	}
 	if database == nil {
-		if database, err = db.NewDB(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("failed to create db: %w", err)
-		}
+		return nil, fmt.Errorf("the database is required")
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
 	prepare := migrate.Apply
@@ -184,9 +181,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		releaseMigrationPool()
 	}
 	if err != nil {
-		if overrides == nil || database != overrides.DB {
-			_ = database.Close()
-		}
 		return nil, err
 	}
 	if overrides != nil && overrides.Notifications != nil {
@@ -196,15 +190,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		database.SetNotifications(overrides.Notifications)
 	}
 
-	redisOwned := false
 	if overrides != nil && !nilRedis(overrides.Redis) {
 		redisClient = overrides.Redis
-	} else {
-		redisClient, err = createRedisClient(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create redis client: %w", err)
-		}
-		redisOwned = redisClient != nil
 	}
 
 	// #788 Layer C: ONE rail resolution seam for the whole runtime. The
@@ -283,26 +270,17 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, err
 	}
 
-	// One sender for all of OpenRails' email: the host's, else Config.SMTP.
+	// One sender for all of OpenRails' email: the host's.
 	var sender config.EmailSender
-	var smtpErr error
-	if overrides != nil && overrides.EmailSender != nil {
+	if overrides != nil {
 		sender = overrides.EmailSender
-	} else if cfg.SMTP != nil {
-		smtp, err := email.NewSMTP(*cfg.SMTP)
-		if err != nil {
-			smtpErr = fmt.Errorf("%w; OpenRails sends no email", err)
-		} else {
-			sender = smtp
-		}
 	}
 	// Operator alerts and AuthKit still use the deployment's sender.
 	alertEmailSender := alerting.NewMailSender(sender, merchantconfig.NewStore(database))
 	alertService := alerting.NewService(alerting.Deps{
-		DB:               database,
-		Email:            alertEmailSender,
-		Clock:            clock,
-		DashboardBaseURL: alertingDashboardBaseURL(cfg),
+		DB:    database,
+		Email: alertEmailSender,
+		Clock: clock,
 	})
 
 	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
@@ -328,13 +306,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DB:            database,
 		leaseDB:       leaseDB,
 		RedisClient:   redisClient,
-		redisOwned:    redisOwned,
 		Config:        cfg,
 		Clock:         clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
-		// empty yields a resolver that trusts nothing. Cloudflare peers (ak#298)
-		// are trusted for X-Forwarded-For here exactly as AuthKit trusts them.
-		TrustedProxies: iputil.ParseTrustedProxies(append(append([]string(nil), cfg.TrustedProxies...), cfg.CloudflareProxies...)),
+		// empty yields a resolver that trusts nothing.
+		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		RailConfigs:    railConfigs,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
@@ -392,9 +368,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtimeRef = runtime
-	if smtpErr != nil {
-		runtime.Refuse("smtp", smtpErr)
-	}
 	if serviceInstances.HyperSwitchErr != nil {
 		runtime.Refuse("hyperswitch", serviceInstances.HyperSwitchErr)
 	}
@@ -539,20 +512,6 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-// createRedisClient opens the declared Redis. It does not wait for it: the
-// health monitor reports it, degraded until it answers.
-func createRedisClient(cfg *config.Config) (redis.UniversalClient, error) {
-	if cfg.Redis == nil {
-		return nil, nil
-	}
-	opts, err := config.RedisOptions(cfg.Redis)
-	if err != nil {
-		return nil, err
-	}
-	log.WithFields(log.Fields{"addr": opts.Addr, "tls": opts.TLSConfig != nil, "acl_user": opts.Username != ""}).Info("Redis declared")
-	return redis.NewClient(opts), nil
-}
-
 // nilRedis reports a missing client, including a nil pointer a host passed
 // as Deps.Redis.
 func nilRedis(c redis.UniversalClient) bool {
@@ -603,15 +562,6 @@ type servicesInstances struct {
 	DashboardService    *dashboard.Service
 	CopilotService      *copilot.Service
 	RailCustomerService *payments.RailCustomerService
-}
-
-// alertingDashboardBaseURL uses the independently configured admin destination.
-// Empty leaves alert links relative to the consuming console.
-func alertingDashboardBaseURL(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
 func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {

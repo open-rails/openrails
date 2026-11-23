@@ -25,7 +25,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billinga
 	// OpenRails-native rate-limiting + captcha, matching the base NewRoutes
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
-	var rateLimits *config.RateLimitsConfig
+	var rateLimits config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies
 	var store *captcha.ChallengeStore

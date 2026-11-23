@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -14,12 +15,13 @@ import (
 )
 
 // Deps is everything an embedded engine reaches outside its own process:
-// connections, credentials and test seams. Config is plain data. Auth is not
+// connections, credentials and test seams. Config is plain data. The host
+// opens and closes every connection; the engine closes none. Auth is not
 // here: it is supplied where routes are mounted (Routes.Auth); the engine
 // itself authenticates nobody.
 type Deps struct {
-	// Postgres is the host's pool; its role owns OpenRails' tables, which New
-	// creates or upgrades. Nil opens one from Config.DB.
+	// Postgres is the host's pool, required; its role owns OpenRails'
+	// tables, which New creates or upgrades.
 	Postgres *pgxpool.Pool
 	// PostgresSession is the direct connection configuration for a transaction-
 	// pooled Postgres. It connects to the same database and role without the
@@ -34,12 +36,12 @@ type Deps struct {
 	// a single-node, failover (Sentinel) or cluster client. The host owns it;
 	// OpenRails never closes it.
 	Redis redis.UniversalClient
-	// Vault is a borrowed, authenticated client; Config.Vault still names its
-	// mounts. The host owns its renewal; OpenRails never revokes it.
+	// Vault is an authenticated client (helpers/vault's Session.Client);
+	// Config.Vault names its mounts. The host keeps it logged in.
 	Vault *vaultapi.Client
 
-	// Email delivers OpenRails' email: billing receipts and alerts. Nil uses
-	// Config.SMTP.
+	// Email delivers OpenRails' email: billing receipts and alerts. Nil
+	// sends none.
 	Email EmailSender
 
 	// UserInfo is the host's directory (authkit/userinfo.Lookup, AuthKit's
@@ -53,6 +55,11 @@ type Deps struct {
 	// or durable remote delivery in the billing transaction. Nil disables this
 	// channel only; retained billing events are still recorded.
 	Notifications *NotificationChannel
+
+	// CheckoutAssets is the built payment page (web/pay) rooted at
+	// index.html, served on Config.CheckoutOrigin. Nil serves no page:
+	// orders still get pay URLs, for another process serving that origin.
+	CheckoutAssets fs.FS
 
 	// Test seams, refused beside a live PSP. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX

@@ -129,7 +129,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 // (Vault, or the manifest at its conventional path), not payment-provider
 // clients, workers, or standalone authentication infrastructure.
 func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, slug string) (*openrails.Client, func(), error) {
-	database, err := openCLIDB(ctx, cfg)
+	database, err := openCLIDB(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +142,11 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	if err != nil {
 		return nil, cleanup, err
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
+	vault, err := cliVault(ctx)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
 	if err != nil {
 		return nil, cleanup, err
 	}

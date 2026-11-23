@@ -24,8 +24,8 @@ const (
 // the background, and while reloads fail until it is MaxStale old. The zero
 // policy reads live.
 type ReadPolicy struct {
-	RefreshAfter time.Duration `yaml:"refresh_after" json:"refresh_after"`
-	MaxStale     time.Duration `yaml:"max_stale" json:"max_stale"`
+	RefreshAfter time.Duration
+	MaxStale     time.Duration
 }
 
 // ReadCache replaces the default policy of each Read it names.

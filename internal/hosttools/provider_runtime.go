@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"net/http"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type providerRuntime struct {
 type providerRuntimeOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
+	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID
 	// MerchantManifest is the parsed MODE-1 merchant manifest; nil reads
 	// MerchantManifestPath, and an empty path tries the conventional one.
@@ -44,10 +46,10 @@ type providerRuntimeOptions struct {
 
 func newProviderRuntime(ctx context.Context, opts providerRuntimeOptions) (*providerRuntime, func(), error) {
 	cfg := opts.Config
-	if cfg == nil || cfg.DB == nil {
+	if cfg == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	database, err := openEmbeddedDB(ctx, cfg, opts.PGXPool)
+	database, err := openEmbeddedDB(cfg, opts.PGXPool)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,7 +61,7 @@ func newProviderRuntime(ctx context.Context, opts providerRuntimeOptions) (*prov
 	}
 	// Rails arm as the server's pulls do: a declared account with a missing
 	// credential is a rail not armed, loudly.
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("merchant configuration unavailable, so no rail can be armed: %w", err)

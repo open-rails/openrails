@@ -101,7 +101,11 @@ func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug str
 	if strings.TrimSpace(resolution.Actor) == "" || resolution.Actor == "unknown" {
 		return fmt.Errorf("--actor is required")
 	}
-	application, err := app.Bootstrap(ctx, cfg)
+	pool, vault, err := cliDeps(ctx)
+	if err != nil {
+		return err
+	}
+	application, err := app.BootstrapWithOptions(ctx, cfg, &app.BootstrapOptions{PGXPool: pool, Vault: vault})
 	if err != nil {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
@@ -457,8 +461,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 }
 
 func withIntentsListDB(cmd *cobra.Command, merchantSlug string, fn func(ctx context.Context, database *db.DB) error) error {
-	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	database, err := openCLIDB(cmd.Context(), cfg)
+	database, err := openCLIDB(cmd.Context())
 	if err != nil {
 		return err
 	}

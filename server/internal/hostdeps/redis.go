@@ -1,4 +1,4 @@
-package config
+package hostdeps
 
 import (
 	"crypto/tls"
@@ -10,29 +10,12 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
-// RedisConfig is a Redis connection: Addr, or a redis:// or rediss:// URL.
-type RedisConfig struct {
-	// Addr is host:port.
-	Addr string `yaml:"addr" json:"addr"`
-	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
-	// TLS, in place of Addr, DB and TLS. Username and Password, when set, are
-	// used over the URL's.
-	URL string `yaml:"url" json:"url"`
-	// Username is the ACL user; empty is the default user.
-	Username string `yaml:"username" json:"username"`
-	Password string `yaml:"password" json:"password"`
-	DB       int    `yaml:"db" json:"db"`
-	// TLS connects over TLS, verifying the server against the system roots,
-	// or against CACert, which implies TLS.
-	TLS bool `yaml:"tls" json:"tls"`
-	// CACert is the PEM bundle of the CA that signed the server's certificate.
-	CACert string `yaml:"ca_cert" json:"ca_cert"`
-}
-
-// RedisOptions are c's client options.
-func RedisOptions(c *RedisConfig) (*redis.Options, error) {
+// RedisOptions are the redis section's client options.
+func RedisOptions(c *hostconfig.RedisConfig) (*redis.Options, error) {
 	if c == nil {
 		return nil, errors.New("redis: no configuration")
 	}

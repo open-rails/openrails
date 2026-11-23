@@ -143,7 +143,7 @@
       "func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
       "func (e *BoundMerchantError) Error() string",
-      "func (e *Engine) CheckoutPage(origin string, assets fs.FS) (string, http.Handler, error)",
+      "func (e *Engine) CheckoutPage() (origin string, handler http.Handler)",
       "func (e *Engine) Close(ctx context.Context) error",
       "func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.CustomerConfig, error)",
       "func (e *Engine) CustomerRoutes(selection CustomerRoutes) ([]Route, error)",
@@ -178,7 +178,7 @@
       "func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error)",
       "func NewGate(c *Client, deps GateDeps) (*Gate, error)",
       "func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error)",
-      "func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error)",
+      "func ParseMerchantDocument(raw []byte) (MerchantDocument, error)",
       "func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption",
       "type AlertWebhookConfig = config.AlertWebhookConfig",
       "type AssertionKey struct {\n\tIssuer string\n\n\tKeyID string\n\n\tSigner crypto.Signer\n\n\tTokenURL string\n}",
@@ -196,7 +196,6 @@
       "type CustomerBinding = config.CustomerBinding",
       "type CustomerProof = config.CustomerProof",
       "type CustomerRoutes = config.CustomerRoutes",
-      "type DBConfig = config.DBConfig",
       "type DatabaseConfig = config.DatabaseConfig",
       "type Deps = config.Deps",
       "type DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig",
@@ -214,6 +213,7 @@
       "type LocalClient struct{}",
       "type LoggerConfig = config.LoggerConfig",
       "type MerchantDeclaration = config.MerchantDeclaration",
+      "type MerchantDocument = config.MerchantDocument",
       "type MerchantSecrets = config.MerchantSecrets",
       "type NMIPSP struct {\n\tGatewayID string `psp:\"gateway_id\"`\n\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"tokenization_key\"`\n\n\tTokenizationURL string `psp:\"tokenization_url\"`\n\n\tCardEntry string `psp:\"card_entry\"`\n}",
       "type NotificationChannel = config.NotificationChannel",
@@ -227,14 +227,12 @@
       "type Read = config.Read",
       "type ReadCache = config.ReadCache",
       "type ReadPolicy = config.ReadPolicy",
-      "type RedisConfig = config.RedisConfig",
       "type Remote struct {\n}",
       "type RemoteCredential struct {\n\tAPIKey string\n\n\tToken func(context.Context) (string, error)\n\n\tAssertion *AssertionKey\n}",
       "type RemoteOptions struct {\n\tCredentials map[billing.MerchantID]RemoteCredential\n\n\tHTTPClient *http.Client\n\n\tTimeout time.Duration\n\n\tReadCache ReadCache\n\n\tEntitlementCheckCache EntitlementCheckCacheOptions\n}",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
       "type RouteGroups = config.RouteGroups",
       "type Routes = config.Routes",
-      "type SMTPConfig = config.SMTPConfig",
       "type SolanaConfig = config.SolanaConfig",
       "type SolanaCrankerConfig = config.SolanaCrankerConfig",
       "type SolanaPSP struct {\n\tEnvironment string `psp:\"environment\"`\n\tArchived    bool   `psp:\"archived\"`\n\n\tTreasury string `psp:\"treasury\"`\n\n\tRPCURL string `psp:\"secrets.rpc_url\"`\n}",
@@ -1241,48 +1239,46 @@
     ],
     "internal/config": [
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
-      "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\" json:\"usage_billing_enabled\"`\n\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\" json:\"destructive_action_limits\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
+      "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
+      "type CardVaultConfig struct {\n\tKind string\n\n\tTenantID string\n\n\tKVMount string\n}",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tMerchants []MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n\n\tLogger *LoggerConfig\n}",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type Custodians map[string]CustodianConfig",
       "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
       "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth billingauth.Authenticator\n\n\tResolve func(*http.Request, billingauth.Verified) (CustomerBinding, error)\n}",
-      "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n\n\tLeaseConns int `yaml:\"lease_conns\" json:\"lease_conns\"`\n}",
-      "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tNotifications *NotificationChannel\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
-      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64 `yaml:\"actor_per_hour\" json:\"actor_per_hour\"`\n\tActorPerDay       int64 `yaml:\"actor_per_day\" json:\"actor_per_day\"`\n\tMerchantPerHour   int64 `yaml:\"merchant_per_hour\" json:\"merchant_per_hour\"`\n\tMerchantPerDay    int64 `yaml:\"merchant_per_day\" json:\"merchant_per_day\"`\n\tDeploymentPerHour int64 `yaml:\"deployment_per_hour\" json:\"deployment_per_hour\"`\n\tDeploymentPerDay  int64 `yaml:\"deployment_per_day\" json:\"deployment_per_day\"`\n}",
+      "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n\n\tSkipMigrations bool\n\n\tLeaseConns int\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tNotifications *NotificationChannel\n\n\tCheckoutAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
+      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
       "type FormerNamesMode string",
-      "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool   `yaml:\"allow_loopback_http\" json:\"allow_loopback_http\"`\n\tAPIBaseURL        string `yaml:\"api_base_url\" json:\"api_base_url\"`\n\tSDKURL            string `yaml:\"sdk_url\" json:\"sdk_url\"`\n}",
-      "type LLMConfig struct {\n\tProvider string `yaml:\"provider\" json:\"provider\"`\n\n\tModel string `yaml:\"model\" json:\"model\"`\n\n\tBaseURL string `yaml:\"base_url\" json:\"base_url\"`\n\n\tAPIKey string `yaml:\"api_key\" json:\"api_key\"`\n\n\tCatalogCopilotEnabled bool `yaml:\"catalog_copilot_enabled\" json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `yaml:\"catalog_drafting_enabled\" json:\"catalog_drafting_enabled\"`\n}",
+      "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
+      "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string `yaml:\"level\" json:\"level\"`\n}",
-      "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\" json:\"-\"`\n\n\tIssuer      string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
+      "type MerchantDeclaration struct {\n\tMerchantDocument `yaml:\",inline\"`\n\n\tIssuer string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\"`\n}",
+      "type MerchantDocument struct {\n\tSlug        string `yaml:\"slug,omitempty\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type NotificationChannel struct {\n\tSink      notify.Publisher\n\tRecipient func(context.Context, NotificationRecipient) (accountID string, deliver bool, err error)\n}",
       "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tEnvironment string `yaml:\"environment,omitempty\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPs map[string]PSPConfig",
-      "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
-      "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
+      "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n\n\tCCBillWebhookSources []string\n}",
+      "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
       "type Read string",
       "type ReadCache map[Read]ReadPolicy",
-      "type ReadPolicy struct {\n\tRefreshAfter time.Duration `yaml:\"refresh_after\" json:\"refresh_after\"`\n\tMaxStale     time.Duration `yaml:\"max_stale\" json:\"max_stale\"`\n}",
-      "type RedisConfig struct {\n\tAddr string `yaml:\"addr\" json:\"addr\"`\n\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\tDB       int    `yaml:\"db\" json:\"db\"`\n\n\tTLS bool `yaml:\"tls\" json:\"tls\"`\n\n\tCACert string `yaml:\"ca_cert\" json:\"ca_cert\"`\n}",
+      "type ReadPolicy struct {\n\tRefreshAfter time.Duration\n\tMaxStale     time.Duration\n}",
       "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
       "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n}",
-      "type SMTPConfig struct {\n\tHost     string       `yaml:\"host\" json:\"host\"`\n\tPort     int          `yaml:\"port\" json:\"port\"`\n\tUsername string       `yaml:\"username\" json:\"username\"`\n\tPassword string       `yaml:\"password\" json:\"password\"`\n\tFrom     EmailAddress `yaml:\"from\" json:\"from\"`\n}",
-      "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig `yaml:\"crankers\" json:\"crankers\"`\n}",
-      "type SolanaCrankerConfig struct {\n\tMode string `yaml:\"mode\" json:\"mode\"`\n\n\tKey string `yaml:\"key\" json:\"key\"`\n\n\tPrivateKey string `yaml:\"private_key\" json:\"private_key\"`\n}",
-      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64 `yaml:\"minimum_customers_per_hour\" json:\"minimum_customers_per_hour\"`\n\tPaidCustomersPerHourlyCustomer int64 `yaml:\"paid_customers_per_hourly_customer\" json:\"paid_customers_per_hourly_customer\"`\n\tMinimumCustomersPerDay         int64 `yaml:\"minimum_customers_per_day\" json:\"minimum_customers_per_day\"`\n\tPaidCustomersPerDailyCustomer  int64 `yaml:\"paid_customers_per_daily_customer\" json:\"paid_customers_per_daily_customer\"`\n}",
+      "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig\n}",
+      "type SolanaCrankerConfig struct {\n\tMode string\n\n\tKey string\n\n\tPrivateKey string\n}",
+      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64\n\tPaidCustomersPerHourlyCustomer int64\n\tMinimumCustomersPerDay         int64\n\tPaidCustomersPerDailyCustomer  int64\n}",
       "type UserInfo = userinfo.Lookup",
-      "type VaultConfig struct {\n\tNamespace   string `yaml:\"namespace\" json:\"namespace\"`\n\tScopePrefix string `yaml:\"scope_prefix\" json:\"scope_prefix\"`\n\n\tAddress string `yaml:\"address\" json:\"address\"`\n\n\tAuthMethod string `yaml:\"auth_method\" json:\"auth_method\"`\n\n\tToken    string `yaml:\"token\" json:\"token\"`\n\tRoleID   string `yaml:\"role_id\" json:\"role_id\"`\n\tSecretID string `yaml:\"secret_id\" json:\"secret_id\"`\n\n\tSecretsPath string `yaml:\"secrets_path\" json:\"secrets_path\"`\n\tK8sRole     string `yaml:\"k8s_role\" json:\"k8s_role\"`\n\n\tAuthMount string `yaml:\"auth_mount\" json:\"auth_mount\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n\n\tTransitMount string `yaml:\"transit_mount\" json:\"transit_mount\"`\n}"
+      "type VaultConfig struct {\n\tKVMount string\n\n\tScopePrefix string\n\n\tTransitMount string\n}"
     ],
     "internal/nmimock": [
       "type Billing struct {\n\tID   string\n\tCard Card\n}",
@@ -1397,9 +1393,9 @@
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AdminConsole = hostconfig.ConsoleConfig",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tCheckoutOrigin string\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
       "type ConsoleIssuer = hostconfig.ConsoleIssuer",
-      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tPaymentPageAssets fs.FS\n\n\tConsoleAssets fs.FS\n}",
+      "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
       "type FormerNamesMode = config.FormerNamesMode",
       "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
@@ -1516,27 +1512,9 @@
       "func (c *Card) UnmarshalJSON(data []byte) error {\n\tif string(data) == `\"`+Redacted+`\"` {\n\t\treturn ErrCardRedacted\n\t}\n\tvar fields map[string]json.RawMessage\n\tif err := json.Unmarshal(data, \u0026fields); err != nil {\n\t\treturn \u0026CardError{}\n\t}\n\tdefer func() {\n\t\tfor _, raw := range fields {\n\t\t\tclear(raw)\n\t\t}\n\t}()\n\tfor name := range fields {\n\t\tswitch name {\n\t\tcase \"number\", \"exp_month\", \"exp_year\", \"cvc\":\n\t\tdefault:\n\t\t\treturn \u0026CardError{}\n\t\t}\n\t}\n\ttext := func(name string, formatted bool) ([]byte, bool) {\n\t\traw := fields[name]\n\t\tif len(raw) \u003c 2 || raw[0] != '\"' || raw[len(raw)-1] != '\"' {\n\t\t\treturn nil, false\n\t\t}\n\t\treturn cardDigits(raw[1:len(raw)-1], formatted)\n\t}\n\tinteger := func(name string) (int, bool) {\n\t\traw := fields[name]\n\t\tif len(raw) \u003e= 2 \u0026\u0026 raw[0] == '\"' \u0026\u0026 raw[len(raw)-1] == '\"' {\n\t\t\traw = raw[1 : len(raw)-1]\n\t\t}\n\t\tif len(raw) == 0 || len(raw) \u003e 4 {\n\t\t\treturn 0, false\n\t\t}\n\t\tn := 0\n\t\tfor _, b := range raw {\n\t\t\tif !isDigit(b) {\n\t\t\t\treturn 0, false\n\t\t\t}\n\t\t\tn = n*10 + int(b-'0')\n\t\t}\n\t\treturn n, true\n\t}\n\tnumber, ok := text(\"number\", true)\n\tif !ok {\n\t\treturn \u0026CardError{Field: \"number\"}\n\t}\n\tcvc, ok := text(\"cvc\", false)\n\tif !ok {\n\t\tclear(number)\n\t\treturn \u0026CardError{Field: \"cvc\"}\n\t}\n\tmonth, ok := integer(\"exp_month\")\n\tif !ok {\n\t\tclear(number)\n\t\tclear(cvc)\n\t\treturn \u0026CardError{Field: \"exp_month\"}\n\t}\n\tyear, ok := integer(\"exp_year\")\n\tif !ok {\n\t\tclear(number)\n\t\tclear(cvc)\n\t\treturn \u0026CardError{Field: \"exp_year\"}\n\t}\n\tcard, err := newCard(number, cvc, month, year)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*c = *card\n\treturn nil\n}"
     ],
     "internal/config": [
-      "type CaptchaConfig struct {\n\tProvider  string `yaml:\"provider\" json:\"provider\"`\n\tSiteKey   string `yaml:\"site_key\" json:\"site_key\"`\n\tSecretKey string `yaml:\"secret_key\" json:\"secret_key\"`\n}",
-      "type CardVaultConfig struct {\n\tKind string `yaml:\"kind\" json:\"kind\"`\n\n\tTenantID string `yaml:\"tenant_id\" json:\"tenant_id\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n}",
-      "type Config struct {\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\" json:\"usage_billing_enabled\"`\n\n\tEventRetention string `yaml:\"event_retention\" json:\"event_retention\"`\n\n\tProviderWriteMode string `yaml:\"provider_write_mode\" json:\"provider_write_mode\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\" json:\"database\"`\n\n\tMerchants map[string]MerchantDeclaration `yaml:\"merchants\" json:\"merchants\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\" json:\"public_billing_base_url\"`\n\n\tDashboardBaseURL string `yaml:\"dashboard_base_url\" json:\"dashboard_base_url\"`\n\n\tDB *DBConfig `yaml:\"db\" json:\"db\"`\n\n\tRedis *RedisConfig `yaml:\"redis\" json:\"redis\"`\n\n\tLogger *LoggerConfig `yaml:\"logger\" json:\"logger\"`\n\n\tSMTP *SMTPConfig `yaml:\"smtp\" json:\"smtp\"`\n\n\tRateLimits *RateLimitsConfig `yaml:\"rate_limits\" json:\"rate_limits\"`\n\n\tRateLimitsDisabled bool `yaml:\"rate_limits_disabled\" json:\"rate_limits_disabled\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\" json:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\" json:\"destructive_action_limits\"`\n\n\tCaptcha *CaptchaConfig `yaml:\"captcha\" json:\"captcha\"`\n\n\tVault *VaultConfig `yaml:\"vault\" json:\"vault\"`\n\n\tSolana *SolanaConfig `yaml:\"solana\" json:\"solana\"`\n\n\tLLM *LLMConfig `yaml:\"llm\" json:\"llm\"`\n\n\tWebhookSecretOverlap string `yaml:\"webhook_secret_overlap\" json:\"webhook_secret_overlap\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\" json:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\" json:\"trusted_proxies\"`\n\n\tCloudflareProxies []string `yaml:\"cloudflare_proxies\" json:\"cloudflare_proxies\"`\n\n\tCCBillWebhookIPAllowlist []string `yaml:\"ccbill_webhook_ip_allowlist\" json:\"ccbill_webhook_ip_allowlist\"`\n\n\tProviderSandbox *ProviderSandboxConfig `yaml:\"provider_sandbox\" json:\"provider_sandbox\"`\n\n\tHyperSwitch *HyperSwitchConfig `yaml:\"hyperswitch\" json:\"hyperswitch\"`\n\n\tCardVault *CardVaultConfig `yaml:\"card_vault\" json:\"card_vault\"`\n\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\" json:\"engine_admission_hold\"`\n\n\tReadCache ReadCache `yaml:\"read_cache\" json:\"read_cache\"`\n}",
-      "type DBConfig struct {\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tHost     string `yaml:\"host\" json:\"host\"`\n\tPort     string `yaml:\"port\" json:\"port\"`\n\tDatabase string `yaml:\"database\" json:\"database\"`\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\n\tSSLMode string `yaml:\"sslmode\" json:\"sslmode\"`\n\n\tSQLTrace bool `yaml:\"sql_trace\" json:\"sql_trace\"`\n\n\tLeaseConns int `yaml:\"lease_conns\" json:\"lease_conns\"`\n}",
-      "type DatabaseConfig struct {\n\tSkipMigrations bool `yaml:\"skip_migrations\" json:\"skip_migrations\"`\n\n\tSchema string `yaml:\"schema\" json:\"schema\"`\n\n\tRiverSchema string `yaml:\"river_schema\" json:\"river_schema\"`\n}",
-      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64 `yaml:\"actor_per_hour\" json:\"actor_per_hour\"`\n\tActorPerDay       int64 `yaml:\"actor_per_day\" json:\"actor_per_day\"`\n\tMerchantPerHour   int64 `yaml:\"merchant_per_hour\" json:\"merchant_per_hour\"`\n\tMerchantPerDay    int64 `yaml:\"merchant_per_day\" json:\"merchant_per_day\"`\n\tDeploymentPerHour int64 `yaml:\"deployment_per_hour\" json:\"deployment_per_hour\"`\n\tDeploymentPerDay  int64 `yaml:\"deployment_per_day\" json:\"deployment_per_day\"`\n}",
       "type EmailAddress struct {\n\tName    string `yaml:\"name\" json:\"name\"`\n\tAddress string `yaml:\"address\" json:\"address\"`\n}",
-      "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool   `yaml:\"allow_loopback_http\" json:\"allow_loopback_http\"`\n\tAPIBaseURL        string `yaml:\"api_base_url\" json:\"api_base_url\"`\n\tSDKURL            string `yaml:\"sdk_url\" json:\"sdk_url\"`\n}",
-      "type LLMConfig struct {\n\tProvider string `yaml:\"provider\" json:\"provider\"`\n\n\tModel string `yaml:\"model\" json:\"model\"`\n\n\tBaseURL string `yaml:\"base_url\" json:\"base_url\"`\n\n\tAPIKey string `yaml:\"api_key\" json:\"api_key\"`\n\n\tCatalogCopilotEnabled bool `yaml:\"catalog_copilot_enabled\" json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `yaml:\"catalog_drafting_enabled\" json:\"catalog_drafting_enabled\"`\n}",
       "type LoggerConfig struct {\n\tLevel string `yaml:\"level\" json:\"level\"`\n}",
-      "type MerchantDeclaration struct {\n\tSlug string `yaml:\"-\"`\n\n\tBinding *billing.MerchantBinding `yaml:\"-\" json:\"-\"`\n\n\tIssuer      string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs PSPs `yaml:\"psps,omitempty\"`\n\n\tCustodians Custodians `yaml:\"custodians,omitempty\"`\n\n\tbilling.MerchantSettings `yaml:\",inline\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
-      "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string `yaml:\"nmi_gateway_url\" json:\"nmi_gateway_url\"`\n\n\tStripeAPIURL string `yaml:\"stripe_api_url\" json:\"stripe_api_url\"`\n\n\tSolanaRPCURL string `yaml:\"solana_rpc_url\" json:\"solana_rpc_url\"`\n\n\tCCBillDataLinkURL string `yaml:\"ccbill_datalink_url\" json:\"ccbill_datalink_url\"`\n}",
-      "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\" json:\"requests_per_minute\"`\n}",
-      "type ReadPolicy struct {\n\tRefreshAfter time.Duration `yaml:\"refresh_after\" json:\"refresh_after\"`\n\tMaxStale     time.Duration `yaml:\"max_stale\" json:\"max_stale\"`\n}",
-      "type RedisConfig struct {\n\tAddr string `yaml:\"addr\" json:\"addr\"`\n\n\tURL string `yaml:\"url\" json:\"url\"`\n\n\tUsername string `yaml:\"username\" json:\"username\"`\n\tPassword string `yaml:\"password\" json:\"password\"`\n\tDB       int    `yaml:\"db\" json:\"db\"`\n\n\tTLS bool `yaml:\"tls\" json:\"tls\"`\n\n\tCACert string `yaml:\"ca_cert\" json:\"ca_cert\"`\n}",
-      "type SMTPConfig struct {\n\tHost     string       `yaml:\"host\" json:\"host\"`\n\tPort     int          `yaml:\"port\" json:\"port\"`\n\tUsername string       `yaml:\"username\" json:\"username\"`\n\tPassword string       `yaml:\"password\" json:\"password\"`\n\tFrom     EmailAddress `yaml:\"from\" json:\"from\"`\n}",
-      "type SolanaConfig struct {\n\tCrankers []SolanaCrankerConfig `yaml:\"crankers\" json:\"crankers\"`\n}",
-      "type SolanaCrankerConfig struct {\n\tMode string `yaml:\"mode\" json:\"mode\"`\n\n\tKey string `yaml:\"key\" json:\"key\"`\n\n\tPrivateKey string `yaml:\"private_key\" json:\"private_key\"`\n}",
-      "type TokenConfig struct {\n\tMint string `json:\"mint\"`\n\tName string `json:\"name\"`\n}",
-      "type UserActionRateLimitConfig struct {\n\tMinimumCustomersPerHour        int64 `yaml:\"minimum_customers_per_hour\" json:\"minimum_customers_per_hour\"`\n\tPaidCustomersPerHourlyCustomer int64 `yaml:\"paid_customers_per_hourly_customer\" json:\"paid_customers_per_hourly_customer\"`\n\tMinimumCustomersPerDay         int64 `yaml:\"minimum_customers_per_day\" json:\"minimum_customers_per_day\"`\n\tPaidCustomersPerDailyCustomer  int64 `yaml:\"paid_customers_per_daily_customer\" json:\"paid_customers_per_daily_customer\"`\n}",
-      "type VaultConfig struct {\n\tNamespace   string `yaml:\"namespace\" json:\"namespace\"`\n\tScopePrefix string `yaml:\"scope_prefix\" json:\"scope_prefix\"`\n\n\tAddress string `yaml:\"address\" json:\"address\"`\n\n\tAuthMethod string `yaml:\"auth_method\" json:\"auth_method\"`\n\n\tToken    string `yaml:\"token\" json:\"token\"`\n\tRoleID   string `yaml:\"role_id\" json:\"role_id\"`\n\tSecretID string `yaml:\"secret_id\" json:\"secret_id\"`\n\n\tSecretsPath string `yaml:\"secrets_path\" json:\"secrets_path\"`\n\tK8sRole     string `yaml:\"k8s_role\" json:\"k8s_role\"`\n\n\tAuthMount string `yaml:\"auth_mount\" json:\"auth_mount\"`\n\n\tKVMount string `yaml:\"kv_mount\" json:\"kv_mount\"`\n\n\tTransitMount string `yaml:\"transit_mount\" json:\"transit_mount\"`\n}"
+      "type TokenConfig struct {\n\tMint string `json:\"mint\"`\n\tName string `json:\"name\"`\n}"
     ],
     "internal/contract": [
       "func (o *obj) MarshalJSON() ([]byte, error) {\n\tvar b bytes.Buffer\n\tb.WriteByte('{')\n\tfor i, k := range o.keys {\n\t\tif i \u003e 0 {\n\t\t\tb.WriteByte(',')\n\t\t}\n\t\tkey, _ := json.Marshal(k)\n\t\tb.Write(key)\n\t\tb.WriteByte(':')\n\t\tval, err := marshal(o.vals[k])\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t\tb.Write(val)\n\t}\n\tb.WriteByte('}')\n\treturn b.Bytes(), nil\n}",
@@ -2558,7 +2536,6 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/config/config.go": {
-      "cmp": "cmp",
       "errors": "errors",
       "fmt": "fmt",
       "log": "github.com/sirupsen/logrus",
@@ -2577,6 +2554,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "fs": "io/fs",
       "http": "net/http",
       "notify": "github.com/open-rails/authkit/notify",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
@@ -2628,16 +2606,6 @@
     },
     "internal/config/read_cache.go": {
       "time": "time"
-    },
-    "internal/config/redis.go": {
-      "errors": "errors",
-      "fmt": "fmt",
-      "net": "net",
-      "strings": "strings",
-      "time": "time",
-      "tls": "crypto/tls",
-      "v9": "github.com/redis/go-redis/v9",
-      "x509": "crypto/x509"
     },
     "internal/config/solana_settings.go": {
       "errors": "errors",
@@ -2832,7 +2800,8 @@
       "strings": "strings",
       "tabwriter": "text/tabwriter",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "vaultapi": "github.com/hashicorp/vault/api"
     },
     "internal/hosttools/prune.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -2855,7 +2824,8 @@
       "strconv": "strconv",
       "strings": "strings",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "vaultapi": "github.com/hashicorp/vault/api"
     },
     "internal/http/handlers/entitlements.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -5233,7 +5203,6 @@
       "url": "net/url"
     },
     "payment_page.go": {
-      "fs": "io/fs",
       "http": "net/http"
     },
     "payments.go": {
@@ -5341,7 +5310,6 @@
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cobra": "github.com/spf13/cobra",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "fmt": "fmt",
@@ -5401,12 +5369,15 @@
     "server/internal/hostconfig/config.go": {
       "authkit": "github.com/open-rails/authkit",
       "billing": "github.com/open-rails/openrails/internal/config",
+      "cmp": "cmp",
       "context": "context",
       "fmt": "fmt",
-      "mail": "net/mail",
+      "net": "net",
+      "slices": "slices",
       "strconv": "strconv",
       "strings": "strings",
-      "time": "time"
+      "time": "time",
+      "url": "net/url"
     },
     "server/internal/hostconfig/server.go": {
       "fmt": "fmt",
@@ -5434,10 +5405,8 @@
       "http": "net/http"
     },
     "server/payment_page.go": {
-      "fs": "io/fs",
       "http": "net/http",
       "paymentpage": "github.com/open-rails/openrails/internal/paymentpage",
-      "paypage": "github.com/open-rails/openrails/web/pay",
       "strings": "strings"
     },
     "server/server.go": {
@@ -5461,9 +5430,11 @@
       "net": "net",
       "openrails": "github.com/open-rails/openrails",
       "operator": "github.com/open-rails/openrails/server/internal/operator",
+      "paypage": "github.com/open-rails/openrails/web/pay",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "riverhelpers": "github.com/open-rails/helpers/river",
       "routebundle": "github.com/open-rails/openrails/internal/http/routebundle",
+      "strings": "strings",
       "sync": "sync",
       "time": "time",
       "userinfo": "github.com/open-rails/authkit/userinfo"

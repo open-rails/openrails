@@ -33,9 +33,9 @@ func newAccountClassWorld(t *testing.T, alpha, beta openrails.PSPs, configure ..
 	return newAuthorityWorld(t, func(w *world) {
 		w.deps.Clock, w.deps.FXTransport = nil, nil
 		for slug, psps := range map[string]openrails.PSPs{"alpha": alpha, "beta": beta} {
-			declaration := w.cfg.Merchants[slug]
+			declaration := cfgMerchant(w.cfg, slug)
 			declaration.PSPs = psps
-			w.cfg.Merchants[slug] = declaration
+			setCfgMerchant(&w.cfg, slug, declaration)
 		}
 		for _, change := range configure {
 			change(w)
@@ -124,10 +124,10 @@ func TestWebhookAccountClasses(t *testing.T) {
 		a := newAccountClassWorld(t, openrails.PSPs{
 			"stripe": openrails.StripePSP{AccountID: "acct_owned", Environment: openrails.EnvironmentLive, SecretKey: "sk_live_owner", WebhookSigningSecret: "whsec_owner"}.PSPConfig(),
 		}, nil, func(w *world) {
-			declaration := w.cfg.Merchants["alpha"]
+			declaration := cfgMerchant(w.cfg, "alpha")
 			declaration.Custodians = openrails.Custodians{"cards": {Kind: "basis_theory", Environment: "live", AccountID: "00000000-0000-4000-8000-0000000000c1",
 				Settings: map[string]any{"public_api_key": "public-owner"}, Secrets: map[string]string{"api_key": "private-owner"}}}
-			w.cfg.Merchants["alpha"] = declaration
+			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
 		owner := pspIDs(t, a.alpha)["stripe"]
 		require.NotEqual(t, uuid.Nil, owner)
@@ -140,11 +140,11 @@ func TestWebhookAccountClasses(t *testing.T) {
 		delivered("evt_before_claims", "prod_before_claims")
 
 		a.restartWith(t, func(cfg *openrails.Config) {
-			declaration := cfg.Merchants["beta"]
+			declaration := cfgMerchant(*cfg, "beta")
 			declaration.PSPs = openrails.PSPs{"squat": openrails.StripePSP{AccountID: "acct_owned", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_squat", WebhookSigningSecret: "whsec_squat"}.PSPConfig()}
 			declaration.Custodians = openrails.Custodians{"cards": {Kind: "basis_theory", Environment: "test", AccountID: "00000000-0000-4000-8000-0000000000c1",
 				Settings: map[string]any{"public_api_key": "public-squat"}, Secrets: map[string]string{"api_key": "private-squat"}}}
-			cfg.Merchants["beta"] = declaration
+			setCfgMerchant(cfg, "beta", declaration)
 		})
 		require.Empty(t, pspIDs(t, a.beta), "a file-declared claim of another merchant's account in the other class is not served")
 		require.Equal(t, map[string]uuid.UUID{"stripe": owner}, pspIDs(t, a.alpha))

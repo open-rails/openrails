@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 406,
+  "scenario_count": 409,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1992,6 +1992,21 @@
       "id": "OR-J04-S38",
       "journey": "J04",
       "name": "A billing pass that starts while another still runs exits without running a scan; the running pass takes what is due"
+    },
+    {
+      "id": "OR-J04-S72",
+      "journey": "J04",
+      "name": "An engine boots on a borrowed pool built from settings, with no connection string, and refuses one without a pool"
+    },
+    {
+      "id": "OR-J04-S73",
+      "journey": "J04",
+      "name": "A Vault KV mount with no Vault client is refused and reported, and merchant configuration answers unavailable"
+    },
+    {
+      "id": "OR-J04-S74",
+      "journey": "J04",
+      "name": "A slug declared twice provisions neither entry and is reported; the other declarations serve"
     },
     {
       "id": "OR-J25-S37",

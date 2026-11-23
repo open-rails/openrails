@@ -34,7 +34,11 @@ func newProposalsCmd() *cobra.Command {
 		if err != nil {
 			return hosttools.ProposalsOptions{}, err
 		}
-		return hosttools.ProposalsOptions{Config: cfg, MerchantID: mid, Actor: cliActor(), Format: format, Out: os.Stdout}, nil
+		pool, err := cliPool(c.Context())
+		if err != nil {
+			return hosttools.ProposalsOptions{}, err
+		}
+		return hosttools.ProposalsOptions{Config: cfg, PGXPool: pool, MerchantID: mid, Actor: cliActor(), Format: format, Out: os.Stdout}, nil
 	}
 	set := func(c *cobra.Command, ids []string) (hosttools.ProposalSet, error) {
 		s := hosttools.ProposalSet{IDs: ids, PSP: psp, Pull: pull, Kind: kind, Source: source, Expect: expect}

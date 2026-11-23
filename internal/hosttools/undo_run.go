@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"strings"
 
@@ -23,6 +24,7 @@ import (
 type UndoRunOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
+	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID
 	RunID      string
 	Actor      string
@@ -58,7 +60,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if err != nil {
 		return fmt.Errorf("undo-run: --run must be a run id, run_<uuid> or the bare UUID (see `openrails prune list` / `openrails proposals runs`): %w", err)
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -68,7 +70,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
 		return err
 	}
-	closeConfig, err := bindMerchantConfig(ctx, opts.Config, database, merchantID, opts.MerchantConfig)
+	closeConfig, err := bindMerchantConfig(ctx, opts.Config, database, opts.Vault, merchantID, opts.MerchantConfig)
 	if err != nil {
 		return err
 	}

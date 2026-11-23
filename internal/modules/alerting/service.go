@@ -30,9 +30,6 @@ type Deps struct {
 	// destinations only, enforced at the dialer and on every redirect hop.
 	Outbound httpx.Policy
 	Clock    clockwork.Clock
-	// DashboardBaseURL prefixes alert dashboard deep links (may be empty → the
-	// link is a relative path the console resolves).
-	DashboardBaseURL string
 }
 
 // Service owns merchant notifications and the merchant's alert webhooks.
@@ -53,13 +50,18 @@ func NewService(deps Deps) *Service {
 	}
 	st := newStore(deps.DB)
 	return &Service{
-		db:               deps.DB,
-		store:            st,
-		deliverer:        newDeliverer(deps.DB, deps.Email, deps.Outbound),
-		clock:            clock,
-		dashboardBaseURL: strings.TrimRight(deps.DashboardBaseURL, "/"),
-		outbound:         deps.Outbound,
+		db:        deps.DB,
+		store:     st,
+		deliverer: newDeliverer(deps.DB, deps.Email, deps.Outbound),
+		clock:     clock,
+		outbound:  deps.Outbound,
 	}
+}
+
+// SetConsoleURL prefixes alert deep links with the console's URL; unset,
+// a link is a path the console resolves. Set it before the workers start.
+func (s *Service) SetConsoleURL(url string) {
+	s.dashboardBaseURL = strings.TrimRight(url, "/")
 }
 
 // SetMerchantConfig binds the merchant configuration webhooks live in.

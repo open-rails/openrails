@@ -111,24 +111,24 @@ products:
 
 // sameWindowTrust caps one spend window apart by trust level.
 func sameWindowTrust(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
 		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
 		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // goldTrust hold a gold trust level against its own spend window.
 func goldTrust(w *world) {
-	m := w.cfg.Merchants["alpha"]
+	m := cfgMerchant(w.cfg, "alpha")
 	m.BillingPolicies = []billing.BillingPolicy{
 		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "free-month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
 		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "gold-month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
 	}
 	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
-	w.cfg.Merchants["alpha"] = m
+	setCfgMerchant(&w.cfg, "alpha", m)
 }
 
 // answeredHold is an answer's hold of the customer and limit set.

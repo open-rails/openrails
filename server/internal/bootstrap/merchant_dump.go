@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -22,7 +23,7 @@ import (
 // so alert webhooks are omitted; a redacted dump re-applies without a
 // placeholder standing in for a real value. With a manifest as the
 // configuration, the manifest is the dump.
-func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, slug string) (*BillingConfig, error) {
+func DumpMerchantConfig(ctx context.Context, cfg *config.Config, vault *vaultapi.Client, cp *controlplane.ControlPlane, slug string) (*BillingConfig, error) {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
 	}
@@ -37,7 +38,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if err != nil {
 		return nil, fmt.Errorf("wrap control-plane db: %w", err)
 	}
-	opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
+	opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database, vault)
 	if err != nil {
 		return nil, err
 	}
@@ -52,15 +53,15 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		return nil, err
 	}
 	return &BillingConfig{Version: merchantbootstrap.BootstrapManifestVersion, Merchants: map[string]MerchantConfig{
-		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug)},
+		selected.Slug: {MerchantDocument: dumpDeclaration(set, selected.Slug)},
 	}}, nil
 }
 
 // dumpDeclaration is a configuration as its manifest declares it: its
 // documents, without credentials.
-func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDeclaration {
+func dumpDeclaration(set merchantdocs.Set, slug string) config.MerchantDocument {
 	doc := set.Merchant.Value
-	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, MerchantSettings: doc.MerchantSettings}
+	out := config.MerchantDocument{DisplayName: doc.DisplayName, MerchantSettings: doc.MerchantSettings}
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}

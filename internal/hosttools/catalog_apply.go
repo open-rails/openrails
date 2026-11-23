@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"os"
 	"strings"
@@ -20,6 +21,7 @@ import (
 type CatalogApplyOptions struct {
 	Config  *config.Config
 	PGXPool *pgxpool.Pool
+	Vault   *vaultapi.Client
 	App     *app.App
 	// MerchantManifest is the manifest the host boots from; nil reads
 	// MerchantManifestPath (or the conventional path). Managed Vault

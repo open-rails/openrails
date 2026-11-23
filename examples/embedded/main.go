@@ -65,21 +65,24 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authk
 // newBilling builds the billing engine and the handle of your merchant: the
 // engine runs and mounts, the handle has every billing operation.
 func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Engine, *openrails.Client, error) {
-	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
+	// You, the seller, and your payment processor accounts (PSPs), declared in
+	// merchant.yaml. It carries PSP credentials: keep it out of version control.
 	raw, err := os.ReadFile("merchant.yaml")
 	if err != nil {
 		return nil, nil, err
 	}
-	merchant, err := openrails.ParseMerchantDeclaration(raw)
+	merchant, err := openrails.ParseMerchantDocument(raw)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
-		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
+		Merchants: []openrails.MerchantDeclaration{{
+			MerchantDocument: merchant,
+			Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
+		}},
 	}
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins

@@ -364,7 +364,9 @@ type errRow struct{ err error }
 func (r errRow) Scan(...interface{}) error { return r.err }
 
 // newSQLTracer is the debug-level pgx query tracer, enabled by db.sql_trace.
-func newSQLTracer() *tracelog.TraceLog {
+// NewSQLTracer logs every query at debug level, for a pool a host opens
+// with sql_trace on.
+func NewSQLTracer() *tracelog.TraceLog {
 	return &tracelog.TraceLog{
 		Logger:   tracelog.LoggerFunc(logPGX),
 		LogLevel: tracelog.LogLevelDebug,
