@@ -41,6 +41,7 @@ pkg openrails, method (*Client) CreateProduct(context.Context, billing.CreatePro
 pkg openrails, method (*Client) CreateProductAccess(context.Context, string, []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error)
 pkg openrails, method (*Client) CreateProviderPrice(context.Context, billing.CreateProviderPriceParams) (*billing.Price, error)
 pkg openrails, method (*Client) CreateProvisioningToken(context.Context, billing.CreateProvisioningTokenParams) (*billing.CreatedProvisioningToken, error)
+pkg openrails, method (*Client) CreateTestMessage(context.Context, billing.CreateTestMessageParams) (*billing.TestMessage, error)
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID) error
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID) error
 pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID) error
@@ -85,6 +86,7 @@ pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams) (*billing.ListPage[billing.CreditGrant], error)
 pkg openrails, method (*Client) ListCustodians(context.Context) (*billing.ListPage[billing.Custodian], error)
 pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.CustomerLimitListParams) (*billing.ListPage[billing.CustomerLimit], error)
+pkg openrails, method (*Client) ListCustomerMessages(context.Context, billing.CustomerID, billing.CustomerMessageListParams) (*billing.ListPage[billing.CustomerMessage], error)
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error)
@@ -114,6 +116,7 @@ pkg openrails, method (*Client) ListSubscriptionChangeOptions(context.Context, b
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams) (*billing.ListPage[billing.Subscription], error)
 pkg openrails, method (*Client) MarkOrderUncollectible(context.Context, billing.OrderID) (*billing.Order, error)
 pkg openrails, method (*Client) MerchantID() billing.MerchantID
+pkg openrails, method (*Client) PreviewMessage(context.Context, billing.PreviewMessageParams) (*billing.MessagePreview, error)
 pkg openrails, method (*Client) PreviewOrder(context.Context, billing.PreviewOrderParams) (*billing.OrderPreview, error)
 pkg openrails, method (*Client) PreviewPSPRouting(context.Context, billing.PreviewPSPRoutingParams) (*billing.PSPRoutingPreview, error)
 pkg openrails, method (*Client) PreviewPriceMigration(context.Context, billing.CreatePriceMigrationParams) (*billing.PriceMigrationPreview, error)
@@ -478,6 +481,7 @@ pkg openrails/billing, const ChargeFailed ChargeOutcome = "failed"
 pkg openrails/billing, const ChargeSucceeded ChargeOutcome = "succeeded"
 pkg openrails/billing, const CodeAdmissionCaptured ErrorCode = "admission_captured"
 pkg openrails/billing, const CodeAdmissionNotFound ErrorCode = "admission_not_found"
+pkg openrails/billing, const CodeAlertEmailRequired ErrorCode = "alert_email_required"
 pkg openrails/billing, const CodeAlreadyOwned ErrorCode = "already_owned"
 pkg openrails/billing, const CodeApplicationRequired ErrorCode = "application_required"
 pkg openrails/billing, const CodeAsOfRequired ErrorCode = "as_of_required"
@@ -555,6 +559,8 @@ pkg openrails/billing, const CodeLimitNotFound ErrorCode = "limit_not_found"
 pkg openrails/billing, const CodeMerchantConfigReadOnly ErrorCode = "merchant_config_read_only"
 pkg openrails/billing, const CodeMerchantMismatch ErrorCode = "merchant_mismatch"
 pkg openrails/billing, const CodeMerchantUnresolved ErrorCode = "merchant_unresolved"
+pkg openrails/billing, const CodeMessageSendFailed ErrorCode = "message_send_failed"
+pkg openrails/billing, const CodeMessageTemplateInvalid ErrorCode = "message_template_invalid"
 pkg openrails/billing, const CodeMeterInUse ErrorCode = "meter_in_use"
 pkg openrails/billing, const CodeMeterRateCardConflict ErrorCode = "meter_rate_card_conflict"
 pkg openrails/billing, const CodeMethodNotAllowed ErrorCode = "method_not_allowed"
@@ -827,6 +833,24 @@ pkg openrails/billing, const MerchantRetirementRefusedReserved MerchantRetiremen
 pkg openrails/billing, const MerchantUsageManage Permission = "merchant:usage:manage"
 pkg openrails/billing, const MerchantUsageRead Permission = "merchant:usage:read"
 pkg openrails/billing, const MessageDataVersion untyped int = 1
+pkg openrails/billing, const MessageDisabled MessageStatus = "disabled"
+pkg openrails/billing, const MessageEmail MessageChannel = "email"
+pkg openrails/billing, const MessageEventMissing MessageError = "event_missing"
+pkg openrails/billing, const MessageEventUnreadable MessageError = "event_unreadable"
+pkg openrails/billing, const MessageFailed MessageStatus = "failed"
+pkg openrails/billing, const MessageInvalidRecipient MessageError = "invalid_recipient"
+pkg openrails/billing, const MessageNoContact MessageStatus = "no_contact"
+pkg openrails/billing, const MessageNoSender MessageError = "no_sender"
+pkg openrails/billing, const MessagePending MessageStatus = "pending"
+pkg openrails/billing, const MessageQueued MessageStatus = "queued"
+pkg openrails/billing, const MessageRateLimited MessageStatus = "rate_limited"
+pkg openrails/billing, const MessageRefused MessageError = "refused"
+pkg openrails/billing, const MessageRenderFailed MessageError = "render_failed"
+pkg openrails/billing, const MessageSendFailed MessageError = "send_failed"
+pkg openrails/billing, const MessageSending MessageStatus = "sending"
+pkg openrails/billing, const MessageSent MessageStatus = "sent"
+pkg openrails/billing, const MessageTestEnvironment MessageStatus = "test_environment"
+pkg openrails/billing, const MessageUnavailable MessageError = "unavailable"
 pkg openrails/billing, const MigrationBlocked PriceMigrationDisposition = "blocked"
 pkg openrails/billing, const MigrationCancelAtPeriodEnd MigrationFallback = "cancel_at_period_end"
 pkg openrails/billing, const MigrationKeepGrandfathered MigrationFallback = "keep_grandfathered"
@@ -981,6 +1005,7 @@ pkg openrails/billing, func ParseAlertWebhookID(string) (AlertWebhookID, error)
 pkg openrails/billing, func ParseBalanceTransactionID(string) (BalanceTransactionID, error)
 pkg openrails/billing, func ParseCreditGrantID(string) (CreditGrantID, error)
 pkg openrails/billing, func ParseCustomerID(string) (CustomerID, error)
+pkg openrails/billing, func ParseCustomerMessageID(string) (CustomerMessageID, error)
 pkg openrails/billing, func ParseDestructiveHoldID(string) (DestructiveHoldID, error)
 pkg openrails/billing, func ParseFindingID(string) (FindingID, error)
 pkg openrails/billing, func ParseHostEventID(string) (HostEventID, error)
@@ -1029,6 +1054,7 @@ pkg openrails/billing, method (*CatalogApplicationReceipt) String() string
 pkg openrails/billing, method (*CreateProductParams) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*CreditGrantID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CustomerID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*CustomerMessageID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*DestructiveHoldID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*FindingID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*HostEventID) UnmarshalText([]byte) error
@@ -1091,6 +1117,10 @@ pkg openrails/billing, method (CustomerID) IsZero() bool
 pkg openrails/billing, method (CustomerID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (CustomerID) String() string
 pkg openrails/billing, method (CustomerID) UUID() uuid.UUID
+pkg openrails/billing, method (CustomerMessageID) IsZero() bool
+pkg openrails/billing, method (CustomerMessageID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (CustomerMessageID) String() string
+pkg openrails/billing, method (CustomerMessageID) UUID() uuid.UUID
 pkg openrails/billing, method (DeclineReason) Failure() PaymentFailure
 pkg openrails/billing, method (DeclineReason) FraudSignal() bool
 pkg openrails/billing, method (DestructiveHoldID) IsZero() bool
@@ -1689,6 +1719,10 @@ pkg openrails/billing, type CreateProviderPriceParams struct, TrialUnitAmount *i
 pkg openrails/billing, type CreateProviderPriceParams struct, UnitAmount *int64 `json:"unit_amount,omitempty,string"`
 pkg openrails/billing, type CreateProvisioningTokenParams struct
 pkg openrails/billing, type CreateProvisioningTokenParams struct, Name string `json:"name"`
+pkg openrails/billing, type CreateTestMessageParams struct
+pkg openrails/billing, type CreateTestMessageParams struct, EventType string `json:"event_type"`
+pkg openrails/billing, type CreateTestMessageParams struct, Language string `json:"language"`
+pkg openrails/billing, type CreateTestMessageParams struct, Template *MessageTemplate `json:"template"`
 pkg openrails/billing, type CreatedProvisioningToken struct
 pkg openrails/billing, type CreatedProvisioningToken struct, Token string `json:"token"`
 pkg openrails/billing, type CreatedProvisioningToken struct, embedded ProvisioningToken
@@ -1788,6 +1822,22 @@ pkg openrails/billing, type CustomerListParams struct
 pkg openrails/billing, type CustomerListParams struct, IDs []CustomerID `form:"ids,comma"`
 pkg openrails/billing, type CustomerListParams struct, Search string `form:"search"`
 pkg openrails/billing, type CustomerListParams struct, embedded PageRequest
+pkg openrails/billing, type CustomerMessage struct
+pkg openrails/billing, type CustomerMessage struct, Attempts int `json:"attempts"`
+pkg openrails/billing, type CustomerMessage struct, Channel MessageChannel `json:"channel"`
+pkg openrails/billing, type CustomerMessage struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type CustomerMessage struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type CustomerMessage struct, EventID NotificationID `json:"event_id"`
+pkg openrails/billing, type CustomerMessage struct, EventType string `json:"event_type"`
+pkg openrails/billing, type CustomerMessage struct, ID CustomerMessageID `json:"id"`
+pkg openrails/billing, type CustomerMessage struct, LastError *MessageError `json:"last_error"`
+pkg openrails/billing, type CustomerMessage struct, Recipient *string `json:"recipient"`
+pkg openrails/billing, type CustomerMessage struct, SentAt *time.Time `json:"sent_at"`
+pkg openrails/billing, type CustomerMessage struct, Status MessageStatus `json:"status"`
+pkg openrails/billing, type CustomerMessage struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type CustomerMessageID [16]byte
+pkg openrails/billing, type CustomerMessageListParams struct
+pkg openrails/billing, type CustomerMessageListParams struct, embedded PageRequest
 pkg openrails/billing, type CustomerSettings struct
 pkg openrails/billing, type CustomerSettings struct, BillingPolicy *string `json:"billing_policy"`
 pkg openrails/billing, type CustomerSettings struct, CreditLimits []CreditLimit `json:"credit_limits"`
@@ -2388,6 +2438,7 @@ pkg openrails/billing, type MerchantDocument struct
 pkg openrails/billing, type MerchantDocument struct, AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 pkg openrails/billing, type MerchantDocument struct, Custodians Custodians `yaml:"custodians,omitempty"`
 pkg openrails/billing, type MerchantDocument struct, DisplayName string `yaml:"display_name"`
+pkg openrails/billing, type MerchantDocument struct, Messages *MessageSettings `yaml:"messages,omitempty"`
 pkg openrails/billing, type MerchantDocument struct, PSPs PSPs `yaml:"psps,omitempty"`
 pkg openrails/billing, type MerchantDocument struct, Secrets MerchantSecrets `yaml:"secrets,omitempty"`
 pkg openrails/billing, type MerchantDocument struct, Slug string `yaml:"slug,omitempty"`
@@ -2479,6 +2530,7 @@ pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *in
 pkg openrails/billing, type MerchantSettings struct, UsageBilling *UsageBillingSettings `json:"usage_billing,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 pkg openrails/billing, type MerchantStatus string
+pkg openrails/billing, type MessageChannel string
 pkg openrails/billing, type MessageContent struct
 pkg openrails/billing, type MessageContent struct, HTML string
 pkg openrails/billing, type MessageContent struct, Subject string
@@ -2494,6 +2546,7 @@ pkg openrails/billing, type MessageData struct, Language string
 pkg openrails/billing, type MessageData struct, Links MessageLinks
 pkg openrails/billing, type MessageData struct, Merchant MessageMerchant
 pkg openrails/billing, type MessageData struct, Version int
+pkg openrails/billing, type MessageError string
 pkg openrails/billing, type MessageEvent struct
 pkg openrails/billing, type MessageEvent struct, AccessEnded bool
 pkg openrails/billing, type MessageEvent struct, Amount string
@@ -2549,10 +2602,17 @@ pkg openrails/billing, type MessageMerchant struct, StatementDescriptor string
 pkg openrails/billing, type MessageMerchant struct, SubscribeURL string
 pkg openrails/billing, type MessageMerchant struct, SupportURL string
 pkg openrails/billing, type MessageMerchant struct, TermsURL string
+pkg openrails/billing, type MessagePreview struct
+pkg openrails/billing, type MessagePreview struct, EventType string `json:"event_type"`
+pkg openrails/billing, type MessagePreview struct, HTML *string `json:"html"`
+pkg openrails/billing, type MessagePreview struct, Language string `json:"language"`
+pkg openrails/billing, type MessagePreview struct, Subject string `json:"subject"`
+pkg openrails/billing, type MessagePreview struct, Text *string `json:"text"`
 pkg openrails/billing, type MessageSettings struct
 pkg openrails/billing, type MessageSettings struct, DefaultLanguage string `json:"default_language,omitempty"`
 pkg openrails/billing, type MessageSettings struct, Events map[string]MessageEventSettings `json:"events,omitempty"`
 pkg openrails/billing, type MessageSettings struct, Layouts map[string]MessageLayout `json:"layouts,omitempty"`
+pkg openrails/billing, type MessageStatus string
 pkg openrails/billing, type MessageTemplate struct
 pkg openrails/billing, type MessageTemplate struct, HTML string `json:"html,omitempty"`
 pkg openrails/billing, type MessageTemplate struct, Subject string `json:"subject"`
@@ -3219,6 +3279,10 @@ pkg openrails/billing, type PaymentStatus string
 pkg openrails/billing, type Permission string
 pkg openrails/billing, type PlatformVaultState struct
 pkg openrails/billing, type PlatformVaultState struct, Available bool `json:"available"`
+pkg openrails/billing, type PreviewMessageParams struct
+pkg openrails/billing, type PreviewMessageParams struct, EventType string `json:"event_type"`
+pkg openrails/billing, type PreviewMessageParams struct, Language string `json:"language"`
+pkg openrails/billing, type PreviewMessageParams struct, Template *MessageTemplate `json:"template"`
 pkg openrails/billing, type PreviewMyOrderParams struct
 pkg openrails/billing, type PreviewMyOrderParams struct, Cart bool `json:"cart,omitempty"`
 pkg openrails/billing, type PreviewMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`
@@ -3842,6 +3906,9 @@ pkg openrails/billing, type SyncLeasesResult struct, Limits []CustomerLimit `jso
 pkg openrails/billing, type SyncLeasesResult struct, Usage LeaseUsageResult `json:"usage"`
 pkg openrails/billing, type SyncLeasesResult struct, Wants []LeaseWantResult `json:"wants"`
 pkg openrails/billing, type SyncStatus string
+pkg openrails/billing, type TestMessage struct
+pkg openrails/billing, type TestMessage struct, Message MessagePreview `json:"message"`
+pkg openrails/billing, type TestMessage struct, Recipient string `json:"recipient"`
 pkg openrails/billing, type TrustLevel struct
 pkg openrails/billing, type TrustLevel struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type TrustLevel struct, TrustLevel string `json:"trust_level"`
