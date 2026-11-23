@@ -248,7 +248,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - `go run ./scripts/docscheck` (in guards) enforces it: Go and YAML fences equal their
   `// guide:<name>` regions in `examples/` (`-write` refreshes them), references and links
   resolve, and the guide names every handle method, server config key, chart value and
-  CLI command. `docs/architecture/` gets the link check only.
+  CLI command, and none that does not exist. `docs/architecture/` gets the link check only.
 
 ## Tests
 - The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis and

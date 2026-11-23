@@ -142,3 +142,39 @@ func TestArchitectureDocsAreOnlyLinkChecked(t *testing.T) {
 	}
 	wantOnly(t, run1(t, tree, fixtureIndex(t), false), cLink, "no such file")
 }
+
+func TestDocumentedButAbsentFails(t *testing.T) {
+	tree := fixture(t, nil)
+	page := "# Standalone\n\n## Configuration reference\n\n| Key | Meaning |\n|---|---|\n" +
+		"| `db.url` | the database |\n| `db.no_such` | gone |\n\nSet `vault.kv_mount`, not `vault.gone_key`.\n\n" +
+		"## Commands\n\n`openrails catalog apply FILE`, `openrails catalog vanish`.\n\n" +
+		"```sh\nDB_URL=x openrails --config c.yaml nope --merchant shop\nkubectl -n openrails create secret generic x\n```\n\n" +
+		"## Kubernetes and Helm\n\n| Value | Meaning |\n|---|---|\n| `secrets.env` | env |\n| `secrets.nothing` | gone |\n"
+	if err := os.WriteFile(filepath.Join(tree.Root, "docs", "standalone.md"), []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree.Files = append(tree.Files, "docs/standalone.md")
+	idx := fixtureIndex(t)
+	idx.Coverage = &Coverage{
+		Methods:     map[string][]string{},
+		AllCommands: map[string]bool{"catalog": true, "catalog apply": true},
+		ConfigPaths: map[string]bool{"db": true, "db.url": true, "vault": true, "vault.kvmount": true},
+		HelmPaths:   map[string]bool{"secrets": true, "secrets.env": true},
+	}
+	var absent []string
+	for _, f := range run1(t, tree, idx, false) {
+		if f.Class != cAbsent {
+			t.Fatalf("unexpected finding %+v", f)
+		}
+		absent = append(absent, f.Detail)
+	}
+	want := []string{"db.no_such", "secrets.nothing", "vault.gone_key", "catalog vanish", "openrails nope"}
+	if len(absent) != len(want) {
+		t.Fatalf("want %d absent findings, got %q", len(want), absent)
+	}
+	for _, w := range want {
+		if !strings.Contains(strings.Join(absent, "\n"), w) {
+			t.Fatalf("no finding for %s in %q", w, absent)
+		}
+	}
+}

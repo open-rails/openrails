@@ -550,8 +550,8 @@ func (r *Report) Summary() (string, bool) {
 		n[f.Class]++
 	}
 	dead := n[cRoute] + n[cIdent] + n[cPerm] + n[cCode] + n[cEvent] + n[cSchema]
-	line := fmt.Sprintf("docscheck: dead references %d (routes %d, identifiers %d, permissions %d, codes %d, events %d, schema %d); broken links %d; snippets: stale %d, untagged %d, unknown %d, unused %d, malformed %d; yaml %d; coverage %d",
-		dead, n[cRoute], n[cIdent], n[cPerm], n[cCode], n[cEvent], n[cSchema], n[cLink], n[cStale], n[cUntagged], n[cUnknown], n[cUnused], n[cRegion], n[cYAML], n[cCoverage])
+	line := fmt.Sprintf("docscheck: dead references %d (routes %d, identifiers %d, permissions %d, codes %d, events %d, schema %d); broken links %d; snippets: stale %d, untagged %d, unknown %d, unused %d, malformed %d; yaml %d; coverage %d; absent %d",
+		dead, n[cRoute], n[cIdent], n[cPerm], n[cCode], n[cEvent], n[cSchema], n[cLink], n[cStale], n[cUntagged], n[cUnknown], n[cUnused], n[cRegion], n[cYAML], n[cCoverage], n[cAbsent])
 	if r.Rewritten > 0 {
 		line += fmt.Sprintf("; rewrote %d fences", r.Rewritten)
 	}
