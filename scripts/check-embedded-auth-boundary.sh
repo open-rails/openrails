@@ -55,10 +55,10 @@ func (ownAuth) Authenticate(r *http.Request) (auth.Verified, error) {
  if r.Header.Get("Authorization") == "" { return nil, auth.ErrUnauthenticated }
  return session{signedIn: time.Now()}, nil
 }
-func (session) Identity() openrails.Identity {
+func (session) Identity() auth.Identity {
  id := "11111111-1111-4111-8111-111111111111"
- return openrails.Identity{Issuer: "https://identity.example", Subject: id, SubjectKind: openrails.SubjectUser,
-  Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}
+ return auth.Identity{Issuer: "https://identity.example", Subject: id, SubjectKind: auth.SubjectUser,
+  Invoker: auth.Invoker{Issuer: "https://identity.example", ID: id}, Credential: auth.Credential{Kind: auth.CredentialSession}}
 }
 func (session) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
  return scope == staff && permission == string(billing.RootCustomerRead), nil
@@ -68,7 +68,7 @@ func (s session) CheckRecentSignIn(context.Context) error {
  return nil
 }
 func main() {
- var a openrails.Authenticator = ownAuth{}
+ var a auth.Authenticator = ownAuth{}
  routes := openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
  cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly}
  _, _ = routes, cfg
