@@ -82,12 +82,16 @@ per UTC day and each project 100,000 tokens per UTC month. A prepaid counter
 starts from funded credits and replenishes through explicit top-ups. These are
 proposed quota mechanics for work that must stay within an allowance.
 
-- One request carries a stable operation ID and the amount needed from each
-  applicable counter. Resolve definitions on the server. Check all balances,
-  decrement them together, and record the decision under that operation ID in
-  the same transaction. If one balance is insufficient, charge none. Replay the
-  original result for the same terms even across a reset, and reject reuse of
-  that ID with changed terms.
+- For a gateway request with a fixed cost, call
+  `Consume(customer, request_id, counter_set, 1)` once. Resolve the configured
+  counter set and subjects on the server. Approval includes checking every
+  applicable balance, decrementing them together, and recording the success
+  under `request_id` in one transaction. If one balance is insufficient, charge
+  none. Replay an earlier success even across a reset, and reject reuse of its
+  ID with changed terms. OpenRails records admitted holds and can re-evaluate
+  a decline on retry. A product can choose to persist declines if it needs those
+  decisions to replay as well.
+  [OpenRails admission lookup](../usage-billing.md#admissions).
 - For a fixed window, serialize the refresh and decrement, then derive the
   generation from the authority's clock. On the first operation in a new
   window, initialize it to its configured capacity and apply the decrement
@@ -95,10 +99,10 @@ proposed quota mechanics for work that must stay within an allowance.
   generation so a retry cannot refill it twice. A funded top-up instead adds
   units in an atomic operation with its own stable ID. A rolling-window policy
   calls for accounting over the trailing interval.
-- When cost is known, consume the exact amount. When cost is estimated, hold an
-  enforceable upper bound before starting, settle actual usage against the
-  hold, and release any remainder. Keep the originating window on the hold so
-  a later capture or release never credits the following window. If more work
+- For variable work, reserve an enforceable upper bound with `Hold` before
+  starting. Settle actual usage with `Capture` and release any remainder. Keep
+  the originating window on the hold so a later capture or release never
+  credits the following window. If more work
   is needed, reserve the additional amount first.
 
 Overlapping counters such as a customer cap and a project cap require one
