@@ -1,0 +1,18 @@
+schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+limits:
+  hourly:
+    unit: units
+    reset: {kind: rolling, window_seconds: 3600}
+    overrun: admit_while_positive
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+  monthly:
+    unit: units
+    reset: {kind: billing_period}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+products:
+  starter: {display_name: Starter, limits: {hourly: "1000", monthly: "100000"}}
+  usage:
+    display_name: Usage
+    rate_cards: [{meter: work, price: {model: per_unit, currency: USD, per_unit: {unit_amount: "100"}}}]

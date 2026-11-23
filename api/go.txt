@@ -24,6 +24,7 @@ pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, Datab
 pkg openrails, func Migrate(context.Context, *pgxpool.Pool, Config) error
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
 pkg openrails, func NewClientCredentialsTokenProvider(ClientCredentialsConfig) (func(context.Context) (string, error), error)
+pkg openrails, func NewGate(*Client, GateConfig) (*Gate, error)
 pkg openrails, func NewRemote(string, RemoteOptions) (*Remote, error)
 pkg openrails, func NewRemoteMerchant(string, RemoteCredential, ...RemoteMerchantOptions) (*Client, error)
 pkg openrails, func ParseMerchantDeclaration([]byte) (MerchantDeclaration, error)
@@ -177,6 +178,12 @@ pkg openrails, method (*Engine) ResolveCustomer(context.Context, auth.Authentica
 pkg openrails, method (*Engine) RiverJobs() river.Contribution
 pkg openrails, method (*Engine) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Engine) Start(context.Context, ...StartOption) error
+pkg openrails, method (*Gate) Admit(context.Context, billing.AdmitParams) (*Ticket, error)
+pkg openrails, method (*Gate) Close(context.Context) error
+pkg openrails, method (*Gate) Consume(context.Context, billing.AdmitParams) (*Ticket, error)
+pkg openrails, method (*Gate) Flush(context.Context) error
+pkg openrails, method (*Gate) Limits(context.Context, billing.CustomerID) ([]billing.CustomerLimit, error)
+pkg openrails, method (*Gate) Record(context.Context, billing.UsageParams) error
 pkg openrails, method (*LocalClient) AdmitTx(context.Context, pgx.Tx, []billing.AdmitParams) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*LocalClient) CaptureAdmissionsTx(context.Context, pgx.Tx, []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)
 pkg openrails, method (*LocalClient) DeclarePSP(context.Context, billing.PSPDeclaration) (*billing.PSP, error)
@@ -189,6 +196,10 @@ pkg openrails, method (*LocalClient) StopRunningChargeTx(context.Context, pgx.Tx
 pkg openrails, method (*Remote) Close(context.Context) error
 pkg openrails, method (*Remote) Merchant(billing.MerchantID) (*Client, error)
 pkg openrails, method (*Remote) Ready(context.Context) error
+pkg openrails, method (*Ticket) Allowed() bool
+pkg openrails, method (*Ticket) Capture(context.Context, billing.CaptureUsage) error
+pkg openrails, method (*Ticket) Refusal() *billing.Refusal
+pkg openrails, method (*Ticket) Release(context.Context) error
 pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
 pkg openrails, method (LocalClient) AdjustCustomerLimit(context.Context, billing.CustomerID, billing.AdjustLimitParams, ...RequestOption) (*billing.CustomerLimit, error)
 pkg openrails, method (LocalClient) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
@@ -477,6 +488,10 @@ pkg openrails, type Engine struct
 pkg openrails, type EntitlementCheckCacheOptions struct
 pkg openrails, type EntitlementCheckCacheOptions struct, MaxAge time.Duration
 pkg openrails, type EntitlementCheckCacheOptions struct, Redis redis.UniversalClient
+pkg openrails, type Gate struct
+pkg openrails, type GateConfig struct
+pkg openrails, type GateConfig struct, Outbox UsageOutbox
+pkg openrails, type GateConfig struct, Redis redis.UniversalClient
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string `yaml:"api_base_url" json:"api_base_url"`
@@ -532,6 +547,9 @@ pkg openrails, type NotificationRecipient struct
 pkg openrails, type NotificationRecipient struct, CustomerID billing.CustomerID
 pkg openrails, type NotificationRecipient struct, Issuer string
 pkg openrails, type NotificationRecipient struct, MerchantID billing.MerchantID
+pkg openrails, type OutboxItem struct
+pkg openrails, type OutboxItem struct, LeaseID billing.LeaseID `json:"lease_id"`
+pkg openrails, type OutboxItem struct, Usage billing.LeaseUsage `json:"usage"`
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -639,6 +657,11 @@ pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.
 pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type SubjectKind = billingauth.SubjectKind
+pkg openrails, type Ticket struct
+pkg openrails, type UsageOutbox interface
+pkg openrails, type UsageOutbox interface, Ack(context.Context, []billing.LeaseUsageRef) error
+pkg openrails, type UsageOutbox interface, Pending(context.Context) ([]OutboxItem, error)
+pkg openrails, type UsageOutbox interface, Put(context.Context, []OutboxItem) error
 pkg openrails, type UserActionRateLimitConfig = config.UserActionRateLimitConfig
 pkg openrails, type UserActionRateLimitConfig struct
 pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
@@ -662,6 +685,7 @@ pkg openrails, type VaultConfig struct, Token string `yaml:"token" json:"token"`
 pkg openrails, type VaultConfig struct, TransitMount string `yaml:"transit_mount" json:"transit_mount"`
 pkg openrails, var ErrMigrationsRequired error
 pkg openrails, var ErrUnauthenticated error
+pkg openrails, var ErrUnavailable error
 pkg openrails/adapters/authkit, func BindMerchant(context.Context, *pgxpool.Pool, openrails.DatabaseConfig, *authkit.Client, billing.MerchantBinding) error
 pkg openrails/adapters/authkit, func MerchantGroups(*authkit.Client) billing.MerchantGroupReader
 pkg openrails/adapters/authkit, func Notifications(notify.Publisher, billing.MerchantID, ...string) *openrails.NotificationChannel

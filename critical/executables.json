@@ -427,6 +427,24 @@
     "OR-J23-S18": [
       "TestLimitHolds/OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own"
     ],
+    "OR-J23-S19": [
+      "TestGate/OR-J23-S19/remote-and-embedded-gates-decide-warm-without-openrails"
+    ],
+    "OR-J23-S20": [
+      "TestGate/OR-J23-S20/racing-requests-on-two-limits-never-take-more-than-either-hold"
+    ],
+    "OR-J23-S21": [
+      "TestGate/OR-J23-S21/restarts-lost-replies-and-dead-leases-converge-once"
+    ],
+    "OR-J23-S22": [
+      "TestGate/OR-J23-S22/a-ticket-lives-across-syncs-and-captures-across-a-session-reset"
+    ],
+    "OR-J23-S23": [
+      "TestGate/OR-J23-S23/processes-sharing-redis-form-one-gate"
+    ],
+    "OR-J23-S24": [
+      "TestGate/OR-J23-S24/refusals-are-verdicts-and-openrails-down-is-unavailable"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
