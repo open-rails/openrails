@@ -13,11 +13,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-type Reader[Option any] interface {
-	ListEvents(context.Context, billing.EventQuery, ...Option) (*billing.EventPage, error)
+type Reader interface {
+	ListEvents(context.Context, billing.EventQuery) (*billing.EventPage, error)
 }
 
-func Hosts[Option any](ctx context.Context, c Reader[Option], kind billing.HostEventType) (*billing.ListPage[billing.HostEvent], error) {
+func Hosts(ctx context.Context, c Reader, kind billing.HostEventType) (*billing.ListPage[billing.HostEvent], error) {
 	out := &billing.ListPage[billing.HostEvent]{Items: []billing.HostEvent{}}
 	query := billing.EventQuery{Limit: 500}
 	if kind != "" {
@@ -79,7 +79,7 @@ type NotificationReader struct {
 	read func(context.Context, billing.EventQuery) (*billing.EventPage, error)
 }
 
-func Notifications[Option any](c Reader[Option]) *NotificationReader {
+func Notifications(c Reader) *NotificationReader {
 	return &NotificationReader{read: func(ctx context.Context, q billing.EventQuery) (*billing.EventPage, error) {
 		return c.ListEvents(ctx, q)
 	}}
