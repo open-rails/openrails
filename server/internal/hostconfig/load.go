@@ -91,10 +91,14 @@ func topLevelKoanfKeys() (scalar, nested map[string]bool) {
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
-	// VAULT_ADDR is HashiCorp's canonical name for the server URL; the field is
-	// vault.address (the mechanical split would yield vault.addr).
-	if s == "vault_addr" {
+	// VAULT_ADDR and VAULT_CACERT are HashiCorp's canonical names for the
+	// server URL and its CA file (the mechanical split would yield vault.addr
+	// and vault.cacert).
+	switch s {
+	case "vault_addr":
 		return "vault.address"
+	case "vault_cacert":
+		return "vault.ca_cert"
 	}
 
 	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /

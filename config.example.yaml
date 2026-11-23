@@ -104,12 +104,13 @@ naming:
 #   kv_mount: ""      # KV v2 mount holding merchant configuration
 #   scope_prefix: ""  # path under the mount; default openrails
 #   transit_mount: "" # Transit mount for Solana crankers; default transit
-#   address: ""       # defaults to the Vault client default / VAULT_ADDR
+#   address: ""       # VAULT_ADDR; default https://127.0.0.1:8200
+#   ca_cert: ""       # path of the private CA's PEM (VAULT_CACERT); the only trust when set
 #   auth_method: ""   # token | approle | kubernetes
 #   token: ""
 #   role_id: ""
 #   secret_id: ""
-#   secrets_path: "" # directory of mounted secret files; a VAULT_SECRET_ID file there is re-read on re-auth
+#   secrets_path: "" # directory of mounted secret files; every approle login reads VAULT_SECRET_ID there
 #   k8s_role: ""
 #   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
 

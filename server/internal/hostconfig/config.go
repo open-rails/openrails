@@ -256,6 +256,10 @@ type VaultLogin struct {
 	// https://127.0.0.1:8200.
 	Address   string `koanf:"address"`
 	Namespace string `koanf:"namespace"`
+	// CACert is the path of the PEM bundle of the CA that signed Vault's
+	// certificate (VAULT_CACERT). Set, it is the only trust: the system
+	// roots are not consulted.
+	CACert string `koanf:"ca_cert"`
 	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is
 	// token.
 	AuthMethod string `koanf:"auth_method"`

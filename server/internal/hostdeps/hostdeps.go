@@ -181,12 +181,20 @@ func pingUntil(ctx context.Context, ping func(context.Context) error) error {
 }
 
 // Vault starts the vault section's session (helpers/vault): it logs in in
-// the background. Only a malformed login fails it.
+// the background. Only a malformed login or an unreadable CA file fails it.
 func Vault(ctx context.Context, c *hostconfig.VaultLogin) (*vault.Session, error) {
+	var caCert []byte
+	if path := strings.TrimSpace(c.CACert); path != "" {
+		var err error
+		if caCert, err = os.ReadFile(path); err != nil { // #nosec G304 -- operator-configured CA path
+			return nil, fmt.Errorf("vault.ca_cert: %w", err)
+		}
+	}
 	staticSecretID := strings.TrimSpace(c.SecretID)
 	return vault.Login(ctx, vault.Config{
 		Address:        cmp.Or(strings.TrimSpace(c.Address), defaultVaultAddress),
 		Namespace:      c.Namespace,
+		CACert:         caCert,
 		Method:         vault.Method(strings.TrimSpace(c.AuthMethod)),
 		Token:          c.Token,
 		RoleID:         c.RoleID,
