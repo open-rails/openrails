@@ -12,7 +12,9 @@ Import `github.com/open-rails/openrails` and its types from
 `github.com/open-rails/openrails/billing` and `/catalog`. Every method takes
 `ctx` first, then typed ids (`billing.CustomerID`, `billing.PriceID`, …) and a
 params struct. Amounts are `int64` native units: micros for USD
-(`4_990_000` is $4.99), each currency's scale in `billing.Currencies()`.
+(`4_990_000` is $4.99), each currency's scale in `billing.Currencies()`. The
+methods are generated from the route catalog, and each one's godoc is its
+route's documentation; this page is about the tasks.
 
 ## Handles
 
@@ -173,10 +175,10 @@ contact claims if receipts should use them. Clear tokens on sign-out.
 | `ListCustomers` | page or search customers (`search` matches email, username or name); `IDs` reads up to 100 |
 | `GetCustomer` | read one: settings, balances, arrears, default cards, contact |
 | `UpdateCustomer` | set its credit limits, trust levels, billing policy, invoice profile, low-balance lines, usage-billing overrides and limit capacity; merges by currency |
-| `GetBalance` | its balance in one currency: available, accrued, rate and when it runs out |
+| `GetBalance` | its balance in one currency (`GetBalanceParams.Currency`): available, accrued, rate and when it runs out |
 | `ListBalanceTransactions` | its ledger lines, newest first, each usage posting with its per-meter detail |
 | `ListPaymentMethods`, `DeletePaymentMethod` | its saved cards; remove one |
-| `GetAccessTenure` | how long it has held access, for loyalty rules |
+| `GetAccessTenure` | how long it has held access (`AccessTenureParams`), for loyalty rules |
 | `CreateProvisioningToken`, `ListProvisioningTokens`, `DeleteProvisioningToken` | SCIM tokens for a directory that cannot use your issuer |
 
 `UpdateCustomer` never creates a customer (`404 customer_not_found`); an amount of
@@ -875,7 +877,7 @@ own row.
 
 | Method | Use it to |
 |---|---|
-| `ListCustomerLimits` | where a customer stands on each limit, then a `balance` line per currency (`GET /v1/me/limits` is the customer's own) |
+| `ListCustomerLimits` | where the customer `CustomerLimitListParams` names stands on each limit, then a `balance` line per currency (`GET /v1/me/limits` is the customer's own) |
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
@@ -1168,8 +1170,14 @@ person acting in person who is not the one held; in process, a handle made with
 An unsuccessful request is a `*billing.StatusError`: the HTTP `Status`, the
 `RetryAfter` header and the envelope's `ErrorDetails` (`Type`, `Code`, `Message`,
 `Param`, `Metadata`, `RequestID`). Every code is registered once with its status
-and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)); classify
-by `errors.Is` and the code, never the message.
+and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)). Each
+code is a `billing.ErrorCode` constant (`billing.CodeCardDeclined`, …), and
+`billing.ErrorCodeFrom(err)` reads it from a `StatusError` or an in-process
+refusal; `billing.LookupErrorCode` returns its `ErrorCodeInfo`. Classify by
+`errors.Is` and the code, never the message: comparing strings, or an interface
+declaring `ErrorCode() string`, does not match. The wire carries the same string.
+The client validates nothing the server checks: a bad request is the server's
+`400 invalid_param`.
 
 ```go guide:errors
 var status *billing.StatusError
@@ -1226,9 +1234,9 @@ response cache.
 Every `List*` method returns a `*billing.ListPage[T]`: `Items` and `Next`, empty on
 the last page. Pass `Next` back as `PageRequest.Cursor`; `Limit` is 1–500
 (default 50). There is no offset or total. Merchant lists of records take `IDs`
-(1–100) in place of a page. `ListEvents` is the exception: its own cursor and
-`HasMore`.
-
+(1–100) in place of a page. A list's PSP filter is a PSP reference, its id
+(`psp_…`) or key (`billing.ParsePSPRef`). `ListEvents` is the exception: its own
+cursor and `HasMore`.
 
 ## Caching
 
