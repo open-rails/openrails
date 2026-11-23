@@ -73,6 +73,41 @@ estimate and adjust to actual input during a request.
 [Claude usage credits](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans),
 [Claude API rate limits](https://platform.claude.com/docs/en/api/rate-limits).
 
+### Merchant integration precedents
+
+| System | What runs before work | How usage or settlement reaches the authority |
+| --- | --- | --- |
+| Stripe Payments | A remote PaymentIntent confirmation can authorize funds on an eligible payment method and return `requires_capture` when configured for manual capture. Confirmation can also require customer action. | A separate capture request collects up to the authorized amount in the standard flow, before the hold expires. [Confirm a PaymentIntent](https://docs.stripe.com/api/payment_intents/confirm), [authorization and expiration](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method), [capture a PaymentIntent](https://docs.stripe.com/api/payment_intents/capture). |
+| Stripe Billing Meters | Stripe Entitlements documents provisioning subscription features in the merchant's system from active entitlement updates and list reads. | Stripe advises pre-aggregating usage or sending batches through its meter event stream. Meter events aggregate asynchronously, thresholds trigger invoices or alerts, and billing credits apply when invoices finalize. Stripe points new usage-based integrations to Metronome. [Entitlements](https://docs.stripe.com/billing/entitlements?dashboard-or-api=api), [record meter events](https://docs.stripe.com/billing/subscriptions/usage-based/recording-usage-api), [usage thresholds](https://docs.stripe.com/billing/subscriptions/usage-based/thresholds), [credit grants](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits#preview-draft-or-finalized-invoices), [usage recording options](https://docs.stripe.com/billing/subscriptions/usage-based/recording-usage). |
+| Metronome | Its prepaid implementation guide tells merchants to keep a `customer_entitled` flag in their own database and check it before work. A zero-balance webhook tells the merchant to revoke access. | The example reports usage after work. Ingest accepts 100 events per batch, deduplicates event `transaction_id`s for 34 days, and recommends a reliable delivery queue so ambiguous batches can be retried. [Prepaid access check](https://docs.metronome.com/guides/pricing-packaging/billing-model-guides/prepaid-credits), [usage events](https://docs.metronome.com/guides/events/send-usage-events), [batch ingestion](https://docs.metronome.com/guides/events/high-volume-ingestion). |
+| Orb | The app checks its own `messages_blocked_until` value per request. Because depletion and recovery webhooks can arrive out of order, the app re-reads Orb's balance before updating that value. A scheduled unblock also prompts a fresh read. | Orb accepts concurrent usage batches of up to 500 events by default and deduplicates per event within the account's grace period. The prepaid guide describes how a delay of seconds or minutes before the merchant acts on a depletion webhook can allow extra usage. [Prepaid product access](https://docs.withorb.com/self-serve/product-access), [event ingestion](https://docs.withorb.com/events-and-metrics/event-ingestion). |
+| Stigg | The merchant can call a colocated Sidecar via REST or gRPC. Its default in-memory cache stores entitlements and current usage. The Sidecar fetches upstream data on a cache miss. Stigg currently documents Redis for caching its separate Governance budget checks. | Stigg exposes a check for requested units before work and separate ingestion. `reportUsage` updates usage synchronously and can return a credit balance. `reportEvent` batches raw events for asynchronous aggregation. The Governance docs specify that ingestion records usage and the check produces the permit decision. [Sidecar overview](https://docs.stigg.io/documentation/high-availability-and-scale/sidecar/overview), [cache architecture](https://docs.stigg.io/documentation/high-availability-and-scale/sidecar/architecture), [Governance check and ingest](https://docs.stigg.io/documentation/governance/check-and-ingest), [ingestion methods](https://docs.stigg.io/documentation/getting-usage-data-into-stigg/choosing-an-ingestion-method). |
+
+Two public protocols show where to place the boundary. Google Cloud Service
+Control recommends caching policy `Check` results for 60 seconds where feasible
+and aggregating completed operation `Report` data for up to five seconds. It
+documents policy propagation lag and exposes a separate `QuotaController` for
+counter allocation. Diameter Credit-Control reserves units at the credit-control
+server, lets the service element meter use against that grant, and reports used
+units when requesting more. The grant can expire even with units remaining.
+[Google Cloud Service Control](https://docs.cloud.google.com/service-infrastructure/docs/service-control/reference/rpc/google.api/servicecontrol.v1),
+[Diameter credit reservation and renewal, RFC 8506 §§5.2–5.3](https://www.rfc-editor.org/rfc/rfc8506.html#section-5.2).
+
+Both Metronome and Orb document pricing leaked usage at zero after prepaid
+credit is exhausted. This caps what the customer is billed and leaves the cost
+of any extra work with the merchant.
+[Metronome overage pricing](https://docs.metronome.com/guides/pricing-packaging/apply-credits-and-commits/guarantee-zero-overages.md),
+[Orb spend management](https://docs.withorb.com/usage-alerting/spend-management).
+
+Once an event is ready for delivery, batching reduces calls and event IDs let
+ingestion deduplicate retries. Two different requests can still consume the
+same apparent balance if each admission only reads a cached view. Metronome and
+Orb show a local access flag backed by billing signals. Stigg shows an
+entitlement cache beside the application. Diameter shows the additional grant
+needed when each local approval must consume reserved capacity. These are
+documented integration contracts. The target of roughly 2 ms mean admission
+with thousands of concurrent requests requires an OpenRails workload test.
+
 ## Merchant-defined counters
 
 Define each counter with a merchant-scoped key, a subject type such as customer
