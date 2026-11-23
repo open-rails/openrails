@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -182,8 +183,18 @@ func realIndex(root string) (*Index, error) {
 			_, err := catalog.ParseApplicationYAML(raw)
 			return err
 		case strings.HasPrefix(base, "merchant"):
+			// A standalone manifest (top-level merchants) is the server
+			// module's to parse; only its YAML is checked here.
+			doc, err := configdocument.YAMLToJSON(raw, 1<<20)
+			if err != nil {
+				return err
+			}
+			var top map[string]json.RawMessage
+			if json.Unmarshal(doc, &top) == nil && top["merchants"] != nil {
+				return nil
+			}
 			// W4 renames this ParseMerchantDocument.
-			_, err := openrails.ParseMerchantDeclaration(raw)
+			_, err = openrails.ParseMerchantDeclaration(raw)
 			return err
 		}
 		return nil
