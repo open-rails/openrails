@@ -10,9 +10,9 @@ import (
 var limitErrors = []string{billing.CodeLimitNotFound, "catalog_revision_conflict", "invalid_param", "resource_conflict", "revision_mismatch"}
 
 // limitsRoutes is usage limits: the catalog's declarations, where a customer
-// stands on each in its current window, and staff adjusting a window. A
-// limit's capacity comes from the customer's products, or an override set
-// with UpdateCustomer.
+// stands on each in its current window, a gate's lease sync, and staff
+// adjusting a window. A limit's capacity comes from the customer's
+// products, or an override set with UpdateCustomer.
 var limitsRoutes = []Route{
 	{Method: GET, Path: "/v1/catalog/limits", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListLimits", Level: LevelRead,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Limit]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListLimits)},
@@ -25,6 +25,9 @@ var limitsRoutes = []Route{
 		Query: params(text("customer_id")), Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Errors: withCustomer(), Handler: h(handlers.ListCustomerLimits)},
 	{Method: GET, Path: "/v1/me/limits", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
+	{Method: POST, Path: "/v1/app/leases/sync", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
+		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
+		Errors: codes("idempotency_key_reused", "invalid_param", billing.CodeLeaseNotFound, billing.CodeLeaseNotHeld, billing.CodeUsageOutOfOrder, billing.CodeNotImplemented), Handler: h(handlers.SyncLeases)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Request: billing.AdjustLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("idempotency_key_reused", "invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
 }

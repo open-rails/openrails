@@ -117,3 +117,13 @@ func AdjustCustomerLimit(r *httprequest.Request) {
 	}
 	r.SuccessJSON(out)
 }
+
+// SyncLeases is a gate's lease sync. The route is declared for gates; this
+// build answers not_implemented.
+func SyncLeases(r *httprequest.Request) {
+	var params billing.SyncLeasesParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	r.ErrorCode(billing.CodeNotImplemented, "lease syncs are not served by this build")
+}

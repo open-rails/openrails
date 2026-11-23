@@ -94,6 +94,22 @@ const CodeRevisionMismatch = "revision_mismatch"
 // CodeLimitNotFound: the catalog declares no limit under the key.
 const CodeLimitNotFound = "limit_not_found"
 
+// Lease codes.
+const (
+	// CodeLeaseNotFound: no lease of the merchant has the id.
+	CodeLeaseNotFound = "lease_not_found"
+	// CodeLeaseNotHeld: the lease is closed or stopped syncing, so it holds
+	// nothing and takes no hold.
+	CodeLeaseNotHeld = "lease_not_held"
+	// CodeUsageOutOfOrder: a usage item skips a number the lease has not
+	// settled.
+	CodeUsageOutOfOrder = "usage_out_of_order"
+)
+
+// CodeNotImplemented: the route is declared and this build does not serve
+// it yet.
+const CodeNotImplemented = "not_implemented"
+
 // CodeProductInUse: a record refers to the product or one of its prices (a
 // purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
@@ -167,6 +183,7 @@ var errorCodes = []ErrorCode{
 	{CodeInsufficientFunds, 402, card, "The payment instrument lacks funds."},
 	{"database_busy", 503, fault, "No database connection is available; retry shortly."},
 	{CodeModelUnavailable, 502, fault, "The language model did not answer; retry, or ask a narrower question."},
+	{CodeNotImplemented, 501, fault, "The route is declared and this build does not serve it yet."},
 
 	// Request shape and transport.
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},
@@ -334,6 +351,9 @@ var errorCodes = []ErrorCode{
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
 	{CodeLimitNotFound, 404, invalid, "The catalog declares no limit under this key."},
+	{CodeLeaseNotFound, 404, invalid, "No lease of the merchant has this id."},
+	{CodeLeaseNotHeld, 409, invalid, "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease."},
+	{CodeUsageOutOfOrder, 409, invalid, "A usage item skips a number the lease has not settled; send the items in order."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

@@ -43,11 +43,11 @@ const (
 	UsageFailed UsageOutcome = "failed"
 )
 
-// RecordUsageParams records one metered usage event for a customer. Source and
-// SourceID identify the event within its EventType, whatever its outcome: a
-// retry with the same Amount and Outcome records nothing new, one with a
-// different Amount or Outcome is ErrIdempotencyKeyReused.
-type RecordUsageParams struct {
+// UsageParams is one metered usage event for a customer. Source and SourceID
+// identify the event within its EventType, whatever its outcome: a retry with
+// the same Amount and Outcome records nothing new, one with a different Amount
+// or Outcome is ErrIdempotencyKeyReused.
+type UsageParams struct {
 	CustomerID CustomerID `json:"customer_id"`
 	Invoker    string     `json:"invoker"`
 	// InvokerType says whose credential the invoker presented (customer when
@@ -70,6 +70,9 @@ type RecordUsageParams struct {
 	// and SourceID are honoured as its idempotency key for those 35 days.
 	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
+
+// RecordUsageParams records one usage event with RecordUsage.
+type RecordUsageParams = UsageParams
 
 // UsageEvent is one recorded usage event. Amount is what it charged: the
 // sum of its Charges, or the cost of failed usage after grace. A failed event's ForgivenAmount is what its grace absorbed, so Amount +
