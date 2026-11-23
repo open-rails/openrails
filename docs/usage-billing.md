@@ -286,7 +286,10 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   returning its holds at once.
 - A refusal is a verdict on the ticket, never an error; `capacity_held` is
   waited out within the request's context first. The error is bad input or
-  `ErrUnavailable`: OpenRails unreachable and no hold covering the request.
+  `ErrUnavailable`: OpenRails unreachable (a 5xx or 429 answer counts) and no
+  hold covering the request. A failed sync never drops usage; only an item
+  refused alone posts nothing. Under a context with no deadline, `Flush` and
+  `Close` give up after 30 seconds.
 - Safe spending is off unless the merchant sets `usage_gate_safe_spend: true`.
   Each hold then names a `safe` amount, its money size, that the gate may spend
   unreserved while OpenRails is unreachable, once the hold's own money is spent
@@ -295,13 +298,19 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   spending admits settles as late usage, owed past the balance.
 - Without Redis, state is in process memory: usage captured but not yet sent is
   lost if the process crashes, and never billed. `GateConfig.Outbox`
-  (`UsageOutbox`, not with Redis) stores it before `Capture` returns; a restarted
-  process resends it against its original leases.
+  (`UsageOutbox`, not with Redis) stores it before `Capture` returns, and a
+  `Put` that fails fails the capture. A restarted process resends it against
+  its original leases, closing them. A resent item is matched by its lease
+  and `n`: the server checks its terms only when the resend repeats a whole
+  recent settlement, and otherwise answers it as settled, so an outbox
+  returns items exactly as stored.
 - With `GateConfig.Redis`, your processes sharing that Redis are one gate: one
   lease and one hold per customer and limit set, decided by one Redis script, so a
   customer one process served is warm on all. Usage waits in a Redis stream and
   one process at a time syncs. A process that cannot reach Redis admits from its
-  own lease meanwhile. Losing Redis loses its unsent usage, never billed, and the
+  own lease meanwhile and closes it once Redis is back and the lease is idle; a
+  capture whose Redis write may or may not have landed is retried, never also
+  reported on that lease. Losing Redis loses its unsent usage, never billed, and the
   lease's unused capacity comes back when the lease expires. `Close` leaves the
   group; the last process to close ends the group's lease.
 

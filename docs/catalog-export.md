@@ -19,7 +19,8 @@ Every row and stored column from these eleven catalog tables is included:
 
 | Table | Retained state |
 |---|---|
-| `products` | All products, including archived products, original UUIDs, current revisions, entitlements, credit grants and tiers |
+| `products` | All products, including archived products, original UUIDs, current revisions, credit grants and tiers |
+| `product_entitlements` | The entitlements each product grants |
 | `prices` | All immutable price versions, including archived ones, private row UUIDs, stored revisions, durations, trials and deposit bounds |
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |

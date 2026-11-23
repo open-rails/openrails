@@ -3,9 +3,12 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -38,13 +41,40 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
+// sessionPlan is tokenPlan with a session of 8 seconds, which ends within
+// one lease's life.
+const sessionPlan = `schema_version: 1
+meters:
+  input-tokens: {event_type: chat, value_property: input_tokens, aggregation: sum, group_by: {model: model}}
+limits:
+  session:
+    unit: usage_units
+    reset: {kind: session, window_seconds: 8}
+    overrun: admit_while_positive
+    rate_cards:
+    - meter: input-tokens
+      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+  weekly:
+    unit: usage_units
+    reset: {kind: fixed, window_seconds: 604800, anchor: first_use}
+    overrun: admit_while_positive
+    rate_cards:
+    - meter: input-tokens
+      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+products:
+  pro: {display_name: Pro, limits: {session: "1000", weekly: "1500"}}
+  chat: {display_name: Chat, rate_cards: [{meter: input-tokens, price: {model: dynamic, currency: USD}}]}
+`
+
 // gateWire is a remote gate's transport to OpenRails: it counts lease
-// syncs, can be cut, and can lose a sync's reply after the server answered.
+// syncs, can be cut, can lose a sync's reply after the server answered, and
+// can watch each sync (watch answers whether to lose that sync's reply).
 type gateWire struct {
 	http.RoundTripper
 	syncs     atomic.Int64
 	down      atomic.Bool
 	dropReply atomic.Int64
+	watch     func(billing.SyncLeasesParams, *billing.SyncLeasesResult) bool
 }
 
 func (w *gateWire) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -55,9 +85,40 @@ func (w *gateWire) RoundTrip(r *http.Request) (*http.Response, error) {
 		return w.RoundTripper.RoundTrip(r)
 	}
 	w.syncs.Add(1)
+	var params billing.SyncLeasesParams
+	if w.watch != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		_ = r.Body.Close()
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		if err := json.Unmarshal(body, &params); err != nil {
+			return nil, err
+		}
+	}
 	resp, err := w.RoundTripper.RoundTrip(r)
-	if err == nil && w.dropReply.Load() > 0 {
-		w.dropReply.Add(-1)
+	if err != nil {
+		return resp, err
+	}
+	lose := false
+	if w.watch != nil && resp.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		var out billing.SyncLeasesResult
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, err
+		}
+		lose = w.watch(params, &out)
+	}
+	if lose || w.dropReply.Load() > 0 {
+		if !lose {
+			w.dropReply.Add(-1)
+		}
 		_ = resp.Body.Close()
 		return nil, errors.New("critical fixture lost the sync's reply")
 	}
@@ -127,7 +188,7 @@ type memOutbox struct {
 	items map[billing.LeaseUsageRef]billing.LeaseUsage
 }
 
-func (o *memOutbox) Put(_ context.Context, items []openrails.OutboxItem) error {
+func (o *memOutbox) Put(_ context.Context, items []billing.OutboxItem) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, it := range items {
@@ -136,12 +197,12 @@ func (o *memOutbox) Put(_ context.Context, items []openrails.OutboxItem) error {
 	return nil
 }
 
-func (o *memOutbox) Pending(context.Context) ([]openrails.OutboxItem, error) {
+func (o *memOutbox) Pending(context.Context) ([]billing.OutboxItem, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]openrails.OutboxItem, 0, len(o.items))
+	out := make([]billing.OutboxItem, 0, len(o.items))
 	for ref, u := range o.items {
-		out = append(out, openrails.OutboxItem{LeaseID: ref.LeaseID, Usage: u})
+		out = append(out, billing.OutboxItem{LeaseID: ref.LeaseID, Usage: u})
 	}
 	return out, nil
 }
@@ -206,11 +267,22 @@ func TestGate(t *testing.T) {
 		var mu sync.Mutex
 		admitted := int64(0)
 		var wg sync.WaitGroup
+		race, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
 		for w := range 12 {
 			wg.Go(func() {
 				for i := range 8 {
 					units := int64(1 + (w+i)%3)
-					ticket, err := g.Admit(t.Context(), gateWork(customer, fmt.Sprintf("race-%d-%d", w, i), units))
+					// capacity_held is the gate's own syncs racing; it is waited
+					// out, and only the limit itself refuses.
+					var ticket *openrails.Ticket
+					var err error
+					for {
+						ticket, err = g.Admit(race, gateWork(customer, fmt.Sprintf("race-%d-%d", w, i), units))
+						if err != nil || ticket.Allowed() || ticket.Refusal().DenyCode != billing.DenyCapacityHeld {
+							break
+						}
+					}
 					if err != nil {
 						t.Errorf("admit: %v", err)
 						return
@@ -313,9 +385,11 @@ func TestGate(t *testing.T) {
 
 	t.Run("OR-J23-S22/a-ticket-lives-across-syncs-and-captures-across-a-session-reset", func(t *testing.T) {
 		a := newAuthorityWorld(t)
-		applyLimits(t, a.alpha, tokenPlan)
+		applyLimits(t, a.alpha, sessionPlan)
 		customer := billing.CustomerID(uuid.New())
 		grantLimitProduct(t, a.alpha, customer, "pro", 24*30)
+		// The gate reads windows by its own clock: the world's starts at it.
+		a.clock.Advance(time.Since(a.clock.Now()))
 		g := newGate(t, a.alpha, openrails.GateConfig{})
 		chat := func(id string, tokens int64) billing.AdmitParams {
 			return billing.AdmitParams{RequestID: id, CustomerID: customer, Invoker: customer.String(), Currency: "USD",
@@ -326,16 +400,17 @@ func TestGate(t *testing.T) {
 		}
 
 		long := gateAdmit(t, g, chat("long", 20_000))
-		time.Sleep(3500 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 		require.NoError(t, long.Capture(t.Context(), capture(40_000)), "a ticket outlives many syncs with no deadline")
 		gateFlush(t, g)
-		require.EqualValues(t, 200, customerLimit(t, a.alpha, customer, "five_hour").Used)
+		require.EqualValues(t, 200, customerLimit(t, a.alpha, customer, "session").Used)
 
+		// The session ends (8 s) while the lease lives (10 s).
 		late := gateAdmit(t, g, chat("late", 20_000))
-		a.clock.Advance(5*time.Hour + time.Minute)
+		a.clock.Advance(9 * time.Second)
 		require.NoError(t, late.Capture(t.Context(), capture(20_000)))
 		gateFlush(t, g)
-		require.Nil(t, customerLimit(t, a.alpha, customer, "five_hour").WindowStartsAt, "the capture settles in its ended session and opens none")
+		require.Nil(t, customerLimit(t, a.alpha, customer, "session").WindowStartsAt, "the capture settles in its ended session and opens none")
 		require.EqualValues(t, 300, customerLimit(t, a.alpha, customer, "weekly").Used)
 	})
 
@@ -593,5 +668,133 @@ func TestGate(t *testing.T) {
 		daily = customerLimit(t, a.alpha, shared, "daily")
 		require.EqualValues(t, 2, daily.Used)
 		require.Zero(t, daily.Held, "the last process closed the group's lease")
+	})
+
+	t.Run("OR-J23-S28/a-units-only-plan-takes-zero-money-through-redis-and-gives-every-unit-back", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		applyLimits(t, a.alpha, gatePlan)
+		customer := gateCustomer(t, a)
+		client, _ := gateRemote(t, a)
+		g := newGate(t, client, openrails.GateConfig{Redis: criticalRedis(t)})
+		// Every hold has a balance part; on a plan with no money it takes 0,
+		// which each script takes, releases, captures and settles.
+		for i := range 30 {
+			require.NoError(t, gateAdmit(t, g, gateWork(customer, fmt.Sprintf("cycle-%d", i), 2)).Release(t.Context()))
+		}
+		for i := range 10 {
+			_, err := g.Consume(t.Context(), gateWork(customer, fmt.Sprintf("used-%d", i), 2))
+			require.NoError(t, err)
+		}
+		gateFlush(t, g)
+		require.EqualValues(t, 20, customerLimit(t, a.alpha, customer, "daily").Used)
+		// Every released unit came back: the 40 left of 60 are admitted.
+		for i := range 4 {
+			_, err := g.Consume(t.Context(), gateWork(customer, fmt.Sprintf("rest-%d", i), 10))
+			require.NoError(t, err)
+		}
+		gateFlush(t, g)
+		require.EqualValues(t, 60, customerLimit(t, a.alpha, customer, "daily").Used)
+		refused, err := g.Admit(t.Context(), gateWork(customer, "past", 1))
+		require.NoError(t, err)
+		require.False(t, refused.Allowed())
+		require.Equal(t, billing.DenyLimitReached, refused.Refusal().DenyCode)
+	})
+
+	t.Run("OR-J23-S29/a-lost-reply-after-a-shrink-keeps-the-capacity-until-the-gate-applies-it", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		applyLimits(t, a.alpha, gatePlan)
+		customer := gateCustomer(t, a)
+		client, wire := gateRemote(t, a)
+		var mu sync.Mutex
+		var version int64
+		var lost, checked bool
+		var afterLoss []billing.HoldApplied
+		var heldAfterLoss int64
+		var readErr error
+		wire.watch = func(p billing.SyncLeasesParams, out *billing.SyncLeasesResult) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			if lost && !checked {
+				// The first sync after the lost reply: the gate has not applied
+				// the shrink, so the server keeps what it held.
+				checked, afterLoss = true, p.Applied
+				page, err := a.alpha.ListCustomerLimits(context.Background(), customer)
+				readErr = err
+				if err == nil {
+					for _, line := range page.Items {
+						if line.Limit == "daily" {
+							heldAfterLoss = line.Held
+						}
+					}
+				}
+				return false
+			}
+			for _, h := range out.Holds {
+				if h.CustomerID != customer {
+					continue
+				}
+				for _, l := range h.Limits {
+					if l.Limit != "daily" {
+						continue
+					}
+					if !lost && l.Held < 40 && version > 0 {
+						lost = true
+						return true
+					}
+					if !lost {
+						version = h.Version
+					}
+				}
+			}
+			return false
+		}
+		holder := newGate(t, client, openrails.GateConfig{})
+		require.NoError(t, gateAdmit(t, holder, gateWork(customer, "big", 40)).Release(t.Context()))
+		require.EqualValues(t, 40, customerLimit(t, a.alpha, customer, "daily").Held)
+
+		// Another gate wants more than is free: the holder's idle hold shrinks
+		// on its next sync, whose reply is lost.
+		contender := newGate(t, a.alpha, openrails.GateConfig{})
+		patient, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		ticket, err := contender.Admit(patient, gateWork(customer, "contender", 30))
+		require.NoError(t, err)
+		require.True(t, ticket.Allowed(), "the shrunk capacity reaches the contender once the holder applied it: %+v", ticket.Refusal())
+		mu.Lock()
+		defer mu.Unlock()
+		require.True(t, lost, "the shrink's reply was lost")
+		require.True(t, checked)
+		require.NoError(t, readErr)
+		for _, applied := range afterLoss {
+			require.False(t, applied.CustomerID == customer && applied.Version > version, "the gate acknowledged a shrink it never received: %+v", applied)
+		}
+		require.EqualValues(t, 40, heldAfterLoss, "a shrink the gate never applied releases nothing")
+	})
+
+	t.Run("OR-J23-S30/an-answer-that-reports-the-lease-dead-starts-a-new-lease", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		applyLimits(t, a.alpha, gatePlan)
+		customer := gateCustomer(t, a)
+		client, wire := gateRemote(t, a)
+		g := newGate(t, client, openrails.GateConfig{})
+		require.NoError(t, gateAdmit(t, g, gateWork(customer, "warm", 50)).Release(t.Context()))
+		// The server's clock passes the lease's life between two syncs: its
+		// next answer reports the lease dead and renews nothing.
+		syncs := wire.syncs.Load()
+		a.clock.Advance(11 * time.Second)
+		require.Eventually(t, func() bool { return wire.syncs.Load() >= syncs+2 }, 10*time.Second, 20*time.Millisecond)
+		// The dead lease's capacity went to another gate.
+		other := newGate(t, a.alpha, openrails.GateConfig{})
+		taken := gateAdmit(t, other, gateWork(customer, "other", 55))
+		// The first gate decides from no hold of the dead lease: it wants
+		// again, on a new lease, and is refused.
+		short, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		stale, err := g.Admit(short, gateWork(customer, "stale", 10))
+		require.NoError(t, err)
+		require.False(t, stale.Allowed(), "a dead lease's hold never decides again")
+		require.NoError(t, taken.Capture(t.Context(), workUsage(55)))
+		gateFlush(t, other)
+		require.EqualValues(t, 55, customerLimit(t, a.alpha, customer, "daily").Used)
 	})
 }

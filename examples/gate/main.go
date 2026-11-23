@@ -5,10 +5,11 @@
 // network call, so the API keeps deciding while OpenRails is briefly
 // unreachable.
 //
-// Run it with OPENRAILS_URL and OPENRAILS_API_KEY, a key holding
-// merchant:usage:manage and merchant:usage:read. REDIS_URL makes the API's
-// replicas one gate. ADDR is the listen address (default :8080). The catalog
-// declares the limits (catalog.yaml).
+// Run it with OPENRAILS_URL, the merchant's API URL, and OPENRAILS_API_KEY,
+// a merchant API key holding merchant:usage:manage and merchant:usage:read
+// (README.md). REDIS_URL makes the API's replicas one gate. ADDR is the
+// listen address (default :8080). The catalog declares the limits
+// (catalog.yaml).
 package main
 
 import (
@@ -69,19 +70,25 @@ func main() {
 		_ = json.NewEncoder(w).Encode(lines)
 	})
 	server := &http.Server{Addr: cmp.Or(os.Getenv("ADDR"), ":8080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdown)
-		// Close sends the captured usage and closes the lease, giving its
-		// holds back.
-		if err := gate.Close(shutdown); err != nil {
-			log.Print(err)
-		}
 	}()
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
+	}
+	// In-flight requests have captured or released their tickets. Close
+	// sends the captured usage and closes the lease, giving its holds back,
+	// before main returns and Redis closes.
+	<-drained
+	closing, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := gate.Close(closing); err != nil {
+		log.Print(err)
 	}
 }
 

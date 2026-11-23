@@ -230,11 +230,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
       # Snapshots are written against a database; a drifted run offers them as a patch to review and commit.
+      # The SQL bindings are the regenerated-sqlc patch's, so the two never overlap.
       - name: Regenerate the drifted contracts as a patch
         if: ${{ failure() }}
         run: |
           go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
-          git add -A && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
+          git add -A -- . ':(exclude)internal/db/gen' && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
         with:

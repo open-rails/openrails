@@ -547,9 +547,6 @@ pkg openrails, type NotificationRecipient struct
 pkg openrails, type NotificationRecipient struct, CustomerID billing.CustomerID
 pkg openrails, type NotificationRecipient struct, Issuer string
 pkg openrails, type NotificationRecipient struct, MerchantID billing.MerchantID
-pkg openrails, type OutboxItem struct
-pkg openrails, type OutboxItem struct, LeaseID billing.LeaseID `json:"lease_id"`
-pkg openrails, type OutboxItem struct, Usage billing.LeaseUsage `json:"usage"`
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -660,8 +657,8 @@ pkg openrails, type SubjectKind = billingauth.SubjectKind
 pkg openrails, type Ticket struct
 pkg openrails, type UsageOutbox interface
 pkg openrails, type UsageOutbox interface, Ack(context.Context, []billing.LeaseUsageRef) error
-pkg openrails, type UsageOutbox interface, Pending(context.Context) ([]OutboxItem, error)
-pkg openrails, type UsageOutbox interface, Put(context.Context, []OutboxItem) error
+pkg openrails, type UsageOutbox interface, Pending(context.Context) ([]billing.OutboxItem, error)
+pkg openrails, type UsageOutbox interface, Put(context.Context, []billing.OutboxItem) error
 pkg openrails, type UserActionRateLimitConfig = config.UserActionRateLimitConfig
 pkg openrails, type UserActionRateLimitConfig struct
 pkg openrails, type UserActionRateLimitConfig struct, MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day" json:"minimum_customers_per_day"`
@@ -2989,6 +2986,9 @@ pkg openrails/billing, type OrderUsage struct, PONumber *string `json:"po_number
 pkg openrails/billing, type OrderUsage struct, PeriodEndsAt time.Time `json:"period_ends_at"`
 pkg openrails/billing, type OrderUsage struct, PeriodStartsAt time.Time `json:"period_starts_at"`
 pkg openrails/billing, type OrderUsage struct, Tax map[string]any `json:"tax"`
+pkg openrails/billing, type OutboxItem struct
+pkg openrails/billing, type OutboxItem struct, LeaseID LeaseID `json:"lease_id"`
+pkg openrails/billing, type OutboxItem struct, Usage LeaseUsage `json:"usage"`
 pkg openrails/billing, type PSP struct
 pkg openrails/billing, type PSP struct, Archived bool `json:"archived"`
 pkg openrails/billing, type PSP struct, CreatedAt time.Time `json:"created_at"`

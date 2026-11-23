@@ -1,7 +1,9 @@
 package openrails
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -51,19 +53,14 @@ type GateConfig struct {
 }
 
 // UsageOutbox stores a gate's captured usage until OpenRails settles it.
-// Put returns before Capture does; Pending is read when a gate starts and
-// resent against the original leases; Ack follows settlement. It must be
+// Put returns before Capture does, and a Capture whose Put fails fails;
+// Pending is read when a gate starts and resent against the original
+// leases; Ack follows settlement, or a Put the gate gave up on. It must be
 // safe for concurrent use.
 type UsageOutbox interface {
-	Put(ctx context.Context, items []OutboxItem) error
-	Pending(ctx context.Context) ([]OutboxItem, error)
+	Put(ctx context.Context, items []billing.OutboxItem) error
+	Pending(ctx context.Context) ([]billing.OutboxItem, error)
 	Ack(ctx context.Context, items []billing.LeaseUsageRef) error
-}
-
-// OutboxItem is one usage item of a lease.
-type OutboxItem struct {
-	LeaseID billing.LeaseID    `json:"lease_id"`
-	Usage   billing.LeaseUsage `json:"usage"`
 }
 
 // ErrUnavailable is a decision the gate could not make because OpenRails
@@ -79,6 +76,8 @@ var errGateClosed = errors.New("openrails: gate: closed")
 const (
 	// syncTimeout bounds one SyncLeases call, well inside the lease's life.
 	syncTimeout = limits.LeaseLifetime / 2
+	// gateFlushBound bounds Flush and Close under a context with no deadline.
+	gateFlushBound = 3 * limits.LeaseLifetime
 	// maxGateHolds bounds the holds a gate keeps; past it the least recently
 	// used are returned on the next sync.
 	maxGateHolds = 10_000
@@ -88,6 +87,9 @@ const (
 	// that fits it.
 	maxColdRounds = 20
 )
+
+// newLeaseID is a gate's lease id: a UUIDv7, as the server requires.
+func newLeaseID() billing.LeaseID { return billing.LeaseID(uuid.Must(uuid.NewV7())) }
 
 // NewGate starts a gate over c, a remote or embedded merchant handle. Its
 // lease is created on the first sync.
@@ -100,8 +102,7 @@ func NewGate(c *Client, cfg GateConfig) (*Gate, error) {
 	}
 	g := &Gate{c: c}
 	if cfg.Redis != nil {
-		g.local = newLocalGate(c, nil, false)
-		g.shared = newSharedGate(c, cfg.Redis, g.local)
+		g.shared = newSharedGate(c, cfg.Redis)
 		g.shared.start()
 		return g, nil
 	}
@@ -185,20 +186,23 @@ func (g *Gate) Limits(ctx context.Context, customer billing.CustomerID) ([]billi
 }
 
 // Flush syncs now and returns once every usage item captured before the call
-// is settled, or with ErrUnavailable or ctx's error. It returns the errors of
-// items OpenRails refused since the last Flush; those posted nothing.
+// is settled, or with ErrUnavailable, the sync's refusal or ctx's error;
+// under a ctx with no deadline it gives up after a bound with
+// ErrUnavailable. It returns the errors of items OpenRails refused since the
+// last Flush; those posted nothing.
 func (g *Gate) Flush(ctx context.Context) error {
 	if g.shared != nil {
-		return errors.Join(g.shared.flush(ctx), g.local.flushIfStarted(ctx))
+		return errors.Join(g.shared.flush(ctx), g.shared.fallback().flushIfStarted(ctx))
 	}
 	return g.local.flush(ctx, false)
 }
 
 // Close sends pending usage, returns the gate's holds and ends its lease
-// (SyncLeasesParams.Close), then stops syncing. With Redis, a process leaves
-// the group, and the group's lease ends with the last process to close; a
-// lease that cannot be closed expires. Close after the gate's tickets are
-// captured or released: a ticket captured after Close is refused.
+// (SyncLeasesParams.Close), then stops syncing, within ctx (or a bound when
+// ctx has no deadline). With Redis, a process leaves the group, and the
+// group's lease ends with the last process to close; a lease that cannot be
+// closed expires. Close after the gate's tickets are captured or released:
+// a ticket captured after Close is refused.
 func (g *Gate) Close(ctx context.Context) error {
 	g.mu.Lock()
 	if g.closed {
@@ -207,11 +211,29 @@ func (g *Gate) Close(ctx context.Context) error {
 	}
 	g.closed = true
 	g.mu.Unlock()
-	var err error
+	ctx, cancel := boundContext(ctx)
+	defer cancel()
 	if g.shared != nil {
-		err = g.shared.close(ctx)
+		return g.shared.close(ctx)
 	}
-	return errors.Join(err, g.local.close(ctx))
+	return g.local.close(ctx)
+}
+
+// boundContext bounds a ctx that has no deadline by gateFlushBound.
+func boundContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeoutCause(ctx, gateFlushBound, unavailable(errors.New("usage did not settle within the gate's bound")))
+}
+
+// waitErr is why a wait under ctx ended: the bound's ErrUnavailable, or
+// ctx's own error.
+func waitErr(ctx context.Context) error {
+	if cause := context.Cause(ctx); errors.Is(cause, ErrUnavailable) {
+		return cause
+	}
+	return ctx.Err()
 }
 
 // Ticket is one decision of a gate. An allowed ticket is captured with the
@@ -253,7 +275,8 @@ func (t *Ticket) Refusal() *billing.Refusal {
 // Capture reports the request's usage, sent on the next sync (with an
 // Outbox, stored before Capture returns). Usage is today's CaptureUsage: its
 // event type is the admitted one, Source defaults to "admit" and SourceID to
-// the request id. A dynamic card charges the admission's stated amount.
+// the request id. A dynamic card charges the admission's stated amount. A
+// capture that fails leaves the ticket open, to capture again or release.
 func (t *Ticket) Capture(ctx context.Context, u billing.CaptureUsage) error {
 	if !t.Allowed() {
 		return invalidParam("request_id", "a refused request has nothing to capture")
@@ -287,6 +310,11 @@ func (t *Ticket) Capture(ctx context.Context, u billing.CaptureUsage) error {
 	return err
 }
 
+// notCaptured is a capture that left its ticket open.
+type notCaptured struct{ error }
+
+func (e notCaptured) Unwrap() error { return e.error }
+
 // Release gives the request's hold back when its work failed; it is a no-op
 // once captured or released.
 func (t *Ticket) Release(ctx context.Context) error {
@@ -305,7 +333,8 @@ func (t *Ticket) Release(ctx context.Context) error {
 		t.local.release()
 		return nil
 	case t.shared != nil:
-		return t.shared.release(ctx)
+		t.shared.release(ctx)
+		return nil
 	default:
 		return t.gate.releaseRemote(ctx, t)
 	}
@@ -435,15 +464,33 @@ func normalizeGateAdmit(p *billing.AdmitParams) error {
 	return nil
 }
 
-// attrsKey names what policy resolution reads of a request: requests with
-// equal keys share a limit set.
+// attrsKey names what policy resolution reads of a request, as the server's
+// limit set does: requests with equal keys share a limit set.
 func attrsKey(p billing.AdmitParams) string {
 	roles := make([]string, len(p.Roles))
 	for i, r := range p.Roles {
 		roles[i] = r.String()
 	}
 	slices.Sort(roles)
-	return strings.Join([]string{p.CustomerID.String(), p.Invoker, string(p.InvokerType), p.TrustLevel, strings.Join(roles, ","), p.Resource, p.Currency}, "\x00")
+	return strings.Join([]string{p.CustomerID.String(), p.Invoker, string(p.InvokerType), p.TrustLevel, strings.Join(roles, ","), p.Resource, p.Currency, eventTypeOf(p)}, "\x00")
+}
+
+// ownWantKey is the want of a request that does not share its attributes'
+// want: requests with equal estimates still share one.
+func ownWantKey(attrs string, p billing.AdmitParams) string {
+	w := leaseWant(p)
+	est, _ := json.Marshal(struct {
+		Usage  *billing.UsageEstimate `json:"usage"`
+		Amount *int64                 `json:"amount"`
+	}{w.Usage, w.EstimatedAmount})
+	return attrs + "\x00" + string(est)
+}
+
+func eventTypeOf(p billing.AdmitParams) string {
+	if p.Usage == nil {
+		return ""
+	}
+	return p.Usage.EventType
 }
 
 func leaseWant(p billing.AdmitParams) billing.LeaseWant {
@@ -457,13 +504,90 @@ func leaseWant(p billing.AdmitParams) billing.LeaseWant {
 	if p.Resource != "" {
 		w.Resource = &p.Resource
 	}
+	if p.Usage == nil && p.EstimatedAmount > 0 {
+		amount := p.EstimatedAmount
+		w.EstimatedAmount = &amount
+	}
 	return w
+}
+
+// dominates reports whether request p costs at least what the sent want
+// estimated under any rate card: the same event type and metadata, and every
+// dimension and stated amount at least the want's. A refusal of the want is
+// then p's too; a request it does not dominate sends its own want.
+func dominates(p billing.AdmitParams, sent *billing.LeaseWant) bool {
+	if sent == nil {
+		return false
+	}
+	if p.Usage == nil || sent.Usage == nil {
+		return p.Usage == nil && sent.Usage == nil && p.EstimatedAmount >= derefInt(sent.EstimatedAmount)
+	}
+	if p.Usage.EventType != sent.Usage.EventType || derefInt(p.Usage.Amount) < derefInt(sent.Usage.Amount) {
+		return false
+	}
+	for k, v := range sent.Usage.Dimensions {
+		if p.Usage.Dimensions[k] < v {
+			return false
+		}
+	}
+	a, errA := json.Marshal(nonNilMeta(p.Usage.Metadata))
+	b, errB := json.Marshal(nonNilMeta(sent.Usage.Metadata))
+	return errA == nil && errB == nil && bytes.Equal(a, b)
+}
+
+func derefInt(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+// syncFault is how a failed sync call is taken inside the gate. No call
+// failure drops usage: only a per-item refusal does.
+type syncFault uint8
+
+const (
+	// faultUnreachable: transport failures, 5xx and 429. The gate decides as
+	// if OpenRails were unreachable.
+	faultUnreachable syncFault = iota + 1
+	faultLeaseNotHeld
+	// faultRefused: any other refusal of the whole call; its usage is kept
+	// and resent.
+	faultRefused
+)
+
+func classify(err error) syncFault {
+	var se *billing.StatusError
+	switch {
+	case !errors.As(err, &se) || overloaded(se.Status):
+		return faultUnreachable
+	case se.Code == billing.CodeLeaseNotHeld:
+		return faultLeaseNotHeld
+	}
+	return faultRefused
+}
+
+// overloaded reports a status the gate takes as OpenRails unreachable.
+func overloaded(status int) bool {
+	return status >= 500 || status == http.StatusTooManyRequests
+}
+
+// wantFailure is a want's own error as its requests see it.
+func wantFailure(status int, details billing.ErrorDetails) wantAnswer {
+	err := &billing.StatusError{Status: status, ErrorDetails: details}
+	if overloaded(status) {
+		return wantAnswer{unavailable: err}
+	}
+	return wantAnswer{err: err}
 }
 
 // unavailable wraps a sync failure as ErrUnavailable.
 func unavailable(cause error) error {
-	if cause == nil || errors.Is(cause, ErrUnavailable) {
+	switch {
+	case cause == nil:
 		return ErrUnavailable
+	case errors.Is(cause, ErrUnavailable):
+		return cause
 	}
 	return fmt.Errorf("%w: %w", ErrUnavailable, cause)
 }
@@ -495,6 +619,53 @@ func waitRetry(ctx context.Context, r *billing.Refusal) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// wantAnswer is a sync's answer to a want: a limit set (its hold applied),
+// a refusal of the estimate that was sent, an error, OpenRails unreachable,
+// or retry with a new sync.
+type wantAnswer struct {
+	limitSet    string
+	refusal     *billing.Refusal
+	sent        *billing.LeaseWant
+	err         error
+	unavailable error
+	retry       bool
+}
+
+// coldStep is what a cold request does with its want's answer.
+type coldStep uint8
+
+const (
+	coldRetry coldStep = iota
+	coldSafe
+	coldFail
+	coldRefused
+	coldOwnWant
+	coldAnswered
+)
+
+// step reads a want's answer for request p: a refusal is p's only when p
+// dominates the estimate that was sent; capacity_held is waited out.
+func (a wantAnswer) step(ctx context.Context, p billing.AdmitParams) coldStep {
+	switch {
+	case a.retry:
+		return coldRetry
+	case a.unavailable != nil:
+		return coldSafe
+	case a.err != nil:
+		return coldFail
+	case a.refusal != nil && !dominates(p, a.sent):
+		return coldOwnWant
+	case a.refusal != nil && a.refusal.DenyCode == billing.DenyCapacityHeld:
+		if waitRetry(ctx, a.refusal) {
+			return coldRetry
+		}
+		return coldRefused
+	case a.refusal != nil:
+		return coldRefused
+	}
+	return coldAnswered
 }
 
 // admitRemote admits a request that declares an accrual rate as a request
