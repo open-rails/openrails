@@ -319,7 +319,7 @@ credential.
 
 ### License
 
-OpenRails is under the Functional Source License 1.1 with an Apache 2.0 future
-license ([LICENSE](LICENSE)): use it for anything except a competing hosted
-billing service. The browser SDK [`@openrails/billing-ui`](sdk/billing-ui) is MIT
+OpenRails is under the Elastic License 2.0 ([LICENSE](LICENSE)): use, change
+and self-host it for any purpose, except offering it to others as a hosted or
+managed service. The browser SDK [`@openrails/billing-ui`](sdk/billing-ui) is MIT
 ([sdk/billing-ui/LICENSE](sdk/billing-ui/LICENSE)).

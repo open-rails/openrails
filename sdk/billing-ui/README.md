@@ -417,4 +417,4 @@ method invocation alone does not establish complete method functionality.
 
 ## License
 
-MIT; see [LICENSE](LICENSE). Only this package is MIT: the rest of the OpenRails repository is under the Functional Source License (FSL-1.1-ALv2).
+MIT; see [LICENSE](LICENSE). Only this package is MIT: the rest of the OpenRails repository is under the Elastic License 2.0 (ELv2).
