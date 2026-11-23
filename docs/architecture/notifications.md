@@ -64,9 +64,10 @@ marks them `queued` and inserts each one's `openrails.customer_message` job
 transaction. `Service.Send` settles a message in order, each stop where it ends:
 `Enabled` (the document's `enabled`, else the default: `defaults`, refined by
 `byDefault`, which turns `premium_ended` on for `confirmedEndings` and off a
-`payment_method_failed` whose `recovery_action` is `resubscribe`) or `disabled`;
-`CustomerMessageOnTestPSP` (any PSP of the fact's payment, order or subscription
-with `psps.live` false) or `test_environment`; no `Deps.Email`, `failed`/`no_sender`;
+`payment_method_failed` whose `recovery_action` is `resubscribe` and a payment
+issue from `checkoutSources`) or `disabled`;
+`CustomerMessageOnTestPSP` (the fact's `psp_id`, or any PSP of its payment, order
+or subscription, with `psps.live` false) or `test_environment`; no `Deps.Email`, `failed`/`no_sender`;
 the directory's contact (`identity.Directory.Contacts`) or `no_contact`; an address
 `net/mail` parses within 320 bytes or `failed`/`invalid_recipient`. It renders
 (`Deps.MessageRenderer` when it takes the message, else `Render`), then `claim`
@@ -75,27 +76,40 @@ takes `LockCustomerMessages` (a per-customer transaction advisory lock), counts
 past `RateCap` (ten an hour), `rate_limited` with
 `alerting.RecordMessageRateLimit`'s `life.customer.messages_rate_limited` finding.
 `config.EmailSender.Send` follows; `SettleCustomerMessage` marks `sent`, back to
-`queued` for a retry, or `failed`: `refused` on an SMTP 5xx (`*textproto.Error`),
-`send_failed` or `unavailable` on the last attempt. From is the profile's
-`from_email` and display name, else the sender's own.
+`queued` for a retry, or `failed`: `refused` on a 5xx to `RCPT TO` (`refusalOf`
+reads helpers/smtp's step text), `send_failed` or `unavailable` on the last
+attempt. A 5xx to `AUTH` or `MAIL FROM` retries and raises
+`alerting.RecordMessageSenderRefused`'s `life.customer.messages_sender_refused`.
+`settle` runs on `context.WithoutCancel` with its own timeout, so a timed-out last
+attempt still ends. From is the profile's `from_email` and display name, else the
+sender's own.
 
 **Templates.** Built-in templates (`templates/en/<type>.subject|.txt|.html`, one
 `layout`) are a `billing.MessageSettings` the merchant's document overlays per
 event type and language. Subject and text are `text/template`, HTML
 `html/template`, over `billing.MessageData` (version `MessageDataVersion`), with
-`missingkey=error` and the functions `default`, `upper` and `lower`; amounts are
-`moneyutil.FormatAmount`. A document is checked by `Check` (every event type against
+`missingkey=error` and `functions` (comparisons, logic, `len`, `index`, `slice`,
+`default`, `upper`, `lower`); amounts are `moneyutil.FormatAmount`. `compile`
+parses each part alone and `vet` refuses `range`, `define`/`block`, variables, a
+`template` call but the layout's one body, and every other function; a part's
+source is at most `maxSource` (64 KiB) and renders through `capped` (256 KiB).
+`typecheck` walks every branch's field chains against `billing.MessageData` by
+reflection. A document is checked by `Check` (every event type against
 its `Sample` in every language it names) where it loads: `checkMessages` in the
 app's merchant configuration sync and `merchantbootstrap.ScopeDeclaration`; a
 refused one is `Rejected` under `merchantdocs.MessagesDoc` and the version served
 before keeps serving. `Service.Preview` renders over a sample fact with the
 merchant's own profile and an optional candidate template; `Service.Test` sends
-that rendering to the merchant's `alert_email` only. Endings record their cause
+that rendering to the merchant's `alert_email` only, `TestCap` (ten) an hour per
+merchant, counted in the abuse state (`Service.Abuse`). Endings record their cause
 for the confirmation: `CancelMembershipTx` (`CancelMembershipParams.EndedReason`:
 `admin` for staff, `refund` for a refund), `FailMembership` (`expired` or
 `non_recoverable` when a decline ends the subscription) and `ExpireAwaitingMethod`
 (`expired`); the converge `notifyPass` records `access_ended`. `refund_completed`
-is written by `PaymentService.queueRefundReceipt` where a refund settles.
+is written by `PaymentService.queueRefundReceipt` where a refund settles, within
+`RefundReceiptWindow` (seven days) of the provider's refund time, with `voided` for
+a reversal `VoidTransactionID` names. `premium_started` carries the first period
+and, when charged, the amount (`membershipCharge`).
 
 **Account inbox.** With `Deps.Notifications` set, `publishInbox` runs inside
 `NotificationService.create`'s transaction. `inboxKey` selects payment issues
@@ -277,8 +291,10 @@ No customer-facing entry point: the log is an application route and AuthKit serv
 the inbox. Outbound alert webhooks are SSRF-guarded: `httpx.Policy` validates each
 URL on write, before each delivery, and at the dialer on every redirect hop. A
 customer is sent at most ten messages an hour. A test message goes only to the
-merchant's `alert_email`: its request has no address. Templates escape every value
-in HTML and call a fixed set of functions.
+merchant's `alert_email`: its request has no address, and a merchant sends ten an
+hour. `alert_email` and `from_email` are one bare address. Templates escape every
+value in HTML, call a fixed set of functions and render in time and size linear
+in their source.
 
 Checks:
 - `CreateWebhook` and `UpdateWebhook` answer `webhook_invalid` for a non-public host.
@@ -286,6 +302,8 @@ Checks:
 - `claim` counts under `LockCustomerMessages`, so concurrent jobs cannot pass `RateCap` (OR-J39-S05).
 - `CreateTestMessageParams` names no recipient; OR-J39-S18 refuses a `to` field (`unknown_field`).
 - `TestHTMLEscapesWhatItIsGiven` renders script and `javascript:` values inert.
+- `Service.Test` counts `customer_message_test:<merchant>` past `TestCap` (OR-J39-S18).
+- `TestTemplatesCannotGrowWithoutBound` and `TestARenderStopsAtItsCap` refuse loops, recursion and amplifying functions and cap a render.
 
 ### 9. Destructive-action safeguards
 This system tells operators about holds: the hold's alert and host event commit with
@@ -310,8 +328,11 @@ Checks:
   (erasure), S07 and S08 (a merchant template; a refused document), S09, S13, S14
   and S15 (each cancellation cause sends one confirmation; a refund's access end
   none), S10 (price change), S11 (refund receipts), S12 (`Deps.MessageRenderer`),
-  S16 (the log route), S17 (preview), S18 (test send).
-  `internal/modules/messages` has unit tests of rendering, defaults and `Check`.
+  S16 (the log route), S17 (preview), S18 (test send and its cap), S19 (SMTP
+  refusals through helpers/smtp), S20 (a last attempt cut off mid-send), S21 (a
+  declined checkout), S22 (a refund found late), S23 (a void), S24 (the
+  subscription receipt). `internal/modules/messages` has unit tests of
+  rendering, defaults, `Check`, template bounds and type checks, and `refusalOf`.
 - Inbox: OR-J31-S40 (adoption export ordering). `TestAccountNotificationChannel`
   and `TestOrderNotificationRecovery` (`critical/account_notifications_test.go`)
   publish and withdraw against AuthKit's real store; they run with the suite but
