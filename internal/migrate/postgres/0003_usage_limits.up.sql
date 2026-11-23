@@ -373,7 +373,7 @@ FROM (
         ''::text AS meter_key, ''::text AS cell,
         CASE WHEN octet_length(e.invoker_id) <= 255 THEN e.invoker_id ELSE '' END AS invoker, e.outcome,
         1::bigint AS requests, 0::bigint AS quantity,
-        GREATEST(e.amount - COALESCE((SELECT sum((c.value->>'amount')::bigint) FROM jsonb_array_elements(e.charges) c), 0), 0)::bigint AS amount,
+        GREATEST(e.amount - COALESCE((SELECT sum(GREATEST((c.value->>'amount')::bigint, 0)) FROM jsonb_array_elements(e.charges) c), 0), 0)::bigint AS amount,
         e.forgiven_amount
     FROM billing.usage_events e
     WHERE octet_length(e.event_type) BETWEEN 1 AND 255
@@ -381,7 +381,7 @@ FROM (
     SELECT e.merchant_id, e.customer_id, date_trunc('day', e.occurred_at, 'UTC'), e.currency, e.event_type,
         c.value->>'meter_key', COALESCE(c.value->>'cell', ''),
         CASE WHEN octet_length(e.invoker_id) <= 255 THEN e.invoker_id ELSE '' END, e.outcome,
-        1::bigint, COALESCE((c.value->>'quantity')::bigint, 0), COALESCE((c.value->>'amount')::bigint, 0), 0::bigint
+        1::bigint, GREATEST(COALESCE((c.value->>'quantity')::bigint, 0), 0), GREATEST(COALESCE((c.value->>'amount')::bigint, 0), 0), 0::bigint
     FROM billing.usage_events e
     CROSS JOIN LATERAL jsonb_array_elements(e.charges) c
     WHERE octet_length(e.event_type) BETWEEN 1 AND 255
