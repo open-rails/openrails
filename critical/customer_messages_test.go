@@ -402,7 +402,11 @@ func TestCustomerMessages(t *testing.T) {
 	})
 	t.Run("OR-J39-S14/a-staff-cancel-that-ends-access-now-sends-one-confirmation", func(t *testing.T) {
 		mail := &alertMailbox{}
-		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		// The cancel lands in the microsecond its period starts, 200ns in,
+		// which PostgreSQL rounds down: the period it saves still ends after
+		// it starts.
+		inMicrosecond := func(w *world) { w.clock.Advance(200 - time.Duration(w.clock.Now().Nanosecond()%1000)) }
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) }, inMicrosecond)
 		_, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "Terms violation", RevokeAccess: true})
 		require.NoError(t, err)
 		liveMoney(t, a.world)

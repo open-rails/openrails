@@ -1367,8 +1367,10 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	// An immediate revoke truncates the paid period to now; a period-end
 	// cancel keeps paid access until the term ends and forfeits only renewal
-	// grace. ApplyLocalCancellation owns the shared local-state core.
-	now := s.now()
+	// grace. ApplyLocalCancellation owns the shared local-state core. now is
+	// at the microsecond the row stores: compared at nanoseconds, a cancel in
+	// the microsecond the period starts saved a period that ends as it starts.
+	now := s.now().Truncate(time.Microsecond)
 	endAt := now
 	if params.RevokeAccess {
 		if subscription.CurrentPeriodEndsAt == nil || subscription.CurrentPeriodEndsAt.After(now) {
