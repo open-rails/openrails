@@ -577,7 +577,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// customer's receipt.
 		start, end := periodStartsAt.UTC(), periodEndsAt.UTC()
 		data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), PeriodStartsAt: &start, PeriodEndsAt: &end}
-		if amount, currency := membershipCharge(params, price); params.TransactionID != "" && amount > 0 {
+		amount, currency := membershipCharge(params, price)
+		if params.Paid != nil {
+			amount, currency = params.Paid.Amount, params.Paid.Currency
+		} else if params.TransactionID == "" {
+			amount = 0
+		}
+		if amount > 0 {
 			data.Amount, data.Currency = &amount, currency
 		}
 		notification := &models.NotificationEvent{
