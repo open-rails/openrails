@@ -49,15 +49,17 @@ through `host-four`; these are placeholders, not customer or repository names.
 ## Public surface
 - The root package is the interface: `openrails.New` (in process) returns the `*Engine`
   (workers, routes, every declared merchant), and `engine.Merchant(id)` the `*Client` bound
-  to one merchant; over HTTP, `openrails.NewRemoteMerchant` (or `NewRemote` with a credential
-  per merchant) returns the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
+  to one merchant; over HTTP, `openrails.NewRemote` (a credential per merchant id) and
+  `Remote.Merchant(id)` return the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
   `ctx` first, request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …) and
   typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
-- The Go client is the admin API: each admin, catalog-edit and merchant-config route
-  has one `*Client` method. Customer self-service (`/v1/me`) is for browsers through
-  `sdk/billing-ui`.
+- The Go client is the admin API, generated into `client_gen.go` from the route catalog
+  (`Name`, `Doc`, `Args`, `Query`, `Cache`): one `*Client` method per admin, catalog-edit and
+  merchant-config route. `HandWritten` routes and the methods no route has live in
+  `client_handwritten.go`; any other exported method fails generation. Customer
+  self-service (`/v1/me`) is for browsers through `sdk/billing-ui`.
 - Every route is declared once in the route catalog (`internal/http/routes`, one file
   per resource) with its tier, level (an admin route: read or write) or permission,
   request, responses and error codes. The catalog mounts the route and generates
@@ -136,7 +138,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   rail's live/test environment, and on Stripe that the key belongs to the declared
   account (`Mismatched` otherwise). NMI has no such read: nothing ties a Gateway ID to its key.
 - A merchant declares a PSP as `psps.<key>: {rail: nmi, environment: live|test|sandbox, account_id: …, settings: …}`
-  (`openrails.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
+  (`billing.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
   credentials under `psps.<key>.secrets`. Merchant configuration is that file (read-only)
   or, with `vault.kv_mount`, Vault: one document per object
   (`<scope_prefix>/merchants/<merchant-id>/psps/<key>`); never Postgres. The retired
@@ -258,4 +260,6 @@ through `host-four`; these are placeholders, not customer or repository names.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
 - Static checks: `scripts/check.sh guards`, `scripts/check-embedded-auth-boundary.sh`,
-  `sqlc vet` and `go run ./scripts/contracts`.
+  `sqlc vet` and `go run ./scripts/contracts`. `go run ./scripts/contracts -lint` (in guards)
+  checks the Go API's conventions against `api/lint-baseline.txt`, which only shrinks: a new
+  finding fails, and so does a line nothing matches (`-lint -prune` drops those).
