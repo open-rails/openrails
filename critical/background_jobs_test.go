@@ -595,6 +595,15 @@ func (refreshMerchantJob) Kind() string { return "openrails.provider_refresh_req
 // it has to read.
 func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UUID) {
 	t.Helper()
+	event := refreshAttempt(t, fleet, merchant)
+	require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+}
+
+// refreshAttempt queues the merchant's provider refresh and answers how its
+// windows ended: completed, or failed with a read left incomplete, which
+// River retries.
+func refreshAttempt(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UUID) *river.Event {
+	t.Helper()
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
 	job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: merchant}, &river.InsertOpts{Queue: "provider_refresh"})
@@ -607,8 +616,7 @@ func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UU
 			if event == nil || event.Job.ID != job.Job.ID {
 				continue
 			}
-			require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
-			return
+			return event
 		case <-deadline.C:
 			t.Fatal("provider refresh did not finish its windows")
 		}
