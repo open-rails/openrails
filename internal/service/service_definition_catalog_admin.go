@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -272,7 +273,7 @@ func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams
 	for _, id := range params.IDs {
 		ids = append(ids, id.String())
 	}
-	filter := catalog.PriceFilter{IDs: ids, Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency),
+	filter := catalog.PriceFilter{IDs: ids, Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(string(params.Currency)),
 		ProductKey: strings.TrimSpace(params.ProductKey), Key: strings.TrimSpace(params.Key), Recurring: params.Recurring}
 	if !params.ProductID.IsZero() {
 		id := params.ProductID.UUID()
@@ -335,7 +336,7 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 	if err != nil {
 		return nil, productLookup(err)
 	}
-	if err := validateCreditPrice(product.CreditGrant, billing.CreatePriceParams{Currency: current.Currency, UnitAmount: current.Amount, BillingIntervalHours: current.BillingIntervalHours, CustomerAmount: current.CustomerAmount,
+	if err := validateCreditPrice(product.CreditGrant, billing.CreatePriceParams{Currency: catalogwire.Currency(current.Currency), UnitAmount: current.Amount, BillingIntervalHours: current.BillingIntervalHours, CustomerAmount: current.CustomerAmount,
 		TrialUnitAmount: current.TrialUnitAmount, TrialDurationHours: current.TrialDurationHours, Quantity: current.Quantity}); err != nil {
 		return nil, err
 	}

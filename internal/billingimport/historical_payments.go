@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -39,9 +40,9 @@ func planHistoricalPayments(psps *pspResolver, declared []billing.DeclaredHistor
 			return nil, apperr.Invalidf("historical payment source_id must be present and unique").WithParam("historical_payments")
 		}
 		seen[p.SourceID] = true
-		p.Rail = strings.ToLower(strings.TrimSpace(p.Rail))
-		p.Currency = moneyutil.NormalizeCurrency(p.Currency)
-		psp, err := psps.resolve(p.PSP, p.Rail, "historical payment "+p.SourceID)
+		p.Rail = billing.Rail(strings.ToLower(strings.TrimSpace(string(p.Rail))))
+		p.Currency = catalog.Currency(moneyutil.NormalizeCurrency(string(p.Currency)))
+		psp, err := psps.resolve(p.PSP, string(p.Rail), "historical payment "+p.SourceID)
 		if err != nil {
 			return nil, err
 		}
@@ -51,14 +52,14 @@ func planHistoricalPayments(psps *pspResolver, declared []billing.DeclaredHistor
 			reason = "customer is required"
 		case p.Rail != "nmi":
 			reason = "historical payments currently support only NMI"
-		case !providerTransactionID(p.Rail, p.TransactionID) || len(p.TransactionID) > 512:
+		case !providerTransactionID(string(p.Rail), p.TransactionID) || len(p.TransactionID) > 512:
 			reason = "a valid provider transaction_id is required"
-		case p.Amount <= 0 || moneyutil.RequireFiatCurrency(p.Currency) != nil:
+		case p.Amount <= 0 || moneyutil.RequireFiatCurrency(string(p.Currency)) != nil:
 			reason = "a positive amount and known fiat currency are required"
 		case p.PaidAt.IsZero() || p.PaidAt.After(asOf):
 			reason = "paid_at is required and cannot be after as_of"
 		default:
-			if _, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount); err != nil {
+			if _, err := moneyutil.NativeToRailMinorExact(string(p.Currency), p.Amount); err != nil {
 				reason = err.Error()
 			}
 		}
@@ -130,9 +131,9 @@ func recordHistoricalPayment(ctx context.Context, d *db.DB, merchantID uuid.UUID
 		return false, err
 	}
 	rail := p.decl.Rail
-	prior, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: merchantID, PspID: &p.psp, Channel: string(models.ChannelRail), Rail: &rail, TransactionID: p.decl.TransactionID})
+	prior, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: merchantID, PspID: &p.psp, Channel: string(models.ChannelRail), Rail: (*string)(&rail), TransactionID: p.decl.TransactionID})
 	if err == nil {
-		if prior.CustomerID != p.decl.Customer.UUID() || prior.Amount != p.decl.Amount || prior.Currency != p.decl.Currency ||
+		if prior.CustomerID != p.decl.Customer.UUID() || prior.Amount != p.decl.Amount || prior.Currency != string(p.decl.Currency) ||
 			!prior.PurchasedAt.Equal(p.decl.PaidAt) || prior.RefundedPaymentID != nil ||
 			prior.MoneyMovement != string(models.MoneyMovementRail) || prior.Status != "succeeded" && prior.Status != "refunded" {
 			return false, observed.ErrConflict
@@ -145,10 +146,10 @@ func recordHistoricalPayment(ctx context.Context, d *db.DB, merchantID uuid.UUID
 	result, err := observed.Record(ctx, d, observed.Bill{
 		PSPID: p.psp, CustomerID: p.decl.Customer.UUID(), Owner: observed.OwnerProvider, Kind: "purchase",
 		SourceKind: historicalPaymentSource, SourceKey: p.decl.TransactionID, ProviderReference: p.decl.TransactionID,
-		Currency: p.decl.Currency, Total: p.decl.Amount, DueAt: p.decl.PaidAt,
+		Currency: string(p.decl.Currency), Total: p.decl.Amount, DueAt: p.decl.PaidAt,
 		Lines: []observed.Line{{Description: "Historical payment", Source: historicalPaymentSource, UnitAmount: p.decl.Amount, Amount: p.decl.Amount}},
 		Payment: &models.Payment{CustomerID: p.decl.Customer.UUID(), Channel: models.ChannelRail, Rail: models.Rail(p.decl.Rail),
-			TransactionID: p.decl.TransactionID, Amount: p.decl.Amount, ListAmount: p.decl.Amount, Currency: p.decl.Currency,
+			TransactionID: p.decl.TransactionID, Amount: p.decl.Amount, ListAmount: p.decl.Amount, Currency: string(p.decl.Currency),
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.decl.PaidAt, CreatedAt: p.decl.PaidAt},
 		Settled: true, SettlementSource: "cash",
 	}, now)
@@ -160,14 +161,14 @@ func validateHistoricalRefunds(p *billing.DeclaredHistoricalPayment, asOf time.T
 	seen := map[string]bool{}
 	for i := range p.Refunds {
 		r := &p.Refunds[i]
-		if !providerTransactionID(p.Rail, r.TransactionID) || len(r.TransactionID) > 512 || r.TransactionID == p.TransactionID || seen[r.TransactionID] {
+		if !providerTransactionID(string(p.Rail), r.TransactionID) || len(r.TransactionID) > 512 || r.TransactionID == p.TransactionID || seen[r.TransactionID] {
 			return "refunds require distinct provider transaction IDs different from the original payment"
 		}
 		seen[r.TransactionID] = true
 		if r.Amount <= 0 || r.Amount > remaining {
 			return "refund amounts must be positive and their total cannot exceed the payment"
 		}
-		if _, err := moneyutil.NativeToRailMinorExact(p.Currency, r.Amount); err != nil {
+		if _, err := moneyutil.NativeToRailMinorExact(string(p.Currency), r.Amount); err != nil {
 			return err.Error()
 		}
 		remaining -= r.Amount

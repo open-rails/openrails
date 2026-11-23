@@ -32,7 +32,7 @@ type MerchantCreationConfig struct {
 // ReservedMerchantSlugs is the deployment's reserved namespace:
 // billing.ReservedMerchantSlugs plus MerchantCreationConfig.ReservedSlugs.
 func (c *ControlPlane) ReservedMerchantSlugs() []string {
-	out := append([]string(nil), billing.ReservedMerchantSlugs...)
+	out := billing.ReservedMerchantSlugs()
 	if c != nil && c.merchantCreation != nil {
 		for _, r := range c.merchantCreation.ReservedSlugs {
 			out = append(out, billing.NormalizeMerchantSlug(r))

@@ -223,7 +223,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
 				require.False(t, oneUsageOrder(t, a, customer).Usage.Delinquent)
 				balance(t, a.alpha, customer, 0, 0, 0)
-				events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
+				events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"delinquency.cleared"}, Limit: 100})
 				require.NoError(t, err)
 				require.Len(t, events.Events, 1)
 				cleared := events.Events[0]
@@ -241,7 +241,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				require.Equal(t, "current", transition.To)
 				require.Equal(t, "USD", transition.Currency)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
-				repeated, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
+				repeated, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"delinquency.cleared"}, Limit: 100})
 				require.NoError(t, err)
 				require.Len(t, repeated.Events, 1, "replaying evaluation must not emit another clearance")
 				p.money(t, 0, 0)
@@ -271,7 +271,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				}
 				require.NoError(t, err)
 				cleared := func() int {
-					events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"delinquency.cleared"}, Limit: 100})
+					events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"delinquency.cleared"}, Limit: 100})
 					require.NoError(t, err)
 					return len(events.Events)
 				}
@@ -295,11 +295,11 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.Equal(t, billing.OrderOpen, order.Status)
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		notices, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order_overdue"}, Limit: 100})
+		notices, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, notices.Events, 1, "the overdue order is told although no usage pass runs")
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		notices, err = a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order_overdue"}, Limit: 100})
+		notices, err = a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, notices.Events, 1, "told once")
 	})
@@ -482,6 +482,6 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.False(t, results[0].Allowed())
 		require.NotNil(t, results[0].Admission)
 		require.NotNil(t, results[0].Admission.DenyCode)
-		require.Equal(t, "delinquent_unpaid_order", *results[0].Admission.DenyCode)
+		require.Equal(t, billing.DenyDelinquentUnpaidOrder, *results[0].Admission.DenyCode)
 	})
 }

@@ -94,12 +94,15 @@ var catalogRoutes = []Route{
 			"key: a key's current price is its one not archived.",
 		Query: billing.PriceListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetPrice", Level: LevelRead,
-		Args:   []any{billing.PriceID("")},
-		Cache:  config.ReadCatalog,
-		Client: HandWritten,
-		Doc: "GetPrice reads a price; params.Verify also reads a provider price's terms at its provider and " +
-			"reports their drift.",
-		Query: billing.GetPriceParams{}, Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
+		Args:      []any{billing.PriceID("")},
+		Cache:     config.ReadCatalog,
+		Doc:       "GetPrice reads a price.",
+		Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
+	{Method: GET, Path: "/v1/catalog/prices/{id}/verification", Group: CatalogAdmin, Auth: AuthMerchant, Name: "VerifyPrice", Level: LevelRead,
+		Args: []any{billing.PriceID("")},
+		Doc: "VerifyPrice reads a price and, for a provider price, its terms at its provider: Provider.SyncStatus " +
+			"and Drift say whether they still match. It never writes, and is never answered from memory.",
+		Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.VerifyPrice)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}/history", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPriceHistory", Level: LevelRead,
 		Args: []any{billing.PriceID("")},
 		Doc: "ListPriceHistory returns one page of the history of a price's key, most recent first: when the key " +

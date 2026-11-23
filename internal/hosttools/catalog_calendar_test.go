@@ -10,7 +10,7 @@ import (
 func TestCalendarCatalogDumpCanBeApplied(t *testing.T) {
 	document := &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 		"membership": {DisplayName: catalog.Value("Membership"), Prices: map[string]catalog.ApplyPrice{
-			"monthly": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(20_000_000)), BillingIntervalHours: catalog.Null[int](), BillingIntervalMonths: catalog.Value(1), AccessDurationHours: catalog.Null[int]()},
+			"monthly": {Currency: catalog.Value[catalog.Currency]("USD"), UnitAmount: catalog.Value(int64(20_000_000)), BillingIntervalHours: catalog.Null[int](), BillingIntervalMonths: catalog.Value(1), AccessDurationHours: catalog.Null[int]()},
 		}},
 	}}
 	yaml, err := readableCatalogYAML(document)

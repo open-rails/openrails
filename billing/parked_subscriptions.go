@@ -10,17 +10,17 @@ import (
 // ParkedSubscriptionID names one park of a provider subscription (pks_).
 type ParkedSubscriptionID uuid.UUID
 
-const ParkedSubscriptionIDPrefix = "pks_"
+const parkedSubscriptionIDPrefix = "pks_"
 
 func ParseParkedSubscriptionID(s string) (ParkedSubscriptionID, error) {
-	u, err := parsePrefixedID("parked subscription", ParkedSubscriptionIDPrefix, s)
+	u, err := parsePrefixedID("parked subscription", parkedSubscriptionIDPrefix, s)
 	return ParkedSubscriptionID(u), err
 }
 
 func (id ParkedSubscriptionID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id ParkedSubscriptionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id ParkedSubscriptionID) String() string {
-	return formatPrefixedID(ParkedSubscriptionIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(parkedSubscriptionIDPrefix, uuid.UUID(id))
 }
 func (id ParkedSubscriptionID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *ParkedSubscriptionID) UnmarshalText(text []byte) error {
@@ -62,7 +62,7 @@ const (
 type ParkedSubscription struct {
 	ID              ParkedSubscriptionID `json:"id"`
 	PSP             PSPID                `json:"psp"`
-	Rail            string               `json:"rail"`
+	Rail            Rail                 `json:"rail"`
 	SubscriptionRef string               `json:"subscription_ref"`
 	Reason          ParkReason           `json:"reason"`
 	PriceRef        *string              `json:"price_ref"`

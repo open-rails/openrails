@@ -20,16 +20,16 @@ func ListCustodians(r *httprequest.Request) {
 	r.JSON(http.StatusOK, billing.ListPage[billing.Custodian]{Items: items})
 }
 
-func PutCustodian(r *httprequest.Request) {
+func SetCustodian(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
 		return
 	}
-	var request billing.PutCustodianParams
+	var request billing.SetCustodianParams
 	if !r.BindJSON(&request) {
 		return
 	}
-	value, err := svc.PutCustodianConfiguration(r.Request.Context(), id, r.Param("key"), request)
+	value, err := svc.SetCustodianConfiguration(r.Request.Context(), id, r.Param("key"), request)
 	if err != nil {
 		writeRefusal(r, err, "Custodian configuration failed")
 		return

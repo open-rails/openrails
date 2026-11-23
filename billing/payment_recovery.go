@@ -7,7 +7,7 @@ type PaymentRecovery struct {
 	// LastFailureReason is the normalized machine category of the latest applicable
 	// failure, never raw provider text. It is absent for successful recovery, old
 	// subscription periods, or a newer pending attempt.
-	LastFailureReason string `json:"last_failure_reason,omitempty"`
+	LastFailureReason DeclineReason `json:"last_failure_reason,omitempty"`
 	// Retryable is false while provider writes are disabled. Limited mode
 	// still permits otherwise eligible customer payments; automatic retries
 	// can remain paused. Commands recheck all eligibility before charging.

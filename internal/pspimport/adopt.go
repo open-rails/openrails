@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -113,7 +114,7 @@ func (im *Importer) AdoptNMISubscription(ctx context.Context, pspID uuid.UUID, s
 			return fmt.Errorf("adopt NMI subscription %s: transaction %s: %w", st.ref, t.TransactionID, err)
 		}
 		declared := billing.DeclaredTransaction{RailSubscriptionID: st.ref, TransactionID: t.TransactionID, OriginalTransactionID: t.OriginalTransactionID,
-			Type: typ, Success: t.Success, Amount: native, Currency: strings.ToUpper(t.Currency), OccurredAt: t.OccurredAt.UTC()}
+			Type: typ, Success: t.Success, Amount: native, Currency: catalog.Currency(strings.ToUpper(t.Currency)), OccurredAt: t.OccurredAt.UTC()}
 		if t.Success && typ != "decline" {
 			// A named receipt is a payment (or its refund) of the subscription.
 			declared.SourceID = "nmi-adoption-receipt:" + t.TransactionID + ":" + typ

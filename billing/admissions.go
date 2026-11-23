@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // InvokerType says whose credential an invoker presents.
@@ -33,8 +34,8 @@ type AdmitParams struct {
 	// TrustLevel selects money policy; empty uses the customer's stored level.
 	TrustLevel string `json:"trust_level,omitempty"`
 	// Resource is attribution only.
-	Resource string `json:"resource,omitempty"`
-	Currency string `json:"currency"`
+	Resource string           `json:"resource,omitempty"`
+	Currency catalog.Currency `json:"currency"`
 	// EstimatedAmount is a host-stated hold. Usage instead states the usage
 	// the request expects, which the meters' rate cards price into the hold;
 	// the two are exclusive, and with neither the admission holds nothing.
@@ -112,13 +113,13 @@ type Admission struct {
 	// window refusal clears, or when to retry capacity_held. A limit_reached
 	// refusal names its Limit and when it ResetsAt (null when nothing refills
 	// it). All are null when allowed.
-	BlockedBy         *AdmissionBlock `json:"blocked_by"`
-	DenyCode          *string         `json:"deny_code"`
-	RetryAfterSeconds *int64          `json:"retry_after_seconds"`
-	Limit             *string         `json:"limit"`
-	ResetsAt          *time.Time      `json:"resets_at"`
-	Currency          string          `json:"currency"`
-	EstimatedAmount   int64           `json:"estimated_amount,string"`
+	BlockedBy         *AdmissionBlock  `json:"blocked_by"`
+	DenyCode          *DenyCode        `json:"deny_code"`
+	RetryAfterSeconds *int64           `json:"retry_after_seconds"`
+	Limit             *string          `json:"limit"`
+	ResetsAt          *time.Time       `json:"resets_at"`
+	Currency          catalog.Currency `json:"currency"`
+	EstimatedAmount   int64            `json:"estimated_amount,string"`
 	// StartCapacityAmount is what the customer could spend when the request
 	// was admitted, before its own hold.
 	StartCapacityAmount int64 `json:"start_capacity_amount,string"`
@@ -208,7 +209,7 @@ func (p CaptureAdmissionBatchParams) Validate() error {
 type CaptureReceipt struct {
 	RequestID            string                `json:"request_id"`
 	CustomerID           CustomerID            `json:"customer_id"`
-	Currency             string                `json:"currency"`
+	Currency             catalog.Currency      `json:"currency"`
 	EstimatedAmount      int64                 `json:"estimated_amount,string"`
 	Amount               int64                 `json:"amount,string"`
 	Charges              []UsageCharge         `json:"charges"`

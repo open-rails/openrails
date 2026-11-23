@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // CatalogDumpOptions exports current, unarchived prices as an editable catalog
@@ -327,7 +328,7 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		}
 		var price catalog.ApplyPrice
 		price.UnitAmount = catalog.Value(row.Amount)
-		price.Currency = catalog.Value(row.Currency)
+		price.Currency = catalog.Value(catalog.Currency(row.Currency))
 		if row.BillingIntervalMonths != nil {
 			price.BillingIntervalMonths = catalog.Value(int(*row.BillingIntervalMonths))
 		}
@@ -357,9 +358,9 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 				return fmt.Errorf("decode price %q quantity: %w", row.Key, err)
 			}
 		}
-		price.SellVia = catalog.Null[[]string]()
+		price.SellVia = catalog.Null[[]catalog.SellVia]()
 		if row.SellVia != nil {
-			price.SellVia = catalog.Value(row.SellVia)
+			price.SellVia = catalog.Value(normalize.Strings[catalog.SellVia](row.SellVia))
 		}
 		if p.Prices == nil {
 			p.Prices = map[string]catalog.ApplyPrice{}
@@ -397,7 +398,7 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 			}
 			if interval != nil {
 				hours := int(*interval)
-				out.UnitAmount, out.Currency, out.BillingIntervalHours = &amount, row.Currency, &hours
+				out.UnitAmount, out.Currency, out.BillingIntervalHours = &amount, catalog.Currency(row.Currency), &hours
 			}
 			if row.TrialUnitAmount != nil && row.TrialDurationHours != nil {
 				hours := int(*row.TrialDurationHours)
@@ -405,7 +406,7 @@ func dumpProviderPrice(row gen.ListLiveCatalogPricesWithPSPLinksRow) (catalog.Ap
 			}
 		case models.RailNMI:
 			if row.Currency != "USD" {
-				out.Currency = row.Currency
+				out.Currency = catalog.Currency(row.Currency)
 			}
 		}
 	}

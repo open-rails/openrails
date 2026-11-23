@@ -328,7 +328,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				_, err := a.deps.Vault.Logical().WriteWithContext(t.Context(), a.cfg.Vault.KVMount+"/data/openrails/platform_vault/"+merchantBTTenant, map[string]any{"data": map[string]any{"api_key": "private-merchant", "collection_applications": map[string]any{a.alpha.MerchantID().UUID().String(): map[string]string{"id": merchantBTApplication, "public_api_key": "public-merchant"}}}})
 				require.NoError(t, err)
 			} else {
-				_, err := a.alphaRemote.PutCustodian(t.Context(), "owned", billing.PutCustodianParams{ExpectedRevision: 0, Kind: "basis_theory", Environment: "test", AccountID: merchantBTTenant, Settings: map[string]any{"public_api_key": "public-merchant"}, Credentials: map[string]string{"api_key": "private-merchant"}})
+				_, err := a.alphaRemote.SetCustodian(t.Context(), "owned", billing.SetCustodianParams{ExpectedRevision: 0, Kind: "basis_theory", Environment: "test", AccountID: merchantBTTenant, Settings: map[string]any{"public_api_key": "public-merchant"}, Credentials: map[string]string{"api_key": "private-merchant"}})
 				require.NoError(t, err)
 			}
 			_, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, Environment: "test", Custodian: custody, PSPAccount: billing.PSPAccount{GatewayID: "critical-gateway"}, TokenizationKey: "critical-collect-key", Credentials: map[string]string{"security_key": "critical-nmi-key", "webhook_signing_secret": "critical-nmi-webhook"}})

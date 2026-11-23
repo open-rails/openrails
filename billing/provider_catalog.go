@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // ProviderCatalogKind is what a provider catalog object is. An NMI plan is a
 // price.
@@ -41,10 +45,10 @@ type ProviderCatalogObject struct {
 // price has no fixed amount; Currency is null where the provider names none
 // (NMI). At most one billing interval is set.
 type ProviderCatalogTerms struct {
-	StatedAmount          *string `json:"stated_amount"`
-	Currency              *string `json:"currency"`
-	BillingIntervalHours  *int    `json:"billing_interval_hours"`
-	BillingIntervalMonths *int    `json:"billing_interval_months"`
+	StatedAmount          *string           `json:"stated_amount"`
+	Currency              *catalog.Currency `json:"currency"`
+	BillingIntervalHours  *int              `json:"billing_interval_hours"`
+	BillingIntervalMonths *int              `json:"billing_interval_months"`
 }
 
 // ProviderCatalogListParams filters one PSP's observed catalog, in (kind,

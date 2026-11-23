@@ -48,7 +48,7 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 			customer uuid.UUID
 			currency string
 		}
-		rows := int32(len(customers) * len(billing.Currencies())) // #nosec G115 -- customers is at most one page (MaxPageLimit), times the currency registry
+		rows := int32(len(customers) * len(catalog.Currencies())) // #nosec G115 -- customers is at most one page (MaxPageLimit), times the currency registry
 		currencies, err := q.ListCustomersBalanceCurrencies(ctx, gen.ListCustomersBalanceCurrenciesParams{MerchantID: mid.UUID(), CustomerIds: customers, RowLimit: rows})
 		if err != nil {
 			return err
@@ -78,7 +78,7 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 			mode[key{row.CustomerID, row.Currency}] = row.BillingMode
 			if row.DefaultPaymentMethodID != nil {
 				m := out[row.CustomerID]
-				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: row.Currency, PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
+				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: catalog.Currency(row.Currency), PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
 			}
 		}
 		now := instant(s.now())
@@ -117,7 +117,7 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 	if err != nil {
 		return nil, err
 	}
-	accounts, err := q.ListCustomersMoneyAccounts(ctx, gen.ListCustomersMoneyAccountsParams{MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer}, RowLimit: int32(2 * len(billing.Currencies()))}) // #nosec G115 -- twice the currency registry
+	accounts, err := q.ListCustomersMoneyAccounts(ctx, gen.ListCustomersMoneyAccountsParams{MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer}, RowLimit: int32(2 * len(catalog.Currencies()))}) // #nosec G115 -- twice the currency registry
 	if err != nil {
 		return nil, err
 	}

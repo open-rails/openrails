@@ -57,7 +57,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 			last4 = *method.Card.Last4
 		}
 		if err := scan(fmt.Sprintf("payment_methods[%d]", i),
-			method.Rail, method.PSP.Key, method.RailCustomerRef, method.RailMethodRef,
+			string(method.Rail), method.PSP.Key, method.RailCustomerRef, method.RailMethodRef,
 			method.RecurringTransactionID, brand, last4,
 		); err != nil {
 			return err
@@ -66,7 +66,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	for i, sub := range book.Subscriptions {
 		where := fmt.Sprintf("subscriptions[%d]", i)
 		if err := scan(where,
-			sub.SourceID, sub.Rail, sub.RailSubscriptionID, sub.PSP.Key,
+			sub.SourceID, string(sub.Rail), sub.RailSubscriptionID, sub.PSP.Key,
 			sub.Cancel.Kind,
 		); err != nil {
 			return err
@@ -76,7 +76,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		}
 		if sub.PaymentMethod != nil {
 			if err := scan(where+".payment_method",
-				sub.PaymentMethod.Rail, sub.PaymentMethod.RailCustomerRef, sub.PaymentMethod.RailMethodRef,
+				string(sub.PaymentMethod.Rail), sub.PaymentMethod.RailCustomerRef, sub.PaymentMethod.RailMethodRef,
 			); err != nil {
 				return err
 			}
@@ -84,13 +84,13 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	}
 	for i, txn := range book.Transactions {
 		if err := scan(fmt.Sprintf("transactions[%d]", i),
-			txn.SourceID, txn.OriginalTransactionID, txn.RailSubscriptionID, txn.TransactionID, txn.Type, txn.Currency,
+			txn.SourceID, txn.OriginalTransactionID, txn.RailSubscriptionID, txn.TransactionID, txn.Type, string(txn.Currency),
 		); err != nil {
 			return err
 		}
 	}
 	for i, payment := range book.HistoricalPayments {
-		if err := scan(fmt.Sprintf("historical_payments[%d]", i), payment.SourceID, payment.Rail, payment.PSP.Key, payment.TransactionID, payment.Currency); err != nil {
+		if err := scan(fmt.Sprintf("historical_payments[%d]", i), payment.SourceID, string(payment.Rail), payment.PSP.Key, payment.TransactionID, string(payment.Currency)); err != nil {
 			return err
 		}
 		for j, refund := range payment.Refunds {

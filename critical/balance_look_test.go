@@ -72,7 +72,7 @@ func lowNotices(t *testing.T, w *world, customer billing.CustomerID) int {
 
 func lowEvents(t *testing.T, w *world, customer billing.CustomerID) int {
 	t.Helper()
-	events, err := w.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"balance.low"}, Limit: 100})
+	events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"balance.low"}, Limit: 100})
 	require.NoError(t, err)
 	n := 0
 	for _, e := range events.Events {

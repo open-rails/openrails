@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -104,7 +105,7 @@ type CatalogConflict struct {
 	Key        string            `json:"key"`
 	ProductKey *string           `json:"product_key"`
 	// Currency is a price's live currency, which its money fields are in.
-	Currency *string                `json:"currency"`
+	Currency *catalog.Currency      `json:"currency"`
 	Fields   []CatalogFieldConflict `json:"fields"`
 }
 
@@ -113,7 +114,7 @@ type CatalogConflict struct {
 func (c CatalogConflict) String() string {
 	var file, live string
 	if c.Currency != nil {
-		file, live = *c.Currency, *c.Currency
+		file, live = string(*c.Currency), string(*c.Currency)
 	}
 	for _, f := range c.Fields {
 		if f.Field == "currency" {

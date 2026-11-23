@@ -224,7 +224,10 @@ function CustodianForm({
           expected_revision: current?.revision ?? 0,
           kind: "basis_theory",
           environment:
-            current?.environment ?? String(form.get("environment") ?? "test"),
+            current?.environment ??
+            (String(
+              form.get("environment") ?? "test"
+            ) as Custodian["environment"]),
           account_id:
             current?.account_id ?? String(form.get("account_id") ?? "").trim(),
           settings: {

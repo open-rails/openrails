@@ -130,7 +130,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if in.Price.Currency == "" {
 		return invalidUsageRateCard(fmt.Errorf("usage rate card: currency is required"))
 	}
-	if err := RequireBillingCurrency(in.Price.Currency); err != nil {
+	if err := RequireBillingCurrency(string(in.Price.Currency)); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if err := catalogrules.ValidateUsageAllowance("usage rate card", in.Price, in.Allowance); err != nil {

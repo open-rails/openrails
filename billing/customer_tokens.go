@@ -3,7 +3,7 @@ package billing
 import "time"
 
 // CustomerTokenParams names the customer a merchant's backend vouches for
-// when it mints a customer token (Client.CustomerToken).
+// when it mints a customer token (Client.CreateCustomerToken).
 type CustomerTokenParams struct {
 	// CustomerID is the customer: the token's subject.
 	CustomerID CustomerID

@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // SubscriptionHistory is retained evidence about one subscription, newest
 // first. It does not predict the next charge or replace current recovery state.
@@ -60,7 +64,7 @@ type SubscriptionHistoryAttempt struct {
 	Source          string           `json:"source"`
 	ObservedVia     string           `json:"observed_via"`
 	Amount          int64            `json:"amount,string"`
-	Currency        string           `json:"currency"`
+	Currency        catalog.Currency `json:"currency"`
 	PSPID           PSPID            `json:"psp_id"`
 	OrderID         *OrderID         `json:"order_id,omitempty"`
 	PaymentID       *PaymentID       `json:"payment_id,omitempty"`

@@ -10,7 +10,7 @@ import (
 // lacks fails to compile. ReadCache has no key: the defaults serve.
 func EngineConfig(c *config.Config) openrails.Config {
 	out := openrails.Config{
-		ProviderWriteMode:       c.ProviderWriteMode,
+		ProviderWriteMode:       openrails.ProviderWriteMode(c.ProviderWriteMode),
 		EngineAdmissionHold:     c.EngineAdmissionHold,
 		UsageBillingEnabled:     c.UsageBillingEnabled,
 		Database:                openrails.DatabaseConfig(c.Database),

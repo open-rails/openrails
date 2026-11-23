@@ -4,21 +4,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // HostEventID names one host event; on the wire "hev_<uuid>".
 type HostEventID uuid.UUID
 
-const HostEventIDPrefix = "hev_"
+const hostEventIDPrefix = "hev_"
 
 func ParseHostEventID(s string) (HostEventID, error) {
-	u, err := parsePrefixedID("host event", HostEventIDPrefix, s)
+	u, err := parsePrefixedID("host event", hostEventIDPrefix, s)
 	return HostEventID(u), err
 }
 
 func (id HostEventID) UUID() uuid.UUID              { return uuid.UUID(id) }
 func (id HostEventID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
-func (id HostEventID) String() string               { return formatPrefixedID(HostEventIDPrefix, uuid.UUID(id)) }
+func (id HostEventID) String() string               { return formatPrefixedID(hostEventIDPrefix, uuid.UUID(id)) }
 func (id HostEventID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *HostEventID) UnmarshalText(b []byte) error {
 	v, err := ParseHostEventID(string(b))
@@ -70,16 +71,16 @@ const (
 // burn rate, null at rate zero. On balance.depleted, stop what the customer's
 // running charges pay for.
 type BalanceHostEvent struct {
-	CustomerID         CustomerID `json:"customer_id"`
-	Currency           string     `json:"currency"`
-	AvailableAmount    int64      `json:"available_amount,string"`
-	OwedAmount         int64      `json:"owed_amount,string"`
-	AccrualRatePerHour int64      `json:"accrual_rate_per_hour,string"`
-	UsageRatePerHour   int64      `json:"usage_rate_per_hour,string"`
-	LowBalanceAmount   int64      `json:"low_balance_amount,string"`
-	AsOf               time.Time  `json:"as_of"`
-	DepletesAt         *time.Time `json:"depletes_at"`
-	RunwayEndsAt       *time.Time `json:"runway_ends_at"`
+	CustomerID         CustomerID       `json:"customer_id"`
+	Currency           catalog.Currency `json:"currency"`
+	AvailableAmount    int64            `json:"available_amount,string"`
+	OwedAmount         int64            `json:"owed_amount,string"`
+	AccrualRatePerHour int64            `json:"accrual_rate_per_hour,string"`
+	UsageRatePerHour   int64            `json:"usage_rate_per_hour,string"`
+	LowBalanceAmount   int64            `json:"low_balance_amount,string"`
+	AsOf               time.Time        `json:"as_of"`
+	DepletesAt         *time.Time       `json:"depletes_at"`
+	RunwayEndsAt       *time.Time       `json:"runway_ends_at"`
 }
 
 // OrderHostEvent is one order transition: the order's status and its
@@ -91,7 +92,7 @@ type OrderHostEvent struct {
 	Status        OrderStatus        `json:"status"`
 	PaymentStatus OrderPaymentStatus `json:"payment_status"`
 	Total         int64              `json:"total,string"`
-	Currency      string             `json:"currency"`
+	Currency      catalog.Currency   `json:"currency"`
 	Number        *int64             `json:"number"`
 	PaymentID     *PaymentID         `json:"payment_id"`
 }
@@ -111,24 +112,24 @@ type ProductEntitlementsChangedEvent struct {
 // from the authoritative payment row so a host can route the settlement
 // without a second read.
 type PaymentSettledEvent struct {
-	PaymentID      PaymentID       `json:"payment_id"`
-	CustomerID     CustomerID      `json:"customer_id"`
-	OrderID        *OrderID        `json:"order_id,omitempty"`
-	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
-	Amount         int64           `json:"amount,string"`
-	Currency       string          `json:"currency"`
+	PaymentID      PaymentID        `json:"payment_id"`
+	CustomerID     CustomerID       `json:"customer_id"`
+	OrderID        *OrderID         `json:"order_id,omitempty"`
+	SubscriptionID *SubscriptionID  `json:"subscription_id,omitempty"`
+	Amount         int64            `json:"amount,string"`
+	Currency       catalog.Currency `json:"currency"`
 }
 
 type DelinquencyHostEvent struct {
-	CustomerID       CustomerID `json:"customer_id"`
-	Currency         string     `json:"currency"`
-	FromState        string     `json:"from_state"`
-	ToState          string     `json:"to_state"`
-	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
-	OverdueAmount    int64      `json:"overdue_amount,string"`
-	OverdueOrders    int64      `json:"overdue_orders"`
-	GraceDays        int64      `json:"grace_days"`
-	AmountFloor      int64      `json:"amount_floor,string"`
+	CustomerID       CustomerID       `json:"customer_id"`
+	Currency         catalog.Currency `json:"currency"`
+	FromState        string           `json:"from_state"`
+	ToState          string           `json:"to_state"`
+	OverdueStartedAt *time.Time       `json:"overdue_started_at,omitempty"`
+	OverdueAmount    int64            `json:"overdue_amount,string"`
+	OverdueOrders    int64            `json:"overdue_orders"`
+	GraceDays        int64            `json:"grace_days"`
+	AmountFloor      int64            `json:"amount_floor,string"`
 }
 
 // HostEvent is a typed host-fact projection with one payload selected by Type.

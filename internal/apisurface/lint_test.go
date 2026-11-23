@@ -2,11 +2,13 @@ package apisurface
 
 import (
 	"context"
+	"errors"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,7 +21,8 @@ var tree = sync.OnceValues(func() (*Surface, error) {
 	return Load(context.Background(), filepath.Join("..", ".."))
 })
 
-// lintTree returns the repository's findings and baseline.
+// lintTree returns the repository's findings and baseline; none once every
+// finding is fixed and -prune deleted the file.
 func lintTree(t *testing.T) (*Surface, []string, []byte) {
 	t.Helper()
 	s, err := tree()
@@ -31,7 +34,7 @@ func lintTree(t *testing.T) (*Surface, []string, []byte) {
 		t.Fatal(err)
 	}
 	baseline, err := os.ReadFile(filepath.Join("..", "..", BaselineFile))
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 	return s, findings, baseline
@@ -45,9 +48,12 @@ func TestLintPassesOnTree(t *testing.T) {
 }
 
 func TestLintFailsWithoutBaselineLine(t *testing.T) {
-	_, findings, baseline := lintTree(t)
-	line := findings[len(findings)/2]
-	trimmed := strings.Replace(string(baseline), "\n"+line+"\n", "\n", 1)
+	findings := seededFindings(t)
+	const line = "untyped-const seed.Seeded"
+	if _, err := Compare(findings, Baseline(findings)); err != nil {
+		t.Fatalf("a baseline listing every finding: %v", err)
+	}
+	trimmed := strings.Replace(string(Baseline(findings)), line+"\n", "", 1)
 	_, err := Compare(findings, []byte(trimmed))
 	if err == nil || !strings.Contains(err.Error(), "new API findings") || !strings.Contains(err.Error(), line) {
 		t.Fatalf("removing %q: %v", line, err)
@@ -55,7 +61,17 @@ func TestLintFailsWithoutBaselineLine(t *testing.T) {
 }
 
 func TestLintFailsOnSeededFinding(t *testing.T) {
-	s, _, baseline := lintTree(t)
+	_, _, baseline := lintTree(t)
+	_, err := Compare(seededFindings(t), baseline)
+	if err == nil || !strings.Contains(err.Error(), "untyped-const seed.Seeded") {
+		t.Fatalf("seeded untyped constant: %v", err)
+	}
+}
+
+// seededFindings are the tree's findings with an untyped constant added.
+func seededFindings(t *testing.T) []string {
+	t.Helper()
+	s, _, _ := lintTree(t)
 	seeded := surfaceOf(append(slices.Clone(s.pkgs), seedPackage(t, `package seed
 
 const Seeded = "seeded"
@@ -64,10 +80,7 @@ const Seeded = "seeded"
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Compare(findings, baseline)
-	if err == nil || !strings.Contains(err.Error(), "untyped-const seed.Seeded") {
-		t.Fatalf("seeded untyped constant: %v", err)
-	}
+	return findings
 }
 
 func TestLintFailsOnStaleLine(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // EntitlementCheckCacheOptions configures the remote Go client's entitlement
@@ -27,7 +27,7 @@ import (
 // keeps each allowed key's answer, never a denial: a check is answered from
 // the cache only when every requested key is allowed there. A newly held key
 // is therefore seen at once, while a change to a held key, such as its seats
-// or a revocation, can take up to MaxAge unless CheckEntitlementsLive sees it.
+// or a revocation, can take up to MaxAge unless an Uncached check sees it.
 type EntitlementCheckCacheOptions struct {
 	// MaxAge bounds the age of an allowed answer, including unscheduled
 	// changes such as a revocation, a refund or the API key's permissions.
@@ -145,7 +145,7 @@ func cacheableEntitlementKeys(params billing.CheckEntitlementsParams) []string {
 		return nil
 	}
 	for _, key := range params.Entitlements {
-		if len(key) > catalog.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+		if len(key) > syntax.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 			return nil
 		}
 	}

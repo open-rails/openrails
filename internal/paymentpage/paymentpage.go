@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -125,7 +126,7 @@ func SavedCards(methods []billing.PaymentMethod) []billing.PaymentMethod {
 		out = append(out, billing.PaymentMethod{
 			ID: m.ID, CustomerID: m.CustomerID, Rail: m.Rail, PSPID: m.PSPID, Status: m.Status, Card: m.Card,
 			Health: m.Health, Reusable: true, Mandates: []billing.Mandate{}, Subscriptions: []billing.PaymentMethodSubscription{},
-			DefaultCurrencies: []string{}, CreatedAt: m.CreatedAt,
+			DefaultCurrencies: []catalog.Currency{}, CreatedAt: m.CreatedAt,
 		})
 	}
 	return out

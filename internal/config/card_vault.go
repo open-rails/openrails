@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -18,7 +19,7 @@ import (
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type CardVaultConfig struct {
 	// Kind is the vault vendor: basis_theory.
-	Kind string
+	Kind billing.CardVaultKind
 	// TenantID is the vendor's tenant id.
 	TenantID string
 	// KVMount holds the platform credential document. Empty uses vault.kv_mount.
@@ -38,7 +39,7 @@ func validateCardVault(cfg *Config) error {
 		return nil
 	}
 	v := cfg.CardVault
-	if kind := strings.ToLower(strings.TrimSpace(v.Kind)); !slices.Contains(cardVaultKinds, kind) {
+	if kind := strings.ToLower(strings.TrimSpace(string(v.Kind))); !slices.Contains(cardVaultKinds, kind) {
 		return fmt.Errorf("card_vault.kind %q: must be one of %s", v.Kind, strings.Join(cardVaultKinds, ", "))
 	}
 	if v.TenantID == "" || strings.ContainsFunc(v.TenantID, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {

@@ -50,7 +50,7 @@ func pageOrder(r *http.Request) (billing.OrderID, bool) {
 		return billing.OrderID{}, false
 	}
 	id, err := billing.ParseOrderID(raw)
-	if err != nil || id.IsZero() || !strings.HasPrefix(raw, billing.OrderIDPrefix) {
+	if err != nil || id.IsZero() {
 		return billing.OrderID{}, false
 	}
 	return id, true

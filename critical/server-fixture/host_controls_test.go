@@ -4,15 +4,16 @@ package serverfixture_test
 
 import (
 	"encoding/json"
-	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/server"
 	"io/fs"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/server"
 )
 
 func hostPaymentAssets(path string) fs.FS {
@@ -100,8 +101,11 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 	case "host-rename":
 		var p billing.RenameMerchantParams
 		err = json.Unmarshal(cmd.Body, &p)
-		p.ActorUserID = cmd.Account
-		if err == nil {
+		switch {
+		case err != nil:
+		case cmd.Account != "":
+			result, err = srv.RenameUserMerchant(t.Context(), mid, cmd.Account, p)
+		default:
 			result, err = srv.RenameMerchant(t.Context(), mid, p)
 		}
 	case "host-delete":

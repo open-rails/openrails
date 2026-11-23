@@ -316,7 +316,7 @@ func solanaPSP(accounts []merchants.PSPScope) *merchants.PSPScope {
 }
 
 // sellsVia reports whether methods (nil: every method) include method.
-func sellsVia(methods []string, method string) bool {
+func sellsVia(methods []catalogwire.SellVia, method catalogwire.SellVia) bool {
 	return len(methods) == 0 || slices.Contains(methods, method)
 }
 
@@ -334,7 +334,7 @@ func sellViaRefusal(req billing.CreatePriceParams, accounts []merchants.PSPScope
 		card := false
 		for _, a := range accounts {
 			rail := models.Rail(a.Rail)
-			if !a.Archived && a.Declared && !a.Superseded && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) && moneyutil.RequireFiatCurrency(req.Currency) == nil {
+			if !a.Archived && a.Declared && !a.Superseded && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) && moneyutil.RequireFiatCurrency(string(req.Currency)) == nil {
 				card = true
 			}
 		}

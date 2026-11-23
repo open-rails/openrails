@@ -33,7 +33,7 @@ const cell = (page: Page, kind: string, state: string) =>
   page.locator(`tr[data-kind="${kind}"] [data-state="${state}"]`)
 
 test("console-pull-link-map-apply-lands-once", async ({ page }) => {
-  const fx = await fixture<{ carol: string; vault: string }>(page)
+  const fx = await fixture<{ carol: string; vault: string; gold: string }>(page)
   await open(page, "/ops/imports")
   await expect(page.getByText("No PSP has been pulled yet.")).toBeVisible()
   await page.getByRole("button", { name: "Pull", exact: true }).click()
@@ -108,6 +108,11 @@ test("console-pull-link-map-apply-lands-once", async ({ page }) => {
   await page.getByRole("button", { name: "Apply again" }).click()
   await confirmTyped(page, "nmi", "Apply again")
   await expect(cell(page, "subscription", "imported")).toHaveText("3")
+
+  // Verify reads the provider price's terms at NMI again.
+  await open(page, `/catalog/prices/${encodeURIComponent(fx.gold)}`)
+  await page.getByRole("button", { name: "Verify", exact: true }).click()
+  await expect(page.getByText("in_sync", { exact: true })).toBeVisible()
 })
 
 test("console-mapping-upload-and-ccbill-price", async ({ page }) => {

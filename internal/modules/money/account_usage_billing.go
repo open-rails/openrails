@@ -77,7 +77,7 @@ func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) 
 		return nil, nil, nil
 	}
 	for i := range cfg.UsageBilling.Currencies {
-		if cfg.UsageBilling.Currencies[i].Currency == currency {
+		if string(cfg.UsageBilling.Currencies[i].Currency) == currency {
 			return cfg.UsageBilling, &cfg.UsageBilling.Currencies[i], nil
 		}
 	}
@@ -233,8 +233,8 @@ func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
 	limits := map[string]int64{}
 	minimums := map[string]int64{}
 	for _, cur := range settings.Config.UsageBilling.Currencies {
-		limits[cur.Currency] = cur.CreditLimit
-		minimums[cur.Currency] = cur.MinimumInvoiceAmount
+		limits[string(cur.Currency)] = cur.CreditLimit
+		minimums[string(cur.Currency)] = cur.MinimumInvoiceAmount
 	}
 	encodedLimits, err := json.Marshal(limits)
 	if err != nil {

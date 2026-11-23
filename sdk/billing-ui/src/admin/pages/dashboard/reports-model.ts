@@ -2,7 +2,7 @@
 // range: subscriptions by UTC day, renewals and churn by UTC month.
 import type {
   MetricsCell,
-  MetricsQuery,
+  QueryMetricsParams,
   MetricsResult,
 } from "#orck/admin/lib/api/metrics"
 
@@ -16,7 +16,7 @@ export function rangeDays(range: DashboardRange, now = new Date()): number {
   return (Date.parse(to) - Date.parse(from)) / 86_400_000 + 1
 }
 
-export function dailyQuery(range: DashboardRange): MetricsQuery {
+export function dailyQuery(range: DashboardRange): QueryMetricsParams {
   return {
     measures: ["new_subscriptions", "cancellations", "net_new_subscriptions"],
     by: ["time"],
@@ -25,7 +25,7 @@ export function dailyQuery(range: DashboardRange): MetricsQuery {
   }
 }
 
-export function renewalsQuery(range: DashboardRange): MetricsQuery {
+export function renewalsQuery(range: DashboardRange): QueryMetricsParams {
   return {
     measures: ["payment_count"],
     by: ["time"],
@@ -35,7 +35,7 @@ export function renewalsQuery(range: DashboardRange): MetricsQuery {
   }
 }
 
-export function churnQuery(range: DashboardRange): MetricsQuery {
+export function churnQuery(range: DashboardRange): QueryMetricsParams {
   return {
     measures: ["cancellations", "churn_rate"],
     by: ["time"],

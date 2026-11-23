@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -252,7 +253,7 @@ func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *Su
 		return nil, err
 	}
 	sub := c.sub
-	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
+	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: billing.Rail(sub.Rail), Currency: catalogwire.Currency(c.price.Currency)}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
 		case c.clears():

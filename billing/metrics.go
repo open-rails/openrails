@@ -2,10 +2,10 @@ package billing
 
 import "time"
 
-// MetricsQuery asks the merchant's metrics: measures, grouped By dimensions
+// QueryMetricsParams asks the merchant's metrics: measures, grouped By dimensions
 // (and "time" at Grain), over Range, filtered and ordered. GET
 // /v1/metrics/schema lists every measure, dimension and grain.
-type MetricsQuery struct {
+type QueryMetricsParams struct {
 	Measures []string            `json:"measures"`
 	By       []string            `json:"by"`
 	Grain    string              `json:"grain"`
@@ -96,8 +96,8 @@ type MetricsDimension struct {
 
 // MetricsExample pairs an intent with the query that answers it.
 type MetricsExample struct {
-	Intent string       `json:"intent"`
-	Query  MetricsQuery `json:"query"`
+	Intent string             `json:"intent"`
+	Query  QueryMetricsParams `json:"query"`
 }
 
 // MetricsLimits are the most buckets and rows a query returns.
@@ -119,12 +119,12 @@ type Dashboard struct {
 // A dashboard shows every widget over the range its viewer picks; a
 // FixedRange widget keeps its query's own range ("today" tiles).
 type DashboardWidget struct {
-	ID         string        `json:"id"`
-	Title      string        `json:"title"`
-	Viz        string        `json:"viz"`
-	Query      MetricsQuery  `json:"query"`
-	Grid       DashboardGrid `json:"grid"`
-	FixedRange bool          `json:"fixed_range"`
+	ID         string             `json:"id"`
+	Title      string             `json:"title"`
+	Viz        string             `json:"viz"`
+	Query      QueryMetricsParams `json:"query"`
+	Grid       DashboardGrid      `json:"grid"`
+	FixedRange bool               `json:"fixed_range"`
 }
 
 // DashboardGrid places a widget on the dashboard's grid.

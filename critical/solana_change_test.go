@@ -26,7 +26,7 @@ func (s *solanaWorld) planTier(t *testing.T, sub *billing.Subscription, key stri
 	product, err := s.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "chain-" + key, DisplayName: "Chain " + key, Ownership: catalog.OwnershipUnique,
 		TierGroup: ptr("chain-plans"), TierRank: rank, Entitlements: []string{"chain:" + key}})
 	require.NoError(t, err)
-	price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", SellVia: []string{billing.SellViaSolana},
+	price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", SellVia: []catalog.SellVia{catalog.SellViaSolana},
 		BillingIntervalHours: ptr(hours), AccessDurationHours: ptr(hours)})
 	require.NoError(t, err)
 	return price
@@ -104,7 +104,7 @@ func (s *solanaWorld) changedTo(t *testing.T, from *billing.Subscription, price 
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionCanceled, old.Status)
 	require.NotEqual(t, from.ID, active.ID)
-	require.Equal(t, "solana", active.Rail)
+	require.Equal(t, billing.RailSolana, active.Rail)
 	return active
 }
 

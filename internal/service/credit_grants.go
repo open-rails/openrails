@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -54,7 +55,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		if strings.TrimSpace(item.SourceID) == "" || len(item.SourceID) > maxSourceIDBytes {
 			return nil, apperr.Invalidf("source_id must contain 1 to %d bytes", maxSourceIDBytes).WithParam(param("source_id"))
 		}
-		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(item.Currency))
+		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(string(item.Currency)))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {
 			return nil, fmt.Errorf("%w: %q", ErrCurrencyUnsupported.WithParam(param("currency")), currency)
 		}
@@ -142,11 +143,11 @@ func (s *Service) ListBalanceTransactions(ctx context.Context, customer identity
 	}
 	defer release()
 	if params.IDs == nil {
-		currency, err := requireCurrency(params.Currency)
+		currency, err := requireCurrency(string(params.Currency))
 		if err != nil {
 			return billing.ListPage[billing.BalanceTransaction]{}, err
 		}
-		params.Currency = currency
+		params.Currency = catalog.Currency(currency)
 	}
 	return s.moneyService().ListBalanceTransactions(ctx, customer, params)
 }

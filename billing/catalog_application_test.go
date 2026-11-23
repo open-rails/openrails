@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // The receipt reads as openrails catalog apply has always printed it.
@@ -19,7 +20,7 @@ func TestCatalogApplicationReceiptString(t *testing.T) {
 			{Object: billing.CatalogObjectPrice, Key: "monthly", ProductKey: &pro, Fields: []string{"unit_amount"}, Revision: 2},
 		},
 		Conflicts: []billing.CatalogConflict{
-			{Object: billing.CatalogObjectPrice, Key: "yearly", ProductKey: &pro, Currency: &usd, Fields: []billing.CatalogFieldConflict{
+			{Object: billing.CatalogObjectPrice, Key: "yearly", ProductKey: &pro, Currency: (*catalog.Currency)(&usd), Fields: []billing.CatalogFieldConflict{
 				{Field: "unit_amount", FileValue: json.RawMessage(`"99000000"`), LiveValue: json.RawMessage(`"89000000"`), SetBy: "console:alice", SetAt: at},
 				{Field: "access_duration_hours", FileValue: json.RawMessage(`720`), LiveValue: json.RawMessage(`null`), SetBy: "console:alice", SetAt: at},
 			}},

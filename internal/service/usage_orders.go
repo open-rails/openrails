@@ -105,7 +105,7 @@ func (s *Service) usageOptions(ctx context.Context, order *orders.Order) ([]bill
 			continue
 		}
 		seen[*m.PspID] = true
-		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(*m.PspID), Rail: m.Rail, Accepts: []string{"saved_card"}})
+		out = append(out, billing.OrderPaymentOption{PSPID: billing.PSPID(*m.PspID), Rail: billing.Rail(m.Rail), Accepts: []string{"saved_card"}})
 	}
 	return out, nil
 }

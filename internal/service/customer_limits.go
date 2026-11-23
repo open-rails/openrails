@@ -85,7 +85,7 @@ func (s *Service) ListCustomerLimits(ctx context.Context, customer identity.Cust
 // AdjustCustomerLimit adds to the capacity of the customer's current window
 // of one limit and answers where the customer stands on it after. Its
 // source_id makes a retry answer the line without adding again.
-func (s *Service) AdjustCustomerLimit(ctx context.Context, customer identity.CustomerID, params billing.AdjustLimitParams) (*billing.CustomerLimit, error) {
+func (s *Service) AdjustCustomerLimit(ctx context.Context, customer identity.CustomerID, params billing.AdjustCustomerLimitParams) (*billing.CustomerLimit, error) {
 	if customer.IsZero() {
 		return nil, apperr.Invalidf("customer_id is required").WithParam("customer_id")
 	}

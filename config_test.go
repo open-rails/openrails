@@ -49,9 +49,9 @@ func TestEngineConfigCopiesEveryField(t *testing.T) {
 // The values Config's fields take are the engine's.
 func TestConfigValuesAreTheEngines(t *testing.T) {
 	for public, engine := range map[string]string{
-		ProviderWritesFull: config.ProviderWriteModeFull, ProviderWritesLimited: config.ProviderWriteModeLimited, ProviderWritesReadOnly: config.ProviderWriteModeReadOnly,
-		EnvironmentLive: config.EnvironmentLive, EnvironmentTest: config.EnvironmentTest, EnvironmentSandbox: config.EnvironmentSandbox,
-		EnvironmentMainnet: config.EnvironmentMainnet, EnvironmentDevnet: config.EnvironmentDevnet, EnvironmentTestnet: config.EnvironmentTestnet,
+		string(ProviderWritesFull): config.ProviderWriteModeFull, string(ProviderWritesLimited): config.ProviderWriteModeLimited, string(ProviderWritesReadOnly): config.ProviderWriteModeReadOnly,
+		string(billing.EnvironmentLive): config.EnvironmentLive, string(billing.EnvironmentTest): config.EnvironmentTest, string(billing.EnvironmentSandbox): config.EnvironmentSandbox,
+		string(billing.EnvironmentMainnet): config.EnvironmentMainnet, string(billing.EnvironmentDevnet): config.EnvironmentDevnet, string(billing.EnvironmentTestnet): config.EnvironmentTestnet,
 		QueueBilling: riverjobs.QueueBilling, QueuePSPImport: riverjobs.QueuePSPImport,
 		string(ReadCatalog): string(config.ReadCatalog), string(ReadMeters): string(config.ReadMeters),
 		string(ReadPublicConfig): string(config.ReadPublicConfig), string(ReadMerchantConfiguration): string(config.ReadMerchantConfiguration),

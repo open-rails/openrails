@@ -31,7 +31,7 @@ func refuseUnentitled(ctx context.Context, q *gen.Queries, merchantID, customerI
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
 	held, err := q.CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: merchantID, CustomerIds: []uuid.UUID{customerID},
-		Entitlements: keys, AtTime: at, RowLimit: int32(len(keys))}) // #nosec G115 -- at most MaxOrderLines × catalog.MaxRequiredEntitlements
+		Entitlements: keys, AtTime: at, RowLimit: int32(len(keys))}) // #nosec G115 -- at most MaxOrderLines × syntax.MaxRequiredEntitlements
 	if err != nil {
 		return err
 	}

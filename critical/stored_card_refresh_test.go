@@ -64,7 +64,7 @@ func newVaultCards(t *testing.T, platform, armed bool) *vaultCards {
 		custody, cardVault = "", "platform"
 		v.armPlatform(t, armed)
 	} else {
-		_, err := a.alphaRemote.PutCustodian(t.Context(), "owned", billing.PutCustodianParams{ExpectedRevision: 0, Kind: "basis_theory", Environment: "test", AccountID: merchantBTTenant,
+		_, err := a.alphaRemote.SetCustodian(t.Context(), "owned", billing.SetCustodianParams{ExpectedRevision: 0, Kind: "basis_theory", Environment: "test", AccountID: merchantBTTenant,
 			Settings: map[string]any{"public_api_key": "public-merchant", "account_updater": armed}, Credentials: map[string]string{"api_key": "private-merchant"}})
 		require.NoError(t, err)
 	}
@@ -157,7 +157,7 @@ func (v *vaultCards) card(t *testing.T, method billing.PaymentMethod) billing.Pa
 
 func noticeCount(t *testing.T, a *authorityWorld, kind string) int {
 	t.Helper()
-	facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{kind}, Limit: 100})
+	facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{kind}, Limit: 100})
 	require.NoError(t, err)
 	return len(facts.Events)
 }

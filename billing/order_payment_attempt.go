@@ -1,5 +1,7 @@
 package billing
 
+import "github.com/open-rails/openrails/catalog"
+
 // OrderPaymentAttempt is the retained receipt of one purchase payment request.
 // Its original POST /me/orders/{id}/pay Idempotency-Key selects the attempt;
 // create-order-with-payment keys and recurring/usage collection keys are separate.
@@ -21,5 +23,5 @@ type OrderPaymentAttempt struct {
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
 	PSPID           PSPID            `json:"psp_id"`
 	Amount          int64            `json:"amount,string"`
-	Currency        string           `json:"currency"`
+	Currency        catalog.Currency `json:"currency"`
 }

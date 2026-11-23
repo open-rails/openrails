@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
@@ -31,7 +33,7 @@ func FleetTimeseries(ctx context.Context, cp *controlplane.ControlPlane, exclude
 	for _, v := range series.Volume {
 		out.Volume = append(out.Volume, billing.FleetWeeklyVolume{
 			WeekStart:     v.WeekStart,
-			Currency:      v.Currency,
+			Currency:      catalog.Currency(v.Currency),
 			Payments:      v.Payments,
 			SettledAmount: v.SettledAmount,
 		})

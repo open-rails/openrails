@@ -661,7 +661,7 @@ func (s *sharedGate) number(ctx context.Context, ns string, item billing.LeaseUs
 			lease = cur
 		}
 		keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+lease), s.g(ns, "leases"), s.g(ns, "k:"+key), s.g(ns, "unsent:"+item.CustomerID.String())}
-		res, err := usageScript.Run(ctx, s.rdb, keys, lease, body, hold, ticket, unsentArg(item.Currency, costs), encodeTakes(costs), gateWriteKeyBackstop.Milliseconds(), key).Slice()
+		res, err := usageScript.Run(ctx, s.rdb, keys, lease, body, hold, ticket, unsentArg(string(item.Currency), costs), encodeTakes(costs), gateWriteKeyBackstop.Milliseconds(), key).Slice()
 		if err == nil && len(res) == 2 {
 			code, _ := res[0].(int64)
 			ref := fmt.Sprint(res[1])

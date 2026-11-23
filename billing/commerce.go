@@ -26,10 +26,19 @@ type NextAction struct {
 // processing_error, try_again_later, authentication_required, do_not_honor,
 // generic_decline); fraud-related declines always read generic_decline.
 // Message is OpenRails' copy for the buyer. Field names the card field to
-// correct: cvc, postal_code, number, expiry or "". DeclineReason.Failure
-// renders one.
+// correct, or "". DeclineReason.Failure renders one.
 type PaymentFailure struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-	Field   string `json:"field,omitempty"`
+	Reason  DeclineReason `json:"reason"`
+	Message string        `json:"message"`
+	Field   CardField     `json:"field,omitempty"`
 }
+
+// CardField is the card field a buyer corrects.
+type CardField string
+
+const (
+	CardFieldCVC        CardField = "cvc"
+	CardFieldPostalCode CardField = "postal_code"
+	CardFieldNumber     CardField = "number"
+	CardFieldExpiry     CardField = "expiry"
+)

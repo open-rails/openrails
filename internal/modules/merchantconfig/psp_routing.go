@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -63,14 +64,14 @@ func NormalizePSPRouting(rules []models.PSPRoutingRule) ([]models.PSPRoutingRule
 
 func normalizeRoutingMatch(i int, m models.PSPRoutingMatch) (models.PSPRoutingMatch, error) {
 	out := models.PSPRoutingMatch{
-		Currency: moneyutil.NormalizeCurrency(m.Currency),
+		Currency: catalog.Currency(moneyutil.NormalizeCurrency(string(m.Currency))),
 		Product:  strings.TrimSpace(m.Product),
 		Price:    strings.TrimSpace(m.Price),
 		Mode:     strings.ToLower(strings.TrimSpace(m.Mode)),
 		Country:  strings.ToUpper(strings.TrimSpace(m.Country)),
 	}
 	if out.Currency != "" {
-		if err := moneyutil.ValidateCurrency(out.Currency); err != nil {
+		if err := moneyutil.ValidateCurrency(string(out.Currency)); err != nil {
 			return out, fmt.Errorf("psp_routing[%d].match.currency: %w", i, err)
 		}
 	}

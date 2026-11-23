@@ -29,7 +29,9 @@ type Product struct {
 	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 	TierGroup            *string                  `json:"tier_group"`
 	TierRank             int                      `json:"tier_rank"`
-	// Ownership is the declared rule; null derives it (catalog.DeriveOwnership).
+	// Ownership is the declared rule; null derives it: consumable for a one-time
+	// credit product, unique for recurring credit, extend when every live price
+	// is one-time with an access duration, unique otherwise.
 	Ownership *catalog.Ownership `json:"ownership"`
 	Archived  bool               `json:"archived"`
 	// Prices are the product's current prices; archived ones are listed with
@@ -122,22 +124,21 @@ type Price struct {
 	Revision int64 `json:"revision"`
 	// Version numbers this price's immutable terms within its key, from one.
 	// It is the v1 suffix in ID; restoring archived terms keeps that version.
-	Version               int64     `json:"version"`
-	ID                    PriceID   `json:"id"`
-	Key                   string    `json:"key"`
-	ProductID             ProductID `json:"product_id"`
-	Archived              bool      `json:"archived"`
-	UnitAmount            int64     `json:"unit_amount,string"`
-	Currency              string    `json:"currency"`
-	AccessDurationHours   *int      `json:"access_duration_hours"`
-	BillingIntervalHours  *int      `json:"billing_interval_hours"`
-	BillingIntervalMonths *int      `json:"billing_interval_months"`
-	TrialUnitAmount       *int64    `json:"trial_unit_amount,string"`
-	TrialDurationHours    *int      `json:"trial_duration_hours"`
-	// SellVia are the methods one of ours sells through: SellViaCard (the
-	// merchant's card vault and charge PSPs) and SellViaSolana. Null: every
-	// method the merchant has. A provider price sells through its provider.
-	SellVia []string `json:"sell_via"`
+	Version               int64            `json:"version"`
+	ID                    PriceID          `json:"id"`
+	Key                   string           `json:"key"`
+	ProductID             ProductID        `json:"product_id"`
+	Archived              bool             `json:"archived"`
+	UnitAmount            int64            `json:"unit_amount,string"`
+	Currency              catalog.Currency `json:"currency"`
+	AccessDurationHours   *int             `json:"access_duration_hours"`
+	BillingIntervalHours  *int             `json:"billing_interval_hours"`
+	BillingIntervalMonths *int             `json:"billing_interval_months"`
+	TrialUnitAmount       *int64           `json:"trial_unit_amount,string"`
+	TrialDurationHours    *int             `json:"trial_duration_hours"`
+	// SellVia are the methods one of ours sells through. Null: every method
+	// the merchant has. A provider price sells through its provider.
+	SellVia []catalog.SellVia `json:"sell_via"`
 	// Provider is the provider that owns and runs a provider price; null on
 	// ours.
 	Provider *PriceProvider `json:"provider"`
@@ -147,12 +148,6 @@ type Price struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
-
-// Methods a price of ours sells through.
-const (
-	SellViaCard   = "card"
-	SellViaSolana = "solana"
-)
 
 // PriceProvider is the PSP that owns and runs a provider price and its
 // identifiers there: plan_id (NMI), price_id (Stripe), or flex_id and
@@ -166,7 +161,7 @@ type PriceProvider struct {
 	AccessDurationDefault bool              `json:"access_duration_default"`
 	PSP                   string            `json:"psp"`
 	PSPID                 PSPID             `json:"psp_id"`
-	Rail                  string            `json:"rail"`
+	Rail                  Rail              `json:"rail"`
 	IDs                   map[string]string `json:"ids"`
 	Retired               bool              `json:"retired"`
 	SyncStatus            SyncStatus        `json:"sync_status"`
@@ -192,7 +187,7 @@ func BuyerPrices(prices []Price) []Price {
 }
 
 // SyncStatus is whether a provider's copy of a provider price matches
-// OpenRails. Only a verifying read (GetPriceParams.Verify) knows; otherwise it
+// OpenRails. Only a verifying read (VerifyPrice) knows; otherwise it
 // is unknown.
 type SyncStatus string
 
@@ -236,7 +231,7 @@ type CreatePriceParams struct {
 	Key         string              `json:"key,omitempty"`
 	UnitAmount  int64               `json:"unit_amount,string"`
 	// Currency is fiat or SOL; a stablecoin is refused.
-	Currency string `json:"currency"`
+	Currency catalog.Currency `json:"currency"`
 	// AccessDurationHours is the access window (nil: no scheduled expiry),
 	// independently of billing cadence. Credit lot expiry belongs to the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
@@ -248,9 +243,9 @@ type CreatePriceParams struct {
 	// terms (0 is a free trial); set both or neither, with a recurring billing interval.
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
-	// SellVia restricts the methods the price sells through (SellViaCard,
-	// SellViaSolana); empty is every method the merchant has.
-	SellVia []string `json:"sell_via,omitempty"`
+	// SellVia restricts the methods the price sells through; empty is every
+	// method the merchant has.
+	SellVia []catalog.SellVia `json:"sell_via,omitempty"`
 	// Archived creates the price retired: subscribers keep paying it, nobody
 	// new can buy it.
 	Archived bool `json:"archived,omitempty"`
@@ -286,7 +281,7 @@ type CreateProviderPriceParams struct {
 	FlexID                   string    `json:"flex_id,omitempty"`
 	RecurringBillingOptionID string    `json:"recurring_billing_option_id,omitempty"`
 	// Currency prices an NMI plan; USD when omitted.
-	Currency             string             `json:"currency,omitempty"`
+	Currency             catalog.Currency   `json:"currency,omitempty"`
 	UnitAmount           *int64             `json:"unit_amount,omitempty,string"`
 	BillingIntervalHours *int               `json:"billing_interval_hours,omitempty"`
 	AccessDurationHours  catalog.Field[int] `json:"access_duration_hours,omitzero"`
@@ -303,16 +298,10 @@ type UpdatePriceParams struct {
 	// SellVia restricts the methods one of ours sells through; null sells
 	// through every method the merchant has. It is not a term: the price
 	// keeps its version.
-	SellVia catalog.Field[[]string] `json:"sell_via,omitzero"`
+	SellVia catalog.Field[[]catalog.SellVia] `json:"sell_via,omitzero"`
 	// ExpectedRevision refuses the edit with revision_mismatch unless the
 	// price key is still at this revision.
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
-}
-
-// GetPriceParams reads a price. Verify asks a provider price's provider for
-// its terms and reports any drift; it is a read, never a write.
-type GetPriceParams struct {
-	Verify bool `form:"verify"`
 }
 
 // PriceListParams filters ListPrices. Nil Archived and Recurring list both.
@@ -322,13 +311,13 @@ type GetPriceParams struct {
 // are absent.
 type PriceListParams struct {
 	PageRequest
-	IDs        []PriceID `form:"ids,comma"`
-	ProductID  ProductID `form:"product_id"`
-	ProductKey string    `form:"product_key"`
-	Key        string    `form:"key"`
-	Currency   string    `form:"currency"`
-	Recurring  *bool     `form:"recurring"`
-	Archived   *bool     `form:"archived"`
+	IDs        []PriceID        `form:"ids,comma"`
+	ProductID  ProductID        `form:"product_id"`
+	ProductKey string           `form:"product_key"`
+	Key        string           `form:"key"`
+	Currency   catalog.Currency `form:"currency"`
+	Recurring  *bool            `form:"recurring"`
+	Archived   *bool            `form:"archived"`
 }
 
 // PriceKeyMovement is one point in a price key's history: from EffectiveAt

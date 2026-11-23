@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // CreditGrantID names one credit grant: a lot of prepaid credit.
@@ -13,17 +14,17 @@ type CreditGrantID uuid.UUID
 type BalanceTransactionID uuid.UUID
 
 const (
-	CreditGrantIDPrefix        = "cgr_"
-	BalanceTransactionIDPrefix = "txn_"
+	creditGrantIDPrefix        = "cgr_"
+	balanceTransactionIDPrefix = "txn_"
 )
 
 func ParseCreditGrantID(s string) (CreditGrantID, error) {
-	u, err := parsePrefixedID("credit grant", CreditGrantIDPrefix, s)
+	u, err := parsePrefixedID("credit grant", creditGrantIDPrefix, s)
 	return CreditGrantID(u), err
 }
 func (id CreditGrantID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id CreditGrantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id CreditGrantID) String() string  { return formatPrefixedID(CreditGrantIDPrefix, uuid.UUID(id)) }
+func (id CreditGrantID) String() string  { return formatPrefixedID(creditGrantIDPrefix, uuid.UUID(id)) }
 func (id CreditGrantID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }
@@ -34,13 +35,13 @@ func (id *CreditGrantID) UnmarshalText(text []byte) error {
 }
 
 func ParseBalanceTransactionID(s string) (BalanceTransactionID, error) {
-	u, err := parsePrefixedID("balance transaction", BalanceTransactionIDPrefix, s)
+	u, err := parsePrefixedID("balance transaction", balanceTransactionIDPrefix, s)
 	return BalanceTransactionID(u), err
 }
 func (id BalanceTransactionID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id BalanceTransactionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id BalanceTransactionID) String() string {
-	return formatPrefixedID(BalanceTransactionIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(balanceTransactionIDPrefix, uuid.UUID(id))
 }
 func (id BalanceTransactionID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
@@ -57,14 +58,14 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 // expiry differs is ErrIdempotencyKeyReused. Source labels where the money
 // came from; Invoker records who granted it (default: the customer).
 type CreateCreditGrantParams struct {
-	CustomerID  CustomerID `json:"customer_id"`
-	Currency    string     `json:"currency"`
-	Amount      int64      `json:"amount,string"`
-	SourceID    string     `json:"source_id"`
-	Source      string     `json:"source"`
-	Invoker     string     `json:"invoker,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	Description *string    `json:"description,omitempty"`
+	CustomerID  CustomerID       `json:"customer_id"`
+	Currency    catalog.Currency `json:"currency"`
+	Amount      int64            `json:"amount,string"`
+	SourceID    string           `json:"source_id"`
+	Source      string           `json:"source"`
+	Invoker     string           `json:"invoker,omitempty"`
+	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+	Description *string          `json:"description,omitempty"`
 }
 
 // CreditGrantState is where a credit grant stands.
@@ -87,7 +88,7 @@ const (
 type CreditGrant struct {
 	ID                CreditGrantID    `json:"id"`
 	CustomerID        CustomerID       `json:"customer_id"`
-	Currency          string           `json:"currency"`
+	Currency          catalog.Currency `json:"currency"`
 	Amount            int64            `json:"amount,string"`
 	SpentAmount       int64            `json:"spent_amount,string"`
 	RemainingAmount   int64            `json:"remaining_amount,string"`
@@ -108,9 +109,9 @@ type CreditGrant struct {
 // CreditGrantListParams filters a customer's credit grants, newest first.
 type CreditGrantListParams struct {
 	// CustomerID is whose grants to list; required unless IDs is set.
-	CustomerID CustomerID `form:"customer_id"`
-	Currency   string     `form:"currency"`
-	SourceID   string     `form:"source_id"`
+	CustomerID CustomerID       `form:"customer_id"`
+	Currency   catalog.Currency `form:"currency"`
+	SourceID   string           `form:"source_id"`
 	// IDs instead reads 1 to MaxBatchItems named grants in one page, whatever
 	// their state; unknown ones are absent.
 	IDs []CreditGrantID `form:"ids,comma"`
@@ -157,7 +158,7 @@ const (
 type BalanceTransaction struct {
 	ID            BalanceTransactionID   `json:"id"`
 	CustomerID    CustomerID             `json:"customer_id"`
-	Currency      string                 `json:"currency"`
+	Currency      catalog.Currency       `json:"currency"`
 	Type          BalanceTransactionType `json:"type"`
 	Amount        int64                  `json:"amount,string"`
 	CreditGrantID *CreditGrantID         `json:"credit_grant_id"`
@@ -175,7 +176,7 @@ type BalanceTransaction struct {
 // newest first. IDs instead reads 1 to MaxBatchItems of the customer's named
 // transactions in one page, in any currency; unknown ones are absent.
 type BalanceTransactionListParams struct {
-	Currency string                 `form:"currency"`
+	Currency catalog.Currency       `form:"currency"`
 	IDs      []BalanceTransactionID `form:"ids,comma"`
 	PageRequest
 }
@@ -191,7 +192,7 @@ const (
 
 // GetBalanceParams names the currency of a customer's balance.
 type GetBalanceParams struct {
-	Currency string `form:"currency"`
+	Currency catalog.Currency `form:"currency"`
 }
 
 // Balance is a customer's money in one currency, as of AsOf. AvailableAmount
@@ -206,26 +207,26 @@ type GetBalanceParams struct {
 // reaches zero at that rate, counting each credit lot's expiry; null with no
 // running charge.
 type Balance struct {
-	CustomerID         CustomerID  `json:"customer_id"`
-	Currency           string      `json:"currency"`
-	BillingMode        BillingMode `json:"billing_mode"`
-	BalanceAmount      int64       `json:"balance_amount,string"`
-	HeldAmount         int64       `json:"held_amount,string"`
-	AccruedAmount      int64       `json:"accrued_amount,string"`
-	AvailableAmount    int64       `json:"available_amount,string"`
-	OwedAmount         int64       `json:"owed_amount,string"`
-	AccrualRatePerHour int64       `json:"accrual_rate_per_hour,string"`
-	AsOf               time.Time   `json:"as_of"`
-	DepletesAt         *time.Time  `json:"depletes_at"`
+	CustomerID         CustomerID       `json:"customer_id"`
+	Currency           catalog.Currency `json:"currency"`
+	BillingMode        BillingMode      `json:"billing_mode"`
+	BalanceAmount      int64            `json:"balance_amount,string"`
+	HeldAmount         int64            `json:"held_amount,string"`
+	AccruedAmount      int64            `json:"accrued_amount,string"`
+	AvailableAmount    int64            `json:"available_amount,string"`
+	OwedAmount         int64            `json:"owed_amount,string"`
+	AccrualRatePerHour int64            `json:"accrual_rate_per_hour,string"`
+	AsOf               time.Time        `json:"as_of"`
+	DepletesAt         *time.Time       `json:"depletes_at"`
 }
 
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
 // request's currency when empty). A spend window is at most 31 days.
 type BudgetWindow struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit,string"`
-	Currency      string `json:"currency,omitempty"`
+	Key           string           `json:"key"`
+	WindowSeconds int64            `json:"window_seconds"`
+	Limit         int64            `json:"limit,string"`
+	Currency      catalog.Currency `json:"currency,omitempty"`
 }
 
 // MerchantProfile is the merchant's public and communication metadata; its
@@ -282,8 +283,8 @@ type BalanceNoticeSettings struct {
 
 // BalanceNoticeAmount is an amount line in one currency.
 type BalanceNoticeAmount struct {
-	Currency string `json:"currency"`
-	Amount   int64  `json:"amount,string"`
+	Currency catalog.Currency `json:"currency"`
+	Amount   int64            `json:"amount,string"`
 }
 
 // CardVaultPlatform is the card_vault holding new cards in the deployment's
@@ -304,10 +305,10 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *string           `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int              `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64            `json:"arrears_delinquency_floor,omitempty,string"`
-	PSPRouting              *[]PSPRoutingRule `json:"psp_routing,omitempty"`
+	ProviderRefundAccess    *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays        *int                  `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64                `json:"arrears_delinquency_floor,omitempty,string"`
+	PSPRouting              *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -372,8 +373,8 @@ type BillingPolicy struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  string         `json:"policy_currency,omitempty"`
+	BadSpendWindows []BudgetWindow   `json:"bad_spend_windows,omitempty"`
+	PolicyCurrency  catalog.Currency `json:"policy_currency,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
@@ -405,18 +406,20 @@ type DunningPolicy struct {
 	// AccessDuringDunning is DunningAccessKeep (default: members keep access
 	// until a confirmed outcome ends it) or DunningAccessSuspend (access ends
 	// with the paid period while a declined renewal is retried).
-	AccessDuringDunning string `json:"access_during_dunning,omitempty"`
+	AccessDuringDunning DunningAccess `json:"access_during_dunning,omitempty"`
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
 	// allowance, min(24h, max(2h, period/10)) past the paid period).
-	AccessWhileRenewalHeld string `json:"access_while_renewal_held,omitempty"`
+	AccessWhileRenewalHeld DunningAccess `json:"access_while_renewal_held,omitempty"`
 }
 
-// Dunning access policies.
+// DunningAccess is whether access holds while a renewal is unpaid.
+type DunningAccess string
+
 const (
-	DunningAccessKeep    = "keep"
-	DunningAccessSuspend = "suspend"
+	DunningAccessKeep    DunningAccess = "keep"
+	DunningAccessSuspend DunningAccess = "suspend"
 )
 
 // DunningTier is the retry schedule for cycles shorter than MaxCycleHours.

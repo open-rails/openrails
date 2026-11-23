@@ -28,7 +28,7 @@ func TestCalendarSubscription(t *testing.T) {
 			{ProductID: product.ID, Key: "zero", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(0)},
 			{ProductID: product.ID, Key: "overflow", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(1201)},
 			{ProductID: product.ID, Key: "trial", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(1), TrialUnitAmount: ptr(int64(0)), TrialDurationHours: ptr(24)},
-			{ProductID: product.ID, Key: "solana", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(1), SellVia: []string{"solana"}},
+			{ProductID: product.ID, Key: "solana", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalMonths: ptr(1), SellVia: []catalog.SellVia{catalog.SellViaSolana}},
 		} {
 			_, err := a.alpha.CreatePrice(t.Context(), invalid)
 			require.ErrorIs(t, err, billing.ErrInvalid)

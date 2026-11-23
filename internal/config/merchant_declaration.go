@@ -31,11 +31,11 @@ func NormalizePSPDeclaration(psp string, p billing.PSPConfig) (billing.PSPConfig
 	if err := ValidatePSPAccount(psp, string(p.Rail), p.AccountID); err != nil {
 		return p, err
 	}
-	environment, err := ResolvePSPEnvironment(psp, string(p.Rail), p.Environment)
+	environment, err := ResolvePSPEnvironment(psp, string(p.Rail), string(p.Environment))
 	if err != nil {
 		return p, err
 	}
-	p.Environment = environment
+	p.Environment = billing.Environment(environment)
 	if rpcURL := strings.TrimSpace(p.Secrets[SolanaSecretRPCURL]); p.Rail == billing.Rail(models.RailSolana) && rpcURL != "" {
 		if err := ValidateSolanaRPCURL(environment, rpcURL); err != nil {
 			return p, fmt.Errorf("psps.%s.%w", psp, err)

@@ -15,17 +15,17 @@ type AlertWebhookID uuid.UUID
 type NotificationID uuid.UUID
 
 const (
-	AlertWebhookIDPrefix = "awh_"
-	NotificationIDPrefix = "ntf_"
+	alertWebhookIDPrefix = "awh_"
+	notificationIDPrefix = "ntf_"
 )
 
 func ParseAlertWebhookID(s string) (AlertWebhookID, error) {
-	u, err := parsePrefixedID("alert webhook", AlertWebhookIDPrefix, s)
+	u, err := parsePrefixedID("alert webhook", alertWebhookIDPrefix, s)
 	return AlertWebhookID(u), err
 }
 
 func ParseNotificationID(s string) (NotificationID, error) {
-	u, err := parsePrefixedID("notification", NotificationIDPrefix, s)
+	u, err := parsePrefixedID("notification", notificationIDPrefix, s)
 	return NotificationID(u), err
 }
 
@@ -34,10 +34,10 @@ func (id NotificationID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id AlertWebhookID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id NotificationID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id AlertWebhookID) String() string {
-	return formatPrefixedID(AlertWebhookIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(alertWebhookIDPrefix, uuid.UUID(id))
 }
 func (id NotificationID) String() string {
-	return formatPrefixedID(NotificationIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(notificationIDPrefix, uuid.UUID(id))
 }
 func (id AlertWebhookID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id NotificationID) MarshalText() ([]byte, error) {

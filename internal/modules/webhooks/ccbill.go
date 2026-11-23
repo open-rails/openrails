@@ -1558,7 +1558,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("record CCBill retry date for %s: %w", sub.ID, err)
 		}
-		if err := s.recordNotices(ctx, d, ccbillNotice{data: billing.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed)); err != nil {
+		if err := s.recordNotices(ctx, d, ccbillNotice{data: billing.NotificationData{Rail: billing.RailCCBill, RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed)); err != nil {
 			return err
 		}
 		return s.recordCCBillAttempt(ctx, d, sub, period, transactionID, false, decline.Evidence{Code: strings.TrimSpace(data.FailureCode), Text: strings.TrimSpace(data.FailureReason)})

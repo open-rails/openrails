@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -291,7 +292,7 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 		usage := limits.Usage{EventType: it.EventType, Dimensions: it.Dimensions, Metadata: it.Metadata}
 		for _, def := range defs {
-			if catalog.LimitUnitCurrency(def.Unit) || !limits.Counts(def, meters, it.EventType) {
+			if syntax.LimitUnitCurrency(def.Unit) || !limits.Counts(def, meters, it.EventType) {
 				continue
 			}
 			units, err := limits.Units(def, meters, usage)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -298,7 +299,7 @@ func declaredInvoice(b subscriptions.StripeBill) (*billing.DeclaredStripeInvoice
 	native := func(minor int64) (int64, error) {
 		return moneyutil.RailMinorToNative(b.Currency, moneyutil.Cents(minor))
 	}
-	out := &billing.DeclaredStripeInvoice{ID: b.ID, CustomerReference: b.CustomerID, Status: b.Status, Reason: b.Reason, Currency: b.Currency, DueAt: b.DueAt}
+	out := &billing.DeclaredStripeInvoice{ID: b.ID, CustomerReference: b.CustomerID, Status: b.Status, Reason: b.Reason, Currency: catalog.Currency(b.Currency), DueAt: b.DueAt}
 	for _, p := range []struct {
 		in  int64
 		out *int64

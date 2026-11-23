@@ -10,16 +10,16 @@ import (
 // call's proposals; on the wire "run_<uuid>".
 type RunID uuid.UUID
 
-const RunIDPrefix = "run_"
+const runIDPrefix = "run_"
 
 func ParseRunID(s string) (RunID, error) {
-	u, err := parsePrefixedID("run", RunIDPrefix, s)
+	u, err := parsePrefixedID("run", runIDPrefix, s)
 	return RunID(u), err
 }
 
 func (id RunID) UUID() uuid.UUID              { return uuid.UUID(id) }
 func (id RunID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
-func (id RunID) String() string               { return formatPrefixedID(RunIDPrefix, uuid.UUID(id)) }
+func (id RunID) String() string               { return formatPrefixedID(runIDPrefix, uuid.UUID(id)) }
 func (id RunID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *RunID) UnmarshalText(b []byte) error {
 	v, err := ParseRunID(string(b))

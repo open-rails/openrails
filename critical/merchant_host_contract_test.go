@@ -100,7 +100,7 @@ func TestMerchantHost(t *testing.T) {
 		w.command(t, map[string]any{"Op": "host-retire", "Merchant": alpha.ID, "ID": alpha.ID.String()}, &retirement)
 		require.False(t, retirement.Retired)
 		require.Equal(t, billing.MerchantRetirementRefusedActive, retirement.Refusal)
-		before, err := w.alpha.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		before, err := w.alpha.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 10_000_000, before.UnitAmount)
 		w.command(t, map[string]any{"Op": "host-retire", "Merchant": beta.ID, "ID": alpha.ID.String()}, &retirement)
@@ -122,7 +122,7 @@ func TestMerchantHost(t *testing.T) {
 		var restored billing.Merchant
 		w.command(t, map[string]any{"Op": "host-restore", "Merchant": alpha.ID}, &restored)
 		require.Equal(t, billing.MerchantActive, restored.Status)
-		after, err := w.alpha.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		after, err := w.alpha.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.Equal(t, before.ID, after.ID)
 		require.Equal(t, before.UnitAmount, after.UnitAmount)

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -73,10 +74,10 @@ func declaredLimit(key string, current *limits.Definition, decl catalogwire.Appl
 
 // validateLimit checks a whole declaration.
 func validateLimit(d limits.Definition) error {
-	if err := catalogwire.ValidateLimitKey(d.Key); err != nil {
+	if err := syntax.ValidateLimitKey(d.Key); err != nil {
 		return apperr.Invalidf("%s", err).WithParam("key")
 	}
-	if err := catalogwire.ValidateLimitUnit(d.Unit); err != nil {
+	if err := syntax.ValidateLimitUnit(d.Unit); err != nil {
 		return apperr.Invalidf("limit %q: %s", d.Key, err).WithParam("unit")
 	}
 	if err := d.Reset.Validate(); err != nil {
@@ -85,7 +86,7 @@ func validateLimit(d limits.Definition) error {
 	if err := d.Overrun.Validate(); err != nil {
 		return apperr.Invalidf("limit %q: %s", d.Key, err).WithParam("overrun")
 	}
-	if catalogwire.LimitUnitCurrency(d.Unit) && len(d.RateCards) > 0 {
+	if syntax.LimitUnitCurrency(d.Unit) && len(d.RateCards) > 0 {
 		return apperr.Invalidf("limit %q: a currency limit counts the rated amount and has no rate_cards", d.Key).WithParam("rate_cards")
 	}
 	return nil

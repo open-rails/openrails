@@ -1,26 +1,26 @@
 package reconcile
 
 import (
+	"context"
 	"encoding/json"
-	"github.com/open-rails/openrails/internal/merchant"
+	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
 	"strings"
-
-	"context"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails/billing"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -291,11 +291,11 @@ func ImportDeclaredSubscriptions(
 			derived = true
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
-			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || (schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.IntervalMonths != 0) && (schedule.IntervalMonths <= 0 || schedule.IntervalMonths > 1200 || schedule.IntervalHours != 0) || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(schedule.Currency) != nil {
+			if schedule.SourceReference == "" || schedule.Amount <= 0 || schedule.FirstDueAt.IsZero() || (schedule.IntervalHours <= 0 || schedule.IntervalHours%24 != 0 || schedule.IntervalMonths != 0) && (schedule.IntervalMonths <= 0 || schedule.IntervalMonths > 1200 || schedule.IntervalHours != 0) || schedule.Quantity != nil && *schedule.Quantity <= 0 || moneyutil.RequireFiatCurrency(string(schedule.Currency)) != nil {
 				block("accepted_schedule requires verified reference, amount, currency, cadence and first renewal boundary")
 				continue
 			}
-			if currency := moneyutil.NormalizeCurrency(schedule.Currency); currency != price.Currency {
+			if currency := moneyutil.NormalizeCurrency(string(schedule.Currency)); currency != price.Currency {
 				block(fmt.Sprintf("accepted_schedule is in %s; its price is in %s", currency, price.Currency))
 				continue
 			}
@@ -411,7 +411,7 @@ func ImportDeclaredSubscriptions(
 			return out, fmt.Errorf("declared import: load %s: %w", subID, err)
 		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
-			bill, err := scheduleBill(ctx, q, sub, price, schedule.Currency, schedule.Amount, schedule.Quantity, schedule.IntervalHours)
+			bill, err := scheduleBill(ctx, q, sub, price, string(schedule.Currency), schedule.Amount, schedule.Quantity, schedule.IntervalHours)
 			if err != nil {
 				return out, fmt.Errorf("declared import: %w", err)
 			}
@@ -703,7 +703,7 @@ func derivedSchedule(f *DeclaredSubscriptionFact, price gen.BillingPrice, txns [
 	if proof.NextBillingAt != nil && !proof.NextBillingAt.UTC().Truncate(24*time.Hour).Equal(end.Truncate(24*time.Hour)) {
 		return nil, "the paid cycle's next billing date differs from the paid-through"
 	}
-	return &billing.DeclaredProviderSchedule{SourceReference: "import:" + f.SourceID, Amount: amount, Currency: currency, IntervalHours: hours, FirstDueAt: first}, ""
+	return &billing.DeclaredProviderSchedule{SourceReference: "import:" + f.SourceID, Amount: amount, Currency: catalog.Currency(currency), IntervalHours: hours, FirstDueAt: first}, ""
 }
 
 // FindingScheduleUnresolved is an imported live provider schedule whose

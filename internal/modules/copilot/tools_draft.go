@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/cadence"
@@ -226,12 +227,12 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		PriceKey:      key,
 		CurrentAmount: current.Amount,
 		NewAmount:     args.NewAmount,
-		Currency:      current.Currency,
+		Currency:      catalog.Currency(current.Currency),
 		AffectedCount: affected,
 		ReviewText:    reviewText,
 		CreatePrice: billing.CreatePriceParams{
 			ProductID: billing.ProductID(current.ProductID), Key: key,
-			UnitAmount: args.NewAmount, Currency: current.Currency,
+			UnitAmount: args.NewAmount, Currency: catalog.Currency(current.Currency),
 			AccessDurationHours: current.AccessDurationHours, BillingIntervalHours: current.BillingIntervalHours,
 			TrialUnitAmount: current.TrialUnitAmount, TrialDurationHours: current.TrialDurationHours,
 			SellVia: current.SellVia,
@@ -323,7 +324,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 		ProductKey: productKey, ReviewText: reviewText,
 		CreatePrice: billing.CreatePriceParams{
 			ProductID: billing.ProductID(product.ID), Key: key,
-			UnitAmount: args.UnitAmount, Currency: currency,
+			UnitAmount: args.UnitAmount, Currency: catalog.Currency(currency),
 			AccessDurationHours: args.AccessDurationHours, BillingIntervalHours: args.BillingIntervalHours,
 		},
 	}

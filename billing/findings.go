@@ -10,16 +10,16 @@ import (
 // FindingID names one finding; on the wire "fnd_<uuid>".
 type FindingID uuid.UUID
 
-const FindingIDPrefix = "fnd_"
+const findingIDPrefix = "fnd_"
 
 func ParseFindingID(s string) (FindingID, error) {
-	u, err := parsePrefixedID("finding", FindingIDPrefix, s)
+	u, err := parsePrefixedID("finding", findingIDPrefix, s)
 	return FindingID(u), err
 }
 
 func (id FindingID) UUID() uuid.UUID              { return uuid.UUID(id) }
 func (id FindingID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
-func (id FindingID) String() string               { return formatPrefixedID(FindingIDPrefix, uuid.UUID(id)) }
+func (id FindingID) String() string               { return formatPrefixedID(findingIDPrefix, uuid.UUID(id)) }
 func (id FindingID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *FindingID) UnmarshalText(b []byte) error {
 	v, err := ParseFindingID(string(b))

@@ -105,7 +105,7 @@ func AdjustCustomerLimit(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.AdjustLimitParams
+	var params billing.AdjustCustomerLimitParams
 	if !r.BindJSON(&params) {
 		return
 	}

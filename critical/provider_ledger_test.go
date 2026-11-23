@@ -216,7 +216,7 @@ func newPaymentWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, 
 		w.deps.StripeTransport = loopbackWire{target: target, wire: transport}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		declaration := cfgMerchant(w.cfg, "alpha")
-		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}
+		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}
 		declaration.CardVault = "stripe"
 		setCfgMerchant(&w.cfg, "alpha", declaration)
 		for _, change := range configure {

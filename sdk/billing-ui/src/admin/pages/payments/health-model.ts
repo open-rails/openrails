@@ -4,7 +4,7 @@
 // differs (metrics group by its key, lists take its id).
 import type {
   MetricsCell,
-  MetricsQuery,
+  QueryMetricsParams,
   MetricsResult,
 } from "#orck/admin/lib/api/metrics"
 import { indexColumns } from "#orck/admin/pages/dashboard/lib"
@@ -58,7 +58,7 @@ export interface Tile {
   measure: string
   // lower: a rise is bad news.
   better: "lower" | "higher"
-  query: (scope: Scope) => MetricsQuery
+  query: (scope: Scope) => QueryMetricsParams
   list: "attempts" | "cycles"
   listFilters: Filters
 }
@@ -67,7 +67,7 @@ const compared = (
   measures: string[],
   scope: Scope,
   filters: Filters = {}
-): MetricsQuery => ({
+): QueryMetricsParams => ({
   measures,
   range: { last: scope.last },
   filters: scoped(scope, filters),
@@ -179,7 +179,10 @@ export function formatChange(v: TileValue): string {
 }
 
 export const trendQueries = (scope: Scope) => {
-  const weekly = (measure: string, filters: Filters = {}): MetricsQuery => ({
+  const weekly = (
+    measure: string,
+    filters: Filters = {}
+  ): QueryMetricsParams => ({
     measures: [measure],
     by: ["time", "owner"],
     grain: "week",
@@ -192,7 +195,7 @@ export const trendQueries = (scope: Scope) => {
   }
 }
 
-export const reasonsQuery = (scope: Scope): MetricsQuery => ({
+export const reasonsQuery = (scope: Scope): QueryMetricsParams => ({
   measures: ["failed_attempts"],
   by: ["category", "reason", "response_code"],
   range: { last: scope.last },
@@ -265,7 +268,7 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
 }
 
 export const checkQueries = (scope: Scope) => {
-  const by = (dim: string): MetricsQuery => ({
+  const by = (dim: string): QueryMetricsParams => ({
     measures: ["attempts", "attempt_failure_rate"],
     by: [dim],
     range: { last: scope.last },
@@ -301,7 +304,7 @@ export const RECOVERY_ATTEMPTS = ["1", "2", "3", "4", "5+"]
 export const RECOVERY_DAYS = [1, 3, 7, 14, 30]
 
 export const recoveryQueries = (scope: Scope) => {
-  const q = (measures: string[], by: string[]): MetricsQuery => ({
+  const q = (measures: string[], by: string[]): QueryMetricsParams => ({
     measures,
     by,
     range: { last: scope.last },
@@ -370,7 +373,7 @@ export function recoveryCurves(
   return out.sort((a, b) => a.owner.localeCompare(b.owner))
 }
 
-export const missedQuery = (scope: Scope): MetricsQuery => ({
+export const missedQuery = (scope: Scope): QueryMetricsParams => ({
   measures: ["rebills_missed"],
   by: ["miss_reason", "psp"],
   range: { last: scope.last },
@@ -401,7 +404,7 @@ export function missedRows(result: MetricsResult | undefined): MissedRow[] {
 }
 
 // coverageQuery: how OpenRails learned of the providers' own charges.
-export const coverageQuery = (scope: Scope): MetricsQuery => ({
+export const coverageQuery = (scope: Scope): QueryMetricsParams => ({
   measures: ["attempts"],
   by: ["psp", "observed_via"],
   range: { last: scope.last },
@@ -476,21 +479,21 @@ export const NMI_KINDS = [
 export const nmiHistoryQueries = (scope: Scope) => {
   const psp: Filters = scope.psp ? { psp: [scope.psp.id] } : {}
   const range = { last: "25m" }
-  const months: MetricsQuery = {
+  const months: QueryMetricsParams = {
     measures: ["nmi_history_authorizations", "nmi_history_refusal_rate"],
     by: ["time", "nmi_kind"],
     grain: "month",
     range,
     filters: scope.psp ? psp : undefined,
   }
-  const reasons: MetricsQuery = {
+  const reasons: QueryMetricsParams = {
     measures: ["nmi_history_refused"],
     by: ["nmi_kind", "category", "reason"],
     range,
     filters: { ...psp, category: FAILED_CATEGORIES },
   }
   // OpenRails' own NMI attempts by month: the first marks where it began.
-  const recorded: MetricsQuery = {
+  const recorded: QueryMetricsParams = {
     measures: ["attempts"],
     by: ["time"],
     grain: "month",

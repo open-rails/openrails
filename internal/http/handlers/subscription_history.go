@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -105,7 +106,7 @@ func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.Subscr
 		out.Kind = "payment_attempt"
 		out.Attempt = &billing.SubscriptionHistoryAttempt{
 			ID: billing.PaymentAttemptID(row.ID), Kind: row.Kind, Category: row.Category, Reason: row.Reason,
-			Action: row.Action, Source: row.Origin, ObservedVia: row.ObservedVia, Amount: row.Amount, Currency: row.Currency,
+			Action: row.Action, Source: row.Origin, ObservedVia: row.ObservedVia, Amount: row.Amount, Currency: catalog.Currency(row.Currency),
 		}
 		if row.PspID != nil {
 			out.Attempt.PSPID = billing.PSPID(*row.PspID)

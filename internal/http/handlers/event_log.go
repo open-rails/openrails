@@ -7,7 +7,7 @@ import (
 )
 
 func ListEvents(r *httprequest.Request) {
-	var query billing.EventQuery
+	var query billing.EventListParams
 	if !r.BindQuery(&query) {
 		return
 	}

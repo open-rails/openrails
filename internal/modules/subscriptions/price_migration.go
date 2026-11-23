@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	catalogwire "github.com/open-rails/openrails/catalog"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -374,7 +376,7 @@ func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPla
 	out := make([]*classified, 0, len(cohort))
 	for _, sub := range cohort {
 		c := &classified{sub: sub, from: plan.sources[sub.PriceID], capability: s.capability(ctx, sub)}
-		c.outcome = billing.PriceMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: string(sub.Rail)}
+		c.outcome = billing.PriceMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: billing.Rail(sub.Rail)}
 		rail := byRail[string(sub.Rail)]
 		if rail == nil {
 			rail = &billing.PriceMigrationRailCounts{}
@@ -712,7 +714,7 @@ func (s *PriceMigrationService) notify(ctx context.Context, d *db.DB, change *mo
 	effective := effectiveAt.UTC()
 	data := billing.NotificationData{
 		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: from.PublicID, ToPriceID: to.PublicID,
-		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: to.Currency, EffectiveAt: &effective,
+		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: catalogwire.Currency(to.Currency), EffectiveAt: &effective,
 	}
 	if change.PriceMigrationID != nil {
 		data.PriceMigrationID = billing.PriceMigrationID(*change.PriceMigrationID)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -36,12 +37,24 @@ func (s *Server) RestoreMerchant(ctx context.Context, id billing.MerchantID) (*b
 	return s.graph.Runtime.Merchants.Restore(ctx, id)
 }
 
-// RenameMerchant renames an active merchant; its former name forwards to it
-// under Config.Naming. With req.ActorUserID, the user renaming their
-// own merchant, the name also answers to Config.MerchantCreation's reserved
-// names and pattern and to the rename interval (*billing.MerchantRenameTooSoonError).
+// RenameMerchant is the operator's rename of an active merchant; its former
+// name forwards to it under Config.Naming.
 func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error) {
-	m, err := s.cp.RenameMerchant(ctx, id, req.Name, req.ActorUserID, req.ActorUserID == "")
+	return s.rename(ctx, id, req, "")
+}
+
+// RenameUserMerchant is userID's rename of their own merchant: the name also
+// answers to Config.MerchantCreation's reserved names and pattern and to the
+// rename interval (*billing.MerchantRenameTooSoonError).
+func (s *Server) RenameUserMerchant(ctx context.Context, id billing.MerchantID, userID string, req billing.RenameMerchantParams) (*billing.MerchantName, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: a user rename names its user", billing.ErrInvalid)
+	}
+	return s.rename(ctx, id, req, userID)
+}
+
+func (s *Server) rename(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams, userID string) (*billing.MerchantName, error) {
+	m, err := s.cp.RenameMerchant(ctx, id, req.Name, userID, userID == "")
 	if err != nil {
 		return nil, err
 	}

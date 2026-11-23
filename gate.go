@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -406,7 +407,7 @@ func captureItem(p billing.AdmitParams, limitSet *string, u billing.CaptureUsage
 }
 
 func recordItem(u billing.UsageParams) (billing.LeaseUsage, error) {
-	u.Currency = normalizeCurrency(u.Currency)
+	u.Currency = catalog.Currency(normalizeCurrency(string(u.Currency)))
 	u.EventType = strings.TrimSpace(u.EventType)
 	switch {
 	case u.CustomerID.IsZero():
@@ -454,7 +455,7 @@ func nonNilMeta(m map[string]any) map[string]any {
 // normalizeGateAdmit checks what a gate decision needs of a request.
 func normalizeGateAdmit(p *billing.AdmitParams) error {
 	p.RequestID = strings.TrimSpace(p.RequestID)
-	p.Currency = normalizeCurrency(p.Currency)
+	p.Currency = catalog.Currency(normalizeCurrency(string(p.Currency)))
 	switch {
 	case p.RequestID == "":
 		return invalidParam("request_id", "request_id is required")
@@ -490,7 +491,7 @@ func attrsKey(p billing.AdmitParams) string {
 		roles[i] = r.String()
 	}
 	slices.Sort(roles)
-	return strings.Join([]string{p.CustomerID.String(), p.Invoker, string(p.InvokerType), p.TrustLevel, strings.Join(roles, ","), p.Resource, p.Currency, eventTypeOf(p)}, "\x00")
+	return strings.Join([]string{p.CustomerID.String(), p.Invoker, string(p.InvokerType), p.TrustLevel, strings.Join(roles, ","), p.Resource, string(p.Currency), eventTypeOf(p)}, "\x00")
 }
 
 // ownWantKey is the want of a request that does not share its attributes'

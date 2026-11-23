@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -20,14 +20,14 @@ import (
 )
 
 func validKey(key string) bool {
-	return key != "" && len(key) <= catalog.MaxEntitlementKeyBytes && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
+	return key != "" && len(key) <= syntax.MaxEntitlementKeyBytes && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }
 
 // validatePrefix requires a byte prefix whose last byte is printable ASCII,
 // so the byte after it bounds the prefix's range.
 func validatePrefix(prefix string) error {
 	if !validKey(prefix) {
-		return apperr.Invalidf("a prefix is 1 to %d bytes of UTF-8 without NUL", catalog.MaxEntitlementKeyBytes).WithParam("prefix")
+		return apperr.Invalidf("a prefix is 1 to %d bytes of UTF-8 without NUL", syntax.MaxEntitlementKeyBytes).WithParam("prefix")
 	}
 	if last := prefix[len(prefix)-1]; last < 0x21 || last > 0x7E {
 		return apperr.Invalidf("a prefix must end in a printable ASCII byte").WithParam("prefix")

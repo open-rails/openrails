@@ -71,7 +71,7 @@ func TestPublicEntitlements(t *testing.T) {
 		}
 		publicAccess(t, a, start.Add(36*time.Hour), false)
 		a.clock.Advance(24 * time.Hour)
-		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), order.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}})
+		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), order.CustomerID, billing.GetAccessTenureParams{Entitlements: []string{"library:read"}})
 		require.NoError(t, err)
 		require.EqualValues(t, 129600, tenure.Seconds["library:read"], "36 hours, not the sum of two overlapping 24-hour sources")
 	})
@@ -152,12 +152,12 @@ func TestPublicEntitlements(t *testing.T) {
 			at      time.Time
 			seconds int64
 		}{{grant.StartsAt, 0}, {grant.StartsAt.Add(3 * time.Hour), 10800}, {*grant.EndsAt, 21600}} {
-			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
+			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.GetAccessTenureParams{Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
 			require.NoError(t, err)
 			require.Equal(t, sample.seconds, tenure.Seconds["library:read"])
 			require.Zero(t, tenure.Seconds["never:granted"])
 		}
-		_, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
+		_, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.GetAccessTenureParams{Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
 		require.ErrorIs(t, err, billing.ErrInvalid)
 	})
 	t.Run("OR-J27-S04/archive-and-refund-obey-explicit-access-policy", func(t *testing.T) {

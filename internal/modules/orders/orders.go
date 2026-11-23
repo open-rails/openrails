@@ -204,7 +204,7 @@ func (o *Order) Items() string {
 func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaymentOption) billing.Order {
 	out := billing.Order{
 		ID: billing.OrderID(o.ID), CustomerID: billing.CustomerID(o.CustomerID), Origin: billing.OrderOrigin(o.Origin),
-		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
+		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: catalog.Currency(o.Currency), Total: o.Total,
 		CollectionOwner: billing.OrderCollectionOwner(o.CollectionOwner),
 		ProviderBills:   append(make([]billing.OrderProviderBill, 0, len(o.ProviderBills)), o.ProviderBills...),
 		Lines:           make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},

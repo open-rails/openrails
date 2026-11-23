@@ -14,12 +14,12 @@ import (
 )
 
 type Reader interface {
-	ListEvents(context.Context, billing.EventQuery) (*billing.EventPage, error)
+	ListEvents(context.Context, billing.EventListParams) (*billing.EventPage, error)
 }
 
 func Hosts(ctx context.Context, c Reader, kind billing.HostEventType) (*billing.ListPage[billing.HostEvent], error) {
 	out := &billing.ListPage[billing.HostEvent]{Items: []billing.HostEvent{}}
-	query := billing.EventQuery{Limit: 500}
+	query := billing.EventListParams{Limit: 500}
 	if kind != "" {
 		query.Types = []string{string(kind)}
 	}
@@ -76,20 +76,20 @@ func Hosts(ctx context.Context, c Reader, kind billing.HostEventType) (*billing.
 }
 
 type NotificationReader struct {
-	read func(context.Context, billing.EventQuery) (*billing.EventPage, error)
+	read func(context.Context, billing.EventListParams) (*billing.EventPage, error)
 }
 
 func Notifications(c Reader) *NotificationReader {
-	return &NotificationReader{read: func(ctx context.Context, q billing.EventQuery) (*billing.EventPage, error) {
+	return &NotificationReader{read: func(ctx context.Context, q billing.EventListParams) (*billing.EventPage, error) {
 		return c.ListEvents(ctx, q)
 	}}
 }
 func (n *NotificationReader) Read(ctx context.Context) ([]billing.NotificationEvent, error) {
 	return ReadNotifications(ctx, n.read)
 }
-func ReadNotifications(ctx context.Context, read func(context.Context, billing.EventQuery) (*billing.EventPage, error)) ([]billing.NotificationEvent, error) {
+func ReadNotifications(ctx context.Context, read func(context.Context, billing.EventListParams) (*billing.EventPage, error)) ([]billing.NotificationEvent, error) {
 	out := []billing.NotificationEvent{}
-	q := billing.EventQuery{Limit: 500}
+	q := billing.EventListParams{Limit: 500}
 	for {
 		page, err := read(ctx, q)
 		if err != nil {

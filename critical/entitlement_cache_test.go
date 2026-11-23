@@ -189,7 +189,7 @@ func TestRemoteEntitlementCache(t *testing.T) {
 		short, shortWire := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 2*time.Second, nil)
 		assertHeld(short, true)
 		require.NoError(t, a.alphaRemote.RevokeProductAccess(t.Context(), revocable.ID, billing.RevokeProductAccessParams{Reason: "revoke access early"}))
-		live, err := short.CheckEntitlementsLive(t.Context(), held)
+		live, err := short.Uncached().CheckEntitlements(t.Context(), held)
 		require.NoError(t, err)
 		require.False(t, live.Entitlements["library:read"])
 		assertHeld(short, false)
@@ -238,7 +238,7 @@ func TestRemoteEntitlementCache(t *testing.T) {
 			}()
 			<-evaluated
 			revoke()
-			live, err := redisA.CheckEntitlementsLive(t.Context(), held)
+			live, err := redisA.Uncached().CheckEntitlements(t.Context(), held)
 			require.NoError(t, err)
 			require.False(t, live.Entitlements["library:read"])
 			releaseOnce()

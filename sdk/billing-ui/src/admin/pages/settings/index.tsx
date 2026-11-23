@@ -1033,7 +1033,7 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
         await createPSP.mutateAsync({
           key: value.key.trim().toLowerCase(),
           rail: value.rail as PSP["rail"],
-          environment: value.environment,
+          environment: value.environment as PSP["environment"],
           ...Object.fromEntries(
             (definition?.account_fields ?? []).map((name) => [
               name,

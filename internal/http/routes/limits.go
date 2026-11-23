@@ -47,5 +47,5 @@ var limitsRoutes = []Route{
 		Doc: "AdjustCustomerLimit adds params.Amount to the capacity of the customer's current window of " +
 			"params.Limit only, and answers where it stands after. A retry with the same params.SourceID answers " +
 			"the line without adding again; other terms under it are billing.ErrIdempotencyKeyReused.",
-		Request: billing.AdjustLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("idempotency_key_reused", "invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
+		Request: billing.AdjustCustomerLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("idempotency_key_reused", "invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
 }

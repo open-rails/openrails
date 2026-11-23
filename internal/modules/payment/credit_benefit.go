@@ -18,7 +18,7 @@ func acceptedCreditGrant(product *models.Product, price *models.Price) (*models.
 		return nil, fmt.Errorf("recurring credit benefits are not supported")
 	}
 	policy := product.CreditGrant
-	currency := strings.ToUpper(strings.TrimSpace(policy.Currency))
+	currency := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
 	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {
 		return nil, fmt.Errorf("purchased credit currency must match payment currency")
 	}

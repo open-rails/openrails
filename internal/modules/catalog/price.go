@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -84,7 +85,7 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		Key:                  price.Key,
 		ProviderOwned:        price.ProviderOwned,
 		ProviderPspID:        price.ProviderPSPID, ProviderSnapshot: providerSnapshot, BillingIntervalMonths: models.IntPtrTo32(price.BillingIntervalMonths), ProviderAccessDefault: price.ProviderAccessDefault,
-		SellVia:   price.SellVia,
+		SellVia:   normalize.Strings[string](price.SellVia),
 		CreatedAt: price.CreatedAt,
 		UpdatedAt: price.UpdatedAt,
 	})
@@ -386,12 +387,12 @@ func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
 // SetArchived sets the archived lifecycle flag on a price.
 // SetSellVia sets the methods one of our prices sells through; nil is every
 // method.
-func (s *PriceService) SetSellVia(ctx context.Context, id uuid.UUID, methods []string) error {
+func (s *PriceService) SetSellVia(ctx context.Context, id uuid.UUID, methods []catalog.SellVia) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	n, err := s.db.Gen(ctx).UpdatePriceSellVia(ctx, gen.UpdatePriceSellViaParams{MerchantID: mid.UUID(), ID: id, SellVia: methods})
+	n, err := s.db.Gen(ctx).UpdatePriceSellVia(ctx, gen.UpdatePriceSellViaParams{MerchantID: mid.UUID(), ID: id, SellVia: normalize.Strings[string](methods)})
 	if err != nil {
 		return err
 	}
@@ -566,7 +567,7 @@ func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceP
 	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
 		Quantity:   quantity,
 		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
-		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours), BillingIntervalMonths: models.IntPtrTo32(req.BillingIntervalMonths),
+		Amount: req.UnitAmount, Currency: string(req.Currency), AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours), BillingIntervalMonths: models.IntPtrTo32(req.BillingIntervalMonths),
 		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours), CustomerAmount: customAmount,
 	})
 	if err != nil {

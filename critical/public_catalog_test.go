@@ -17,6 +17,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -48,11 +49,11 @@ func TestPublicCatalog(t *testing.T) {
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		product, price := publicSale(t, a, "exact-usd", 9_990_000, nil)
-		read, err := a.alphaRemote.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		read, err := a.alphaRemote.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.Equal(t, product.ID, read.ProductID)
 		require.EqualValues(t, 9_990_000, read.UnitAmount)
-		require.Equal(t, "USD", read.Currency)
+		require.Equal(t, catalog.Currency("USD"), read.Currency)
 		preview, err := a.alphaRemote.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}})
 		require.NoError(t, err)
 		require.EqualValues(t, 29_970_000, preview.Total)
@@ -77,18 +78,18 @@ func TestPublicCatalog(t *testing.T) {
 				require.NoError(t, err)
 				price := doc.Products["exact"].Prices["exact"]
 				require.Equal(t, sample.units, price.UnitAmount.Value)
-				require.Equal(t, sample.currency, price.Currency.Value)
+				require.Equal(t, catalog.Currency(sample.currency), price.Currency.Value)
 			}
 			for _, sample := range []struct {
 				input string
 				hours int
 			}{{"1 hour", 1}, {"30 days", 720}, {"2 weeks", 336}, {"2562047 hours", 2562047}} {
-				hours, err := catalog.ParseDurationHours(sample.input)
+				hours, err := syntax.ParseDurationHours(sample.input)
 				require.NoError(t, err)
 				require.Equal(t, sample.hours, hours)
 			}
 			for _, invalid := range []string{"0 hours", "-1 day", "1.5 days", "1 month", "2562048 hours", "9223372036854775807 weeks"} {
-				_, err := catalog.ParseDurationHours(invalid)
+				_, err := syntax.ParseDurationHours(invalid)
 				require.Error(t, err, invalid)
 			}
 			id, err := billing.NewPriceID("media/a:b", "monthly plus", 7)
@@ -233,7 +234,7 @@ func TestPublicCatalog(t *testing.T) {
 		cfg := a.cfg
 		cfg.Merchants = slices.Clone(a.cfg.Merchants)
 		declaration := cfgMerchant(cfg, "alpha")
-		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
+		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
 		setCfgMerchant(&cfg, "alpha", declaration)
 		a.server.Close()
 		require.NoError(t, a.engine.Close(t.Context()))

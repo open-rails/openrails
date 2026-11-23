@@ -30,37 +30,6 @@ import (
 // new-account low default (#300): start at the lowest level until graduated.
 const DefaultTrustLevel = "free"
 
-// DenyFailureRateLimited is the delegated-invoker wasted-spend cutoff deny code.
-const DenyFailureRateLimited = "failure_rate_limited"
-
-// DenyDelegatedSpendNotAllowed denies a delegated invoker: only the customer's
-// own credential spends its balance.
-const DenyDelegatedSpendNotAllowed = "delegated_spend_not_allowed"
-
-// DenyBudgetExceeded is the deny code when a spend-cap window blocks the request.
-const DenyBudgetExceeded = "budget_exceeded"
-
-// DenyOutstandingCap is the or#897 outstanding_cap refusal: LEDGER-measured
-// unpaid arrears have reached the payer's credit line. Distinct from
-// insufficient_credit (which is "this one request does not fit") and from
-// delinquent (the TIME axis) — this is "your debt is at the cap".
-const DenyOutstandingCap = "outstanding_cap_reached"
-
-// DenyAccrualRateCap is the or#897 accrual_rate_cap refusal: the payer's
-// MEASURED accrual rate plus the deployment it is asking to start would exceed
-// its declared micros/hour quota. Distinct from budget_exceeded (a window of
-// past spend is full) and from outstanding_cap_reached (debt at the line) —
-// this one is about how fast money would be burning from now on, and the only
-// fix is to run less, not to pay or to wait for a window to roll.
-const DenyAccrualRateCap = "accrual_rate_cap_reached"
-
-// DenyDelinquent is the or#878 TIME-axis refusal: the payer has a debt that has
-// outlived the merchant's grace window. Deliberately DISTINCT from
-// insufficient_credit — "you are over your limit" and "you have an unpaid
-// bill" call for different things from the customer, and a host that cannot
-// tell them apart cannot say anything useful to either.
-const DenyDelinquent = "delinquent_unpaid_order"
-
 // Admitter is the service-admit money gate.
 type Admitter struct {
 	money  *money.MoneyService
@@ -143,7 +112,7 @@ type AdmitDecision struct {
 	// what its usage estimate was priced at.
 	EstimatedAmount int64
 	BlockedBy       string // "budget" | "abuse" | "money" | "limit" | ""
-	DenyCode        string
+	DenyCode        billing.DenyCode
 	// Limit and ResetsAt name a limit_reached refusal's limit and when it
 	// resets.
 	Limit    string
@@ -282,19 +251,19 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		}
 		return out, nil
 	}
-	code, blocked := DenyBudgetExceeded, "budget"
+	code, blocked := billing.DenyBudgetExceeded, "budget"
 	if dec.BlockedBalance {
 		if capacity.HardCreditLimit && outstanding > 0 && canFitAfterDebtSettlement(capacity, resolved, req.EstimatedAmount) {
 			if err := a.money.RequestUsageCollection(ctx, q, req.CustomerID, req.Currency); err != nil {
 				return AdmitDecision{}, err
 			}
 		}
-		code, blocked = money.DenyInsufficientBalance, "money"
+		code, blocked = billing.DenyInsufficientBalance, "money"
 		if creditLine > 0 {
-			code = money.DenyInsufficientCredit
+			code = billing.DenyInsufficientCredit
 		}
 		if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
-			code = DenyOutstandingCap
+			code = billing.DenyOutstandingCapReached
 		}
 	}
 	return AdmitDecision{BlockedBy: blocked, DenyCode: code, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
@@ -334,7 +303,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, werr
 		}
 		if over {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: billing.DenyFailureRateLimited}, nil
 		}
 	}
 
@@ -357,7 +326,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, derr
 		}
 		if delinquent {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidOrder}, nil
 		}
 	}
 
@@ -381,7 +350,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	// Only the customer's own credential spends its balance: nothing grants a
 	// delegated invoker spend.
 	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
+		return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
 	}
 
 	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
@@ -401,7 +370,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, rerr
 		}
 		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: billing.DenyAccrualRateCapReached}, nil
 		}
 	}
 

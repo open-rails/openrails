@@ -48,9 +48,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 - The root package is the interface: `openrails.New` (in process) returns the `*Engine`
   (workers, routes, every declared merchant), and `engine.Merchant(id)` the `*Client` bound
   to one merchant; over HTTP, `openrails.NewRemoteMerchant` (or `NewRemote` with a credential
-  per merchant) returns the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
-  `ctx` first, request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …) and
-  typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
+  per merchant) returns the same `*Client`. Flat methods (`Get/List/Create/Update/Delete/Set/Ensure`,
+  or an action verb from the closed list in `internal/apisurface/lint.go`), `ctx` first,
+  request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …), typed enums and
+  `catalog.Currency`. A positional `string` is only a host-chosen `key`, `reference`,
+  `requestID(s)` or `idempotencyKey`. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
 - The Go client is the admin API: each admin, catalog-edit and merchant-config route

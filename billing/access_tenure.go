@@ -2,9 +2,9 @@ package billing
 
 import "time"
 
-// AccessTenureParams asks how long a customer held each of 1 to
+// GetAccessTenureParams asks how long a customer held each of 1 to
 // MaxEntitlementChecks keys. At is a past instant; zero uses the service clock.
-type AccessTenureParams struct {
+type GetAccessTenureParams struct {
 	Entitlements []string  `form:"entitlement"`
 	At           time.Time `form:"at"`
 }

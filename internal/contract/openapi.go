@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -152,7 +153,7 @@ func (m *model) objectSchema(o *object) *obj {
 				newObj("type", "null"),
 			}))
 			props.set(name+"_hours", newObj("oneOf", []any{
-				newObj("type", "integer", "minimum", 1, "maximum", catalog.MaxDurationHours),
+				newObj("type", "integer", "minimum", 1, "maximum", syntax.MaxDurationHours),
 				newObj("type", "null"),
 			}))
 			aliases = append(aliases, newObj("not", newObj("required", []string{name, name + "_hours"})))

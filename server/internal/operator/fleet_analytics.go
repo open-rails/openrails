@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
@@ -29,13 +31,13 @@ func FleetAnalytics(ctx context.Context, cp *controlplane.ControlPlane, exclude 
 		MRR:     make([]billing.FleetMRR, 0, len(snapshot.MRR)),
 	}
 	for _, r := range snapshot.Revenue {
-		out.Revenue = append(out.Revenue, billing.FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
+		out.Revenue = append(out.Revenue, billing.FleetCurrencyRevenue{Currency: catalog.Currency(r.Currency), Payments: r.Payments, SettledAmount: r.SettledAmount})
 	}
 	for _, r := range snapshot.Rails {
-		out.Rails = append(out.Rails, billing.FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
+		out.Rails = append(out.Rails, billing.FleetRailHealth{Rail: billing.Rail(r.Rail), Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
 	}
 	for _, r := range snapshot.MRR {
-		out.MRR = append(out.MRR, billing.FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
+		out.MRR = append(out.MRR, billing.FleetMRR{Currency: catalog.Currency(r.Currency), Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
 	}
 	return out, nil
 }

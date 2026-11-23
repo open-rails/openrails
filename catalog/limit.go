@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"strconv"
 
-	"github.com/open-rails/openrails/internal/currency"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // BalanceLimit is the built-in limit of a customer's prepaid balance and
@@ -58,11 +57,6 @@ const (
 
 // MaxLimitWindowSeconds bounds a limit's window: 366 days.
 const MaxLimitWindowSeconds = 366 * 24 * 60 * 60
-
-var (
-	limitKeyPattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-	limitUnitPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-)
 
 // LimitReset is when a limit's window starts over. WindowSeconds is set for
 // fixed, session, rolling and rate; Anchor for fixed only.
@@ -153,34 +147,6 @@ func (c *Capacity) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// ValidateLimitKey refuses a key that is not a lowercase identifier of at
-// most 64 bytes, and the reserved key balance.
-func ValidateLimitKey(key string) error {
-	if key == BalanceLimit {
-		return fmt.Errorf("limit key %q is reserved for the prepaid balance and credit line", key)
-	}
-	if !limitKeyPattern.MatchString(key) {
-		return fmt.Errorf("limit key %q must match %s", key, limitKeyPattern)
-	}
-	return nil
-}
-
-// LimitUnitCurrency reports whether a limit's unit is a currency code, as
-// the registry writes it.
-func LimitUnitCurrency(unit string) bool {
-	units, ok := currency.Lookup(unit)
-	return ok && units.Code == unit
-}
-
-// ValidateLimitUnit refuses a unit that is neither a named unit (lowercase)
-// nor a registered currency code.
-func ValidateLimitUnit(unit string) error {
-	if limitUnitPattern.MatchString(unit) || LimitUnitCurrency(unit) {
-		return nil
-	}
-	return fmt.Errorf("limit unit %q must be a lowercase name matching %s or a currency code", unit, limitUnitPattern)
-}
-
 // validate checks the declaration's syntax; meters and prices are checked
 // against the catalog when it applies.
 func (l ApplyLimit) validate() error {
@@ -191,7 +157,7 @@ func (l ApplyLimit) validate() error {
 		return fmt.Errorf("nonnullable field is null")
 	}
 	if l.Unit.Set {
-		if err := ValidateLimitUnit(l.Unit.Value); err != nil {
+		if err := syntax.ValidateLimitUnit(l.Unit.Value); err != nil {
 			return err
 		}
 	}
@@ -205,7 +171,7 @@ func (l ApplyLimit) validate() error {
 			return err
 		}
 	}
-	if l.Unit.Set && LimitUnitCurrency(l.Unit.Value) && len(l.RateCards.Value) > 0 {
+	if l.Unit.Set && syntax.LimitUnitCurrency(l.Unit.Value) && len(l.RateCards.Value) > 0 {
 		return fmt.Errorf("a currency limit counts the rated amount and has no rate_cards")
 	}
 	for i, card := range l.RateCards.Value {
@@ -235,7 +201,7 @@ func validateProductLimits(limits Field[map[string]Capacity]) error {
 		return fmt.Errorf("limits must be a map of capacities, not null; use {} for none")
 	}
 	for _, key := range slices.Sorted(maps.Keys(limits.Value)) {
-		if err := ValidateLimitKey(key); err != nil {
+		if err := syntax.ValidateLimitKey(key); err != nil {
 			return err
 		}
 		if limits.Value[key] < 0 {

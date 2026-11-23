@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"log/slog"
 	"strings"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -118,11 +119,11 @@ func UndoRun(ctx context.Context, logger *slog.Logger, opts UndoRunOptions) erro
 
 func parseRunID(raw string) (uuid.UUID, error) {
 	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, billing.RunIDPrefix) {
-		id, err := billing.ParseRunID(raw)
-		return id.UUID(), err
+	if u, err := uuid.Parse(raw); err == nil || raw == "" {
+		return u, err
 	}
-	return uuid.Parse(raw)
+	id, err := billing.ParseRunID(raw)
+	return id.UUID(), err
 }
 
 func encodeJSON(w io.Writer, v any) error {

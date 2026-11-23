@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -31,8 +32,8 @@ func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTar
 	if _, known := rails.Lookup(rail); !known {
 		return models.PSPRoutingSkipUnknownSelector
 	}
-	if (rail == models.RailNMI || rail == models.RailStripe) && !price.SellsVia(models.SellViaCard) && !price.ProviderOwned ||
-		rail == models.RailSolana && !price.SellsVia(models.SellViaSolana) {
+	if (rail == models.RailNMI || rail == models.RailStripe) && !price.SellsVia(catalog.SellViaCard) && !price.ProviderOwned ||
+		rail == models.RailSolana && !price.SellsVia(catalog.SellViaSolana) {
 		return models.PSPRoutingSkipNotSoldVia
 	}
 	if rail == models.RailStripe || rail == models.RailNMI || rail == models.RailCCBill {

@@ -139,7 +139,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 	out := PublicPSPConfig{
 		PSPID:       billing.PSPID(scope.ID),
 		Key:         key,
-		Rail:        rail,
+		Rail:        billing.Rail(rail),
 		Custodian:   models.CustodianPSP,
 		DisplayName: rails.DisplayName(models.Rail(rail)),
 		Flow:        profile.Flow,
@@ -281,7 +281,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 				s.Log.WarnContext(ctx, "payment config: PSP credentials could not be checked; listed as temporarily unavailable", logx.Err(err), "merchant_id", id.String(), "rail", scope.Rail, "psp", scope.Key)
 				cfg, _, _ := PublicPSPConfigFor(scope, custodian)
 				if cfg.PSPID.IsZero() {
-					cfg.PSPID, cfg.Rail, cfg.Key = billing.PSPID(scope.ID), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
+					cfg.PSPID, cfg.Rail, cfg.Key = billing.PSPID(scope.ID), billing.Rail(strings.ToLower(scope.Rail)), strings.ToLower(scope.Key)
 				}
 				cfg.Config = nil
 				cfg.Status, cfg.RetryAfter = billing.PSPTemporarilyUnavailable, pspRetryAfterSeconds
@@ -294,7 +294,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 			}
 		}
 		if platform != nil && scope.Rail == string(models.RailNMI) {
-			cfg := PublicPSPConfig{PSPID: billing.PSPID(scope.ID), Key: scope.Key, Rail: scope.Rail, Custodian: models.CustodianPlatform, Flow: FlowTokenize, DisplayName: rails.DisplayName(models.RailNMI)}
+			cfg := PublicPSPConfig{PSPID: billing.PSPID(scope.ID), Key: scope.Key, Rail: billing.Rail(scope.Rail), Custodian: models.CustodianPlatform, Flow: FlowTokenize, DisplayName: rails.DisplayName(models.RailNMI)}
 			if platformErr != nil {
 				cfg.Status, cfg.RetryAfter = billing.PSPTemporarilyUnavailable, pspRetryAfterSeconds
 			} else {
@@ -315,7 +315,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 		return nil, err
 	}
 	for i := range out {
-		out[i].Routed = selectors == nil || selectors[out[i].Key] || selectors[out[i].Rail]
+		out[i].Routed = selectors == nil || selectors[out[i].Key] || selectors[string(out[i].Rail)]
 	}
 	return out, nil
 }

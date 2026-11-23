@@ -306,7 +306,7 @@ func TestBillingPass(t *testing.T) {
 		require.True(t, runPass(t, fleet), "a scan that fails fails the pass")
 		renewalSettled(t, a, p, sub, due)
 		require.Zero(t, lotExpired(t, a.alpha, lots[0].ID))
-		tidied, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order.expired"}, Limit: 10})
+		tidied, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order.expired"}, Limit: 10})
 		require.NoError(t, err)
 		require.Len(t, tidied.Events, 1, "the scans after the failed one still run")
 		require.Equal(t, order.ID.String(), tidied.Events[0].Subject.ID)
