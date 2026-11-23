@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 356,
+  "scenario_count": 362,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1012,6 +1012,36 @@
       "id": "OR-J23-S18",
       "journey": "J23",
       "name": "Invokers with the same limits share their windows; another trust level is held against its own"
+    },
+    {
+      "id": "OR-J23-S19",
+      "journey": "J23",
+      "name": "Remote and embedded gates decide with the same code; a warm decision needs no I/O and holds while OpenRails is unreachable"
+    },
+    {
+      "id": "OR-J23-S20",
+      "journey": "J23",
+      "name": "Racing requests on two limits never take more than either hold; holding 80 of 100 and capturing 30 leaves 70"
+    },
+    {
+      "id": "OR-J23-S21",
+      "journey": "J23",
+      "name": "A lost sync reply and a restart with unsent usage converge once, with and without an outbox; a dead lease's holds never reopen"
+    },
+    {
+      "id": "OR-J23-S22",
+      "journey": "J23",
+      "name": "A gate ticket lives across many syncs without a deadline and its capture settles in the session it was admitted in"
+    },
+    {
+      "id": "OR-J23-S23",
+      "journey": "J23",
+      "name": "Processes sharing Redis form one gate: warm on each other, never past the hold, syncing handed over without loss, own leases while Redis is down"
+    },
+    {
+      "id": "OR-J23-S24",
+      "journey": "J23",
+      "name": "Gate refusals are verdicts (limit_reached with its reset, capacity_held waited out or refused); OpenRails down is ErrUnavailable"
     },
     {
       "id": "OR-J29-S07",
