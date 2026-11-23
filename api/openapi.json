@@ -18624,6 +18624,9 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
+          "usage_gate_safe_spend": {
+            "type": "boolean"
+          },
           "card_vault": {
             "type": "string"
           },
@@ -24926,6 +24929,9 @@
               "$ref": "#/components/schemas/HoldReturn"
             }
           },
+          "close": {
+            "type": "boolean"
+          },
           "committed": {
             "type": "array",
             "items": {
@@ -25171,6 +25177,9 @@
           },
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
+          },
+          "usage_gate_safe_spend": {
+            "type": "boolean"
           },
           "card_vault": {
             "type": "string"

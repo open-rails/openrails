@@ -2649,6 +2649,7 @@ pkg openrails/billing, type MerchantSettings struct, Profile *MerchantProfile `j
 pkg openrails/billing, type MerchantSettings struct, ProviderRefundAccess *string `json:"provider_refund_access,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, UsageBilling *UsageBillingSettings `json:"usage_billing,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 pkg openrails/billing, type MerchantStatus string
 pkg openrails/billing, type Meter struct
 pkg openrails/billing, type Meter struct, Aggregation catalog.Aggregation `json:"aggregation"`
@@ -3908,6 +3909,7 @@ pkg openrails/billing, type SubscriptionRetryNowResult struct, Subscription Subs
 pkg openrails/billing, type SubscriptionSort string
 pkg openrails/billing, type SubscriptionStatus string
 pkg openrails/billing, type SyncLeasesParams struct
+pkg openrails/billing, type SyncLeasesParams struct, Close bool `json:"close,omitempty"`
 pkg openrails/billing, type SyncLeasesParams struct, Committed []HoldCommitment `json:"committed"`
 pkg openrails/billing, type SyncLeasesParams struct, LeaseID LeaseID `json:"lease_id"`
 pkg openrails/billing, type SyncLeasesParams struct, Returns []HoldReturn `json:"returns"`

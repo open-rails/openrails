@@ -1407,6 +1407,7 @@ export type MerchantConfigurationState = {
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
+  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -2697,6 +2698,7 @@ export type SyncLeasesParams = {
   usage?: LeaseUsage[]
   wants?: LeaseWant[]
   returns?: HoldReturn[]
+  close?: boolean
   committed?: HoldCommitment[]
 }
 
@@ -2752,6 +2754,7 @@ export type UpdateMerchantConfigurationParams = {
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
+  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
