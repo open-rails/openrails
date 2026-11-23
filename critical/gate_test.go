@@ -808,6 +808,8 @@ func TestGate(t *testing.T) {
 	t.Run("OR-J23-S30/a-lease-answered-dead-is-closed-and-its-holds-free-at-once", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		applyLimits(t, a.alpha, gatePlan)
+		// The first mode moves the server's clock past real time, so the
+		// second's windows open ahead of its gates' clocks.
 		for _, mode := range []string{"in process", "redis"} {
 			customer := gateCustomer(t, a)
 			client, wire := gateRemote(t, a)

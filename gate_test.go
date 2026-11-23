@@ -1009,6 +1009,29 @@ func TestGateDecidesFromTheCurrentWindowOfMergedHolds(t *testing.T) {
 	}
 }
 
+func TestGateDecidesFromAWindowTheServerOpenedAheadOfItsClock(t *testing.T) {
+	customer := billing.CustomerID(uuid.New())
+	opened := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	h := newLocalHold(holdKey{customer, fakeSet}, newLeaseID())
+	h.apply([]billing.Hold{dayHold(customer, opened, 10, 100, 1)}, opened.Add(-time.Second))
+	r := request{usage: &limits.Usage{EventType: "work", Dimensions: map[string]int64{"units": 3}}}
+	// The server opened the window at its second; the gate's clock is behind.
+	takes, _, out, err := h.decide(opened.Add(-500*time.Millisecond), r, true, false)
+	if err != nil || out != decideAllowed {
+		t.Fatalf("decide = %d, %v: the window the server holds is its current one", out, err)
+	}
+	got := map[string]int64{}
+	for _, tk := range takes {
+		got[tk.part] = tk.cost
+	}
+	if got[partID("daily", &opened)] != 3 || got["balance@"] != 30 || len(got) != 2 {
+		t.Fatalf("takes %v: the opened window and the money", got)
+	}
+	if _, _, out, _ := h.decide(opened.Add(25*time.Hour), r, true, false); out != decideUnpriced {
+		t.Fatalf("decide = %d once every window ended, want unpriced (a sync)", out)
+	}
+}
+
 func TestGateLeavesADeadLeasesHoldsToSafeSpending(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 100})
 	f.pool(t, 3)

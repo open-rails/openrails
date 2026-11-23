@@ -297,8 +297,8 @@ var errUnpriced = errors.New("openrails: gate: the hold cannot price this reques
 // every request's money cost, a named-unit limit the units its rate cards
 // count of r's usage (a host-stated request has none). The money cost is
 // priced when a currency limit (or withMoney) needs it. errUnpriced asks for
-// a sync: a limit r counts toward has no current window, or the hold has no
-// card or bound for r.
+// a sync: every window of a limit r counts toward has ended, or the hold has
+// no card or bound for r.
 func (p *holdPricing) cost(now time.Time, r request, withMoney bool) ([]take, int64, error) {
 	var claimed []holdPart
 	seen := map[string]bool{}
@@ -306,16 +306,11 @@ func (p *holdPricing) cost(now time.Time, r request, withMoney bool) ([]take, in
 		if seen[part.limit] || !p.counts(part, r) {
 			continue
 		}
-		current := false
-		for _, other := range p.parts {
-			if other.limit == part.limit && other.current(now) {
-				claimed, current = append(claimed, other), true
-				break
-			}
-		}
-		if !current {
+		w, ok := p.window(part.limit, now)
+		if !ok {
 			return nil, 0, errUnpriced
 		}
+		claimed = append(claimed, w)
 		seen[part.limit] = true
 		withMoney = withMoney || p.isMoney(part)
 	}
@@ -338,6 +333,28 @@ func (p *holdPricing) cost(now time.Time, r request, withMoney bool) ([]take, in
 		out = append(out, take{part: part.id, cost: c, overrun: part.overrun, money: p.isMoney(part)})
 	}
 	return out, money, nil
+}
+
+// window is the limit's part a request counts in at now: the one whose
+// window contains now, else the next to begin. The server places windows by
+// its own clock, and holds only its current window and the next: a window it
+// holds that has not begun by the gate's clock is current on the server's,
+// which is ahead (a first-use or session window it just opened).
+func (p *holdPricing) window(limit string, now time.Time) (holdPart, bool) {
+	var next *holdPart
+	for i, part := range p.parts {
+		switch {
+		case part.limit != limit:
+		case part.current(now):
+			return part, true
+		case part.start != nil && now.Before(*part.start) && (next == nil || part.start.Before(*next.start)):
+			next = &p.parts[i]
+		}
+	}
+	if next == nil {
+		return holdPart{}, false
+	}
+	return *next, true
 }
 
 func (p *holdPricing) isMoney(part holdPart) bool { return strings.EqualFold(part.unit, p.currency) }
