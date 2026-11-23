@@ -88,7 +88,7 @@ adds `draft_price_change` and `draft_catalog_diff`, which return the requests a
 person would send. The model sees aggregate catalog data and subscriber counts.
 
 `internal/catalogrules` validates charge models and rates usage in integer
-micros ([metering](metering.md)). Price migrations are
+micros ([usage billing](usage-billing.md)). Price migrations are
 [subscriptions](subscriptions.md); `StripeCatalogService` (webhook endpoints) is
 [payment providers](payment-providers.md).
 

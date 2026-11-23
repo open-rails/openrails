@@ -1,9 +1,12 @@
-# Entitlements
+# Entitlements and limits
 
-Entitlements answer who has access to what, and until when. A customer holds a
-key while a live window of theirs covers a product that grants the key; keys are
-derived when read. A merchant's backend checks keys before serving content; staff
-grant and revoke products; the remote Go SDK caches allowed answers.
+Entitlements and limits answer what a customer may use and how much. A customer
+holds a key while a live access window of theirs covers a product that grants the
+key; keys are derived when read. Declared limits, the prepaid balance and spend
+caps bound consumption over a period by holds set aside before work starts, by an
+admission or by the Go SDK's gate. A merchant's backend checks keys and limits;
+staff grant and revoke products; the remote Go SDK caches allowed answers. What
+usage costs is [usage billing](usage-billing.md).
 
 ## Concepts
 
@@ -14,15 +17,32 @@ grant and revoke products; the remote Go SDK caches allowed answers.
   `[added_at, removed_at)`; a removal closes the row.
 - **Access window**: a customer's `[starts_at, ends_at)` of one product
   (`product_access`) from a `purchase`, `subscription`, `grace` or free `grant`,
-  each projected from one access grant in the append-only `grants` ledger.
-- **Held key**: a key some live window's product grants at T. A window is live
-  when `starts_at <= T < ends_at` (or no end), not revoked and not deleted;
-  windows may overlap and reads take their union.
+  each projected from one access grant in the append-only `grants` ledger. It is
+  live when `starts_at <= T < ends_at` (or no end), not revoked and not deleted;
+  windows may overlap and reads take their union. A **held key** is one some live
+  window's product grants at T.
 - **Seats**: a per-seat window's `quantity`; a check answers the most seats held.
 - **`valid_until`**: the next scheduled change that could alter a requested
   answer, null when none.
 - **Heavy buyer**: a customer holding at least 500 products
   (`entitlements.HeavyBuyerProducts`), whose keys OpenRails caches.
+- **Limit**: a declared cap in a named unit or a currency, with a reset and an
+  overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`).
+  Products give it capacity (`catalog_product_limits`); a customer override
+  replaces their sum (`customer_limit_overrides`).
+- **Reset kinds**: `fixed` (tiles of `window_seconds` from the subscription start
+  or the first use), `billing_period`, `session` (opens at the first use),
+  `rolling` (60 buckets), `rate` (refills continuously), `lifetime`.
+- **`balance`**: the built-in limit per currency, prepaid balance plus credit line
+  (`catalog.BalanceLimit`), never declared. A billing policy's **spend window** is
+  a fixed currency window kept as a limit window keyed `spend:` and a hash.
+- **Limit window**: one customer's settled units of one limit in one window
+  (`limit_windows`), placed by the server clock.
+- **Hold**: capacity set aside for one customer in one currency (`limit_holds`),
+  one part per limit and window (`limit_hold_parts`). An admission's hold has a
+  `request_id`; a gate's hold belongs to a lease and one limit set.
+- **Lease**: a gate's claim on its holds (`leases`), one per process or per group
+  of processes sharing Redis. It dies 10 seconds after its last sync.
 
 ## How it works
 
@@ -41,8 +61,7 @@ revocations queue the customer's convergence in the same transaction
 **Product keys.** `UpdateProduct` and catalog applications set a product's keys;
 an application's `entitlement_replacements` moves a key across every product in
 one edit. Each edit reports the keys added and removed and how many customers
-held the product, and queues `product.entitlements_changed`
-(`billing.ProductEntitlementsChangedEvent`).
+held the product, and queues `product.entitlements_changed`.
 
 **Reading.** Each `EntitlementService.List` call, and the `include_validity`
 check, reads one snapshot (`ReadSnapshot`); a `Check` with prefixes makes one
@@ -75,36 +94,85 @@ refused, never stored. `CheckEntitlementsLive` always asks; its answer replaces
 allowed entries, drops denied ones and, when it denies a key, advances the
 scope's generation, so a fill begun before it cannot restore a dropped entry.
 
+**Lease sync.** A gate settles usage and asks for holds on a lease sync
+(`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
+`limits.SyncTimeout` (5 s) and a 2 s lock budget. It locks the lease (creating it
+on the first sync) and the customers it names in id order, settles new usage
+([usage billing](usage-billing.md)), releases what the gate returned or confirmed
+shrinking, answers wants, renews up to `maxRenewals` (64) other holds and stores
+`settled_through_n` and receipts.
+
+**Holds.** Every writer of holds and windows locks the customer
+(`LockCustomerForSpend`) and takes window rows in one order (`limits.Holder.Take`).
+A claim fits by its overrun (`limits.Fits`). A request is checked against
+`balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits.
+One that fits only if other leases' holds came back is `capacity_held`, and those
+holds are marked (`MarkLeaseHoldsContended`) to shrink at their next sync.
+`admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`,
+summing `usage_minutes`) and the delegated-invoker cutoff. Settlement
+(`settleLimitsTx`) adds units to their windows in full, never clamped, and takes
+them from the live hold.
+
+**Lease holds.** `internal/modules/leases/holds.go` sizes a hold from traffic:
+demand until the next sync, at most 1/`HeadroomShare` of what is free, doubled
+after running dry, shrunk toward recent use. Growth applies at once. A smaller
+size carries a new `version` and is released once the gate reports it applied
+(`applied_version`), never below what open tickets `committed`. Readers count a
+lease's holds `LeaseGrace` (5 s) past its life (`limits.LeaseLiveSince`); no hold
+counts past 30 days (`limits.HeldSince`).
+
+**The gate.** `openrails.NewGate` keeps one lease and one hold per customer and
+limit set, in memory (`localGate`) or Redis (`sharedGate`). A warm decision prices
+the request with the hold's pinned cards at their `PriceBound`s
+(`holdPricing.cost`) and takes it from every part of the hold or none, with no
+I/O; a cold customer waits for one sync. Captured usage goes on the next sync
+(once a second), stored first by `GateDeps.Outbox`, or with Redis in a stream
+deduplicated by write key for 15 minutes.
+
 ## Interfaces
 
 - **Check**: `Client.CheckEntitlements`, `CheckEntitlementsLive`
   (`POST /v1/app/entitlements/check`, `merchant:entitlements:read`): up to 100
-  keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant.
-- **Cache**: `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on
-  `RemoteOptions`; `DefaultEntitlementCheckMaxAge`
-  (2 minutes). See [backend](../standalone.md#backend).
+  keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant. Cache:
+  `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on `RemoteOptions`,
+  `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../standalone.md#backend).
+- **Gate**: `openrails.NewGate(client, GateDeps{Redis, Outbox})`; `Gate.Admit`,
+  `Consume`, `Record`, `Limits`, `Flush`, `Close`; `Ticket.Capture`, `Release`,
+  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../usage-billing.md#the-gate)).
+- **Limits and admissions** (`merchant:usage:manage`, reads `merchant:usage:read`):
+  `SyncLeases` (`POST /v1/app/leases/sync`); `Admit` (`POST /v1/app/admissions`),
+  `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, `GetAdmission`,
+  `ListAdmissions`; `ListCustomerLimits` (`GET /v1/app/limits`); in a host
+  transaction (`LocalClient`) `AdmitTx`, `CaptureAdmissionsTx`, `ReleaseAdmissionsTx`.
 - **Staff** (`merchant:customer:read`, `merchant:customer:manage`):
-  `ListEntitlements` (`GET /v1/admin/entitlements`), `ListProductAccess`
-  (`GET /v1/admin/product-access`), `CreateProductAccess`
-  (`POST /v1/admin/product-access`), `RevokeProductAccess`
-  (`POST /v1/admin/product-access/{id}/revoke`), `GetAccessTenure`
-  (`GET /v1/admin/customers/{customer_id}/access-tenure`).
-- **Customer**: `GET /v1/me/entitlements`, `GET /v1/me/access-tenure`.
-- **Catalog and events**: a product's `entitlements`, an application's
-  `entitlement_replacements`; `product.entitlements_changed`. Guide:
+  `ListEntitlements` (`GET /v1/admin/entitlements`), `ListProductAccess`,
+  `CreateProductAccess` (`GET`/`POST /v1/admin/product-access`),
+  `RevokeProductAccess` (`POST /v1/admin/product-access/{id}/revoke`),
+  `GetAccessTenure` (`GET /v1/admin/customers/{customer_id}/access-tenure`);
+  `UpdateCustomer` (`limits`, `credit_limits`, `billing_policy`);
+  `AdjustCustomerLimit` (`POST /v1/admin/customers/{customer_id}/limit-adjustments`).
+- **Customer**: `GET /v1/me/entitlements`, `/v1/me/access-tenure`, `/v1/me/limits`.
+- **Catalog, metrics and events**: a product's `entitlements`, an application's
+  `entitlement_replacements`; `ListLimits`, `GetLimit`, `SetLimit`
+  (`PUT /v1/catalog/limits/{key}`); `limits_reached` (`POST /v1/metrics/query`);
+  `product.entitlements_changed` (`billing.ProductEntitlementsChangedEvent`),
+  `balance.low`, `balance.depleted`. Guide:
   [entitlements follow the product](../entitlements_timeline.md).
+- **Configuration**: merchant `billing_policies`, `usage_gate_safe_spend`
+  ([spend limits](../spend-limits.md)).
 
 ## Guarantees
 
 ### 1. Exactly-once provider calls
-Does not apply: entitlements call no provider; the payments and subscriptions that open or close windows are made by [checkout](checkout.md), [subscriptions](subscriptions.md) and [refunds](refunds.md).
+Does not apply: entitlements and limits call no provider; the payments and subscriptions that open or close windows are made by [orders and checkout](orders.md), [subscriptions](subscriptions.md) and [refunds](refunds.md).
 
 ### 2. Agreement with providers
-Access follows what OpenRails recorded of a provider, never a guess. A refund
-that revokes access does so in the transaction that records the refund;
-canceling a subscription's recurrence never shortens a paid period; an uncertain
-or `unverified` subscription keeps its access. Repair rechecks recorded evidence
-and never reopens access a recorded revocation ended.
+Limits, leases and holds come from the merchant's backend, not a provider. Access
+follows what OpenRails recorded of a provider, never a guess. A refund that
+revokes access does so in the transaction that records the refund; canceling a
+subscription's recurrence never shortens a paid period; an uncertain or
+`unverified` subscription keeps its access. Repair rechecks recorded evidence and
+never reopens access a recorded revocation ended.
 Checks:
 - `internal/intents/refund.go` calls `RevokeRefundedPaymentAccess` with the
   refund's transaction (`txDB`).
@@ -114,107 +182,169 @@ Checks:
   chargeback and uncertain state.
 
 ### 3. Exact money
-Does not apply: windows and keys carry no amounts; credit lots in `grants` belong to [prepaid credits](prepaid-credits.md).
+Access windows and keys carry no amounts; credit lots in `grants` belong to
+[prepaid credits](prepaid-credits.md). Holds and limit windows are `int64` native
+units of one currency each. The one FX use converts a spend window's cap declared
+in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap,
+never a ledger amount.
+Checks:
+- No `fx` import in `internal/modules/leases` or `internal/modules/limits`.
 
 ### 4. Access control and tenant isolation
-The check route needs `merchant:entitlements:read` (or `root:entitlements:read`)
-and the credential's customer scope (`commerceCustomer`, refusing
-`service_credential_customer_scope_denied`). Staff routes are admin reads and
-writes; `/v1/me/entitlements` and `/v1/me/access-tenure` act as the signed-in
-customer. Every query names `merchant_id`, and `product_access` references its
-customer by `(merchant_id, customer_id)`. The SDK cache's scope hashes the base
-URL, merchant, API key, customer and `MaxAge`, so another key, merchant or stricter
+The check route needs `merchant:entitlements:read` (or `root:entitlements:read`);
+lease, admission and limit routes the `merchant:usage:manage` or
+`merchant:usage:read` pair; adjustments `merchant:customer:manage`. Both obey the
+credential's customer scope (`commerceCustomer`, `Syncer.Allows`), refusing
+`service_credential_customer_scope_denied`; a sync refuses that item alone and
+never locks the customer. `/v1/me` routes act as the signed-in customer. Every
+query names `merchant_id`; `product_access` references its customer by
+`(merchant_id, customer_id)`, and a lease id is per merchant
+(`PRIMARY KEY (merchant_id, id)`). The SDK cache's scope hashes the base URL,
+merchant, API key, customer and `MaxAge`, so another key, merchant or stricter
 `MaxAge` never reuses an entry, and token credentials never cache.
 Checks:
 - `CheckEntitlements` in `internal/http/routes/entitlements.go` declares
   `Permission: needEntitlements`; the handler calls `commerceCustomer`.
+- Each `/v1/app` route in `internal/http/routes/limits.go` and each admission route
+  in `metering.go` has a `Permission` pair; `AdjustCustomerLimit` is
+  `Group: Admin, Level: LevelUpdate`.
+- `syncRun.usageItem` and `syncRun.lockCustomers` apply `Syncer.Allows`.
 - `entitlementCacheScopeOf` (`entitlement_check_cache.go`) and `newRemoteHandle`
   (`remote.go`), which enables the cache only for an `APIKey`.
 - Every query in `internal/db/queries/entitlement_checks.sql`,
-  `entitlement_cache.sql` and `product_access.sql`, advisory locks aside, filters
-  on `merchant_id`.
+  `entitlement_cache.sql`, `product_access.sql`, `limits.sql`, `leases.sql` and
+  `limit_holds.sql`, advisory locks aside, filters on `merchant_id`.
 - OR-J27-S13: a key without `merchant:entitlements:read` is refused, and another
-  merchant's key never sees a cached answer.
+  merchant's key never sees a cached answer. OR-J23-S11 and OR-J24-S03 keep limit
+  reads, adjustments and refusals in their merchant.
 - `TestEntitlementCheckCacheRequiresMetadataAndScope`: an answer without
   `evaluated_at` is not cached, and one naming no merchant is refused.
 
 ### 5. Contracts match the code
-The check, list, product-access and cache types are in `api/go.txt`, the routes
-in the route catalog and `api/openapi.json`. `include_validity` was added to the
-request; a server older than the SDK refuses it with `unknown_field`, so the
-server is deployed first. The in-process `Client` has no cache and always answers
-live; a remote client answers alike except that a revocation or seat change can
-show up to `MaxAge` late, unless `CheckEntitlementsLive` is used.
+Their types are in `api/go.txt`, the routes in the route catalog and
+`api/openapi.json`, the tables in `api/schema.txt`. `include_validity` was added
+to the request; a server older than the SDK refuses it with `unknown_field`, so
+the server is deployed first. The in-process `Client` has no entitlement cache
+and always answers live; a remote client answers alike except that a revocation
+or seat change can show up to `MaxAge` late, unless `CheckEntitlementsLive` is
+used. `NewGate` takes any `*Client`: the in-process client reaches the same
+handlers through an in-process transport, and the gate prices named units with
+the server's own `limits` code. Before v1.0.0 a release may still break them:
+`0003_usage_limits` dropped `admission_operations`.
 Checks:
 - `go run ./scripts/contracts` leaves the snapshots unchanged.
 - `cacheableEntitlementKeys` sends checks with `at`, prefixes or invalid keys to
   the server, so validation answers alike.
+- OR-J23-S19: remote and embedded gates decide alike, warm without I/O.
+- `holdPricing` (`gate_cost.go`) builds on `limits.Meter` and `limits.Definition`.
+- `LocalClient`'s only admission methods in `api/go.txt` are the three `…Tx` forms
+  above.
 
 ### 6. Data lifecycle
-`product_entitlements` and `grants` are permanent;
-`product_access` is state and keeps revoked and removed windows; the two cache
-tables are derived state, left out of merchant archives. None is partitioned.
+`product_entitlements` and `grants` are permanent; `product_access` is state and
+keeps revoked and removed windows; the two cache tables are derived state, left
+out of merchant archives. `limit_holds` (`created_at`) and `limit_hold_parts`
+(`hold_created_at`) are monthly partitions, dropped past the 61-day replay
+horizon, parts first since they have no foreign key to holds; `limit_windows`,
+`leases` and `limit_adjustments` are rows (61 days); the limit catalog and
+override tables are state. Every partitioned read bounds its key by the hold
+lifetime (`limits.HeldSince`), the replay horizon or the range a list asks for.
+An archive refuses open request holds and live leases.
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
 - `internal/merchantarchive/checks.go` lists both cache tables as derived.
 - Outside the gated merchant purge (`PurgeMerchantRowsProductAccess`), no query
   deletes `product_access` rows: revocation sets `revoked_at` or `deleted_at`.
+- Each query on `limit_holds` or `limit_hold_parts` in `limit_holds.sql`,
+  `leases.sql`, `money_accounts.sql` and `operational_reads.sql`, inserts aside,
+  bounds `created_at` or `hold_created_at`.
+- `retention.Partitioned` drops parts before holds (`AdmissionsDropBefore`).
+- OR-J31-S14 moves windows and adjustments in archives; OR-J29-S08 ages out leases.
 
 ### 7. Work scales with activity
-No job projects or expires keys: they are derived at read time from indexes
-(`product_entitlements_entitlement_idx`, `product_access_customer_idx`,
-`product_access_product_idx`), and a window ends by its own `ends_at`. Derived
-reads use custom plans (`plan_cache_mode`), so a customer with three products
-and one with thousands are each planned for their size. The heavy-buyer cache is
-rebuilt only after a read misses, and goes stale by counters that triggers step,
-not by a sweep. A staff grant or revocation queues one customer's convergence.
+No job projects or expires keys or holds: keys are derived at read time from
+indexes (`product_entitlements_entitlement_idx`, `product_access_customer_idx`,
+`product_access_product_idx`), a window ends by its own `ends_at`, and holds
+expire by time (`LeaseLiveSince`, `HeldSince`, `expires_at`). Derived reads use
+custom plans (`plan_cache_mode`), so a customer with three products and one with
+thousands are each planned for their size. The heavy-buyer cache is rebuilt only
+after a read misses and goes stale by counters that triggers step. A staff grant
+or revocation queues one customer's convergence; a sync's 64 renewals spread a
+window that closes for every customer over syncs.
 Checks:
 - `internal/river` has no job that reads `product_access` or
-  `product_entitlements` for expiry.
+  `product_entitlements` for expiry, and none but retention scans `limit_windows`,
+  `limit_holds` or `leases` across customers; a balance look reads one
+  customer's holds.
 - `rebuildAfterMiss` (`internal/modules/entitlements/cache.go`) runs one rebuild
   per customer and process.
 - `step_entitlement_generation` and `step_access_version` are statement
   triggers on `product_entitlements` and `product_access`.
+- OR-J24-S30 and OR-J24-S34 bound a sync's renewals and settlement.
 
 ### 8. Abuse protection
-The check route takes application credentials and bounds each request (100
-keys, 10 prefixes, `prefix_limit` up to 10,000). `middleware.AdminOperationGrant`
+Limits are themselves the consumption limit: holds bound spend and units before
+work starts; a delegated invoker cannot spend (`delegated_spend_not_allowed`) and
+is cut off past its wasted-spend limit (`failure_rate_limited`). The check, sync
+and admission routes take application credentials and bound each request (100
+keys, 10 prefixes and `prefix_limit` up to 10,000; `billing.MaxSyncUsageItems`,
+`MaxSyncWants`, `MaxAdmissionBatchItems`). `middleware.AdminOperationGrant`
 meters each invoker by item: 10 a minute, shared by `UpdateCustomer`,
 `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess` (at most
 100 grants a call, `billing.MaxBatchItems`); going over locks the invoker out for
 an hour. An application acting as itself is not metered. `/v1/me/entitlements`
-takes no OpenRails rate limit; the proxy owns a generic ceiling. SDK Redis calls
-wait at most 25 ms (lookups and fills) or 250 ms (a live denial's eviction), at
-most 64 outstanding each, so a slow Redis falls back to OpenRails.
+and `/v1/me/limits` take no OpenRails rate limit; the proxy owns a generic
+ceiling ([limits](../limits.md)). SDK Redis calls wait at most 25 ms (lookups and
+fills) or 250 ms (a live denial's eviction), at most 64 outstanding each, so a
+slow Redis falls back to OpenRails.
 Checks:
 - `ValidateCheck` (`internal/modules/entitlements/resource_checks.go`) refuses an
-  oversize or malformed check before any read.
-- The `CreateProductAccess` route sets `Limit: middleware.AdminOperationGrant`.
+  oversize or malformed check before any read; `validate`
+  (`internal/modules/leases/sync.go`) and `Client.SyncLeases` an oversize sync
+  before any I/O.
+- The `CreateProductAccess` and `AdjustCustomerLimit` routes set
+  `Limit: middleware.AdminOperationGrant`.
 - `TestEntitlementRedisBudgetLimitsOutstandingWork` bounds outstanding Redis work.
+- OR-J23-S17 refuses a delegated invoker and holds nothing.
 
 ### 9. Destructive-action safeguards
 Revoking a window is a `revoke_access` destructive command
 (`productaccess.Service.RevokeProductAccessAsOf`, `destructive.RunLocal`), run
 under the customer's lock; the window keeps its row and reason. A free grant
 records its actor and reason (`grants_access_grant_reason_check`). Changing or
-replacing a product's keys is a `catalog_change` command that reports the
-holders it affects, and key history is closed, never deleted.
+replacing a product's keys, or changing an existing limit (`limitEditPlan` for
+`SetLimit`, `applicationAdmissionPlan` for a document), is a `catalog_change`
+command; key history is closed, never deleted, and a new limit is additive.
+`AdjustCustomerLimit` changes the current window only, once per `source_id`, but
+is not a destructive command, and `limit_adjustments` records no actor: its
+attribution is the limiter's log event, which an application acting as itself
+does not emit.
 Checks:
 - `RevokeProductAccessAsOf` builds its command with `destructive.RevokeAccess`.
 - `substantiveCatalogField` (`internal/service/catalog_admission.go`) treats every
   product field except `display_name` and `description` as substantive.
+- `limitEditPlan` (`internal/service/catalog_limits.go`) names a changed limit as
+  a target of the catalog admission.
 - OR-J27-S02: revoking one source keeps another.
 
 ## Tests
 
-Critical journeys: OR-J27-S01 to S04 (window union, revocation, boundaries,
-archive and refund), S05 to S09 (subscription closure and repair), S10 to S12
-(imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff,
-Redis sharing, live denial, a purchase seen at once).
+Critical journeys, over real PostgreSQL, Redis and Vault:
+- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries,
+  archive and refund), S05 to S09 (subscription closure and repair), S10 to S12
+  (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff,
+  Redis sharing, live denial, a purchase seen at once).
+- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to
+  S18 (declarations, capacity, windows, overruns, spend caps, racing replicas),
+  S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing).
+- **J24**, leases and holds: OR-J24-S03, S12 to S20, S23 to S35 (lease lifetime,
+  hold versions, sizing, bounded syncs).
+- Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.
 
 Other tests: `entitlement_check_cache_test.go` drives the cache against a test
-server: defaults, allowed keys only, live eviction, an in-flight fill refused
-after a live denial, relative lifetime, Redis budgets.
+server (defaults, allowed keys only, live eviction, an in-flight fill refused
+after a live denial, relative lifetime, Redis budgets); `gate_test.go` drives the
+gate against a scripted server.
 
 Gaps:
 - No scenario covers the heavy-buyer cache, or a product key edit and
@@ -222,3 +352,9 @@ Gaps:
 - No scenario reads keys through `ListEntitlements` or `GET /v1/me/entitlements`;
   OR-J01-S02 only checks that they refuse a missing credential.
 - `CheckEntitlementsLive` with `at` or prefixes leaves cached entries as they were.
+- No test reaches an `outstanding_cap` cap or uses `accrual_rate_cap`, or
+  declares a spend window in another currency.
+- The accrual-rate measure reads `usage_minutes` only, so running charges never
+  count toward an `accrual_rate_cap`; no test pins either way.
+- Nothing checks that partitioned reads name a time range, or that
+  `retention.Tables` matches the schema; both are review-only.

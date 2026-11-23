@@ -2,7 +2,7 @@
 
 Recurring agreements between a customer and one price: start, renewal, cancel
 and resume, plan and seat changes, and price migrations. Retries are in
-[dunning.md](dunning.md); the starting order is in [checkout.md](checkout.md).
+[dunning.md](dunning.md); the starting order is in [orders.md](orders.md).
 
 ## Concepts
 
