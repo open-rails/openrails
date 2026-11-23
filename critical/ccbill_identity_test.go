@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -540,7 +541,7 @@ func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, 
 	dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 		DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})
 	dl.BaseURL = feed.URL
-	engine := reconcile.NewEngine(database, &w.cfg, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)
+	engine := reconcile.NewEngine(database, embedded.Graph(w.engine).Config, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)
 	engine.Now = w.clock.Now
 	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)

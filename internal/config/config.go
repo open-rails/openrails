@@ -97,9 +97,6 @@ type Config struct {
 	// LLM is the model behind the console's catalog questions.
 	// Without an API key those features are off.
 	LLM *LLMConfig
-	// ReadCache overrides how long the engine's handles serve catalog and
-	// configuration reads from memory; nil keeps the defaults.
-	ReadCache ReadCache
 
 	// ProviderSandbox points non-live PSPs' provider clients at loopback
 	// gateways, to qualify a process against fake providers, and accepts

@@ -12,6 +12,7 @@ package engine
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"slices"
@@ -32,6 +33,16 @@ import (
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/service"
 )
+
+// Deps is what New reaches outside the process: the application graph's
+// connections and seams, and what the engine itself reads.
+type Deps struct {
+	app.BootstrapOptions
+	// MerchantGroups reads the live ownership of declared bindings.
+	MerchantGroups billing.MerchantGroupReader
+	// CheckoutAssets is the built payment page; nil serves none.
+	CheckoutAssets fs.FS
+}
 
 // Engine is one embedded engine.
 type Engine struct {
@@ -95,11 +106,11 @@ func Graph(client any) *app.App {
 // one of its documents, the checkout origin. PSP posture and Redis recover in
 // the background. It never changes a catalog: a catalog document applies by
 // an explicit ApplyCatalog.
-func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
+func New(ctx context.Context, cfg config.Config, deps Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if deps.Postgres == nil {
+	if deps.PGXPool == nil {
 		return nil, fmt.Errorf("openrails: Deps.Postgres is required")
 	}
 	logger := logx.New(deps.Logger)
@@ -107,22 +118,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
-	bootstrap := &app.BootstrapOptions{
-		Logger:               logger,
-		PGXPool:              deps.Postgres,
-		PostgresSession:      deps.PostgresSession,
-		Redis:                deps.Redis,
-		StripeTransport:      deps.StripeTransport,
-		BasisTheoryTransport: deps.BasisTheoryTransport,
-		NMITransport:         deps.NMITransport,
-		FXTransport:          deps.FXTransport,
-		Clock:                deps.Clock,
-		EmailSender:          deps.Email,
-		UserInfo:             deps.UserInfo,
-		Notifications:        deps.Notifications,
-		Vault:                deps.Vault,
-	}
-	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
+	bootstrap := deps.BootstrapOptions
+	bootstrap.Logger = logger
+	application, err := app.BootstrapWithOptions(ctx, &cfg, &bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
@@ -228,7 +226,7 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
-func validate(cfg *config.Config, deps config.Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
+func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
@@ -261,14 +259,14 @@ func validate(cfg *config.Config, deps config.Deps) ([]billing.MerchantDeclarati
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
 // no live PSP is declared beside them.
-func fakeProviders(cfg *config.Config, deps config.Deps) []string {
+func fakeProviders(cfg *config.Config, deps Deps) []string {
 	out := append(config.FakeProviders(cfg), seams(deps)...)
 	slices.Sort(out)
 	return out
 }
 
 // seams names the Deps test seams wired.
-func seams(deps config.Deps) []string {
+func seams(deps Deps) []string {
 	var out []string
 	for name, set := range map[string]bool{
 		"Deps.BasisTheoryTransport": deps.BasisTheoryTransport != nil, "Deps.StripeTransport": deps.StripeTransport != nil, "Deps.NMITransport": deps.NMITransport != nil, "Deps.FXTransport": deps.FXTransport != nil,

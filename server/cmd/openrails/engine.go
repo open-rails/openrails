@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -23,8 +24,8 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 		return server.Config{}, fmt.Errorf("config not loaded")
 	}
 	cfg := server.Config{
-		Engine: *h.Config, Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: h.Naming,
-		RouteGroups: h.RouteGroups, AdminConsole: h.AdminConsole,
+		Engine: hostconfig.EngineConfig(h.Config), Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: h.Naming,
+		RouteGroups: openrails.RouteGroups(h.RouteGroups), AdminConsole: h.AdminConsole,
 		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
 	}

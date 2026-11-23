@@ -10,7 +10,7 @@ func (e *Engine) CustomerRoutes(selection CustomerRoutes) ([]Route, error) {
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("openrails: an initialized Engine is required")
 	}
-	routes, err := e.engine.CustomerRoutes(selection)
+	routes, err := e.engine.CustomerRoutes(engineCustomerRoutes(selection))
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,130 @@
+package openrails
+
+import (
+	"net/http"
+
+	"github.com/open-rails/authkit/auth"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
+)
+
+// Routes is the HTTP surface the adapters mount on the root router, and the
+// host's auth that says who its requests are. The public, customer (/v1/me)
+// and webhook routes are always mounted; every other route group is off
+// until RouteGroups turns it on.
+type Routes struct {
+	// Auth says who a request is; OpenRails decides what each route admits
+	// and answers refusals itself. It asks Authenticate once per request,
+	// then the Verified's Can for a staff or programmatic route's permission
+	// and, for a person on a route that moves money or removes access,
+	// CheckRecentSignIn. Required.
+	//
+	// A request acts on the one merchant its credential is bound to, and
+	// nothing in the request names it: the merchant whose scope the
+	// Verified's BoundScope is (authkit/auth Bound: {Authority: RootScope's,
+	// ID: the merchant's id}), else the merchant that declares the
+	// Identity's Issuer (billing.MerchantDeclaration.Issuer). A credential
+	// bound to neither is refused 403 merchant_unresolved.
+	//
+	// With a route group on, Auth is a authkit/auth Root, as AuthKit's
+	// ak.Authenticator() is. A route acting on merchant M admits its
+	// merchant: permission held in M's scope ({Authority: RootScope's, ID:
+	// M's id}) or its root: twin held in RootScope. The names are
+	// billing.Permissions: declare them in your auth and grant them in its
+	// roles. Mount fails for a route neither of whose names Auth knows
+	// (authkit/auth PermissionCatalog); a name it does not know is never
+	// asked.
+	Auth auth.Authenticator
+	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
+	// Empty is the root.
+	Prefix string
+	// RouteGroups turns route groups on; each is off by default.
+	RouteGroups RouteGroups
+}
+
+// RouteGroups are Routes.RouteGroups: the route groups beyond the public,
+// customer and webhook routes, each off until turned on.
+type RouteGroups struct {
+	// Admin is customer support (/v1/admin): customers, their
+	// subscriptions, payments, refunds, orders, credits, access and usage.
+	// Its reads need billing.MerchantCustomerRead or RootCustomerRead, its
+	// changes MerchantCustomerManage or RootCustomerManage.
+	Admin bool
+	// Catalog is the catalog: products, prices, meters and their rates,
+	// archiving a product, applying a catalog document, moving subscribers
+	// between prices. It needs billing.MerchantCatalogManage or
+	// RootCatalogManage.
+	Catalog bool
+	// MerchantConfig is the merchant's own configuration: PSPs, settings,
+	// billing import and export, the dashboard layout. It needs
+	// billing.MerchantConfigManage or RootConfigManage.
+	MerchantConfig bool
+	// Metrics is the merchant's business metrics, read-only: revenue, sales,
+	// the metrics queries and the dashboard. It needs
+	// billing.MerchantMetricsRead or RootMetricsRead.
+	Metrics bool
+	// Programmatic is the routes the host's backend calls over HTTP at
+	// /v1/app: entitlement checks, usage and admissions, provider
+	// operations, host events and SCIM provisioning. They take an
+	// application Auth says a request is (its Identity's SubjectKind) and
+	// refuse a person. Each route needs its own permission (entitlements,
+	// usage, costs, events, orders, customers), so a program's role
+	// grants only what its task needs. SCIM takes any application at the
+	// merchant or the merchant's provisioning token, and is not mounted with
+	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
+	// calls the same operations in process without it.
+	Programmatic bool
+}
+
+// CustomerRoutes mounts customer operations with a host-authorized binding.
+// The host owns the live relationship policy; OpenRails keeps the original
+// verified identity, customer views and sensitive-operation checks.
+type CustomerRoutes struct {
+	// Prefix replaces /v1/me, defaulting to /v1/me. Trusted native whole-segment
+	// parameters, such as /account/links/{link_id}, are allowed.
+	Prefix string
+	// Auth verifies the original request once. Only self-acting users may act
+	// through this mount; sensitive operations require their original recent sign-in.
+	Auth auth.Authenticator
+	// Resolve proves the live relationship and returns one existing customer.
+	// It runs before a core database connection is pinned. The request carries
+	// its original path values; identity and recent-login proof must not be reminted.
+	Resolve func(*http.Request, auth.Verified) (CustomerBinding, error)
+}
+
+// CustomerBinding is the existing merchant/customer pair a host authorizes for
+// one request. It is supplied by trusted host code, never decoded from a client.
+type CustomerBinding struct {
+	MerchantID billing.MerchantID
+	CustomerID billing.CustomerID
+}
+
+// CustomerProof is request-scoped evidence of an existing billing customer,
+// as Engine.ResolveCustomer reads it. It grants no durable relationship or
+// permission.
+type CustomerProof struct {
+	MerchantID billing.MerchantID
+	CustomerID billing.CustomerID
+	// Issuer is copied from the validated stored customer. Nil means exactly
+	// SQL NULL: the host's or merchant's native customer namespace. It does
+	// not prove that a platform account exists or owns this customer.
+	Issuer *string
+}
+
+// engineRoutes is r as the engine mounts it.
+func engineRoutes(r Routes) config.Routes {
+	return config.Routes{Auth: r.Auth, Prefix: r.Prefix, RouteGroups: config.RouteGroups(r.RouteGroups)}
+}
+
+// engineCustomerRoutes is c as the engine mounts it.
+func engineCustomerRoutes(c CustomerRoutes) config.CustomerRoutes {
+	out := config.CustomerRoutes{Prefix: c.Prefix, Auth: c.Auth}
+	if resolve := c.Resolve; resolve != nil {
+		out.Resolve = func(r *http.Request, v auth.Verified) (config.CustomerBinding, error) {
+			b, err := resolve(r, v)
+			return config.CustomerBinding(b), err
+		}
+	}
+	return out
+}

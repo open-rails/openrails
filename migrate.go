@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/migrate"
 )
@@ -17,5 +18,5 @@ var ErrMigrationsRequired = migrate.ErrMigrationsRequired
 // tables in database's schemas, without constructing an engine. It runs
 // regardless of database.SkipMigrations, which controls New only.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, database DatabaseConfig) error {
-	return engine.Migrate(ctx, pool, Config{Database: database})
+	return engine.Migrate(ctx, pool, config.Config{Database: config.DatabaseConfig(database)})
 }

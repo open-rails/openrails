@@ -247,8 +247,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if akDeps.Redis == nil && s.graph.RedisClient != nil {
 		akDeps.Redis = s.graph.RedisClient
 	}
-	if akDeps.Email == nil && s.graph.Runtime.EmailSender != nil {
-		akDeps.Email = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
+	if akDeps.Email == nil && deps.Engine.Email != nil {
+		akDeps.Email = controlplane.AuthKitSender{Sender: deps.Engine.Email}
 	}
 	akCfg, err := controlplane.AuthKit(s.graph.Config, cfg.Auth, opts)
 	if err != nil {
@@ -273,9 +273,15 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		consoleAssets = admin.FS()
 	}
 	checkout, page := eng.CheckoutPage()
+	var admission func(context.Context, auth.Verified, config.CustomerBinding) error
+	if policy := deps.CustomerAdmissionPolicy; policy != nil {
+		admission = func(ctx context.Context, v auth.Verified, b config.CustomerBinding) error {
+			return policy(ctx, v, openrails.CustomerBinding(b))
+		}
+	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
-		CustomerAdmissionPolicy: deps.CustomerAdmissionPolicy,
+		RouteGroups: config.RouteGroups(cfg.RouteGroups), AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
+		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
