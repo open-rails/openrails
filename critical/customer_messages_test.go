@@ -4,8 +4,12 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,6 +154,279 @@ func TestCustomerMessages(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, log, "erasure deletes the customer's message log")
 	})
+	t.Run("OR-J39-S07/a-merchant-template-replaces-the-built-in-message", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.Email = mail
+			declareMessages(w, billing.MessageSettings{Events: map[string]billing.MessageEventSettings{receiptEvent: {Templates: map[string]billing.MessageTemplate{"en": {
+				Subject: "Thanks for shopping at {{.Merchant.Name}}",
+				Text:    "You paid {{.Event.Amount}} for {{.Event.ProductName}}.",
+				HTML:    "<p>You paid <b>{{.Event.Amount}}</b> for {{.Event.ProductName}}.</p>",
+			}}}}})
+		})
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		paidExternally(t, a, alice, messageSale(t, a), "custom-receipt")
+		startFleet(t, a.world)
+		require.Equal(t, "sent", settledMessages(t, a.world, alice, 1)[0].Status)
+		sent := mail.to(a.alice.Email)
+		require.Len(t, sent, 1)
+		require.Equal(t, "Thanks for shopping at Alpha", sent[0].Subject)
+		require.Contains(t, sent[0].Text, "You paid 10.00 USD for receipt-item.")
+		require.NotContains(t, sent[0].Text, "Amount paid", "the merchant's body replaces the built-in one")
+		require.True(t, strings.HasSuffix(sent[0].Text, "\nAlpha\n"), "the built-in layout still wraps it:\n%s", sent[0].Text)
+		require.Contains(t, sent[0].HTML, "<p>You paid <b>10.00 USD</b> for receipt-item.</p>")
+	})
+	t.Run("OR-J39-S08/a-messages-document-whose-template-does-not-render-is-refused-on-load", func(t *testing.T) {
+		mail := &alertMailbox{}
+		off := false
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.Email = mail
+			declareMessages(w, billing.MessageSettings{Events: map[string]billing.MessageEventSettings{
+				receiptEvent:       {Templates: map[string]billing.MessageTemplate{"en": {Subject: "Receipt", Text: "Total: {{.Event.Total}}"}}},
+				"refund_completed": {Enabled: &off},
+			}})
+		})
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.merchant_config.not_served"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Equal(t, "messages", findings.Items[0].SubjectKey)
+		reason := fmt.Sprint(findings.Items[0].Evidence["reason"])
+		require.Contains(t, reason, "events."+receiptEvent+": text:", "the refusal names the event type")
+		require.Contains(t, reason, "can't evaluate field Total", "and the error")
+		// Nothing of the refused document is served: the receipt is the
+		// built-in one.
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		paidExternally(t, a, alice, messageSale(t, a), "refused-document-receipt")
+		startFleet(t, a.world)
+		require.Equal(t, "sent", settledMessages(t, a.world, alice, 1)[0].Status)
+		sent := mail.to(a.alice.Email)
+		require.Len(t, sent, 1)
+		require.Equal(t, "Your receipt from Alpha", sent[0].Subject)
+		require.Contains(t, sent[0].Text, "Amount paid: 10.00 USD")
+	})
+	t.Run("OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words", func(t *testing.T) {
+		t.Run("the-customer-canceled", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+			status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Moving on"})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			liveMoney(t, a.world)
+			startFleet(t, a.world)
+			confirmation := sentAbout(t, a, mail, "subscription_canceled", "You canceled your subscription to Alpha")
+			require.Contains(t, confirmation.Text, "This confirms that you canceled your subscription to Membership.")
+			require.Contains(t, confirmation.Text, "You keep your access until ")
+			require.Contains(t, confirmation.Text, "You won't be charged again.")
+			require.Contains(t, confirmation.Text, "Changed your mind? You can resume it before it ends: https://alpha.example/billing")
+		})
+		t.Run("staff-canceled", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+			_, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends future service"})
+			require.NoError(t, err)
+			liveMoney(t, a.world)
+			startFleet(t, a.world)
+			confirmation := sentAbout(t, a, mail, "subscription_canceled", "Your subscription to Alpha was canceled")
+			require.Contains(t, confirmation.Text, "Your subscription to Membership was canceled by Alpha.")
+			require.Contains(t, confirmation.Text, "You won't be charged again.")
+			require.Contains(t, confirmation.Text, "If you didn't expect this, please contact us: https://alpha.example/help")
+			require.NotContains(t, confirmation.Text, "resume")
+		})
+		t.Run("payments-failed", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a, p, customer := usageBillingWorld(t, true, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+			p.core.SetDecline("4242", "252")
+			oneUsage(t, a.alpha, usageInput(customer, "stolen-card-usage", 3))
+			a.clock.Advance(time.Hour)
+			// No listening dispatcher: the fleet's start-up pass runs first,
+			// and the collection's message waits for the pass below, once
+			// the PSP is live.
+			fleet := hostFleet(t, a.world)
+			require.NoError(t, fleet.Start(t.Context()))
+			require.Eventually(t, func() bool {
+				jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.customer_messages_dispatch").States(rivertype.JobStateCompleted))
+				return err == nil && len(jobs.Jobs) > 0
+			}, 30*time.Second, 20*time.Millisecond, "the fleet's start-up dispatch pass ran")
+			runUsageDue(t, fleet)
+			require.Eventually(t, func() bool {
+				log, err := customerMessages(t, a.world, a.alpha.MerchantID(), customer)
+				return err == nil && len(ofType(log, "order_collection_stopped")) == 1
+			}, 30*time.Second, 20*time.Millisecond, "the stopped collection queues its message")
+			liveMoney(t, a.world)
+			runRegistered(t, fleet, "openrails.customer_messages_dispatch", 1)
+			messagesSettled(t, fleet)
+			confirmation := sentAbout(t, a, mail, "order_collection_stopped", "We stopped charging your card for Alpha")
+			require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so we have stopped trying to collect the 30.00 USD you owe.")
+			require.Contains(t, confirmation.Text, "Pay it or add another payment method: https://alpha.example/billing")
+		})
+	})
+	t.Run("OR-J39-S10/a-scheduled-price-change-sends-its-notice", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		target, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: "membership-week-repriced", UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24), AccessDurationHours: ptr(7 * 24)})
+		require.NoError(t, err)
+		migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: target.ID, EffectiveAt: *sub.CurrentPeriodEndsAt, AcknowledgeShortNotice: true})
+		require.NoError(t, err)
+		require.Equal(t, 1, migration.Scheduled)
+		liveMoney(t, a.world)
+		startFleet(t, a.world)
+		notice := sentAbout(t, a, mail, "subscription_reprice_scheduled", "The price of your subscription to Alpha is changing")
+		require.Contains(t, notice.Text, "The price of your Membership subscription is changing from 10.00 USD to 12.00 USD, starting "+sub.CurrentPeriodEndsAt.UTC().Format("January 2, 2006")+".")
+		require.Contains(t, notice.Text, "If you'd rather not continue, you can cancel before then: https://alpha.example/billing")
+		require.Contains(t, notice.HTML, `href="https://alpha.example/billing"`)
+	})
+	t.Run("OR-J39-S11/a-refund-sends-one-refund-receipt", func(t *testing.T) {
+		t.Run("staff-refund", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-purchase"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			require.NotNil(t, order.Payment.PaymentID)
+			params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Customer asked"}
+			first, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *order.Payment.PaymentID, params)
+			require.NoError(t, err)
+			require.Equal(t, billing.PaymentSucceeded, first.Status)
+			replay, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *order.Payment.PaymentID, params)
+			require.NoError(t, err)
+			require.Equal(t, first.ID, replay.ID)
+			liveMoney(t, a.world)
+			startFleet(t, a.world)
+			receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
+			require.Contains(t, receipt.Text, "We refunded 10.00 USD for Sale.")
+			require.True(t, factEmitted(t, a.alpha, "refund_completed", customerOf(a.alice)))
+		})
+		t.Run("provider-reported-refund", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a := ccbillWebhookWorld(t, func(w *world) { w.deps.Email = mail })
+			price := ccbillMemberPrice(t, a.alpha)
+			now := a.clock.Now().UTC().Truncate(time.Second)
+			const ref, sale = "556677889900112244", "0812233445566778822"
+			importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(customerOf(a.alice), price, ref, sale, now.Add(5*24*time.Hour)))
+			for range 2 {
+				status, body := ccbillNotice(t, a, "Refund", map[string]any{"subscriptionId": ref, "transactionId": sale,
+					"amount": "3.00", "currencyCode": "840", "reason": "customer request", "timestamp": now.Add(-time.Hour).Format(time.DateTime)})
+				require.Equal(t, http.StatusOK, status, body)
+			}
+			liveMoney(t, a.world)
+			startFleet(t, a.world)
+			receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
+			require.Contains(t, receipt.Text, "We refunded 3.00 USD")
+		})
+	})
+	t.Run("OR-J39-S12/the-host-renderer-takes-precedence-for-the-messages-it-renders", func(t *testing.T) {
+		mail := &alertMailbox{}
+		var mu sync.Mutex
+		var rendered []billing.MessageData
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.Email = mail
+			declareMessages(w, billing.MessageSettings{Events: map[string]billing.MessageEventSettings{receiptEvent: {Templates: map[string]billing.MessageTemplate{"en": {
+				Subject: "Merchant receipt", Text: "From the merchant's template.",
+			}}}}})
+			w.deps.MessageRenderer = func(_ context.Context, data billing.MessageData) (billing.MessageContent, bool, error) {
+				mu.Lock()
+				rendered = append(rendered, data)
+				mu.Unlock()
+				if data.Event.ProductName != "host-item" {
+					return billing.MessageContent{}, false, nil
+				}
+				return billing.MessageContent{Subject: "Host receipt from " + data.Merchant.Name, Text: "The host rendered " + data.Event.Amount + "."}, true, nil
+			}
+		})
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		paidExternally(t, a, alice, []billing.OrderLineParams{{PriceID: hostProduct(t, a.alpha, "host-item").ID}}, "host-rendered")
+		paidExternally(t, a, alice, messageSale(t, a), "template-rendered")
+		startFleet(t, a.world)
+		for _, m := range settledMessages(t, a.world, alice, 2) {
+			require.Equal(t, "sent", m.Status)
+		}
+		subjects := map[string]string{}
+		for _, email := range mail.to(a.alice.Email) {
+			subjects[email.Subject] = email.Text
+		}
+		require.Len(t, subjects, 2)
+		require.Equal(t, "The host rendered 10.00 USD.", subjects["Host receipt from Alpha"])
+		require.Contains(t, subjects["Merchant receipt"], "From the merchant's template.", "a message the host declines is the merchant's template")
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, rendered, 2)
+		for _, data := range rendered {
+			require.Equal(t, billing.MessageDataVersion, data.Version)
+			require.Equal(t, receiptEvent, data.EventType)
+			require.Equal(t, "en", data.Language)
+			require.Equal(t, alice.String(), data.Customer.ID)
+			require.Equal(t, "Alpha", data.Merchant.Name)
+			require.Equal(t, "10.00 USD", data.Event.Amount)
+		}
+	})
+}
+
+// declareMessages gives alpha the messages document s.
+func declareMessages(w *world, s billing.MessageSettings) {
+	declaration := cfgMerchant(w.cfg, "alpha")
+	declaration.Messages = &s
+	setCfgMerchant(&w.cfg, "alpha", declaration)
+}
+
+// alphaProfile gives alpha a profile with its support and billing pages.
+func alphaProfile(w *world) {
+	declaration := cfgMerchant(w.cfg, "alpha")
+	declaration.Profile = &billing.MerchantProfile{SupportURL: "https://alpha.example/help", BillingURL: "https://alpha.example/billing"}
+	setCfgMerchant(&w.cfg, "alpha", declaration)
+}
+
+// liveMoney declares alpha's PSPs live, as a live merchant's are, so the
+// messages of facts on them send: a world with test seams has test PSPs
+// only. A scenario calls it once its business is done and before its
+// messages are dispatched, so only the send job reads it.
+func liveMoney(t *testing.T, w *world) {
+	t.Helper()
+	_, err := w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "psps"}.Sanitize()+" SET environment = 'live' WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
+	require.NoError(t, err)
+}
+
+// sentAbout waits until every one of alice's messages has ended, then
+// requires one sent message about eventType and one email with subject,
+// and returns the email.
+func sentAbout(t *testing.T, a *authorityWorld, mail *alertMailbox, eventType, subject string) openrails.Email {
+	t.Helper()
+	alice := customerOf(a.alice)
+	var log []loggedMessage
+	require.Eventually(t, func() bool {
+		rows, err := customerMessages(t, a.world, a.alpha.MerchantID(), alice)
+		if err != nil || len(ofType(rows, eventType)) == 0 {
+			return false
+		}
+		for _, m := range rows {
+			if m.Status == "pending" || m.Status == "queued" || m.Status == "sending" {
+				return false
+			}
+		}
+		log = rows
+		return true
+	}, 30*time.Second, 20*time.Millisecond, "every message ends")
+	about := ofType(log, eventType)
+	require.Len(t, about, 1, "one message per fact")
+	require.Equal(t, "sent", about[0].Status)
+	var emails []openrails.Email
+	for _, email := range mail.to(a.alice.Email) {
+		if email.Subject == subject {
+			emails = append(emails, email)
+		}
+	}
+	require.Len(t, emails, 1, "one %q among %d emails", subject, len(mail.to(a.alice.Email)))
+	return emails[0]
+}
+
+// ofType is the log's messages about eventType.
+func ofType(log []loggedMessage, eventType string) []loggedMessage {
+	var out []loggedMessage
+	for _, m := range log {
+		if m.EventType == eventType {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // messageSale is a one-off price alpha sells, as order lines.

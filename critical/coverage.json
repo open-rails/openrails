@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 418,
+  "scenario_count": 424,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2092,6 +2092,36 @@
       "id": "OR-J39-S06",
       "journey": "J39",
       "name": "Erasing a customer over SCIM deletes its message log"
+    },
+    {
+      "id": "OR-J39-S07",
+      "journey": "J39",
+      "name": "A merchant's template in its messages document replaces the built-in message, inside the built-in layout"
+    },
+    {
+      "id": "OR-J39-S08",
+      "journey": "J39",
+      "name": "A messages document whose template does not render is refused on load, naming the event type and the error, and the built-in messages send"
+    },
+    {
+      "id": "OR-J39-S09",
+      "journey": "J39",
+      "name": "Each cancellation cause sends one confirmation in its own words: the customer canceled, staff canceled, or collection stopped after failed payments"
+    },
+    {
+      "id": "OR-J39-S10",
+      "journey": "J39",
+      "name": "A scheduled price change sends its notice: the old and new amounts, the date and how to cancel"
+    },
+    {
+      "id": "OR-J39-S11",
+      "journey": "J39",
+      "name": "A refund sends one refund receipt, whether staff refunded it or the provider reported it, however often it is replayed"
+    },
+    {
+      "id": "OR-J39-S12",
+      "journey": "J39",
+      "name": "The host's message renderer takes precedence over the merchant's templates for the messages it renders"
     }
   ]
 }

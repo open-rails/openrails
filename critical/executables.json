@@ -1332,6 +1332,29 @@
     ],
     "OR-J39-S06": [
       "TestCustomerMessages/OR-J39-S06/erasing-a-customer-erases-its-message-log"
+    ],
+    "OR-J39-S07": [
+      "TestCustomerMessages/OR-J39-S07/a-merchant-template-replaces-the-built-in-message"
+    ],
+    "OR-J39-S08": [
+      "TestCustomerMessages/OR-J39-S08/a-messages-document-whose-template-does-not-render-is-refused-on-load"
+    ],
+    "OR-J39-S09": [
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/the-customer-canceled",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/staff-canceled",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/payments-failed"
+    ],
+    "OR-J39-S10": [
+      "TestCustomerMessages/OR-J39-S10/a-scheduled-price-change-sends-its-notice"
+    ],
+    "OR-J39-S11": [
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt",
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt/staff-refund",
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt/provider-reported-refund"
+    ],
+    "OR-J39-S12": [
+      "TestCustomerMessages/OR-J39-S12/the-host-renderer-takes-precedence-for-the-messages-it-renders"
     ]
   }
 }
