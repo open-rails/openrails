@@ -528,6 +528,8 @@ func TestGateNumbersUsageOnceAndResendsAfterALostReply(t *testing.T) {
 			if _, err := g.Consume(t.Context(), work(customer, fmt.Sprintf("c-%d", i), 2)); err != nil {
 				t.Fatal(err)
 			}
+			// No start-up sync is in flight when the reply is dropped.
+			synctest.Wait()
 		}
 		f.set(func(f *fakeSync) { f.dropReply = 1 })
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -752,6 +754,8 @@ func TestGateRollsOverADeadLease(t *testing.T) {
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		ticket := mustAdmit(t, g, work(customer, "first", 10))
+		// No start-up sync finds the lease dead before the capture is queued.
+		synctest.Wait()
 		first := leaseOf(g)
 		f.set(func(f *fakeSync) { f.dead[first] = true })
 		if err := ticket.Capture(t.Context(), capture(2)); err != nil {
@@ -1545,6 +1549,8 @@ func TestGateReportsAppliedVersionsUntilASyncIsAnswered(t *testing.T) {
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		// The start-up syncs end before the hold grows: one sync answers it.
+		synctest.Wait()
 		mustAdmit(t, g, work(customer, "grow", 20)).Release(t.Context())
 		synctest.Wait()
 		var version int64
@@ -1571,10 +1577,11 @@ func TestGateFlushIsBoundedWithoutADeadline(t *testing.T) {
 		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
+		// Stalled first, so no start-up sync settles the item.
+		f.set(func(f *fakeSync) { f.stall = true })
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
 			t.Fatal(err)
 		}
-		f.set(func(f *fakeSync) { f.stall = true })
 		started := time.Now()
 		if err := g.Flush(context.Background()); !errors.Is(err, ErrUnavailable) || time.Since(started) != gateFlushBound {
 			t.Fatalf("flush that never settles = %v after %v, want ErrUnavailable after %v", err, time.Since(started), gateFlushBound)
@@ -1599,11 +1606,15 @@ func TestGateClosesTheEarlierLeasesItResends(t *testing.T) {
 			t.Fatal(err)
 		}
 		time.Sleep(11 * time.Second)
+		// A sync that woke with the sleep fails before the server is back.
+		synctest.Wait()
 		if leaseOf(g) == first {
 			t.Fatal("a lease past its life by the local clock was kept")
 		}
 		f.set(func(f *fakeSync) { f.down = false })
 		flush(t, g)
+		// Flush settles usage; the close follows in the same round.
+		synctest.Wait()
 		f.mu.Lock()
 		closed := slices.Clone(f.closed)
 		through := f.leases[first].through
