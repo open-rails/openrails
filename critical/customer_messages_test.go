@@ -474,7 +474,7 @@ func TestCustomerMessages(t *testing.T) {
 		require.Zero(t, test.Attempts)
 		require.Nil(t, test.Recipient)
 		require.Nil(t, test.SentAt)
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{receiptEvent}, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{receiptEvent}, Limit: 100})
 		require.NoError(t, err)
 		var facts []string
 		for _, e := range events.Events {
@@ -938,7 +938,7 @@ func messagesSettled(t *testing.T, fleet *river.Client[pgx.Tx]) {
 // factEmitted reports whether the event log holds the customer's fact.
 func factEmitted(t *testing.T, client *openrails.Client, eventType string, customer billing.CustomerID) bool {
 	t.Helper()
-	page, err := client.ListEvents(t.Context(), billing.EventQuery{Types: []string{eventType}, Limit: 100})
+	page, err := client.ListEvents(t.Context(), billing.EventListParams{Types: []string{eventType}, Limit: 100})
 	require.NoError(t, err)
 	for _, e := range page.Events {
 		if e.Subject.ID == customer.String() {

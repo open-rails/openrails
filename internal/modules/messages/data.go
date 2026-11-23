@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -77,11 +78,11 @@ func links(p models.MerchantProfileConfiguration) billing.MessageLinks {
 	return billing.MessageLinks{ManageBilling: billingURL, UpdatePaymentMethod: billingURL, Pay: billingURL, Resubscribe: or(p.SubscribeURL, billingURL)}
 }
 
-func money(v *int64, currency string) string {
+func money(v *int64, currency catalog.Currency) string {
 	if v == nil || currency == "" {
 		return ""
 	}
-	return moneyutil.FormatAmount(*v, currency)
+	return moneyutil.FormatAmount(*v, string(currency))
 }
 
 func day(t *time.Time) string {

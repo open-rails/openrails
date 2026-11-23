@@ -92,7 +92,9 @@ func TestEngineDepsCopiesEveryField(t *testing.T) {
 	deps := Deps{
 		Postgres: &pgxpool.Pool{}, PostgresSession: &pgxpool.Config{}, MerchantGroups: stub{}, Redis: redisClient, Vault: &vaultapi.Client{},
 		Email: emailCapture{&sent}, Logger: slog.New(slog.DiscardHandler), UserInfo: stub{},
-		MessageRenderer: func(context.Context, billing.MessageData) (billing.MessageContent, bool, error) { return billing.MessageContent{}, false, nil },
+		MessageRenderer: func(context.Context, billing.MessageData) (billing.MessageContent, bool, error) {
+			return billing.MessageContent{}, false, nil
+		},
 		Notifications: &NotificationChannel{Sink: stub{}, Recipient: func(_ context.Context, r NotificationRecipient) (string, bool, error) {
 			recipient = r
 			return "account", true, nil

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -45,7 +46,7 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 	q := s.db.Gen(ctx)
 	amount := -refund.Amount
 	data := billing.NotificationData{
-		Amount: &amount, Currency: refund.Currency, Rail: string(refund.Rail),
+		Amount: &amount, Currency: catalog.Currency(refund.Currency), Rail: billing.Rail(refund.Rail),
 		PaymentID: billing.PaymentID(refund.ID), RefundedPaymentID: billing.PaymentID(*refund.RefundedPaymentID),
 		Voided: strings.HasPrefix(refund.TransactionID, voidPrefix),
 	}

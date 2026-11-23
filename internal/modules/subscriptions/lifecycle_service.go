@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -584,7 +585,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			amount = 0
 		}
 		if amount > 0 {
-			data.Amount, data.Currency = &amount, currency
+			data.Amount, data.Currency = &amount, catalogwire.Currency(currency)
 		}
 		notification := &models.NotificationEvent{
 			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
