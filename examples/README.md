@@ -27,6 +27,9 @@ OpenRails emails a customer only at an address they proved, so the
 standalone and hosted apps make AuthKit verify each sign-up's email. Each
 folder's README says how to run it.
 
+[`gate`](gate) is a backend whose requests count toward usage limits:
+`openrails.Gate` admits each one in process and reports what it used.
+
 [`own-auth`](own-auth) stands apart: a backend with custom authentication and no web
 app, two merchants on one engine, whose own users, sessions and roles tables
 answer OpenRails through authkit/auth's `Authenticator`.

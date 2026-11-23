@@ -7,18 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // UsageEstimate is an admission's usage estimate as it is stored and compared.
@@ -31,6 +26,27 @@ func UsageEstimate(est billing.UsageEstimate) ([]byte, error) {
 		return nil, apperr.Invalidf("usage.amount must be nonnegative").WithParam("usage.amount")
 	}
 	return json.Marshal(est)
+}
+
+// PinnedCards are the rate cards in force for an event type in a currency,
+// as a hold pins them; nil when none prices it. The cards of a lease's hold
+// are compared with these: a hold whose cards changed is issued again.
+func (s *MoneyService) PinnedCards(ctx context.Context, q *gen.Queries, eventType, currency string) ([]byte, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cards, err := usageCards(ctx, q, mid.UUID(), strings.TrimSpace(eventType), normalizeCurrency(currency))
+	var coded *apperr.Error
+	switch {
+	case errors.As(err, &coded):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case len(cards) == 0:
+		return nil, nil
+	}
+	return json.Marshal(cards)
 }
 
 // RateUsageEstimate prices an admission's usage estimate at the customer's
@@ -136,7 +152,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	gate.SetClock(s.now)
 	s.db.EnsurePartitions(ctx, s.now())
 	var receipt *billing.CaptureReceipt
-	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
+	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingLimitHold) error {
 		txSvc := s.WithDatabase(d)
 		if row.State == "captured" {
 			var rerr error
@@ -150,15 +166,15 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	return receipt, err
 }
 
-func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, terms []byte, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
+func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, terms []byte, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
 	original, err := spendgate.OriginalTerms(row)
 	if err != nil {
 		return nil, err
 	}
-	payer := identity.CustomerID(row.CustomerID)
 	now := s.now()
-	receipt := &billing.CaptureReceipt{RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
-		EstimatedAmount: row.EstimatedAmount, Charges: []billing.UsageCharge{}}
+	requestID := deref(row.RequestID)
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+		EstimatedAmount: derefInt(row.EstimatedAmount), Charges: []billing.UsageCharge{}}
 
 	// The admitted event type remains binding even when the host states money.
 	if len(row.EstimateUsage) > 0 {
@@ -170,155 +186,87 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 			return nil, apperr.Invalidf("usage.event_type must be the admitted %q", admitted.EventType).WithParam("usage.event_type")
 		}
 	}
-	cards, err := s.captureCards(ctx, q, row, u.EventType)
+	parts, err := q.ListHoldParts(ctx, gen.ListHoldPartsParams{MerchantID: row.MerchantID, HoldID: row.ID, HoldCreatedAt: row.CreatedAt})
 	if err != nil {
 		return nil, err
 	}
-	quantities, err := usageQuantities(cards, eventFields{Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: stated})
-	if err != nil {
-		return nil, usageParam(err)
+	hold := &SettleHold{ID: row.ID, CreatedAt: row.CreatedAt}
+	for _, p := range parts {
+		hold.Parts = append(hold.Parts, HoldPart{Key: p.LimitKey, Unit: p.Unit, WindowStartsAt: p.WindowStartsAt, WindowEndsAt: p.WindowEndsAt, Held: p.Held})
 	}
-	// The coordinate is claimed here, under the customer spend lock.
-	keyFrom, keyTo := usageKeyWindow(now)
-	_, err = q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
-		MerchantID: row.MerchantID, CustomerID: row.CustomerID, Currency: row.Currency,
-		EventType: u.EventType, Source: u.Source, SourceID: u.SourceID, OccurredFrom: keyFrom, OccurredTo: keyTo,
-	})
-	if err == nil {
-		return nil, fmt.Errorf("%w: capture usage coordinate belongs to another operation", ErrIdempotencyKeyReused)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
-
-	// What the work charges is priced first; the hold leaves the held total
-	// before the charge posts, in the same transaction, so the charge draws
-	// the balance the hold reserved. A late capture after release or expiry
-	// still records the operation.
-	eventID := uuidutil.NewV7()
-	charges, err := s.priceUsageTx(ctx, q, payer, row.Currency, now, quantities)
+	// Usage is priced by the admission's pinned cards, or those in force when
+	// it pinned none; a capture settles money, so usage no card prices is
+	// refused.
+	batch, err := s.PriceUsageTx(ctx, q, []UsageItem{{
+		Customer: identity.CustomerID(row.CustomerID), Invoker: original.Invoker, Currency: row.Currency, EventType: u.EventType,
+		Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: stated, OccurredAt: now,
+		Cards: row.RateCards, RequireCards: true, Hold: hold,
+	}})
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range charges {
-		receipt.Amount += c.Amount
+	result := batch.Results[0]
+	if result.Err != nil {
+		return nil, usageParam(result.Err)
 	}
-	if _, err := q.CaptureAdmissionOperation(ctx, gen.CaptureAdmissionOperationParams{
-		MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, Amount: receipt.Amount, AsOf: now, CaptureTerms: terms,
+	receipt.Amount, receipt.Charges = result.Amount, result.Charges
+	charges, err := json.Marshal(result.Charges)
+	if err != nil {
+		return nil, err
+	}
+	// The hold leaves the held total before the usage settles, in the same
+	// transaction, so its accrual takes the balance the hold reserved. A late
+	// capture after release or expiry still settles.
+	if _, err := q.CaptureRequestHold(ctx, gen.CaptureRequestHoldParams{
+		MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, Amount: receipt.Amount, CapturedCharges: charges, AsOf: now, CaptureTerms: terms,
 	}); err != nil {
 		return nil, err
 	}
-	transfer, err := s.postChargesTx(ctx, q, payer, original.Invoker, row.Currency, eventID, charges)
-	if err != nil {
+	if err := s.SettleUsageTx(ctx, q, batch); err != nil {
 		return nil, err
 	}
-	if transfer != nil {
-		txn := billing.BalanceTransactionID(*transfer)
-		receipt.BalanceTransactionID = &txn
-	}
-	dimensions, err := toJSONBC(u.Dimensions)
-	if err != nil {
-		return nil, err
-	}
-	metadata, err := toJSONBC(u.Metadata)
-	if err != nil {
-		return nil, err
-	}
-	chargesJSON, err := json.Marshal(charges)
-	if err != nil {
-		return nil, err
-	}
-	err = q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
-		ID: eventID, MerchantID: row.MerchantID, CustomerID: row.CustomerID,
-		InvokerID: original.Invoker, Currency: row.Currency, Resource: nilIfEmpty(u.Resource),
-		EventType: u.EventType, Dimensions: dimensions, Metadata: metadata, Amount: receipt.Amount, StatedAmount: stated,
-		Source: u.Source, SourceID: u.SourceID, LedgerTransferID: transfer,
-		OccurredAt: now, CreatedAt: now, Outcome: UsageSucceeded, Charges: chargesJSON,
-	})
-	if err != nil {
-		var conflict *pgconn.PgError
-		if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "usage_events_idem_key" {
-			return nil, fmt.Errorf("%w: capture usage coordinate belongs to another operation", ErrIdempotencyKeyReused)
-		}
-		return nil, err
-	}
-	id := billing.UsageEventID(eventID)
-	receipt.UsageEventID = &id
-	receipt.Charges = billingCharges(charges)
 	return receipt, nil
-}
-
-// captureCards are the rate cards a capture is priced by: the admission's
-// pinned cards, or those in force when it pinned none. A capture exists to
-// settle money, so usage no card prices is refused.
-func (s *MoneyService) captureCards(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, eventType string) ([]ratingCard, error) {
-	var cards []ratingCard
-	if len(row.RateCards) > 0 {
-		if err := json.Unmarshal(row.RateCards, &cards); err != nil {
-			return nil, fmt.Errorf("decode pinned rate cards: %w", err)
-		}
-	} else {
-		var err error
-		if cards, err = usageCards(ctx, q, row.MerchantID, eventType, row.Currency); err != nil {
-			return nil, usageParam(err)
-		}
-	}
-	if len(cards) == 0 {
-		return nil, usageNotPriced("usage.event_type", "no rate card prices event type %q", eventType)
-	}
-	return cards, nil
 }
 
 // captureReplay answers a captured admission's receipt for a retry with its
-// exact terms.
-func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, terms []byte, u billing.CaptureUsage) (*billing.CaptureReceipt, error) {
-	matches, err := q.AdmissionCaptureTermsMatch(ctx, gen.AdmissionCaptureTermsMatchParams{
-		MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, CaptureTerms: terms,
+// exact terms. Its balance transaction is its accrual's first posting after
+// the capture, once one posted.
+func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, terms []byte, _ billing.CaptureUsage) (*billing.CaptureReceipt, error) {
+	matches, err := q.RequestHoldCaptureTermsMatch(ctx, gen.RequestHoldCaptureTermsMatchParams{
+		MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, CaptureTerms: terms,
 	})
 	if err != nil {
 		return nil, err
 	}
+	requestID := deref(row.RequestID)
 	if !matches {
-		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: row.RequestID,
+		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: requestID,
 			Field: "usage", Committed: "original capture terms", Retried: "different capture terms"}
 	}
-	receipt := &billing.CaptureReceipt{RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
-		EstimatedAmount: row.EstimatedAmount, Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
-	if row.CapturedAt != nil {
-		from, to := usageKeyWindow(*row.CapturedAt)
-		event, err := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
-			MerchantID: row.MerchantID, CustomerID: row.CustomerID, Currency: row.Currency,
-			EventType: u.EventType, Source: u.Source, SourceID: u.SourceID, OccurredFrom: from, OccurredTo: to,
-		})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+		EstimatedAmount: derefInt(row.EstimatedAmount), Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
+	if len(row.CapturedCharges) > 0 {
+		if err := json.Unmarshal(row.CapturedCharges, &receipt.Charges); err != nil {
+			return nil, fmt.Errorf("decode captured charges: %w", err)
 		}
-		if err == nil {
-			ev, err := UsageEventFromRow(event)
-			if err != nil {
-				return nil, err
-			}
-			id := billing.UsageEventID(ev.ID)
-			receipt.UsageEventID, receipt.Charges = &id, billingCharges(ev.Charges)
-			if ev.LedgerTransferID != nil {
-				txn := billing.BalanceTransactionID(*ev.LedgerTransferID)
-				receipt.BalanceTransactionID = &txn
-			}
-			return receipt, nil
-		}
+	}
+	if row.CapturedAt == nil || receipt.Amount == 0 {
+		return receipt, nil
+	}
+	posting, err := s.accrualPostingSince(ctx, q, row.MerchantID, row.CustomerID, row.Currency, *row.CapturedAt)
+	if err != nil {
+		return nil, err
+	}
+	if posting != nil {
+		txn := billing.BalanceTransactionID(*posting)
+		receipt.BalanceTransactionID = &txn
 	}
 	return receipt, nil
 }
 
-// billingCharges is the wire form of an event's meter charges.
-func billingCharges(in []models.UsageCharge) []billing.UsageCharge {
-	out := make([]billing.UsageCharge, len(in))
-	for i, c := range in {
-		out[i] = billing.UsageCharge{MeterKey: c.MeterKey, Model: c.Model, Quantity: c.Quantity, Amount: c.Amount}
-		if c.Cell != "" {
-			cell := c.Cell
-			out[i].Cell = &cell
-		}
+func deref(v *string) string {
+	if v == nil {
+		return ""
 	}
-	return out
+	return *v
 }

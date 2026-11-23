@@ -440,5 +440,14 @@ func exportWhere(table string) string {
 	if table == "maintenance_runs" {
 		where += " AND t.kind IN ('prune','approval','merchant_purge')"
 	}
+	// A lease's holds die with it; only admitted requests' holds move.
+	if table == "limit_holds" {
+		where += " AND t.request_id IS NOT NULL"
+	}
+	// Windows still open, and the end-less ones of lifetime and rate
+	// limits, carry their usage and staff adjustments to the destination.
+	if table == "limit_windows" {
+		where += " AND (t.window_ends_at IS NULL OR t.window_ends_at > now())"
+	}
 	return where
 }

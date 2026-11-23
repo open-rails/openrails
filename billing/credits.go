@@ -165,7 +165,10 @@ type BalanceTransaction struct {
 	Resource      *string                `json:"resource"`
 	Source        string                 `json:"source"`
 	SourceID      string                 `json:"source_id"`
-	CreatedAt     time.Time              `json:"created_at"`
+	// Usage is what a usage deduction was for: the day's usage per meter.
+	// Every leg of one posting carries it; null on other movements.
+	Usage     *UsageDeduction `json:"usage"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // BalanceTransactionListParams selects a customer's ledger in one currency,
@@ -308,6 +311,11 @@ type MerchantSettings struct {
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
+	// UsageGateSafeSpend lets gates keep admitting while OpenRails is
+	// unreachable: each hold names a safe amount, its money size, that its
+	// gate may spend unreserved. Off by default. Unit limits are never spent
+	// past their holds.
+	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".

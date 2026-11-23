@@ -11,7 +11,7 @@ const (
 	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
 	// ListPrices.
 	ReadCatalog Read = "catalog"
-	// ReadMeters is GetMeter and ListMeters.
+	// ReadMeters is GetMeter, ListMeters, GetLimit and ListLimits.
 	ReadMeters Read = "meters"
 	// ReadPublicConfig is GetPublicConfig.
 	ReadPublicConfig Read = "public_config"

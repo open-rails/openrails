@@ -116,6 +116,8 @@ without credentials or alert webhooks.
 - `checkout.embed_origins`: sites that may frame the merchant's pay URLs
   ([payment page](payment-page.md)).
 - `provider_refund_access`: what a provider-side refund does to access.
+- `usage_gate_safe_spend` (default `false`): gates may spend each hold's money
+  size again while OpenRails is unreachable ([the gate](usage-billing.md#the-gate)).
 
 Policy references must resolve in the resulting document, and removing a policy
 a customer is bound to is refused.

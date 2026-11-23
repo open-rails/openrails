@@ -15,6 +15,7 @@ import {
   accountSchema,
   customerConfigSchema,
   customerEntitlementSchema,
+  customerLimitSchema,
   lowBalanceLineSchema,
   publicConfigSchema,
   listPageSchema,
@@ -31,6 +32,7 @@ import {
   type Account,
   type CustomerConfig,
   type CustomerEntitlement,
+  type CustomerLimit,
   type LowBalanceLine,
   type PublicConfig,
   type CurrencyScales,
@@ -108,7 +110,7 @@ export interface CursorOptions {
  */
 export interface UsageOptions extends CursorOptions {
   currency: string
-  groupBy?: "event_type" | "resource" | "invoker" | "meter"
+  groupBy?: "event_type" | "invoker" | "meter"
   from?: string
   to?: string
 }
@@ -342,6 +344,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const paymentPage = listPageSchema(paymentSchema)
   const orderPage = listPageSchema(orderSchema)
   const entitlementPage = listPageSchema(customerEntitlementSchema)
+  const limitPage = listPageSchema(customerLimitSchema)
   const changeOptionPage = listPageSchema(subscriptionChangeOptionSchema)
   const cursorQuery = (opts: CursorOptions, limit: number) => ({
     limit: opts.limit ?? limit,
@@ -830,6 +833,14 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         },
         signal: opts.signal,
       })
+    },
+
+    /**
+     * Where the customer stands on each limit: the declared limits by key,
+     * then a `balance` line per currency. One page; `next_cursor` is null.
+     */
+    getLimits(signal?: AbortSignal): Promise<ListPage<CustomerLimit>> {
+      return json(limitPage, "/me/limits", { signal })
     },
 
     /**

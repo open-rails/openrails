@@ -22,6 +22,10 @@ import (
 // happens to be batched rather than by what is actually deployed.
 const MinAccrualRateWindowSeconds int64 = 60
 
+// MaxAccrualRateWindowSeconds is the longest accrual-rate lookback: the
+// per-minute spend it reads is kept a day.
+const MaxAccrualRateWindowSeconds int64 = 86400
+
 // MaxSpendWindowSeconds is the longest spend window a policy or a spend
 // delegation may declare. Admitted requests are kept for this long plus 30
 // days, so a longer window would count requests already dropped.
@@ -119,6 +123,9 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 		}
 		if p.AccrualRateWindowSeconds > 0 && p.AccrualRateWindowSeconds < MinAccrualRateWindowSeconds {
 			return models.BillingPolicy{}, fmt.Errorf("%s: accrual_rate_window_seconds must be at least %d — a shorter lookback measures noise, not a rate", label, MinAccrualRateWindowSeconds)
+		}
+		if p.AccrualRateWindowSeconds > MaxAccrualRateWindowSeconds {
+			return models.BillingPolicy{}, fmt.Errorf("%s: accrual_rate_window_seconds must be at most %d (a day): usage is measured from per-minute spend kept that long", label, MaxAccrualRateWindowSeconds)
 		}
 		out.AccrualRateCapPerHour = p.AccrualRateCapPerHour
 		out.AccrualRateWindowSeconds = p.AccrualRateWindowSeconds

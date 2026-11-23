@@ -82,13 +82,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 
 -- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
-    -- Each meter's latest retained event: a backward index probe per partition,
-    -- never a count of its events. It spans every retained month by definition.
+    -- Each meter's latest settled usage: the newest day of its event type's
+    -- rollups, by a backward index probe, and that day's last settlement.
     SELECT m.key AS meter_key,
-           (SELECT max(ue.occurred_at)
-              FROM billing.usage_events ue
-             WHERE ue.merchant_id = m.merchant_id
-               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+           (SELECT max(ud.updated_at)
+              FROM billing.usage_daily ud
+             WHERE ud.merchant_id = m.merchant_id
+               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
+               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
+                                 WHERE last.merchant_id = m.merchant_id
+                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = sqlc.arg(merchant_id)
 )
@@ -128,13 +131,16 @@ LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetUsageMeterWithCatalog :one
 WITH activity AS (
-    -- Each meter's latest retained event: a backward index probe per partition,
-    -- never a count of its events. It spans every retained month by definition.
+    -- Each meter's latest settled usage: the newest day of its event type's
+    -- rollups, by a backward index probe, and that day's last settlement.
     SELECT m.key AS meter_key,
-           (SELECT max(ue.occurred_at)
-              FROM billing.usage_events ue
-             WHERE ue.merchant_id = m.merchant_id
-               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+           (SELECT max(ud.updated_at)
+              FROM billing.usage_daily ud
+             WHERE ud.merchant_id = m.merchant_id
+               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
+               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
+                                 WHERE last.merchant_id = m.merchant_id
+                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = sqlc.arg(merchant_id)
 )
@@ -169,17 +175,6 @@ LEFT JOIN billing.products product
  AND product.id = card.product_id
 WHERE meter.merchant_id = sqlc.arg(merchant_id)
   AND meter.key = sqlc.arg(meter_key);
-
--- name: LockUsageEventsForMeterCorrection :exec
-LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE;
-
--- name: UsageEventsExistForTypes :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.usage_events
-    WHERE merchant_id = sqlc.arg(merchant_id)
-      AND event_type = ANY(sqlc.arg(event_types)::text[])
-);
 
 -- name: GetUsageMeterForUpdate :one
 SELECT key,

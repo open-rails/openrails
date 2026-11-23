@@ -69,6 +69,8 @@ func wireForm(t reflect.Type) (reflect.Type, bool) {
 	switch {
 	case name == "cardguard.Card":
 		return reflect.TypeFor[CardEntry](), true
+	case name == "catalog.Capacity":
+		return reflect.TypeFor[string](), true
 	case name == "billing.UpdateMerchantConfigurationParams":
 		// Its codec only enforces strictness; the members are the wire.
 		return t, true

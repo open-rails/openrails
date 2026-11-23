@@ -15,11 +15,11 @@ import (
 // periodicJob declares p with River. RunOnStart catches up an overdue pass;
 // for an interval the shared helper's retained-history check skips a recent
 // one after a restart, and an hourly pass's insert skips a second in its hour.
-// A leased pass is queued only by the fleet holding its lease.
+// A pass is queued only by the fleet holding its lease.
 func (r *Runtime) periodicJob(cfg *river.Config, p riverjobs.Periodic) *river.PeriodicJob {
 	id := p.Args.Kind()
 	construct := func() (river.JobArgs, *river.InsertOpts) {
-		if !p.PerFleet && !r.claimPeriodic(id, p.Every) {
+		if !r.claimPeriodic(id, p.Every) {
 			return nil, nil
 		}
 		return p.Args, nil

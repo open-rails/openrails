@@ -248,7 +248,7 @@ function CatalogConflicts({ conflicts }: { conflicts: CatalogConflict[] }) {
           <p className="font-medium">
             {conflict.product_key
               ? `Price ${conflict.key} of product ${conflict.product_key}`
-              : `${conflict.object === "meter" ? "Meter" : "Product"} ${conflict.key}`}{" "}
+              : `${{ meter: "Meter", limit: "Limit", product: "Product", price: "Price" }[conflict.object]} ${conflict.key}`}{" "}
             <AdminMessage id={"skipped"} />
           </p>
           <ul className="mt-1 grid gap-1 text-xs text-muted-foreground">

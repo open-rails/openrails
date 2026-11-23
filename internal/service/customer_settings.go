@@ -13,11 +13,13 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -75,6 +77,9 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 			return err
 		}
 		if err := change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC()); err != nil {
+			return err
+		}
+		if err := setLimitOverrides(ctx, q, mid.UUID(), change.customer, change.limits); err != nil {
 			return err
 		}
 		if len(change.creditLimits) > 0 || len(change.usageBilling) > 0 || len(change.trustLevels) > 0 || change.setPolicy {
@@ -165,6 +170,7 @@ type customerSettingsChange struct {
 	setProfile      bool
 	invoiceProfile  *money.CustomerInvoiceProfile
 	usageBilling    []billing.UsageBillingAccountUpdate
+	limits          []billing.LimitOverride
 }
 
 func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerParams) (customerSettingsChange, error) {
@@ -228,6 +234,24 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 			return c, err
 		}
 		c.lowBalanceLines = append(c.lowBalanceLines, line)
+	}
+	seen := map[string]bool{}
+	for j, o := range params.Limits {
+		field := fmt.Sprintf("limits[%d]", j)
+		if err := catalog.ValidateLimitKey(o.Limit); err != nil {
+			return c, apperr.Invalidf("%s", err).WithParam(field + ".limit")
+		}
+		if seen[o.Limit] {
+			return c, apperr.Invalidf("limit %s is named twice", o.Limit).WithParam(field + ".limit")
+		}
+		seen[o.Limit] = true
+		if o.Inherit && o.Capacity != 0 {
+			return c, apperr.Invalidf("inherit requires capacity zero").WithParam(field + ".capacity")
+		}
+		if o.Capacity < 0 {
+			return c, apperr.Invalidf("capacity must be nonnegative").WithParam(field + ".capacity")
+		}
+		c.limits = append(c.limits, o)
 	}
 	if params.BillingPolicy.Set {
 		c.setPolicy = true
@@ -374,7 +398,7 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, customers []uuid.UUID) (map[uuid.UUID]billing.CustomerSettings, error) {
 	out := make(map[uuid.UUID]billing.CustomerSettings, len(customers))
 	for _, id := range customers {
-		out[id] = billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}, LowBalanceLines: []billing.LowBalanceLine{}}
+		out[id] = billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}, LowBalanceLines: []billing.LowBalanceLine{}, Limits: []billing.LimitOverride{}}
 	}
 	if len(customers) == 0 {
 		return out, nil
@@ -433,6 +457,15 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 		name := p.PolicyName
 		doc.BillingPolicy = &name
 		out[p.CustomerID] = doc
+	}
+	overrides, err := limits.Overrides(ctx, q, mid, customers)
+	if err != nil {
+		return nil, err
+	}
+	for id, list := range overrides {
+		doc := out[id]
+		doc.Limits = list
+		out[id] = doc
 	}
 	profiles, err := money.InvoiceProfilesTx(ctx, q, mid, customers)
 	if err != nil {

@@ -81,8 +81,8 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 
-// ErrUsageOutsideIngestWindow is returned by RecordUsage when occurred_at is
-// older than the ingest window or ahead of the clock.
+// ErrUsageOutsideIngestWindow refuses usage whose occurred_at is older than
+// the ingest window or ahead of the clock.
 var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
 
 // CaptureAdmission settles an admitted request. The first capture fixes its
@@ -129,7 +129,7 @@ func (s *Service) GetAdmission(ctx context.Context, requestID string) (*billing.
 	if err != nil {
 		return nil, err
 	}
-	return admissionFromOperation(row, s.now()), nil
+	return admissionFromHold(row, s.now()), nil
 }
 
 // AdmissionCustomer resolves ownership from the durable operation before route authorization.
@@ -166,7 +166,7 @@ func (s *Service) releaseAdmission(ctx context.Context, gate *spendgate.Gate, re
 	if err != nil {
 		return nil, err
 	}
-	return admissionFromOperation(row, s.now()), nil
+	return admissionFromHold(row, s.now()), nil
 }
 
 // ExtendAdmission moves an open hold's deadline to expiresAt.
@@ -198,5 +198,5 @@ func (s *Service) ExtendAdmission(ctx context.Context, requestID string, expires
 	if err != nil {
 		return nil, err
 	}
-	return admissionFromOperation(row, s.now()), nil
+	return admissionFromHold(row, s.now()), nil
 }

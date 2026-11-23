@@ -95,7 +95,7 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpMeteredRating  Operation = "metered_rating"  // a meter's charge for one usage event
+	OpUsageAccrual   Operation = "usage_accrual"   // one posting of a customer's day of usage
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.
 	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge
@@ -105,10 +105,8 @@ const (
 	usageOpPrefix = "usage:"
 )
 
-// UsageOperation is the operation kind of a metered usage charge. event_type is
-// part of the kind because usage_events already dedupes on it
-// (usage_events_idem_key): two different event types at one (source, source_id)
-// are two events, so they must be two ledger legs.
+// UsageOperation is the operation kind of a charged failed usage item's legs,
+// at its lease and number.
 func UsageOperation(eventType string) Operation {
 	return Operation(usageOpPrefix + strings.TrimSpace(eventType))
 }

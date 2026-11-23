@@ -1,4 +1,4 @@
-// Package spendgate evaluates durable SQL admission operations and spend windows.
+// Package spendgate evaluates request holds and spend windows.
 package spendgate
 
 import (

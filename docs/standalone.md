@@ -132,7 +132,7 @@ The backend's role decides what it may do; grant only what it needs:
 |---|---|
 | read or change the catalog | `merchant:catalog:read`, `merchant:catalog:manage` |
 | read or change configuration (and billing archives) | `merchant:config:read`, `merchant:config:manage` |
-| inspect, or record usage and running charges | `merchant:usage:read`, `merchant:usage:manage` |
+| read, or admit and report usage, limits and running charges (a gate needs both) | `merchant:usage:read`, `merchant:usage:manage` |
 | check entitlements | `merchant:entitlements:read` |
 | create orders | `merchant:orders:manage` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
@@ -239,6 +239,16 @@ curl -X POST https://billing.example.com/v1/app/admissions -H "Authorization: Be
        "usage":{"event_type":"chat","dimensions":{"input_tokens":4000,"output_tokens":1000}},
        "expires_at":"2026-09-16T12:00:00Z"}]}'
 ```
+
+**Usage limits.** `openrails.NewGate(client, openrails.GateConfig{})` admits each
+request in your process against holds of the customer's capacity and reports what
+it used on the gate's lease ([the gate](usage-billing.md#the-gate)). A warm
+decision makes no network call, so it continues while OpenRails is unreachable; a
+cold one waits for one `SyncLeases` call, or is `openrails.ErrUnavailable`. A
+process alone keeps the gate in memory, and `GateConfig.Outbox` keeps its captured
+usage across a crash; with `GateConfig.Redis`, your own Redis, the processes
+sharing it are one gate. Nothing else is configured: hold sizes and timing follow
+traffic, and the merchant declares only limits, products and prices.
 
 The remote CLI reads a token from `--token-file` on every call:
 `openrails get-merchant-config --server-url https://billing.example.com --token-file token`.

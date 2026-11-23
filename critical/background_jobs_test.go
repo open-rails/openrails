@@ -19,6 +19,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -90,21 +91,6 @@ func runRegisteredFails(t *testing.T, fleet *river.Client[pgx.Tx], kind string) 
 			t.Fatalf("registered %s job did not finish", kind)
 		}
 	}
-}
-
-func deniedAdmissions(t *testing.T, w *world, from time.Time) int64 {
-	t.Helper()
-	result, err := w.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"admission_denials"},
-		Range: &billing.MetricsRange{From: from.Format(time.RFC3339), To: from.Add(time.Hour).Format(time.RFC3339)}})
-	require.NoError(t, err)
-	var total int64
-	for _, row := range result.Rows {
-		var n int64
-		_, err := fmt.Sscan(fmt.Sprint(row[len(row)-1]), &n)
-		require.NoError(t, err)
-		total += n
-	}
-	return total
 }
 
 func TestBackgroundJobs(t *testing.T) {
@@ -226,7 +212,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
-		for _, scan := range []string{"openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
+		for _, scan := range []string{"openrails.usage_accruals", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
 			"openrails.rebill_watch", "openrails.nmi_history", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
@@ -244,28 +230,6 @@ func TestBackgroundJobs(t *testing.T) {
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+jobs+" SET state='completed', finalized_at=now() WHERE kind='openrails.usage_orders'")
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
-	})
-	t.Run("OR-J23-S06/denials-count-each-closed-hour-once", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
-		customer := billing.CustomerID(uuid.New())
-		hour := w.clock.Now().UTC().Truncate(time.Hour)
-		for i := range 3 {
-			results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, fmt.Sprintf("denied-%d", i), 500)})
-			require.NoError(t, err)
-			require.False(t, results[0].Allowed(), "an unfunded customer is denied")
-		}
-		fleet := startFleet(t, w)
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.Zero(t, deniedAdmissions(t, w, hour), "an open hour is not flushed")
-		// A count whose customer no longer exists is dropped alone.
-		key := fmt.Sprintf("or:mdeny:%s:%d", w.alpha.MerchantID().UUID(), hour.Unix())
-		require.NoError(t, w.deps.Redis.HIncrBy(t.Context(), key, uuid.NewString()+"|insufficient_balance", 2).Err())
-		w.clock.Advance(hour.Add(time.Hour + 10*time.Minute).Sub(w.clock.Now()))
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 2)
-		require.EqualValues(t, 3, deniedAdmissions(t, w, hour))
-		require.Zero(t, w.deps.Redis.Exists(t.Context(), key).Val(), "a flushed hour leaves Redis")
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.EqualValues(t, 3, deniedAdmissions(t, w, hour), "a flushed hour is counted once")
 	})
 	t.Run("OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish", func(t *testing.T) {
 		w := newWorld(t)
@@ -292,7 +256,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
 	})
-	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state", func(t *testing.T) {
+	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		w := a.world
 		fleet := hostFleet(t, w)
@@ -318,10 +282,16 @@ func TestBackgroundJobs(t *testing.T) {
 			return state
 		}
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
-		hour := w.clock.Now().UTC().Truncate(time.Hour)
-		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, billing.CustomerID(uuid.New()), "denied", 500)})
+		// A gate lease that stopped syncing; it is kept 61 days past its last sync.
+		leases := pgx.Identifier{w.schema, "leases"}.Sanitize()
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts, hold_version) VALUES ($1, $2, $3, $3, 0, '[]', 0)",
+			w.alpha.MerchantID().UUID(), uuid.New(), w.clock.Now())
 		require.NoError(t, err)
-		require.False(t, denied[0].Allowed())
+		leaseCount := func() int {
+			var n int
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+leases+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID()).Scan(&n))
+			return n
+		}
 		// The lease of a periodic kind no fleet runs any more.
 		orphans := func() int {
 			var n int
@@ -333,9 +303,8 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Equal(t, 1, orphans())
 
 		w.clock.Advance(25 * time.Hour)
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.Equal(t, 1, leaseCount(), "a lease is kept through the replay horizon")
 		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
 		require.Zero(t, orphans())
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -348,10 +317,7 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound)
-		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
-		w.clock.Advance(397 * 24 * time.Hour)
-		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		require.Zero(t, deniedAdmissions(t, w, hour))
+		require.Zero(t, leaseCount(), "a lease 61 days past its last sync is deleted")
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
 		w := newWorld(t)
@@ -381,6 +347,44 @@ func TestBackgroundJobs(t *testing.T) {
 		attempts, err := pgx.CollectRows(rows, pgx.RowTo[int])
 		require.NoError(t, err)
 		require.Equal(t, []int{1}, attempts, "the continuation makes one attempt; the next period's pass retries what it left")
+	})
+	t.Run("OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts", func(t *testing.T) {
+		w := newWorld(t)
+		fleet := quietFleet(t, w)
+		meterForCapture(t, w)
+		customer, _ := fundedCustomer(t, w)
+		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "kept-a-month", 600)})
+		require.NoError(t, err)
+		require.True(t, admitted[0].Allowed())
+		month := retention.MonthStart(w.clock.Now())
+		suffix := month.Format("_y2006m01")
+		partitions := func(table string) []string {
+			rows, err := w.pool.Query(t.Context(), `SELECT c.relname::text FROM pg_inherits i
+				JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_class p ON p.oid = i.inhparent JOIN pg_namespace n ON n.oid = p.relnamespace
+				WHERE n.nspname = $1 AND p.relname = $2 ORDER BY 1`, w.schema, table)
+			require.NoError(t, err)
+			names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			require.NoError(t, err)
+			return names
+		}
+		rowsIn := func(partition string) int {
+			var n int
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, partition}.Sanitize()).Scan(&n))
+			return n
+		}
+		require.Contains(t, partitions("limit_holds"), "limit_holds"+suffix)
+		require.Contains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)
+		require.Equal(t, 1, rowsIn("limit_holds"+suffix))
+		require.Positive(t, rowsIn("limit_hold_parts"+suffix), "the hold's parts are in its month")
+
+		// Once the whole month is past the replay horizon, one cleanup pass
+		// drops both months: no foreign key ties a partition of parts to one
+		// of holds, so neither drop is refused.
+		w.clock.Advance(month.AddDate(0, 1, 0).Add(retention.Admissions + time.Hour).Sub(w.clock.Now()))
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.NotContains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)
+		require.NotContains(t, partitions("limit_holds"), "limit_holds"+suffix)
+		require.Contains(t, partitions("limit_holds"), "limit_holds"+retention.MonthStart(w.clock.Now()).Format("_y2006m01"), "the current month is kept")
 	})
 	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
@@ -592,6 +596,15 @@ func (refreshMerchantJob) Kind() string { return "openrails.provider_refresh_req
 // it has to read.
 func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UUID) {
 	t.Helper()
+	event := refreshAttempt(t, fleet, merchant)
+	require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+}
+
+// refreshAttempt queues the merchant's provider refresh and answers how its
+// windows ended: completed, or failed with a read left incomplete, which
+// River retries.
+func refreshAttempt(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UUID) *river.Event {
+	t.Helper()
 	events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
 	defer unsubscribe()
 	job, err := fleet.Insert(t.Context(), refreshMerchantJob{MerchantID: merchant}, &river.InsertOpts{Queue: "provider_refresh"})
@@ -604,8 +617,7 @@ func refreshMerchant(t *testing.T, fleet *river.Client[pgx.Tx], merchant uuid.UU
 			if event == nil || event.Job.ID != job.Job.ID {
 				continue
 			}
-			require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
-			return
+			return event
 		case <-deadline.C:
 			t.Fatal("provider refresh did not finish its windows")
 		}

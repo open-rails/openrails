@@ -108,6 +108,19 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 			plan.document.Meters[key] = params.Meters[key]
 		}
 	}
+	for _, key := range slices.Sorted(maps.Keys(params.Limits)) {
+		fields, err := documentLimitFields(key, params.Limits[key])
+		if err != nil {
+			return plan, err
+		}
+		plan.declared[limitObject(key)] = true
+		if consider(limitObject(key), fields) {
+			if plan.document.Limits == nil {
+				plan.document.Limits = map[string]catalogwire.ApplyLimit{}
+			}
+			plan.document.Limits[key] = params.Limits[key]
+		}
+	}
 	if params.Prune {
 		// A whole catalog: an omitted product or price only documents set is
 		// deleted when nothing refers to it and archived otherwise; one an edit
@@ -118,7 +131,7 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 			_, keptProvider := product.ProviderPrices[obj.priceKey]
 			kept = kept || keptProvider
 			switch {
-			case obj.kind == billing.CatalogObjectMeter,
+			case obj.kind == billing.CatalogObjectMeter, obj.kind == billing.CatalogObjectLimit,
 				obj.kind == billing.CatalogObjectProduct && declared,
 				obj.kind == billing.CatalogObjectPrice && kept:
 			case owners.soleFileOwned(obj):

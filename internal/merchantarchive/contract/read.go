@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/archivewire"
 )
 
@@ -22,6 +24,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// before migration 207 the custody migration record, and one from before
 	// migration 208 the usage collection cadence: skipped.
 	watermarks, custody, cadence := false, false, false
+	// An archive from before holds carries admissions, each a request hold.
+	admissions := false
+	// An archive from before usage settled in batches carries raw usage
+	// events: their money is in the ledger it carries, and they are not read.
+	events := false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			invoices = r.Table == "invoices"
@@ -33,13 +40,22 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			if custody = r.Table == "custody_migrations"; custody {
 				return nil
 			}
+			if events = r.Table == "usage_events"; events {
+				return nil
+			}
 			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
 				r.Table = "meter_period_quantities"
+			}
+			if admissions = r.Table == "admission_operations"; admissions {
+				r.Table = "limit_holds"
 			}
 			if renamed, ok := usageRenames[r.Table]; ok {
 				r.Table, preUsage = renamed, true
 			}
 			if table+1 < len(Profiles) && Profiles[table+1].Name == "subscription_billing_changes" && r.Table == "subscription_status_transitions" {
+				table++
+			}
+			for table+1 < len(Profiles) && addedTables[Profiles[table+1].Name] && r.Table != Profiles[table+1].Name {
 				table++
 			}
 			table++
@@ -51,10 +67,17 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
-		if watermarks || custody || cadence {
+		if watermarks || custody || cadence || events {
 			return nil
 		}
 		p := Profiles[table]
+		if admissions {
+			values, err := holdFromAdmission(r.Values)
+			if err != nil {
+				return err
+			}
+			r.Values = values
+		}
 		if err := dropUnreadColumns(p, &r.Values); err != nil {
 			return err
 		}
@@ -71,20 +94,13 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return err
 			}
 		}
-		// Usage events before failed usage all succeeded and forgave nothing;
-		// before rating at ingest none recorded charges.
-		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-3 {
-			r.Values = append(r.Values, new("succeeded"), new("0"))
-		}
-		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, new("[]"))
+		// Holds before batch settlement kept no captured charges, and before
+		// versioned answers no versions: a request's hold has neither.
+		if p.Name == "limit_holds" && len(r.Values) < len(p.Columns) && len(r.Values) >= len(p.Columns)-3 {
+			r.Values = append(r.Values, make([]*string, len(p.Columns)-len(r.Values))...)
 		}
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
-		}
-		// Admissions before usage estimates held host-stated estimates only.
-		if p.Name == "admission_operations" && len(r.Values) == len(p.Columns)-2 {
-			r.Values = append(r.Values, nil, nil)
 		}
 		// Orders before usage orders had none of their columns; before
 		// embedded pay URLs hosted ones only; before renewals none of their
@@ -191,6 +207,37 @@ func embeddedFromUIMode(p Profile, values []*string) {
 		}
 	}
 }
+
+// holdFromAdmission is an archived admission as its request hold. Its id is
+// derived from the admission's identity, so a restore reads the same rows.
+// Admissions before usage estimates have no estimate_usage or rate_cards.
+func holdFromAdmission(v []*string) ([]*string, error) {
+	if len(v) != 16 && len(v) != 18 {
+		return nil, fmt.Errorf("invalid archived admission")
+	}
+	at := func(i int) *string {
+		if i < len(v) {
+			return v[i]
+		}
+		return nil
+	}
+	if v[0] == nil || v[1] == nil || v[9] == nil {
+		return nil, fmt.Errorf("invalid archived admission")
+	}
+	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("openrails.admission:"+*v[0]+":"+*v[1]+":"+*v[9])).String()
+	updated := v[9]
+	for _, t := range []*string{v[14], v[15]} {
+		if t != nil {
+			updated = t
+		}
+	}
+	return []*string{v[0], &id, v[9], v[2], v[3], nil, nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
+}
+
+// addedTables are tables an archive from before them lacks; it holds none
+// of their rows.
+var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
+	"usage_daily": true, "usage_accruals": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}

@@ -37,9 +37,9 @@ const (
 	FamSubsCanceled   Family = "subs_canceled"   // flow over subscriptions (canceled_at)
 	FamSubsEnded      Family = "subs_ended"      // flow over subscriptions (ended_at)
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
-	FamUsage          Family = "usage"           // flow over usage_events (occurred_at)
+	FamUsage          Family = "usage"           // flow over daily usage rollups (day_at)
 	FamTransitions    Family = "transitions"     // flow over subscription_status_transitions (occurred_at)
-	FamDenials        Family = "denials"         // flow over admission_denials_hourly (hour_at)
+	FamLimitsReached  Family = "limits_reached"  // flow over limit windows (reached_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over product access and product keys
 	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
@@ -142,18 +142,17 @@ var Dimensions = []Dimension{
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
-	{Name: "customer", Description: "the customer id (usage and admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
+	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
 	{Name: "outcome", Description: "usage outcome: succeeded | failed (failed usage is charged only past the customer's grace)", Values: []string{"succeeded", "failed"}},
-	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
-	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
+	{Name: "rate_card", Description: "metered event type (usage_daily.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); attempt_failure_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "attempt_kind", Description: "payment attempt kind stamped at write time: initial | renewal | unknown (pre-instrumentation or imported rows)", Values: []string{"initial", "renewal", "unknown"}},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
-	{Name: "denial_reason", Description: "admission denial reason", Values: []string{"insufficient_balance", "insufficient_credit", "budget_exceeded", "failure_rate_limited", "delegated_spend_not_allowed"}},
+	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
 	// #1116 attempt and rebill-cycle dimensions.
 	{Name: "owner", Description: "who collects the subscription: engine (OpenRails) | nmi_schedule (NMI charges, OpenRails duns) | provider (Stripe Billing, CCBill) | none (no subscription)", Values: []string{"engine", "nmi_schedule", "provider", "none"}},
 	{Name: "kind", Description: "attempt kind: verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | invoice", Values: []string{"verify", "initial", "upgrade", "rebill", "dunning_retry", "customer_retry", "invoice"}},
@@ -284,15 +283,14 @@ var families = map[Family]familySpec{
 	},
 	FamUsage: {
 		Kind:     "flow",
-		From:     `billing.usage_events ue`,
-		TimeExpr: `ue.occurred_at`,
+		From:     `billing.usage_daily ud`,
+		TimeExpr: `ud.day_at`,
 		DimExprs: map[string]string{
-			"currency":  `ue.currency`,
-			"customer":  `ue.customer_id::text`,
-			"invoker":   `ue.invoker_id`,
-			"outcome":   `ue.outcome`,
-			"sku":       `COALESCE(ue.resource, '')`,
-			"rate_card": `ue.event_type`,
+			"currency":  `ud.currency`,
+			"customer":  `ud.customer_id::text`,
+			"invoker":   `ud.invoker`,
+			"outcome":   `ud.outcome`,
+			"rate_card": `ud.event_type`,
 		},
 	},
 	FamTransitions: {
@@ -303,14 +301,16 @@ var families = map[Family]familySpec{
 			"cancel_type": `COALESCE(st.cancel_type, 'unknown')`,
 		},
 	},
-	FamDenials: {
+	FamLimitsReached: {
 		Kind:     "flow",
-		From:     `billing.admission_denials_hourly ad`,
-		TimeExpr: `ad.hour_at`,
+		From:     `billing.limit_windows lw`,
+		TimeExpr: `lw.reached_at`,
 		DimExprs: map[string]string{
-			"denial_reason": `ad.denial_reason`,
-			"customer":      `ad.customer_id::text`,
+			"limit":    `lw.limit_key`,
+			"customer": `lw.customer_id::text`,
 		},
+		// Spend windows are policy, not declared limits.
+		BaseWhere: `lw.reached_at IS NOT NULL AND lw.limit_key NOT LIKE 'spend:%'`,
 	},
 	FamSubsSnapshot: {
 		Kind: "snapshot",
@@ -831,34 +831,34 @@ var Measures = []Measure{
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
-		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold; failed usage counts only what was charged past grace",
-		Formula:     "SUM(amount) of usage events",
-		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
+		Description: "consumed (recognized) usage spend in native currency units, from daily usage rollups; cash-in is credits_sold; failed usage counts only what was charged past grace",
+		Formula:     "SUM(amount) of daily usage rollups",
+		Expr:        `COALESCE(SUM(ud.amount), 0)::bigint`,
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
 	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count",
-		Description: "count of metered usage events (raw volume; per-dimension token counts live host-side)",
-		Formula:     "COUNT(usage events)",
-		Expr:        `COUNT(*)`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
+		Description: "count of settled usage items (raw volume; per-dimension token counts live host-side)",
+		Formula:     "SUM(requests) of the rollups' event rows",
+		Expr:        `COALESCE(SUM(ud.requests) FILTER (WHERE ud.meter_key = ''), 0)::bigint`,
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
 	{Name: "forgiven_usage", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
 		Description: "failed usage the customer's grace absorbed (native currency units): what failures cost the merchant",
-		Formula:     "SUM(forgiven_amount) of failed usage events",
-		Expr:        `COALESCE(SUM(ue.forgiven_amount), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
+		Formula:     "SUM(forgiven_amount) of failed usage",
+		Expr:        `COALESCE(SUM(ud.forgiven_amount), 0)::bigint`,
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
 	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
 		Description: "distinct customers with any usage in the bucket (the API platform's WAU/MAU)",
-		Formula:     "COUNT(DISTINCT customers) over usage events",
-		Expr:        `COUNT(DISTINCT ue.customer_id)`,
-		Dims:        []string{"currency", "sku", "rate_card"}},
+		Formula:     "COUNT(DISTINCT customers) over daily usage rollups",
+		Expr:        `COUNT(DISTINCT ud.customer_id)`,
+		Dims:        []string{"currency", "rate_card"}},
 	{Name: "credit_utilization", Class: ClassRatio, Unit: "ratio", Money: true, Num: "usage_revenue", Den: "credits_sold",
 		Description: "usage consumed / credits sold in the same window (per currency)",
 		Formula:     "usage_revenue / credits_sold",
 		Dims:        []string{"currency"}},
-	{Name: "admission_denials", Class: ClassAdditive, Family: FamDenials, Unit: "count",
-		Description: "admission denials (hourly aggregates flushed from the Redis hot path once each hour closes)",
-		Formula:     "SUM(hourly denial counters)",
-		Expr:        `COALESCE(SUM(ad.denials), 0)::bigint`,
-		Dims:        []string{"denial_reason", "customer"}},
+	{Name: "limits_reached", Class: ClassAdditive, Family: FamLimitsReached, Unit: "count",
+		Description: "limit windows that reached capacity, dated when they first did",
+		Formula:     "COUNT(limit windows by reached_at)",
+		Expr:        `COUNT(*)`,
+		Dims:        []string{"limit", "customer"}},
 	// --- snapshots ------------------------------------------------------------------
 	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
 		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
@@ -963,7 +963,7 @@ var Caveats = []string{
 	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
 	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; a purchase quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
-	"admission_denials are hourly aggregates flushed from Redis once each hour closes; the current hour is not yet counted",
+	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only",
 	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
 }

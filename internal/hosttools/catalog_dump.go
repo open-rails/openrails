@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -191,6 +192,9 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 	if err := dumpCatalogRateCards(ctx, database, merchantID, byID); err != nil {
 		return nil, err
 	}
+	if m.Limits, err = dumpCatalogLimits(ctx, database, merchantID, byID); err != nil {
+		return nil, err
+	}
 	if len(byID) > 0 {
 		m.Products = map[string]catalog.ApplyProduct{}
 		for _, p := range byID {
@@ -233,6 +237,7 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		}
 		p.Entitlements = catalog.Value([]string{})
 		p.RateCards = catalog.Value([]catalog.RateCard{})
+		p.Limits = catalog.Value(map[string]catalog.Capacity{})
 		if len(row.Entitlements) == 0 || string(row.Entitlements) == "null" {
 			p.Entitlements = catalog.Value([]string{})
 		} else if err := json.Unmarshal(row.Entitlements, &p.Entitlements.Value); err != nil {
@@ -266,6 +271,36 @@ func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUI
 			out = map[string]catalog.ApplyMeter{}
 		}
 		out[row.Key] = m
+	}
+	return out, nil
+}
+
+// dumpCatalogLimits are the declared limits, and each product's capacities.
+func dumpCatalogLimits(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*dumpedProduct) (map[string]catalog.ApplyLimit, error) {
+	q := database.Gen(ctx)
+	defs, err := limits.Definitions(ctx, q, merchantID)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog limits: %w", err)
+	}
+	var out map[string]catalog.ApplyLimit
+	for _, d := range defs {
+		if out == nil {
+			out = map[string]catalog.ApplyLimit{}
+		}
+		cards := d.RateCards
+		if cards == nil {
+			cards = []catalog.LimitRateCard{}
+		}
+		out[d.Key] = catalog.ApplyLimit{Unit: catalog.Value(d.Unit), Reset: catalog.Value(d.Reset), Overrun: catalog.Value(d.Overrun), RateCards: catalog.Value(cards)}
+	}
+	rows, err := q.ListCatalogProductLimits(ctx, merchantID)
+	if err != nil {
+		return nil, fmt.Errorf("list product limits: %w", err)
+	}
+	for _, row := range rows {
+		if p := byID[row.ProductID]; p != nil {
+			p.Limits.Value[row.LimitKey] = catalog.Capacity(row.Capacity)
+		}
 	}
 	return out, nil
 }

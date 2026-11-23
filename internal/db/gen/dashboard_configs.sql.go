@@ -35,13 +35,13 @@ func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const hasUsageActivity = `-- name: HasUsageActivity :one
-SELECT (EXISTS (SELECT 1 FROM billing.usage_events
-WHERE usage_events.merchant_id = $1::uuid
+SELECT (EXISTS (SELECT 1 FROM billing.usage_daily
+WHERE usage_daily.merchant_id = $1::uuid
 )
     OR EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
 `
 
-// Any usage-stream signal for the merchant: metered events or purchased credit
+// Any usage-stream signal for the merchant: settled usage or purchased credit
 // lots. Decides whether the default dashboard seeds usage widgets.
 func (q *Queries) HasUsageActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, hasUsageActivity, merchantID)

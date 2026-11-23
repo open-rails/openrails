@@ -674,18 +674,15 @@ func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent
 }
 
 // usageCycleHours is the order's own billing cycle for the dunning schedule:
-// its period, floored at the shortest retriable cycle (a threshold order can
-// cover an hour and must not be written off on its first decline). 0 =
-// unknown, which the schedule refuses (ErrUnknownCycle).
+// its period, floored at the shortest retriable cycle. A threshold order can
+// cover minutes, or one instant when the day's usage posts as it is billed,
+// and must not be written off on its first decline. 0 = no period, which the
+// schedule refuses (ErrUnknownCycle).
 func usageCycleHours(order gen.BillingOrder) int {
-	if order.PeriodStartsAt == nil || order.PeriodEndsAt == nil {
+	if order.PeriodStartsAt == nil || order.PeriodEndsAt == nil || !order.PeriodEndsAt.After(*order.PeriodStartsAt) {
 		return 0
 	}
-	cycleHours := collection.CycleHoursBetween(*order.PeriodStartsAt, *order.PeriodEndsAt)
-	if cycleHours > 0 && cycleHours < collection.MinRetryCycleHours {
-		return collection.MinRetryCycleHours
-	}
-	return cycleHours
+	return max(collection.CycleHoursBetween(*order.PeriodStartsAt, *order.PeriodEndsAt), collection.MinRetryCycleHours)
 }
 
 // logCollectionDecline names the bucket and its consequence on every

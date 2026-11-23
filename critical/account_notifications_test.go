@@ -413,7 +413,9 @@ func TestOrderNotificationRecovery(t *testing.T) {
 			a, p, customer := usageBillingWorld(t, true, false, accountInbox(t, &inbox))
 			p.core.SetDecline("4242", "202")
 			oneUsage(t, a.alpha, usageInput(customer, "declined-usage", 3))
-			a.clock.Advance(time.Hour) // The threshold order needs a nonzero billing period.
+			// The day's usage posts as its threshold order is billed: the
+			// order covers one instant and still duns on the shortest cycle.
+			a.clock.Advance(time.Hour)
 			fleet := startFleet(t, a.world)
 			runUsageDue(t, fleet)
 			require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)

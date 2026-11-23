@@ -147,7 +147,14 @@ func TestRefundRecovery(t *testing.T) {
 		require.NoError(t, err)
 		a.clock.Advance(10 * time.Minute)
 		fleet := quietFleet(t, a.world)
-		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		// The full read cannot finish, so the refresh fails incomplete and
+		// River would retry it.
+		attempt := refreshAttempt(t, fleet, a.alpha.MerchantID().UUID())
+		require.Equal(t, river.EventKindJobFailed, attempt.Kind)
+		require.NotEmpty(t, attempt.Job.Errors)
+		require.Contains(t, attempt.Job.Errors[len(attempt.Job.Errors)-1].Error, "incomplete")
+		_, err = fleet.JobCancel(t.Context(), attempt.Job.ID)
+		require.NoError(t, err)
 		read, err := a.alpha.GetPayment(t.Context(), payment)
 		require.NoError(t, err)
 		require.EqualValues(t, 10_000_000, read.AmountRefunded, "the reversals read records a refund the full read never reaches")

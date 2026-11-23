@@ -11,148 +11,149 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
-func usageMeter(t *testing.T, client *openrails.Client, amount int64) (*billing.Product, billing.SetMeterParams) {
-	t.Helper()
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "usage-compute", DisplayName: "Usage compute"})
-	require.NoError(t, err)
-	params := billing.SetMeterParams{EventType: "compute", ValueProperty: "units", Aggregation: catalog.AggregationSum, RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: amount, DivideBy: 1}}})}
-	_, err = client.SetMeter(t.Context(), "compute", params)
-	require.NoError(t, err)
-	return product, params
-}
-func usageInput(customer billing.CustomerID, id string, units int64) billing.RecordUsageParams {
-	return billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "compute", Dimensions: map[string]int64{"units": units}, Source: "critical", SourceID: id, Metadata: map[string]any{"source": "host work receipt"}}
-}
-func oneUsage(t *testing.T, client *openrails.Client, input billing.RecordUsageParams) *billing.UsageEvent {
-	t.Helper()
-	rows, err := client.RecordUsage(t.Context(), []billing.RecordUsageParams{input})
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.NoError(t, rows[0].Err())
-	require.Equal(t, http.StatusCreated, rows[0].Status)
-	require.NotNil(t, rows[0].Event)
-	return rows[0].Event
-}
 func TestUsageContracts(t *testing.T) {
 	t.Run("OR-J24-S01/replay-retains-one-immutable-rated-event", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
-		input := usageInput(customer, "stable-event", 2)
-		input.Amount = ptr(int64(200))
-		first := oneUsage(t, w.alpha, input)
-		require.EqualValues(t, 200, first.Amount)
-		require.Len(t, first.Charges, 1)
-		require.EqualValues(t, 2, first.Charges[0].Quantity)
-		input.Dimensions = map[string]int64{"units": 99}
-		input.Metadata = map[string]any{"source": "different replay metadata"}
-		replay, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{input})
-		require.NoError(t, err)
-		require.NoError(t, replay[0].Err())
-		require.Equal(t, http.StatusOK, replay[0].Status)
-		require.True(t, replay[0].Event.Replayed)
-		require.Equal(t, first.ID, replay[0].Event.ID)
-		require.Equal(t, first.Dimensions, replay[0].Event.Dimensions)
-		require.Equal(t, first.Metadata, replay[0].Event.Metadata)
-		require.Equal(t, first.Charges, replay[0].Event.Charges)
-		for _, changed := range []billing.RecordUsageParams{func() billing.RecordUsageParams { v := input; v.Amount = ptr(int64(201)); return v }(), func() billing.RecordUsageParams { v := input; v.Outcome = billing.UsageFailed; return v }()} {
-			refused, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{changed})
-			require.NoError(t, err)
-			require.ErrorIs(t, refused[0].Err(), billing.ErrIdempotencyKeyReused)
+		lease := newLease()
+		items := numbered(1, usageInput(customer, "stable-event", 2))
+		settleUsage(t, w.alpha, lease, items...)
+		balance(t, w.alpha, customer, 800, 200, 1000)
+
+		// A lost reply resends the item: it answers its receipt and settles
+		// nothing again.
+		replay := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.EqualValues(t, 1, replay.Usage.ThroughN)
+		require.Empty(t, replay.Usage.Refused)
+		balance(t, w.alpha, customer, 800, 200, 1000)
+
+		// A changed payload under the settled number is refused.
+		for _, change := range []func(*billing.LeaseUsage){
+			func(u *billing.LeaseUsage) { u.Dimensions = map[string]int64{"units": 99} },
+			func(u *billing.LeaseUsage) { u.Outcome, u.Amount = billing.UsageFailed, ptr(int64(201)) },
+		} {
+			changed := items[0]
+			change(&changed)
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: []billing.LeaseUsage{changed}})
+			refused := refusedItem(t, out, 1)
+			require.Equal(t, http.StatusUnprocessableEntity, refused.Status)
+			require.Equal(t, billing.CodeIdempotencyKeyReused, refused.Error.Code)
 		}
-		read, err := w.alpha.GetUsageEvent(t.Context(), first.ID)
-		require.NoError(t, err)
-		require.False(t, read.Replayed)
-		require.Equal(t, first.Charges, read.Charges)
-		events, err := w.alpha.ListUsageEvents(t.Context(), billing.UsageEventListParams{CustomerID: customer})
-		require.NoError(t, err)
-		require.Len(t, events.Items, 1)
+		balance(t, w.alpha, customer, 800, 200, 1000)
+
+		// The day's usage posts once, after the day ends, with what it was for.
+		fleet := startFleet(t, w)
+		nextDay(w)
+		postDays(t, fleet)
 		balance(t, w.alpha, customer, 800, 0, 800)
 		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
-		require.Len(t, ledger.Items, 2)
+		require.Len(t, ledger.Items, 2, "the grant and one usage deduction")
+		deductions := usageDeductions(t, w.alpha, customer)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -200, deductions[0].Amount)
+		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[0].Usage.Lines)
+		postDays(t, fleet)
+		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted day posts nothing again")
 	})
+
 	t.Run("OR-J24-S02/late-event-uses-ingest-price-and-prior-event-stays-pinned", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		_, params := usageMeter(t, w.alpha, 100)
-		original := usageInput(customer, "before-price-edit", 2)
-		first := oneUsage(t, w.alpha, original)
-		require.EqualValues(t, 200, first.Amount)
+		lease := newLease()
+		original := numbered(1, usageInput(customer, "before-price-edit", 2))
+		settleUsage(t, w.alpha, lease, original...)
+		balance(t, w.alpha, customer, 800, 200, 1000)
 		params.RateCard.Value.Price.PerUnit.UnitAmount = 300
 		_, err := w.alpha.SetMeter(t.Context(), "compute", params)
 		require.NoError(t, err)
 		late := usageInput(customer, "late-after-price-edit", 2)
-		late.OccurredAt = ptr(w.clock.Now().Add(-time.Hour))
-		recorded := oneUsage(t, w.alpha, late)
-		require.EqualValues(t, 600, recorded.Amount, "new events are rated at ingestion, including late delivery")
-		require.WithinDuration(t, *late.OccurredAt, recorded.OccurredAt, time.Microsecond)
-		replay, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{original})
-		require.NoError(t, err)
-		require.NoError(t, replay[0].Err())
-		require.EqualValues(t, 200, replay[0].Event.Amount)
-		require.Equal(t, first.ID, replay[0].Event.ID)
+		late.OccurredAt = w.clock.Now().Add(-time.Hour)
+		settleUsage(t, w.alpha, lease, numbered(2, late)...)
+		balance(t, w.alpha, customer, 200, 800, 1000)
+		// The first item stays as it settled: its resend charges nothing.
+		replay := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: original})
+		require.Empty(t, replay.Usage.Refused)
+		balance(t, w.alpha, customer, 200, 800, 1000)
 		changed := params
 		changed.ValueProperty = "different-units"
 		_, err = w.alpha.SetMeter(t.Context(), "compute", changed)
-		require.ErrorIs(t, err, billing.ErrConflict)
+		require.ErrorIs(t, err, billing.ErrConflict, "settled usage pins the meter's reading")
+		var outside []billing.LeaseUsage
 		for i, at := range []time.Time{w.clock.Now().Add(-36 * 24 * time.Hour), w.clock.Now().Add(time.Hour)} {
 			invalid := usageInput(customer, fmt.Sprintf("outside-%d", i), 2)
-			invalid.OccurredAt = &at
-			rows, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{invalid})
-			require.NoError(t, err)
-			require.Error(t, rows[0].Err())
+			invalid.OccurredAt = at
+			outside = append(outside, invalid)
 		}
-		balance(t, w.alpha, customer, 200, 0, 200)
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(3, outside...)})
+		require.EqualValues(t, 4, out.Usage.ThroughN, "a refused item is settled as refused")
+		for _, n := range []int64{3, 4} {
+			refused := refusedItem(t, out, n)
+			require.Equal(t, http.StatusBadRequest, refused.Status)
+			require.Equal(t, billing.CodeInvalidParam, refused.Error.Code)
+		}
+		balance(t, w.alpha, customer, 200, 800, 1000)
 	})
+
 	t.Run("OR-J24-S03/batch-item-errors-preserve-neighbors-and-merchant-boundary", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		usageMeter(t, a.alphaRemote, 100)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
-		input := []billing.RecordUsageParams{usageInput(alice, "alice-good", 2), usageInput(billing.CustomerID{}, "invalid-customer", 5), usageInput(bob, "bob-good", 3)}
-		rows, err := a.alphaRemote.RecordUsage(t.Context(), input)
-		require.NoError(t, err)
-		require.Len(t, rows, 3)
-		require.NoError(t, rows[0].Err())
-		require.EqualValues(t, 200, rows[0].Event.Amount)
-		require.Error(t, rows[1].Err())
-		require.Nil(t, rows[1].Event)
-		require.NoError(t, rows[2].Err())
-		require.Equal(t, bob, rows[2].Event.CustomerID)
-		require.EqualValues(t, 300, rows[2].Event.Amount)
-		_, err = a.betaRemote.GetUsageEvent(t.Context(), rows[0].Event.ID)
-		require.ErrorIs(t, err, billing.ErrNotFound)
-		foreign, err := a.betaRemote.ListUsageEvents(t.Context(), billing.UsageEventListParams{CustomerID: alice})
-		require.NoError(t, err)
-		require.Empty(t, foreign.Items)
-		status, raw := a.request(t, http.MethodPost, "/v1/app/usage-events", a.aliceToken, billing.RecordUsageBatchParams{Items: input})
+		lease := newLease()
+		items := numbered(1, usageInput(alice, "alice-good", 2), usageInput(billing.CustomerID{}, "invalid-customer", 5), usageInput(bob, "bob-good", 3))
+		out := syncLease(t, a.alphaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.EqualValues(t, 3, out.Usage.ThroughN)
+		require.Len(t, out.Usage.Refused, 1)
+		refused := refusedItem(t, out, 2)
+		require.Equal(t, http.StatusBadRequest, refused.Status)
+		require.Equal(t, billing.CodeInvalidParam, refused.Error.Code)
+
+		// Another merchant's credential names another lease under the same id:
+		// it sees none of the first merchant's receipts.
+		foreign := syncLease(t, a.betaRemote, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, usageInput(billing.CustomerID(uuid.New()), "beta-own", 1))})
+		require.EqualValues(t, 1, foreign.Usage.ThroughN)
+		require.Empty(t, foreign.Usage.Refused)
+		status, raw := a.request(t, http.MethodPost, "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
-		own, err := a.alphaRemote.ListUsageEvents(t.Context(), billing.UsageEventListParams{CustomerID: alice})
-		require.NoError(t, err)
-		require.Len(t, own.Items, 1)
+
+		report := func(token string) billing.Usage {
+			q := url.Values{"currency": {"USD"}, "group_by": {"event_type"}}
+			status, raw := a.request(t, http.MethodGet, "/v1/me/usage?"+q.Encode(), token, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var page billing.Usage
+			require.NoError(t, json.Unmarshal(raw, &page))
+			return page
+		}
+		own := report(a.aliceToken)
+		require.Len(t, own.Rows, 1)
+		require.EqualValues(t, 200, own.Rows[0].Amount)
+		require.EqualValues(t, 1, own.Rows[0].EventCount)
+		require.EqualValues(t, 300, report(a.bobToken).Rows[0].Amount)
 	})
+
 	t.Run("OR-J24-S04/grouped-pagination-retains-exact-customer-totals", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		usageMeter(t, a.alphaRemote, 10)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
+		var items []billing.LeaseUsage
 		for i, row := range []struct {
-			resource string
-			units    int64
+			invoker string
+			units   int64
 		}{{"alpha", 10}, {"alpha", 20}, {"beta", 40}, {"gamma", 5}} {
 			input := usageInput(alice, fmt.Sprintf("report-%d", i), row.units)
-			input.Resource = row.resource
-			oneUsage(t, a.alphaRemote, input)
+			input.Invoker = row.invoker
+			items = append(items, input)
 		}
 		foreign := usageInput(bob, "foreign-report", 90)
-		foreign.Resource = "foreign"
-		oneUsage(t, a.alphaRemote, foreign)
-		q := url.Values{"currency": {"USD"}, "group_by": {"resource"}, "from": {a.clock.Now().Add(-time.Hour).Format(time.RFC3339Nano)}, "to": {a.clock.Now().Add(time.Hour).Format(time.RFC3339Nano)}, "limit": {"1"}}
+		foreign.Invoker = "foreign"
+		settleUsage(t, a.alphaRemote, newLease(), numbered(1, append(items, foreign)...)...)
+		q := url.Values{"currency": {"USD"}, "group_by": {"invoker"}, "from": {a.clock.Now().Add(-time.Hour).Format(time.RFC3339Nano)}, "to": {a.clock.Now().Add(time.Hour).Format(time.RFC3339Nano)}, "limit": {"1"}}
 		var all []billing.UsageRow
 		var firstCursor string
 		for i := 0; i < 3; i++ {
@@ -190,7 +191,11 @@ func TestUsageContracts(t *testing.T) {
 		require.Len(t, scoped.Rows, 1)
 		require.Equal(t, "foreign", scoped.Rows[0].Key)
 		require.EqualValues(t, 900, scoped.Rows[0].Amount)
+		q.Set("group_by", "resource")
+		status, raw = a.request(t, http.MethodGet, "/v1/me/usage?"+q.Encode(), a.aliceToken, nil)
+		require.Equal(t, http.StatusBadRequest, status, "usage keeps no free-form resource to group by: %s", raw)
 	})
+
 	t.Run("OR-J24-S05/charged-failure-replayed-past-its-key-window-charges-once", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			m := w.cfg.Merchants["alpha"]
@@ -203,36 +208,36 @@ func TestUsageContracts(t *testing.T) {
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: amount, Source: "critical", SourceID: id}})
 			require.NoError(t, err)
 		}
-		failed := func(id string, amount int64) billing.RecordUsageParams {
+		failed := func(id string, amount int64) billing.LeaseUsage {
 			v := usageInput(customer, id, 0)
 			v.Outcome, v.Amount = billing.UsageFailed, ptr(amount)
 			return v
 		}
 		grant("lot-a", 300)
-		first := oneUsage(t, w.alpha, failed("failed-once", 400))
-		require.EqualValues(t, 300, first.Amount)
-		require.EqualValues(t, 100, first.ForgivenAmount)
+		lease := newLease()
+		first := numbered(1, failed("failed-once", 400))
+		settleUsage(t, w.alpha, lease, first...)
+		// A charged failure posts its own legs at once: 300 past the 100 of grace.
 		balance(t, w.alpha, customer, 0, 0, 0)
+		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
+		require.NoError(t, err)
+		require.Len(t, ledger.Items, 2, "the grant and the failure's charge")
 
-		// Past the key window lot A is empty and lot B funds the customer.
+		// Past the old key window lot A is empty and lot B funds the customer;
+		// the lease still knows what it settled.
 		w.clock.Advance(36 * 24 * time.Hour)
 		grant("lot-b", 1000)
-		refused, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{failed("failed-once", 500)})
-		require.NoError(t, err)
-		require.ErrorIs(t, refused[0].Err(), billing.ErrIdempotencyKeyReused)
-		replay, err := w.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{failed("failed-once", 400)})
-		require.NoError(t, err)
-		require.NoError(t, replay[0].Err())
-		require.Equal(t, http.StatusOK, replay[0].Status)
-		require.True(t, replay[0].Event.Replayed)
-		require.Equal(t, first.ID, replay[0].Event.ID)
-		require.EqualValues(t, 300, replay[0].Event.Amount)
+		changed := first[0]
+		changed.Amount = ptr(int64(500))
+		refused := refusedItem(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: []billing.LeaseUsage{changed}}), 1)
+		require.Equal(t, billing.CodeIdempotencyKeyReused, refused.Error.Code)
+		replay := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: first})
+		require.Empty(t, replay.Usage.Refused)
+		require.EqualValues(t, 1, replay.Usage.ThroughN)
 		balance(t, w.alpha, customer, 1000, 0, 1000)
 
-		// The replay counted nothing toward this window's grace.
-		next := oneUsage(t, w.alpha, failed("failed-next", 100))
-		require.EqualValues(t, 0, next.Amount)
-		require.EqualValues(t, 100, next.ForgivenAmount)
+		// The resend counted nothing toward this window's grace.
+		settleUsage(t, w.alpha, lease, numbered(2, failed("failed-next", 100))...)
 		balance(t, w.alpha, customer, 1000, 0, 1000)
 	})
 }

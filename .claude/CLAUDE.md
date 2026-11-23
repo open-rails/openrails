@@ -194,8 +194,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   every one against PostgreSQL.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
   state), stated in its table comment; `docs/operations.md` lists the periods.
-  `usage_events` and `admission_operations` are partitioned by month, so every read of
-  them names a time range.
+  `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
+  them names a time range. Usage keeps no events: settlement writes aggregates only.
 - External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`docs/provider-managed-orders.md`);

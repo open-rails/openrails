@@ -81,9 +81,9 @@ var merchantCols = map[Family]string{
 	FamSubsCanceled:   "s.merchant_id",
 	FamSubsEnded:      "s.merchant_id",
 	FamGrants:         "g.merchant_id",
-	FamUsage:          "ue.merchant_id",
+	FamUsage:          "ud.merchant_id",
 	FamTransitions:    "st.merchant_id",
-	FamDenials:        "ad.merchant_id",
+	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
 	FamEntitlSnapshot: "e.merchant_id",
 	FamBalance:        "lt.merchant_id",
@@ -275,10 +275,10 @@ LEFT JOIN LATERAL (
     GROUP BY la.customer_id, la.currency
   ) bal
   JOIN (
-    SELECT ue.customer_id, ue.currency, SUM(ue.amount) AS burn
-    FROM billing.usage_events ue
-    WHERE ue.merchant_id = $1 AND ue.occurred_at > edge.bucket - interval '7 days' AND ue.occurred_at <= edge.bucket
-    GROUP BY ue.customer_id, ue.currency
+    SELECT ud.customer_id, ud.currency, SUM(ud.amount) AS burn
+    FROM billing.usage_daily ud
+    WHERE ud.merchant_id = $1 AND ud.day_at >= edge.bucket - interval '7 days' AND ud.day_at < edge.bucket
+    GROUP BY ud.customer_id, ud.currency
   ) burn ON burn.customer_id = bal.customer_id AND burn.currency = bal.currency
   WHERE burn.burn > 0 AND bal.balance <= (burn.burn / 7.0) * %d
 ) x ON TRUE

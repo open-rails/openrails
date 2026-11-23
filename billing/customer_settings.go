@@ -9,9 +9,10 @@ type CustomerSettingsResult struct {
 }
 
 // CustomerSettings is the configuration a merchant keeps for one customer:
-// its credit lines, trust levels, low-balance lines, billing policy and
-// invoice terms. A field at its default is absent: a currency with no credit
-// limit, trust level or own low-balance line is not listed, a null
+// its credit lines, trust levels, low-balance lines, limit overrides,
+// billing policy and invoice terms. A field at its default is absent: a
+// currency with no credit limit, trust level or own low-balance line, and a
+// limit with no override, is not listed, a null
 // BillingPolicy inherits the customer's tier's or the merchant's default
 // policy, and a null InvoiceProfile invoices at net 0, charged automatically.
 type CustomerSettings struct {
@@ -19,6 +20,7 @@ type CustomerSettings struct {
 	CreditLimits    []CreditLimit         `json:"credit_limits"`
 	TrustLevels     []TrustLevel          `json:"trust_levels"`
 	LowBalanceLines []LowBalanceLine      `json:"low_balance_lines"`
+	Limits          []LimitOverride       `json:"limits"`
 	BillingPolicy   *string               `json:"billing_policy"`
 	InvoiceProfile  *InvoiceProfile       `json:"invoice_profile"`
 }
@@ -84,8 +86,10 @@ type TrustLevel struct {
 // UpdateCustomerParams changes the settings it names for one customer; an
 // omitted field is unchanged. CreditLimits, TrustLevels and LowBalanceLines
 // merge by currency: amount 0 or an empty level clears that currency's, and a
-// low-balance line replaces that currency's (nulls inherit the merchant's). A
-// null BillingPolicy or InvoiceProfile clears it. Every field can change the
+// low-balance line replaces that currency's (nulls inherit the merchant's).
+// Limits merge by limit: an override replaces what the customer's products
+// give, and inherit clears it. A null BillingPolicy or InvoiceProfile clears
+// it. Every field can change the
 // customer's spending authority: a person signed in needs a recent sign-in for
 // any write.
 type UpdateCustomerParams struct {
@@ -93,6 +97,7 @@ type UpdateCustomerParams struct {
 	CreditLimits    []CreditLimit                 `json:"credit_limits,omitempty"`
 	TrustLevels     []TrustLevel                  `json:"trust_levels,omitempty"`
 	LowBalanceLines []LowBalanceLine              `json:"low_balance_lines,omitempty"`
+	Limits          []LimitOverride               `json:"limits,omitempty"`
 	BillingPolicy   catalog.Field[string]         `json:"billing_policy,omitzero"`
 	InvoiceProfile  catalog.Field[InvoiceProfile] `json:"invoice_profile,omitzero"`
 }

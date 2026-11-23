@@ -16,7 +16,7 @@ response; [every error code](error-codes.md); shapes in
   (`null` on the last page). `?limit=` 1–500, default 50. No offset, no total.
   Merchant lists of records take `?ids=a,b,c` (1–100, alone): one page in the
   list's order, unknown or foreign ids absent.
-- **Batches.** 1–100 items (usage events and admissions: 1,000). A batch either
+- **Batches.** 1–100 items (a lease sync's usage and admissions: 1,000). A batch either
   applies all or none, naming the offending `items[i].field`, or answers one
   `{status, …, error}` per item.
 - **Statuses.** `200` result, `201` created, `202` accepted and unresolved, `204`
@@ -29,8 +29,12 @@ response; [every error code](error-codes.md); shapes in
   terms are `422 idempotency_key_reused`. Generate one when the buyer decides to
   buy, store it with the order and resend it on every retry; a new key is a new
   purchase (a duplicate subscription or permanent product is refused, a timed pass
-  or credit pack sells again). Admissions use `request_id`, usage events
-  `(source, source_id)`, running charges `reference`. There is no response cache.
+  or credit pack sells again). Admissions use `request_id`, running charges
+  `reference`. The server deduplicates lease usage by its lease and `n` only,
+  never by `source_id`; a gate using Redis also posts a `Record` repeated with
+  the same customer, event type, `source` and `source_id` once, until 15 minutes
+  after the first settles ([the gate](../usage-billing.md#the-gate)). There is no
+  response cache.
 - **Discovery.** A route the deployment does not serve is not registered
   (`404 route_not_found`).
 
@@ -56,7 +60,7 @@ lists `[]`.
 Ids are prefixed text, accepted only in their own spelling (a bare UUID or another
 prefix is `400 invalid_param`): `prod_`, `sub_`, `pay_`, `pm_`, `ord_`, `psp_`,
 `oat_` (order attempt), `att_` (payment attempt), `cyc_` (rebill cycle), `cgr_`,
-`txn_`, `ent_`, `pa_`, `pmig_`, `uev_`, `hev_`, `ntf_`, `fnd_`, `awh_`. Customer and
+`txn_`, `ent_`, `pa_`, `pmig_`, `lse_` (lease), `hev_`, `ntf_`, `fnd_`, `awh_`. Customer and
 merchant ids are UUIDs. A price id is `product-key:price-key:v1` (versions start at
 one; reserved bytes percent-encoded, `:` as `%3A`); URL-encode it as a path
 segment. A product or price *key* is a separate handle, never accepted where an id

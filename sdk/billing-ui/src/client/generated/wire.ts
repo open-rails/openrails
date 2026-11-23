@@ -11,6 +11,12 @@ export type AccessTenure = {
   seconds: Record<string, number> | null
 }
 
+export type AdjustLimitParams = {
+  limit?: string
+  amount?: string
+  source_id?: string
+}
+
 export type AdminAccess = {
   admin: "none" | "read" | "update"
   catalog: "none" | "read" | "update"
@@ -30,9 +36,11 @@ export type Admission = {
   request_id: string
   customer_id: string
   allowed: boolean
-  blocked_by: "abuse" | "budget" | "money" | null
+  blocked_by: "abuse" | "budget" | "limit" | "money" | null
   deny_code: string | null
   retry_after_seconds: number | null
+  limit: string | null
+  resets_at: string | null
   currency: string
   estimated_amount: string
   start_capacity_amount: string
@@ -129,6 +137,14 @@ export type Application = {
   entitlement_replacements?: EntitlementReplacement[]
   products?: Record<string, ApplyProduct>
   meters?: Record<string, ApplyMeter>
+  limits?: Record<string, ApplyLimit>
+}
+
+export type ApplyLimit = {
+  unit?: string | null
+  reset?: LimitReset | null
+  overrun?: "admit_while_positive" | "require_estimate" | null
+  rate_cards?: LimitRateCard[] | null
 }
 
 export type ApplyMeter = {
@@ -171,6 +187,7 @@ export type ApplyProduct = {
   prices?: Record<string, ApplyPrice>
   provider_prices?: Record<string, ApplyProviderPrice>
   rate_cards?: RateCard[] | null
+  limits?: Record<string, string> | null
 }
 
 export type ApplyProviderPrice = {
@@ -233,6 +250,7 @@ export type BalanceTransaction = {
   resource: string | null
   source: string
   source_id: string
+  usage: UsageDeduction | null
   created_at: string
 }
 
@@ -339,7 +357,6 @@ export type CaptureReceipt = {
   estimated_amount: string
   amount: string
   charges: UsageCharge[]
-  usage_event_id: string | null
   balance_transaction_id: string | null
   replayed: boolean
 }
@@ -402,7 +419,7 @@ export type CatalogApplicationReceipt = {
 }
 
 export type CatalogChange = {
-  object: "meter" | "price" | "product"
+  object: "limit" | "meter" | "price" | "product"
   key: string
   product_key: string | null
   fields: string[]
@@ -410,7 +427,7 @@ export type CatalogChange = {
 }
 
 export type CatalogConflict = {
-  object: "meter" | "price" | "product"
+  object: "limit" | "meter" | "price" | "product"
   key: string
   product_key: string | null
   currency: string | null
@@ -779,11 +796,24 @@ export type CustomerEntitlement = {
   quantity: number | null
 }
 
+export type CustomerLimit = {
+  customer_id: string
+  limit: string
+  unit: string
+  capacity: string
+  used: string
+  held: string
+  remaining: string
+  window_starts_at: string | null
+  resets_at: string | null
+}
+
 export type CustomerSettings = {
   usage_billing?: UsageBillingAccount[]
   credit_limits: CreditLimit[]
   trust_levels: TrustLevel[]
   low_balance_lines: LowBalanceLine[]
+  limits: LimitOverride[]
   billing_policy: string | null
   invoice_profile: InvoiceProfile | null
 }
@@ -1166,6 +1196,55 @@ export type HeldEntitlements = {
   truncated: boolean
 }
 
+export type Hold = {
+  customer_id: string
+  limit_set: string
+  currency: string
+  limits: HoldLimit[]
+  rate_cards: HoldRateCard[]
+  price_bounds: PriceBound[]
+  safe: string | null
+  version: number
+}
+
+export type HoldApplied = {
+  customer_id?: string
+  limit_set?: string
+  version?: number
+}
+
+export type HoldCommitment = {
+  customer_id?: string
+  limit_set?: string
+  limits?: LimitCommitment[]
+}
+
+export type HoldLimit = {
+  limit: string
+  unit: string
+  held: string
+  overrun: "admit_while_positive" | "require_estimate"
+  window_starts_at: string | null
+  window_ends_at: string | null
+}
+
+export type HoldRateCard = {
+  limit: string | null
+  meter: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  group_by: Record<string, string> | null
+  filter: Record<string, string[]> | null
+  allowance: Allowance | null
+  price: RatePrice
+}
+
+export type HoldReturn = {
+  customer_id?: string
+  limit_set?: string
+}
+
 export type InvoiceContact = {
   name: string
   email: string
@@ -1178,6 +1257,101 @@ export type InvoiceProfile = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string
+}
+
+export type Lease = {
+  id: string
+  expires_at: string
+  live: boolean
+}
+
+export type LeaseUsage = {
+  n?: number
+  customer_id?: string
+  limit_set?: string | null
+  invoker?: string
+  invoker_type?: "customer" | "delegated"
+  currency?: string
+  source?: string
+  source_id?: string
+  outcome?: "failed" | "succeeded"
+  event_type?: string
+  dimensions?: Record<string, number> | null
+  metadata?: Record<string, unknown> | null
+  amount?: string | null
+  occurred_at?: string
+}
+
+export type LeaseUsageRefusal = {
+  n: number
+  status: number
+  error: ErrorDetails | null
+}
+
+export type LeaseUsageResult = {
+  through_n: number
+  refused: LeaseUsageRefusal[]
+}
+
+export type LeaseWant = {
+  customer_id?: string
+  invoker?: string
+  invoker_type?: "customer" | "delegated"
+  trust_level?: string | null
+  roles?: string[]
+  resource?: string | null
+  currency?: string
+  usage?: UsageEstimate | null
+  estimated_amount?: string | null
+}
+
+export type LeaseWantResult = {
+  status: number
+  limit_set: string | null
+  error: ErrorDetails | null
+  refusal: Refusal | null
+}
+
+export type Limit = {
+  key: string
+  unit: string
+  reset: LimitReset
+  overrun: "admit_while_positive" | "require_estimate"
+  rate_cards: LimitRateCard[]
+  products: LimitProduct[]
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export type LimitCommitment = {
+  limit?: string
+  window_starts_at?: string | null
+  committed?: string
+}
+
+export type LimitOverride = {
+  inherit?: boolean
+  limit: string
+  capacity: string
+}
+
+export type LimitProduct = {
+  product_id: string
+  product_key: string
+  capacity: string
+}
+
+export type LimitRateCard = {
+  meter: string
+  filter?: Record<string, string[]>
+  price: RatePrice
+}
+
+export type LimitReset = {
+  kind: "billing_period" | "fixed" | "lifetime" | "rate" | "rolling" | "session"
+  window_seconds?: number
+  anchor?: "first_use" | "subscription"
 }
 
 export type LinkPSPImportParams = {
@@ -1242,6 +1416,7 @@ export type MerchantConfigurationState = {
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
+  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -1910,6 +2085,13 @@ export type Price = {
   updated_at: string
 }
 
+export type PriceBound = {
+  meter: string
+  cell: string | null
+  unit_amount: string
+  divide_by: string
+}
+
 export type PriceChangeDraft = {
   product_key: string
   price_key: string
@@ -2158,35 +2340,18 @@ export type RecordExternalPaymentParams = {
   paid_at?: string
 }
 
-export type RecordUsageBatchParams = {
-  items?: RecordUsageParams[]
-}
-
-export type RecordUsageBatchResult = {
-  items: UsageEventResult[]
-}
-
-export type RecordUsageParams = {
-  customer_id?: string
-  invoker?: string
-  invoker_type?: "customer" | "delegated"
-  currency?: string
-  event_type?: string
-  dimensions?: Record<string, number>
-  amount?: string
-  outcome?: "failed" | "succeeded"
-  resource?: string
-  metadata?: Record<string, unknown>
-  source?: string
-  source_id?: string
-  occurred_at?: string
-}
-
 export type RefundPaymentParams = {
   amount?: string
   full?: boolean
   reason?: string
   revoke_access?: boolean
+}
+
+export type Refusal = {
+  deny_code: string
+  limit: string | null
+  resets_at: string | null
+  retry_after_seconds: number | null
 }
 
 export type ReleaseAdmissionBatchParams = {
@@ -2271,6 +2436,14 @@ export type SetDashboardParams = {
 
 export type SetDefaultPaymentMethodParams = {
   payment_method_id?: string
+}
+
+export type SetLimitParams = {
+  unit?: string
+  reset?: LimitReset
+  overrun?: "admit_while_positive" | "require_estimate"
+  rate_cards?: LimitRateCard[]
+  expected_revision?: number
 }
 
 export type SetLowBalanceLineParams = {
@@ -2529,6 +2702,24 @@ export type SubscriptionRetryNowResult = {
   replayed: boolean
 }
 
+export type SyncLeasesParams = {
+  lease_id?: string
+  usage?: LeaseUsage[]
+  wants?: LeaseWant[]
+  returns?: HoldReturn[]
+  close?: boolean
+  committed?: HoldCommitment[]
+  applied?: HoldApplied[]
+}
+
+export type SyncLeasesResult = {
+  lease: Lease
+  usage: LeaseUsageResult
+  wants: LeaseWantResult[]
+  holds: Hold[]
+  limits: CustomerLimit[]
+}
+
 export type TieredPrice = {
   mode?: "graduated" | "volume"
   tiers?: RateTier[]
@@ -2551,6 +2742,7 @@ export type UpdateCustomerParams = {
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
   low_balance_lines?: LowBalanceLine[]
+  limits?: LimitOverride[]
   billing_policy?: string | null
   invoice_profile?: InvoiceProfile | null
 }
@@ -2572,6 +2764,7 @@ export type UpdateMerchantConfigurationParams = {
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
+  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -2625,7 +2818,7 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "invoker" | "meter" | "resource"
+  group_by: "event_type" | "invoker" | "meter"
   rows: UsageRow[]
   next_cursor: string | null
 }
@@ -2662,38 +2855,25 @@ export type UsageCharge = {
   amount: string
 }
 
+export type UsageDeduction = {
+  day: string
+  amount: string
+  lines: UsageDeductionLine[]
+}
+
+export type UsageDeductionLine = {
+  meter_key: string
+  cell: string | null
+  requests: number
+  quantity: number
+  amount: string
+}
+
 export type UsageEstimate = {
   amount?: string
   event_type?: string
   dimensions?: Record<string, number>
   metadata?: Record<string, unknown>
-}
-
-export type UsageEvent = {
-  id: string
-  customer_id: string
-  invoker: string
-  currency: string
-  event_type: string
-  dimensions: Record<string, number> | null
-  outcome: "failed" | "succeeded"
-  amount: string
-  forgiven_amount: string
-  resource: string | null
-  metadata: Record<string, unknown> | null
-  source: string
-  source_id: string
-  charges: UsageCharge[]
-  balance_transaction_id: string | null
-  occurred_at: string
-  created_at: string
-  replayed: boolean
-}
-
-export type UsageEventResult = {
-  status: number
-  event: UsageEvent | null
-  error: ErrorDetails | null
 }
 
 export type UsageRow = {
@@ -2702,7 +2882,6 @@ export type UsageRow = {
   event_count: number
   amount: string
   quantity: number | null
-  dimensions: Record<string, number> | null
 }
 
 export type WebhookReceipt = {

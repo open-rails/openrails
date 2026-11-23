@@ -19,11 +19,15 @@ ORDER BY currency;
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     -- Same hold total as GetFinancialHeldAmount.
-    (COALESCE((SELECT SUM(ao.estimated_amount)
-              FROM billing.admission_operations ao
-             WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
-               AND ao.admitted_at >= sqlc.arg(held_since)::timestamptz
-               AND ao.expires_at > sqlc.arg(as_of)::timestamptz), 0)
+    (COALESCE((SELECT SUM(hp.held)
+              FROM billing.limit_hold_parts hp
+              JOIN billing.limit_holds lh ON lh.merchant_id = hp.merchant_id AND lh.id = hp.hold_id AND lh.created_at = hp.hold_created_at
+             WHERE hp.merchant_id = a.merchant_id AND hp.customer_id = a.customer_id AND hp.limit_key = 'balance'
+               AND lh.currency = a.currency AND lh.state = 'open'
+               AND hp.hold_created_at >= sqlc.arg(held_since)::timestamptz AND lh.created_at >= sqlc.arg(held_since)::timestamptz
+               AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
+                   ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+                       AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
      -- Retired credit funds its refund from the retired account. Only value
      -- still in customer_balance remains reserved here; an unswept expired
      -- source is entirely unavailable, including its unrefunded remainder.
@@ -43,6 +47,11 @@ SELECT
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
            AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What the customer's usage accrued and the ledger has not taken.
+     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
+              FROM billing.usage_accruals ua
+             WHERE ua.merchant_id = a.merchant_id AND ua.customer_id = a.customer_id AND ua.currency = a.currency
+               AND ua.amount > ua.posted_amount), 0)
      -- What the customer's running charges have accrued and not posted.
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc

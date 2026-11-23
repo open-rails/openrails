@@ -45,11 +45,8 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 	require.NoError(t, err)
 	_, err = a.alpha.SetMeter(t.Context(), "sdk-units", billing.SetMeterParams{EventType: "sdk-compute", ValueProperty: "units", Aggregation: catalog.AggregationSum, RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: compute.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10, DivideBy: 1}}})})
 	require.NoError(t, err)
-	usage, err := a.alpha.RecordUsage(t.Context(), []billing.RecordUsageParams{{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "sdk-compute", Dimensions: map[string]int64{"units": 2}, Source: "critical-sdk", SourceID: "worked-usage"}})
-	require.NoError(t, err)
-	require.Len(t, usage, 1)
-	require.NoError(t, usage[0].Err())
-	require.EqualValues(t, 20, usage[0].Event.Amount)
+	oneUsage(t, a.alpha, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EventType: "sdk-compute",
+		Dimensions: map[string]int64{"units": 2}, Source: "critical-sdk", SourceID: "worked-usage"})
 	for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
 		known, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 		require.NoError(t, err)
