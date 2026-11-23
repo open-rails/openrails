@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export GOWORK=off
 export GOMAXPROCS=${GOMAXPROCS:-2}
-modules=(. server adapters/authkit examples)
+modules=()
+while IFS= read -r mod; do modules+=("$(dirname "$mod")"); done < <(git ls-files go.mod '*/go.mod')
 in_modules() {
   local module
   for module in "${modules[@]}"; do (cd "$module" && "$@"); done
@@ -34,6 +35,27 @@ build() {
   in_modules go build -o /dev/null ./...
   bash scripts/check-embedded-auth-boundary.sh
 }
+# Every build tag in the repository at once; no constraint negates one, so
+# this run sees every file.
+vet() {
+  local tags
+  if git grep -n '^//go:build.*!' -- '*.go'; then
+    echo 'A negated build constraint hides files from the tagged vet.' >&2
+    return 1
+  fi
+  tags="$(git grep -h '^//go:build' -- '*.go' | cut -c11- | grep -oE '[[:alnum:]_.]+' | sort -u | paste -sd, -)"
+  in_modules go vet -tags "$tags" ./...
+}
+# Package tests need nothing outside their process. A test that needs
+# PostgreSQL, Redis, Vault or a fixture process is tagged integration.
+unit() {
+  local module packages
+  for module in "${modules[@]}"; do
+    # A module of only tagged tests (critical/server-fixture) has none.
+    packages="$(cd "$module" && go list ./...)"
+    [[ -z "$packages" ]] || (cd "$module" && go test ./...)
+  done
+}
 browser() {
   # The SDK and both consuming apps share this one SDK build. E2E behavior
   # runs only in critical/public_sdk_test.go against its real service fixture.
@@ -60,13 +82,15 @@ chart() {
 case "${1:-all}" in
   guards) guards ;;
   build) build ;;
+  vet) vet ;;
+  unit) unit ;;
   browser) browser ;;
   chart) chart ;;
   critical) bash scripts/critical-tests.sh ;;
   all)
     : "${OPENRAILS_CRITICAL_DSN:?Set an owned disposable PostgreSQL URL}"
-    guards; build; browser; chart
+    guards; build; vet; unit; browser; chart
     bash scripts/critical-tests.sh
     ;;
-  *) echo 'usage: scripts/check.sh [guards|build|browser|chart|critical|all]' >&2; exit 2 ;;
+  *) echo 'usage: scripts/check.sh [guards|build|vet|unit|browser|chart|critical|all]' >&2; exit 2 ;;
 esac
