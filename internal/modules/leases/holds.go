@@ -521,7 +521,7 @@ func (r *syncRun) renew() error {
 		return cmp.Or(compareUUID(a.key.customer, b.key.customer), strings.Compare(a.key.limitSet, b.key.limitSet), compareTasks(a, b))
 	})
 	for _, t := range tasks {
-		if over, err := r.pastBudget(); err != nil || over {
+		if over, err := r.pastBudget(workBudget); err != nil || over {
 			return err
 		}
 		if t.hold == nil {

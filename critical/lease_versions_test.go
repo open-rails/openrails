@@ -752,6 +752,37 @@ func TestLeaseVersions(t *testing.T) {
 		require.Zero(t, visit.Used, "the session ended with its hour, and lapsed use started none")
 		require.Nil(t, visit.WindowStartsAt)
 	})
+
+	t.Run("OR-J24-S34/a-backlog-across-a-thousand-customers-settles-a-bounded-prefix-per-sync", func(t *testing.T) {
+		w := newWorld(t)
+		usageMeter(t, w.alpha, 1)
+		items := make([]billing.LeaseUsage, billing.MaxSyncUsageItems)
+		for i := range items {
+			items[i] = usageInput(billing.CustomerID(uuid.New()), fmt.Sprintf("backlog-%d", i), 1)
+		}
+		items = numbered(1, items...)
+		lease := newLease()
+		through, syncs := int64(0), 0
+		for through < int64(len(items)) {
+			syncs++
+			require.LessOrEqual(t, syncs, len(items)/20, "each sync settles at least one chunk of 20 customers")
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items[through:]})
+			require.Empty(t, out.Usage.Refused, "items past the prefix are neither settled nor refused")
+			require.Greater(t, out.Usage.ThroughN, through, "every sync settles a prefix")
+			require.LessOrEqual(t, out.Usage.ThroughN-through, int64(100), "of at most 100 customers")
+			through = out.Usage.ThroughN
+		}
+		require.GreaterOrEqual(t, syncs, len(items)/100, "the backlog drained over several syncs")
+		// A resend of the whole backlog answers it as settled and charges
+		// nothing again.
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.Empty(t, out.Usage.Refused)
+		require.EqualValues(t, len(items), out.Usage.ThroughN)
+		var charged int64
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount), 0)::bigint FROM "+pgx.Identifier{w.schema, "usage_accruals"}.Sanitize()+" WHERE merchant_id = $1",
+			w.alpha.MerchantID().UUID()).Scan(&charged))
+		require.EqualValues(t, len(items), charged, "every item settled exactly once")
+	})
 }
 
 func TestLimitArchive(t *testing.T) {

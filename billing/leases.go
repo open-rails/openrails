@@ -169,7 +169,8 @@ type Lease struct {
 }
 
 // LeaseUsageResult is the lease's highest settled item and the items the
-// sync refused, which posted nothing.
+// sync refused, which posted nothing. A sync settles a prefix of its items:
+// one past ThroughN that it did not refuse is unsettled, to send again.
 type LeaseUsageResult struct {
 	ThroughN int64               `json:"through_n"`
 	Refused  []LeaseUsageRefusal `json:"refused"`

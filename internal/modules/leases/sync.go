@@ -73,6 +73,14 @@ const (
 	// or a renewal, well inside the commit guard: a want it has no time for
 	// is answered 503 service_unavailable and sent again, the renewals wait.
 	workBudget = 2500 * time.Millisecond
+	// A sync settles a prefix of its new usage: the items of at most
+	// maxSettleCustomers customers, in chunks of settleChunk customers, and
+	// no chunk after the first once settleBudget of real transaction time
+	// has passed. The rest are neither settled nor refused, and come again,
+	// so a backlog drains over several syncs inside the commit guard.
+	maxSettleCustomers = 100
+	settleChunk        = 20
+	settleBudget       = 1500 * time.Millisecond
 )
 
 // Syncer syncs leases of the context's merchant.
@@ -215,11 +223,11 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	return out, err
 }
 
-// pastBudget reports a sync past its work budget, by the transaction's real
-// elapsed time.
-func (r *syncRun) pastBudget() (bool, error) {
+// pastBudget reports a sync past budget, by the transaction's real elapsed
+// time.
+func (r *syncRun) pastBudget(budget time.Duration) (bool, error) {
 	elapsed, err := r.q.SyncElapsed(r.ctx)
-	return time.Duration(elapsed)*time.Microsecond > workBudget, err
+	return time.Duration(elapsed)*time.Microsecond > budget, err
 }
 
 // deferWant answers a want the sync had no time for: retryable, it comes
@@ -283,6 +291,63 @@ type syncRun struct {
 	safe *bool
 	// usedBefore is each part's unsized usage before this sync settled.
 	usedBefore map[partRef]int64
+	// prefix is the new usage this sync may settle.
+	prefix prefix
+}
+
+// prefix is the run of new usage items one sync may settle: from first, the
+// items whose numbers follow on (end exclusive), naming at most
+// maxSettleCustomers customers. gap is an item at end that skips a number.
+type prefix struct {
+	first, end int
+	gap        bool
+	customers  []billing.CustomerID
+}
+
+// usagePrefix finds the sync's prefix of new usage: items at or below the
+// lease's settled number are resends.
+func (r *syncRun) usagePrefix() prefix {
+	through := r.lease.SettledThroughN
+	var p prefix
+	for p.first < len(r.p.Usage) && r.p.Usage[p.first].N <= through {
+		p.first++
+	}
+	seen := map[billing.CustomerID]bool{}
+	last := through
+	p.end = p.first
+	for i := p.first; i < len(r.p.Usage); i++ {
+		u := r.p.Usage[i]
+		if u.N != last+1 {
+			p.gap = true
+			break
+		}
+		if !u.CustomerID.IsZero() && !seen[u.CustomerID] {
+			if len(seen) == maxSettleCustomers {
+				break
+			}
+			seen[u.CustomerID] = true
+			p.customers = append(p.customers, u.CustomerID)
+		}
+		last = u.N
+		p.end = i + 1
+	}
+	return p
+}
+
+// chunkEnd is where the chunk of the prefix from start ends: before the item
+// naming its (settleChunk+1)th customer.
+func (r *syncRun) chunkEnd(start int) int {
+	seen := map[billing.CustomerID]bool{}
+	for i := start; i < r.prefix.end; i++ {
+		c := r.p.Usage[i].CustomerID
+		if !seen[c] {
+			if len(seen) == settleChunk {
+				return i
+			}
+			seen[c] = true
+		}
+	}
+	return r.prefix.end
 }
 
 type partRef struct {
@@ -401,6 +466,7 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	if err := r.findMoved(); err != nil {
 		return nil, err
 	}
+	r.prefix = r.usagePrefix()
 	if err := r.lockCustomers(); err != nil {
 		return nil, err
 	}
@@ -455,7 +521,7 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		return nil, err
 	}
 	for i := range r.p.Wants {
-		over, err := r.pastBudget()
+		over, err := r.pastBudget(workBudget)
 		if err != nil {
 			return nil, err
 		}
@@ -571,9 +637,12 @@ func (r *syncRun) findMoved() error {
 	return err
 }
 
-// lockCustomers locks, in id order, every customer the sync names and every
-// customer whose holds it may change: it writes a lease's parts only under
-// their customer's lock, as every other writer of them does.
+// lockCustomers locks, in id order, the customers of the usage prefix and
+// those the sync's wants, returns and applied versions name, then, without
+// waiting, the customers of the most urgent holds no item names: one held
+// elsewhere is skipped and its holds wait for a later sync. The sync writes a
+// lease's parts only under their customer's lock, as every other writer of
+// them does.
 func (r *syncRun) lockCustomers() error {
 	r.locked = map[uuid.UUID]bool{}
 	var ids []uuid.UUID
@@ -584,8 +653,8 @@ func (r *syncRun) lockCustomers() error {
 		r.locked[c.UUID()] = true
 		ids = append(ids, c.UUID())
 	}
-	for _, u := range r.p.Usage {
-		add(u.CustomerID)
+	for _, c := range r.prefix.customers {
+		add(c)
 	}
 	for _, w := range r.p.Wants {
 		add(w.CustomerID)
@@ -599,14 +668,6 @@ func (r *syncRun) lockCustomers() error {
 				add(a.CustomerID)
 			}
 		}
-		// Of the holds no item names, the most urgent few, within the bound.
-		tasks, err := r.rank(func(holdKey) bool { return true })
-		if err != nil {
-			return err
-		}
-		for _, t := range tasks[:min(len(tasks), maxRenewals)] {
-			add(billing.CustomerID(t.key.customer))
-		}
 	}
 	slices.SortFunc(ids, compareUUID)
 	for _, id := range ids {
@@ -614,6 +675,30 @@ func (r *syncRun) lockCustomers() error {
 			return err
 		}
 		if _, err := r.q.LockCustomerForSpend(r.ctx, gen.LockCustomerForSpendParams{MerchantID: r.merchant, ID: id}); err != nil {
+			return err
+		}
+	}
+	if !r.live && !r.p.Close {
+		return nil
+	}
+	// Of the holds no item names, the most urgent few, within the bound.
+	tasks, err := r.rank(func(holdKey) bool { return true })
+	if err != nil {
+		return err
+	}
+	var extra []uuid.UUID
+	for _, t := range tasks[:min(len(tasks), maxRenewals)] {
+		if c := t.key.customer; !r.locked[c] && !slices.Contains(extra, c) && (r.Allows == nil || r.Allows(billing.CustomerID(c))) {
+			extra = append(extra, c)
+		}
+	}
+	slices.SortFunc(extra, compareUUID)
+	for _, id := range extra {
+		_, err := r.q.TryLockCustomerForSpend(r.ctx, gen.TryLockCustomerForSpendParams{MerchantID: r.merchant, ID: id})
+		switch {
+		case err == nil:
+			r.locked[id] = true
+		case !errors.Is(err, pgx.ErrNoRows):
 			return err
 		}
 	}
@@ -899,7 +984,9 @@ func (r *syncRun) current(k holdKey, at time.Time) *hold {
 	return best
 }
 
-// settle settles the sync's usage in order and answers what it resent.
+// settle settles the sync's usage prefix in order and answers what it
+// resent: through_n covers what settled, and items past it are neither
+// settled nor refused.
 func (r *syncRun) settle() (int64, []receipt, error) {
 	var receipts []receipt
 	if err := json.Unmarshal(r.lease.Receipts, &receipts); err != nil {
@@ -915,10 +1002,7 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 	for i, u := range r.p.Usage {
 		digests[i] = itemDigest(u)
 	}
-	first := 0
-	for first < len(r.p.Usage) && r.p.Usage[first].N <= through {
-		first++
-	}
+	first := r.prefix.first
 	for _, rc := range receipts {
 		var covered []int
 		for i := 0; i < first; i++ {
@@ -945,57 +1029,73 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 			}
 		}
 	}
-	// New items settle in order; a gap stops them.
-	var items []money.UsageItem
-	var index []int
+	// New items settle in order, chunk by chunk while the sync has time; a
+	// gap stops them once every item before it settled.
 	var refusals []billing.LeaseUsageRefusal
 	refuseNew := func(i int, err error) {
 		status, details := Details(err)
 		refusals = append(refusals, billing.LeaseUsageRefusal{N: r.p.Usage[i].N, Status: status, Error: &details})
 	}
-	last := through
-	for i := first; i < len(r.p.Usage); i++ {
-		u := r.p.Usage[i]
-		if u.N != last+1 {
-			for j := i; j < len(r.p.Usage); j++ {
-				refuse(r.p.Usage[j].N, apperr.New(http.StatusConflict, billing.CodeUsageOutOfOrder,
-					fmt.Sprintf("usage item %d skips %d, which the lease has not settled", r.p.Usage[j].N, last+1)).WithParam(fmt.Sprintf("usage[%d].n", j)))
+	end := first
+	for end < r.prefix.end {
+		if end > first {
+			over, err := r.pastBudget(settleBudget)
+			if err != nil {
+				return 0, nil, err
 			}
-			break
+			if over {
+				break
+			}
 		}
-		last = u.N
-		item, err := r.usageItem(u)
-		if err != nil {
-			refuseNew(i, prefixParam(err, fmt.Sprintf("usage[%d]", i)))
-			continue
+		stop := r.chunkEnd(end)
+		var items []money.UsageItem
+		var index []int
+		for i := end; i < stop; i++ {
+			item, err := r.usageItem(r.p.Usage[i])
+			if err != nil {
+				refuseNew(i, prefixParam(err, fmt.Sprintf("usage[%d]", i)))
+				continue
+			}
+			items = append(items, item)
+			index = append(index, i)
 		}
-		items = append(items, item)
-		index = append(index, i)
+		if len(items) > 0 {
+			batch, err := r.money.PriceUsageTx(r.ctx, r.q, items)
+			if err != nil {
+				return 0, nil, err
+			}
+			if err := r.money.SettleUsageTx(r.ctx, r.q, batch); err != nil {
+				return 0, nil, err
+			}
+			for j, res := range batch.Results {
+				i := index[j]
+				if res.Err != nil {
+					if _, coded := asCoded(res.Err); !coded {
+						return 0, nil, res.Err
+					}
+					refuseNew(i, prefixParam(res.Err, fmt.Sprintf("usage[%d]", i)))
+					continue
+				}
+				r.touched[r.p.Usage[i].CustomerID.UUID()] = true
+			}
+		}
+		end = stop
 	}
-	if last == through {
+	if r.prefix.gap && end == r.prefix.end {
+		next := through + 1
+		if end > first {
+			next = r.p.Usage[end-1].N + 1
+		}
+		for j := end; j < len(r.p.Usage); j++ {
+			refuse(r.p.Usage[j].N, apperr.New(http.StatusConflict, billing.CodeUsageOutOfOrder,
+				fmt.Sprintf("usage item %d skips %d, which the lease has not settled", r.p.Usage[j].N, next)).WithParam(fmt.Sprintf("usage[%d].n", j)))
+		}
+	}
+	if end == first {
 		slices.SortFunc(r.result.Usage.Refused, func(a, b billing.LeaseUsageRefusal) int { return cmp.Compare(a.N, b.N) })
 		return through, receipts, nil
 	}
-	if len(items) > 0 {
-		batch, err := r.money.PriceUsageTx(r.ctx, r.q, items)
-		if err != nil {
-			return 0, nil, err
-		}
-		if err := r.money.SettleUsageTx(r.ctx, r.q, batch); err != nil {
-			return 0, nil, err
-		}
-		for j, res := range batch.Results {
-			i := index[j]
-			if res.Err != nil {
-				if _, coded := asCoded(res.Err); !coded {
-					return 0, nil, res.Err
-				}
-				refuseNew(i, prefixParam(res.Err, fmt.Sprintf("usage[%d]", i)))
-				continue
-			}
-			r.touched[r.p.Usage[i].CustomerID.UUID()] = true
-		}
-	}
+	last := r.p.Usage[end-1].N
 	slices.SortFunc(refusals, func(a, b billing.LeaseUsageRefusal) int { return cmp.Compare(a.N, b.N) })
 	r.result.Usage.Refused = append(r.result.Usage.Refused, refusals...)
 	slices.SortFunc(r.result.Usage.Refused, func(a, b billing.LeaseUsageRefusal) int { return cmp.Compare(a.N, b.N) })
@@ -1007,11 +1107,7 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 		}
 		rc.Refused = append(rc.Refused, refusedEntry{N: ref.N, Code: code})
 	}
-	var newDigests []string
-	for i := first; i < len(r.p.Usage) && r.p.Usage[i].N <= last; i++ {
-		newDigests = append(newDigests, digests[i])
-	}
-	rc.Digest = settlementDigest(newDigests)
+	rc.Digest = settlementDigest(digests[first:end])
 	receipts = append(receipts, rc)
 	return last, receipts, nil
 }

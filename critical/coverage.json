@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 402,
+  "scenario_count": 403,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -732,6 +732,11 @@
       "id": "OR-J24-S33",
       "journey": "J24",
       "name": "Usage without a grant opens no window of any reset kind, so a late buyer gets the whole capacity and unpaid use starts no session; usage while a grant has lapsed is not enforced but counts in the windows the grant opened while they last, which the returning grant reads"
+    },
+    {
+      "id": "OR-J24-S34",
+      "journey": "J24",
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
       "id": "OR-J25-S01",

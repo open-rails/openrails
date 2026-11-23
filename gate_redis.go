@@ -1368,6 +1368,10 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 	}
 	s.setLease(lease, newValid)
 	s.observe(gen)
+	if partial(params.Usage, res, syncErr) {
+		// The rest of the usage goes with the next sync, at once.
+		_ = s.rdb.LPush(ctx, s.g(ns, "kick"), "1").Err()
+	}
 	if gap != "" {
 		if err := s.moveGap(ctx, ns, lease, gap); err != nil {
 			return err
@@ -2040,9 +2044,15 @@ func (s *sharedGate) closeGroup(ctx context.Context, ns string) error {
 	if perr != nil || valid <= 1 || time.Now().UnixMilli() >= valid {
 		return nil
 	}
-	for batch := 0; batch < 10; batch++ {
+	ctx, cancel := boundContext(ctx)
+	defer cancel()
+	// Each sync settles a prefix of the stream; the next sends the rest.
+	for sent := false; ctx.Err() == nil; sent = true {
 		entries, _, _, err := s.readUsage(ctx, ns, lease)
 		if err != nil {
+			return nil
+		}
+		if sent && len(entries) == 0 {
 			return nil
 		}
 		params := billing.SyncLeasesParams{LeaseID: id, Usage: make([]billing.LeaseUsage, len(entries)), Wants: []billing.LeaseWant{}, Returns: []billing.HoldReturn{},
@@ -2066,7 +2076,8 @@ func (s *sharedGate) closeGroup(ctx context.Context, ns string) error {
 		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
-		if len(entries) < billing.MaxSyncUsageItems {
+		if len(entries) == 0 || res.Usage.ThroughN < entries[0].item.N {
+			// Nothing left, or nothing more this process can settle.
 			return nil
 		}
 	}

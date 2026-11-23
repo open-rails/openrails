@@ -40,6 +40,7 @@ type fakeSync struct {
 	dropReply int
 	reject    int
 	stall     bool
+	perSync   int // new items one sync settles, 0 every one, as a server settling a prefix
 	noHolds   bool
 	block     chan struct{}
 	capHeld   int
@@ -179,8 +180,9 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	touched := map[billing.CustomerID]bool{}
 	res := billing.SyncLeasesResult{Lease: billing.Lease{ID: p.LeaseID, ExpiresAt: time.Now().Add(10 * time.Second).UTC(), Live: live},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}, Wants: []billing.LeaseWantResult{}, Holds: []billing.Hold{}, Limits: []billing.CustomerLimit{}}
+	fresh := 0
 	for i, u := range p.Usage {
-		if f.stall {
+		if f.stall || f.perSync > 0 && fresh == f.perSync && u.N > lease.through {
 			break
 		}
 		n := u.N
@@ -199,6 +201,7 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		lease.through, lease.items[n] = n, string(body)
+		fresh++
 		f.firstSeen = append(f.firstSeen, n)
 		touched[u.CustomerID] = true
 		units := u.Dimensions["units"]
@@ -1308,6 +1311,31 @@ func TestGateNeverReusesTheNumberOfAFailedPut(t *testing.T) {
 		}
 		if _, ok := outbox.items[billing.LeaseUsageRef{LeaseID: first, N: 2}]; !ok {
 			t.Fatal("the leaked item is still the outbox's only item under its number")
+		}
+	})
+}
+
+func TestGateResendsUsageASyncLeftUnsettled(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
+		f.set(func(f *fakeSync) { f.perSync, f.firstSeen = 2, nil })
+		for i := range 5 {
+			if _, err := g.Consume(t.Context(), work(customer, fmt.Sprint(i), 1)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		flush(t, g)
+		f.mu.Lock()
+		seen := slices.Clone(f.firstSeen)
+		f.mu.Unlock()
+		if got := f.settledOf(customer, "quota"); got != 5 || !slices.Equal(seen, []int64{1, 2, 3, 4, 5}) {
+			t.Fatalf("settled %d as %v, want 5 once each in order: items past through_n are sent again", got, seen)
 		}
 	})
 }

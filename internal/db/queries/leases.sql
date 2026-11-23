@@ -30,6 +30,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 -- the transaction's own clock, which a test's business clock leaves alone.
 SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 1000000)::bigint AS elapsed_micros;
 
+-- name: TryLockCustomerForSpend :one
+-- The customer's spend lock unless another transaction holds it: a sync
+-- renews the holds of a customer no item names only when it need not wait.
+-- No row when skipped.
+SELECT id FROM billing.customers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+FOR UPDATE SKIP LOCKED;
+
 -- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
 SET settled_through_n = sqlc.arg(settled_through_n)::bigint, receipts = sqlc.arg(receipts)::jsonb,

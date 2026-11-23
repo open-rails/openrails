@@ -629,6 +629,27 @@ func (q *Queries) SyncElapsed(ctx context.Context) (int64, error) {
 	return elapsed_micros, err
 }
 
+const tryLockCustomerForSpend = `-- name: TryLockCustomerForSpend :one
+SELECT id FROM billing.customers
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+FOR UPDATE SKIP LOCKED
+`
+
+type TryLockCustomerForSpendParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The customer's spend lock unless another transaction holds it: a sync
+// renews the holds of a customer no item names only when it need not wait.
+// No row when skipped.
+func (q *Queries) TryLockCustomerForSpend(ctx context.Context, arg TryLockCustomerForSpendParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, tryLockCustomerForSpend, arg.MerchantID, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateLeaseSettlement = `-- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
 SET settled_through_n = $1::bigint, receipts = $2::jsonb,

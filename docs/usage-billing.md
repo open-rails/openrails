@@ -42,6 +42,10 @@ batch job calls it directly with `usage` alone.
   decided against (null without one), `source_id` is your call id and `amount` a
   stated cost. `occurred_at` may be up to 35 days old and at most 5 minutes ahead.
 - **Replay.** The lease keeps its highest settled number (`usage.through_n`). A
+  sync settles a prefix of its new items: those of at most 100 customers, 20
+  customers at a time, starting no more after 1.5 seconds. `through_n` says how
+  far it got; items past it are neither settled nor refused, so send them
+  again, as a gate does at once. A backlog drains over several syncs. A
   resent item answers as settled; a changed item under a settled `n` is
   `422 idempotency_key_reused`; a gap refuses that item and the ones after it
   `409 usage_out_of_order`. Any credential of the merchant may report on its

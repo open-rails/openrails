@@ -757,11 +757,17 @@ func (g *localGate) syncOnce() {
 	g.persistMoves(moves)
 	g.resendEarlier()
 	g.mu.Lock()
-	more := len(g.wants) > 0 && err == nil || len(sendableLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || len(moves) > 0)
+	more := len(g.wants) > 0 && err == nil || len(sendableLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || len(moves) > 0 || partial(usage, res, err))
 	g.mu.Unlock()
 	if more {
 		g.poke()
 	}
+}
+
+// partial reports a sync that settled some of its usage and not the rest,
+// which the server left for the next sync.
+func partial(usage []billing.LeaseUsage, res *billing.SyncLeasesResult, err error) bool {
+	return err == nil && len(usage) > 0 && res.Usage.ThroughN >= usage[0].N && res.Usage.ThroughN < usage[len(usage)-1].N
 }
 
 // commitments are what open tickets took of each hold, as the sync is built.
