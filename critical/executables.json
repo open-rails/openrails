@@ -1302,6 +1302,9 @@
     "OR-J04-S75": [
       "TestPublicSDK/OR-J04-S75/the-generated-client-gets-the-servers-own-refusals"
     ],
+    "OR-J04-S76": [
+      "TestLogging/OR-J04-S76/every-logger-the-engine-reaches-is-the-hosts"
+    ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
     ],

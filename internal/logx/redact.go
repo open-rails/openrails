@@ -3,6 +3,8 @@ package logx
 import (
 	"regexp"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
 var (
@@ -15,7 +17,8 @@ var (
 	shapedSecret = regexp.MustCompile(`\b(?:(?:sk|rk)_(?:live|test)_[0-9A-Za-z_]+|whsec_[0-9A-Za-z_]+|hvs\.[0-9A-Za-z_-]+)|(?i:\b(?:bearer|basic)\s+[0-9A-Za-z._~+/=-]+)|://[^/\s:@]+:[^/\s@]+@`)
 )
 
-// Redact is s without card numbers or credentials.
+// Redact is s without card numbers or credentials, credential-bearing query
+// parameters (redact.Secrets) included.
 func Redact(s string) string {
 	s = panPattern.ReplaceAllStringFunc(s, func(m string) string {
 		if luhn(m) {
@@ -29,7 +32,7 @@ func Redact(s string) string {
 		}
 		return "[redacted]"
 	})
-	return namedSecret.ReplaceAllString(s, "${1}[redacted]")
+	return namedSecret.ReplaceAllString(redact.Secrets(s), "${1}[redacted]")
 }
 
 func luhn(s string) bool {

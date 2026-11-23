@@ -11,15 +11,16 @@ import (
 
 func TestRedact(t *testing.T) {
 	for in, want := range map[string]string{
-		"card 4111 1111 1111 1111 declined":              "card [card] declined",
-		"pan=4111111111111111&cvv=867":                   "pan=[card]&cvv=[redacted]",
-		`{"cvc":"867","card_number":"5555555555554444"}`: `{"cvc":"[redacted]","card_number":"[redacted]"}`,
-		"order 20251123000001 for 29970000 micros":       "order 20251123000001 for 29970000 micros",
-		"stripe key sk_test_critical refused":            "stripe key [redacted] refused",
-		"Authorization: Bearer eyJhbGciOi.x.y":           "Authorization: [redacted]",
-		"dial postgres://billing:hunter2@db:5432/x":      "dial postgres://[redacted]@db:5432/x",
-		"security_key=abc123 gateway refused":            "security_key=[redacted] gateway refused",
-		"whsec_critical_fixture did not verify":          "[redacted] did not verify",
+		"card 4111 1111 1111 1111 declined":               "card [card] declined",
+		"pan=4111111111111111&cvv=867":                    "pan=[card]&cvv=[redacted]",
+		`{"cvc":"867","card_number":"5555555555554444"}`:  `{"cvc":"[redacted]","card_number":"[redacted]"}`,
+		"order 20251123000001 for 29970000 micros":        "order 20251123000001 for 29970000 micros",
+		"stripe key sk_test_critical refused":             "stripe key [redacted] refused",
+		"Authorization: Bearer eyJhbGciOi.x.y":            "Authorization: [redacted]",
+		"dial postgres://billing:hunter2@db:5432/x":       "dial postgres://[redacted]@db:5432/x",
+		"security_key=abc123 gateway refused":             "security_key=[redacted] gateway refused",
+		"whsec_critical_fixture did not verify":           "[redacted] did not verify",
+		"GET https://x.test/v1?signature=abc&id=7 failed": "GET https://x.test/v1?signature=REDACTED&id=7 failed",
 	} {
 		if got := Redact(in); got != want {
 			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
