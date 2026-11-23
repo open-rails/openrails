@@ -394,7 +394,8 @@ one overdue past the customer's grace ([spend limits](spend-limits.md)).
 - **Collection:** `charge_automatically` orders are charged to the default card for
   the currency once due (no fallback card), each attempt an `order_collection`
   operation; the order is `processing` meanwhile, and a decline leaves it `open`
-  for the retry schedule. `send_invoice` orders are never charged: the customer
+  for the [retry schedule](dunning.md) of a cycle as long as its period, at least
+  4 days. `send_invoice` orders are never charged: the customer
   remits, or pays with `POST /v1/me/orders/{id}/pay`. Funding the balance repays
   owed orders first, oldest first (a ledger transfer, not a payment).
 - **Events:** `order_due` when billed, `order_overdue` once when still owed past
