@@ -187,8 +187,8 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 `logger`, `provider_write_mode`, `engine_admission_hold`,
 `usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
-`checkout_origin`, `return_origins`, `dashboard_base_url`, `trusted_proxies`,
-`cloudflare_proxies`, `ccbill_webhook_ip_allowlist`, `db`, `database`, `redis`,
+`checkout_origin`, `return_origins`, `trusted_proxies`,
+`cloudflare_proxies`, `db`, `database`, `redis`,
 `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
 `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
 `rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
@@ -231,10 +231,8 @@ the deployment does not serve answers `404 route_not_found`.
 | `public_billing_base_url` | where browsers and PSPs reach the server, without `/v1`. Provider callbacks and billing links are built on it; Stripe webhook registration needs it public https |
 | `checkout_origin` | the payment page's own origin ([the payment page](#the-payment-page)); unset issues no pay URLs |
 | `return_origins` | exact origins a purchase's success, cancel and billing-portal return URLs may name; empty allows `public_billing_base_url`'s origin only |
-| `dashboard_base_url` | where alert links into the console point |
 | `trusted_proxies` | CIDRs whose `X-Forwarded-For` is walked; empty trusts none ([proxies](#tls-proxies-cors-and-webhooks)) |
 | `cloudflare_proxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `trusted_proxies`, and the only peers whose `CF-Connecting-IP` AuthKit takes |
-| `ccbill_webhook_ip_allowlist` | extra CCBill webhook sources, honored only for a sandbox CCBill account; `/0` is refused |
 
 **Database**
 
@@ -380,6 +378,7 @@ Metrics and dashboards use no LLM.
 | Key | Meaning |
 |---|---|
 | `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
+| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
 
 `openrails sandbox nmi-gateway` serves such an NMI fake.
 
@@ -718,8 +717,8 @@ the checkout origin. Give one public origin to `public_billing_base_url`,
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `ccbill_webhook_ip_allowlist` for sandbox
-  accounts). Stripe endpoints are registered automatically once
+  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
+  sandbox accounts). Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
