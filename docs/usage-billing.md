@@ -160,9 +160,12 @@ named-unit limit, and its capture counts there.
   left, so the crossing request finishes and the limit stays below zero.
 - **Refusals.** `limit_reached` (`blocked_by: limit`) names the `limit` and its
   `resets_at` (null when nothing refills it), with `retry_after_seconds` until
-  then. A gate's request that would fit but for capacity other gates hold is
-  refused `capacity_held` instead, with `retry_after_seconds`; those holds shrink
-  on their next sync.
+  then: the request would not fit even were every gate's hold returned. A
+  request that would fit but for capacity gates hold, a gate's want or an
+  admission alike, is refused `capacity_held` (`blocked_by: limit`) with
+  `retry_after_seconds` of one sync interval, and those holds shrink at their
+  next sync. The same rule holds for `balance` and spend windows: their own
+  codes mean the request would not fit even then.
 - **`balance`.** The prepaid balance and credit line are the built-in limit
   `balance`, per currency, checked first and refused with the money codes
   (`insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached`). A
@@ -197,8 +200,9 @@ hold owned by one request. The durable `request_id` (1–255 bytes) owns replay;
   and `estimated_amount`. The cards are pinned: capture pays the admitted price. A
   host-stated `estimated_amount` is the alternative. The request is checked
   against `balance`, then its spend windows, then the declared limits it counts
-  toward by key; the first refusal wins and nothing is held. An allowed request
-  holds its estimate in every one of them.
+  toward by key; the first that would not fit even were gates' holds returned
+  refuses it, else one that fits only then makes it `capacity_held`, and
+  nothing is held. An allowed request holds its estimate in every one of them.
 - **Capture** (`{request_id, usage: {…, resource, source, source_id}}`, same event
   type) prices the consumed usage with the pinned cards and settles it in the
   hold's windows as the hold leaves, in one transaction. Above the hold the whole

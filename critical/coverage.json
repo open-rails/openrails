@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 373,
+  "scenario_count": 374,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1097,6 +1097,11 @@
       "id": "OR-J23-S25",
       "journey": "J23",
       "name": "With usage_gate_safe_spend a hold's safe is its money size; a gate spends it only while OpenRails is unreachable, and never for units"
+    },
+    {
+      "id": "OR-J23-S26",
+      "journey": "J23",
+      "name": "An admission that fits only were gates' lease holds returned is capacity_held (Admit and AdmitTx, limits and balance) and takes those holds back at their next sync"
     },
     {
       "id": "OR-J29-S07",

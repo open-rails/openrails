@@ -54,11 +54,13 @@ type Standing struct {
 func (s Standing) Remaining() int64 { return subSat(subSat(s.Capacity, s.Settled), s.Held) }
 
 // Taken is a hold's outcome: the first claim refused (-1 when all fit) and
-// when that limit resets, or what the hold sets aside of each claim.
+// when that limit resets, or what the hold sets aside of each claim. Every
+// claim's standing is read either way.
 type Taken struct {
-	Refused  int
-	ResetsAt *time.Time
-	Held     []int64
+	Refused   int
+	ResetsAt  *time.Time
+	Held      []int64
+	Standings []Standing
 }
 
 // Holder takes and settles one customer's claims. Its caller holds the
@@ -80,9 +82,9 @@ func (h Holder) heldSince() time.Time { return retention.AdmissionsDropBefore(h.
 // reached_at. A refusal opens no window and holds nothing.
 func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 	h.Now = h.Now.UTC()
-	out := Taken{Refused: -1, Held: make([]int64, len(claims))}
+	out := Taken{Refused: -1, Held: make([]int64, len(claims)), Standings: make([]Standing, len(claims))}
 	rows := make([]*gen.GetLimitWindowForUpdateRow, len(claims))
-	standings := make([]Standing, len(claims))
+	standings := out.Standings
 	for _, i := range lockOrder(claims) {
 		c := claims[i]
 		if !c.Opens {
@@ -101,11 +103,7 @@ func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 	}
 	for i, c := range claims {
 		s := standings[i]
-		fits := c.Cost <= s.Remaining()
-		if c.Overrun == catalog.OverrunAdmitWhilePositive {
-			fits = s.Remaining() > 0
-		}
-		if !fits {
+		if !Fits(c, s, 0) {
 			out.Refused, out.ResetsAt = i, h.resetsAt(ctx, c, s)
 			return out, nil
 		}
@@ -207,6 +205,55 @@ func (h Holder) Commit(ctx context.Context, l Locked, added []int64) error {
 func (h Holder) ResetsAt(ctx context.Context, c Claim, s Standing) *time.Time {
 	h.Now = h.Now.UTC()
 	return h.resetsAt(ctx, c, s)
+}
+
+// Fits reports whether c fits with extra more capacity than s leaves, by
+// its overrun.
+func Fits(c Claim, s Standing, extra int64) bool {
+	remaining := addSat(s.Remaining(), extra)
+	if c.Overrun == catalog.OverrunAdmitWhilePositive {
+		return remaining > 0
+	}
+	return c.Cost <= remaining
+}
+
+// Returnable names what live leases hold of one limit: from through to are
+// the windows a request counts in (a rolling limit's buckets, else one),
+// Currency narrows it to balance's, Except is the asking lease (none for an
+// admission).
+type Returnable struct {
+	Key      string
+	Currency *string
+	From, To time.Time
+	Except   uuid.UUID
+}
+
+// ReturnableOf is what a claim counts in.
+func ReturnableOf(c Claim, now time.Time, except uuid.UUID) Returnable {
+	r := Returnable{Key: c.Key, From: c.Window.StartsAt, To: c.Window.StartsAt, Except: except}
+	if c.Reset.Kind == catalog.ResetRolling {
+		r.From = RollingFrom(c.Reset.WindowSeconds, now)
+	}
+	return r
+}
+
+// BalanceReturnable is what balance counts in, in one currency.
+func BalanceReturnable(currency string, except uuid.UUID) Returnable {
+	return Returnable{Key: catalog.BalanceLimit, Currency: &currency, From: Epoch, To: Epoch, Except: except}
+}
+
+// LeaseHeld is what other live leases' holds set aside of r: capacity a
+// refused want or admission would get were they returned. Request holds are
+// never returned, so they do not count.
+func (h Holder) LeaseHeld(ctx context.Context, r Returnable) (int64, error) {
+	return h.Q.SumOtherLeaseHeld(ctx, gen.SumOtherLeaseHeldParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
+		FromWindow: r.From, ToWindow: r.To, HeldSince: h.Now.Add(-retention.AdmissionMaxHold), LeaseID: r.Except, LeaseLiveSince: h.Now.Add(-LeaseLifetime)})
+}
+
+// TakeBack marks those holds to shrink at their leases' next sync.
+func (h Holder) TakeBack(ctx context.Context, r Returnable) error {
+	return h.Q.MarkLeaseHoldsContended(ctx, gen.MarkLeaseHoldsContendedParams{Now: h.Now, MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
+		FromWindow: r.From, ToWindow: r.To, HeldSince: h.Now.Add(-retention.AdmissionMaxHold), LeaseID: r.Except, LeaseLiveSince: h.Now.Add(-LeaseLifetime)})
 }
 
 // Settlement is units a capture or report settles into one limit's window:

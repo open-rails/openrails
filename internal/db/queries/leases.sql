@@ -68,29 +68,31 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 
 -- name: SumOtherLeaseHeld :one
 -- What other live leases' holds set aside of a limit, in the windows from
--- from_window through to_window and the currency: capacity a want would get
--- if they returned it.
+-- from_window through to_window and, when named, the currency (balance's):
+-- capacity a want or an admission would get if they returned it.
 SELECT COALESCE(SUM(p.held), 0)::bigint AS held
 FROM billing.limit_hold_parts p
 JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
 JOIN billing.leases l ON l.merchant_id = h.merchant_id AND l.id = h.lease_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid
-  AND p.limit_key = sqlc.arg(limit_key)::text AND h.currency = sqlc.arg(currency)::text
+  AND p.limit_key = sqlc.arg(limit_key)::text
+  AND (sqlc.narg(currency)::text IS NULL OR h.currency = sqlc.narg(currency)::text)
   AND p.window_starts_at >= sqlc.arg(from_window)::timestamptz AND p.window_starts_at <= sqlc.arg(to_window)::timestamptz
   AND p.hold_created_at >= sqlc.arg(held_since)::timestamptz AND h.created_at >= sqlc.arg(held_since)::timestamptz
   AND h.state = 'open' AND h.lease_id <> sqlc.arg(lease_id)::uuid
   AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz;
 
 -- name: MarkLeaseHoldsContended :exec
--- Other live leases' parts holding capacity of a limit a want was refused
--- for shrink on their next sync.
+-- Other live leases' parts holding capacity of a limit a want or an
+-- admission was refused capacity_held for shrink on their next sync.
 UPDATE billing.limit_hold_parts p
 SET contended_at = sqlc.arg(now)::timestamptz
 FROM billing.limit_holds h, billing.leases l
 WHERE h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
   AND l.merchant_id = h.merchant_id AND l.id = h.lease_id
   AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid
-  AND p.limit_key = sqlc.arg(limit_key)::text AND h.currency = sqlc.arg(currency)::text
+  AND p.limit_key = sqlc.arg(limit_key)::text
+  AND (sqlc.narg(currency)::text IS NULL OR h.currency = sqlc.narg(currency)::text)
   AND p.window_starts_at >= sqlc.arg(from_window)::timestamptz AND p.window_starts_at <= sqlc.arg(to_window)::timestamptz
   AND p.hold_created_at >= sqlc.arg(held_since)::timestamptz AND h.created_at >= sqlc.arg(held_since)::timestamptz
   AND p.held > 0 AND h.state = 'open' AND h.lease_id <> sqlc.arg(lease_id)::uuid

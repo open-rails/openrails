@@ -27,7 +27,8 @@ A spend window is a currency limit: a fixed window of `window_seconds` (at most
 31 days) tiled from an offset of the customer's own. A hold, and what it settles,
 counts in the window it was issued in, never clamped; a request that does not fit
 is refused `budget_exceeded` (`blocked_by: budget`) with `retry_after_seconds` to
-the window's end. One request holds `balance`, every spend window and every limit
+the window's end, or `capacity_held` when it would fit were gates' holds
+returned ([refusals](usage-billing.md#limits)). One request holds `balance`, every spend window and every limit
 it counts toward, or none of them. Spend windows are not declared limits:
 `ListCustomerLimits` and `limits_reached` leave them out.
 

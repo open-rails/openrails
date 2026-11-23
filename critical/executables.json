@@ -448,6 +448,9 @@
     "OR-J23-S25": [
       "TestGate/OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units"
     ],
+    "OR-J23-S26": [
+      "TestLimitHolds/OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],

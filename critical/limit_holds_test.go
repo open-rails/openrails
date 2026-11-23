@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -384,5 +385,68 @@ func TestLimitHolds(t *testing.T) {
 		require.True(t, admitOne(t, w.alpha, key(reservation(w, customer, "gold-key", 600), "apiKey:three", "gold")).Allowed(),
 			"another trust level is held against its own window")
 		balance(t, w.alpha, customer, 8400, 1600, 10_000)
+	})
+
+	t.Run("OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back", func(t *testing.T) {
+		w := newWorld(t)
+		applyLimits(t, w.alpha, unitPlan)
+		customer := billing.CustomerID(uuid.New())
+		grantLimitProduct(t, w.alpha, customer, "plan", 24)
+		_, err := w.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{Limits: []billing.LimitOverride{{Limit: "quota", Capacity: 10}}})
+		require.NoError(t, err)
+		work := func(id string, units int64) billing.AdmitParams {
+			return usageAdmission(w, customer, id, "work", map[string]int64{"units": units}, nil)
+		}
+		lease := newLease()
+		set, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{workWant(customer, 4)}}))
+		require.Nil(t, refusal)
+		held := customerLimit(t, w.alpha, customer, "quota").Held
+		require.Positive(t, held)
+
+		// One unit more than is free fits only were the gate's hold returned:
+		// capacity_held, in the host's own transaction too.
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback(context.Background()) //nolint:errcheck
+		verdicts, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{work("fits-if-returned", 10-held+1)})
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		require.Len(t, verdicts, 1)
+		v := verdicts[0]
+		requireDenied(t, v, billing.DenyCapacityHeld)
+		require.Equal(t, http.StatusTooManyRequests, v.Status)
+		require.Equal(t, billing.AdmissionBlockedByLimit, *v.Admission.BlockedBy)
+		require.NotNil(t, v.Admission.RetryAfterSeconds)
+		require.EqualValues(t, 1, *v.Admission.RetryAfterSeconds)
+		require.Nil(t, v.Admission.Limit)
+		// More than the capacity would not fit even then.
+		tooBig := admitOne(t, w.alpha, work("too-big", 11))
+		requireDenied(t, tooBig, billing.DenyLimitReached)
+		require.Equal(t, "quota", *tooBig.Admission.Limit)
+
+		// The refusal takes the hold back as a competing want does: the gate's
+		// next sync tells it the smaller size, the one after releases it, and
+		// the admission fits.
+		h, listed := heldIn(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}), customer, set, "quota")
+		require.True(t, listed)
+		require.Zero(t, h)
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
+		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
+		require.True(t, admitOne(t, w.alpha, work("fits-now", 10-held+1)).Allowed())
+
+		// The balance the same way.
+		usageMeter(t, w.alpha, 100)
+		payer := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, payer, "funded", 1000)
+		set, refusal = wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{computeWant(payer, 1)}}))
+		require.Nil(t, refusal)
+		b, err := w.alpha.GetBalance(t.Context(), payer, "USD")
+		require.NoError(t, err)
+		require.Positive(t, b.HeldAmount)
+		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "money-if-returned", b.AvailableAmount+1)), billing.DenyCapacityHeld)
+		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "past-the-balance", b.AvailableAmount+b.HeldAmount+1)), "insufficient_balance")
+		h, listed = heldIn(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}), payer, set, "balance")
+		require.True(t, listed)
+		require.Zero(t, h)
 	})
 }

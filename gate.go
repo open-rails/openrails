@@ -496,32 +496,38 @@ func waitRetry(ctx context.Context, r *billing.Refusal) bool {
 }
 
 // admitRemote admits a request that declares an accrual rate as a request
-// hold on the server, as Client.Admit does.
+// hold on the server, as Client.Admit does; capacity_held is waited out
+// within ctx.
 func (g *Gate) admitRemote(ctx context.Context, p billing.AdmitParams) (*Ticket, error) {
-	verdicts, err := g.c.Admit(ctx, []billing.AdmitParams{p})
-	if errors.Is(err, billing.ErrUnreachable) {
-		return nil, unavailable(err)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(verdicts) != 1 {
-		return nil, fmt.Errorf("%w: admit answered %d verdicts for one request", billing.ErrUnreachable, len(verdicts))
-	}
-	v := verdicts[0]
-	if v.Admission == nil {
-		if v.Error != nil {
-			return nil, &billing.StatusError{Status: v.Status, ErrorDetails: *v.Error}
+	for {
+		verdicts, err := g.c.Admit(ctx, []billing.AdmitParams{p})
+		if errors.Is(err, billing.ErrUnreachable) {
+			return nil, unavailable(err)
 		}
-		return nil, fmt.Errorf("%w: admit answered neither an admission nor an error", billing.ErrUnreachable)
-	}
-	if r := v.Admission.Refusal(); r != nil || !v.Allowed() {
-		if r == nil {
-			r = &billing.Refusal{DenyCode: "not_admitted"}
+		if err != nil {
+			return nil, err
 		}
-		return refusedTicket(g, p, r), nil
+		if len(verdicts) != 1 {
+			return nil, fmt.Errorf("%w: admit answered %d verdicts for one request", billing.ErrUnreachable, len(verdicts))
+		}
+		v := verdicts[0]
+		if v.Admission == nil {
+			if v.Error != nil {
+				return nil, &billing.StatusError{Status: v.Status, ErrorDetails: *v.Error}
+			}
+			return nil, fmt.Errorf("%w: admit answered neither an admission nor an error", billing.ErrUnreachable)
+		}
+		if r := v.Admission.Refusal(); r != nil || !v.Allowed() {
+			if r == nil {
+				r = &billing.Refusal{DenyCode: "not_admitted"}
+			}
+			if r.DenyCode == billing.DenyCapacityHeld && waitRetry(ctx, r) {
+				continue
+			}
+			return refusedTicket(g, p, r), nil
+		}
+		return &Ticket{gate: g, params: p}, nil
 	}
-	return &Ticket{gate: g, params: p}, nil
 }
 
 func (g *Gate) captureRemote(ctx context.Context, t *Ticket, u billing.CaptureUsage) error {

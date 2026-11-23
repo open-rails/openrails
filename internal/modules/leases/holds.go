@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -221,8 +220,8 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 		standing[j] = &locked.Standings[c]
 	}
 	n := len(slots)
-	helds, answers, mines, requests, needs, rooms := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
-	failing := -1
+	helds, answers, mines, requests, needs, rooms, commits := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
+	var failing []int
 	for j, s := range slots {
 		p := carried[s.key]
 		mine, used, prev, committed := int64(0), int64(0), int64(0), int64(0)
@@ -278,14 +277,14 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 		if s.overrun == catalog.OverrunAdmitWhilePositive {
 			fits = room0 > committed || request == 0
 		}
-		if dry && !fits && failing < 0 {
-			failing = j
+		if dry && !fits {
+			failing = append(failing, j)
 		}
-		helds[j], answers[j], mines[j], requests[j], needs[j], rooms[j] = held, min(target, held), mine, request, need, room0
+		helds[j], answers[j], mines[j], requests[j], needs[j], rooms[j], commits[j] = held, min(target, held), mine, request, need, room0, committed
 	}
 	var refusal *billing.Refusal
-	if failing >= 0 {
-		if refusal, err = r.refusal(holder, k, currency, slots[failing], standing[failing], rooms[failing], needs[failing], room); err != nil {
+	if len(failing) > 0 {
+		if refusal, err = r.refusal(holder, currency, slots, standing, failing, rooms, needs, commits, room); err != nil {
 			return nil, err
 		}
 		// A refused hold grows nothing and keeps only what tickets took.
@@ -369,50 +368,56 @@ func (r *syncRun) issue(k holdKey, currency string, slots []slot, helds, answers
 	return h, nil
 }
 
-// refusal is why a want does not fit slot s: capacity_held when its need
-// would fit were other leases' holds, committed or not, returned (they
-// shrink on their next sync), else the limit's own refusal.
-func (r *syncRun) refusal(holder limits.Holder, k holdKey, currency string, s slot, st *limits.Standing, free, need int64, room moneyRoom) (*billing.Refusal, error) {
-	from, to := limits.Epoch, limits.Epoch
-	if !s.balance {
-		from, to = s.claim.Window.StartsAt, s.claim.Window.StartsAt
-		if s.claim.Reset.Kind == catalog.ResetRolling {
-			from = limits.RollingFrom(s.claim.Reset.WindowSeconds, r.now)
+// refusal is why a want does not fit: the first failing slot that would not
+// fit even were other leases' holds, committed or not, returned refuses it
+// with its limit's own code; when every one would, it is capacity_held and
+// those holds shrink on their next sync.
+func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, standing []*limits.Standing, failing []int, free, need, committed []int64, room moneyRoom) (*billing.Refusal, error) {
+	var short []limits.Returnable
+	for _, j := range failing {
+		s := slots[j]
+		ret := limits.BalanceReturnable(currency, r.lease.ID)
+		if !s.balance {
+			ret = limits.ReturnableOf(s.claim, r.now, r.lease.ID)
 		}
-	}
-	args := gen.SumOtherLeaseHeldParams{MerchantID: r.merchant, CustomerID: k.customer, LimitKey: s.key, Currency: currency, FromWindow: from, ToWindow: to,
-		HeldSince: r.now.Add(-retention.AdmissionMaxHold), LeaseID: r.lease.ID, LeaseLiveSince: r.now.Add(-limits.LeaseLifetime)}
-	others, err := r.q.SumOtherLeaseHeld(r.ctx, args)
-	if err != nil {
-		return nil, err
-	}
-	if others > 0 && need <= satAdd(free, others) {
-		if err := r.q.MarkLeaseHoldsContended(r.ctx, gen.MarkLeaseHoldsContendedParams{Now: r.now, MerchantID: args.MerchantID, CustomerID: args.CustomerID,
-			LimitKey: args.LimitKey, Currency: args.Currency, FromWindow: args.FromWindow, ToWindow: args.ToWindow, HeldSince: args.HeldSince,
-			LeaseID: args.LeaseID, LeaseLiveSince: args.LeaseLiveSince}); err != nil {
+		others, err := holder.LeaseHeld(r.ctx, ret)
+		if err != nil {
 			return nil, err
 		}
-		retry := int64(limits.SyncInterval / time.Second)
-		return &billing.Refusal{DenyCode: billing.DenyCapacityHeld, RetryAfterSeconds: &retry}, nil
-	}
-	switch {
-	case s.balance:
-		return &billing.Refusal{DenyCode: room.code}, nil
-	case strings.HasPrefix(s.key, limits.SpendKeyPrefix):
-		out := &billing.Refusal{DenyCode: admission.DenyBudgetExceeded}
-		if s.claim.Window.EndsAt != nil {
-			retry := ceilSeconds(s.claim.Window.EndsAt.Sub(r.now))
+		fits := need[j] <= satAdd(free[j], others)
+		if s.overrun == catalog.OverrunAdmitWhilePositive {
+			fits = satAdd(free[j], others) > committed[j]
+		}
+		if others > 0 && fits {
+			short = append(short, ret)
+			continue
+		}
+		switch {
+		case s.balance:
+			return &billing.Refusal{DenyCode: room.code}, nil
+		case strings.HasPrefix(s.key, limits.SpendKeyPrefix):
+			out := &billing.Refusal{DenyCode: admission.DenyBudgetExceeded}
+			if s.claim.Window.EndsAt != nil {
+				retry := ceilSeconds(s.claim.Window.EndsAt.Sub(r.now))
+				out.RetryAfterSeconds = &retry
+			}
+			return out, nil
+		}
+		key := s.key
+		out := &billing.Refusal{DenyCode: billing.DenyLimitReached, Limit: &key, ResetsAt: holder.ResetsAt(r.ctx, s.claim, *standing[j])}
+		if out.ResetsAt != nil {
+			retry := ceilSeconds(out.ResetsAt.Sub(r.now))
 			out.RetryAfterSeconds = &retry
 		}
 		return out, nil
 	}
-	key := s.key
-	out := &billing.Refusal{DenyCode: billing.DenyLimitReached, Limit: &key, ResetsAt: holder.ResetsAt(r.ctx, s.claim, *st)}
-	if out.ResetsAt != nil {
-		retry := ceilSeconds(out.ResetsAt.Sub(r.now))
-		out.RetryAfterSeconds = &retry
+	for _, ret := range short {
+		if err := holder.TakeBack(r.ctx, ret); err != nil {
+			return nil, err
+		}
 	}
-	return out, nil
+	retry := int64(limits.SyncInterval / time.Second)
+	return &billing.Refusal{DenyCode: billing.DenyCapacityHeld, RetryAfterSeconds: &retry}, nil
 }
 
 // renew keeps the live lease's other holds sized: one that reported usage is

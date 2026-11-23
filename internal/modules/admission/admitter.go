@@ -270,6 +270,10 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	if dec.Allowed {
 		return AdmitDecision{Allowed: true, EstimatedAmount: dec.EstimatedAmount, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
 	}
+	if dec.CapacityHeld {
+		return AdmitDecision{BlockedBy: "limit", DenyCode: billing.DenyCapacityHeld, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
+			RetryAfterSeconds: ceilSeconds(dec.RetryAfter)}, nil
+	}
 	if dec.BlockedLimit != nil {
 		out := AdmitDecision{BlockedBy: "limit", DenyCode: billing.DenyLimitReached, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
 			Limit: dec.BlockedLimit.Key, ResetsAt: dec.BlockedLimit.ResetsAt}

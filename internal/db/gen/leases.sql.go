@@ -375,7 +375,8 @@ FROM billing.limit_holds h, billing.leases l
 WHERE h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
   AND l.merchant_id = h.merchant_id AND l.id = h.lease_id
   AND p.merchant_id = $2::uuid AND p.customer_id = $3::uuid
-  AND p.limit_key = $4::text AND h.currency = $5::text
+  AND p.limit_key = $4::text
+  AND ($5::text IS NULL OR h.currency = $5::text)
   AND p.window_starts_at >= $6::timestamptz AND p.window_starts_at <= $7::timestamptz
   AND p.hold_created_at >= $8::timestamptz AND h.created_at >= $8::timestamptz
   AND p.held > 0 AND h.state = 'open' AND h.lease_id <> $9::uuid
@@ -387,7 +388,7 @@ type MarkLeaseHoldsContendedParams struct {
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	LimitKey       string
-	Currency       string
+	Currency       *string
 	FromWindow     time.Time
 	ToWindow       time.Time
 	HeldSince      time.Time
@@ -395,8 +396,8 @@ type MarkLeaseHoldsContendedParams struct {
 	LeaseLiveSince time.Time
 }
 
-// Other live leases' parts holding capacity of a limit a want was refused
-// for shrink on their next sync.
+// Other live leases' parts holding capacity of a limit a want or an
+// admission was refused capacity_held for shrink on their next sync.
 func (q *Queries) MarkLeaseHoldsContended(ctx context.Context, arg MarkLeaseHoldsContendedParams) error {
 	_, err := q.db.Exec(ctx, markLeaseHoldsContended,
 		arg.Now,
@@ -478,7 +479,8 @@ FROM billing.limit_hold_parts p
 JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
 JOIN billing.leases l ON l.merchant_id = h.merchant_id AND l.id = h.lease_id
 WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid
-  AND p.limit_key = $3::text AND h.currency = $4::text
+  AND p.limit_key = $3::text
+  AND ($4::text IS NULL OR h.currency = $4::text)
   AND p.window_starts_at >= $5::timestamptz AND p.window_starts_at <= $6::timestamptz
   AND p.hold_created_at >= $7::timestamptz AND h.created_at >= $7::timestamptz
   AND h.state = 'open' AND h.lease_id <> $8::uuid
@@ -489,7 +491,7 @@ type SumOtherLeaseHeldParams struct {
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	LimitKey       string
-	Currency       string
+	Currency       *string
 	FromWindow     time.Time
 	ToWindow       time.Time
 	HeldSince      time.Time
@@ -498,8 +500,8 @@ type SumOtherLeaseHeldParams struct {
 }
 
 // What other live leases' holds set aside of a limit, in the windows from
-// from_window through to_window and the currency: capacity a want would get
-// if they returned it.
+// from_window through to_window and, when named, the currency (balance's):
+// capacity a want or an admission would get if they returned it.
 func (q *Queries) SumOtherLeaseHeld(ctx context.Context, arg SumOtherLeaseHeldParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumOtherLeaseHeld,
 		arg.MerchantID,

@@ -121,7 +121,10 @@ type Decision struct {
 	BlockedBalance  bool
 	BlockedWindow   *Window
 	// BlockedLimit is the declared limit that refused, and when it resets.
-	BlockedLimit    *LimitBlock
+	BlockedLimit *LimitBlock
+	// CapacityHeld: the request would fit were gates' lease holds returned;
+	// they shrink at their next sync.
+	CapacityHeld    bool
 	RetryAfter      time.Duration
 	Replayed        bool
 	ExpiresAt       *time.Time
@@ -201,9 +204,6 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	} else {
 		capacity += in.CreditLimit
 	}
-	if in.Cost > capacity {
-		return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
-	}
 	// Spend windows are currency limits on their hashed anchors; they and the
 	// declared limits are taken together, all or none.
 	windows := in.Policy.EffectiveWindows(in.Request)
@@ -212,16 +212,27 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		return Decision{}, err
 	}
 	claims = append(claims, in.Limits...)
-	taken, err := limits.Holder{Q: q, MerchantID: mid.UUID(), CustomerID: in.Customer, Now: now}.Take(ctx, claims)
+	holder := limits.Holder{Q: q, MerchantID: mid.UUID(), CustomerID: in.Customer, Now: now}
+	if in.Cost > capacity {
+		returned, err := holder.LeaseHeld(ctx, limits.BalanceReturnable(in.Currency, uuid.Nil))
+		if err != nil {
+			return Decision{}, err
+		}
+		if returned <= 0 || in.Cost-capacity > returned {
+			return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
+		}
+		locked, err := holder.Lock(ctx, claims)
+		if err != nil {
+			return Decision{}, err
+		}
+		return refuse(ctx, holder, in, windows, claims, locked.Standings, true)
+	}
+	taken, err := holder.Take(ctx, claims)
 	if err != nil {
 		return Decision{}, err
 	}
 	if taken.Refused >= 0 {
-		if taken.Refused < len(windows) {
-			blocked := windows[taken.Refused].Window
-			return Decision{BlockedWindow: &blocked, RetryAfter: claims[taken.Refused].Window.EndsAt.Sub(now), EstimatedAmount: in.Cost}, nil
-		}
-		return Decision{BlockedLimit: &LimitBlock{Key: claims[taken.Refused].Key, ResetsAt: taken.ResetsAt}, EstimatedAmount: in.Cost}, nil
+		return refuse(ctx, holder, in, windows, claims, taken.Standings, false)
 	}
 	body, err := json.Marshal(in.Terms)
 	if err != nil {
@@ -257,6 +268,43 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		return Decision{}, err
 	}
 	return Decision{Allowed: true, EstimatedAmount: in.Cost, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: capacity - in.Cost}, nil
+}
+
+// refuse answers a request that does not fit: the first claim that would not
+// fit even were every gate's lease hold returned refuses it with its own
+// code; when every short claim (and balance, when balanceShort) would, it is
+// capacity_held and those holds shrink at their next sync, as for a
+// competing want.
+func refuse(ctx context.Context, holder limits.Holder, in AdmitInput, windows []resolvedWindow, claims []limits.Claim, standings []limits.Standing, balanceShort bool) (Decision, error) {
+	var short []limits.Returnable
+	if balanceShort {
+		short = append(short, limits.BalanceReturnable(in.Currency, uuid.Nil))
+	}
+	for i, c := range claims {
+		if limits.Fits(c, standings[i], 0) {
+			continue
+		}
+		r := limits.ReturnableOf(c, holder.Now, uuid.Nil)
+		returned, err := holder.LeaseHeld(ctx, r)
+		if err != nil {
+			return Decision{}, err
+		}
+		if limits.Fits(c, standings[i], returned) {
+			short = append(short, r)
+			continue
+		}
+		if i < len(windows) {
+			blocked := windows[i].Window
+			return Decision{BlockedWindow: &blocked, RetryAfter: c.Window.EndsAt.Sub(holder.Now), EstimatedAmount: in.Cost}, nil
+		}
+		return Decision{BlockedLimit: &LimitBlock{Key: c.Key, ResetsAt: holder.ResetsAt(ctx, c, standings[i])}, EstimatedAmount: in.Cost}, nil
+	}
+	for _, r := range short {
+		if err := holder.TakeBack(ctx, r); err != nil {
+			return Decision{}, err
+		}
+	}
+	return Decision{CapacityHeld: true, RetryAfter: limits.SyncInterval, EstimatedAmount: in.Cost}, nil
 }
 
 // CheckIdentity refuses key reuse before current policy evaluation can mask a conflict.

@@ -92,7 +92,8 @@ const (
 	AdmissionBlockedByMoney  AdmissionBlock = "money"
 	AdmissionBlockedByBudget AdmissionBlock = "budget"
 	AdmissionBlockedByAbuse  AdmissionBlock = "abuse"
-	// AdmissionBlockedByLimit is a usage limit: deny code limit_reached.
+	// AdmissionBlockedByLimit is a usage limit: deny code limit_reached, or
+	// capacity_held when only gates' lease holds keep the request out.
 	AdmissionBlockedByLimit AdmissionBlock = "limit"
 )
 
@@ -102,8 +103,9 @@ type Admission struct {
 	CustomerID CustomerID `json:"customer_id"`
 	Allowed    bool       `json:"allowed"`
 	// BlockedBy and DenyCode name a refusal; RetryAfterSeconds is when a
-	// window refusal clears. A limit_reached refusal names its Limit and when
-	// it ResetsAt (null when nothing refills it). All are null when allowed.
+	// window refusal clears, or when to retry capacity_held. A limit_reached
+	// refusal names its Limit and when it ResetsAt (null when nothing refills
+	// it). All are null when allowed.
 	BlockedBy         *AdmissionBlock `json:"blocked_by"`
 	DenyCode          *string         `json:"deny_code"`
 	RetryAfterSeconds *int64          `json:"retry_after_seconds"`
