@@ -255,7 +255,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
 	})
-	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-and-orphan-state", func(t *testing.T) {
+	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		w := a.world
 		fleet := hostFleet(t, w)
@@ -281,6 +281,16 @@ func TestBackgroundJobs(t *testing.T) {
 			return state
 		}
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
+		// A gate lease that stopped syncing; it is kept 61 days past its last sync.
+		leases := pgx.Identifier{w.schema, "leases"}.Sanitize()
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n) VALUES ($1, $2, $3, $3, 0)",
+			w.alpha.MerchantID().UUID(), uuid.New(), w.clock.Now())
+		require.NoError(t, err)
+		leaseCount := func() int {
+			var n int
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+leases+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID()).Scan(&n))
+			return n
+		}
 		// The lease of a periodic kind no fleet runs any more.
 		orphans := func() int {
 			var n int
@@ -293,6 +303,7 @@ func TestBackgroundJobs(t *testing.T) {
 
 		w.clock.Advance(25 * time.Hour)
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		require.Equal(t, 1, leaseCount(), "a lease is kept through the replay horizon")
 		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
 		require.Zero(t, orphans())
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -305,6 +316,7 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound)
+		require.Zero(t, leaseCount(), "a lease 61 days past its last sync is deleted")
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
 		w := newWorld(t)

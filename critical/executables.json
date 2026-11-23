@@ -409,6 +409,24 @@
     "OR-J23-S12": [
       "TestUsageLimits/OR-J23-S12/a-customer-reads-its-own-limits"
     ],
+    "OR-J23-S13": [
+      "TestLimitHolds/OR-J23-S13/a-session-and-a-weekly-cap-let-the-crossing-request-finish"
+    ],
+    "OR-J23-S14": [
+      "TestLimitHolds/OR-J23-S14/balance-and-a-monthly-spend-cap-hold-both-or-neither"
+    ],
+    "OR-J23-S15": [
+      "TestLimitHolds/OR-J23-S15/four-replicas-racing-for-the-last-units-admit-exactly-the-capacity"
+    ],
+    "OR-J23-S16": [
+      "TestLimitHolds/OR-J23-S16/an-overrun-settles-past-capacity-and-records-reached-once"
+    ],
+    "OR-J23-S17": [
+      "TestLimitHolds/OR-J23-S17/a-delegated-invoker-is-refused-and-holds-nothing"
+    ],
+    "OR-J23-S18": [
+      "TestLimitHolds/OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -845,7 +863,7 @@
       "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
     ],
     "OR-J29-S08": [
-      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-and-orphan-state"
+      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state"
     ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"

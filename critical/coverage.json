@@ -984,6 +984,36 @@
       "name": "A customer reads its own limits at /v1/me/limits"
     },
     {
+      "id": "OR-J23-S13",
+      "journey": "J23",
+      "name": "A five-hour session and a weekly cap in weighted tokens: first use opens the session, a hold keeps its window, the crossing request finishes and the next is refused limit_reached"
+    },
+    {
+      "id": "OR-J23-S14",
+      "journey": "J23",
+      "name": "Balance and a monthly spend cap: one request holds and settles both or neither"
+    },
+    {
+      "id": "OR-J23-S15",
+      "journey": "J23",
+      "name": "Four replicas racing for a limit's last units admit exactly its capacity"
+    },
+    {
+      "id": "OR-J23-S16",
+      "journey": "J23",
+      "name": "An overrun settles past capacity unclamped, refuses holds until a refill, and records reached_at once"
+    },
+    {
+      "id": "OR-J23-S17",
+      "journey": "J23",
+      "name": "A delegated invoker is refused as before and holds no money and no limit"
+    },
+    {
+      "id": "OR-J23-S18",
+      "journey": "J23",
+      "name": "Invokers with the same limits share their windows; another trust level is held against its own"
+    },
+    {
       "id": "OR-J29-S07",
       "journey": "J29",
       "name": "One merchant's failed background pass fails its job after the other merchants finish"
@@ -1296,7 +1326,7 @@
     {
       "id": "OR-J29-S08",
       "journey": "J29",
-      "name": "Retention cleanup alone ages out unpaid orders and orphan state; order expiry alone expires abandoned attempts"
+      "name": "Retention cleanup alone ages out unpaid orders, stale gate leases and orphan state; order expiry alone expires abandoned attempts"
     },
     {
       "id": "OR-J19-S05",
