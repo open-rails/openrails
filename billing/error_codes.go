@@ -91,6 +91,9 @@ const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 // current revision; metadata.revision is the current one.
 const CodeRevisionMismatch = "revision_mismatch"
 
+// CodeLimitNotFound: the catalog declares no limit under the key.
+const CodeLimitNotFound = "limit_not_found"
+
 // CodeProductInUse: a record refers to the product or one of its prices (a
 // purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
@@ -330,6 +333,7 @@ var errorCodes = []ErrorCode{
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
+	{CodeLimitNotFound, 404, invalid, "The catalog declares no limit under this key."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

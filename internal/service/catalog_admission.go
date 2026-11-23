@@ -306,6 +306,16 @@ func applicationAdmissionPlan(document catalogwire.Application, prepared *catalo
 				targets[obj] = true
 			}
 		}
+		for key, limit := range plan.document.Limits {
+			fields, err := documentLimitFields(key, limit)
+			if err != nil {
+				return nil, err
+			}
+			obj := limitObject(key)
+			if catalogFieldsChanged(obj, state[obj], fields) {
+				targets[obj] = true
+			}
+		}
 		for obj := range plan.renamed {
 			targets[obj] = true
 		}

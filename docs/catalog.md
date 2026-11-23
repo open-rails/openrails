@@ -44,9 +44,9 @@ products:
       purchase: { amount: 2.99 USD }
 ```
 
-Products, prices and meters are maps keyed by a stable key you choose. A document
-holds `schema_version`, optional `prune`, `products` (each with `prices`,
-`provider_prices` and `rate_cards`), `meters`, and optional
+Products, prices, meters and limits are maps keyed by a stable key you choose. A
+document holds `schema_version`, optional `prune`, `products` (each with `prices`,
+`provider_prices`, `rate_cards` and `limits`), `meters`, `limits`, and optional
 `entitlement_replacements: [{from, to}]`, which move a key across every product
 granting it before products apply (empty `to` removes it). See
 [`config/catalog.example.yaml`](../config/catalog.example.yaml).
@@ -89,6 +89,36 @@ charge model (`per_unit` with `divide_by`, `round`, `maximum_amount` and `matrix
 `tiered` graduated, `package`, `dynamic`) with an optional per-period `allowance`,
 or charge a `flat` fee per period with no meter.
 See [usage billing](usage-billing.md#pricing).
+
+**Limits.** `limits` declare what a customer may use per window, apart from what
+it pays:
+
+```yaml
+limits:
+  five_hour:
+    unit: usage_units                      # a lowercase name, or a currency code
+    reset: {kind: session, window_seconds: 18000}
+    overrun: admit_while_positive          # default require_estimate
+    rate_cards:                            # how usage counts, in the limit's unit
+    - meter: input-tokens
+      price: {model: per_unit, per_unit: {divide_by: 1000, unit_amount: "1"}}
+  weekly:
+    unit: usage_units
+    reset: {kind: fixed, window_seconds: 604800, anchor: subscription}
+products:
+  pro: {display_name: Pro, limits: {five_hour: "1000", weekly: "5000"}}
+```
+
+`reset.kind` is `fixed` (windows of `window_seconds` tiled from the customer's
+subscription or `first_use`), `billing_period` (the pricing period), `session`
+(opens at the first use after the last one ended), `rolling` (the last
+`window_seconds`), `rate` (refills continuously over `window_seconds`) or
+`lifetime`. Rate cards take the rate-card price shapes without a currency; a
+currency limit has none. A customer's capacity is the sum over its live products'
+`limits`; `limits` on `UpdateCustomer` overrides it, and
+`AdjustCustomerLimit` adds to the current window only. `balance` is reserved.
+`ListCustomerLimits` (`GET /v1/app/limits?customer_id=`) and `GET /v1/me/limits`
+read `{capacity, used, held, remaining, window_starts_at, resets_at}` per limit.
 
 ### Provider prices
 
@@ -212,7 +242,7 @@ while reloads fail; customer and money reads always go to the server.
 
 | Read | Embedded | Remote |
 |---|---|---|
-| `ReadCatalog` (products, prices without `Verify`), `ReadMeters` | 1 m, stale ≤ 10 m | 10 m, stale ≤ 1 h |
+| `ReadCatalog` (products, prices without `Verify`), `ReadMeters` (meters, limits) | 1 m, stale ≤ 10 m | 10 m, stale ≤ 1 h |
 | `ReadPublicConfig` | live | 10 m, stale ≤ 1 h |
 | `ReadMerchantConfiguration` | live | 30 s, stale ≤ 10 m |
 

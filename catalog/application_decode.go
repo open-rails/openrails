@@ -70,6 +70,7 @@ var keyedCollections = map[reflect.Type]string{
 	reflect.TypeFor[ApplyPrice]():         "price",
 	reflect.TypeFor[ApplyProviderPrice](): "provider price",
 	reflect.TypeFor[ApplyMeter]():         "meter",
+	reflect.TypeFor[ApplyLimit]():         "limit",
 }
 
 // encoding/json accepts case-insensitive aliases for struct fields. Catalog
@@ -126,7 +127,7 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 		}
 	case reflect.Map:
 		if noun, keyed := keyedCollections[shape.Elem()]; keyed && bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
-			return fmt.Errorf("must be a map keyed by %s key, not a list: catalog products, prices and meters are maps keyed by their key (write `<key>:`, not `- key: <key>`)", noun)
+			return fmt.Errorf("must be a map keyed by %s key, not a list: catalog products, prices, meters and limits are maps keyed by their key (write `<key>:`, not `- key: <key>`)", noun)
 		}
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {

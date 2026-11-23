@@ -184,11 +184,22 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 	for _, m := range next.Meters {
 		nextMeters[m.Key] = m
 	}
+	var removed []string
 	for _, m := range current.Meters {
 		if _, keep := nextMeters[m.Key]; !keep {
 			if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, nil); err != nil {
 				return err
 			}
+			removed = append(removed, m.Key)
+		}
+	}
+	if len(removed) > 0 {
+		counted, err := gen.New(tx).ListCatalogLimitsUsingMeters(ctx, gen.ListCatalogLimitsUsingMetersParams{MerchantID: merchantID, MeterKeys: removed})
+		if err != nil {
+			return err
+		}
+		if len(counted) > 0 {
+			return fmt.Errorf("limit %q counts a removed meter: %w", counted[0], ErrMeterInUse)
 		}
 	}
 	for _, m := range next.Meters {

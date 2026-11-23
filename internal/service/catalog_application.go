@@ -164,6 +164,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err := scoped.applyCatalogBilling(ctx, plan.document); err != nil {
 			return nil, err
 		}
+		if err := scoped.applyCatalogLimits(ctx, plan.document); err != nil {
+			return nil, err
+		}
 		if err := scoped.pruneCatalogObjects(ctx, plan.prune); err != nil {
 			return nil, err
 		}
