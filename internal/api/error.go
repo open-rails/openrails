@@ -47,8 +47,8 @@ type ErrorResponse struct {
 // APIError represents an error that can be returned to clients
 type APIError struct {
 	HTTPStatus int
-	Type       string
-	Code       string
+	Type       billing.ErrorType
+	Code       billing.ErrorCode
 	Message    string
 	RequestID  string
 	Param      *string
@@ -85,7 +85,7 @@ func (e *APIError) ToResponse() ErrorResponse {
 // Coded is the refusal for a registered code: the registry fixes its status
 // and type. An empty message answers the code's meaning. New refusals are
 // built here; an unregistered code is a programming error and answers 500.
-func Coded(code, message string) *APIError {
+func Coded(code billing.ErrorCode, message string) *APIError {
 	info, ok := billing.LookupErrorCode(code)
 	if !ok {
 		observe(0, code)
@@ -111,14 +111,14 @@ func SimpleErrorResponse(httpStatus int, message string) ErrorResponse {
 }
 
 // ErrorTypeForStatus is the envelope category an HTTP status maps to.
-func ErrorTypeForStatus(httpStatus int) string {
+func ErrorTypeForStatus(httpStatus int) billing.ErrorType {
 	errType, _ := inferErrorTypeAndCode(httpStatus)
 	return errType
 }
 
 // TypeForCode is a code's registered envelope type, or its status's category
 // for a code a host hook supplied.
-func TypeForCode(httpStatus int, code string) string {
+func TypeForCode(httpStatus int, code billing.ErrorCode) billing.ErrorType {
 	if info, ok := billing.LookupErrorCode(code); ok {
 		return info.Type
 	}
@@ -126,7 +126,7 @@ func TypeForCode(httpStatus int, code string) string {
 }
 
 // inferErrorTypeAndCode is the generic type and code of an HTTP status.
-func inferErrorTypeAndCode(httpStatus int) (errType string, code string) {
+func inferErrorTypeAndCode(httpStatus int) (billing.ErrorType, billing.ErrorCode) {
 	switch httpStatus {
 	case http.StatusBadRequest:
 		return ErrorTypeInvalidRequest, CodeInvalidParam
@@ -153,7 +153,7 @@ func inferErrorTypeAndCode(httpStatus int) (errType string, code string) {
 }
 
 // NewAPIError creates a new APIError
-func NewAPIError(httpStatus int, errType, code, message string) *APIError {
+func NewAPIError(httpStatus int, errType billing.ErrorType, code billing.ErrorCode, message string) *APIError {
 	return &APIError{
 		HTTPStatus: httpStatus,
 		Type:       errType,
@@ -196,14 +196,14 @@ var violations sync.Map
 
 // observe records a code answered outside the registry: unregistered, or
 // under another status than the registry's. It is logged once.
-func observe(status int, code string) {
+func observe(status int, code billing.ErrorCode) {
 	if code == "" {
 		return
 	}
 	problem := ""
 	switch info, ok := billing.LookupErrorCode(code); {
 	case !ok:
-		problem = "error code " + code + " is not registered in billing.ErrorCodes"
+		problem = "error code " + string(code) + " is not registered in billing.ErrorCodes"
 	case status != 0 && info.Status != status:
 		problem = fmt.Sprintf("error code %s answered %d; billing.ErrorCodes registers %d", code, status, info.Status)
 	default:

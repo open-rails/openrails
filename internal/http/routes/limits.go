@@ -7,7 +7,7 @@ import (
 )
 
 // limitErrors are the codes of a limit declaration.
-var limitErrors = []string{billing.CodeLimitNotFound, "catalog_revision_conflict", "invalid_param", "resource_conflict", "revision_mismatch"}
+var limitErrors = []billing.ErrorCode{billing.CodeLimitNotFound, "catalog_revision_conflict", "invalid_param", "resource_conflict", "revision_mismatch"}
 
 // limitsRoutes is usage limits: the catalog's declarations, where a customer
 // stands on each in its current window, a gate's lease sync, and staff

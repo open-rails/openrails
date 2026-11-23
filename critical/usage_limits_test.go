@@ -99,7 +99,7 @@ func limitKeys(lines []billing.CustomerLimit) []string {
 	return out
 }
 
-func requireCode(t *testing.T, err error, code string) *billing.StatusError {
+func requireCode(t *testing.T, err error, code billing.ErrorCode) *billing.StatusError {
 	t.Helper()
 	var failure *billing.StatusError
 	require.ErrorAs(t, err, &failure)

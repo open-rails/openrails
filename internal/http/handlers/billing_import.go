@@ -25,7 +25,7 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 		r.APIError(&api.APIError{
 			HTTPStatus: http.StatusBadRequest,
 			Type:       api.ErrorTypeInvalidRequest,
-			Code:       "as_of_required",
+			Code:       billing.CodeAsOfRequired,
 			Message:    "as_of (RFC3339 evidence horizon) is required",
 		})
 		return

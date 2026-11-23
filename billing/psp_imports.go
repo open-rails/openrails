@@ -50,7 +50,7 @@ func (id *PSPImportRecordID) UnmarshalText(text []byte) error {
 }
 
 // CodePSPImportInProgress: one import per PSP pulls or applies at a time.
-const CodePSPImportInProgress = "psp_import_in_progress"
+const CodePSPImportInProgress ErrorCode = "psp_import_in_progress"
 
 // ErrPSPImportInProgress matches the in-progress refusal of CreatePSPImport,
 // from the API or in process: retry once the PSP's import finishes.

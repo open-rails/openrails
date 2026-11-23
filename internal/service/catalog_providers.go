@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -21,7 +22,7 @@ import (
 var errRemoteWritesDisabled = errors.New("provider writes are disabled (mode=limited/readonly)")
 
 // ErrPriceNotSellable refuses a price none of its methods can sell.
-var ErrPriceNotSellable = apperr.New(http.StatusBadRequest, "price_not_sellable", "no PSP can sell this price")
+var ErrPriceNotSellable = apperr.New(http.StatusBadRequest, billing.CodePriceNotSellable, "no PSP can sell this price")
 
 // solanaPlanContext is the price a Solana plan is published for.
 type solanaPlanContext struct {

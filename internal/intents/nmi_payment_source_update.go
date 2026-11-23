@@ -389,7 +389,7 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 			return nil
 		}
 		if targetFound && (locked.Custodian != models.CustodianPSP || locked.CustodianID != nil) {
-			refused = ptr(TerminalWithEvidence(subscriptions.ErrPaymentMethodNotPSPVaulted.Error(), map[string]any{"code": subscriptions.ErrPaymentMethodNotPSPVaulted.Code}))
+			refused = ptr(TerminalWithEvidence(subscriptions.ErrPaymentMethodNotPSPVaulted.Error(), map[string]any{"code": string(subscriptions.ErrPaymentMethodNotPSPVaulted.Code)}))
 			return nil
 		}
 		pin = providerAccountPin{sub: sub, newRailCustomerRef: ref}

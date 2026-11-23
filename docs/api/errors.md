@@ -19,7 +19,9 @@ Batch admission places the same error object inside each unsuccessful item's
 
 The Go client returns `*billing.StatusError` with the full `ErrorDetails`, HTTP
 `Status`, and `RetryAfter` response header. `errors.Is` classifies by status and
-machine code, never by message text. In particular, `idempotency_key_reused` means
+machine code, never by message text. Each code is a `billing.ErrorCode` constant
+(`billing.CodeCardDeclined`, ...), and `billing.ErrorCodeFrom(err)` reads it from a
+`StatusError` or an in-process refusal. In particular, `idempotency_key_reused` means
 changed operation terms, and `insufficient_credits` means insufficient credit;
 other HTTP 402 responses do not imply a low credit balance. Metadata numbers
 are decoded as `json.Number` so their integer precision is preserved. The body

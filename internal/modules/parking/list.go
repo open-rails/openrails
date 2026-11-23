@@ -36,7 +36,7 @@ func List(ctx context.Context, d *db.DB, psps *merchants.Service, p billing.Park
 			return out, err
 		}
 		if !found {
-			return out, apperr.New(404, "psp_not_found", fmt.Sprintf("PSP %s not found", ref)).WithParam("psp")
+			return out, apperr.New(404, billing.CodePSPNotFound, fmt.Sprintf("PSP %s not found", ref)).WithParam("psp")
 		}
 		params.PspID = &scope.ID
 	}

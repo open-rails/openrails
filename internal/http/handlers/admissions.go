@@ -51,7 +51,7 @@ func admissionStatus(a *billing.Admission) int {
 	return http.StatusForbidden
 }
 
-func admitRefusal(code, message, param string) billing.AdmissionVerdict {
+func admitRefusal(code billing.ErrorCode, message, param string) billing.AdmissionVerdict {
 	err := api.Coded(code, message)
 	if param != "" {
 		err = err.WithParam(param)
@@ -99,9 +99,8 @@ func AdmitVerdicts(
 			details := refusalOf(err).ToResponse().Error
 			out[i] = billing.AdmissionVerdict{Status: refusalOf(err).HTTPStatus, Error: &details}
 		default:
-			var refusal interface{ ErrorCode() string }
-			if errors.As(err, &refusal) {
-				out[i] = admitRefusal(refusal.ErrorCode(), err.Error(), "")
+			if code, ok := billing.ErrorCodeFrom(err); ok {
+				out[i] = admitRefusal(code, err.Error(), "")
 				continue
 			}
 			// The wire stays non-leaky; the cause reaches the operator log.
@@ -160,7 +159,7 @@ func admissionItemScope(r *httprequest.Request, svc *billingservice.Service, req
 // code (database_busy is a retry), anything else is a 500.
 func admissionLookupRefusal(r *httprequest.Request, requestID string, err error) *api.APIError {
 	if errors.Is(err, spendgate.ErrNotFound) {
-		return api.Coded("admission_not_found", "")
+		return api.Coded(billing.CodeAdmissionNotFound, "")
 	}
 	if out := refusalOf(err); out != nil {
 		return out
@@ -249,7 +248,7 @@ func CaptureResults(
 		case err == nil:
 			out[i] = billing.CaptureResult{Status: http.StatusOK, Receipt: receipt}
 		case errors.Is(err, spendgate.ErrNotFound):
-			out[i] = refused(api.Coded("admission_not_found", ""))
+			out[i] = refused(api.Coded(billing.CodeAdmissionNotFound, ""))
 		default:
 			out[i] = refused(admissionFailure(ctx, err, item.RequestID, "capture failed"))
 		}
@@ -283,9 +282,9 @@ func ReleaseResult(ctx context.Context, requestID string, release func(context.C
 	case err == nil:
 		return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
 	case errors.Is(err, spendgate.ErrNotFound):
-		return admissionRefusal(api.Coded("admission_not_found", ""))
+		return admissionRefusal(api.Coded(billing.CodeAdmissionNotFound, ""))
 	case errors.Is(err, spendgate.ErrCaptured):
-		return admissionRefusal(api.Coded("admission_captured", ""))
+		return admissionRefusal(api.Coded(billing.CodeAdmissionCaptured, ""))
 	}
 	return admissionRefusal(admissionFailure(ctx, err, requestID, "release failed"))
 }
@@ -311,7 +310,7 @@ func ExtendAdmissions(r *httprequest.Request) {
 		case err == nil:
 			return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
 		case errors.Is(err, billingservice.ErrHoldNotFound):
-			return admissionRefusal(api.Coded("hold_not_found", ""))
+			return admissionRefusal(api.Coded(billing.CodeHoldNotFound, ""))
 		case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
 			return admissionRefusal(api.Coded(billing.CodeInvalidParam, "expires_at already passed").WithParam("expires_at"))
 		case errors.Is(err, spendgate.ErrDeadlineShortened):

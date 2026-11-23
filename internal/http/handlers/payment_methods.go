@@ -30,12 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	createPaymentMethodTimeout              = 28 * time.Second
-	codePaymentMethodProviderOutcomeUnknown = "provider_outcome_unknown"
-	codePaymentMethodDeleteFailed           = "payment_method_delete_failed"
-	codePaymentMethodDeleteUnsupported      = "payment_method_delete_unsupported"
-)
+const createPaymentMethodTimeout = 28 * time.Second
 
 // ListPaymentMethods (GET /me/payment-methods) is one page of the caller's
 // saved cards, newest first.
@@ -276,8 +271,6 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	writePaymentMethod(r, http.StatusCreated, identity.CustomerIDFromString(user.ID), pm)
 }
 
-const codePaymentMethodUpdateUnsupported = "payment_method_update_unsupported"
-
 // pspRail is the rail of one of the merchant's PSPs, "" when unknown.
 func pspRail(r *httprequest.Request, merchantID, pspID uuid.UUID) string {
 	psp, err := r.State.DB.Gen(r.Request.Context()).GetPSP(r.Request.Context(), gen.GetPSPParams{MerchantID: merchantID, ID: pspID})
@@ -392,7 +385,7 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 	if !nmi.IsTransportAmbiguous(err) {
 		return nil
 	}
-	return api.Coded(codePaymentMethodProviderOutcomeUnknown, "The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.")
+	return api.Coded(billing.CodeProviderOutcomeUnknown, "The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.")
 }
 
 // DeletePaymentMethod returns 204 only after synchronous provider confirmation.
@@ -459,9 +452,9 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
 		r.ErrorCode(billing.CodeResourceConflict, "Payment method cannot be deleted safely; contact support")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
-		r.APIError(api.Coded(codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
+		r.APIError(api.Coded(billing.CodePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
 	case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
-		r.APIError(api.Coded(codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"rail": pm.Rail}))
+		r.APIError(api.Coded(billing.CodePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"rail": pm.Rail}))
 	case errors.Is(err, intents.ErrRateCeilingTripped):
 		// #732: the operator alert is raised by the destructive-operation
 		// ceiling; this surface returns a stable refusal and never deletes locally.
@@ -474,7 +467,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 		var terminal *paymentmethods.PaymentMethodDeleteFailedError
 		if errors.As(err, &terminal) {
 			log.WithError(err).WithFields(fields).Error("Payment method deletion failed permanently at the provider")
-			r.ErrorCode(codePaymentMethodDeleteFailed, "Payment method could not be deleted at the payment provider")
+			r.ErrorCode(billing.CodePaymentMethodDeleteFailed, "Payment method could not be deleted at the payment provider")
 			return
 		}
 		writeRefusal(r, err, "Failed to delete payment method")

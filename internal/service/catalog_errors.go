@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -14,12 +15,12 @@ import (
 
 // Catalog refusals. Status and code are the contract; messages are not.
 var (
-	ErrProductNotFound  = apperr.New(http.StatusNotFound, "product_not_found", "product not found")
-	ErrPriceNotFound    = apperr.New(http.StatusNotFound, "price_not_found", "price not found")
-	ErrPriceKeyNotFound = apperr.New(http.StatusNotFound, "price_key_not_found", "price key not found")
+	ErrProductNotFound  = apperr.New(http.StatusNotFound, billing.CodeProductNotFound, "product not found")
+	ErrPriceNotFound    = apperr.New(http.StatusNotFound, billing.CodePriceNotFound, "price not found")
+	ErrPriceKeyNotFound = apperr.New(http.StatusNotFound, billing.CodePriceKeyNotFound, "price key not found")
 	// ErrPriceKeyCadenceConflict: a defaulted price key is held by a price on
 	// another cadence (billing.ErrPriceKeyCadenceConflict).
-	ErrPriceKeyCadenceConflict = apperr.New(http.StatusConflict, "price_key_cadence_conflict", "default price key is held by a price on another cadence")
+	ErrPriceKeyCadenceConflict = apperr.New(http.StatusConflict, billing.CodePriceKeyCadenceConflict, "default price key is held by a price on another cadence")
 	// ErrCatalogConflict is a unique-constraint collision on a catalog write.
 	ErrCatalogConflict = apperr.New(http.StatusConflict, api.CodeResourceConflict, "a resource with these attributes already exists")
 )

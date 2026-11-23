@@ -475,9 +475,9 @@ func statusOf(err error) error {
 	if !errors.As(err, &refusal) {
 		return err
 	}
-	kind := "invalid_request_error"
+	kind := billing.ErrorTypeInvalidRequest
 	if refusal.Status >= 500 {
-		kind = "api_error"
+		kind = billing.ErrorTypeAPI
 	}
 	out := &billing.StatusError{Status: refusal.Status, ErrorDetails: billing.ErrorDetails{Type: kind, Code: refusal.Code, Message: refusal.Message, Metadata: refusal.Metadata}}
 	if refusal.Param != "" {
@@ -487,5 +487,5 @@ func statusOf(err error) error {
 }
 
 func invalidParam(param, msg string) error {
-	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeInvalidParam, Message: msg, Param: &param}}
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeInvalidParam, Message: msg, Param: &param}}
 }

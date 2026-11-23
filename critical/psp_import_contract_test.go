@@ -378,7 +378,7 @@ func refuseNMI(m *nmimock.Mock, key string) {
 	})
 }
 
-func refusalCode(t *testing.T, err error) (int, string) {
+func refusalCode(t *testing.T, err error) (int, billing.ErrorCode) {
 	t.Helper()
 	require.Error(t, err)
 	var refusal *billing.StatusError

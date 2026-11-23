@@ -14,10 +14,7 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-const (
-	codePaymentMethodNotUsable = "payment_method_not_usable"
-	editPaymentMethodTimeout   = 25 * time.Second
-)
+const editPaymentMethodTimeout = 25 * time.Second
 
 // UpdatePaymentMethod (PATCH /me/payment-methods/{id}) edits a saved card in
 // place: its expiry and billing details, pushed to its holder, and whether it
@@ -81,9 +78,9 @@ func writePaymentMethodChangeError(r *httprequest.Request, err error) {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 	case errors.Is(err, billingservice.ErrPaymentMethodNotUsable):
-		r.ErrorCode(codePaymentMethodNotUsable, "This payment method is closed, replaced, removed or being deleted.")
+		r.ErrorCode(billing.CodePaymentMethodNotUsable, "This payment method is closed, replaced, removed or being deleted.")
 	case errors.Is(err, billingservice.ErrPaymentMethodEditUnsupported):
-		r.ErrorCode(codePaymentMethodUpdateUnsupported, err.Error())
+		r.ErrorCode(billing.CodePaymentMethodUpdateUnsupported, err.Error())
 	case errors.Is(err, billingservice.ErrPaymentMethodEditRefused):
 		r.ErrorCode(billing.CodePaymentProviderRejected, "The payment provider refused the change; the card is unchanged.")
 	case errors.As(err, &refused):

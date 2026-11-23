@@ -16,7 +16,7 @@ import (
 type GateError struct {
 	Status   int
 	Message  string
-	Code     string
+	Code     billing.ErrorCode
 	Metadata map[string]any
 	// Err is the authkit/auth class the refusal answers as, so a refusal of
 	// OpenRails' own Authenticators classifies like a host's (auth.Refuse).
@@ -25,7 +25,7 @@ type GateError struct {
 
 func (e GateError) Error() string {
 	if e.Message == "" {
-		return e.Code
+		return string(e.Code)
 	}
 	return e.Message
 }
@@ -34,10 +34,10 @@ func (e GateError) Unwrap() error { return e.Err }
 
 // Refusal is the GateError of a registered error code; message, when given,
 // replaces the code's meaning as the human text.
-func Refusal(code string, message ...string) GateError {
+func Refusal(code billing.ErrorCode, message ...string) GateError {
 	info, ok := billing.LookupErrorCode(code)
 	if !ok {
-		return GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "unregistered refusal " + code}
+		return GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "unregistered refusal " + string(code)}
 	}
 	out := GateError{Status: info.Status, Code: info.Code, Message: info.Meaning, Err: classOf(info.Code, info.Status)}
 	if len(message) > 0 && message[0] != "" {
@@ -47,7 +47,7 @@ func Refusal(code string, message ...string) GateError {
 }
 
 // classOf is the authkit/auth class of a registered refusal.
-func classOf(code string, status int) error {
+func classOf(code billing.ErrorCode, status int) error {
 	switch code {
 	case billing.CodeCredentialExpired:
 		return errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)

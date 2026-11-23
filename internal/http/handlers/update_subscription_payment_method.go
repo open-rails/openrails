@@ -240,11 +240,11 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
 		writePaymentMethodPSPMismatch(r)
-	case out.Terminal && out.Code == subscriptions.ErrPaymentMethodNotPSPVaulted.Code:
+	case out.Terminal && out.Code == string(subscriptions.ErrPaymentMethodNotPSPVaulted.Code):
 		writeRefusal(r, subscriptions.ErrPaymentMethodNotPSPVaulted, "Failed to update payment method")
 	case out.Terminal:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID, "reason": out.Reason}).Error("Failed to update subscription payment source with NMI")
-		r.ErrorCode("payment_method_update_failed", "")
+		r.ErrorCode(billing.CodePaymentMethodUpdateFailed, "")
 	default:
 		// Ambiguous/parked: neither success nor decline — the durable intent
 		// finishes out-of-band and a retried request maps onto the SAME intent.

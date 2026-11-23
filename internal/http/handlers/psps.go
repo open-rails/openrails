@@ -123,7 +123,7 @@ func writePSPError(r *httprequest.Request, err error) {
 	var lastActive *merchants.LastActivePSPError
 	switch {
 	case errors.As(err, &lastActive):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "psp_last_active", err.Error()).
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePSPLastActive, err.Error()).
 			WithMetadata(map[string]any{"psp_id": lastActive.PSP.String()}))
 	case errors.Is(err, merchants.ErrConfigUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")

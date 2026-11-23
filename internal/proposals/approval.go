@@ -83,7 +83,7 @@ func (a *approval) one(ctx context.Context, id uuid.UUID) billing.ProposalResult
 	}
 	if err != nil {
 		result = billing.ProposalResult{ID: billing.FindingID(id), Outcome: billing.ProposalFailed,
-			Error: &billing.ProposalError{Code: "finding_action_failed", Message: err.Error()}}
+			Error: &billing.ProposalError{Code: billing.CodeFindingActionFailed, Message: err.Error()}}
 		note := "approve by " + a.actor + " failed: " + err.Error()
 		if nerr := a.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			_, err := gen.New(tx).AppendReconciliationFindingNotes(ctx, gen.AppendReconciliationFindingNotesParams{ID: id, Note: note})
@@ -112,7 +112,7 @@ func (a *approval) try(ctx context.Context, id uuid.UUID, admitted *destructive.
 		rec := reconcile.FindingRecordFromRow(row)
 		if rec.Change == nil || rec.PSPID == nil {
 			result.Outcome = billing.ProposalFailed
-			result.Error = &billing.ProposalError{Code: "finding_not_actionable", Message: "this finding proposes no change; dismiss it"}
+			result.Error = &billing.ProposalError{Code: billing.CodeFindingNotActionable, Message: "this finding proposes no change; dismiss it"}
 			return nil
 		}
 		now := a.e.now()

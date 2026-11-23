@@ -175,7 +175,7 @@ func (e *Executor) Foreign(ctx context.Context, req Request) (billing.ProposalRe
 			if reason, err := notForeign(ctx, q, mid, row); err != nil || reason != "" {
 				if err == nil {
 					result.Outcome = billing.ProposalFailed
-					result.Error = &billing.ProposalError{Code: "finding_not_actionable", Message: reason}
+					result.Error = &billing.ProposalError{Code: billing.CodeFindingNotActionable, Message: reason}
 				}
 				return err
 			}

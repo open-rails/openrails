@@ -322,7 +322,7 @@ func printResults(w io.Writer, res billing.ProposalResults) {
 		detail := ""
 		switch {
 		case r.Error != nil:
-			detail = r.Error.Code + ": " + r.Error.Message
+			detail = string(r.Error.Code) + ": " + r.Error.Message
 		case len(r.Execution) > 0:
 			b, _ := json.Marshal(r.Execution)
 			detail = string(b)

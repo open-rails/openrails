@@ -77,18 +77,9 @@ func RequireSameCurrency(old, new PriceAmount) error {
 // TierChangeError is a refused tier change: Code is a registered error code,
 // which fixes the HTTP status.
 type TierChangeError struct {
-	Code    string
+	Code    billing.ErrorCode
 	Message string
 }
-
-// Refusal codes the tier change shares with other routes.
-const (
-	codePriceNotFound         = "price_not_found"
-	codeProductNotFound       = "product_not_found"
-	codeSubscriptionNotFound  = "subscription_not_found"
-	codeSubscriptionNotActive = "subscription_not_active"
-	codeCustomerEmailRequired = "customer_email_required"
-)
 
 // TierChangeDeclinedError is the provider's payment decline of a tier
 // change's charge; it answers card_declined or payment_provider_rejected by
@@ -144,7 +135,7 @@ func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
 // more per hour than the current one. Rank never makes a costlier plan free.
 func SolanaTierChange(sub *models.Subscription, current, next *models.Product, currentPrice, nextPrice *models.Price) (upgrade bool, err error) {
 	if sub == nil || sub.Status != models.StatusActive {
-		return false, &TierChangeError{Code: codeSubscriptionNotActive, Message: "only an active subscription can change tier on Solana"}
+		return false, &TierChangeError{Code: billing.CodeSubscriptionNotActive, Message: "only an active subscription can change tier on Solana"}
 	}
 	if current.ID == next.ID {
 		return false, ErrTierChangeSameProduct

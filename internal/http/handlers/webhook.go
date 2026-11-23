@@ -115,7 +115,7 @@ func dispatchStripeWebhook(r *httprequest.Request, signed stripeSigned, accountI
 	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body, r.State.StripeClients); herr != nil {
 		if errors.Is(herr, errStripeWebhookAccountMismatch) {
 			r.State.WebhookHealth.Rejected(r.Request.Context())
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_account_mismatch", "Webhook account does not match payload"))
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeWebhookAccountMismatch, "Webhook account does not match payload"))
 			return
 		}
 		log.WithError(herr).Error("failed to hydrate thin stripe event")

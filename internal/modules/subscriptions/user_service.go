@@ -30,11 +30,11 @@ import (
 // Sentinel errors for subscription operations. The typed ones carry the
 // status and wire code handlers answer with.
 var (
-	ErrSubscriptionNotFound  = apperr.New(http.StatusNotFound, "subscription_not_found", "subscription not found")
-	ErrSubscriptionNotActive = apperr.New(http.StatusConflict, "subscription_not_active", "subscription is not active")
+	ErrSubscriptionNotFound  = apperr.New(http.StatusNotFound, billing.CodeSubscriptionNotFound, "subscription not found")
+	ErrSubscriptionNotActive = apperr.New(http.StatusConflict, billing.CodeSubscriptionNotActive, "subscription is not active")
 	// ErrCancelUnsupportedOnRail refuses a server-side cancel on a rail that has
 	// no cancel operation.
-	ErrCancelUnsupportedOnRail = apperr.New(http.StatusBadRequest, "cancel_unsupported_on_rail", "cancel operation not supported for this rail")
+	ErrCancelUnsupportedOnRail = apperr.New(http.StatusBadRequest, billing.CodeCancelUnsupportedOnRail, "cancel operation not supported for this rail")
 )
 
 // UserSubscriptionService handles user-facing subscription operations

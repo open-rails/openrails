@@ -27,26 +27,26 @@ import (
 
 var (
 	// ErrPSPNotFound: the merchant has no such PSP.
-	ErrPSPNotFound = apperr.New(http.StatusNotFound, "psp_not_found", "merchants: PSP not found")
+	ErrPSPNotFound = apperr.New(http.StatusNotFound, billing.CodePSPNotFound, "merchants: PSP not found")
 	// ErrPSPExists: the account is already a PSP, of this merchant or another.
-	ErrPSPExists = apperr.New(http.StatusConflict, "psp_exists", "merchants: the account is already a PSP")
+	ErrPSPExists = apperr.New(http.StatusConflict, billing.CodePSPExists, "merchants: the account is already a PSP")
 	// ErrPSPKeyTaken: another PSP holds the key.
-	ErrPSPKeyTaken = apperr.New(http.StatusConflict, "psp_key_taken", "merchants: another PSP holds this key")
+	ErrPSPKeyTaken = apperr.New(http.StatusConflict, billing.CodePSPKeyTaken, "merchants: another PSP holds this key")
 	// ErrPSPCredentialsRejected: the provider refused the credentials, or
 	// answered that they are not in the PSP's declared environment.
-	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, "psp_credentials_rejected", "the provider rejected the credentials")
+	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, billing.CodePSPCredentialsRejected, "the provider rejected the credentials")
 	// ErrPSPClaimUnproven refuses a merchant's first claim of an account whose
 	// credentials do not prove control of it (SEC-33). The operator declares
 	// such accounts instead.
-	ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, "psp_claim_requires_proof", "provider account claims require credentials that prove control of the account, or operator declaration")
+	ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, billing.CodePSPClaimRequiresProof, "provider account claims require credentials that prove control of the account, or operator declaration")
 	// ErrRevisionMismatch refuses an edit naming a revision the document has
 	// moved past.
 	ErrRevisionMismatch = apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, "the configuration changed since the revision the request names; read it again")
 	// ErrPSPEnvironmentRefused: a live PSP where the deployment wires fake
 	// providers.
-	ErrPSPEnvironmentRefused = apperr.New(http.StatusConflict, "psp_environment_refused", "a live PSP never talks to a fake provider")
+	ErrPSPEnvironmentRefused = apperr.New(http.StatusConflict, billing.CodePSPEnvironmentRefused, "a live PSP never talks to a fake provider")
 	// ErrConfigReadOnly refuses an edit of configuration read from a file.
-	ErrConfigReadOnly = apperr.New(http.StatusConflict, "merchant_config_read_only", "the merchant's configuration is read from a file; change the file")
+	ErrConfigReadOnly = apperr.New(http.StatusConflict, billing.CodeMerchantConfigReadOnly, "the merchant's configuration is read from a file; change the file")
 )
 
 // providerCredentialError types a provider-side credential rejection; any

@@ -76,7 +76,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 			return receipt, err
 		}
 		if attempt == maxCatalogSnapshotAttempts {
-			return nil, apperr.New(409, "catalog_revision_conflict", "catalog kept changing during the declarative application; retry")
+			return nil, apperr.New(409, billing.CodeCatalogRevisionConflict, "catalog kept changing during the declarative application; retry")
 		}
 	}
 }

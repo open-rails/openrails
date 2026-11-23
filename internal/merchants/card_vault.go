@@ -28,25 +28,25 @@ var (
 	// ErrPlatformVaultUnavailable refuses card_vault platform where the
 	// deployment has no platform vault, or the merchant's identity in it names
 	// another tenant.
-	ErrPlatformVaultUnavailable = apperr.New(http.StatusConflict, "platform_vault_unavailable",
+	ErrPlatformVaultUnavailable = apperr.New(http.StatusConflict, billing.CodePlatformVaultUnavailable,
 		"this deployment has no platform vault for its posture; save new cards at a card PSP's vault").WithParam("settings.card_vault")
 	// ErrPlatformVaultUnreachable refuses card_vault platform beside a charge
 	// PSP that cannot charge the platform vault's cards.
-	ErrPlatformVaultUnreachable = apperr.New(http.StatusConflict, "platform_vault_unreachable",
+	ErrPlatformVaultUnreachable = apperr.New(http.StatusConflict, billing.CodePlatformVaultUnreachable,
 		"a charge PSP cannot charge cards from the platform vault").WithParam("settings.charge_psps")
 	// ErrPlatformVaultMixedClass refuses card_vault platform charged through
 	// both live and test PSPs: one platform identity holds one money class.
-	ErrPlatformVaultMixedClass = apperr.New(http.StatusConflict, "platform_vault_mixed_class",
+	ErrPlatformVaultMixedClass = apperr.New(http.StatusConflict, billing.CodePlatformVaultMixedClass,
 		"the platform vault's charge PSPs mix live and test; name charge PSPs of one money class").WithParam("settings.charge_psps")
 	// ErrCardVaultUnknown refuses a card_vault naming no live card PSP.
-	ErrCardVaultUnknown = apperr.New(http.StatusConflict, "card_vault_unknown",
+	ErrCardVaultUnknown = apperr.New(http.StatusConflict, billing.CodeCardVaultUnknown,
 		"card_vault names no live card PSP of the merchant, nor platform").WithParam("settings.card_vault")
 	// ErrChargePSPUnknown refuses charge_psps naming no live card PSP.
-	ErrChargePSPUnknown = apperr.New(http.StatusConflict, "charge_psp_unknown",
+	ErrChargePSPUnknown = apperr.New(http.StatusConflict, billing.CodeChargePSPUnknown,
 		"charge_psps names a PSP that is not a live card PSP of the merchant").WithParam("settings.charge_psps")
 	// ErrChargePSPIncompatible refuses a charge PSP that cannot charge cards
 	// from the card vault.
-	ErrChargePSPIncompatible = apperr.New(http.StatusConflict, "charge_psp_incompatible",
+	ErrChargePSPIncompatible = apperr.New(http.StatusConflict, billing.CodeChargePSPIncompatible,
 		"a charge PSP cannot charge cards from the card vault").WithParam("settings.charge_psps")
 )
 

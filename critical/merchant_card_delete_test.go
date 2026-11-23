@@ -29,8 +29,10 @@ func TestMerchantCardRemoval(t *testing.T) {
 		// invalid is the provider's refusal, a card it will not take is the
 		// customer's decline. Neither shows NMI's own code or text.
 		for _, refusal := range []struct {
-			envelope, code, recorded string
-			status                   int
+			envelope string
+			code     billing.ErrorCode
+			recorded string
+			status   int
 		}{
 			{`{"type":"validationError","error_code":"E_INVALID_SUBMISSION","message":"The provided data is invalid."}`, billing.CodePaymentProviderRejected, "e_invalid_submission", http.StatusBadGateway},
 			{`{"type":"generalError","error_code":"E_GENERIC_ERROR","message":"Bad Request. Please use a valid test card or test ACH account from the documentation."}`, billing.CodeCardDeclined, "e_generic_error", http.StatusPaymentRequired},

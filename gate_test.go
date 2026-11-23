@@ -174,7 +174,7 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	f.calls++
 	if f.reject != 0 {
-		code := "fake_rejected"
+		code := billing.ErrorCode("fake_rejected")
 		if f.reject == http.StatusServiceUnavailable {
 			// As a sync that could not take its locks, or commit, in time.
 			code = billing.CodeServiceUnavailable
@@ -352,10 +352,10 @@ func (f *fakeSync) hold(customer billing.CustomerID, held map[string]int64, vers
 	return h
 }
 
-func writeFakeError(w http.ResponseWriter, status int, code, msg string) {
+func writeFakeError(w http.ResponseWriter, status int, code billing.ErrorCode, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": billing.ErrorDetails{Type: "api_error", Code: code, Message: msg}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": billing.ErrorDetails{Type: billing.ErrorTypeAPI, Code: code, Message: msg}})
 }
 
 func (f *fakeSync) set(fn func(f *fakeSync)) {

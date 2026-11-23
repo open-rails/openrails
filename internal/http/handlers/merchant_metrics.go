@@ -39,6 +39,6 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 			return
 		}
 	}
-	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "metrics_query_invalid", verr.Error()).
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeMetricsQueryInvalid, verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }

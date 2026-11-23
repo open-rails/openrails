@@ -74,52 +74,52 @@ type SubscriptionChangeOption struct {
 const (
 	// CodeSubscriptionChangeInFlight: another unresolved change owns the
 	// subscription: read it back with its Idempotency-Key, or confirm it.
-	CodeSubscriptionChangeInFlight = "subscription_change_in_flight"
+	CodeSubscriptionChangeInFlight ErrorCode = "subscription_change_in_flight"
 	// CodeSubscriptionChangeRefused: the provider definitively refused the
 	// change.
-	CodeSubscriptionChangeRefused = "subscription_change_refused"
+	CodeSubscriptionChangeRefused ErrorCode = "subscription_change_refused"
 	// CodeSubscriptionChangeIdempotencyConflict: the Idempotency-Key already
 	// names a different change (another customer, subscription or target).
-	CodeSubscriptionChangeIdempotencyConflict = "subscription_change_idempotency_conflict"
+	CodeSubscriptionChangeIdempotencyConflict ErrorCode = "subscription_change_idempotency_conflict"
 	// CodeSubscriptionChangeIdempotencyKeyRequired: a change needs a client
 	// Idempotency-Key; it is the only way to read back a lost response.
-	CodeSubscriptionChangeIdempotencyKeyRequired = "subscription_change_idempotency_key_required"
+	CodeSubscriptionChangeIdempotencyKeyRequired ErrorCode = "subscription_change_idempotency_key_required"
 	// CodeSubscriptionChangeCycleUnknown: the target price has no positive
 	// billing cycle, so an upgrade's new period is undefined.
-	CodeSubscriptionChangeCycleUnknown = "subscription_change_cycle_unknown"
+	CodeSubscriptionChangeCycleUnknown ErrorCode = "subscription_change_cycle_unknown"
 	// CodeSubscriptionChangePeriodUnknown: the subscription has no valid
 	// current period to prorate against.
-	CodeSubscriptionChangePeriodUnknown = "subscription_change_period_unknown"
+	CodeSubscriptionChangePeriodUnknown ErrorCode = "subscription_change_period_unknown"
 	// CodeSubscriptionChangeCreditExceedsPrice: the current plan's unused value
 	// is larger than the target (e.g. a long-cadence plan moving to a
 	// short-cadence one early in its period); upgrades never forfeit credit.
-	CodeSubscriptionChangeCreditExceedsPrice = "subscription_change_credit_exceeds_price"
+	CodeSubscriptionChangeCreditExceedsPrice ErrorCode = "subscription_change_credit_exceeds_price"
 	// CodeSubscriptionChangeRenewalDue: an engine-owned subscription's current
 	// period has ended or its renewal is unresolved; the renewal settles first.
-	CodeSubscriptionChangeRenewalDue = "subscription_change_renewal_due"
+	CodeSubscriptionChangeRenewalDue ErrorCode = "subscription_change_renewal_due"
 	// CodeSubscriptionChangeAlreadyScheduled: a different period-end change is
 	// already scheduled on the subscription.
-	CodeSubscriptionChangeAlreadyScheduled = "subscription_change_already_scheduled"
+	CodeSubscriptionChangeAlreadyScheduled ErrorCode = "subscription_change_already_scheduled"
 	// CodeSubscriptionChangeCadenceUnsupported: a provider-billed (NMI)
 	// subscription keeps its schedule's next billing date, so its tier can
 	// change only to a price of the same cadence.
-	CodeSubscriptionChangeCadenceUnsupported = "subscription_change_cadence_unsupported"
+	CodeSubscriptionChangeCadenceUnsupported ErrorCode = "subscription_change_cadence_unsupported"
 	// CodeSubscriptionChangeRequiresLinkedPlan: the target price has no plan
 	// on the subscription's PSP that this change can use (a named NMI plan
 	// needs one of the same amount and cycle). Nothing was charged.
-	CodeSubscriptionChangeRequiresLinkedPlan = "subscription_change_requires_linked_plan"
+	CodeSubscriptionChangeRequiresLinkedPlan ErrorCode = "subscription_change_requires_linked_plan"
 	// CodeSubscriptionChangeTargetInactive: the target price or its product is
 	// archived.
-	CodeSubscriptionChangeTargetInactive = "subscription_change_target_inactive"
+	CodeSubscriptionChangeTargetInactive ErrorCode = "subscription_change_target_inactive"
 	// CodeSubscriptionChangeUnsupportedOnRail: the subscription's rail cannot
 	// make this change: seats on a provider-owned or Solana subscription, or a
 	// CCBill downgrade.
-	CodeSubscriptionChangeUnsupportedOnRail = "subscription_change_unsupported_on_rail"
+	CodeSubscriptionChangeUnsupportedOnRail ErrorCode = "subscription_change_unsupported_on_rail"
 	// CodeSubscriptionChangeProviderConflict: the provider's copy of the
 	// subscription is missing or differs from OpenRails' (another price, a
 	// provider schedule); reconcile it first.
-	CodeSubscriptionChangeProviderConflict = "subscription_change_provider_conflict"
+	CodeSubscriptionChangeProviderConflict ErrorCode = "subscription_change_provider_conflict"
 	// CodeStoredCredentialRequired is retained for historical merchant-initiated
 	// charge refusals. New staff changes schedule the next renewal.
-	CodeStoredCredentialRequired = "stored_credential_required"
+	CodeStoredCredentialRequired ErrorCode = "stored_credential_required"
 )

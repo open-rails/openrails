@@ -98,7 +98,7 @@ func TestAuthorityBoundaries(t *testing.T) {
 		var refusal *billing.StatusError
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, 401, refusal.Status)
-		require.Equal(t, "credential_revoked", refusal.Code)
+		require.Equal(t, billing.CodeCredentialRevoked, refusal.Code)
 		products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{})
 		require.NoError(t, err)
 		require.Empty(t, products.Items)

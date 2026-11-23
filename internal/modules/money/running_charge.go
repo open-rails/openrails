@@ -38,7 +38,7 @@ const (
 )
 
 // ErrRunningChargeNotFound: no charge was started under the reference.
-var ErrRunningChargeNotFound = apperr.New(http.StatusNotFound, "running_charge_not_found", "no running charge was started under this reference")
+var ErrRunningChargeNotFound = apperr.New(http.StatusNotFound, billing.CodeRunningChargeNotFound, "no running charge was started under this reference")
 
 func runningChargeInvalid(param, format string, args ...any) error {
 	return apperr.Invalidf(format, args...).WithParam(param)
@@ -95,7 +95,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	}
 	in.Currency = normalizeCurrency(in.Currency)
 	if err := moneyutil.ValidateCurrency(in.Currency); err != nil {
-		return nil, false, apperr.New(http.StatusBadRequest, "currency_unsupported", err.Error()).WithParam("currency")
+		return nil, false, apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, err.Error()).WithParam("currency")
 	}
 	txSvc := s.WithDatabase(txDB)
 	now := instant(txSvc.now())

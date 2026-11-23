@@ -122,6 +122,6 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.Merc
 // invalidRange refuses an out-of-range argument instead of substituting a default.
 func invalidRange(name string, low, high int) error {
 	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{
-		Type: "invalid_request_error", Code: "invalid_param", Message: fmt.Sprintf("%s must be between %d and %d", name, low, high),
+		Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeInvalidParam, Message: fmt.Sprintf("%s must be between %d and %d", name, low, high),
 	}}
 }

@@ -14,7 +14,7 @@ import (
 )
 
 // RefusalEntitlementRequired is also the line's error code.
-const RefusalEntitlementRequired = billing.CodeEntitlementRequired
+const RefusalEntitlementRequired = string(billing.CodeEntitlementRequired)
 
 // refuseUnentitled refuses each buyable line whose product requires keys the
 // customer does not hold at at.

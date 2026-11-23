@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ErrCurrencyUnsupported refuses a currency outside the supported registry.
-var ErrCurrencyUnsupported = apperr.New(http.StatusBadRequest, "currency_unsupported", "unknown currency")
+var ErrCurrencyUnsupported = apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, "unknown currency")
 
 // requireCurrency validates and normalizes a supported currency.
 func requireCurrency(currency string) (string, error) {

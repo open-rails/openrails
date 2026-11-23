@@ -7,9 +7,11 @@ import (
 )
 
 // customerErrors are the codes of a route addressed to one customer.
-var customerErrors = []string{"invalid_customer_id", billing.CodeServiceCredentialCustomerScopeDenied}
+var customerErrors = []billing.ErrorCode{billing.CodeInvalidCustomerID, billing.CodeServiceCredentialCustomerScopeDenied}
 
-func withCustomer(list ...string) []string { return codes(append(list, customerErrors...)...) }
+func withCustomer(list ...billing.ErrorCode) []billing.ErrorCode {
+	return codes(append(list, customerErrors...)...)
+}
 
 // creditsRoutes is a customer's prepaid money: credit grants, the ledger and
 // balances.

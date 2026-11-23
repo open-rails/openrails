@@ -169,7 +169,7 @@ func assertNoPSPSecrets(t *testing.T, value any) {
 	}
 }
 
-func pspRefusal(t *testing.T, err error, status int, code string) {
+func pspRefusal(t *testing.T, err error, status int, code billing.ErrorCode) {
 	t.Helper()
 	var refusal *billing.StatusError
 	require.ErrorAs(t, err, &refusal)
@@ -233,9 +233,9 @@ func TestPSPControls(t *testing.T) {
 				}
 				_, err := a.alphaRemote.CreatePSP(t.Context(), in)
 				if profile == "environment" {
-					pspRefusal(t, err, 409, "psp_environment_refused")
+					pspRefusal(t, err, 409, billing.CodePSPEnvironmentRefused)
 				} else {
-					pspRefusal(t, err, 400, "psp_credentials_rejected")
+					pspRefusal(t, err, 400, billing.CodePSPCredentialsRejected)
 				}
 				require.NotContains(t, err.Error(), in.Credentials["secret_key"])
 				psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
@@ -247,7 +247,7 @@ func TestPSPControls(t *testing.T) {
 		unarmed := pspInput()
 		unarmed.Credentials = map[string]string{}
 		_, err := a.alphaRemote.CreatePSP(t.Context(), unarmed)
-		pspRefusal(t, err, 403, "psp_claim_requires_proof")
+		pspRefusal(t, err, 403, billing.CodePSPClaimRequiresProof)
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Empty(t, psps.Items, "an account claimed without credentials is not declared")
@@ -330,7 +330,7 @@ func TestPSPControls(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond, "another replica must invalidate its cached credential immediately")
 		require.Less(t, time.Since(cachedAt), 30*time.Second, "the periodic cache fallback is not notification proof")
 		_, err = a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{ExpectedRevision: &initial.Revision, Credentials: map[string]string{"secret_key": "sk_test_critical"}})
-		pspRefusal(t, err, 409, "revision_mismatch")
+		pspRefusal(t, err, 409, billing.CodeRevisionMismatch)
 		p.mu.Lock()
 		p.keys = nil
 		p.mu.Unlock()
@@ -343,7 +343,7 @@ func TestPSPControls(t *testing.T) {
 		require.Contains(t, keys, "sk_test_rotated")
 		require.NotContains(t, keys, "sk_test_critical")
 		_, err = a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{Archived: true})
-		pspRefusal(t, err, 409, "psp_last_active")
+		pspRefusal(t, err, 409, billing.CodePSPLastActive)
 		archived, err := a.alphaRemote.UpdatePSP(t.Context(), initial.ID, billing.UpdatePSPParams{Archived: true, AllowLast: true})
 		require.NoError(t, err)
 		require.True(t, archived.Archived)
@@ -368,7 +368,7 @@ func TestPSPControls(t *testing.T) {
 		require.NotContains(t, string(encoded), "private-hook-token")
 		for _, destination := range []string{"http://127.0.0.1/private", "http://169.254.169.254/latest/meta-data", "http://[::1]/private", "file:///etc/passwd"} {
 			_, err := a.alphaRemote.CreateAlertWebhook(t.Context(), billing.CreateAlertWebhookParams{Name: "blocked", URL: destination})
-			pspRefusal(t, err, 400, "webhook_invalid")
+			pspRefusal(t, err, 400, billing.CodeWebhookInvalid)
 		}
 		hooks, err := a.alphaRemote.ListAlertWebhooks(t.Context(), billing.AlertWebhookListParams{})
 		require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestPSPControls(t *testing.T) {
 		p.redirect = private.URL + "/secret-destination"
 		p.mu.Unlock()
 		_, err = a.alphaRemote.CreatePSP(t.Context(), pspInput())
-		pspRefusal(t, err, 503, "service_unavailable")
+		pspRefusal(t, err, 503, billing.CodeServiceUnavailable)
 		require.NotContains(t, err.Error(), "secret-destination")
 		require.Zero(t, received.Load())
 		// Allow only this fixture's entry address. A redirect to a different

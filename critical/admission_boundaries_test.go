@@ -142,7 +142,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		changed, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{request})
 		require.NoError(t, err)
 		require.Equal(t, 422, changed[0].Status)
-		require.Equal(t, "idempotency_key_reused", changed[0].Error.Code)
+		require.Equal(t, billing.CodeIdempotencyKeyReused, changed[0].Error.Code)
 		balance(t, w.alpha, customer, 400, 600, 1000)
 	})
 	t.Run("OR-J22-S02/capture-and-credit-revocation-conserve-funds", func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		_, err = w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
-		require.Equal(t, "credit_grant_held", held.Code)
+		require.Equal(t, billing.CodeCreditGrantHeld, held.Code)
 		type captureResult struct {
 			rows []billing.CaptureResult
 			err  error
@@ -185,7 +185,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		if r.err != nil {
 			var refusal *billing.StatusError
 			require.ErrorAs(t, r.err, &refusal)
-			require.Equal(t, "credit_grant_held", refusal.Code)
+			require.Equal(t, billing.CodeCreditGrantHeld, refusal.Code)
 		}
 		// The capture's accrual posts before a revocation moves the lot, or
 		// once its day ends.
