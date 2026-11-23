@@ -17,4 +17,14 @@ for app in server/web/console web/pay; do
   test -s "$app/dist/index.html"
 done
 git diff --quiet HEAD -- sdk/billing-ui server/web/console web/pay
-bash scripts/pack-billing-ui.sh "$1" "$2" --prebuilt-sdk
+# Pack that SDK build as <archive-dir>/openrails-billing-ui-<version>.tgz for release.yaml's npm publish.
+version="${1#v}"
+out="$(mkdir -p "$2" && cd "$2" && pwd)"
+cd sdk/billing-ui
+for entry in index.js client.js admin.js index.d.ts; do test -s "dist/$entry"; done
+backup="$(mktemp)"
+cp package.json "$backup"
+trap 'cp "$backup" package.json; rm -f "$backup"' EXIT
+npm version "$version" --no-git-tag-version --allow-same-version >/dev/null
+pnpm pack --pack-destination "$out"
+tar -tzf "$out/openrails-billing-ui-$version.tgz" package/dist/index.js >/dev/null

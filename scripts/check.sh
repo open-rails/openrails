@@ -12,7 +12,7 @@ in_modules() {
 # Static guards: one command each.
 guards() {
   bash scripts/migration-prefix-collision.sh
-  bash scripts/check_business_time.sh
+  go run ./scripts/business-time
   bash scripts/check-one-pull-entry.sh
   bash scripts/check-borrowed-connections.sh
   bash scripts/scan-injected-code.sh --all

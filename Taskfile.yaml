@@ -19,9 +19,11 @@ tasks:
       - task -l
 
   setup:
-    desc: Prepare a fresh clone after system prerequisites are installed
+    desc: Prepare a fresh clone (.env, git hooks, the compose module-cache volume)
     cmds:
-      - bash scripts/setup.sh
+      - '[ -e .env ] || [ -L .env ] || cp .env.example .env'
+      - ./scripts/install-git-hooks.sh
+      - docker volume create go_mod_cache_persistent >/dev/null
 
   ci-local:
     desc: Run critical behavioral and static checks against owned disposable services
@@ -97,13 +99,16 @@ tasks:
 
   tunnel-webhooks:
     desc: Run cloudflared tunnel for deterministic webhook hostname (requires CLOUDFLARED_TUNNEL_TOKEN)
+    dotenv: [.env]
     cmds:
-      - bash scripts/webhook_tunnel.sh
+      - cloudflared tunnel run --token "${CLOUDFLARED_TUNNEL_TOKEN:?set it in .env or your shell}"
 
   verify-webhook-tunnel:
     desc: Verify Cloudflared routing reaches local openrails (/health/live + /health/ready)
+    dotenv: [.env]
     cmds:
-      - bash scripts/verify_webhook_tunnel.sh
+      - curl -fsS "https://${CLOUDFLARED_PUBLIC_HOSTNAME:?set it in .env or your shell}/health/live" >/dev/null
+      - curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/health/ready" >/dev/null
 
   sqlc:
     desc: Generate SQL bindings and prepare every query against a disposable migrated database
