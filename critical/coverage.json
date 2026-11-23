@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 396,
+  "scenario_count": 397,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1637,6 +1637,11 @@
       "id": "OR-J29-S40",
       "journey": "J29",
       "name": "Retention cleanup continues past a full batch of merchants in a new job and reaches every merchant"
+    },
+    {
+      "id": "OR-J29-S41",
+      "journey": "J29",
+      "name": "Partition retention drops a month of hold parts before the month of holds they reference, and keeps the current month"
     },
     {
       "id": "OR-J26-S50",
