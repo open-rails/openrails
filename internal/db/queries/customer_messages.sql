@@ -30,8 +30,8 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: CustomerMessageOnTestPSP :one
--- Whether the fact's payment, order or subscription is on a PSP that moves
--- no real money.
+-- Whether the fact's PSP, payment, order or subscription is on a PSP that
+-- moves no real money.
 SELECT EXISTS (
     SELECT 1 FROM billing.psps p
     WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT p.live
@@ -41,6 +41,8 @@ SELECT EXISTS (
         SELECT o.psp_id FROM billing.orders o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(order_id)::uuid
         UNION ALL
         SELECT s.psp_id FROM billing.subscriptions s WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.narg(subscription_id)::uuid
+        UNION ALL
+        SELECT sqlc.narg(psp_id)::uuid
       )
 )::boolean AS test_environment;
 

@@ -13,7 +13,8 @@ was sent (`customer_messages`) keeps no body.
   name, else the sender's own address.
 - The recipient is the customer's address in the directory
   ([customer contacts](customer-contacts.md)); none ends `no_contact`.
-- A fact on a test or sandbox PSP sends nothing (`test_environment`).
+- A fact on a test or sandbox PSP sends nothing (`test_environment`): its
+  `psp_id`, or its payment's, order's or subscription's PSP.
 - A customer is sent at most ten messages an hour; more are `rate_limited` and
   open a `life.customer.messages_rate_limited` finding.
 - A failed send is retried with backoff, ten attempts in all. Only a mail
@@ -30,7 +31,7 @@ Every event type below has a built-in English message.
 | `one_off_purchase_completed` | Receipt for a one-off purchase |
 | `refund_completed` | Refund receipt |
 | `premium_started` | The subscription started |
-| `payment_method_failed` | A payment failed, with the update-card link; not the failure that ended a subscription (`recovery_action: resubscribe`), whose ending confirms it |
+| `payment_method_failed` | A payment failed, with the update-card link; not the failure that ended a subscription (`recovery_action: resubscribe`), whose ending confirms it, nor a declined checkout (`source: customer_checkout` or `customer_subscription_change`), which the page reports |
 | `payment_authentication_required` | The bank wants the customer to confirm a payment |
 | `payment_method_update_required` | The card on file no longer works |
 | `subscription_canceled` | Cancellation confirmation while paid access remains, worded by `Reason`: `user_cancel` (the customer, with a resume link), `admin` (staff), `expired` or `non_recoverable` (failed payments) or anything else |

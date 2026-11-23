@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/notificationinbox"
 )
 
 const (
@@ -55,7 +56,7 @@ const (
 // defaults is whether each event type sends an email until the merchant
 // says otherwise; every type listed has a built-in template. A type not
 // listed sends none unless the merchant turns it on with a template.
-// byDefault refines two of them by the fact.
+// byDefault refines some of them by the fact.
 var defaults = map[models.NotificationEventType]bool{
 	models.NotificationOneOffPurchaseCompleted:       true,
 	models.NotificationRefundCompleted:               true,
@@ -108,17 +109,24 @@ var confirmedEndings = []subscriptions.PremiumEndReason{
 	subscriptions.PremiumEndReasonExpired, subscriptions.PremiumEndReasonNonRecoverable,
 }
 
+// checkoutSources are the payment issues a customer meets in checkout,
+// where the page told them already; as the account inbox, they send none.
+var checkoutSources = []string{"customer_checkout", "customer_subscription_change"}
+
 // byDefault is whether a fact of eventType with data sends its message when
 // the merchant does not say.
 func byDefault(eventType string, data billing.NotificationData) bool {
-	switch models.NotificationEventType(eventType) {
-	case models.NotificationPremiumEnded:
+	kind := models.NotificationEventType(eventType)
+	switch {
+	case kind == models.NotificationPremiumEnded:
 		return slices.Contains(confirmedEndings, subscriptions.PremiumEndReason(data.Reason))
-	case models.NotificationPaymentMethodFailed:
+	case notificationinbox.IsPaymentIssue(eventType) && slices.Contains(checkoutSources, data.Source):
+		return false
+	case kind == models.NotificationPaymentMethodFailed && data.RecoveryAction == billing.NotificationRecoveryResubscribe:
 		// The failure that ended a subscription: its ending confirms it.
-		return data.RecoveryAction != billing.NotificationRecoveryResubscribe
+		return false
 	}
-	return defaults[models.NotificationEventType(eventType)]
+	return defaults[kind]
 }
 
 // Enabled reports whether s sends the message of a fact of eventType with

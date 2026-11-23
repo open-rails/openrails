@@ -593,6 +593,38 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, billing.MessageSendFailed, lastError(log[0]))
 		require.Equal(t, messageSendAttempts, log[0].Attempts)
 	})
+	t.Run("OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp", func(t *testing.T) {
+		decline := func(t *testing.T, a *authorityWorld, transaction string) {
+			t.Helper()
+			status, body := ccbillNotice(t, a, "NewSaleFailure", map[string]any{"transactionId": transaction, "email": a.alice.Email, "username": a.alice.Username,
+				"flexId": "critical-flex", "billedCurrencyCode": "840", "failureCode": "15", "failureReason": "Insufficient funds"})
+			require.Equal(t, http.StatusOK, status, body)
+		}
+		t.Run("off-by-default", func(t *testing.T) {
+			mail := &alertMailbox{}
+			a := ccbillWebhookWorld(t, func(w *world) { w.deps.Email = mail })
+			decline(t, a, "0912233445566778801")
+			liveMoney(t, a.world)
+			startFleet(t, a.world)
+			log := settledMessages(t, a.world, customerOf(a.alice), 1)
+			require.Equal(t, "payment_method_failed", log[0].EventType)
+			require.Equal(t, billing.MessageDisabled, log[0].Status, "the checkout page told the customer")
+			require.Empty(t, mail.all())
+		})
+		t.Run("turned-on-on-a-sandbox-psp", func(t *testing.T) {
+			mail := &alertMailbox{}
+			on := true
+			a := ccbillWebhookWorld(t, func(w *world) {
+				w.deps.Email = mail
+				declareMessages(w, billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"payment_method_failed": {Enabled: &on}}})
+			})
+			decline(t, a, "0912233445566778802")
+			startFleet(t, a.world)
+			log := settledMessages(t, a.world, customerOf(a.alice), 1)
+			require.Equal(t, billing.MessageTestEnvironment, log[0].Status, "the decline names its sandbox PSP")
+			require.Empty(t, mail.all())
+		})
+	})
 }
 
 // declareMessages gives alpha the messages document s.

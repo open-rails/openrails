@@ -2162,6 +2162,11 @@
       "id": "OR-J39-S20",
       "journey": "J39",
       "name": "A message whose last attempt's job ends while the sender holds it settles failed, not sending"
+    },
+    {
+      "id": "OR-J39-S21",
+      "journey": "J39",
+      "name": "A declined checkout sends no message by default, and turned on it sends none from a sandbox PSP: the decline names its PSP"
     }
   ]
 }

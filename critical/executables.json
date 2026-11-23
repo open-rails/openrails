@@ -1381,6 +1381,11 @@
     ],
     "OR-J39-S20": [
       "TestCustomerMessages/OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed"
+    ],
+    "OR-J39-S21": [
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp",
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/off-by-default",
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/turned-on-on-a-sandbox-psp"
     ]
   }
 }

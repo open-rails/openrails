@@ -618,6 +618,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_checkout", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
@@ -975,6 +976,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_subscription_change", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {

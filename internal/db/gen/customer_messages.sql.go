@@ -105,6 +105,8 @@ SELECT EXISTS (
         SELECT o.psp_id FROM billing.orders o WHERE o.merchant_id = $1::uuid AND o.id = $3::uuid
         UNION ALL
         SELECT s.psp_id FROM billing.subscriptions s WHERE s.merchant_id = $1::uuid AND s.id = $4::uuid
+        UNION ALL
+        SELECT $5::uuid
       )
 )::boolean AS test_environment
 `
@@ -114,16 +116,18 @@ type CustomerMessageOnTestPSPParams struct {
 	PaymentID      *uuid.UUID
 	OrderID        *uuid.UUID
 	SubscriptionID *uuid.UUID
+	PspID          *uuid.UUID
 }
 
-// Whether the fact's payment, order or subscription is on a PSP that moves
-// no real money.
+// Whether the fact's PSP, payment, order or subscription is on a PSP that
+// moves no real money.
 func (q *Queries) CustomerMessageOnTestPSP(ctx context.Context, arg CustomerMessageOnTestPSPParams) (bool, error) {
 	row := q.db.QueryRow(ctx, customerMessageOnTestPSP,
 		arg.MerchantID,
 		arg.PaymentID,
 		arg.OrderID,
 		arg.SubscriptionID,
+		arg.PspID,
 	)
 	var test_environment bool
 	err := row.Scan(&test_environment)

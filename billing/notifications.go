@@ -141,7 +141,10 @@ type NotificationData struct {
 	LowBalanceAmount *int64     `json:"low_balance_amount,omitempty,string"`
 	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
 
-	// Rail context on payment_method_failed.
+	// Rail context on payment_method_failed. PSPID is the account a decline
+	// came from when the fact names no payment, order or subscription that
+	// does (a declined checkout).
+	PSPID              PSPID  `json:"psp_id,omitzero"`
 	Rail               Rail   `json:"rail,omitempty"`
 	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 	TransactionID      string `json:"transaction_id,omitempty"`

@@ -76,7 +76,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	}
 	test, err := s.DB.Gen(ctx).CustomerMessageOnTestPSP(ctx, gen.CustomerMessageOnTestPSPParams{
 		MerchantID: m.MerchantID, PaymentID: optional(data.PaymentID.UUID()),
-		OrderID: optional(data.OrderID.UUID()), SubscriptionID: optional(data.SubscriptionID.UUID()),
+		OrderID: optional(data.OrderID.UUID()), SubscriptionID: optional(data.SubscriptionID.UUID()), PspID: optional(data.PSPID.UUID()),
 	})
 	if err != nil {
 		return err

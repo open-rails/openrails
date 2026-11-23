@@ -88,3 +88,18 @@ func TestAnEndingConfirmsTheCancellationsItWasCausedBy(t *testing.T) {
 		t.Error("a failure the customer can fix is sent")
 	}
 }
+
+func TestACheckoutDeclineSendsNoneByDefault(t *testing.T) {
+	on := true
+	for _, source := range []string{"customer_checkout", "customer_subscription_change"} {
+		decline := billing.NotificationData{Source: source, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod}
+		for _, kind := range []string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped"} {
+			if Enabled(billing.MessageSettings{}, kind, decline) {
+				t.Errorf("%s from %s: the checkout page told the customer", kind, source)
+			}
+		}
+		if !Enabled(billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"payment_method_failed": {Enabled: &on}}}, "payment_method_failed", decline) {
+			t.Errorf("%s: the merchant's enabled overrides the default", source)
+		}
+	}
+}
