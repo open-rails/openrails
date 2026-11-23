@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -18,12 +19,16 @@ import (
 
 type entitlementWire struct {
 	http.RoundTripper
-	requests atomic.Int64
+	requests    atomic.Int64
+	unreachable atomic.Bool
 }
 
 func (w *entitlementWire) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.URL.Path == "/v1/app/entitlements/check" {
 		w.requests.Add(1)
+		if w.unreachable.Load() {
+			return nil, errors.New("critical fixture cannot reach OpenRails")
+		}
 	}
 	return w.RoundTripper.RoundTrip(r)
 }
@@ -94,7 +99,8 @@ func TestRemoteEntitlementCache(t *testing.T) {
 		require.EqualValues(t, samples, uncachedWire.requests.Load())
 
 		sharedA, sharedWireA := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 30*time.Second, criticalRedis(t))
-		sharedB, sharedWireB := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 30*time.Second, criticalRedis(t))
+		replicaRedis := criticalRedis(t)
+		sharedB, sharedWireB := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 30*time.Second, replicaRedis)
 		assertVerdict(sharedA, true)
 		started = time.Now()
 		for range samples {
@@ -106,6 +112,9 @@ func TestRemoteEntitlementCache(t *testing.T) {
 			time.Since(started)/samples, samples, sharedWireA.requests.Load(), sharedWireB.requests.Load())
 		require.EqualValues(t, 1, sharedWireA.requests.Load())
 		require.Zero(t, sharedWireB.requests.Load())
+		require.NoError(t, replicaRedis.Close())
+		assertVerdict(sharedB, true)
+		require.EqualValues(t, 1, sharedWireB.requests.Load())
 
 		readOnlyKey, err := a.auth.CreateAPIKey(t.Context(), iam.SystemIdentity(), a.alphaGroup, iam.NewAPIKey{Name: "customer-reader", Role: a.reader})
 		require.NoError(t, err)
@@ -131,11 +140,15 @@ func TestRemoteEntitlementCache(t *testing.T) {
 		assertVerdict(nearEnd, true)
 		require.EqualValues(t, 1, nearEndWire.requests.Load())
 		a.clock.Advance(time.Second)
+		nearEndWire.unreachable.Store(true)
 		require.Eventually(t, func() bool {
-			current, err := nearEnd.CheckEntitlements(t.Context(), params)
-			return err == nil && !current.Entitlements["library:read"]
+			_, err := nearEnd.CheckEntitlements(t.Context(), params)
+			return errors.Is(err, billing.ErrUnreachable)
 		}, 2*time.Second, 25*time.Millisecond)
 		require.EqualValues(t, 2, nearEndWire.requests.Load())
+		nearEndWire.unreachable.Store(false)
+		assertVerdict(nearEnd, false)
+		require.EqualValues(t, 3, nearEndWire.requests.Load())
 
 		// An unplanned revocation is immediately visible on the live path.
 		revocable := publicGrant(t, a, "cache-revocation", 2)
