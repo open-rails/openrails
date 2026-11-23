@@ -1,10 +1,9 @@
 # Embedded example
 
-The root README's program: a creator site on one Go server. Users sign in with
-AuthKit, buy video courses one at a time or as a bundle (or rent one for 3
-days), or join the channel membership, monthly or yearly, which unlocks every
-video, members-only ones included. The walkthrough is
-the root README's [Sell Your Content](../../README.md#sell-your-content).
+A runnable course store with the application, AuthKit and embedded OpenRails
+in one Go process. It sells individual courses, rentals and recurring access.
+The [embedded guide](../../docs/embedded.md) explains boot, mounting routes
+and using the merchant client.
 
 | File | What it is |
 |---|---|

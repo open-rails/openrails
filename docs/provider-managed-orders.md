@@ -63,24 +63,18 @@ count it when it was charged, and renewal cycles never include it. Import,
 the NMI pull and verification record it the same way, once per provider
 transaction.
 
-## Import and prelaunch upgrade
+## Import and archive restore
 
-[Billing import](batch-import.md) accepts explicit verified schedule and invoice
-facts. A live NMI/CCBill import provides its accepted recurring amount, currency,
-cadence and first due boundary. Stripe financial history provides the complete
-invoice and actual settlement evidence. An amount-only transaction cannot
-reconstruct an unknown historical bill from today's catalog; a charge before
-the accepted schedule is settled history (above). A live NMI schedule the book
-does not prove takes its terms from NMI's own recurring record on the next
-provider pull, when they match the subscription's price; otherwise it stays
-unresolved. A declared charge without an
-amount is read from the provider by its transaction id. One-off sales import
-as complete orders with their payments.
+Use the [billing import guide](batch-import.md#accepted-bills-and-provider-schedules)
+to prepare evidence for NMI and CCBill recurring bills and Stripe invoices.
+Use [historical payments](batch-import.md#historical-payments) for a verified
+NMI receipt whose original subscription or catalog purchase is unavailable.
 
-The order-only payment migration removes `payments.price_id`. It refuses an
-existing book containing payments without orders, rather than deleting records
-or inventing historical obligations. For the prelaunch cut, use an empty billing
-schema or an explicitly prepared order-based book. This is a coordinated
-application/schema upgrade: update hosts and the browser SDK together. Restoring
-an old archive with orderless payments is explicitly refused. Migration itself
-performs no database reset and makes no provider call.
+Every payment and reversal requires its original order. Merchant archive import
+checks that each order belongs to the payment's customer and that reversals
+reference the original payment's order. Use
+[merchant portability](merchant-portability.md) for a current OpenRails archive.
+Use [billing import](batch-import.md#the-migration-playbook) to bring verified
+legacy facts into the current schema.
+[Payment constraint](../internal/migrate/postgres/0001_schema.up.sql) ·
+[Archive validation](../internal/merchantarchive/provider_bill_checks.go)
