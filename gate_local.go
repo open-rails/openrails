@@ -51,8 +51,9 @@ type localGate struct {
 	applied map[holdKey]int64
 	// unpersisted are moved items whose old outbox refs are not yet acked.
 	unpersisted []move
-	// closes are earlier leases to close, so their holds free at once.
-	closes  map[billing.LeaseID]bool
+	// closes are earlier leases to close, so their holds free before they
+	// expire.
+	closes  map[billing.LeaseID]*retiredLease
 	display map[billing.CustomerID][]billing.CustomerLimit
 	refused []error
 	// failure is the last sync attempt's failure, nil once one succeeds;
@@ -79,7 +80,7 @@ func newLocalGate(c *Client, outbox UsageOutbox, start bool) *localGate {
 		holds: map[holdKey]*localHold{}, expired: map[holdKey]*localHold{}, sets: map[string]string{},
 		lease: newLeaseID(), queues: map[billing.LeaseID]*usageQueue{},
 		wants: map[string]*pendingWant{}, returns: map[holdKey]*localHold{}, applied: map[holdKey]int64{},
-		closes: map[billing.LeaseID]bool{}, display: map[billing.CustomerID][]billing.CustomerLimit{},
+		closes: map[billing.LeaseID]*retiredLease{}, display: map[billing.CustomerID][]billing.CustomerLimit{},
 		synced: make(chan struct{}), kick: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		recovered: outbox == nil,
 	}
@@ -633,12 +634,50 @@ func sendableLocked(q *usageQueue, limit int) []billing.LeaseUsage {
 	return out
 }
 
-// rolloverLocked starts a new lease. The old one is closed, with its usage
-// sent against it, so its holds free at once; they keep only their safe
-// amounts here when keepSafe.
-func (g *localGate) rolloverLocked(keepSafe bool) {
+// retiredLease is an earlier lease to close. One the server answered dead
+// closes at once; any other closes once none of its holds has an open
+// ticket or unsettled usage, or is left to expire once it would have.
+type retiredLease struct {
+	holds   []*localHold
+	dead    bool
+	expires time.Time
+}
+
+// due reports a retired lease ready to close, and marks its idle holds gone
+// so no decision takes from them after; expired is one left to expire.
+// Lock order: mu, then each hold.
+func (r *retiredLease) due(now time.Time) (due, expired bool) {
+	if r.dead {
+		return true, false
+	}
+	for _, h := range r.holds {
+		h.mu.Lock()
+		busy := h.open > 0 || h.pending > 0
+		if !busy {
+			h.gone = true
+		}
+		h.mu.Unlock()
+		if busy {
+			return false, !now.Before(r.expires)
+		}
+	}
+	return true, false
+}
+
+// rolloverLocked starts a new lease; the old one's holds keep only their
+// safe amounts here when keepSafe. The old lease is closed, with its usage
+// sent against it, at once when the server answered it dead, and otherwise
+// once its holds' tickets ended: closing frees its holds, which an open
+// ticket still counts on.
+func (g *localGate) rolloverLocked(keepSafe, dead bool) {
 	if len(g.closes) < maxGateCloses {
-		g.closes[g.lease] = true
+		r := &retiredLease{dead: dead, expires: time.Now().Add(limits.LeaseLifetime + limits.LeaseGrace)}
+		g.index.RLock()
+		for _, h := range g.holds {
+			r.holds = append(r.holds, h)
+		}
+		g.index.RUnlock()
+		g.closes[g.lease] = r
 	}
 	g.lease = newLeaseID()
 	g.liveUntil.Store(0)
@@ -705,7 +744,7 @@ func (g *localGate) syncOnce() {
 	g.mu.Lock()
 	closing := g.closing
 	if !closing && g.liveUntil.Load() != 0 && !g.leaseLive(now) {
-		g.rolloverLocked(true)
+		g.rolloverLocked(true, false)
 	}
 	g.evictLocked()
 	lease := g.lease
@@ -840,6 +879,7 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 	acks, settled, moves, collided := g.settleLocked(lease, res.Usage)
 	// Usage past a gap moves to a new lease, even a closing gate's.
 	roll := current && ((!res.Lease.Live || collided) && !params.Close || len(moves) > 0)
+	dead := current && !res.Lease.Live
 
 	now := time.Now()
 	g.index.Lock()
@@ -906,7 +946,7 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 	}
 	g.index.Unlock()
 	if roll {
-		g.rolloverLocked(false)
+		g.rolloverLocked(false, dead)
 	}
 	moves = g.placeMovesLocked(moves)
 
@@ -968,7 +1008,9 @@ func (g *localGate) failedLocked(lease billing.LeaseID, params billing.SyncLease
 			e.answer = wantAnswer{retry: true}
 		}
 		if current && !params.Close {
-			g.rolloverLocked(false)
+			// The server holds nothing on it: closed at once, as a lease
+			// answered dead.
+			g.rolloverLocked(false, true)
 		}
 		return nil
 	case faultUnreachable:
@@ -1151,8 +1193,9 @@ func (g *localGate) ack(refs []billing.LeaseUsageRef) {
 }
 
 // resendEarlier sends the usage of earlier leases (rolled over, or read from
-// the outbox at start), one usage-only sync per lease, each closing it; an
-// abandoned lease with no usage left gets one empty closing sync.
+// the outbox at start), one usage-only sync per lease, closing it when its
+// close is due; then each retired lease whose close is due and that has no
+// usage left gets one empty closing sync.
 func (g *localGate) resendEarlier() {
 	g.mu.Lock()
 	var leases []billing.LeaseID
@@ -1161,38 +1204,35 @@ func (g *localGate) resendEarlier() {
 			leases = append(leases, id)
 		}
 	}
-	for id := range g.closes {
-		if id == g.lease || slices.Contains(leases, id) {
-			continue
-		}
-		leases = append(leases, id)
-	}
 	g.mu.Unlock()
 	for _, lease := range leases {
 		g.mu.Lock()
 		usage := sendableLocked(g.queues[lease], billing.MaxSyncUsageItems)
-		closeOnly := g.closes[lease] && len(usage) == 0
+		closing := true
+		if r := g.closes[lease]; r != nil {
+			due, expired := r.due(time.Now())
+			closing = due || expired
+		}
 		g.mu.Unlock()
-		if len(usage) == 0 && !closeOnly {
+		if len(usage) == 0 {
 			continue
 		}
 		params := billing.SyncLeasesParams{LeaseID: lease, Usage: nonNilUsage(usage), Wants: []billing.LeaseWant{}, Returns: []billing.HoldReturn{},
-			Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true}
+			Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: closing}
+		sent := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		res, err := g.c.SyncLeases(ctx, params)
 		cancel()
 		unreachable := err != nil && classify(err) == faultUnreachable
 		g.mu.Lock()
-		if !unreachable {
-			// Closed, or refused for good: either way not tried again.
-			delete(g.closes, lease)
-		}
-		if closeOnly {
-			g.mu.Unlock()
-			if unreachable {
-				return
+		if r := g.closes[lease]; r != nil && !unreachable {
+			if closing {
+				// Closed, or refused for good: either way not tried again.
+				delete(g.closes, lease)
+			} else if err == nil && res.Lease.Live {
+				// The usage renewed it.
+				r.expires = sent.Add(limits.LeaseLifetime + limits.LeaseGrace)
 			}
-			continue
 		}
 		var acks []billing.LeaseUsageRef
 		var moves []move
@@ -1216,6 +1256,35 @@ func (g *localGate) resendEarlier() {
 		if unreachable {
 			return
 		}
+	}
+	now := time.Now()
+	g.mu.Lock()
+	var due []billing.LeaseID
+	for id, r := range g.closes {
+		if id == g.lease || len(sendableLocked(g.queues[id], 1)) > 0 {
+			continue
+		}
+		ready, expired := r.due(now)
+		switch {
+		case expired:
+			delete(g.closes, id)
+		case ready:
+			due = append(due, id)
+		}
+	}
+	g.mu.Unlock()
+	for _, lease := range due {
+		params := billing.SyncLeasesParams{LeaseID: lease, Usage: []billing.LeaseUsage{}, Wants: []billing.LeaseWant{}, Returns: []billing.HoldReturn{},
+			Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true}
+		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+		_, err := g.c.SyncLeases(ctx, params)
+		cancel()
+		if err != nil && classify(err) == faultUnreachable {
+			return
+		}
+		g.mu.Lock()
+		delete(g.closes, lease)
+		g.mu.Unlock()
 	}
 }
 

@@ -1240,6 +1240,104 @@ func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
 	})
 }
 
+func TestGateKeepsALiveLeaseItRolledOverUntilItsTicketsEnd(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
+		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		// An open ticket, then a capture whose Put fails (item 2) and one
+		// past the gap it leaves (item 3).
+		open := mustAdmit(t, g, work(customer, "open", 5))
+		first := leaseOf(g)
+		failed := make(chan error, 1)
+		var lost *Ticket
+		go func() {
+			var err error
+			lost, err = g.Consume(t.Context(), work(customer, "lost", 2))
+			failed <- err
+		}()
+		synctest.Wait()
+		if _, err := g.Consume(t.Context(), work(customer, "past-the-gap", 3)); err != nil {
+			t.Fatal(err)
+		}
+		close(outbox.release)
+		if err := <-failed; err == nil {
+			t.Fatal("a capture whose Put failed succeeded")
+		}
+		if err := lost.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		flush(t, g)
+		if leaseOf(g) == first {
+			t.Fatal("the gapped lease stayed current")
+		}
+		time.Sleep(2 * limits.SyncInterval)
+		f.mu.Lock()
+		closed, held := slices.Contains(f.closed, first), f.holds[fakeHold{first, customer}]["quota"]
+		f.mu.Unlock()
+		if closed || held == 0 {
+			t.Fatalf("closed %v, holding %d: a lease the server still holds is kept while a ticket of it is open", closed, held)
+		}
+		if err := open.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * limits.SyncInterval)
+		f.mu.Lock()
+		closed = slices.Contains(f.closed, first)
+		f.mu.Unlock()
+		if !closed {
+			t.Fatal("the rolled-over lease was not closed once its last ticket ended")
+		}
+	})
+}
+
+func TestGateLeavesARolledOverLeaseToExpireWhileATicketOutlivesIt(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		g := newTestGate(t, f, GateConfig{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		open := mustAdmit(t, g, work(customer, "open", 5))
+		flush(t, g)
+		first := leaseOf(g)
+		// The lease settled numbers the gate never issued: it rolls over,
+		// and the server still holds it.
+		f.set(func(f *fakeSync) { f.leases[first].through = 50 })
+		time.Sleep(limits.SyncInterval + 100*time.Millisecond)
+		if leaseOf(g) == first {
+			t.Fatal("the lease was kept")
+		}
+		time.Sleep(limits.LeaseLifetime + limits.LeaseGrace + 2*limits.SyncInterval)
+		if err := open.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * limits.SyncInterval)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if slices.Contains(f.closed, first) {
+			t.Fatal("a lease whose ticket outlived its life was closed, not left to expire")
+		}
+		g.local.mu.Lock()
+		left := len(g.local.closes)
+		g.local.mu.Unlock()
+		if left != 0 {
+			t.Fatalf("%d leases still waiting to close", left)
+		}
+	})
+}
+
 // leakyOutbox stores every item, but fails the first Put of number failN
 // and every Ack of it: a failed Put that stored the item anyway.
 type leakyOutbox struct {

@@ -29,11 +29,14 @@ import (
 //
 //	G:lease    hash  id, valid (unix ms the lease lives until, by the
 //	                 syncer's clock less a skew margin; 0 not yet answered,
-//	                 1 dead), n:<lease> highest number issued
+//	                 1 answered dead, 2 to replace while the server holds
+//	                 it), n:<lease> highest number issued
 //	G:u:<id>   stream of a lease's unsettled usage: n, item, hold, ticket,
 //	           key, unsent, costs
 //	G:leases   set   leases with a usage stream
-//	G:close    set   earlier leases to close
+//	G:close    set   earlier leases answered dead, to close at once
+//	G:retire   hash  earlier lease -> unix ms it would have expired by: closed
+//	                 once no ticket counts on its holds, dropped after
 //	G:k:<key>  a usage write (a ticket's, or a Record's source and source_id)
 //	           -> lease|n, kept gateWriteKeyTTL past its settlement (at
 //	           most gateWriteKeyBackstop unsettled)
@@ -50,10 +53,15 @@ import (
 //	G:procs    hash  process -> heartbeat (unix ms)
 //	G:limits:<customer>  display lines
 //	G:unsent:<customer>  hash  limit|unit -> unsent cost
-//	H          hash  lease, ver, p (the hold set), safe, safe_spent, used,
-//	                 ev:<event type>, h:<part> held, o:<part> taken by open
-//	                 tickets, u:<part> captured and unsettled, e:<part> end
-//	H:t        hash  ticket -> o|<process>|<part>=<cost>;... or c|<n>|...
+//	H          hash  lease ('-' retired: nothing takes from it), ver, p (the
+//	                 hold set), safe, safe_spent, used, ev:<event type>,
+//	                 h:<part> held, o:<part> taken by open tickets, u:<part>
+//	                 captured and unsettled, e:<part> end
+//	H:t        hash  ticket -> o|<process>|<part>=<cost>;... or c|<n>|...;
+//	                 x|<process or n>|<lease>|... an open or unsettled
+//	                 ticket of an earlier lease, which counts on nothing
+//	                 here and keeps that lease from closing until a release,
+//	                 its usage's settlement or a reclaim forgets it
 const (
 	gateKeyPrefix = "openrails:gate:v2:"
 	// gateLockTTL is how long the syncing process keeps the group's lock
@@ -99,6 +107,14 @@ const (
 	// stream dropped with a dead lease, or unreadable).
 	gateWriteKeyBackstop = 24 * time.Hour
 	maxGateOrphans       = 10_000
+	// gateLeaseDead and gateLeaseReplaced are G:lease valid values: a lease
+	// the server answered dead, closed at once once replaced, and one to
+	// replace that the server still holds, closed once no ticket counts on
+	// its holds.
+	gateLeaseDead     = 1
+	gateLeaseReplaced = 2
+	// retiredHold is the lease field of a hold its retired lease left idle.
+	retiredHold = "-"
 	// maxGateMaybe bounds the write keys a process remembers as maybe
 	// written; past it the oldest is forgotten.
 	maxGateMaybe = 100_000
@@ -371,7 +387,7 @@ func (s *sharedGate) pricedHold(ctx context.Context, ns, hold string) (*sharedPr
 	if s.redisFailed(err) {
 		return nil, errRedis
 	}
-	if len(fields) == 0 || fields["p"] == "" {
+	if len(fields) == 0 || fields["p"] == "" || fields["lease"] == retiredHold {
 		return nil, nil
 	}
 	var set holdSet
@@ -1189,8 +1205,7 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 			p.HSet(ctx, s.g(ns, "lease"), "id", lease, "valid", 0)
 			p.Del(ctx, s.g(ns, "applied"))
 			if old != "" {
-				// Closed, so its holds free at once.
-				p.SAdd(ctx, s.g(ns, "close"), old)
+				s.retire(ctx, p, ns, old, valid == gateLeaseDead)
 			}
 			return nil
 		}); err != nil {
@@ -1313,7 +1328,7 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 		}
 		switch fault {
 		case faultLeaseNotHeld:
-			newValid = 1
+			newValid = gateLeaseDead
 		case faultUnreachable:
 			pipe.HSet(ctx, s.g(ns, "state"), "err", time.Now().UnixMilli(), "kind", "unavailable", "cause", syncErr.Error())
 		default:
@@ -1325,8 +1340,11 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 		newValid = sentAt.Add(limits.LeaseLifetime - gateClockSkew).UnixMilli()
 		// A lease the server reports dead, or whose numbering collided with
 		// numbers it settled (a Redis that lost writes), is replaced.
-		if !live || res.Usage.ThroughN > issued || collided(res.Usage) {
-			newValid = 1
+		switch {
+		case !live:
+			newValid = gateLeaseDead
+		case res.Usage.ThroughN > issued || collided(res.Usage):
+			newValid = gateLeaseReplaced
 		}
 		for _, a := range applied {
 			pipe.HDel(ctx, s.g(ns, "applied"), holdID(a.CustomerID, a.LimitSet))
@@ -1337,7 +1355,7 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 			switch {
 			case wr.Error != nil && wr.Error.Code == billing.CodeLeaseNotHeld:
 				a.Retry = true
-				newValid = 1
+				newValid = gateLeaseDead
 			case wantDeferred(wr):
 				a.Retry = true
 			case wr.Error != nil:
@@ -1392,13 +1410,26 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 	if err := s.resendEarlier(ctx, ns, lease); err != nil {
 		return err
 	}
-	return s.closeEarlier(ctx, ns, lease)
+	return s.closeEarlier(ctx, ns, lease, holds)
 }
 
-// closeEarlier closes the group's abandoned leases that have no usage left
-// to send (a usage sync closes the others), one empty closing sync each, so
-// their holds free before the leases would expire.
-func (s *sharedGate) closeEarlier(ctx context.Context, ns, current string) error {
+// retire queues an earlier lease to close: at once when the server answered
+// it dead, else once no ticket counts on its holds, since closing frees
+// them, unless it would have expired first.
+func (s *sharedGate) retire(ctx context.Context, p redis.Pipeliner, ns, lease string, dead bool) {
+	if dead {
+		p.SAdd(ctx, s.g(ns, "close"), lease)
+		return
+	}
+	p.HSet(ctx, s.g(ns, "retire"), lease, time.Now().Add(limits.LeaseLifetime+limits.LeaseGrace).UnixMilli())
+}
+
+// closeEarlier closes the group's earlier leases that have no usage left to
+// send (a usage sync closes the others), one empty closing sync each, so
+// their holds free before the leases would expire: a lease answered dead at
+// once, a retired one once no ticket counts on its holds. A retired lease
+// that would have expired is left to.
+func (s *sharedGate) closeEarlier(ctx context.Context, ns, current string, holds *groupHolds) error {
 	leases, err := s.rdb.SRandMemberN(ctx, s.g(ns, "close"), maxGateCloses).Result()
 	if err != nil {
 		return err
@@ -1413,11 +1444,7 @@ func (s *sharedGate) closeEarlier(ctx context.Context, ns, current string) error
 			if pending > 0 {
 				continue
 			}
-			call, cancel := context.WithTimeout(ctx, syncTimeout)
-			_, syncErr := s.c.SyncLeases(call, billing.SyncLeasesParams{LeaseID: id, Usage: []billing.LeaseUsage{}, Wants: []billing.LeaseWant{},
-				Returns: []billing.HoldReturn{}, Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true})
-			cancel()
-			if syncErr != nil && classify(syncErr) == faultUnreachable {
+			if !s.closeLease(ctx, id) {
 				return nil
 			}
 		}
@@ -1426,7 +1453,77 @@ func (s *sharedGate) closeEarlier(ctx context.Context, ns, current string) error
 			return err
 		}
 	}
+	retired, err := s.rdb.HGetAll(ctx, s.g(ns, "retire")).Result()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	for lease, until := range retired {
+		id, perr := billing.ParseLeaseID(lease)
+		expires, _ := strconv.ParseInt(until, 10, 64)
+		if perr == nil && lease != current && now < expires {
+			pending, err := s.rdb.XLen(ctx, s.g(ns, "u:"+lease)).Result()
+			if err != nil {
+				return err
+			}
+			if pending > 0 {
+				continue
+			}
+			busy, err := s.ticketsOn(ctx, ns, lease, holds)
+			if err != nil {
+				return err
+			}
+			if busy {
+				continue
+			}
+			if !s.closeLease(ctx, id) {
+				return nil
+			}
+		}
+		if err := s.rdb.HDel(ctx, s.g(ns, "retire"), lease).Err(); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// closeLease sends a lease one empty closing sync; false is OpenRails
+// unreachable, to try again.
+func (s *sharedGate) closeLease(ctx context.Context, id billing.LeaseID) bool {
+	call, cancel := context.WithTimeout(ctx, syncTimeout)
+	defer cancel()
+	_, err := s.c.SyncLeases(call, billing.SyncLeasesParams{LeaseID: id, Usage: []billing.LeaseUsage{}, Wants: []billing.LeaseWant{},
+		Returns: []billing.HoldReturn{}, Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true})
+	return err == nil || classify(err) != faultUnreachable
+}
+
+// ticketsOn reports whether an open or unsettled ticket of the lease still
+// counts on one of the group's holds; each of the lease's holds found idle
+// is retired, so nothing takes from it after. A hold Redis could not check
+// counts as busy.
+func (s *sharedGate) ticketsOn(ctx context.Context, ns, lease string, holds *groupHolds) (bool, error) {
+	if err := busyScript.Load(ctx, s.rdb).Err(); err != nil {
+		return false, err
+	}
+	ids := make([]string, 0, len(holds.refs))
+	for id := range holds.refs {
+		if holds.fields[id]["lease"] != "" {
+			ids = append(ids, id)
+		}
+	}
+	cmds := make([]*redis.Cmd, len(ids))
+	_, _ = s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
+		for i, id := range ids {
+			cmds[i] = busyScript.EvalSha(ctx, p, s.holdKeys(ns, id), lease)
+		}
+		return nil
+	})
+	for _, c := range cmds {
+		if n, err := c.Int64(); err != nil || n != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // collided reports a refusal that shows the lease's numbers were issued
@@ -1642,10 +1739,12 @@ func (s *sharedGate) unsentLess(ctx context.Context, pipe redis.Pipeliner, ns st
 // moveGap numbers a lease's entries from the gap the server refused on on
 // the group's current lease, after replacing the lease when it is the gap's.
 func (s *sharedGate) moveGap(ctx context.Context, ns, from, startID string) error {
-	cur, err := s.rdb.HGet(ctx, s.g(ns, "lease"), "id").Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
+	info, err := s.rdb.HMGet(ctx, s.g(ns, "lease"), "id", "valid").Result()
+	if err != nil {
 		return err
 	}
+	cur, _ := info[0].(string)
+	valid, _ := strconv.ParseInt(fmt.Sprint(info[1]), 10, 64)
 	if cur == "" || cur == from {
 		replaced := cur
 		cur = newLeaseID().String()
@@ -1653,7 +1752,9 @@ func (s *sharedGate) moveGap(ctx context.Context, ns, from, startID string) erro
 			p.HSet(ctx, s.g(ns, "lease"), "id", cur, "valid", 0)
 			p.Del(ctx, s.g(ns, "applied"))
 			if replaced != "" {
-				p.SAdd(ctx, s.g(ns, "close"), replaced)
+				// The server still holds a lease a gap replaced, unless it
+				// answered it dead.
+				s.retire(ctx, p, ns, replaced, valid == gateLeaseDead)
 			}
 			return nil
 		}); err != nil {
@@ -1671,9 +1772,14 @@ func (s *sharedGate) moveGap(ctx context.Context, ns, from, startID string) erro
 }
 
 // resendEarlier sends the usage of the group's earlier leases, each sync
-// closing its lease.
+// closing its lease unless it is retired and waits for its tickets, which
+// closeEarlier closes once they end.
 func (s *sharedGate) resendEarlier(ctx context.Context, ns, current string) error {
 	leases, err := s.rdb.SMembers(ctx, s.g(ns, "leases")).Result()
+	if err != nil {
+		return err
+	}
+	retired, err := s.rdb.HGetAll(ctx, s.g(ns, "retire")).Result()
 	if err != nil {
 		return err
 	}
@@ -1700,11 +1806,13 @@ func (s *sharedGate) resendEarlier(ctx context.Context, ns, current string) erro
 		if err != nil {
 			continue
 		}
+		_, waits := retired[lease]
 		params := billing.SyncLeasesParams{LeaseID: id, Usage: make([]billing.LeaseUsage, len(entries)), Wants: []billing.LeaseWant{}, Returns: []billing.HoldReturn{},
-			Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true}
+			Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: !waits}
 		for i, e := range entries {
 			params.Usage[i] = e.item
 		}
+		sentAt := time.Now()
 		call, cancel := context.WithTimeout(ctx, syncTimeout)
 		res, syncErr := s.c.SyncLeases(call, params)
 		cancel()
@@ -1726,7 +1834,13 @@ func (s *sharedGate) resendEarlier(ctx context.Context, ns, current string) erro
 		}
 		pipe := s.rdb.Pipeline()
 		gap := s.applyAnswer(ctx, pipe, ns, lease, entries, &billing.SyncLeasesResult{Usage: res.Usage}, nil, false, &groupHolds{fields: map[string]map[string]string{}})
-		pipe.SRem(ctx, s.g(ns, "close"), lease)
+		switch {
+		case !waits:
+			pipe.SRem(ctx, s.g(ns, "close"), lease)
+		case res.Lease.Live:
+			// The usage renewed it.
+			pipe.HSet(ctx, s.g(ns, "retire"), lease, sentAt.Add(limits.LeaseLifetime+limits.LeaseGrace).UnixMilli())
+		}
 		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
@@ -1862,7 +1976,7 @@ func (s *sharedGate) reclaim(ctx context.Context, ns, lease string, holds *group
 		for i, id := range ids {
 			var lost []any
 			for ticket, v := range tickets[i].Val() {
-				if fields := strings.SplitN(v, "|", 3); len(fields) == 3 && fields[0] == "o" && dead[fields[1]] {
+				if fields := strings.SplitN(v, "|", 3); len(fields) == 3 && (fields[0] == "o" || fields[0] == "x") && dead[fields[1]] {
 					lost = append(lost, ticket)
 				}
 			}
@@ -2176,9 +2290,14 @@ redis.call('HSET', KEYS[2], ARGV[3], 'o|' .. ARGV[4] .. '|' .. table.concat(rec,
 return out
 `)
 
-// releaseScript: KEYS hold, tickets; ARGV ticket.
+// releaseScript: KEYS hold, tickets; ARGV ticket. A ticket of an earlier
+// lease counts on nothing here: it is only forgotten.
 var releaseScript = redis.NewScript(luaCosts + `
 local v = redis.call('HGET', KEYS[2], ARGV[1])
+if v and string.sub(v, 1, 1) == 'x' then
+  redis.call('HDEL', KEYS[2], ARGV[1])
+  return 1
+end
 if not v or string.sub(v, 1, 1) ~= 'o' then return 0 end
 local list = parse(costs(v))
 if not list then return redis.error_reply('release: bad ticket') end
@@ -2188,8 +2307,9 @@ return 1
 `)
 
 // captureScript: KEYS hold, tickets; ARGV ticket, n, actual costs. Turns an
-// open ticket's take into its usage's cost; a ticket already captured, or
-// gone (reclaimed, or settled), is left as it is.
+// open ticket's take into its usage's cost; a ticket already captured, of an
+// earlier lease (its settlement forgets it), or gone (reclaimed, or
+// settled), is left as it is.
 var captureScript = redis.NewScript(luaCosts + `
 local v = redis.call('HGET', KEYS[2], ARGV[1])
 if not v or string.sub(v, 1, 1) ~= 'o' then return 0 end
@@ -2201,22 +2321,26 @@ redis.call('HSET', KEYS[2], ARGV[1], 'c|' .. ARGV[2] .. '|' .. ARGV[3])
 return 1
 `)
 
-// reclaimScript: KEYS hold, tickets; ARGV open tickets of dead processes.
+// reclaimScript: KEYS hold, tickets; ARGV open tickets of dead processes,
+// an earlier lease's ones included, which count on nothing here.
 var reclaimScript = redis.NewScript(luaCosts + `
-local lost = {}
+local lost, earlier = {}, {}
 for _, ticket in ipairs(ARGV) do
   local v = redis.call('HGET', KEYS[2], ticket)
   if v and string.sub(v, 1, 1) == 'o' then
     local list = parse(costs(v))
     if not list then return redis.error_reply('reclaim: bad ticket') end
     lost[#lost + 1] = {ticket, list}
+  elseif v and string.sub(v, 1, 1) == 'x' then
+    earlier[#earlier + 1] = ticket
   end
 end
 for _, l in ipairs(lost) do
   add(KEYS[1], 'o:', l[2], -1)
   redis.call('HDEL', KEYS[2], l[1])
 end
-return #lost
+for _, ticket in ipairs(earlier) do redis.call('HDEL', KEYS[2], ticket) end
+return #lost + #earlier
 `)
 
 // settleScript: KEYS hold, tickets; ARGV lease, mode, hold set, safe, then
@@ -2226,8 +2350,10 @@ return #lost
 // Mode a writes an answered hold (its safe amount spent anew), w writes the
 // hold's state after usage the answer left out, d only settles tickets, e
 // only adds event types the server priced to the lease's hold. Writing a
-// hold of another lease (or none) starts it over. Every write but e bumps
-// ver; e bumps it for a new event type.
+// hold of another lease (or none) starts it over, keeping that lease's open
+// and unsettled tickets, and earlier leases' x tickets, as x tickets: they
+// count on nothing here and keep their lease from closing while they last.
+// Every write but e bumps ver; e bumps it for a new event type.
 var settleScript = redis.NewScript(luaCosts + `
 local h, t = KEYS[1], KEYS[2]
 local lease, mode = ARGV[1], ARGV[2]
@@ -2255,6 +2381,22 @@ local cur = redis.call('HGET', h, 'lease')
 if mode == 'e' and cur ~= lease then return 0 end
 local write = mode == 'a' or mode == 'w'
 local reset = write and cur ~= lease
+local keep = {}
+if reset then
+  local settled = {}
+  for _, ticket in ipairs(tickets) do settled[ticket] = true end
+  local all = redis.call('HGETALL', t)
+  for j = 1, #all, 2 do
+    local id, v = all[j], all[j + 1]
+    local second, rest = string.match(v, '^[oc]|([^|]*)|(.*)$')
+    if settled[id] then
+    elseif string.sub(v, 1, 1) == 'x' then
+      keep[#keep + 1] = {id, v}
+    elseif second and cur and cur ~= '' and cur ~= '-' then
+      keep[#keep + 1] = {id, 'x|' .. second .. '|' .. cur .. '|' .. rest}
+    end
+  end
+end
 local settle = {}
 if not reset then
   for _, ticket in ipairs(tickets) do
@@ -2275,7 +2417,10 @@ if write and not reset then
     if (kind == 'h:' or kind == 'o:' or kind == 'u:') and not parts[id] then stale[id] = true end
   end
 end
-if reset then redis.call('DEL', h, t) end
+if reset then
+  redis.call('DEL', h, t)
+  for _, k in ipairs(keep) do redis.call('HSET', t, k[1], k[2]) end
+end
 for _, s in ipairs(settle) do
   if cur == lease then add(h, s[2], s[3], -1) end
   redis.call('HDEL', t, s[1])
@@ -2379,6 +2524,24 @@ if cur == ARGV[1] or cur == '' then return 0 end
 if redis.call('HLEN', KEYS[2]) > 0 then return 0 end
 redis.call('DEL', KEYS[1], KEYS[2])
 return 1
+`)
+
+// busyScript: KEYS hold, tickets; ARGV an earlier lease. Answers 1 while a
+// ticket of that lease counts on the hold: one of its own while the hold is
+// still the lease's, or one an answer to a later lease kept as an x ticket.
+// Otherwise it retires the lease's hold, so nothing takes from it, and
+// answers 0.
+var busyScript = redis.NewScript(`
+local cur = redis.call('HGET', KEYS[1], 'lease')
+for _, v in ipairs(redis.call('HVALS', KEYS[2])) do
+  if string.sub(v, 1, 1) == 'x' then
+    if string.match(v, '^x|[^|]*|([^|]*)|') == ARGV[1] then return 1 end
+  elseif cur == ARGV[1] then
+    return 1
+  end
+end
+if cur == ARGV[1] then redis.call('HSET', KEYS[1], 'lease', '-') end
+return 0
 `)
 
 // wantScript: KEYS wants, kick, gen; ARGV want key, want. Answers the sync

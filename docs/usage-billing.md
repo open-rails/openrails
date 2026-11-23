@@ -295,7 +295,10 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   customer's lines less the usage not yet sent, for display. `Flush` syncs now
   and waits for settlement; `Close` sends pending usage and closes the lease,
   returning its holds at once. A lease a sync answers dead is closed the same
-  way, and the gate starts another.
+  way, and the gate starts another. A gate that starts another lease for any
+  other reason (a gap in its numbering, or a lease that lapsed by its own
+  clock) closes the old one only once no open ticket or unsettled usage counts
+  on its holds, or leaves it to expire: closing frees those holds.
 - A refusal is a verdict on the ticket, never an error; `capacity_held` is
   waited out within the request's context first. The error is bad input or
   `ErrUnavailable`: OpenRails unreachable (a 5xx or 429 answer counts) and no
