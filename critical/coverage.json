@@ -2122,6 +2122,36 @@
       "id": "OR-J39-S12",
       "journey": "J39",
       "name": "The host's message renderer takes precedence over the merchant's templates for the messages it renders"
+    },
+    {
+      "id": "OR-J39-S13",
+      "journey": "J39",
+      "name": "A subscription ended by failed payments sends one confirmation, its ending's, and not the final failure's notice"
+    },
+    {
+      "id": "OR-J39-S14",
+      "journey": "J39",
+      "name": "A staff cancel that ends access now sends one confirmation in staff's words"
+    },
+    {
+      "id": "OR-J39-S15",
+      "journey": "J39",
+      "name": "An access end a refund caused sends no confirmation by default; the refund receipt is sent"
+    },
+    {
+      "id": "OR-J39-S16",
+      "journey": "J39",
+      "name": "The customer messages route lists a customer's messages newest first, paged, with their statuses, attempts, recipients and facts, for the bound merchant only"
+    },
+    {
+      "id": "OR-J39-S17",
+      "journey": "J39",
+      "name": "A preview renders a candidate template against sample data without saving it, and refuses an invalid one with its error"
+    },
+    {
+      "id": "OR-J39-S18",
+      "journey": "J39",
+      "name": "A test message goes to the merchant's alert address only: the request cannot name one, and a merchant without one is refused"
     }
   ]
 }

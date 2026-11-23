@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -50,10 +52,10 @@ func TestCustomerMessages(t *testing.T) {
 		require.Contains(t, sent[0].Text, "Amount paid: 10.00 USD")
 		log := settledMessages(t, a.world, alice, 1)
 		require.Equal(t, receiptEvent, log[0].EventType)
-		require.Equal(t, "sent", log[0].Status)
+		require.Equal(t, billing.MessageSent, log[0].Status)
 		require.Equal(t, 2, log[0].Attempts)
 		require.Equal(t, a.alice.Email, deref(log[0].Recipient))
-		require.Nil(t, log[0].ErrorCode)
+		require.Nil(t, log[0].LastError)
 	})
 	t.Run("OR-J39-S02/a-billing-restore-sends-nothing", func(t *testing.T) {
 		mail := &alertMailbox{}
@@ -75,7 +77,7 @@ func TestCustomerMessages(t *testing.T) {
 		runRegistered(t, targetFleet, "openrails.customer_messages_dispatch", 1)
 		messagesSettled(t, targetFleet)
 		require.Empty(t, restoredMail.all(), "a restore sends nothing again")
-		log, err := customerMessages(t, target, client.MerchantID(), alice)
+		log, err := customerMessages(t, client, alice)
 		require.NoError(t, err)
 		require.Empty(t, log, "a restore queues no message")
 	})
@@ -86,7 +88,7 @@ func TestCustomerMessages(t *testing.T) {
 		paidExternally(t, a, stranger, messageSale(t, a), "stranger-receipt")
 		startFleet(t, a.world)
 		log := settledMessages(t, a.world, stranger, 1)
-		require.Equal(t, "no_contact", log[0].Status)
+		require.Equal(t, billing.MessageNoContact, log[0].Status)
 		require.Nil(t, log[0].Recipient)
 		require.Zero(t, log[0].Attempts)
 		require.Empty(t, mail.all())
@@ -102,7 +104,7 @@ func TestCustomerMessages(t *testing.T) {
 		startFleet(t, a.world)
 		log := settledMessages(t, a.world, alice, 1)
 		require.Equal(t, receiptEvent, log[0].EventType)
-		require.Equal(t, "test_environment", log[0].Status)
+		require.Equal(t, billing.MessageTestEnvironment, log[0].Status)
 		require.Nil(t, log[0].Recipient)
 		require.Empty(t, mail.all(), "a test PSP's facts send no automatic email")
 		require.True(t, factEmitted(t, a.alpha, receiptEvent, alice))
@@ -117,11 +119,11 @@ func TestCustomerMessages(t *testing.T) {
 		}
 		startFleet(t, a.world)
 		log := settledMessages(t, a.world, alice, 11)
-		statuses := map[string]int{}
+		statuses := map[billing.MessageStatus]int{}
 		for _, m := range log {
 			statuses[m.Status]++
 		}
-		require.Equal(t, map[string]int{"sent": 10, "rate_limited": 1}, statuses)
+		require.Equal(t, map[billing.MessageStatus]int{billing.MessageSent: 10, billing.MessageRateLimited: 1}, statuses)
 		require.Len(t, mail.to(a.alice.Email), 10)
 		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_rate_limited"})
 		require.NoError(t, err)
@@ -146,11 +148,11 @@ func TestCustomerMessages(t *testing.T) {
 		paidExternally(t, a, customer, messageSale(t, a), "erased-receipt")
 		startFleet(t, a.world)
 		log := settledMessages(t, a.world, customer, 1)
-		require.Equal(t, "sent", log[0].Status)
+		require.Equal(t, billing.MessageSent, log[0].Status)
 		require.Len(t, mail.to("erased@directory.invalid"), 1)
 		status, raw = a.request(t, http.MethodDelete, "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
-		log, err = customerMessages(t, a.world, a.alpha.MerchantID(), customer)
+		log, err = customerMessages(t, a.alpha, customer)
 		require.NoError(t, err)
 		require.Empty(t, log, "erasure deletes the customer's message log")
 	})
@@ -167,7 +169,7 @@ func TestCustomerMessages(t *testing.T) {
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		paidExternally(t, a, alice, messageSale(t, a), "custom-receipt")
 		startFleet(t, a.world)
-		require.Equal(t, "sent", settledMessages(t, a.world, alice, 1)[0].Status)
+		require.Equal(t, billing.MessageSent, settledMessages(t, a.world, alice, 1)[0].Status)
 		sent := mail.to(a.alice.Email)
 		require.Len(t, sent, 1)
 		require.Equal(t, "Thanks for shopping at Alpha", sent[0].Subject)
@@ -198,7 +200,7 @@ func TestCustomerMessages(t *testing.T) {
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		paidExternally(t, a, alice, messageSale(t, a), "refused-document-receipt")
 		startFleet(t, a.world)
-		require.Equal(t, "sent", settledMessages(t, a.world, alice, 1)[0].Status)
+		require.Equal(t, billing.MessageSent, settledMessages(t, a.world, alice, 1)[0].Status)
 		sent := mail.to(a.alice.Email)
 		require.Len(t, sent, 1)
 		require.Equal(t, "Your receipt from Alpha", sent[0].Subject)
@@ -237,23 +239,16 @@ func TestCustomerMessages(t *testing.T) {
 			p.core.SetDecline("4242", "252")
 			oneUsage(t, a.alpha, usageInput(customer, "stolen-card-usage", 3))
 			a.clock.Advance(time.Hour)
-			// No listening dispatcher: the fleet's start-up pass runs first,
-			// and the collection's message waits for the pass below, once
+			// The collection's message waits for the dispatch below, once
 			// the PSP is live.
-			fleet := hostFleet(t, a.world)
-			require.NoError(t, fleet.Start(t.Context()))
-			require.Eventually(t, func() bool {
-				jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.customer_messages_dispatch").States(rivertype.JobStateCompleted))
-				return err == nil && len(jobs.Jobs) > 0
-			}, 30*time.Second, 20*time.Millisecond, "the fleet's start-up dispatch pass ran")
+			fleet := undispatchedFleet(t, a.world)
 			runUsageDue(t, fleet)
 			require.Eventually(t, func() bool {
-				log, err := customerMessages(t, a.world, a.alpha.MerchantID(), customer)
+				log, err := customerMessages(t, a.alpha, customer)
 				return err == nil && len(ofType(log, "order_collection_stopped")) == 1
 			}, 30*time.Second, 20*time.Millisecond, "the stopped collection queues its message")
 			liveMoney(t, a.world)
-			runRegistered(t, fleet, "openrails.customer_messages_dispatch", 1)
-			messagesSettled(t, fleet)
+			dispatchMessages(t, fleet)
 			confirmation := sentAbout(t, a, mail, "order_collection_stopped", "We stopped charging your card for Alpha")
 			require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so we have stopped trying to collect the 30.00 USD you owe.")
 			require.Contains(t, confirmation.Text, "Pay it or add another payment method: https://alpha.example/billing")
@@ -338,7 +333,7 @@ func TestCustomerMessages(t *testing.T) {
 		paidExternally(t, a, alice, messageSale(t, a), "template-rendered")
 		startFleet(t, a.world)
 		for _, m := range settledMessages(t, a.world, alice, 2) {
-			require.Equal(t, "sent", m.Status)
+			require.Equal(t, billing.MessageSent, m.Status)
 		}
 		subjects := map[string]string{}
 		for _, email := range mail.to(a.alice.Email) {
@@ -358,6 +353,185 @@ func TestCustomerMessages(t *testing.T) {
 			require.Equal(t, "Alpha", data.Merchant.Name)
 			require.Equal(t, "10.00 USD", data.Event.Amount)
 		}
+	})
+	t.Run("OR-J39-S13/a-subscription-ended-by-failed-payments-sends-one-confirmation", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, p, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		enableLifecycleMaintenance(t, a)
+		// The purchase's messages end on the test PSP; the decline's wait for
+		// the dispatch after it, once the PSP is live.
+		fleet := undispatchedFleet(t, a.world)
+		dispatchMessages(t, fleet)
+		p.core.SetDecline("4242", "stolen_card")
+		a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		subscriptionState(t, a, sub.ID, "canceled")
+		liveMoney(t, a.world)
+		dispatchMessages(t, fleet)
+		confirmation := sentAbout(t, a, mail, "premium_ended", "Your subscription to Alpha has ended")
+		require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so your subscription to Membership has ended.")
+		require.Contains(t, confirmation.Text, "You won't be charged again.")
+		require.Contains(t, confirmation.Text, "Subscribe again any time: https://alpha.example/billing")
+		require.Len(t, mail.to(a.alice.Email), 1, "the ending is the one message")
+		log, err := customerMessages(t, a.alpha, customerOf(a.alice))
+		require.NoError(t, err)
+		failed := ofType(log, "payment_method_failed")
+		require.Len(t, failed, 1)
+		require.Equal(t, billing.MessageDisabled, failed[0].Status, "the failure that ended it is confirmed by the ending")
+	})
+	t.Run("OR-J39-S14/a-staff-cancel-that-ends-access-now-sends-one-confirmation", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		_, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "Terms violation", RevokeAccess: true})
+		require.NoError(t, err)
+		liveMoney(t, a.world)
+		startFleet(t, a.world)
+		confirmation := sentAbout(t, a, mail, "premium_ended", "Your subscription to Alpha was canceled")
+		require.Contains(t, confirmation.Text, "Your subscription to Membership was canceled by Alpha.")
+		require.Contains(t, confirmation.Text, "Your access ended on ")
+		require.Contains(t, confirmation.Text, "You won't be charged again.")
+		require.Contains(t, confirmation.Text, "If you didn't expect this, please contact us: https://alpha.example/help")
+		log, err := customerMessages(t, a.alpha, customerOf(a.alice))
+		require.NoError(t, err)
+		require.Empty(t, ofType(log, "subscription_canceled"), "access ended with the cancel: one fact, one confirmation")
+	})
+	t.Run("OR-J39-S15/an-access-end-a-refund-caused-sends-no-confirmation-by-default", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		a.clock.Advance(time.Hour)
+		paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, paid.Items, 1)
+		_, err = a.alpha.RefundPayment(t.Context(), "refund-and-end", paid.Items[0].ID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end"})
+		require.NoError(t, err)
+		subscriptionState(t, a, sub.ID, "canceled")
+		liveMoney(t, a.world)
+		startFleet(t, a.world)
+		receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
+		require.Contains(t, receipt.Text, "We refunded 10.00 USD")
+		log, err := customerMessages(t, a.alpha, customerOf(a.alice))
+		require.NoError(t, err)
+		ends := ofType(log, "premium_ended")
+		require.Len(t, ends, 1)
+		require.Equal(t, billing.MessageDisabled, ends[0].Status, "a refund's access end sends nothing by default")
+		require.Empty(t, ofType(log, "subscription_canceled"))
+		for _, email := range mail.to(a.alice.Email) {
+			require.NotContains(t, []string{"Your subscription to Alpha has ended", "Your subscription to Alpha was canceled", "Your subscription to Alpha is canceled"}, email.Subject)
+		}
+	})
+	t.Run("OR-J39-S16/the-log-route-lists-a-customers-messages-with-their-statuses", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		alice := customerOf(a.alice)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "logged-on-test-psp"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		paidExternally(t, a, alice, messageSale(t, a), "logged-receipt")
+		startFleet(t, a.world)
+		settledMessages(t, a.world, alice, 2)
+		first, err := a.alphaRemote.ListCustomerMessages(t.Context(), alice, billing.CustomerMessageListParams{PageRequest: billing.PageRequest{Limit: 1}})
+		require.NoError(t, err)
+		require.Len(t, first.Items, 1)
+		require.NotEmpty(t, first.Next)
+		second, err := a.alphaRemote.ListCustomerMessages(t.Context(), alice, billing.CustomerMessageListParams{PageRequest: billing.PageRequest{Limit: 1, Cursor: first.Next}})
+		require.NoError(t, err)
+		require.Len(t, second.Items, 1)
+		require.Empty(t, second.Next)
+		sent, test := first.Items[0], second.Items[0]
+		require.Equal(t, receiptEvent, sent.EventType)
+		require.Equal(t, billing.MessageEmail, sent.Channel)
+		require.Equal(t, billing.MessageSent, sent.Status, "newest first")
+		require.Equal(t, 1, sent.Attempts)
+		require.Equal(t, a.alice.Email, deref(sent.Recipient))
+		require.NotNil(t, sent.SentAt)
+		require.Nil(t, sent.LastError)
+		require.Equal(t, alice, sent.CustomerID)
+		require.Equal(t, billing.MessageTestEnvironment, test.Status)
+		require.Zero(t, test.Attempts)
+		require.Nil(t, test.Recipient)
+		require.Nil(t, test.SentAt)
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{receiptEvent}, Limit: 100})
+		require.NoError(t, err)
+		var facts []string
+		for _, e := range events.Events {
+			facts = append(facts, e.ID)
+		}
+		require.ElementsMatch(t, []string{sent.EventID.String(), test.EventID.String()}, facts, "each names its fact in the event log")
+		inProcess, err := a.alpha.ListCustomerMessages(t.Context(), alice, billing.CustomerMessageListParams{})
+		require.NoError(t, err)
+		require.Equal(t, []billing.CustomerMessage{sent, test}, inProcess.Items, "the in-process client answers alike")
+		other, err := a.betaRemote.ListCustomerMessages(t.Context(), alice, billing.CustomerMessageListParams{})
+		require.NoError(t, err)
+		require.Empty(t, other.Items, "another merchant's credential reads its own log")
+	})
+	t.Run("OR-J39-S17/a-preview-renders-a-candidate-template-and-refuses-an-invalid-one", func(t *testing.T) {
+		a, _ := newPaymentWorld(t, func(w *world) {
+			alphaProfile(w)
+			declareMessages(w, billing.MessageSettings{Events: map[string]billing.MessageEventSettings{receiptEvent: {Templates: map[string]billing.MessageTemplate{"en": {
+				Subject: "Saved receipt", Text: "The saved template.",
+			}}}}})
+		})
+		candidate := &billing.MessageTemplate{
+			Subject: "Receipt for {{.Customer.Name}} from {{.Merchant.Name}}",
+			Text:    "You paid {{.Event.Amount}} for {{.Event.ProductName}}.\nManage it: {{.Links.ManageBilling}}",
+		}
+		preview, err := a.alphaRemote.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: receiptEvent, Template: candidate})
+		require.NoError(t, err)
+		require.Equal(t, receiptEvent, preview.EventType)
+		require.Equal(t, "en", preview.Language)
+		require.Equal(t, "Receipt for Ada Lovelace from Alpha", preview.Subject)
+		require.NotNil(t, preview.Text)
+		require.Contains(t, *preview.Text, "You paid 12.50 USD for Field guide.\nManage it: https://alpha.example/billing")
+		require.Nil(t, preview.HTML, "the candidate has no html body")
+		saved, err := a.alpha.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: receiptEvent})
+		require.NoError(t, err)
+		require.Equal(t, "Saved receipt", saved.Subject, "a preview saves nothing")
+		_, err = a.alphaRemote.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: receiptEvent, Template: &billing.MessageTemplate{Subject: "Receipt", Text: "Total: {{.Event.Total}}"}})
+		var refusal *billing.StatusError
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, http.StatusBadRequest, refusal.Status)
+		require.Equal(t, billing.CodeMessageTemplateInvalid, refusal.Code)
+		require.Equal(t, "template", deref(refusal.Param))
+		require.Contains(t, refusal.Message, "can't evaluate field Total")
+		_, err = a.alpha.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: "order.completed"})
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, billing.CodeInvalidParam, refusal.Code)
+		require.Equal(t, "event_type", deref(refusal.Param))
+	})
+	t.Run("OR-J39-S18/a-test-message-goes-only-to-the-alert-address", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.Email = mail
+			alphaProfile(w)
+			m := cfgMerchant(w.cfg, "alpha")
+			m.AlertEmail = ptr("ops@alpha.example")
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		sent, err := a.alphaRemote.CreateTestMessage(t.Context(), billing.CreateTestMessageParams{EventType: "refund_completed"})
+		require.NoError(t, err)
+		require.Equal(t, "ops@alpha.example", sent.Recipient)
+		require.Equal(t, "Your refund from Alpha", sent.Message.Subject)
+		emails := mail.all()
+		require.Len(t, emails, 1)
+		require.Equal(t, "ops@alpha.example", emails[0].To)
+		require.Equal(t, "Your refund from Alpha", emails[0].Subject)
+		require.Contains(t, emails[0].Text, "We refunded 12.50 USD for Field guide.")
+		require.Equal(t, "Alpha", emails[0].From.Name)
+		// The request has no address to name: another field is refused.
+		status, raw := a.request(t, http.MethodPost, "/v1/merchant/messages/test", a.alphaKey.Secret, map[string]any{"event_type": "refund_completed", "to": a.alice.Email})
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Contains(t, string(raw), string(billing.CodeUnknownField))
+		require.Len(t, mail.all(), 1)
+		require.Empty(t, mail.to(a.alice.Email))
+		log, err := customerMessages(t, a.alpha, customerOf(a.alice))
+		require.NoError(t, err)
+		require.Empty(t, log, "a test is not a customer message")
+		// A merchant with no alert address is refused.
+		_, err = a.betaRemote.CreateTestMessage(t.Context(), billing.CreateTestMessageParams{EventType: "refund_completed"})
+		var refusal *billing.StatusError
+		require.True(t, errors.As(err, &refusal), "%v", err)
+		require.Equal(t, http.StatusConflict, refusal.Status)
+		require.Equal(t, billing.CodeAlertEmailRequired, refusal.Code)
+		require.Len(t, mail.all(), 1)
 	})
 }
 
@@ -391,23 +565,18 @@ func liveMoney(t *testing.T, w *world) {
 func sentAbout(t *testing.T, a *authorityWorld, mail *alertMailbox, eventType, subject string) openrails.Email {
 	t.Helper()
 	alice := customerOf(a.alice)
-	var log []loggedMessage
+	var log []billing.CustomerMessage
 	require.Eventually(t, func() bool {
-		rows, err := customerMessages(t, a.world, a.alpha.MerchantID(), alice)
-		if err != nil || len(ofType(rows, eventType)) == 0 {
+		rows, err := customerMessages(t, a.alpha, alice)
+		if err != nil || len(ofType(rows, eventType)) == 0 || !ended(rows) {
 			return false
-		}
-		for _, m := range rows {
-			if m.Status == "pending" || m.Status == "queued" || m.Status == "sending" {
-				return false
-			}
 		}
 		log = rows
 		return true
 	}, 30*time.Second, 20*time.Millisecond, "every message ends")
 	about := ofType(log, eventType)
 	require.Len(t, about, 1, "one message per fact")
-	require.Equal(t, "sent", about[0].Status)
+	require.Equal(t, billing.MessageSent, about[0].Status)
 	var emails []openrails.Email
 	for _, email := range mail.to(a.alice.Email) {
 		if email.Subject == subject {
@@ -419,14 +588,24 @@ func sentAbout(t *testing.T, a *authorityWorld, mail *alertMailbox, eventType, s
 }
 
 // ofType is the log's messages about eventType.
-func ofType(log []loggedMessage, eventType string) []loggedMessage {
-	var out []loggedMessage
+func ofType(log []billing.CustomerMessage, eventType string) []billing.CustomerMessage {
+	var out []billing.CustomerMessage
 	for _, m := range log {
 		if m.EventType == eventType {
 			out = append(out, m)
 		}
 	}
 	return out
+}
+
+// ended reports whether every message of the log has ended.
+func ended(log []billing.CustomerMessage) bool {
+	for _, m := range log {
+		if m.Status == billing.MessagePending || m.Status == billing.MessageQueued || m.Status == billing.MessageSending {
+			return false
+		}
+	}
+	return true
 }
 
 // messageSale is a one-off price alpha sells, as order lines.
@@ -445,48 +624,59 @@ func paidExternally(t *testing.T, a *authorityWorld, customer billing.CustomerID
 	require.NoError(t, err)
 }
 
-// loggedMessage is one row of a customer's message log.
-type loggedMessage struct {
-	EventType string
-	Status    string
-	Attempts  int
-	Recipient *string
-	ErrorCode *string
-}
-
-// customerMessages is the customer's message log, oldest first.
-func customerMessages(t *testing.T, w *world, merchant billing.MerchantID, customer billing.CustomerID) ([]loggedMessage, error) {
-	rows, err := w.pool.Query(t.Context(), "SELECT event_type, status, attempts, recipient, last_error_code FROM "+pgx.Identifier{w.schema, "customer_messages"}.Sanitize()+
-		" WHERE merchant_id = $1 AND customer_id = $2 ORDER BY created_at, id", merchant.UUID(), customer.UUID())
-	if err != nil {
-		return nil, err
+// customerMessages is the customer's message log as client's route lists
+// it, every page, oldest first.
+func customerMessages(t *testing.T, client *openrails.Client, customer billing.CustomerID) ([]billing.CustomerMessage, error) {
+	var out []billing.CustomerMessage
+	var params billing.CustomerMessageListParams
+	for {
+		page, err := client.ListCustomerMessages(t.Context(), customer, params)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page.Items...)
+		if page.Next == "" {
+			break
+		}
+		params.Cursor = page.Next
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (loggedMessage, error) {
-		var m loggedMessage
-		err := row.Scan(&m.EventType, &m.Status, &m.Attempts, &m.Recipient, &m.ErrorCode)
-		return m, err
-	})
+	slices.Reverse(out)
+	return out, nil
 }
 
 // settledMessages waits for n of alpha's messages to the customer and for
 // each to end.
-func settledMessages(t *testing.T, w *world, customer billing.CustomerID, n int) []loggedMessage {
+func settledMessages(t *testing.T, w *world, customer billing.CustomerID, n int) []billing.CustomerMessage {
 	t.Helper()
-	var log []loggedMessage
+	var log []billing.CustomerMessage
 	require.Eventually(t, func() bool {
-		rows, err := customerMessages(t, w, w.alpha.MerchantID(), customer)
-		if err != nil || len(rows) != n {
+		rows, err := customerMessages(t, w.alpha, customer)
+		if err != nil || len(rows) != n || !ended(rows) {
 			return false
-		}
-		for _, m := range rows {
-			if m.Status == "pending" || m.Status == "queued" || m.Status == "sending" {
-				return false
-			}
 		}
 		log = rows
 		return true
 	}, 30*time.Second, 20*time.Millisecond, "every message ends")
 	return log
+}
+
+// undispatchedFleet starts a fleet with no dispatcher, listening or
+// periodic, and no periodic pass: a scenario's messages wait for the
+// dispatch it runs (dispatchMessages).
+func undispatchedFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
+	t.Helper()
+	fleet := hostFleet(t, w)
+	fleet.PeriodicJobs().Clear()
+	require.NoError(t, fleet.Start(t.Context()))
+	return fleet
+}
+
+// dispatchMessages runs one dispatch pass and waits for the send jobs it
+// queued.
+func dispatchMessages(t *testing.T, fleet *river.Client[pgx.Tx]) {
+	t.Helper()
+	runRegistered(t, fleet, "openrails.customer_messages_dispatch", 1)
+	messagesSettled(t, fleet)
 }
 
 // messagesSettled waits until no customer message job is outstanding.

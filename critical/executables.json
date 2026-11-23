@@ -1355,6 +1355,24 @@
     ],
     "OR-J39-S12": [
       "TestCustomerMessages/OR-J39-S12/the-host-renderer-takes-precedence-for-the-messages-it-renders"
+    ],
+    "OR-J39-S13": [
+      "TestCustomerMessages/OR-J39-S13/a-subscription-ended-by-failed-payments-sends-one-confirmation"
+    ],
+    "OR-J39-S14": [
+      "TestCustomerMessages/OR-J39-S14/a-staff-cancel-that-ends-access-now-sends-one-confirmation"
+    ],
+    "OR-J39-S15": [
+      "TestCustomerMessages/OR-J39-S15/an-access-end-a-refund-caused-sends-no-confirmation-by-default"
+    ],
+    "OR-J39-S16": [
+      "TestCustomerMessages/OR-J39-S16/the-log-route-lists-a-customers-messages-with-their-statuses"
+    ],
+    "OR-J39-S17": [
+      "TestCustomerMessages/OR-J39-S17/a-preview-renders-a-candidate-template-and-refuses-an-invalid-one"
+    ],
+    "OR-J39-S18": [
+      "TestCustomerMessages/OR-J39-S18/a-test-message-goes-only-to-the-alert-address"
     ]
   }
 }
