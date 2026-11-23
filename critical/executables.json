@@ -744,6 +744,9 @@
     "OR-J34-S30": [
       "TestVerificationBinding/OR-J34-S30/switch-turned-off-during-a-pull-holds-the-pulls-retractions"
     ],
+    "OR-J34-S31": [
+      "TestDestructiveControls/OR-J34-S31/a-remote-handle-refuses-acting-for"
+    ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",

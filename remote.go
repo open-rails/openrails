@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	auth "github.com/open-rails/authkit/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -35,6 +36,9 @@ type Client struct {
 	// inprocess marks a handle over the in-process transport: its merchant
 	// travels as a private context value and it sends no credential.
 	inprocess bool
+	// invoker is the person an in-process handle's calls act for (ActingFor);
+	// nil is the host's own work.
+	invoker *auth.Invoker
 	baseURL   string
 	client    *http.Client
 	timeout   time.Duration
@@ -63,6 +67,27 @@ func (c *Client) MerchantID() billing.MerchantID {
 	return c.merchantID
 }
 
+// ActingFor is the in-process handle whose calls act for invoker, the person
+// signed in at the host, by issuer and subject as the host's identity
+// provider verified them. Each call is then theirs, as their own HTTP call
+// would be: their destructive-action limits and holds apply, and a route
+// that needs a person, such as ClearDestructiveHold, admits them. A handle
+// naming no one is the host's own work: audited, never counted or held. An
+// issuer beginning "openrails:" or an empty name is refused at the call
+// (host_principal_invalid). A remote handle refuses: its credential names
+// its caller.
+func (c *Client) ActingFor(invoker auth.Invoker) (*Client, error) {
+	switch {
+	case c == nil || c.client == nil:
+		return nil, fmt.Errorf("openrails: a Client comes from Engine.Merchant or Remote.Merchant")
+	case !c.inprocess:
+		return nil, fmt.Errorf("openrails: ActingFor is for an in-process handle; a remote handle's credential names its caller")
+	}
+	d := c.derive()
+	d.invoker = &invoker
+	return d, nil
+}
+
 // Uncached is the handle reading everything from OpenRails: no catalog or
 // configuration read and no entitlement check is answered from memory. Its
 // answers still refresh the entitlement cache (CheckEntitlementsLive), and its
@@ -78,7 +103,7 @@ func (c *Client) Uncached() *Client {
 
 // derive is a copy of the handle, sharing its transport and caches.
 func (c *Client) derive() *Client {
-	return &Client{engine: c.engine, inprocess: c.inprocess, baseURL: c.baseURL, client: c.client, timeout: c.timeout,
+	return &Client{engine: c.engine, inprocess: c.inprocess, invoker: c.invoker, baseURL: c.baseURL, client: c.client, timeout: c.timeout,
 		merchantID: c.MerchantID(), token: c.token, assertion: c.assertion, reads: c.reads,
 		entitlementChecks: c.entitlementChecks, entitlementCacheScope: c.entitlementCacheScope, uncached: c.uncached}
 }
@@ -709,9 +734,13 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	}
 	var bearer string
 	if c.inprocess {
-		// Holding the engine is the authority: the handle's merchant reaches
-		// the in-process transport as a context value, never as a header.
+		// Holding the engine is the authority: the handle's merchant and
+		// invoker reach the in-process transport as context values, never as
+		// headers.
 		ctx = inprocess.WithMerchant(ctx, c.merchantID)
+		if c.invoker != nil {
+			ctx = inprocess.WithInvoker(ctx, *c.invoker)
+		}
 	} else if path != "/v1/config" {
 		var err error
 		if bearer, err = c.bearer(ctx); err != nil {

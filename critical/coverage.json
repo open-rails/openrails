@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 405,
+  "scenario_count": 406,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1562,6 +1562,11 @@
       "id": "OR-J34-S30",
       "journey": "J34",
       "name": "Kill switch turned off during a provider pull holds that pull's convergence retractions"
+    },
+    {
+      "id": "OR-J34-S31",
+      "journey": "J34",
+      "name": "Only an in-process handle acts for a named person; a remote handle refuses ActingFor"
     },
     {
       "id": "OR-J16-S30",
