@@ -667,14 +667,16 @@ func TestLeaseVersions(t *testing.T) {
 		// before the commit guard, and is answered a retryable 503.
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
-		defer func() { _ = tx.Rollback(context.Background()) }()
+		var rolledBack sync.Once
+		release := func() { rolledBack.Do(func() { _ = tx.Rollback(context.Background()) }) }
+		defer release()
 		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
 			w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		unlocked := make(chan struct{})
 		started := time.Now()
 		unlock := time.AfterFunc(limits.SyncTimeout+time.Second, func() {
-			_ = tx.Rollback(context.Background())
+			release()
 			close(unlocked)
 		})
 		defer unlock.Stop()
@@ -808,13 +810,17 @@ func TestLeaseVersions(t *testing.T) {
 		// shrink the second lease waits for is not skipped: the sync waits.
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
-		defer func() { _ = tx.Rollback(context.Background()) }()
+		// The timer and the deferred cleanup both release the lock; a pgx
+		// transaction must not be rolled back from two goroutines at once.
+		var rolledBack sync.Once
+		release := func() { rolledBack.Do(func() { _ = tx.Rollback(context.Background()) }) }
+		defer release()
 		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
 			w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		busy := 500 * time.Millisecond
 		freed := time.Now().Add(busy)
-		unlock := time.AfterFunc(busy, func() { _ = tx.Rollback(context.Background()) })
+		unlock := time.AfterFunc(busy, release)
 		defer unlock.Stop()
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: first})
 		require.False(t, time.Now().Before(freed), "the sync waited for the busy customer")
