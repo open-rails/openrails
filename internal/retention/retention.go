@@ -65,6 +65,9 @@ const (
 	// OrphanState keeps the deployment-global lease of a periodic kind no
 	// fleet has scheduled for 30 days.
 	OrphanState = 30 * Day
+	// LimitWindows keeps a closed limit window 61 days past its end: the
+	// replay horizon, within which late usage and replays still resolve.
+	LimitWindows = 61 * Day
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day

@@ -636,6 +636,7 @@ hourly cleanup) or **state** (one row per thing that exists).
 | `user_destructive_reservations` | 24 hours |
 | `failed_usage_windows` | when the window ends |
 | `meter_period_quantities` | 100 days after `period_starts_at` |
+| `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
 | `admission_denials_hourly`, `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 

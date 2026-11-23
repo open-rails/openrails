@@ -125,15 +125,35 @@ type BillingCatalogApplication struct {
 type BillingCatalogFieldOwner struct {
 	MerchantID uuid.UUID
 	Object     string
-	// The product or meter key; a price's product key.
+	// The product, meter or limit key; a price's product key.
 	Key string
-	// A price's key; empty for a product or meter.
+	// A price's key; empty for a product, meter or limit.
 	PriceKey string
 	Field    string
 	Manager  string
 	// apply: the document's application id; edit: the signed-in user, or api.
 	Actor string
 	SetAt time.Time
+}
+
+// Usage limits the merchant declares: what a limit counts (its unit and rate cards), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
+type BillingCatalogLimit struct {
+	MerchantID uuid.UUID
+	Key        string
+	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no rate cards.
+	Unit      string
+	ResetKind string
+	// The window of a fixed, session, rolling or rate limit; null for billing_period and lifetime.
+	WindowSeconds *int32
+	// What a fixed window tiles from: the customer's subscription or its first use; null for every other reset.
+	ResetAnchor *string
+	Overrun     string
+	// How usage counts toward the limit: rate cards (meter, filter, price) priced in the limit's unit, in declaration order.
+	RateCards []byte
+	// Advances on every change to the limit.
+	Revision  int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
@@ -153,6 +173,16 @@ type BillingCatalogMeter struct {
 	GroupBy []byte
 	// Advances on every change to the meter or its rate card.
 	Revision int64
+}
+
+// The capacity a product gives a limit in each window. A customer's capacity is the sum over its live products, unless an override replaces it.
+type BillingCatalogProductLimit struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	LimitKey   string
+	Capacity   int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Rate cards: product usage and flat prices expressed as charge-model JSON. The only metered-pricing engine.
@@ -283,6 +313,16 @@ type BillingCustomerInvoiceProfile struct {
 	Memo             *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// A customer's own capacity for a limit, in place of the sum its products give; no row inherits that sum.
+type BillingCustomerLimitOverride struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	LimitKey   string
+	Capacity   int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // A customer's own low-balance line per currency: the amount line and the runway line (hours of spend at its burn rate). A null part inherits the merchant's settings.balance_notices; a line with no part set has no row.
@@ -578,6 +618,27 @@ type BillingLedgerTransfer struct {
 	CreatedAt  time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
+}
+
+// One customer's use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit's bucket, or the one row of a lifetime or rate limit. Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
+type BillingLimitWindow struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	LimitKey   string
+	// The window's start; 1970-01-01 for the one row of a lifetime or rate limit.
+	WindowStartsAt time.Time
+	// The window's end; null for a lifetime or rate limit.
+	WindowEndsAt *time.Time
+	// The capacity products or an override gave the limit at the row's last write, without adjustments. Reads take the live capacity.
+	Capacity int64
+	// Units settled in the window, never clamped: it may pass capacity. For a rate limit, the level as of updated_at, which drains at capacity per window_seconds.
+	Settled int64
+	// Capacity staff added to this window only (negative takes it away).
+	Adjusted int64
+	// When settled and held usage first took the window to its capacity.
+	ReachedAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Typed maintenance run headers: reversible destructive work, billing restore receipts and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: permanent, never pruned.

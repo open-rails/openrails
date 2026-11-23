@@ -176,6 +176,34 @@ func (q *Queries) DeleteHostOutboxBefore(ctx context.Context, arg DeleteHostOutb
 	return result.RowsAffected(), nil
 }
 
+const deleteLimitWindowsBefore = `-- name: DeleteLimitWindowsBefore :execrows
+DELETE FROM billing.limit_windows w
+WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.limit_key, e.window_starts_at
+    FROM billing.limit_windows e
+    WHERE e.merchant_id = $1::uuid AND e.window_ends_at < $2::timestamptz
+    ORDER BY e.window_ends_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLimitWindowsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A closed limit window past the replay horizon; a row another writer
+// holds waits for a later pass.
+func (q *Queries) DeleteLimitWindowsBefore(ctx context.Context, arg DeleteLimitWindowsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLimitWindowsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteMeterPeriodQuantitiesBefore = `-- name: DeleteMeterPeriodQuantitiesBefore :execrows
 DELETE FROM billing.meter_period_quantities q
 WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_starts_at) IN (
@@ -534,6 +562,12 @@ FROM (
       WHERE ($1::uuid IS NULL OR pk.merchant_id > $1::uuid)
         AND pk.released_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT lw.merchant_id AS mid
+       FROM billing.limit_windows lw
+      WHERE ($1::uuid IS NULL OR lw.merchant_id > $1::uuid)
+        AND lw.window_ends_at < $15::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -554,6 +588,7 @@ type ListRetentionWorkMerchantsParams struct {
 	FindingCutoff       time.Time
 	ProviderWriteCutoff time.Time
 	ParkCutoff          time.Time
+	LimitWindowCutoff   time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -576,6 +611,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.FindingCutoff,
 		arg.ProviderWriteCutoff,
 		arg.ParkCutoff,
+		arg.LimitWindowCutoff,
 	)
 	if err != nil {
 		return nil, err

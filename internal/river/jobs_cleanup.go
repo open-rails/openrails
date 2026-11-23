@@ -142,6 +142,7 @@ type CleanupResult struct {
 	UnpaidOrders               int64
 	FailedUsageWindows         int64
 	MeterPeriodQuantities      int64
+	LimitWindows               int64
 	AdmissionDenials           int64
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
@@ -217,6 +218,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 			FindingCutoff:       now.Add(-retention.ResolvedFindings),
 			ProviderWriteCutoff: now.Add(-retention.ProviderWrites),
 			ParkCutoff:          now.Add(-retention.ReleasedParks),
+			LimitWindowCutoff:   now.Add(-retention.LimitWindows),
 			After:               after,
 			MerchantLimit:       limit,
 		})
@@ -267,6 +269,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"unpaid_orders":                result.UnpaidOrders,
 		"failed_usage_windows":         result.FailedUsageWindows,
 		"meter_period_quantities":      result.MeterPeriodQuantities,
+		"limit_windows":                result.LimitWindows,
 		"admission_denials":            result.AdmissionDenials,
 		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
@@ -497,6 +500,11 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete meter period quantities", &result.MeterPeriodQuantities, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteMeterPeriodQuantitiesBefore(ctx, gen.DeleteMeterPeriodQuantitiesBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.MeterPeriodQuantities), RowLimit: limit,
+		})
+	})
+	sweep("delete limit windows", &result.LimitWindows, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteLimitWindowsBefore(ctx, gen.DeleteLimitWindowsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.LimitWindows), RowLimit: limit,
 		})
 	})
 

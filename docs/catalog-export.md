@@ -15,7 +15,7 @@ an editable `ApplyCatalog` declaration.
 
 ## What the snapshot retains
 
-Every row and stored column from these nine catalog tables is included:
+Every row and stored column from these eleven catalog tables is included:
 
 | Table | Retained state |
 |---|---|
@@ -24,6 +24,8 @@ Every row and stored column from these nine catalog tables is included:
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
 | `catalog_meters` | Current meter definitions and revisions |
+| `catalog_limits` | Current limit definitions and revisions |
+| `catalog_product_limits` | The capacity each product gives each limit |
 | `catalog_rate_cards` | All current rate cards, with IDs |
 | `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog.md#applying)) |
 | `catalog_applications` | Original application receipts, canonical hashes and revision coordinates |

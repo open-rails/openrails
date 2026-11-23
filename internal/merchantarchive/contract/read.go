@@ -42,6 +42,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			if table+1 < len(Profiles) && Profiles[table+1].Name == "subscription_billing_changes" && r.Table == "subscription_status_transitions" {
 				table++
 			}
+			for table+1 < len(Profiles) && addedTables[Profiles[table+1].Name] && r.Table != Profiles[table+1].Name {
+				table++
+			}
 			table++
 			if table >= len(Profiles) || r.Table != Profiles[table].Name {
 				return fmt.Errorf("invalid archive table order")
@@ -191,6 +194,10 @@ func embeddedFromUIMode(p Profile, values []*string) {
 		}
 	}
 }
+
+// addedTables are tables an archive from before them lacks; it holds none
+// of their rows.
+var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
