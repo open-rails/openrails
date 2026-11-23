@@ -2016,7 +2016,7 @@
     {
       "id": "OR-J04-S76",
       "journey": "J04",
-      "name": "Every logger the engine reaches is the host's, the default logger is untouched, and a refusal is logged with its route, request and merchant"
+      "name": "Every logger the engine and the standalone server reach is set, the default logger is untouched, and a refusal is logged with its route, request and merchant"
     },
     {
       "id": "OR-J25-S37",

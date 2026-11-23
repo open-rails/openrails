@@ -37,6 +37,7 @@ type standaloneWorld struct {
 	DirectoryURL                         string
 	AliceID, BobID, AliceToken, BobToken string
 	Merchants                            map[string]standaloneMerchant
+	UnsetLoggers                         []string
 	alpha, beta                          *openrails.Client
 }
 

@@ -57,4 +57,13 @@ func TestLogging(t *testing.T) {
 		require.Equal(t, a.alpha.MerchantID().String(), refusal["merchant_id"])
 		require.NotEmpty(t, refusal["request_id"])
 	})
+	t.Run("OR-J04-S76/the-standalone-server-boots-with-every-logger-set", func(t *testing.T) {
+		// server.New, its meta routes included, with the real wiring.
+		w := newStandaloneWorld(t)
+		require.Empty(t, w.UnsetLoggers)
+		for _, path := range []string{"/health/live", "/v1/config"} {
+			status, raw := w.request(t, http.MethodGet, path, "", nil)
+			require.Equal(t, http.StatusOK, status, "%s: %s", path, raw)
+		}
+	})
 }
