@@ -168,7 +168,7 @@ Checks:
 - OR-J04-S02 keeps cached catalog reads bound to their merchant.
 - Every query in `products.sql` and `prices.sql` names `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 The `catalog` package, `billing` catalog types and `Client` methods are in
 `api/go.txt`, the routes in `api/openapi.json`, the tables in `api/schema.txt`;

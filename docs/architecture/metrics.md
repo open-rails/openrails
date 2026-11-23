@@ -100,7 +100,7 @@ Checks:
 - Every `DimJoins` and `From` join in `registry.go` joins on `merchant_id`.
 - OR-J01-S02 refuses both routes without a valid credential.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `QueryMetrics` and `GetMetricsSchema` are in `api/go.txt` for `*Client`; both routes
 are declared once in `internal/http/routes/ops.go`, and the in-process client calls
 the same handlers. The vocabulary itself (measure and dimension names) is in no

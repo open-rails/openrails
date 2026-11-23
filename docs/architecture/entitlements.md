@@ -138,7 +138,7 @@ Checks:
 - `TestEntitlementCheckCacheRequiresMetadataAndScope`: an answer without
   `evaluated_at` is not cached, and one naming no merchant is refused.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The check, list, product-access and cache types are in `api/go.txt`, the routes
 in the route catalog and `api/openapi.json`. `include_validity` was added to the
 request; a server older than the SDK refuses it with `unknown_field`, so the

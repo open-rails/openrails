@@ -47,8 +47,10 @@ Every system keeps these. A page says how, or why one does not apply.
 4. **Access control and tenant isolation.** Every route checks its permission and
    acts on the one merchant its credential is bound to; a customer route acts only
    as the signed-in customer; every tenant query names its merchant.
-5. **Stable contracts.** The system's Go API, HTTP routes and schema change only
-   by adding to them, and the in-process and remote clients answer alike.
+5. **Contracts match the code.** The Go API, HTTP routes and schema snapshots in
+   `api/` are regenerated with every change, and the in-process and remote clients
+   answer alike. Before v1.0.0 any of them may change; from v1.0.0 they change
+   only by adding to them ([compatibility](../compatibility.md)).
 6. **Migrations and retention.** Schema changes are numbered migrations; every
    table has a retention class, and partitioned reads name a time range.
 7. **Work scales with activity.** Background work is driven by events, watermarks

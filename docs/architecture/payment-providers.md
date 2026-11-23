@@ -223,7 +223,7 @@ Checks:
 - OR-J28-S06, S07: another merchant's claim of an account is refused; live and test PSPs on one account get only events their own secret verifies.
 - OR-J15-S06: an unverified subscription is read with its own PSP, and a sibling account's absence cancels nothing.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared once (`internal/http/routes/psps.go`, `ops.go`,
 `merchant.go`) and snapshotted in `api/openapi.json`, `Client` methods in

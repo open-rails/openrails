@@ -174,7 +174,7 @@ Checks:
 - `payURLScope` refuses another order's `{id}` and saved cards the URL does not offer.
 - OR-J03-S01 to S03: a secret pays its order only; API and checkout authority stay apart.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 Every route is declared once in the route catalog; admin and app routes carry the
 `Name` of their `Client` method. The in-process `Client` calls the same handlers
 through the in-process transport, so both clients answer alike. Orders, lines,

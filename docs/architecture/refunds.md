@@ -189,7 +189,7 @@ Checks:
 - `RefundPayment` is `Level: LevelUpdate` in `internal/http/routes/payments.go`.
 - OR-J21-S03: a receipt cannot be relinked to another customer or merchant.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The methods, `billing.Payment`, `billing.RefundPaymentParams` and the routes are
 in `api/go.txt` and `api/openapi.json`; `payments` and `provider_intents` are in
 `api/schema.txt`. The in-process client calls the same routes as the remote one.

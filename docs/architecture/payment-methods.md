@@ -159,7 +159,7 @@ Checks:
 - OR-J12-S02: a foreign, reused or stale card reference is refused.
 - OR-J06-S06: custody configuration keeps tenant ownership and never echoes secrets.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared in `internal/http/routes/payment_methods.go`,
 `agreements.go` and `psps.go`, and snapshotted in `api/openapi.json`; `Client`

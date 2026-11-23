@@ -167,7 +167,7 @@ Checks:
 - `consoleMerchants` refuses a request without an `Authorization` header.
 - OR-J32-S03: deleting a merchant closes its credentials' authority.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `api/go.txt` lists `pkg openrails/server` and `pkg openrails/server/web/console`. The
 HTTP surface is the engine's catalog plus AuthKit's routes and `/admin`, so the
 in-process and remote clients see the same API. The image, chart and modules share one

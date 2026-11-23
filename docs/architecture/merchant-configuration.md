@@ -185,7 +185,7 @@ Checks:
 - `Restore` compares `header.MerchantID` and `header.TenantID` with the target.
 - OR-J06-S04 (secrets redacted), OR-J06-S06 (custody ownership), OR-J31-S02.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The client methods are in `api/go.txt`. Declarations and documents parse strictly and
 name retired keys (`retiredDeclarationKeys`). Import reads only `archivewire.Version`;
 version 2 is `ErrPriceOwnershipFormat`. The CLI calls the same `ExportBillingArchive`

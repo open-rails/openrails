@@ -151,7 +151,7 @@ Checks:
 - OR-J38-S27: only a person or the in-process host applies or approves; OR-J38-S34: a configuration reader writes nothing.
 - `internal/db/queries/psp_imports.sql` filters every statement on `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared in `internal/http/routes/merchant.go` and snapshotted in
 `api/openapi.json`, `Client` methods in `api/go.txt`, tables in

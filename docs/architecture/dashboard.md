@@ -81,7 +81,7 @@ Checks:
 - `Service.Get` and `Service.Put` take the merchant from `merchant.Require`, never the body.
 - `GetDashboardConfig`, `UpsertDashboardConfig` and `HasUsageActivity` all bind `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `GetDashboard` and `SetDashboard` are in `api/go.txt` for `*Client`, and both
 routes are declared once in the catalog. A widget is a metrics query, so the
 metrics vocabulary is part of this contract: a measure removed from the registry

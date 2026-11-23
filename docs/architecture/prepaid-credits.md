@@ -179,7 +179,7 @@ Checks:
   `credit_grant_not_found`.
 - OR-J22-S01 reads the customer through another merchant and sees nothing.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The methods, `billing.CreditGrant`, `CreditGrantState`, `CreateCreditGrantParams`,
 `Balance` and the routes are in `api/go.txt` and `api/openapi.json`; the tables
 are in `api/schema.txt`. The in-process client calls the same routes as the remote
