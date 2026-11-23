@@ -81,7 +81,7 @@ func (r *syncRun) want(i int) error {
 	case moneyutil.ValidateCurrency(currency) != nil:
 		fail(apperr.New(http.StatusBadRequest, "currency_unsupported", "currency is not supported").WithParam("currency"))
 		return nil
-	case !r.live:
+	case !r.live || r.p.Close:
 		fail(apperr.New(http.StatusConflict, billing.CodeLeaseNotHeld, "the lease is closed or stopped syncing; start a new lease"))
 		return nil
 	}

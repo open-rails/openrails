@@ -265,6 +265,7 @@ CREATE TABLE billing.leases (
 COMMENT ON TABLE billing.leases IS 'One gate''s lease: a running process, or the processes that share one Redis. It is live while it is not closed and its gate synced within the lease lifetime; its holds live and die with it. Retention: rows are deleted 61 days after last_sync_at.';
 COMMENT ON COLUMN billing.leases.id IS 'The UUID the client chose; lse_ on the wire.';
 COMMENT ON COLUMN billing.leases.settled_through_n IS 'The highest usage item number settled. Items are numbered once per lease and settle in order.';
+COMMENT ON COLUMN billing.leases.closed_at IS 'When a sync with close ended the lease and returned its holds. A closed lease takes no want; usage against it still settles.';
 
 CREATE INDEX leases_last_sync_at_idx ON billing.leases (merchant_id, last_sync_at);
 

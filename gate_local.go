@@ -654,11 +654,13 @@ func (g *localGate) evictLocked() {
 	}
 }
 
-// syncOnce is one sync of the lease, then the usage of earlier leases.
+// syncOnce is one sync of the lease, then the usage of earlier leases. A
+// closing gate's syncs close its lease.
 func (g *localGate) syncOnce() {
 	now := time.Now()
 	g.mu.Lock()
-	if g.liveUntil.Load() != 0 && !g.leaseLive(now) {
+	closing := g.closing
+	if !closing && g.liveUntil.Load() != 0 && !g.leaseLive(now) {
 		g.rolloverLocked(true)
 	}
 	g.evictLocked()
@@ -694,7 +696,7 @@ func (g *localGate) syncOnce() {
 	for i, e := range entries {
 		wants[i] = e.want
 	}
-	params := billing.SyncLeasesParams{LeaseID: lease, Usage: nonNilUsage(usage), Wants: wants, Returns: returns, Committed: committed}
+	params := billing.SyncLeasesParams{LeaseID: lease, Usage: nonNilUsage(usage), Wants: wants, Returns: returns, Committed: committed, Close: closing}
 	sent := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 	res, err := g.c.SyncLeases(ctx, params)
@@ -803,6 +805,11 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 	for i, wr := range res.Wants {
 		e := entries[i]
 		e.answer = g.wantResultLocked(lease, e, wr)
+	}
+	if params.Close && lease == g.lease {
+		// The closed lease returned every hold.
+		g.holds = map[holdKey]*localHold{}
+		g.returns = map[holdKey]*localHold{}
 	}
 	g.index.Unlock()
 
@@ -1069,7 +1076,8 @@ func (g *localGate) flushIfStarted(ctx context.Context) error {
 	return g.flush(ctx, false)
 }
 
-// close sends pending usage, returns every hold and stops the sync loop.
+// close sends pending usage with a sync that closes the lease, returning
+// every hold, and stops the sync loop.
 func (g *localGate) close(ctx context.Context) error {
 	if !g.started.Load() {
 		return nil

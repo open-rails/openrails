@@ -1373,7 +1373,7 @@ func (s *sharedGate) flush(ctx context.Context) error {
 }
 
 // close flushes and leaves the group: its lease lives while another process
-// syncs it.
+// syncs it, and the last process to leave closes it.
 func (s *sharedGate) close(ctx context.Context) error {
 	err := s.flush(ctx)
 	close(s.stop)
@@ -1384,10 +1384,65 @@ func (s *sharedGate) close(ctx context.Context) error {
 		return errors.Join(err, ctx.Err())
 	}
 	if ns, ok := s.namespace(); ok {
-		c, cancel := context.WithTimeout(context.Background(), syncTimeout)
-		_ = s.rdb.HDel(c, s.g(ns, "procs"), s.proc).Err()
-		cancel()
+		c, cancel := context.WithTimeout(context.Background(), 2*syncTimeout)
+		defer cancel()
+		others, lerr := leaveScript.Run(c, s.rdb, []string{s.g(ns, "procs")}, s.proc, time.Now().Add(-gateProcTTL).UnixMilli()).Int64()
+		if lerr == nil && others == 0 {
+			err = errors.Join(err, s.closeGroup(c, ns))
+		}
 	}
+	return err
+}
+
+// closeGroup closes the group's lease with the usage left in its stream,
+// under the group's lock; a process that joins later starts a new lease. A
+// lease another process holds the lock of, or that already died, is left to
+// it.
+func (s *sharedGate) closeGroup(ctx context.Context, ns string) error {
+	locked, err := s.rdb.SetNX(ctx, s.g(ns, "lock"), s.proc, gateLockTTL).Result()
+	if err != nil || !locked {
+		return nil
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), syncTimeout)
+		_ = unlockScript.Run(c, s.rdb, []string{s.g(ns, "lock")}, s.proc).Err()
+		cancel()
+	}()
+	info, err := s.rdb.HMGet(ctx, s.g(ns, "lease"), "id", "valid").Result()
+	if err != nil {
+		return nil
+	}
+	lease, _ := info[0].(string)
+	valid, _ := strconv.ParseInt(fmt.Sprint(info[1]), 10, 64)
+	id, perr := billing.ParseLeaseID(lease)
+	if perr != nil || valid == 0 || time.Now().UnixMilli() >= valid {
+		return nil
+	}
+	entries, err := s.readUsage(ctx, ns, lease)
+	if err != nil {
+		return nil
+	}
+	params := billing.SyncLeasesParams{LeaseID: id, Usage: make([]billing.LeaseUsage, len(entries)), Wants: []billing.LeaseWant{}, Returns: []billing.HoldReturn{},
+		Committed: []billing.HoldCommitment{}, Close: true}
+	for i, e := range entries {
+		params.Usage[i] = e.item
+	}
+	call, cancel := context.WithTimeout(ctx, syncTimeout)
+	res, err := s.c.SyncLeases(call, params)
+	cancel()
+	if err != nil {
+		if errors.Is(err, billing.ErrUnreachable) {
+			return unavailable(err)
+		}
+		return err
+	}
+	pipe := s.rdb.Pipeline()
+	if err := s.applyAnswer(ctx, pipe, ns, lease, entries, &billing.SyncLeasesResult{Usage: res.Usage}, nil); err != nil {
+		return err
+	}
+	pipe.HSet(ctx, s.g(ns, "lease"), "valid", 1)
+	pipe.Del(ctx, s.g(ns, "returns"))
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
@@ -1592,6 +1647,18 @@ return 0
 var unlockScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
+`)
+
+// leaveScript: KEYS procs; ARGV process, cutoff (unix ms). Takes the
+// process out of the group and answers how many others beat since cutoff.
+var leaveScript = redis.NewScript(`
+redis.call('HDEL', KEYS[1], ARGV[1])
+local n = 0
+local all = redis.call('HGETALL', KEYS[1])
+for i = 2, #all, 2 do
+  if tonumber(all[i]) and tonumber(all[i]) >= tonumber(ARGV[2]) then n = n + 1 end
+end
+return n
 `)
 
 // emptyLeaseScript: KEYS leases, stream; ARGV lease. Forgets a lease whose

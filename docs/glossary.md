@@ -74,5 +74,5 @@ See [operations.md](operations.md#convergence) for the full reconciliation model
 | Collection threshold | The debt amount that triggers an invoice before the billing date. It cannot exceed the credit limit. |
 | Limit | What a customer may use per window, in a named unit or a currency, declared in the catalog and given capacity by products. `balance` (the prepaid balance and credit line) is the built-in one. |
 | Hold | Capacity set aside for one customer in each limit's window: owned by one request (an admission) or by a lease, for a limit set. |
-| Lease (`lse_`) | One gate's, or one batch job's, numbered stream of usage (`SyncLeases`). A gate's holds live while it keeps syncing. |
+| Lease (`lse_`) | One gate's, or one batch job's, numbered stream of usage (`SyncLeases`). A gate's holds live while it keeps syncing, until a sync closes the lease. |
 | Accrual | A customer's usage charges for one currency and UTC day, posted to the ledger as one deduction. |

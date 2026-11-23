@@ -20,6 +20,10 @@ calls it directly with `usage` alone.
   starts, a batch job once for its whole stream. The first sync under a new id
   creates the lease, so a lost first reply repeats harmlessly. A UUIDv7 id more
   than 60 days old that names no lease is `404 lease_not_found`: start a new one.
+  A sync with `close: true` settles its usage, returns every hold of the lease
+  and ends it; a lease that stops syncing ends 10 seconds after its last sync.
+  An ended lease answers wants `409 lease_not_held`, and usage against it still
+  settles, in full.
 - **Items.** `usage` holds up to 1,000 items
   `{n, customer_id, limit_set, invoker, invoker_type, currency, source, source_id,
   outcome, event_type, dimensions, metadata, amount, occurred_at}`, numbered once
@@ -264,7 +268,8 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   admitted by the server as a request hold. `Consume` admits a known cost and
   captures it at once; `Record` sends usage no admission held. `Limits` shows a
   customer's lines less the usage not yet sent, for display. `Flush` syncs now
-  and waits for settlement; `Close` sends pending usage and returns the holds.
+  and waits for settlement; `Close` sends pending usage and closes the lease,
+  returning its holds at once.
 - A refusal is a verdict on the ticket, never an error; `capacity_held` is
   waited out within the request's context first. The error is bad input or
   `ErrUnavailable`: OpenRails unreachable and no hold covering the request.
@@ -283,7 +288,8 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   customer one process served is warm on all. Usage waits in a Redis stream and
   one process at a time syncs. A process that cannot reach Redis admits from its
   own lease meanwhile. Losing Redis loses its unsent usage, never billed, and the
-  lease's unused capacity comes back when the lease expires.
+  lease's unused capacity comes back when the lease expires. `Close` leaves the
+  group; the last process to close ends the group's lease.
 
 Nothing in `GateConfig` tunes sizes, timing or process counts: holds follow
 traffic, and a merchant declares only limits, products and prices. A gate that

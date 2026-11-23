@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 374,
+  "scenario_count": 376,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -644,6 +644,11 @@
       "name": "A hold grows with its traffic within a few syncs"
     },
     {
+      "id": "OR-J24-S16",
+      "journey": "J24",
+      "name": "A sync with close settles its usage, returns every hold and ends the lease; later wants are lease_not_held and usage still settles"
+    },
+    {
       "id": "OR-J25-S01",
       "journey": "J25",
       "name": "Start and stop charge account for the exact known elapsed segment"
@@ -1102,6 +1107,11 @@
       "id": "OR-J23-S26",
       "journey": "J23",
       "name": "An admission that fits only were gates' lease holds returned is capacity_held (Admit and AdmitTx, limits and balance) and takes those holds back at their next sync"
+    },
+    {
+      "id": "OR-J23-S27",
+      "journey": "J23",
+      "name": "Closing a gate ends its lease and returns its holds at once; with Redis the group lease lives while a process remains and ends with the last"
     },
     {
       "id": "OR-J29-S07",

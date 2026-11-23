@@ -299,7 +299,13 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 			}
 		}
 	}
-	if r.live {
+	switch {
+	case r.p.Close:
+		// A closing sync, its usage settled, returns every hold of the lease.
+		if err := r.releaseEvery(); err != nil {
+			return nil, err
+		}
+	case r.live:
 		if err := r.releaseAll(); err != nil {
 			return nil, err
 		}
@@ -312,7 +318,7 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 			return nil, err
 		}
 	}
-	if r.live {
+	if r.live && !r.p.Close {
 		if err := r.renew(); err != nil {
 			return nil, err
 		}
@@ -328,7 +334,20 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	if err := r.q.UpdateLeaseSync(r.ctx, gen.UpdateLeaseSyncParams{LastSyncAt: lastSync, SettledThroughN: through, Receipts: encoded, MerchantID: r.merchant, ID: r.lease.ID}); err != nil {
 		return nil, err
 	}
-	r.result.Lease = billing.Lease{ID: r.p.LeaseID, ExpiresAt: lastSync.Add(limits.LeaseLifetime)}
+	expires, closedAt := lastSync.Add(limits.LeaseLifetime), r.lease.ClosedAt
+	if r.p.Close && closedAt == nil {
+		if err := r.q.CloseLease(r.ctx, gen.CloseLeaseParams{ClosedAt: r.now, MerchantID: r.merchant, ID: r.lease.ID}); err != nil {
+			return nil, err
+		}
+		closedAt = &r.now
+		if r.now.Before(r.lease.CreatedAt) {
+			closedAt = &r.lease.CreatedAt
+		}
+	}
+	if closedAt != nil && closedAt.Before(expires) {
+		expires = *closedAt
+	}
+	r.result.Lease = billing.Lease{ID: r.p.LeaseID, ExpiresAt: expires}
 	r.result.Usage.ThroughN = through
 	if err := r.answer(); err != nil {
 		return nil, err
@@ -416,10 +435,10 @@ func (r *syncRun) lockCustomers() error {
 		add(ret.CustomerID)
 	}
 	// A hold whose window closed or that grew old, or whose customer's
-	// standing moved, is sized again.
+	// standing moved, is sized again; a closing sync returns every hold.
 	for k, holds := range r.holds {
 		for _, h := range holds {
-			if h.stale(r.now) || r.moved[k.customer] {
+			if r.p.Close || h.stale(r.now) || r.moved[k.customer] {
 				add(billing.CustomerID(k.customer))
 			}
 		}
@@ -699,6 +718,22 @@ func (r *syncRun) giveBack() error {
 			if err := r.release(h); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// releaseEvery returns every open hold of the lease.
+func (r *syncRun) releaseEvery() error {
+	for _, holds := range r.holds {
+		for _, h := range holds {
+			if h.released {
+				continue
+			}
+			if err := r.release(h); err != nil {
+				return err
+			}
+			h.changed = true
 		}
 	}
 	return nil

@@ -20,6 +20,13 @@ SET last_sync_at = sqlc.arg(last_sync_at)::timestamptz, settled_through_n = sqlc
     receipts = sqlc.arg(receipts)::jsonb
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
+-- name: CloseLease :exec
+-- A sync with close ends the lease once: it takes no want after, and usage
+-- against it still settles.
+UPDATE billing.leases
+SET closed_at = COALESCE(closed_at, GREATEST(created_at, sqlc.arg(closed_at)::timestamptz))
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
 -- name: ListLeaseHolds :many
 -- A lease's open holds, retained or not past the hold lifetime, oldest first.
 SELECT * FROM billing.limit_holds

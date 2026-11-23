@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const closeLease = `-- name: CloseLease :exec
+UPDATE billing.leases
+SET closed_at = COALESCE(closed_at, GREATEST(created_at, $1::timestamptz))
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+`
+
+type CloseLeaseParams struct {
+	ClosedAt   time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// A sync with close ends the lease once: it takes no want after, and usage
+// against it still settles.
+func (q *Queries) CloseLease(ctx context.Context, arg CloseLeaseParams) error {
+	_, err := q.db.Exec(ctx, closeLease, arg.ClosedAt, arg.MerchantID, arg.ID)
+	return err
+}
+
 const consumeLeaseHoldPart = `-- name: ConsumeLeaseHoldPart :exec
 UPDATE billing.limit_hold_parts
 SET held = GREATEST(held - $1::bigint, 0), used_units = COALESCE(used_units, 0) + $1::bigint,

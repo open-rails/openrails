@@ -41,6 +41,7 @@ type fakeSync struct {
 	calls     int
 	wants     int
 	returns   []billing.HoldReturn
+	closed    []billing.LeaseID
 	firstSeen []int64
 	clients   []*Client
 }
@@ -193,6 +194,15 @@ func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, c := range p.Committed {
 		for _, l := range c.Limits {
 			committed[fakeLine{c.CustomerID, l.Limit}] += l.Committed
+		}
+	}
+	if p.Close {
+		f.closed = append(f.closed, p.LeaseID)
+		f.dead[p.LeaseID] = true
+		for k := range f.holds {
+			if k.lease == p.LeaseID {
+				delete(f.holds, k)
+			}
 		}
 	}
 	for _, want := range p.Wants {
@@ -777,14 +787,18 @@ func TestGateCloseSendsUsageAndReturnsHolds(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		lease := g.local.lease
 		if err := g.Close(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		f.mu.Lock()
-		returns, calls := len(f.returns), f.calls
+		returns, calls, closed := len(f.returns), f.calls, slices.Clone(f.closed)
 		f.mu.Unlock()
 		if f.settledOf(a, "quota") != 3 || f.settledOf(b, "quota") != 3 || returns != 2 {
 			t.Fatalf("close settled %d and %d, returned %d holds", f.settledOf(a, "quota"), f.settledOf(b, "quota"), returns)
+		}
+		if len(closed) == 0 || closed[0] != lease {
+			t.Fatalf("closed leases %v, want the gate's %s", closed, lease)
 		}
 		time.Sleep(3 * time.Second)
 		f.mu.Lock()

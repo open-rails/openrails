@@ -396,4 +396,43 @@ func TestLeaseSyncs(t *testing.T) {
 		}
 		require.LessOrEqual(t, syncs, 6, "no setting changed, and the gate stopped waiting")
 	})
+
+	t.Run("OR-J24-S16/a-closed-lease-settles-returns-its-holds-and-takes-no-want", func(t *testing.T) {
+		w := newWorld(t)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		lease := newLease()
+		var set string
+		for range 2 {
+			var refusal *billing.Refusal
+			set, refusal = wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{computeWant(customer, 1)}}))
+			require.Nil(t, refusal)
+		}
+		balance(t, w.alpha, customer, 800, 200, 1000)
+
+		// A sync with close settles its usage, then returns every hold and
+		// ends the lease, long before it would have expired.
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, spent(customer, set, "last", 1)), Close: true})
+		require.EqualValues(t, 1, out.Usage.ThroughN)
+		require.Empty(t, out.Usage.Refused)
+		h, listed := heldIn(out, customer, set, "balance")
+		require.True(t, listed)
+		require.Zero(t, h)
+		require.False(t, out.Lease.ExpiresAt.After(w.clock.Now()), "a closed lease has ended")
+		balance(t, w.alpha, customer, 900, 100, 1000)
+
+		// A closed lease takes no want; usage against it still settles, in full.
+		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, spent(customer, set, "late", 1)), Wants: []billing.LeaseWant{computeWant(customer, 1)}})
+		require.EqualValues(t, 2, out.Usage.ThroughN)
+		require.Empty(t, out.Usage.Refused)
+		require.NotNil(t, out.Wants[0].Error)
+		require.Equal(t, http.StatusConflict, out.Wants[0].Status)
+		require.Equal(t, billing.CodeLeaseNotHeld, out.Wants[0].Error.Code)
+		require.Empty(t, out.Holds)
+		balance(t, w.alpha, customer, 800, 200, 1000)
+		again := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Close: true})
+		require.EqualValues(t, 2, again.Usage.ThroughN)
+		require.Empty(t, again.Holds)
+		require.Equal(t, out.Lease.ExpiresAt, again.Lease.ExpiresAt, "a lease closes once")
+	})
 }

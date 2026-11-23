@@ -194,9 +194,11 @@ func (g *Gate) Flush(ctx context.Context) error {
 	return g.local.flush(ctx, false)
 }
 
-// Close sends pending usage, returns the gate's holds and stops syncing, so
-// its lease expires. Close after the gate's tickets are captured or
-// released: a ticket captured after Close is refused.
+// Close sends pending usage, returns the gate's holds and ends its lease
+// (SyncLeasesParams.Close), then stops syncing. With Redis, a process leaves
+// the group, and the group's lease ends with the last process to close; a
+// lease that cannot be closed expires. Close after the gate's tickets are
+// captured or released: a ticket captured after Close is refused.
 func (g *Gate) Close(ctx context.Context) error {
 	g.mu.Lock()
 	if g.closed {

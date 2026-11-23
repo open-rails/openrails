@@ -74,7 +74,8 @@ func main() {
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdown)
-		// Close sends the captured usage and gives the holds back.
+		// Close sends the captured usage and closes the lease, giving its
+		// holds back.
 		if err := gate.Close(shutdown); err != nil {
 			log.Print(err)
 		}

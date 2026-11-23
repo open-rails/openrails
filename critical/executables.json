@@ -451,6 +451,9 @@
     "OR-J23-S26": [
       "TestLimitHolds/OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back"
     ],
+    "OR-J23-S27": [
+      "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-a-shared-lease-ends-with-its-last-process"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -495,6 +498,9 @@
     ],
     "OR-J24-S15": [
       "TestLeaseSyncs/OR-J24-S15/a-hold-grows-with-its-traffic"
+    ],
+    "OR-J24-S16": [
+      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-returns-its-holds-and-takes-no-want"
     ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"

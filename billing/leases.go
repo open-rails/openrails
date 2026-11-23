@@ -40,12 +40,16 @@ const (
 
 // SyncLeasesParams is one gate's sync: the usage it settles, the holds it
 // wants and the holds it gives back. The first sync under a new LeaseID
-// creates the lease; every later one renews it.
+// creates the lease; every later one renews it, until one with Close: that
+// sync settles its usage, returns every hold of the lease and ends it. A
+// closed lease answers its wants lease_not_held; usage against it still
+// settles.
 type SyncLeasesParams struct {
 	LeaseID LeaseID      `json:"lease_id"`
 	Usage   []LeaseUsage `json:"usage"`
 	Wants   []LeaseWant  `json:"wants"`
 	Returns []HoldReturn `json:"returns"`
+	Close   bool         `json:"close,omitempty"`
 	// Committed is what the gate's open tickets have taken of its holds, as
 	// the sync was built: every hold with open tickets, none for the rest.
 	// A want asks for its estimate beyond its hold's commitment. A hold
@@ -132,7 +136,8 @@ type SyncLeasesResult struct {
 }
 
 // Lease is a gate's lease: it lives until ExpiresAt unless the gate syncs
-// again, and its holds live and die with it.
+// again, and its holds live and die with it. A closed lease's ExpiresAt is
+// when it closed.
 type Lease struct {
 	ID        LeaseID   `json:"id"`
 	ExpiresAt time.Time `json:"expires_at"`

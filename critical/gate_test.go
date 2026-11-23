@@ -558,4 +558,40 @@ func TestGate(t *testing.T) {
 		require.ErrorIs(t, err, openrails.ErrUnavailable)
 		wire.down.Store(false)
 	})
+
+	t.Run("OR-J23-S27/closing-a-gate-ends-its-lease-and-a-shared-lease-ends-with-its-last-process", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		applyLimits(t, a.alpha, gatePlan)
+
+		// In process: Close settles the usage and returns the holds at once.
+		customer := gateCustomer(t, a)
+		g := newGate(t, a.alpha, openrails.GateConfig{})
+		_, err := g.Consume(t.Context(), gateWork(customer, "one", 2))
+		require.NoError(t, err)
+		require.Positive(t, customerLimit(t, a.alpha, customer, "daily").Held)
+		require.NoError(t, g.Close(t.Context()))
+		daily := customerLimit(t, a.alpha, customer, "daily")
+		require.EqualValues(t, 2, daily.Used)
+		require.Zero(t, daily.Held, "a closed lease holds nothing, before it would have expired")
+
+		// Sharing Redis: the group's lease lives while a process remains and
+		// ends with the last one to close.
+		shared := gateCustomer(t, a)
+		start := func() *openrails.Gate {
+			client, _ := gateRemote(t, a)
+			return newGate(t, client, openrails.GateConfig{Redis: criticalRedis(t)})
+		}
+		first, second := start(), start()
+		_, err = first.Consume(t.Context(), gateWork(shared, "first", 1))
+		require.NoError(t, err)
+		gateFlush(t, first)
+		require.NoError(t, first.Close(t.Context()))
+		require.Positive(t, customerLimit(t, a.alpha, shared, "daily").Held, "the remaining process keeps the group's lease")
+		_, err = second.Consume(t.Context(), gateWork(shared, "second", 1))
+		require.NoError(t, err)
+		require.NoError(t, second.Close(t.Context()))
+		daily = customerLimit(t, a.alpha, shared, "daily")
+		require.EqualValues(t, 2, daily.Used)
+		require.Zero(t, daily.Held, "the last process closed the group's lease")
+	})
 }
