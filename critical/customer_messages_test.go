@@ -3,7 +3,6 @@
 package critical_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,29 +59,37 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, a.alice.Email, deref(log[0].Recipient))
 		require.Nil(t, log[0].LastError)
 	})
-	t.Run("OR-J39-S02/a-billing-restore-sends-nothing", func(t *testing.T) {
-		mail := &alertMailbox{}
-		source, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
-		alice := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		paidExternally(t, source, alice, messageSale(t, source), "archived-receipt")
-		fleet := startFleet(t, source.world)
-		require.Eventually(t, func() bool { return len(mail.to(source.alice.Email)) == 1 }, 30*time.Second, 20*time.Millisecond)
-		messagesSettled(t, fleet)
-		archive := archiveBytes(t, source.alpha)
-		restoredMail := &alertMailbox{}
-		target, client := archiveTarget(t, source.world, func(w *world) { w.deps.Email = restoredMail })
-		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
-		require.NoError(t, err)
-		payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: alice})
-		require.NoError(t, err)
-		require.Len(t, payments.Items, 1, "the paid order moved with the book")
-		targetFleet := startFleet(t, target)
-		runRegistered(t, targetFleet, "openrails.customer_messages_dispatch", 1)
-		messagesSettled(t, targetFleet)
-		require.Empty(t, restoredMail.all(), "a restore sends nothing again")
-		log, err := customerMessages(t, client, alice)
-		require.NoError(t, err)
-		require.Empty(t, log, "a restore queues no message")
+	t.Run("OR-J39-S02/a-fact-a-billing-restore-writes-queues-no-message", func(t *testing.T) {
+		source := newWorld(t)
+		target, _ := archiveTarget(t, source)
+		merchantID := source.alpha.MerchantID().UUID()
+		table := func(name string) string { return pgx.Identifier{target.schema, name}.Sanitize() }
+		// written records a customer and a fact about her in one transaction,
+		// inside a billing restore as an import begins one when restoring,
+		// and counts the messages it queued.
+		written := func(restoring bool) int {
+			ctx := t.Context()
+			tx, err := target.pool.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+			_, err = tx.Exec(ctx, "SELECT set_config('openrails.merchant_id', $1, true)", merchantID.String())
+			require.NoError(t, err)
+			if restoring {
+				_, err = tx.Exec(ctx, "SELECT "+table("begin_billing_restore")+"($1)", merchantID)
+				require.NoError(t, err)
+			}
+			customer := uuid.New()
+			_, err = tx.Exec(ctx, "INSERT INTO "+table("customers")+" (merchant_id, id) VALUES ($1, $2)", merchantID, customer)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, "INSERT INTO "+table("notification_events")+" (merchant_id, id, customer_id, event_type, data) VALUES ($1, $2, $3, $4, '{}')",
+				merchantID, uuid.New(), customer, receiptEvent)
+			require.NoError(t, err)
+			var queued int
+			require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM "+table("customer_messages")+" WHERE merchant_id = $1", merchantID).Scan(&queued))
+			return queued
+		}
+		require.Zero(t, written(true), "a fact a restore writes queues no message")
+		require.Equal(t, 1, written(false), "the same fact outside a restore queues one")
 	})
 	t.Run("OR-J39-S03/a-customer-without-an-address-is-no-contact-and-the-fact-is-emitted", func(t *testing.T) {
 		mail := &alertMailbox{}

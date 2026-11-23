@@ -2071,7 +2071,7 @@
     {
       "id": "OR-J39-S02",
       "journey": "J39",
-      "name": "A billing restore queues and sends no customer message"
+      "name": "A fact written inside a billing restore queues no customer message; the same fact outside one queues one"
     },
     {
       "id": "OR-J39-S03",

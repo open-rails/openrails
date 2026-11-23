@@ -297,7 +297,7 @@ nothing.
 Checks:
 - `projectDestructiveHold` inserts the finding, the alert job and the host event in one transaction.
 - `Service.Channels` selects email and webhooks for a hold regardless of severity.
-- `billing.queue_customer_message` returns before inserting while `billing_restore_active` (OR-J39-S02).
+- `billing.queue_customer_message` returns before inserting while `billing_restore_active`: OR-J39-S02 writes a fact inside a restore's transaction and outside one.
 
 ## Tests
 

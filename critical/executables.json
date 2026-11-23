@@ -1319,7 +1319,7 @@
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],
     "OR-J39-S02": [
-      "TestCustomerMessages/OR-J39-S02/a-billing-restore-sends-nothing"
+      "TestCustomerMessages/OR-J39-S02/a-fact-a-billing-restore-writes-queues-no-message"
     ],
     "OR-J39-S03": [
       "TestCustomerMessages/OR-J39-S03/a-customer-without-an-address-is-no-contact-and-the-fact-is-emitted"
