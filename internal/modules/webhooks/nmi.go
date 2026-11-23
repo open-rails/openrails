@@ -1026,7 +1026,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
-			reversalID := "void:" + txnID
+			reversalID := payments.VoidTransactionID(txnID)
 			if existingVoid, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), reversalID); lookupErr == nil && existingVoid != nil {
 				s.Log.InfoContext(ctx, "NMI void reversal already recorded", "void_transaction_id", reversalID)
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {

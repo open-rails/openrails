@@ -635,6 +635,72 @@ func TestCustomerMessages(t *testing.T) {
 			require.Empty(t, mail.all())
 		})
 	})
+	t.Run("OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt", func(t *testing.T) {
+		// refundFound is alice's sale refunded at the provider and found by a
+		// refresh late after it, with its messages sent.
+		refundFound := func(t *testing.T, late time.Duration) (*authorityWorld, *alertMailbox) {
+			t.Helper()
+			mail := &alertMailbox{}
+			a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-at-the-provider"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			var charge string
+			for _, effect := range p.effects(t) {
+				if effect.Kind == "charge" {
+					charge = effect.ID
+				}
+			}
+			require.NotEmpty(t, charge)
+			_, err := p.core.Refund(charge, 1000)
+			require.NoError(t, err)
+			a.clock.Advance(late)
+			fleet := undispatchedFleet(t, a.world)
+			refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+			read, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+			require.NoError(t, err)
+			require.Len(t, read.Refunds, 1, "the refresh records the refund")
+			liveMoney(t, a.world)
+			dispatchMessages(t, fleet)
+			return a, mail
+		}
+		t.Run("minutes-late", func(t *testing.T) {
+			a, mail := refundFound(t, 10*time.Minute)
+			receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
+			require.Contains(t, receipt.Text, "We refunded 10.00 USD")
+		})
+		t.Run("eight-days-late", func(t *testing.T) {
+			a, mail := refundFound(t, 8*24*time.Hour)
+			alice := customerOf(a.alice)
+			log, err := customerMessages(t, a.alpha, alice)
+			require.NoError(t, err)
+			require.True(t, ended(log))
+			require.Empty(t, ofType(log, "refund_completed"), "old news records no receipt")
+			require.False(t, factEmitted(t, a.alpha, "refund_completed", alice))
+			for _, email := range mail.to(a.alice.Email) {
+				require.NotEqual(t, "Your refund from Alpha", email.Subject)
+			}
+		})
+	})
+	t.Run("OR-J39-S23/a-void-is-confirmed-as-a-canceled-charge", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a := ccbillWebhookWorld(t, func(w *world) { w.deps.Email = mail })
+		price := ccbillMemberPrice(t, a.alpha)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		const ref, sale = "556677889900112255", "0812233445566778833"
+		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(customerOf(a.alice), price, ref, sale, now.Add(5*24*time.Hour)))
+		for range 2 {
+			status, body := ccbillNotice(t, a, "Void", map[string]any{"subscriptionId": ref, "transactionId": sale, "amount": "10.00", "currencyCode": "840", "reason": "voided"})
+			require.Equal(t, http.StatusOK, status, body)
+		}
+		liveMoney(t, a.world)
+		startFleet(t, a.world)
+		receipt := sentAbout(t, a, mail, "refund_completed", "Your payment to Alpha was canceled")
+		require.Contains(t, receipt.Text, "Your payment of 10.00 USD")
+		require.Contains(t, receipt.Text, "was canceled; you weren't charged.")
+		require.NotContains(t, receipt.Text, "refund")
+	})
 }
 
 // declareMessages gives alpha the messages document s.

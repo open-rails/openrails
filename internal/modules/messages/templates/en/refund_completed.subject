@@ -1,1 +1,1 @@
-Your refund{{with .Merchant.Name}} from {{.}}{{end}}
+{{if .Event.Voided}}Your payment{{with .Merchant.Name}} to {{.}}{{end}} was canceled{{else}}Your refund{{with .Merchant.Name}} from {{.}}{{end}}{{end}}

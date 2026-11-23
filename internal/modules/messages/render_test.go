@@ -96,6 +96,11 @@ func TestReceipts(t *testing.T) {
 	requireText(t, jpy, "Your receipt from Alpha", "Amount paid: 500 JPY")
 	refund := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
 	requireText(t, refund, "Your refund from Alpha", "We refunded 4.00 USD for Guide.", "Order: 1001\nRefunded: 4.00 USD\nDate: November 23, 2026")
+	void := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001, Voided: true})
+	requireText(t, void, "Your payment to Alpha was canceled", "Your payment of 4.00 USD for Guide was canceled; you weren't charged.", "Order: 1001\nCanceled: 4.00 USD")
+	if strings.Contains(void.Text+void.HTML, "refund") || !strings.Contains(void.HTML, "Canceled</td>") {
+		t.Errorf("a void is no refund:\n%s\n%s", void.Text, void.HTML)
+	}
 }
 
 func TestCancellationsSayTheirCause(t *testing.T) {

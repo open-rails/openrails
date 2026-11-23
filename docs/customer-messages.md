@@ -29,7 +29,7 @@ Every event type below has a built-in English message.
 | On by default | |
 |---|---|
 | `one_off_purchase_completed` | Receipt for a one-off purchase |
-| `refund_completed` | Refund receipt |
+| `refund_completed` | Refund receipt; a void is worded as a canceled charge (`Voided`). A refund found more than seven days after the provider made it has none |
 | `premium_started` | The subscription started |
 | `payment_method_failed` | A payment failed, with the update-card link; not the failure that ended a subscription (`recovery_action: resubscribe`), whose ending confirms it, nor a declined checkout (`source: customer_checkout` or `customer_subscription_change`), which the page reports |
 | `payment_authentication_required` | The bank wants the customer to confirm a payment |

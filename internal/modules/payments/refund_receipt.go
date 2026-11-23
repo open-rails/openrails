@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,13 +15,26 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
+// RefundReceiptWindow is how recent a refund must be, by the provider's
+// time, for its receipt: one found later (a backfill, a late refresh) is old
+// news to the customer.
+const RefundReceiptWindow = 7 * 24 * time.Hour
+
+// voidPrefix marks the reversal a void records: a void is a refund of the
+// whole charge before it settled.
+const voidPrefix = "void:"
+
+// VoidTransactionID is the reversal's transaction id for the void of the
+// charge transactionID.
+func VoidTransactionID(transactionID string) string { return voidPrefix + transactionID }
+
 // queueRefundReceipt records refund's refund_completed fact in the
 // transaction that settles it. Its id is the refund's, so it is written once
 // however often the settlement is replayed. A chargeback or dispute reversal
-// has none.
+// has none, nor a refund older than RefundReceiptWindow.
 func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.Payment) error {
 	if refund.ReversalKind == nil || *refund.ReversalKind != ReversalRefund || refund.RefundedPaymentID == nil ||
-		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) {
+		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) || s.now().Sub(refund.PurchasedAt) > RefundReceiptWindow {
 		return nil
 	}
 	mid, err := merchant.Require(ctx)
@@ -32,6 +46,7 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 	data := billing.NotificationData{
 		Amount: &amount, Currency: refund.Currency, Rail: string(refund.Rail),
 		PaymentID: billing.PaymentID(refund.ID), RefundedPaymentID: billing.PaymentID(*refund.RefundedPaymentID),
+		Voided: strings.HasPrefix(refund.TransactionID, voidPrefix),
 	}
 	if refund.SubscriptionID != nil {
 		data.SubscriptionID = billing.SubscriptionID(*refund.SubscriptionID)

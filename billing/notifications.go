@@ -157,13 +157,15 @@ type NotificationData struct {
 	// the amount paid, the payment and, for an order, the order and its
 	// number. A refund receipt (refund_completed) has the same fields:
 	// Amount is what was refunded, PaymentID the refund and
-	// RefundedPaymentID the charge it reverses. Delivery addresses belong to
-	// the consuming application.
+	// RefundedPaymentID the charge it reverses; Voided is a charge canceled
+	// before it settled, so the customer was not charged. Delivery addresses
+	// belong to the consuming application.
 	Amount            *int64    `json:"amount,omitempty,string"`
 	ProductName       string    `json:"product_name,omitempty"`
 	PaymentMethod     string    `json:"payment_method,omitempty"`
 	PaymentID         PaymentID `json:"payment_id,omitzero"`
 	RefundedPaymentID PaymentID `json:"refunded_payment_id,omitzero"`
+	Voided            bool      `json:"voided,omitempty"`
 	OrderID           OrderID   `json:"order_id,omitzero"`
 	OrderNumber       int64     `json:"order_number,omitempty"`
 }

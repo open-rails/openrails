@@ -1386,6 +1386,14 @@
       "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp",
       "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/off-by-default",
       "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/turned-on-on-a-sandbox-psp"
+    ],
+    "OR-J39-S22": [
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt",
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt/minutes-late",
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt/eight-days-late"
+    ],
+    "OR-J39-S23": [
+      "TestCustomerMessages/OR-J39-S23/a-void-is-confirmed-as-a-canceled-charge"
     ]
   }
 }

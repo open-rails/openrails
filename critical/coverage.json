@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 432,
+  "scenario_count": 435,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2167,6 +2167,16 @@
       "id": "OR-J39-S21",
       "journey": "J39",
       "name": "A declined checkout sends no message by default, and turned on it sends none from a sandbox PSP: the decline names its PSP"
+    },
+    {
+      "id": "OR-J39-S22",
+      "journey": "J39",
+      "name": "A refund a refresh finds more than a week after the provider made it records no receipt; one found minutes late sends one"
+    },
+    {
+      "id": "OR-J39-S23",
+      "journey": "J39",
+      "name": "A void sends one receipt worded as a canceled charge: the customer was not charged"
     }
   ]
 }

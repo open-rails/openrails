@@ -1,7 +1,13 @@
-We refunded {{.Event.Amount}}{{with .Event.ProductName}} for {{.}}{{end}}.
+{{if .Event.Voided}}Your payment of {{.Event.Amount}}{{with .Event.ProductName}} for {{.}}{{end}} was canceled; you weren't charged.
+
+{{with .Event.OrderNumber}}Order: {{.}}
+{{end}}Canceled: {{.Event.Amount}}
+Date: {{.Event.OccurredAt}}
+
+If it shows on your statement as pending, it drops off in a few days.{{else}}We refunded {{.Event.Amount}}{{with .Event.ProductName}} for {{.}}{{end}}.
 
 {{with .Event.OrderNumber}}Order: {{.}}
 {{end}}Refunded: {{.Event.Amount}}
 Date: {{.Event.OccurredAt}}
 
-It can take a few days to reach your account{{with .Merchant.StatementDescriptor}}, and it shows on your statement as {{.}}{{end}}.
+It can take a few days to reach your account{{with .Merchant.StatementDescriptor}}, and it shows on your statement as {{.}}{{end}}.{{end}}

@@ -104,6 +104,9 @@ type MessageEvent struct {
 	Quantity         string
 	AccessEnded      bool
 	DowngradeApplied bool
+	// Voided is a refund_completed that canceled the charge before it
+	// settled: the customer was not charged.
+	Voided           bool
 	RetryStatus      NotificationRetryStatus
 	RecoveryAction   NotificationRecoveryAction
 	CollectionMethod InvoiceCollectionMethod

@@ -52,7 +52,7 @@ func messageData(f fact) billing.MessageData {
 			EndedAt:          day(d.EndedAt), EffectiveAt: day(d.EffectiveAt), PeriodStartsAt: day(d.PeriodStartsAt), PeriodEndsAt: day(d.PeriodEndsAt),
 			DueAt: day(d.DueAt), NextAttemptAt: day(d.NextAttemptAt), RunwayEndsAt: day(d.RunwayEndsAt), OverdueStartedAt: day(d.OverdueStartedAt),
 			OrderNumber: count(d.OrderNumber), OverdueOrders: count(int64(d.OverdueOrders)), Quantity: quantity(d.Quantity),
-			AccessEnded: d.AccessEnded, DowngradeApplied: d.DowngradeApplied,
+			AccessEnded: d.AccessEnded, DowngradeApplied: d.DowngradeApplied, Voided: d.Voided,
 			RetryStatus: d.RetryStatus, RecoveryAction: d.RecoveryAction, CollectionMethod: d.CollectionMethod,
 			OrderID: id(d.OrderID.IsZero(), d.OrderID.String()), PaymentID: id(d.PaymentID.IsZero(), d.PaymentID.String()),
 			RefundedPaymentID: id(d.RefundedPaymentID.IsZero(), d.RefundedPaymentID.String()),
