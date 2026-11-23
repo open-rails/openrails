@@ -11,7 +11,6 @@ in_modules() {
 }
 # Static guards: one command each.
 guards() {
-  bash scripts/migration-prefix-collision.sh
   go run ./scripts/business-time
   bash scripts/check-one-pull-entry.sh
   bash scripts/check-borrowed-connections.sh

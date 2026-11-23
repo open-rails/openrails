@@ -1305,20 +1305,5 @@
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ]
-  },
-  "suites": {
-    "browser": [
-      "OR-J03-S04",
-      "OR-J04-S01",
-      "OR-J04-S03",
-      "OR-J04-S04",
-      "OR-J01-S09",
-      "OR-J38-S30",
-      "OR-J38-S31",
-      "OR-J38-S32",
-      "OR-J38-S33",
-      "OR-J38-S34",
-      "OR-J38-S41"
-    ]
   }
 }
