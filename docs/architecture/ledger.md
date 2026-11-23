@@ -152,7 +152,7 @@ Checks:
   writer sets `Transfer.Customer` from the customer whose accounts it names.
 - OR-J22-S01 reads the customer through another merchant and gets no transactions.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `billing.Balance`, `billing.BalanceTransaction`, `billing.BalanceTransactionType`
 and the routes above are in `api/go.txt` and `api/openapi.json`; both tables are
 in `api/schema.txt`. Stored names never change: the usage order operations keep

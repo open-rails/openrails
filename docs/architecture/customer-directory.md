@@ -147,7 +147,7 @@ Checks:
   `401` on `/v1/app/scim/v2` once deleted.
 - `customerscope.Bind` is called only from `internal/http/routes`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The routes are in the route catalog (`provisioningRoutes`); their bodies are the
 RFC's (`scimBody`), so `api/openapi.json` leaves them out and `docs/api/routes.md`
 lists them.

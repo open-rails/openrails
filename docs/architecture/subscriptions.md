@@ -174,7 +174,7 @@ Checks:
 - `ownSubscription` answers `subscription_not_found` for another's id.
 - OR-J16-S05: a failing pass holds back no other merchant's renewal.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared once (`internal/http/routes/subscriptions.go`); the
 in-process `Client` reaches the same handlers, so both answer alike. Snapshots:

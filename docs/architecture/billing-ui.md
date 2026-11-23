@@ -123,7 +123,7 @@ Checks:
 - OR-J38-S34: a configuration reader sees the ops pages with no actions and writes nothing; Map needs `merchant:catalog:manage`.
 - OR-J03-S03: the checkout origin cannot reach the privileged API.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `internal/contract` generates the wire types and route table from the route
 catalog, and the error codes and currency scales from their registries; `go run
 ./scripts/contracts` (and `pnpm contract:check`) fails on a stale file. The package

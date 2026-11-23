@@ -179,7 +179,7 @@ Checks:
   `usage_orders.sql` filters on `merchant_id`; due scans are marked `CROSS-MERCHANT`.
 - OR-J23-S11 and OR-J24-S03 keep reads, adjustments and refusals in their merchant.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The gate, lease, limit, admission and running-charge types are in `api/go.txt`,
 the routes in the route catalog and `api/openapi.json`, the tables in
 `api/schema.txt`. `NewGate` takes any `*Client`: the in-process client reaches the

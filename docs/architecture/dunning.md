@@ -172,7 +172,7 @@ Checks:
   (OR-J16-S05).
 - `GetCycleCardStanding` and `GetOverdueOrderAggregate` name `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `billing.DunningPolicy`, `SubscriptionDunning`, `DeclineReason` and
 `DelinquencyHostEvent` are in `api/go.txt`. The routes are in
 `api/openapi.json` and the tables in `api/schema.txt`. A case stores its full
