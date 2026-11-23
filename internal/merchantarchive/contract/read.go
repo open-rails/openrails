@@ -94,9 +94,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return err
 			}
 		}
-		// Holds before batch settlement kept no captured charges.
-		if p.Name == "limit_holds" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, nil)
+		// Holds before batch settlement kept no captured charges, and before
+		// versioned answers no versions: a request's hold has neither.
+		if p.Name == "limit_holds" && len(r.Values) < len(p.Columns) && len(r.Values) >= len(p.Columns)-3 {
+			r.Values = append(r.Values, make([]*string, len(p.Columns)-len(r.Values))...)
 		}
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
@@ -235,7 +236,8 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
-var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "usage_daily": true, "usage_accruals": true}
+var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
+	"usage_daily": true, "usage_accruals": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
