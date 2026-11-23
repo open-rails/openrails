@@ -392,7 +392,7 @@ func (s *Service) fingerprint(ctx context.Context, tx pgx.Tx, id billing.Merchan
 // declaration.
 func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) error {
 	rail := normalizeProviderSecretType(p.Rail)
-	if _, err := config.NormalizePSPDeclaration(key, config.PSPConfig{Rail: billing.Rail(rail), Environment: p.Environment, AccountID: p.AccountID,
+	if _, err := config.NormalizePSPDeclaration(key, billing.PSPConfig{Rail: billing.Rail(rail), Environment: p.Environment, AccountID: p.AccountID,
 		Custodian: p.Custodian, Settings: p.Settings, Secrets: p.Secrets}); err != nil {
 		return err
 	}

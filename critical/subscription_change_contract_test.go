@@ -50,7 +50,7 @@ func stripeSeatMembership(t *testing.T) *stripeSeats {
 		accounts = newStripeAccounts(t, w, "sk_test_seats")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"seats": stripePSP("acct_seats", "sk_test_seats", false)}
+		m.PSPs = billing.PSPs{"seats": stripePSP("acct_seats", "sk_test_seats", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	s := &stripeSeats{authorityWorld: a, stripe: accounts.accounts["sk_test_seats"].core}

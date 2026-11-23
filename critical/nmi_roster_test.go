@@ -80,7 +80,7 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, b
 	require.NoError(t, err)
 	require.NoError(t, a.engine.Close(context.Background()))
 	m := cfgMerchant(a.cfg, "alpha")
-	m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
+	m.PSPs = billing.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
 	setCfgMerchant(&a.cfg, "alpha", m)
 	// A refresh pass verifies unverified rows only for a merchant whose
 	// provider writes are not held, so the next whole read can happen.

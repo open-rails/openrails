@@ -44,7 +44,7 @@ type Engine struct {
 	// declared are Config.Merchants' provisioned ids, by slug.
 	declared       map[string]billing.MerchantID
 	issuers        map[string]billing.MerchantID
-	bySlug         map[billing.MerchantID]config.MerchantDeclaration
+	bySlug         map[billing.MerchantID]billing.MerchantDeclaration
 	merchantGroups billing.MerchantGroupReader
 
 	mu          sync.Mutex
@@ -126,7 +126,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}, Log: logger}
+	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]billing.MerchantDeclaration{}, Log: logger}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -168,7 +168,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 // admit records a provisioned declared merchant. late is a merchant a
 // background retry provisioned after New: it is published and verified at
 // once.
-func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, late bool) {
+func (e *Engine) admit(m billing.MerchantDeclaration, id billing.MerchantID, late bool) {
 	rt := e.App.Runtime
 	e.declMu.Lock()
 	e.declared[m.Slug], e.bySlug[id] = id, m
@@ -187,7 +187,7 @@ func (e *Engine) admit(m config.MerchantDeclaration, id billing.MerchantID, late
 
 // provisionLater refuses a declared merchant whose provisioning failed and
 // retries it in the background with capped backoff until it succeeds.
-func (e *Engine) provisionLater(m config.MerchantDeclaration, err error) {
+func (e *Engine) provisionLater(m billing.MerchantDeclaration, err error) {
 	rt := e.App.Runtime
 	rt.Refuse(merchantSubject(m.Slug), fmt.Errorf("%w; the merchant is not provisioned, retrying in the background", err))
 	rt.Go("provision merchant "+m.Slug, func(ctx context.Context) {
@@ -228,7 +228,7 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
-func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaration, []config.Degradation, error) {
+func validate(cfg *config.Config, deps config.Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
 	// Unset would run fail-closed readonly: renewals, retries and refunds
 	// would silently never reach a provider. The host states it.
 	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
@@ -253,7 +253,7 @@ func validate(cfg *config.Config, deps config.Deps) ([]config.MerchantDeclaratio
 	for i, m := range declarations {
 		if err := config.RefuseDeclarationBesideVault(cfg, m.Slug, m.MerchantDocument); err != nil {
 			refused = append(refused, config.Degradation{Field: merchantSubject(m.Slug) + ".declaration", Err: fmt.Errorf("%w; Vault's configuration serves", err)})
-			declarations[i] = config.MerchantDeclaration{MerchantDocument: config.MerchantDocument{Slug: m.Slug}, Issuer: m.Issuer, Binding: m.Binding}
+			declarations[i] = billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: m.Slug}, Issuer: m.Issuer, Binding: m.Binding}
 		}
 	}
 	return declarations, refused, nil
@@ -283,7 +283,7 @@ func seams(deps config.Deps) []string {
 }
 
 // declaredLive names a live PSP the declarations declare, or "".
-func declaredLive(declarations []config.MerchantDeclaration) string {
+func declaredLive(declarations []billing.MerchantDeclaration) string {
 	for _, m := range declarations {
 		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
 			if p := m.PSPs[key]; config.LiveEnvironment(string(p.Rail), p.Environment) {

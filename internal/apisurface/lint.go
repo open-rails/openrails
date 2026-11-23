@@ -61,8 +61,8 @@ var plannedEnums = []string{
 
 // enumFields are string fields whose name does not spell their enum.
 var enumFields = []string{
-	"billing.PaymentFailure.Reason",       // DeclineReason
-	"openrails.AlertWebhookConfig.Format", // AlertWebhookFormat
+	"billing.PaymentFailure.Reason",     // DeclineReason
+	"billing.AlertWebhookConfig.Format", // AlertWebhookFormat
 }
 
 // An exception allows the findings of rule whose identifier matches pattern

@@ -1,6 +1,7 @@
 package openrails
 
 import (
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 )
@@ -32,30 +33,6 @@ type (
 	CustomerProof = config.CustomerProof
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.
 	RouteGroups = config.RouteGroups
-	// MerchantDeclaration is one entry of Config.Merchants: a merchant the
-	// engine provisions on start, its document, and the issuer whose
-	// credentials are bound to it.
-	MerchantDeclaration = config.MerchantDeclaration
-	// MerchantDocument is MerchantDeclaration's document: the merchant's slug
-	// and configuration, as ParseMerchantDocument reads it.
-	MerchantDocument = config.MerchantDocument
-	// MerchantSecrets is MerchantDocument.Secrets: the merchant's own
-	// credentials (secrets.scim_token).
-	MerchantSecrets = config.MerchantSecrets
-	// AlertWebhookConfig is one of MerchantDocument.AlertWebhooks: where
-	// the merchant's operational alerts are posted.
-	AlertWebhookConfig = config.AlertWebhookConfig
-	// PSPConfig is one PSP of MerchantDocument.PSPs: the merchant's account
-	// on a rail, with its credentials and settings.
-	PSPConfig = config.PSPConfig
-	// PSPs is MerchantDocument.PSPs: the merchant's PSPs by key.
-	PSPs = config.PSPs
-	// Custodians is MerchantDocument.Custodians: its custodians by key.
-	Custodians = config.Custodians
-	// CustodianConfig is one custodian of MerchantDocument.Custodians: the
-	// merchant's account with a card custodian.
-	CustodianConfig = config.CustodianConfig
-
 	// DatabaseConfig is Config.Database: the Postgres schemas New creates,
 	// upgrades or validates when SkipMigrations is enabled, and the lease
 	// pool's size.
@@ -188,6 +165,6 @@ var ErrUnauthenticated = billingauth.ErrUnauthenticated
 // ParseMerchantDocument reads a merchant's document from YAML: a required
 // slug and the configuration beside it, refusing unknown fields. A
 // MerchantDeclaration's Issuer and Binding are set in code.
-func ParseMerchantDocument(raw []byte) (MerchantDocument, error) {
+func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	return config.ParseMerchantDocument(raw)
 }

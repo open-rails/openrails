@@ -233,7 +233,7 @@ func TestPublicCatalog(t *testing.T) {
 		cfg := a.cfg
 		cfg.Merchants = slices.Clone(a.cfg.Merchants)
 		declaration := cfgMerchant(cfg, "alpha")
-		declaration.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
+		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_rotated"}.PSPConfig()}
 		setCfgMerchant(&cfg, "alpha", declaration)
 		a.server.Close()
 		require.NoError(t, a.engine.Close(t.Context()))

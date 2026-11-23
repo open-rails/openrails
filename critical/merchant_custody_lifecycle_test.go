@@ -319,7 +319,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				t.Cleanup(wire.CloseIdleConnections)
 				w.deps.BasisTheoryTransport = custodianProbeWire{loopback: loopbackWire{target: target, wire: wire}, wire: wire}
 				for i := range w.cfg.Merchants {
-					w.cfg.Merchants[i].MerchantDocument = openrails.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
+					w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
 				}
 			})
 			custody, newVault := "owned", "nmi"

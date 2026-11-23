@@ -58,9 +58,9 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		ReturnOrigins:     []string{"https://critical.invalid"},
-		Merchants: []openrails.MerchantDeclaration{
-			{MerchantDocument: openrails.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
-			{MerchantDocument: openrails.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
+		Merchants: []billing.MerchantDeclaration{
+			{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
+			{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
 		},
 	}
 	w.deps = openrails.Deps{Postgres: pool, Clock: w.clock, FXTransport: fixedFX(t)}
@@ -125,17 +125,17 @@ func ptr[T any](v T) *T { return &v }
 
 // cfgMerchant is a copy of cfg's declaration of slug; the bare slug when it
 // declares none.
-func cfgMerchant(cfg openrails.Config, slug string) openrails.MerchantDeclaration {
+func cfgMerchant(cfg openrails.Config, slug string) billing.MerchantDeclaration {
 	for _, m := range cfg.Merchants {
 		if m.Slug == slug {
 			return m
 		}
 	}
-	return openrails.MerchantDeclaration{MerchantDocument: openrails.MerchantDocument{Slug: slug}}
+	return billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: slug}}
 }
 
 // setCfgMerchant replaces cfg's declaration of slug with m, or adds it.
-func setCfgMerchant(cfg *openrails.Config, slug string, m openrails.MerchantDeclaration) {
+func setCfgMerchant(cfg *openrails.Config, slug string, m billing.MerchantDeclaration) {
 	m.Slug = slug
 	for i := range cfg.Merchants {
 		if cfg.Merchants[i].Slug == slug {

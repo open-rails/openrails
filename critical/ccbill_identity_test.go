@@ -46,7 +46,7 @@ func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld
 	return newAuthorityWorld(t, func(w *world) {
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
+		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		for _, change := range configure {

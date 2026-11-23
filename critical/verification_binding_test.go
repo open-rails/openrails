@@ -75,7 +75,7 @@ func (s *stripeAccounts) read(secret, path string) bool {
 	return false
 }
 
-func stripePSP(account, secret string, archived bool) openrails.PSPConfig {
+func stripePSP(account, secret string, archived bool) billing.PSPConfig {
 	return openrails.StripePSP{AccountID: account, Environment: openrails.EnvironmentTest, SecretKey: secret,
 		WebhookSigningSecret: "whsec_" + account, PublishableKey: "pk_test_" + account, Archived: archived}.PSPConfig()
 }
@@ -101,7 +101,7 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 		accounts = newStripeAccounts(t, w, "sk_test_old", "sk_test_new")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
+		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
@@ -136,7 +136,7 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 	a, accounts, sub := stripeMembership(t)
 	require.NoError(t, a.engine.Close(context.Background()))
 	m := cfgMerchant(a.cfg, "alpha")
-	m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", true), "new": stripePSP("acct_new", "sk_test_new", false)}
+	m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", true), "new": stripePSP("acct_new", "sk_test_new", false)}
 	setCfgMerchant(&a.cfg, "alpha", m)
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
@@ -243,7 +243,7 @@ func TestVerificationBinding(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, a.engine.Close(context.Background()))
 		m := cfgMerchant(a.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
+		m.PSPs = billing.PSPs{"old": nmiPSP("old", true), "new": nmiPSP("new", false)}
 		setCfgMerchant(&a.cfg, "alpha", m)
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
@@ -360,7 +360,7 @@ type nmiAccounts struct {
 	cores map[string]*nmimock.Mock
 }
 
-func nmiPSP(name string, archived bool) openrails.PSPConfig {
+func nmiPSP(name string, archived bool) billing.PSPConfig {
 	return openrails.NMIPSP{GatewayID: name + "-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "nmi-" + name + "-key",
 		WebhookSigningSecret: "nmi-" + name + "-webhook", TokenizationKey: "nmi-" + name + "-collect", Archived: archived}.PSPConfig()
 }
@@ -406,7 +406,7 @@ func nmiAccountsWorld(t *testing.T) (*authorityWorld, *nmiAccounts) {
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"old": nmiPSP("old", false)}
+		m.PSPs = billing.PSPs{"old": nmiPSP("old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	return a, accounts

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -48,7 +49,7 @@ type Config struct {
 	// configuration, read-only; with one it seeds Vault once, when Vault
 	// holds nothing for the merchant. A request acts on the merchant its
 	// credential is bound to: see MerchantDeclaration.Issuer.
-	Merchants []MerchantDeclaration
+	Merchants []billing.MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.

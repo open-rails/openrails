@@ -46,8 +46,8 @@ type NMIPSP struct {
 }
 
 // PSPConfig returns the declaration.
-func (p NMIPSP) PSPConfig() PSPConfig {
-	return PSPConfig{
+func (p NMIPSP) PSPConfig() billing.PSPConfig {
+	return billing.PSPConfig{
 		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
 		Secrets: secretSlots(map[string]string{
 			"security_key":                    p.SecurityKey,
@@ -87,8 +87,8 @@ type StripePSP struct {
 }
 
 // PSPConfig returns the declaration.
-func (p StripePSP) PSPConfig() PSPConfig {
-	return PSPConfig{
+func (p StripePSP) PSPConfig() billing.PSPConfig {
+	return billing.PSPConfig{
 		Rail: billing.RailStripe, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{
 			"secret_key":                      p.SecretKey,
@@ -120,8 +120,8 @@ type CCBillPSP struct {
 }
 
 // PSPConfig returns the declaration.
-func (p CCBillPSP) PSPConfig() PSPConfig {
-	return PSPConfig{
+func (p CCBillPSP) PSPConfig() billing.PSPConfig {
+	return billing.PSPConfig{
 		Rail: billing.RailCCBill, Environment: p.Environment, Archived: p.Archived,
 		AccountID: rails.Account(models.RailCCBill, map[string]string{"client_accnum": p.ClientAccnum, "client_subacc": p.ClientSubacc}),
 		Secrets: secretSlots(map[string]string{
@@ -150,8 +150,8 @@ type SolanaPSP struct {
 }
 
 // PSPConfig returns the declaration.
-func (p SolanaPSP) PSPConfig() PSPConfig {
-	return PSPConfig{
+func (p SolanaPSP) PSPConfig() billing.PSPConfig {
+	return billing.PSPConfig{
 		Rail: billing.RailSolana, Environment: p.Environment, AccountID: p.Treasury, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{"rpc_url": p.RPCURL}),
 	}
