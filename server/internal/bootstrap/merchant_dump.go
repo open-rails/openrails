@@ -66,6 +66,10 @@ func dumpDeclaration(set merchantdocs.Set, slug string) billing.MerchantDocument
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}
+	if set.HasMessages {
+		messages := set.Messages.Value
+		out.Messages = &messages
+	}
 	for _, key := range set.CustodianKeys() {
 		c := set.Custodians[key].Value
 		if out.Custodians == nil {

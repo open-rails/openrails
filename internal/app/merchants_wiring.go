@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/scim"
@@ -75,6 +76,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	cache.SetSync(func(ctx context.Context, id billing.MerchantID, previous, loaded merchantdocs.Set) (merchantdocs.Set, error) {
 		set, err := r.syncMerchantConfig(ctx, id, previous, loaded)
 		if err == nil {
+			set = checkMessages(previous, set)
 			r.followPSPPosture(id, previous, set)
 			r.followPaymentDomain(id, previous, set)
 			r.followStripeWebhooks(id, previous, set)
@@ -235,6 +237,22 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		return previous, err
 	}
 	return set, nil
+}
+
+// checkMessages refuses a messages document a message of which does not
+// render; the version served before keeps serving.
+func checkMessages(previous, set merchantdocs.Set) merchantdocs.Set {
+	if !set.HasMessages || previous.HasMessages && previous.Messages.Revision == set.Messages.Revision && reflect.DeepEqual(previous.Messages.Value, set.Messages.Value) {
+		return set
+	}
+	if err := messages.Check(set.Messages.Value); err != nil {
+		if set.Rejected == nil {
+			set.Rejected = map[string]string{}
+		}
+		set.Rejected[merchantdocs.MessagesDoc] = err.Error()
+		set.Messages, set.HasMessages = previous.Messages, previous.HasMessages
+	}
+	return set
 }
 
 // configFindings are the configuration problems a merchant's operator is

@@ -304,6 +304,16 @@ func (c *Cache) Delete(ctx context.Context, id billing.MerchantID) error {
 	return nil
 }
 
+// MerchantMessages is the messages document the merchant serves; none is
+// the zero settings.
+func (c *Cache) MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error) {
+	set, err := c.Get(ctx, id)
+	if err != nil {
+		return billing.MessageSettings{}, err
+	}
+	return set.Messages.Value, nil
+}
+
 // MerchantSettings is the merchant document's display name and settings.
 func (c *Cache) MerchantSettings(ctx context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error) {
 	set, err := c.Get(ctx, id)

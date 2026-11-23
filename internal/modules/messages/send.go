@@ -59,7 +59,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	end := func(status, code string) error {
 		return s.settle(ctx, m, settled{status: status, attempts: m.Attempts, code: code})
 	}
-	settings, err := s.settings(ctx)
+	settings, err := s.Profiles.Messages(ctx)
 	if err != nil {
 		return err
 	}
@@ -204,11 +204,6 @@ func (v settled) params(m gen.GetCustomerMessageRow, now time.Time) gen.SettleCu
 func (s *Service) settle(ctx context.Context, m gen.GetCustomerMessageRow, v settled) error {
 	_, err := s.DB.Gen(ctx).SettleCustomerMessage(ctx, v.params(m, s.Clock.Now().UTC()))
 	return err
-}
-
-// settings are the merchant's messages document; none is the defaults.
-func (s *Service) settings(context.Context) (billing.MessageSettings, error) {
-	return billing.MessageSettings{}, nil
 }
 
 // hostError is a failure of the host's renderer: retried like a send.
