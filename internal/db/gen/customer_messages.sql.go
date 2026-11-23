@@ -186,6 +186,64 @@ func (q *Queries) GetCustomerMessage(ctx context.Context, arg GetCustomerMessage
 	return i, err
 }
 
+const listCustomerMessages = `-- name: ListCustomerMessages :many
+SELECT merchant_id, id, customer_id, event_id, event_type, channel, status, attempts, last_error_code, recipient, sent_at, created_at, updated_at FROM billing.customer_messages
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND ($3::timestamptz IS NULL
+   OR (created_at, id) < ($3::timestamptz, $4::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $5::int
+`
+
+type ListCustomerMessagesParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// A customer's messages, newest first.
+func (q *Queries) ListCustomerMessages(ctx context.Context, arg ListCustomerMessagesParams) ([]BillingCustomerMessage, error) {
+	rows, err := q.db.Query(ctx, listCustomerMessages,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomerMessage
+	for rows.Next() {
+		var i BillingCustomerMessage
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.CustomerID,
+			&i.EventID,
+			&i.EventType,
+			&i.Channel,
+			&i.Status,
+			&i.Attempts,
+			&i.LastErrorCode,
+			&i.Recipient,
+			&i.SentAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCustomerMessages = `-- name: LockCustomerMessages :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.customer_messages:' || $1::uuid::text || ':' || $2::uuid::text, 0))
 `

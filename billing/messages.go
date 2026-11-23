@@ -1,5 +1,11 @@
 package billing
 
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
 // MessageDataVersion is the version of MessageData that templates and
 // Deps.MessageRenderer read. Within a version fields are only added; removing
 // or changing one is a new version.
@@ -149,4 +155,153 @@ type MessageTemplate struct {
 type MessageLayout struct {
 	HTML string `json:"html,omitempty"`
 	Text string `json:"text,omitempty"`
+}
+
+// CustomerMessageID names one customer message; on the wire "msg_<uuid>".
+type CustomerMessageID uuid.UUID
+
+const customerMessageIDPrefix = "msg_"
+
+func ParseCustomerMessageID(s string) (CustomerMessageID, error) {
+	u, err := parsePrefixedID("customer message", customerMessageIDPrefix, s)
+	return CustomerMessageID(u), err
+}
+
+func (id CustomerMessageID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id CustomerMessageID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id CustomerMessageID) String() string {
+	return formatPrefixedID(customerMessageIDPrefix, uuid.UUID(id))
+}
+func (id CustomerMessageID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id *CustomerMessageID) UnmarshalText(text []byte) error {
+	parsed, err := ParseCustomerMessageID(string(text))
+	*id = parsed
+	return err
+}
+
+// MessageStatus is where a customer message stands. Pending, queued and
+// sending are on the way; the others are where it ended.
+type MessageStatus string
+
+const (
+	// MessagePending: recorded with its fact; its send job is not queued yet.
+	MessagePending MessageStatus = "pending"
+	// MessageQueued: its send job is queued, or waits to retry.
+	MessageQueued MessageStatus = "queued"
+	// MessageSending: its job is handing it to the sender.
+	MessageSending MessageStatus = "sending"
+	// MessageSent: the sender accepted it.
+	MessageSent MessageStatus = "sent"
+	// MessageDisabled: the merchant does not send it: its event type is
+	// turned off, or off by default for this fact.
+	MessageDisabled MessageStatus = "disabled"
+	// MessageTestEnvironment: its fact is on a PSP that moves no real money.
+	MessageTestEnvironment MessageStatus = "test_environment"
+	// MessageNoContact: the customer has no address.
+	MessageNoContact MessageStatus = "no_contact"
+	// MessageRateLimited: the customer was sent the hourly cap already.
+	MessageRateLimited MessageStatus = "rate_limited"
+	// MessageFailed: it will not be sent; LastError says why.
+	MessageFailed MessageStatus = "failed"
+)
+
+// MessageError is why a message's last attempt did not send.
+type MessageError string
+
+const (
+	// MessageSendFailed: the sender failed; the job retries it, and the last
+	// attempt fails it.
+	MessageSendFailed MessageError = "send_failed"
+	// MessageRefused: the mail server refused it for good (an SMTP 5xx).
+	MessageRefused MessageError = "refused"
+	// MessageRenderFailed: neither the host's renderer nor a template gave
+	// it a subject and a body.
+	MessageRenderFailed MessageError = "render_failed"
+	// MessageInvalidRecipient: the customer's address is not an address.
+	MessageInvalidRecipient MessageError = "invalid_recipient"
+	// MessageNoSender: the deployment has no email sender.
+	MessageNoSender MessageError = "no_sender"
+	// MessageEventMissing: its fact was pruned before it was sent.
+	MessageEventMissing MessageError = "event_missing"
+	// MessageEventUnreadable: its fact's data does not decode.
+	MessageEventUnreadable MessageError = "event_unreadable"
+	// MessageUnavailable: the database or the directory failed its last
+	// attempt.
+	MessageUnavailable MessageError = "unavailable"
+)
+
+// MessageChannel is how a message reaches the customer.
+type MessageChannel string
+
+// MessageEmail is email through the deployment's sender.
+const MessageEmail MessageChannel = "email"
+
+// CustomerMessage is one message to a customer about one billing fact on one
+// channel, and what became of it: the delivery log a dispute response cites.
+// It keeps no body.
+type CustomerMessage struct {
+	ID         CustomerMessageID `json:"id"`
+	CustomerID CustomerID        `json:"customer_id"`
+	// EventID is the fact's id in the event log, kept after the fact is
+	// pruned.
+	EventID   NotificationID `json:"event_id"`
+	EventType string         `json:"event_type"`
+	Channel   MessageChannel `json:"channel"`
+	Status    MessageStatus  `json:"status"`
+	// Attempts is how many times it was handed to the sender.
+	Attempts int `json:"attempts"`
+	// LastError is why the last attempt did not send; null after a send.
+	LastError *MessageError `json:"last_error"`
+	// Recipient is the address it was handed to.
+	Recipient *string    `json:"recipient"`
+	SentAt    *time.Time `json:"sent_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// CustomerMessageListParams pages a customer's message log, newest first.
+type CustomerMessageListParams struct {
+	PageRequest
+}
+
+// PreviewMessageParams renders an event type's message against sample data:
+// the merchant's own profile, a sample customer and fact.
+type PreviewMessageParams struct {
+	// EventType is the notification event type the message is about.
+	EventType string `json:"event_type"`
+	// Language is the customer's language, a BCP 47 tag; empty is the
+	// merchant's default.
+	Language string `json:"language"`
+	// Template, when set, is a candidate for EventType's template in
+	// Language (the default language when empty), rendered in place of the
+	// merchant's. It is not saved.
+	Template *MessageTemplate `json:"template"`
+}
+
+// MessagePreview is a message rendered from the templates.
+type MessagePreview struct {
+	EventType string `json:"event_type"`
+	// Language is the language it is written in: the first of the requested
+	// language, the default language and en that has a template.
+	Language string `json:"language"`
+	Subject  string `json:"subject"`
+	// Text and HTML are the bodies; null is one the template has none of.
+	Text *string `json:"text"`
+	HTML *string `json:"html"`
+}
+
+// CreateTestMessageParams sends a sample of an event type's message to the
+// merchant's alert email address, as PreviewMessageParams renders it.
+type CreateTestMessageParams struct {
+	EventType string           `json:"event_type"`
+	Language  string           `json:"language"`
+	Template  *MessageTemplate `json:"template"`
+}
+
+// TestMessage is a sample message the sender accepted.
+type TestMessage struct {
+	// Recipient is the merchant's alert email address, the only address a
+	// test is sent to.
+	Recipient string         `json:"recipient"`
+	Message   MessagePreview `json:"message"`
 }

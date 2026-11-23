@@ -20,6 +20,15 @@ FROM billing.customer_messages m
 LEFT JOIN billing.notification_events e ON e.merchant_id = m.merchant_id AND e.id = m.event_id
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = sqlc.arg(id)::uuid;
 
+-- name: ListCustomerMessages :many
+-- A customer's messages, newest first.
+SELECT * FROM billing.customer_messages
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+   OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: CustomerMessageOnTestPSP :one
 -- Whether the fact's payment, order or subscription is on a PSP that moves
 -- no real money.

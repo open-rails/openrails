@@ -112,9 +112,13 @@ func id(zero bool, s string) string {
 	return s
 }
 
-// Sample is data an event type's message renders from in a preview or a
-// check: every field the event type has, filled.
-func Sample(eventType string) billing.MessageData {
+// Sample is data an event type's message renders from in a check: every
+// field the event type has, filled, from a sample merchant.
+func Sample(eventType string) billing.MessageData { return messageData(sample(eventType)) }
+
+// sample is a fact of eventType with every field it has filled, to a sample
+// customer from a sample merchant.
+func sample(eventType string) fact {
 	at := time.Date(2026, 11, 23, 15, 4, 0, 0, time.UTC)
 	later, sooner := at.AddDate(0, 1, 0), at.AddDate(0, 0, 7)
 	amount := func(v int64) *int64 { return &v }
@@ -164,7 +168,7 @@ func Sample(eventType string) billing.MessageData {
 		d.EffectiveAt, d.AmountDue, d.OrderID = &at, amount(3_000_000), order
 	case models.NotificationPaymentMethodAutoUpdated:
 	}
-	return messageData(fact{
+	return fact{
 		EventType: eventType, Data: d, OccurredAt: at, CustomerID: uuid.MustParse("019a0000-0000-7000-8000-000000000005"),
 		Customer: "Ada Lovelace", ProductName: "Pro plan",
 		Profile: models.MerchantProfileConfiguration{
@@ -172,5 +176,5 @@ func Sample(eventType string) billing.MessageData {
 			BillingURL: "https://store.example/account/billing", SubscribeURL: "https://store.example/plans",
 			TermsURL: "https://store.example/terms", PrivacyURL: "https://store.example/privacy", StatementDescriptor: "EXAMPLE STORE",
 		},
-	})
+	}
 }

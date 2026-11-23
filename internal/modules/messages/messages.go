@@ -29,26 +29,26 @@ const (
 
 // Where a message stands (customer_messages.status).
 const (
-	statusQueued          = "queued"
-	statusSending         = "sending"
-	statusSent            = "sent"
-	statusDisabled        = "disabled"
-	statusTestEnvironment = "test_environment"
-	statusNoContact       = "no_contact"
-	statusRateLimited     = "rate_limited"
-	statusFailed          = "failed"
+	statusQueued          = string(billing.MessageQueued)
+	statusSending         = string(billing.MessageSending)
+	statusSent            = string(billing.MessageSent)
+	statusDisabled        = string(billing.MessageDisabled)
+	statusTestEnvironment = string(billing.MessageTestEnvironment)
+	statusNoContact       = string(billing.MessageNoContact)
+	statusRateLimited     = string(billing.MessageRateLimited)
+	statusFailed          = string(billing.MessageFailed)
 )
 
 // Why an attempt did not send (customer_messages.last_error_code).
 const (
-	errSendFailed       = "send_failed"
-	errRefused          = "refused"
-	errRenderFailed     = "render_failed"
-	errInvalidRecipient = "invalid_recipient"
-	errNoSender         = "no_sender"
-	errEventMissing     = "event_missing"
-	errEventUnreadable  = "event_unreadable"
-	errUnavailable      = "unavailable"
+	errSendFailed       = string(billing.MessageSendFailed)
+	errRefused          = string(billing.MessageRefused)
+	errRenderFailed     = string(billing.MessageRenderFailed)
+	errInvalidRecipient = string(billing.MessageInvalidRecipient)
+	errNoSender         = string(billing.MessageNoSender)
+	errEventMissing     = string(billing.MessageEventMissing)
+	errEventUnreadable  = string(billing.MessageEventUnreadable)
+	errUnavailable      = string(billing.MessageUnavailable)
 )
 
 // defaults is whether each event type sends an email until the merchant
