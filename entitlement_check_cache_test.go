@@ -535,14 +535,14 @@ func TestEntitlementRedisBudgetLimitsOutstandingWork(t *testing.T) {
 			return 1
 		}
 		started := time.Now()
-		if got := withEntitlementRedisBudget(t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 {
+		if got := withEntitlementRedisBudget(t.Context(), t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 {
 			t.Fatalf("lookup = %d, want miss", got)
 		}
 		if elapsed := time.Since(started); elapsed != entitlementCacheRedisTimeout {
 			t.Fatalf("blocked lookup waited %v, want %v", elapsed, entitlementCacheRedisTimeout)
 		}
 		started = time.Now()
-		if got := withEntitlementRedisBudget(t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 || time.Since(started) != 0 {
+		if got := withEntitlementRedisBudget(t.Context(), t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 || time.Since(started) != 0 {
 			t.Fatal("a full Redis work budget must fail immediately")
 		}
 		close(release)
@@ -608,11 +608,14 @@ func TestEntitlementCheckLiveDenialRefusesInFlightFill(t *testing.T) {
 }
 
 // slowRedis stands in for Redis: it answers the lookup script after delay with
-// every entry at ttl milliseconds, and accepts every other script.
+// every entry at ttl milliseconds, and accepts every other script. The fill
+// script takes fillDelay, then reports its context's error to filled.
 type slowRedis struct {
-	delay time.Duration
-	ttl   int64
-	value string
+	delay     time.Duration
+	ttl       int64
+	value     string
+	fillDelay time.Duration
+	filled    chan<- error
 }
 
 func (slowRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
@@ -622,7 +625,7 @@ func (slowRedis) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Proce
 }
 
 func (r slowRedis) ProcessHook(redis.ProcessHook) redis.ProcessHook {
-	return func(_ context.Context, cmd redis.Cmder) error {
+	return func(ctx context.Context, cmd redis.Cmder) error {
 		reply, ok := cmd.(*redis.Cmd)
 		args := cmd.Args()
 		if !ok || len(args) < 3 {
@@ -639,8 +642,14 @@ func (r slowRedis) ProcessHook(redis.ProcessHook) redis.ProcessHook {
 			reply.SetVal(values)
 		case entitlementRedisProbe.Hash():
 			reply.SetVal(values)
-		default:
+		case entitlementRedisFill.Hash():
+			time.Sleep(r.fillDelay)
+			if r.filled != nil {
+				r.filled <- ctx.Err()
+			}
 			reply.SetVal(int64(1))
+		default:
+			return errors.New("unexpected Redis script")
 		}
 		return nil
 	}
@@ -676,4 +685,49 @@ func TestEntitlementCheckRedisReplyPastDeadlineGoesLive(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEntitlementLiveEvictionKeepsCallerDeadline(t *testing.T) {
+	server := newEntitlementServer(t, grants(nil))
+	store := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	t.Cleanup(func() { _ = store.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		filled := make(chan error, 1)
+		store.AddHook(slowRedis{fillDelay: 200 * time.Millisecond, filled: filled})
+		remote, err := NewRemote(server.URL, RemoteOptions{
+			// Closed connections leave no transport goroutine in the bubble.
+			HTTPClient:            &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
+			Credentials:           map[billing.MerchantID]RemoteCredential{server.merchant: {APIKey: "test-key"}},
+			EntitlementCheckCache: EntitlementCheckCacheOptions{MaxAge: time.Minute, Redis: store},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = remote.Close(context.Background()) })
+		client, err := remote.Merchant(server.merchant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		out, err := client.CheckEntitlementsLive(ctx, billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}})
+		if err != nil || out.Entitlements["premium"] {
+			t.Fatalf("live check = %+v, %v; want the denial", out, err)
+		}
+		if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
+			t.Fatalf("live check returned after %v, past its 50ms deadline", elapsed)
+		}
+		select {
+		case <-filled:
+			t.Fatal("live check waited for its eviction")
+		default:
+		}
+		if err := <-filled; err != nil {
+			t.Fatalf("eviction ran with a done context: %v", err)
+		}
+		if elapsed := time.Since(started); elapsed != 200*time.Millisecond {
+			t.Fatalf("eviction landed after %v, want its own 200ms", elapsed)
+		}
+	})
 }

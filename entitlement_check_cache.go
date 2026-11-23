@@ -382,7 +382,7 @@ func (c *entitlementCheckCache) probe(ctx context.Context, scope entitlementCach
 }
 
 func (c *entitlementCheckCache) redisRun(ctx context.Context, script *redis.Script, keys []string) ([]any, time.Time) {
-	reply := withEntitlementRedisBudget(ctx, c.probes, entitlementCacheRedisTimeout, func(ctx context.Context) []any {
+	reply := withEntitlementRedisBudget(ctx, ctx, c.probes, entitlementCacheRedisTimeout, func(ctx context.Context) []any {
 		values, err := script.Run(ctx, c.redis, keys).Slice()
 		if err != nil {
 			return nil
@@ -523,12 +523,12 @@ func (c *entitlementCheckCache) redisRecord(ctx context.Context, scope entitleme
 		return entitlementRedisFill.Run(ctx, c.redis, keys, args...).Err()
 	}
 	if bump == "" {
-		withEntitlementRedisBudget(ctx, c.probes, entitlementCacheRedisTimeout, write)
+		withEntitlementRedisBudget(ctx, ctx, c.probes, entitlementCacheRedisTimeout, write)
 		return
 	}
-	// A live denial's eviction outlives the caller's context and has its own
-	// budget, so lookups cannot crowd it out.
-	withEntitlementRedisBudget(context.WithoutCancel(ctx), c.evictions, entitlementCacheEvictTimeout, write)
+	// A live denial's eviction has its own budget, so lookups cannot crowd it
+	// out. It outlives the caller's context, which only bounds the wait.
+	withEntitlementRedisBudget(ctx, context.WithoutCancel(ctx), c.evictions, entitlementCacheEvictTimeout, write)
 }
 
 func (c *entitlementCheckCache) remove(element *list.Element) {
@@ -540,26 +540,32 @@ func (c *entitlementCheckCache) remove(element *list.Element) {
 
 // Merchant-supplied Redis clients may ignore context deadlines on socket I/O.
 // Limit both the wait per request and the work still running after timeout.
-func withEntitlementRedisBudget[T any](ctx context.Context, pending chan struct{}, timeout time.Duration, op func(context.Context) T) (zero T) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if ctx.Err() != nil {
+// op runs under run bounded by timeout; the caller also stops waiting when
+// wait is done, leaving op to finish within its own bound.
+func withEntitlementRedisBudget[T any](wait, run context.Context, pending chan struct{}, timeout time.Duration, op func(context.Context) T) (zero T) {
+	run, cancel := context.WithTimeout(run, timeout)
+	if run.Err() != nil {
+		cancel()
 		return zero
 	}
 	select {
 	case pending <- struct{}{}:
 	default:
+		cancel()
 		return zero
 	}
 	result := make(chan T, 1)
 	go func() {
 		defer func() { <-pending }()
-		result <- op(ctx)
+		defer cancel()
+		result <- op(run)
 	}()
 	select {
 	case value := <-result:
 		return value
-	case <-ctx.Done():
+	case <-run.Done():
+		return zero
+	case <-wait.Done():
 		return zero
 	}
 }

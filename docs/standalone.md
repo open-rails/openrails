@@ -188,9 +188,9 @@ scheduled access change, such as a rental's end.
 keys' entries and drops denied ones, and an ordinary check already in flight
 cannot restore a dropped entry. In process, only that client's own memory is
 affected: other processes keep their entries for up to `MaxAge`. With Redis,
-every replica sees the drop once it is written; the live check waits up to
-250 ms for that, and if Redis fails, replicas may serve the old answer for up
-to `MaxAge`.
+every replica sees the drop once it is written. The write has 250 ms; the live
+check waits for it no longer than its own deadline. If Redis fails, replicas
+may serve the old answer for up to `MaxAge`.
 
 Configure the cache on `RemoteMerchantOptions.EntitlementCheckCache` (or the
 same field on `RemoteOptions`); `Disabled: true` makes every check ask
