@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// positivePlan counts work units toward a daily quota that admits the
+// crossingQuota counts work units toward a daily quota that admits the
 // request that crosses it.
-const positivePlan = `schema_version: 1
+const crossingQuota = `schema_version: 1
 meters:
   work: {event_type: work, value_property: units, aggregation: sum}
 limits:
@@ -33,8 +33,8 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
-// sessionPlan counts work units toward a twenty-second session.
-const sessionPlan = `schema_version: 1
+// burstSession counts work units toward a twenty-second session.
+const burstSession = `schema_version: 1
 meters:
   work: {event_type: work, value_property: units, aggregation: sum}
 limits:
@@ -47,8 +47,8 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
-// quarterPlan counts work units toward a ninety-day window.
-const quarterPlan = `schema_version: 1
+// quarterQuota counts work units toward a ninety-day window.
+const quarterQuota = `schema_version: 1
 meters:
   work: {event_type: work, value_property: units, aggregation: sum}
 limits:
@@ -405,7 +405,7 @@ func TestLeaseVersions(t *testing.T) {
 
 	t.Run("OR-J24-S26/a-renewal-never-opens-a-session", func(t *testing.T) {
 		w := newWorld(t)
-		applyLimits(t, w.alpha, sessionPlan)
+		applyLimits(t, w.alpha, burstSession)
 		customer := billing.CustomerID(uuid.New())
 		grantLimitProduct(t, w.alpha, customer, "plan", 24)
 		lease := newLease()
@@ -436,7 +436,7 @@ func TestLeaseVersions(t *testing.T) {
 
 	t.Run("OR-J24-S27/admit-while-positive-wants-only-capacity-free-beyond-their-tickets", func(t *testing.T) {
 		w := newWorld(t)
-		applyLimits(t, w.alpha, positivePlan)
+		applyLimits(t, w.alpha, crossingQuota)
 		customer := billing.CustomerID(uuid.New())
 		grantLimitProduct(t, w.alpha, customer, "plan", 24)
 		overrideLimit(t, w, customer, "quota", 10)
@@ -470,7 +470,7 @@ func TestLeaseVersions(t *testing.T) {
 
 	t.Run("OR-J24-S28/no-hold-holds-past-the-30-day-hold-lifetime", func(t *testing.T) {
 		w := newWorld(t)
-		applyLimits(t, w.alpha, quarterPlan)
+		applyLimits(t, w.alpha, quarterQuota)
 		customer := billing.CustomerID(uuid.New())
 		grantLimitProduct(t, w.alpha, customer, "plan", 24*120)
 		require.True(t, admitOne(t, w.alpha, usageAdmission(w, customer, "abandoned", "work", map[string]int64{"units": 5}, nil)).Allowed())
