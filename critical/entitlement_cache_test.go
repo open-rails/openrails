@@ -159,9 +159,24 @@ func TestRemoteEntitlementCache(t *testing.T) {
 		live, err := short.CheckEntitlementsLive(t.Context(), params)
 		require.NoError(t, err)
 		require.False(t, live.Entitlements["library:read"])
-		require.Eventually(t, func() bool {
-			current, err := short.CheckEntitlements(t.Context(), params)
-			return err == nil && !current.Entitlements["library:read"]
-		}, 3*time.Second, 50*time.Millisecond)
+		// The live answer replaced the cached one.
+		assertVerdict(short, false)
+
+		// Over a shared Redis, one replica's live answer replaces the entry for
+		// every replica. A distinct MaxAge keeps these entries apart from the
+		// ones above, which Redis still holds in real time.
+		shared := publicGrant(t, a, "cache-revocation-shared", 3)
+		a.clock.Advance(time.Millisecond)
+		redisA, _ := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 45*time.Second, criticalRedis(t))
+		redisB, redisWireB := newCachedEntitlementClient(t, a, merchant, a.alphaKey.Secret, 45*time.Second, criticalRedis(t))
+		assertVerdict(redisA, true)
+		assertVerdict(redisB, true)
+		require.Zero(t, redisWireB.requests.Load())
+		require.NoError(t, a.alphaRemote.RevokeProductAccess(t.Context(), shared.ID, billing.RevokeProductAccessParams{Reason: "revoke shared access early"}))
+		live, err = redisA.CheckEntitlementsLive(t.Context(), params)
+		require.NoError(t, err)
+		require.False(t, live.Entitlements["library:read"])
+		assertVerdict(redisB, false)
+		require.Zero(t, redisWireB.requests.Load())
 	})
 }

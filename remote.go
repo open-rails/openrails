@@ -497,9 +497,10 @@ func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEnti
 	return c.checkEntitlements(ctx, params, true, requestOptions)
 }
 
-// CheckEntitlementsLive checks access against OpenRails, bypassing the SDK
-// cache. Use it when a recent grant, revocation or credential change must
-// be visible immediately.
+// CheckEntitlementsLive checks access against OpenRails, never answering from
+// the SDK cache; with a cache configured its answer replaces the cached one.
+// Use it when a recent grant, revocation or credential change must be visible
+// immediately.
 func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	return c.checkEntitlements(ctx, params, false, requestOptions)
 }
@@ -523,9 +524,9 @@ func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEnti
 	if params.Entitlements == nil {
 		params.Entitlements = []string{}
 	}
-	if useCache && c != nil && c.entitlementChecks != nil && len(options) == 0 {
+	if c != nil && c.entitlementChecks != nil && len(options) == 0 {
 		if keys := cacheableEntitlementKeys(params); keys != nil {
-			return c.checkEntitlementsCached(ctx, params, keys)
+			return c.checkEntitlementsCached(ctx, params, keys, !useCache)
 		}
 	}
 	var out billing.EntitlementCheck

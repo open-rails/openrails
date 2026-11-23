@@ -36,14 +36,24 @@ type EntitlementCheckCacheOptions struct {
 }
 
 const (
-	entitlementCheckPath           = "/v1/app/entitlements/check"
-	entitlementCacheMetadataHeader = "OpenRails-Entitlement-Cache-Metadata"
-	entitlementCacheKeyPrefix      = "openrails:entitlement-check:v1:"
-	entitlementCacheMaxEntries     = 1024
-	entitlementCacheMaxBytes       = 8 << 20
-	entitlementCacheRedisTimeout   = 25 * time.Millisecond
-	entitlementCacheRedisPending   = 64
+	entitlementCheckPath          = "/v1/app/entitlements/check"
+	entitlementCacheKeyPrefix     = "openrails:entitlement-check:v1:"
+	entitlementCacheMaxBytes      = 8 << 20
+	entitlementCacheEntryOverhead = 160
+	entitlementCacheRedisTimeout  = 25 * time.Millisecond
+	entitlementCacheRedisPending  = 64
 )
+
+// entitlementDeadlineAhead also checks the wall clock: the monotonic clock can
+// stop while a host is suspended, which must not stretch a cached answer.
+func entitlementDeadlineAhead(deadline time.Time) bool {
+	now := time.Now()
+	return now.Before(deadline) && now.Round(0).Before(deadline.Round(0))
+}
+
+func (e entitlementCacheEntry) size() int {
+	return len(e.key) + len(e.body) + entitlementCacheEntryOverhead
+}
 
 type entitlementCacheEntry struct {
 	key      string
@@ -105,7 +115,9 @@ func (c *Client) entitlementCacheKey(mid billing.MerchantID, customer billing.Cu
 	return entitlementCacheKeyPrefix + entitlementDigest(raw)
 }
 
-func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.CheckEntitlementsParams, keys []string) (*billing.EntitlementCheck, error) {
+// checkEntitlementsCached answers from the cache when it can; live skips the
+// lookup and its answer replaces the entry, so a fresh grant is seen at once.
+func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.CheckEntitlementsParams, keys []string, live bool) (*billing.EntitlementCheck, error) {
 	if c.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.timeout)
@@ -119,7 +131,7 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 		entry, sample := cache.lookup(ctx, key)
 		clock = sample
 		var cached billing.EntitlementCheck
-		if entry.body != nil && decodeJSON(entry.body, &cached) == nil && time.Now().Before(entry.deadline) && ctx.Err() == nil {
+		if !live && entry.body != nil && decodeJSON(entry.body, &cached) == nil && entitlementDeadlineAhead(entry.deadline) && ctx.Err() == nil {
 			return normalizeEntitlementCheck(&cached), nil
 		}
 	}
@@ -127,8 +139,8 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 	// The server samples the query time during this request. Starting the
 	// relative lifetime before sending it avoids assuming synchronized clocks.
 	started := time.Now()
-	headers := http.Header{entitlementCacheMetadataHeader: []string{"1"}}
-	response, err := c.doResponse(ctx, http.MethodPost, entitlementCheckPath, params, headers)
+	params.IncludeValidity = true
+	response, err := c.doResponse(ctx, http.MethodPost, entitlementCheckPath, params, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +151,7 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 	deadline := entitlementCheckDeadline(started, cache.maxAge, out)
 	// doResponse checks the header against the handle when it exists. Require
 	// it for caching so only an explicitly bound response can populate entries.
-	if mid := c.MerchantID(); !mid.IsZero() && response.header.Get(merchant.BoundHeader) != "" && time.Now().Before(deadline) && ctx.Err() == nil {
+	if mid := c.MerchantID(); !mid.IsZero() && response.header.Get(merchant.BoundHeader) != "" && entitlementDeadlineAhead(deadline) && ctx.Err() == nil {
 		if key == "" {
 			key = c.entitlementCacheKey(mid, params.CustomerID, keys)
 			// The first authenticated reply may have just resolved this handle.
@@ -147,7 +159,7 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 				_, clock = cache.lookup(ctx, key)
 			}
 		}
-		cache.store(ctx, entitlementCacheEntry{key: key, body: response.body, deadline: deadline}, clock)
+		cache.store(ctx, entitlementCacheEntry{key: key, body: response.body, deadline: deadline}, clock, live)
 	}
 	return normalizeEntitlementCheck(&out), nil
 }
@@ -192,7 +204,7 @@ func (c *entitlementCheckCache) lookup(ctx context.Context, key string) (entitle
 		return entitlementCacheEntry{}, entitlementRedisClock{}
 	}
 	entry := element.Value.(entitlementCacheEntry)
-	if !time.Now().Before(entry.deadline) {
+	if !entitlementDeadlineAhead(entry.deadline) {
 		c.remove(element)
 		return entitlementCacheEntry{}, entitlementRedisClock{}
 	}
@@ -230,45 +242,51 @@ func (c *entitlementCheckCache) redisLookup(ctx context.Context, key string) (en
 	return entitlementCacheEntry{key: key, body: []byte(body), deadline: deadline}, clock
 }
 
-func (c *entitlementCheckCache) store(ctx context.Context, entry entitlementCacheEntry, clock entitlementRedisClock) {
+// store keeps a live entry unless replace is set: an ordinary fill never
+// overwrites a valid answer, while a live check's fresher answer does.
+func (c *entitlementCheckCache) store(ctx context.Context, entry entitlementCacheEntry, clock entitlementRedisClock, replace bool) {
 	if c.redis != nil {
-		if clock.received.IsZero() || time.Until(entry.deadline) < time.Millisecond {
+		if clock.received.IsZero() || time.Until(entry.deadline) < time.Millisecond || !entitlementDeadlineAhead(entry.deadline.Add(-time.Millisecond)) {
 			return
 		}
 		// PXAT prevents a slow SET or a client retry from starting a fresh
 		// lifetime. The Redis sample was taken before Go received it.
 		expiry := clock.server.Add(entry.deadline.Sub(clock.received))
+		args := redis.SetArgs{ExpireAt: expiry, Mode: "NX"}
+		if replace {
+			args.Mode = ""
+		}
 		withEntitlementRedisBudget(ctx, c.probes, func(ctx context.Context) error {
-			return c.redis.SetArgs(ctx, entry.key, entry.body, redis.SetArgs{ExpireAt: expiry, Mode: "NX"}).Err()
+			return c.redis.SetArgs(ctx, entry.key, entry.body, args).Err()
 		})
 		return
 	}
-	if len(entry.body) > entitlementCacheMaxBytes {
+	if entry.size() > entitlementCacheMaxBytes {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !time.Now().Before(entry.deadline) {
+	if !entitlementDeadlineAhead(entry.deadline) {
 		return
 	}
 	if previous := c.entries[entry.key]; previous != nil {
-		if time.Now().Before(previous.Value.(entitlementCacheEntry).deadline) {
+		if !replace && entitlementDeadlineAhead(previous.Value.(entitlementCacheEntry).deadline) {
 			return
 		}
 		c.remove(previous)
 	}
-	for c.recency.Len() >= entitlementCacheMaxEntries || c.bytes+len(entry.body) > entitlementCacheMaxBytes {
+	for c.bytes+entry.size() > entitlementCacheMaxBytes {
 		c.remove(c.recency.Back())
 	}
 	c.entries[entry.key] = c.recency.PushFront(entry)
-	c.bytes += len(entry.body)
+	c.bytes += entry.size()
 }
 
 func (c *entitlementCheckCache) remove(element *list.Element) {
 	entry := element.Value.(entitlementCacheEntry)
 	delete(c.entries, entry.key)
 	c.recency.Remove(element)
-	c.bytes -= len(entry.body)
+	c.bytes -= entry.size()
 }
 
 // Merchant-supplied Redis clients may ignore context deadlines on socket I/O.

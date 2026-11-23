@@ -287,14 +287,19 @@ func exactCheckCacheMetadata(t *testing.T, a *authorityWorld, grant billing.Prod
 		return out
 	}
 	params := billing.CheckEntitlementsParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read", "movie:rental", "never:granted"}}
-	metadata := map[string]string{"OpenRails-Entitlement-Cache-Metadata": "1"}
-	require.Nil(t, check(params, nil).EvaluatedAt)
-	historical := params
+	// Unasked, both fields are present and null.
+	status, raw := a.request(t, http.MethodPost, "/v1/app/entitlements/check", a.alphaKey.Secret, params, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.Contains(t, string(raw), `"evaluated_at":null`)
+	require.Contains(t, string(raw), `"valid_until":null`)
+	validity := params
+	validity.IncludeValidity = true
+	historical := validity
 	historical.At = grant.StartsAt.Add(-time.Microsecond)
-	require.Nil(t, check(historical, metadata).EvaluatedAt)
-	prefix := params
+	require.Nil(t, check(historical, nil).EvaluatedAt)
+	prefix := validity
 	prefix.Prefixes = []string{"library:"}
-	require.Nil(t, check(prefix, metadata).EvaluatedAt)
+	require.Nil(t, check(prefix, nil).EvaluatedAt)
 	for _, tc := range []struct {
 		hour     int
 		nextHour int
@@ -311,7 +316,7 @@ func exactCheckCacheMetadata(t *testing.T, a *authorityWorld, grant billing.Prod
 	} {
 		at := start.Add(time.Duration(tc.hour) * time.Hour)
 		a.clock.Advance(at.Sub(a.clock.Now()))
-		out := check(params, metadata)
+		out := check(validity, nil)
 		require.Equal(t, &at, out.EvaluatedAt)
 		require.Equal(t, map[string]bool{"library:read": tc.library, "movie:rental": tc.movie, "never:granted": false}, out.Entitlements)
 		require.Equal(t, map[string]*int{"library:read": tc.seats, "movie:rental": nil, "never:granted": nil}, out.Quantities)

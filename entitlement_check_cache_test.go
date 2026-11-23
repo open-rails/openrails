@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,7 @@ func TestEntitlementCheckProcessCache(t *testing.T) {
 			Entitlements: map[string]bool{"premium": true, "rental": false},
 			Quantities:   map[string]*int{"premium": new(3), "rental": nil},
 		}
-		if r.Header.Get(entitlementCacheMetadataHeader) == "1" {
+		if params.IncludeValidity {
 			now := time.Now().UTC().Add(-10 * time.Minute)
 			boundary := now.Add(10 * time.Second)
 			answer.EvaluatedAt, answer.ValidUntil = &now, &boundary
@@ -82,8 +83,9 @@ func TestEntitlementCheckProcessCache(t *testing.T) {
 		t.Fatalf("requests after repeated check = %d, want 1", count)
 	}
 
+	// A live check skips the cache but, with one configured, refreshes it.
 	live, err := client.CheckEntitlementsLive(t.Context(), params)
-	if err != nil || live.EvaluatedAt != nil {
+	if err != nil || live.EvaluatedAt == nil || !live.Entitlements["premium"] {
 		t.Fatalf("live check = %+v, %v", live, err)
 	}
 	historical := params
@@ -120,7 +122,7 @@ func TestEntitlementCheckCacheRequiresMetadataAndScope(t *testing.T) {
 		bound    bool
 		metadata bool
 	}{
-		{name: "old server ignores negotiation", bound: true},
+		{name: "answer without metadata", bound: true},
 		{name: "merchant unresolved", metadata: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -128,8 +130,7 @@ func TestEntitlementCheckCacheRequiresMetadataAndScope(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				// Verify the SDK request remains understood by an old server
-				// with a strict decoder.
+				// The request decodes strictly, as the server's does.
 				decoder := json.NewDecoder(r.Body)
 				decoder.DisallowUnknownFields()
 				if err := decoder.Decode(new(billing.CheckEntitlementsParams)); err != nil {
@@ -174,7 +175,8 @@ func TestEntitlementCheckCacheDoesNotSkipTokenProvider(t *testing.T) {
 	mid := billing.MerchantID(uuid.New())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if r.Header.Get(entitlementCacheMetadataHeader) != "" {
+		var params billing.CheckEntitlementsParams
+		if err := json.NewDecoder(r.Body).Decode(&params); err != nil || params.IncludeValidity {
 			t.Error("dynamic credential requested cache metadata")
 		}
 		w.Header().Set(merchant.BoundHeader, mid.String())
@@ -239,16 +241,32 @@ func TestEntitlementCheckCacheExpiresAndEvicts(t *testing.T) {
 		}
 		now := time.Now()
 		entry := entitlementCacheEntry{key: "expiring", body: []byte("test"), deadline: now.Add(time.Second)}
-		cache.store(t.Context(), entry, entitlementRedisClock{})
+		cache.store(t.Context(), entry, entitlementRedisClock{}, false)
 		time.Sleep(time.Second)
 		if got, _ := cache.lookup(t.Context(), entry.key); got.body != nil {
 			t.Fatal("cache hit at the exclusive deadline")
 		}
 
-		cache.store(t.Context(), entitlementCacheEntry{key: "first", body: []byte(strings.Repeat("a", entitlementCacheMaxBytes)), deadline: now.Add(time.Minute)}, entitlementRedisClock{})
-		cache.store(t.Context(), entitlementCacheEntry{key: "next", body: []byte("next"), deadline: now.Add(time.Minute)}, entitlementRedisClock{})
+		full := entitlementCacheMaxBytes - entitlementCacheEntryOverhead - len("first")
+		cache.store(t.Context(), entitlementCacheEntry{key: "first", body: []byte(strings.Repeat("a", full)), deadline: now.Add(time.Minute)}, entitlementRedisClock{}, false)
+		if got, _ := cache.lookup(t.Context(), "first"); got.body == nil {
+			t.Fatal("an entry filling the byte budget was not kept")
+		}
+		cache.store(t.Context(), entitlementCacheEntry{key: "next", body: []byte("next"), deadline: now.Add(time.Minute)}, entitlementRedisClock{}, false)
 		if got, _ := cache.lookup(t.Context(), "first"); got.body != nil {
 			t.Fatal("cache retained more data than its byte budget")
+		}
+
+		// Many small answers fit: the bound is bytes, not a count.
+		small, err := newEntitlementCheckCache(EntitlementCheckCacheOptions{MaxAge: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range 5000 {
+			small.store(t.Context(), entitlementCacheEntry{key: fmt.Sprintf("k%d", i), body: []byte(`{"entitlements":{}}`), deadline: now.Add(time.Minute)}, entitlementRedisClock{}, false)
+		}
+		if got, _ := small.lookup(t.Context(), "k0"); got.body == nil {
+			t.Fatal("small entries evicted far below the byte budget")
 		}
 	})
 }
@@ -274,4 +292,59 @@ func TestEntitlementRedisBudgetLimitsOutstandingWork(t *testing.T) {
 		}
 		close(release)
 	})
+}
+
+func TestEntitlementCheckLiveReplacesCachedAnswer(t *testing.T) {
+	mid := billing.MerchantID(uuid.New())
+	var requests atomic.Int32
+	var granted atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var params billing.CheckEntitlementsParams
+		if err := json.NewDecoder(r.Body).Decode(&params); err != nil || !params.IncludeValidity {
+			t.Errorf("cached client did not ask for validity: %v", err)
+		}
+		w.Header().Set(merchant.BoundHeader, mid.String())
+		now := time.Now().UTC()
+		out := billing.EntitlementCheck{Entitlements: map[string]bool{"premium": granted.Load()}, Quantities: map[string]*int{"premium": nil}, EvaluatedAt: &now}
+		if err := json.NewEncoder(w).Encode(out); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+	client, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "test-key"}, RemoteMerchantOptions{
+		EntitlementCheckCache: EntitlementCheckCacheOptions{MaxAge: time.Minute},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}}
+	check := func(live bool) bool {
+		t.Helper()
+		call := client.CheckEntitlements
+		if live {
+			call = client.CheckEntitlementsLive
+		}
+		out, err := call(t.Context(), params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Entitlements["premium"]
+	}
+	if check(false) {
+		t.Fatal("first check granted before the purchase")
+	}
+	granted.Store(true)
+	if check(false) {
+		t.Fatal("cached denial was not served within MaxAge")
+	}
+	if !check(true) {
+		t.Fatal("live check missed the purchase")
+	}
+	if !check(false) {
+		t.Fatal("cached check still denies after a live check saw the purchase")
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2 (one fill, one live)", got)
+	}
 }

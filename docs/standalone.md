@@ -201,9 +201,10 @@ response before it can reuse shared entries.
 An answer can be reused for up to `MaxAge` and expires by the next scheduled
 access change. A new purchase, early revocation or API key permission change
 can take up to `MaxAge` to appear. Call `CheckEntitlementsLive` when you require a
-fresh decision. Prefix or historical requests, token-backed credentials and
-servers without cache metadata use live checks. Redis failures also fall back
-to OpenRails. See [entitlement windows](entitlements_timeline.md#reading-access).
+fresh decision; its answer also replaces the cached one, so the next
+`CheckEntitlements` sees it too. Prefix or historical requests and token-backed
+credentials use live checks. Redis failures also fall back to OpenRails. The
+cache needs a server of the same release. See [entitlement windows](entitlements_timeline.md#reading-access).
 
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application sets `RemoteCredential.Assertion` (issuer, `kid`, a `crypto.Signer`,

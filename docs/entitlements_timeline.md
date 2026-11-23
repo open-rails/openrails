@@ -35,10 +35,10 @@ the `Client`):
   `{"customer_id", "entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
   `{"entitlements": {key: bool}, "quantities": {key: n}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
   for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
-  An exact-key check for the present can send the header
-  `OpenRails-Entitlement-Cache-Metadata: 1` to request `evaluated_at` and
-  `valid_until`. The latter is the next scheduled change that could affect a
-  requested verdict or quantity, and is omitted when no change is scheduled.
+  An exact-key check for the present can set `"include_validity": true` to
+  receive `evaluated_at` and `valid_until`. The latter is the next scheduled
+  change that could affect a requested verdict or quantity, and is null when
+  no change is scheduled. Both are null for a check that did not ask.
   The [remote Go SDK cache](standalone.md#backend) requests this metadata
   when enabled.
 

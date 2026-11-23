@@ -264,9 +264,9 @@ func ValidateCheck(params billing.CheckEntitlementsParams) error {
 }
 
 // Check answers whether the customer holds each key at params.At, with its
-// seats, and the first keys held under each prefix, in byte order. When asked
-// for cache metadata, current exact-key checks also return the next boundary.
-func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, params billing.CheckEntitlementsParams, includeCacheMetadata bool) (billing.EntitlementCheck, error) {
+// seats, and the first keys held under each prefix, in byte order. A current
+// exact-key check with IncludeValidity also returns the next boundary.
+func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, params billing.CheckEntitlementsParams) (billing.EntitlementCheck, error) {
 	out := billing.EntitlementCheck{Entitlements: map[string]bool{}, Quantities: map[string]*int{}, Held: map[string]billing.HeldEntitlements{}}
 	if err := ValidateCheck(params); err != nil {
 		return out, err
@@ -276,7 +276,7 @@ func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, para
 	for _, key := range keys {
 		out.Entitlements[key], out.Quantities[key] = false, nil
 	}
-	if includeCacheMetadata && params.At.IsZero() && len(params.Prefixes) == 0 {
+	if params.IncludeValidity && params.At.IsZero() && len(params.Prefixes) == 0 {
 		err := s.checkWithCacheMetadata(ctx, customer, keys, &out)
 		return out, err
 	}
