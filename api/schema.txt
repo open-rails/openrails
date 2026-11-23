@@ -4,22 +4,7 @@
 migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352cab53af9e6dd57fde0f661
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
-
-table billing.access_cutover_approvals
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column entitlement text COLLATE "C" NOT NULL
-  column change text NOT NULL
-  column approved_by text NOT NULL
-  column approved_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint access_cutover_approvals_approved_by_check CHECK (((octet_length(approved_by) >= 1) AND (octet_length(approved_by) <= 255)))
-  constraint access_cutover_approvals_change_check CHECK ((change = ANY (ARRAY['lost'::text, 'gained'::text])))
-  constraint access_cutover_approvals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint access_cutover_approvals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint access_cutover_approvals_pkey PRIMARY KEY (merchant_id, id)
-  index CREATE UNIQUE INDEX access_cutover_approvals_key ON billing.access_cutover_approvals USING btree (merchant_id, customer_id, entitlement, change)
-  index CREATE UNIQUE INDEX access_cutover_approvals_pkey ON billing.access_cutover_approvals USING btree (merchant_id, id)
+migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3303,128 +3288,6 @@ function billing.close_landed_park()
   END;
   $function$
 
-function billing.convert_entitlement_windows(uuid,regclass,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.convert_entitlement_windows(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
-   RETURNS bigint
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  DECLARE converted bigint;
-  BEGIN
-      DROP TABLE IF EXISTS pg_temp.access_conversion;
-      EXECUTE format($q$
-      CREATE TEMP TABLE access_conversion ON COMMIT DROP AS
-      WITH win AS (
-          SELECT e.customer_id, e.entitlement::text COLLATE "C" AS entitlement, e.starts_at, e.ends_at,
-                 e.revoked_at, e.revoke_reason, e.destructive_run_id::text AS destructive_run_id,
-                 g.source_type, COALESCE(g.source_id, g.id::text) AS source_id,
-                 CASE WHEN g.source_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN g.source_id::uuid END AS source_uuid
-          FROM %1$s e
-          JOIN grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id AND g.id = e.grant_id
-          WHERE e.merchant_id = %2$L AND e.deleted_at IS NULL
-      ), purchases AS (
-          SELECT w.customer_id, line.product_id, 'purchase'::text AS source_type, w.source_id, pay.id AS payment_id,
-                 min(w.starts_at) AS starts_at,
-                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
-                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
-                 max(w.destructive_run_id) AS destructive_run_id
-          FROM win w
-          JOIN payments pay ON pay.merchant_id = %2$L AND pay.id = w.source_uuid AND pay.customer_id = w.customer_id
-          CROSS JOIN LATERAL (
-              SELECT l.product_id FROM order_lines l
-              WHERE l.merchant_id = %2$L AND l.order_id = pay.order_id AND l.product_id IS NOT NULL
-              ORDER BY (SELECT count(*) FROM product_entitlements pe
-                        WHERE pe.merchant_id = %2$L AND pe.product_id = l.product_id AND pe.removed_at IS NULL
-                          AND pe.entitlement = w.entitlement) DESC, l.position
-              LIMIT 1
-          ) line
-          WHERE w.source_type = 'purchase'
-          GROUP BY w.customer_id, line.product_id, w.source_id, pay.id
-      ), periods AS (
-          SELECT w.customer_id, w.source_type, w.source_id, w.source_uuid, w.starts_at,
-                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
-                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
-                 max(w.destructive_run_id) AS destructive_run_id, array_agg(DISTINCT w.entitlement) AS keys
-          FROM win w WHERE w.source_type IN ('subscription', 'grace')
-          GROUP BY w.customer_id, w.source_type, w.source_id, w.source_uuid, w.starts_at
-      ), subscription_windows AS (
-          SELECT p.customer_id, best.product_id, p.source_type, p.source_id, NULL::uuid AS payment_id, p.starts_at, p.ends_at,
-                 p.revoked, p.revoked_at, p.revoke_reason, p.destructive_run_id
-          FROM periods p
-          JOIN subscriptions s ON s.merchant_id = %2$L AND s.id = p.source_uuid
-          CROSS JOIN LATERAL (
-              SELECT c.product_id FROM (
-                  SELECT s.product_id
-                  UNION SELECT l.product_id FROM payments pay
-                  JOIN order_lines l ON l.merchant_id = pay.merchant_id AND l.order_id = pay.order_id
-                  WHERE pay.merchant_id = %2$L AND pay.subscription_id = s.id AND l.product_id IS NOT NULL
-              ) c
-              ORDER BY (SELECT count(*) FROM product_entitlements pe
-                        WHERE pe.merchant_id = %2$L AND pe.product_id = c.product_id AND pe.removed_at IS NULL
-                          AND pe.entitlement = ANY (p.keys)) DESC,
-                       (c.product_id = s.product_id) DESC, c.product_id
-              LIMIT 1
-          ) best
-      ), admin_groups AS (
-          SELECT w.customer_id, w.source_id, w.starts_at,
-                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
-                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
-                 max(w.destructive_run_id) AS destructive_run_id, array_agg(DISTINCT w.entitlement ORDER BY w.entitlement) AS keys
-          FROM win w WHERE w.source_type = 'admin'
-          GROUP BY w.customer_id, w.source_id, w.starts_at
-      ), admin_windows AS (
-          SELECT a.customer_id, match.product_id, 'grant'::text AS source_type, a.source_id, NULL::uuid AS payment_id, a.starts_at, a.ends_at,
-                 a.revoked, a.revoked_at, a.revoke_reason, a.destructive_run_id
-          FROM admin_groups a
-          CROSS JOIN LATERAL (
-              SELECT candidate.product_id
-              FROM product_entitlements candidate
-              JOIN products p ON p.merchant_id = candidate.merchant_id AND p.id = candidate.product_id
-              WHERE candidate.merchant_id = %2$L AND candidate.entitlement = a.keys[1] AND candidate.removed_at IS NULL
-                AND (SELECT array_agg(pe.entitlement ORDER BY pe.entitlement) FROM product_entitlements pe
-                     WHERE pe.merchant_id = candidate.merchant_id AND pe.product_id = candidate.product_id AND pe.removed_at IS NULL) = a.keys
-              ORDER BY p.archived, p.key
-              LIMIT 1
-          ) match
-      ), ownership_windows AS (
-          SELECT g.customer_id, g.product_id, CASE g.source_type WHEN 'admin' THEN 'grant' ELSE g.source_type END AS source_type,
-                 COALESCE(g.source_id, g.id::text) AS source_id, g.payment_id, g.starts_at, g.ends_at,
-                 t.id IS NOT NULL AS revoked, t.starts_at AS revoked_at, COALESCE(t.reason, t.event) AS revoke_reason, NULL::text AS destructive_run_id
-          FROM grants g
-          LEFT JOIN grants t ON t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-          WHERE g.merchant_id = %2$L AND g.kind = 'ownership' AND g.event = 'grant' AND g.product_id IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.payment_id = g.payment_id AND p.product_id = g.product_id)
-      )
-      SELECT uuidv7() AS grant_id, uuidv7() AS access_id, c.customer_id, c.product_id, c.source_type, c.source_id, c.payment_id,
-             c.starts_at, c.ends_at, c.revoked AND c.revoked_at IS NOT NULL AS revoked, c.revoked_at,
-             COALESCE(c.revoke_reason, 'revoked') AS revoke_reason, c.destructive_run_id::uuid AS destructive_run_id
-      FROM (
-          SELECT * FROM purchases UNION ALL SELECT * FROM subscription_windows
-          UNION ALL SELECT * FROM admin_windows UNION ALL SELECT * FROM ownership_windows
-      ) c
-      $q$, p_source, p_merchant);
-      INSERT INTO billing.grants (id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, starts_at, ends_at, reason, actor, grant_reason)
-      SELECT c.grant_id, p_merchant, c.customer_id, c.product_id, 'access', c.source_type, c.source_id, c.payment_id, 'grant', c.starts_at, c.ends_at,
-             'product access migration', CASE WHEN c.source_type = 'grant' THEN 'migration' END, CASE WHEN c.source_type = 'grant' THEN 'migration' END
-      FROM access_conversion c;
-      INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, starts_at, reason)
-      SELECT p_merchant, c.customer_id, c.product_id, 'access', c.source_type, c.source_id, c.payment_id, 'revoke', c.grant_id, c.revoked_at, c.revoke_reason
-      FROM access_conversion c WHERE c.revoked;
-      INSERT INTO billing.product_access (id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id,
-                                          starts_at, ends_at, revoked_at, revoke_reason, destructive_run_id)
-      SELECT c.access_id, p_merchant, c.customer_id, c.product_id, c.grant_id, c.source_type, c.source_id, c.payment_id, c.starts_at, c.ends_at,
-             CASE WHEN c.revoked THEN c.revoked_at END, CASE WHEN c.revoked THEN c.revoke_reason END, c.destructive_run_id
-      FROM access_conversion c;
-      GET DIAGNOSTICS converted = ROW_COUNT;
-      INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, reason)
-      SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, 'supersede', g.id, g.spec_snapshot, p_at, 'product access migration'
-      FROM billing.grants g
-      WHERE g.merchant_id = p_merchant AND g.kind IN ('entitlement', 'ownership') AND g.event = 'grant'
-        AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-                          AND t.event IN ('revoke', 'expire', 'supersede'));
-      RETURN converted;
-  END $function$
-
 function billing.create_event_log_stream()
   CREATE OR REPLACE FUNCTION billing.create_event_log_stream()
    RETURNS trigger
@@ -3757,7 +3620,6 @@ function billing.guard_billing_restore_receipt()
                 -- Every merchant-scoped table but the directory's own identity rows
                 -- (former names, host claims); a test keeps this list complete.
                 AND c.relname = ANY(ARRAY[
-                    'access_cutover_approvals',
                     'balance_watches',
                     'carts',
                     'catalog_applications',
@@ -4326,75 +4188,6 @@ function billing.preserve_subscription_collection_policy()
    RETURN NEW;
   END;
   $function$
-
-function billing.product_access_changes(uuid,regclass,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.product_access_changes(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
-   RETURNS TABLE(customer_id uuid, entitlement text, change text)
-   LANGUAGE plpgsql
-   STABLE
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  BEGIN
-      RETURN QUERY EXECUTE format($q$
-      WITH old AS (
-          SELECT e.customer_id, e.entitlement::text COLLATE "C" AS entitlement,
-                 range_agg(tstzrange(GREATEST(e.starts_at, %3$L::timestamptz), e.ends_at)) AS r
-          FROM %1$s e
-          WHERE e.merchant_id = %2$L AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-            AND (e.ends_at IS NULL OR e.ends_at > %3$L::timestamptz)
-          GROUP BY 1, 2
-      ), new AS (
-          SELECT pa.customer_id, pe.entitlement::text COLLATE "C" AS entitlement,
-                 range_agg(tstzrange(GREATEST(pa.starts_at, pe.added_at, %3$L::timestamptz), LEAST(pa.ends_at, pe.removed_at))) AS r
-          FROM product_access pa
-          JOIN product_entitlements pe ON pe.merchant_id = pa.merchant_id AND pe.product_id = pa.product_id
-          WHERE pa.merchant_id = %2$L AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-            AND (pa.ends_at IS NULL OR pa.ends_at > %3$L::timestamptz)
-            AND (pe.removed_at IS NULL OR pe.removed_at > %3$L::timestamptz)
-            AND GREATEST(pa.starts_at, pe.added_at, %3$L::timestamptz) < COALESCE(LEAST(pa.ends_at, pe.removed_at), 'infinity'::timestamptz)
-          GROUP BY 1, 2
-      )
-      SELECT COALESCE(o.customer_id, n.customer_id), COALESCE(o.entitlement, n.entitlement)::text, d.change
-      FROM old o FULL JOIN new n ON n.customer_id = o.customer_id AND n.entitlement = o.entitlement
-      CROSS JOIN LATERAL (VALUES
-          ('lost', NOT isempty(COALESCE(o.r, '{}'::tstzmultirange) - COALESCE(n.r, '{}'::tstzmultirange))),
-          ('gained', NOT isempty(COALESCE(n.r, '{}'::tstzmultirange) - COALESCE(o.r, '{}'::tstzmultirange)))
-      ) d(change, changed)
-      WHERE d.changed
-      ORDER BY 1, 2, 3
-      $q$, p_source, p_merchant, p_at);
-  END $function$
-
-function billing.product_access_conversion_notes(uuid,regclass,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.product_access_conversion_notes(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
-   RETURNS TABLE(customer_id uuid, note text, source_type text, source_id text, entitlements text[])
-   LANGUAGE plpgsql
-   STABLE
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  BEGIN
-      RETURN QUERY EXECUTE format($q$
-      WITH live AS (
-          SELECT e.customer_id, e.entitlement::text AS entitlement, e.ends_at, g.source_type, COALESCE(g.source_id, g.id::text) AS source_id
-          FROM %1$s e
-          JOIN grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id AND g.id = e.grant_id
-          WHERE e.merchant_id = %2$L AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-            AND (e.ends_at IS NULL OR e.ends_at > %3$L::timestamptz)
-      )
-      SELECT l.customer_id, 'unmapped'::text, l.source_type, l.source_id, array_agg(DISTINCT l.entitlement ORDER BY l.entitlement)
-      FROM live l
-      WHERE NOT EXISTS (SELECT 1 FROM product_access pa
-          WHERE pa.merchant_id = %2$L AND pa.customer_id = l.customer_id AND pa.source_id = l.source_id
-            AND pa.source_type = CASE l.source_type WHEN 'admin' THEN 'grant' ELSE l.source_type END)
-      GROUP BY 1, 2, 3, 4
-      UNION ALL
-      SELECT l.customer_id, 'mixed_duration'::text, l.source_type, l.source_id, array_agg(DISTINCT l.entitlement ORDER BY l.entitlement)
-      FROM live l WHERE l.source_type = 'purchase'
-      GROUP BY 1, 2, 3, 4
-      HAVING count(DISTINCT COALESCE(l.ends_at, 'infinity'::timestamptz)) > 1
-      ORDER BY 1, 2, 3, 4
-      $q$, p_source, p_merchant, p_at);
-  END $function$
 
 function billing.products_guard_tier_group()
   CREATE OR REPLACE FUNCTION billing.products_guard_tier_group()
