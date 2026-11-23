@@ -212,10 +212,12 @@ const (
 type MessageError string
 
 const (
-	// MessageSendFailed: the sender failed; the job retries it, and the last
-	// attempt fails it.
+	// MessageSendFailed: the sender failed, or the mail server refused it
+	// other than for its recipient; the job retries it, and the last attempt
+	// fails it.
 	MessageSendFailed MessageError = "send_failed"
-	// MessageRefused: the mail server refused it for good (an SMTP 5xx).
+	// MessageRefused: the mail server refused the recipient for good (a 5xx
+	// to RCPT TO).
 	MessageRefused MessageError = "refused"
 	// MessageRenderFailed: neither the host's renderer nor a template gave
 	// it a subject and a body.

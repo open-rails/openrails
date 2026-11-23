@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 430,
+  "scenario_count": 432,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2152,6 +2152,16 @@
       "id": "OR-J39-S18",
       "journey": "J39",
       "name": "A test message goes to the merchant's alert address only: the request cannot name one, and a merchant without one is refused"
+    },
+    {
+      "id": "OR-J39-S19",
+      "journey": "J39",
+      "name": "Only a mail server's refusal of the recipient is final: a refused sender is retried and opens the merchant's finding"
+    },
+    {
+      "id": "OR-J39-S20",
+      "journey": "J39",
+      "name": "A message whose last attempt's job ends while the sender holds it settles failed, not sending"
     }
   ]
 }

@@ -1373,6 +1373,14 @@
     ],
     "OR-J39-S18": [
       "TestCustomerMessages/OR-J39-S18/a-test-message-goes-only-to-the-alert-address"
+    ],
+    "OR-J39-S19": [
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding",
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding/recipient-refused",
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding/sender-refused"
+    ],
+    "OR-J39-S20": [
+      "TestCustomerMessages/OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed"
     ]
   }
 }

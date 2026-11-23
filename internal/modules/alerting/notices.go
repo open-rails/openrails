@@ -25,6 +25,9 @@ const (
 	// FindingCustomerMessagesRateLimited is a customer whose messages reached
 	// the hourly cap: something sends them far more than billing should.
 	FindingCustomerMessagesRateLimited reconcile.FindingType = "life.customer.messages_rate_limited"
+	// FindingCustomerMessagesSenderRefused is a mail server that refused the
+	// merchant's sender, so its customer messages wait for it.
+	FindingCustomerMessagesSenderRefused reconcile.FindingType = "life.customer.messages_sender_refused"
 )
 
 // LedgerRepair is a provider event OpenRails could not book, which the
@@ -163,6 +166,41 @@ func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time,
 	})
 	if err != nil {
 		return fmt.Errorf("message rate limit: %w", err)
+	}
+	return nil
+}
+
+// MessageSenderRefusal is a mail server's refusal of the sender of a
+// customer message: its credentials (AUTH) or its from address (MAIL FROM).
+type MessageSenderRefusal struct {
+	// From is the merchant's from address; empty is the sender's own.
+	From      string
+	Step      string
+	Code      int
+	Reply     string
+	MessageID uuid.UUID
+	EventType string
+}
+
+// RecordMessageSenderRefused raises the merchant's sender-refused finding,
+// one per from address; a later refusal observes it again.
+func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.Time, r MessageSenderRefusal) error {
+	if database == nil {
+		return fmt.Errorf("message sender refused: database is required")
+	}
+	subject, sender := r.From, "from_email "+r.From
+	if subject == "" {
+		subject, sender = "deployment_sender", "the deployment's sender"
+	}
+	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingCustomerMessagesSenderRefused, SubjectKey: subject, Severity: reconcile.SeverityHigh,
+		RecommendedAction: fmt.Sprintf("The mail server refused %s at %s (%d %s), so customer messages are not sent; each is retried. Fix the sender's credentials or let it send as this address.",
+			sender, r.Step, r.Code, r.Reply),
+		Evidence: map[string]any{"from_email": r.From, "step": r.Step, "reply_code": r.Code, "reply": r.Reply,
+			"message_id": r.MessageID.String(), "event_type": r.EventType, "observed_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("message sender refused: %w", err)
 	}
 	return nil
 }

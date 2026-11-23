@@ -16,8 +16,10 @@ was sent (`customer_messages`) keeps no body.
 - A fact on a test or sandbox PSP sends nothing (`test_environment`).
 - A customer is sent at most ten messages an hour; more are `rate_limited` and
   open a `life.customer.messages_rate_limited` finding.
-- A failed send is retried with backoff, ten attempts in all; an SMTP 5xx
-  refusal is final.
+- A failed send is retried with backoff, ten attempts in all. Only a mail
+  server's 5xx to the recipient (`RCPT TO`) is final (`refused`). A 5xx to the
+  sender (`AUTH` or `MAIL FROM`) is retried and opens a
+  `life.customer.messages_sender_refused` finding naming the from address.
 
 ## Event types and defaults
 

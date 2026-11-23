@@ -17,6 +17,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	riverhelpers "github.com/open-rails/helpers/river"
+	"github.com/open-rails/helpers/smtp"
+	"github.com/open-rails/helpers/smtp/smtptest"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
@@ -533,6 +536,63 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, billing.CodeAlertEmailRequired, refusal.Code)
 		require.Len(t, mail.all(), 1)
 	})
+	t.Run("OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding", func(t *testing.T) {
+		t.Run("recipient-refused", func(t *testing.T) {
+			server := smtptest.Start(t, smtptest.Options{RefuseRecipient: func(string) string { return "550 5.1.1 no such user" }})
+			a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = smtpSender(t, server, "") })
+			alice := customerOf(a.alice)
+			paidExternally(t, a, alice, messageSale(t, a), "refused-recipient")
+			fleet := startFleet(t, a.world)
+			log := settledMessages(t, a.world, alice, 1)
+			messagesSettled(t, fleet)
+			require.Equal(t, billing.MessageFailed, log[0].Status)
+			require.Equal(t, billing.MessageRefused, lastError(log[0]))
+			require.Equal(t, 1, log[0].Attempts, "a recipient refused for good is not retried")
+			require.Empty(t, server.Messages())
+		})
+		t.Run("sender-refused", func(t *testing.T) {
+			server := smtptest.Start(t, smtptest.Options{Username: "openrails", Password: "the-right-one"})
+			a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = smtpSender(t, server, "a-wrong-one") })
+			alice := customerOf(a.alice)
+			paidExternally(t, a, alice, messageSale(t, a), "refused-sender")
+			startFleet(t, a.world)
+			require.Eventually(t, func() bool {
+				log, err := customerMessages(t, a.alpha, alice)
+				return err == nil && len(log) == 1 && log[0].Status == billing.MessageQueued && log[0].Attempts >= 1 &&
+					lastError(log[0]) == billing.MessageSendFailed
+			}, 30*time.Second, 20*time.Millisecond, "a refused sender is retried")
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_sender_refused"})
+			require.NoError(t, err)
+			require.Len(t, findings.Items, 1)
+			require.Equal(t, "deployment_sender", findings.Items[0].SubjectKey)
+			require.Equal(t, "AUTH", findings.Items[0].Evidence["step"])
+			require.EqualValues(t, 535, findings.Items[0].Evidence["reply_code"])
+			require.Empty(t, server.Messages())
+		})
+	})
+	t.Run("OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed", func(t *testing.T) {
+		mail := &stalledMailbox{refuse: messageSendAttempts - 1, stalled: make(chan struct{})}
+		a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		alice := customerOf(a.alice)
+		paidExternally(t, a, alice, messageSale(t, a), "stalled-receipt")
+		fleet := promptFleet(t, a.world)
+		_, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.customer_messages_dispatch"}, &river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		select {
+		case <-mail.stalled:
+		case <-time.After(30 * time.Second):
+			t.Fatal("the last attempt never reached the sender")
+		}
+		stop, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, fleet.StopAndCancel(stop), "the job's context ends while the sender holds its last attempt")
+		log, err := customerMessages(t, a.alpha, alice)
+		require.NoError(t, err)
+		require.Len(t, log, 1)
+		require.Equal(t, billing.MessageFailed, log[0].Status, "not left sending")
+		require.Equal(t, billing.MessageSendFailed, lastError(log[0]))
+		require.Equal(t, messageSendAttempts, log[0].Attempts)
+	})
 }
 
 // declareMessages gives alpha the messages document s.
@@ -720,4 +780,92 @@ func (m *alertMailbox) all() []openrails.Email {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]openrails.Email(nil), m.sent...)
+}
+
+// messageSendAttempts is a message's tries (messages.SendAttempts).
+const messageSendAttempts = 10
+
+// smtpSender is helpers/smtp to server as the engine's EmailSender, as the
+// server builds it from email_smtp, signing in with password when the server
+// asks for one.
+func smtpSender(t *testing.T, server *smtptest.Server, password string) openrails.EmailSender {
+	t.Helper()
+	cfg := smtp.Config{Host: server.Host, Port: server.Port, From: "billing@alpha.example", Timeout: 5 * time.Second}
+	if password != "" {
+		cfg.Username, cfg.Password = "openrails", password
+	}
+	sender, err := smtp.New(cfg)
+	require.NoError(t, err)
+	return helpersSMTP{sender}
+}
+
+type helpersSMTP struct{ *smtp.Sender }
+
+func (s helpersSMTP) Send(ctx context.Context, m openrails.Email) error {
+	from := s.From()
+	if m.From.Address != "" {
+		from.Address = m.From.Address
+	}
+	from.Name = m.From.Name
+	return s.Sender.Send(ctx, smtp.Message{From: from, To: m.To, Subject: m.Subject, Text: m.Text, HTML: m.HTML})
+}
+
+// stalledMailbox refuses its first refuse sends, then holds the next until
+// its context ends.
+type stalledMailbox struct {
+	mu      sync.Mutex
+	refuse  int
+	held    bool
+	stalled chan struct{}
+}
+
+func (m *stalledMailbox) Send(ctx context.Context, _ openrails.Email) error {
+	m.mu.Lock()
+	refuse := m.refuse > 0
+	if refuse {
+		m.refuse--
+	} else if !m.held {
+		m.held = true
+		close(m.stalled)
+	}
+	m.mu.Unlock()
+	if refuse {
+		return errors.New("critical mailbox is unavailable")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (m *stalledMailbox) CheckHealth(context.Context) error { return nil }
+
+// promptFleet is a fleet that retries a failed job at once and dispatches
+// nothing by itself, so a message reaches its last attempt within a
+// scenario.
+func promptFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
+	t.Helper()
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
+		RetryPolicy: retryAtOnce{}, FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond}, w.engine.RiverJobs())
+	require.NoError(t, err)
+	fleet.PeriodicJobs().Clear()
+	require.NoError(t, fleet.Start(t.Context()))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = fleet.StopAndCancel(ctx)
+	})
+	return fleet
+}
+
+type retryAtOnce struct{}
+
+func (retryAtOnce) NextRetry(*rivertype.JobRow) time.Time {
+	return time.Now().Add(10 * time.Millisecond)
+}
+
+// lastError is m's last error; empty after a send.
+func lastError(m billing.CustomerMessage) billing.MessageError {
+	if m.LastError == nil {
+		return ""
+	}
+	return *m.LastError
 }

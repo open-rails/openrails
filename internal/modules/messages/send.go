@@ -132,19 +132,23 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 		Subject: content.Subject, Text: content.Text, HTML: content.HTML,
 	})
 	now := s.Clock.Now().UTC()
+	refusal, reply := refusalOf(sendErr)
+	var settleErr error
 	switch {
 	case sendErr == nil:
 		return s.settle(ctx, m, settled{status: statusSent, attempts: attempts, sentAt: &now})
-	case permanent(sendErr):
+	case refusal == recipientRefused:
 		return s.settle(ctx, m, settled{status: statusFailed, attempts: attempts, code: errRefused})
 	case last:
-		if err := s.settle(ctx, m, settled{status: statusFailed, attempts: attempts, code: errSendFailed}); err != nil {
-			return errors.Join(sendErr, err)
-		}
+		settleErr = s.settle(ctx, m, settled{status: statusFailed, attempts: attempts, code: errSendFailed})
 	default:
-		if err := s.settle(ctx, m, settled{status: statusQueued, attempts: attempts, code: errSendFailed}); err != nil {
-			return errors.Join(sendErr, err)
-		}
+		settleErr = s.settle(ctx, m, settled{status: statusQueued, attempts: attempts, code: errSendFailed})
+	}
+	if refusal == senderRefused {
+		settleErr = errors.Join(settleErr, s.senderRefused(ctx, m, profile.FromEmail, sendErr, reply, now))
+	}
+	if settleErr != nil {
+		return errors.Join(sendErr, settleErr)
 	}
 	return sendError{sendErr}
 }
@@ -202,9 +206,30 @@ func (v settled) params(m gen.GetCustomerMessageRow, now time.Time) gen.SettleCu
 	return p
 }
 
+// settleTimeout bounds a settle. It runs whatever the job's context says, so
+// a message the sender took, or its last attempt's failure, is recorded
+// after a timeout too.
+const settleTimeout = 10 * time.Second
+
 func (s *Service) settle(ctx context.Context, m gen.GetCustomerMessageRow, v settled) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
 	_, err := s.DB.Gen(ctx).SettleCustomerMessage(ctx, v.params(m, s.Clock.Now().UTC()))
 	return err
+}
+
+// senderRefused raises the merchant's finding for a mail server that refused
+// its sender; the message is retried.
+func (s *Service) senderRefused(ctx context.Context, m gen.GetCustomerMessageRow, from string, err error, reply *textproto.Error, now time.Time) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
+	step := "MAIL FROM"
+	if strings.Contains(err.Error(), "AUTH: ") {
+		step = "AUTH"
+	}
+	return alerting.RecordMessageSenderRefused(ctx, s.DB, now, alerting.MessageSenderRefusal{
+		From: from, Step: step, Code: reply.Code, Reply: reply.Msg, MessageID: m.ID, EventType: m.EventType,
+	})
 }
 
 // hostError is a failure of the host's renderer: retried like a send.
@@ -273,10 +298,34 @@ func (s *Service) profile(ctx context.Context) (models.MerchantProfileConfigurat
 	return cfg.Profile, err
 }
 
-// permanent is a refusal another attempt cannot change: an SMTP 5xx reply.
-func permanent(err error) bool {
+// refusal is what a sender's error says of the message.
+type refusal int
+
+const (
+	// retryable: another attempt may send it.
+	retryable refusal = iota
+	// recipientRefused: the mail server refused the recipient for good.
+	recipientRefused
+	// senderRefused: the mail server refused the sender (AUTH or MAIL
+	// FROM); another attempt may send it once the sender is fixed.
+	senderRefused
+)
+
+// refusalOf reads a sender's error. helpers/smtp names the step a reply
+// answered ("smtp: RCPT TO: 550 …") and exposes nothing else, so the step is
+// read from its text: only a 5xx to RCPT TO refuses this recipient for good.
+func refusalOf(err error) (refusal, *textproto.Error) {
 	var reply *textproto.Error
-	return errors.As(err, &reply) && reply.Code >= 500
+	if !errors.As(err, &reply) || reply.Code < 500 || reply.Code > 599 {
+		return retryable, nil
+	}
+	switch text := err.Error(); {
+	case strings.Contains(text, "RCPT TO: "):
+		return recipientRefused, reply
+	case strings.Contains(text, "MAIL FROM: "), strings.Contains(text, "AUTH: "):
+		return senderRefused, reply
+	}
+	return retryable, reply
 }
 
 func optional(id uuid.UUID) *uuid.UUID {
