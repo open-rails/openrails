@@ -5,9 +5,8 @@ package decline
 
 import (
 	"context"
+	"log/slog"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -178,10 +177,9 @@ func lookup(rail, code, text string) Result {
 // AlertUnmapped logs the one loud line for a code no table knows. An unmapped
 // code is retried like an ordinary decline, so nothing downstream looks wrong;
 // this line is the only place the gap is visible.
-func AlertUnmapped(ctx context.Context, r Result) {
+func AlertUnmapped(ctx context.Context, logger *slog.Logger, r Result) {
 	if !r.NeedsMapping() {
 		return
 	}
-	log.WithContext(ctx).WithFields(log.Fields{"rail": r.Rail, "failure_code": r.Code}).
-		Error("UNMAPPED decline code: retried by doctrine. Map it in internal/decline")
+	logger.ErrorContext(ctx, "UNMAPPED decline code: retried by doctrine. Map it in internal/decline", "rail", r.Rail, "failure_code", r.Code)
 }

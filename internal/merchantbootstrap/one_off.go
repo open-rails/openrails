@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
 	vaultapi "github.com/hashicorp/vault/api"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -32,7 +32,7 @@ type Merchants struct {
 // Vault, over client, when a KV mount is named, else an empty file source the
 // caller fills. The database handle reads settings through it.
 func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
-	conn, err := vaultconn.Open(ctx, cfg, client)
+	conn, err := vaultconn.Open(ctx, database.Log, cfg, client)
 	if err != nil {
 		return nil, err
 	}
@@ -42,14 +42,14 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, cli
 	}
 	var source merchantdocs.Source = merchantdocs.NewFileSource()
 	if conn.KV != nil {
-		if source, err = merchantdocs.NewVaultSource(conn.KV, cfg.Vault.ScopePrefix); err != nil {
+		if source, err = merchantdocs.NewVaultSource(database.Log, conn.KV, cfg.Vault.ScopePrefix); err != nil {
 			conn.Close()
 			return nil, err
 		}
 	}
-	cache := merchantdocs.NewCache(source)
+	cache := merchantdocs.NewCache(database.Log, source)
 	closeAll := func() { cache.Close(); conn.Close() }
-	svc, err := merchants.NewService(database.DataPool(), cache, cfg)
+	svc, err := merchants.NewService(database.Log, database.DataPool(), cache, cfg)
 	if err != nil {
 		closeAll()
 		return nil, err
@@ -84,7 +84,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, c
 	}
 	svc := opened.Service
 	if _, ok := svc.Config().Source().(*merchantdocs.FileSource); ok {
-		declaration, err := manifestEntry(ctx, svc, merchantID, manifest, manifestPath, overlays)
+		declaration, err := manifestEntry(ctx, database.Log, svc, merchantID, manifest, manifestPath, overlays)
 		if err != nil {
 			opened.Close()
 			return nil, err
@@ -106,7 +106,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, c
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
 // else the file at manifestPath, else the conventional path when it exists.
-func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*config.MerchantDocument, error) {
+func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*billing.MerchantDocument, error) {
 	if manifest == nil {
 		path := strings.TrimSpace(manifestPath)
 		explicit := path != ""
@@ -115,7 +115,7 @@ func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID
 		}
 		raw, err := os.ReadFile(path) // #nosec G304 -- operator CLI flag or the fixed conventional path
 		if errors.Is(err, os.ErrNotExist) && !explicit {
-			log.Warn("no merchant manifest was supplied or found; the merchant has no configuration and no rail can be armed")
+			logger.WarnContext(ctx, "no merchant manifest was supplied or found; the merchant has no configuration and no rail can be armed")
 			return nil, nil
 		}
 		if err != nil {
@@ -129,10 +129,10 @@ func manifestEntry(ctx context.Context, directory *merchants.Service, merchantID
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}
-	var selected *config.MerchantDocument
+	var selected *billing.MerchantDocument
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
-		if errors.Is(err, merchants.ErrMerchantNotFound) {
+		if errors.Is(err, billing.ErrMerchantNotFound) {
 			continue
 		}
 		if err != nil {

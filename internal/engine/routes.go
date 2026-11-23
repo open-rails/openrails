@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
@@ -106,7 +106,7 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 			return nil, fmt.Errorf("openrails: %w", err)
 		}
 	}
-	table, err := embedhttp.ConfiguredRoutes(a, sel)
+	table, err := embedhttp.ConfiguredRoutes(e.Log, a, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err
 	}
-	logMount(sel, len(table.Entries))
+	logMount(e.Log, sel, len(table.Entries))
 	routes = routebundle.FromTable(table)
 	return e.guardRouteLifetimes(routes), nil
 }
@@ -141,15 +141,12 @@ func (e *Engine) guardRouteLifetimes(routes []routebundle.Route) []routebundle.R
 
 // logMount names the Auth the mounted route groups answer to: the admin API
 // at WARN, since it moves money.
-func logMount(sel config.Routes, routes int) {
+func logMount(logger *slog.Logger, sel config.Routes, routes int) {
 	g := sel.RouteGroups
-	fields := log.Fields{
-		"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth),
-		"admin": g.Admin, "catalog": g.Catalog, "merchant_config": g.MerchantConfig, "metrics": g.Metrics, "programmatic": g.Programmatic,
-	}
+	fields := []any{"prefix", sel.Prefix + "/v1", "routes", routes, "auth", fmt.Sprintf("%T", sel.Auth), "admin", g.Admin, "catalog", g.Catalog, "merchant_config", g.MerchantConfig, "metrics", g.Metrics, "programmatic", g.Programmatic}
 	if httproutes.StaffGroups(g) {
-		log.WithFields(fields).Warn("openrails: staff routes mounted; each asks the caller's Can for its permission at the merchant or in the root scope")
+		logger.With(fields...).Warn("openrails: staff routes mounted; each asks the caller's Can for its permission at the merchant or in the root scope")
 		return
 	}
-	log.WithFields(fields).Info("openrails: routes mounted")
+	logger.With(fields...).Info("openrails: routes mounted")
 }

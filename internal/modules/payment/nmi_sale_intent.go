@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -28,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	log "github.com/sirupsen/logrus"
 )
 
 func NMISaleIdempotencyKey(key string) string {
@@ -38,10 +39,11 @@ func NMISaleIdempotencyKey(key string) string {
 type NMISaleIntentHandler struct {
 	Sale   *NMISaleService
 	Policy intents.BackoffPolicy
+	Log    *slog.Logger
 }
 
-func NewNMISaleIntentHandler(sale *NMISaleService) *NMISaleIntentHandler {
-	return &NMISaleIntentHandler{Sale: sale, Policy: intents.DefaultBackoff}
+func NewNMISaleIntentHandler(logger *slog.Logger, sale *NMISaleService) *NMISaleIntentHandler {
+	return &NMISaleIntentHandler{Sale: sale, Policy: intents.DefaultBackoff, Log: logger}
 }
 func (h *NMISaleIntentHandler) Type() string                         { return payments.TypeNMISale }
 func (h *NMISaleIntentHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
@@ -188,7 +190,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 			// A new card is known only to NMI: its report names the card tried.
 			if p.Token != "" && refusal.TransactionID != "" {
 				if brand, last4, err := client.TransactionCard(ctx, refusal.TransactionID); err != nil {
-					log.WithContext(ctx).WithError(err).WithField("transaction_id", refusal.TransactionID).Warn("read the declined new card")
+					h.Log.WarnContext(ctx, "read the declined new card", logx.Err(err), "transaction_id", refusal.TransactionID)
 				} else {
 					evidence["card_brand"], evidence["card_last4"] = brand, last4
 				}
@@ -197,7 +199,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 			// sale asked for and the gateway made anyway.
 			if params.SaveCard != nil && refusal.CustomerVaultID != "" {
 				if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: refusal.CustomerVaultID}); err != nil {
-					log.WithContext(ctx).WithError(err).WithField("vault_id", refusal.CustomerVaultID).Warn("delete the declined new card's vault")
+					h.Log.WarnContext(ctx, "delete the declined new card's vault", logx.Err(err), "vault_id", refusal.CustomerVaultID)
 				}
 			}
 		}
@@ -433,7 +435,7 @@ func (h *NMISaleIntentHandler) unresolvedSale(ctx context.Context, in gen.Billin
 	defer cancel()
 	if _, err := h.database().Gen(wctx).UpsertReconciliationFinding(wctx, gen.UpsertReconciliationFindingParams{MerchantID: in.MerchantID, FindingType: SaleUnresolvedFinding,
 		SubjectKey: in.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw}); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("operation_id", in.ID).Error("nmi sale: could not record the unresolved-sale finding")
+		h.Log.ErrorContext(ctx, "nmi sale: could not record the unresolved-sale finding", logx.Err(err), "operation_id", in.ID)
 	}
 	return intents.Ambiguous(reason)
 }
@@ -640,7 +642,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	if storageErr != nil {
 		return intents.Ambiguous("order paid; card storage pending: " + storageErr.Error())
 	}
-	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
+	discardCard(ctx, h.Log, h.Sale.RailPaymentMethodService, declined)
 	if saved != nil && saved.Custodian == models.CustodianBasisTheory {
 		h.provisionNetworkToken(ctx, in, p, saved)
 	}

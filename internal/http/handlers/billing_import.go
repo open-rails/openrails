@@ -39,7 +39,7 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "billing import unavailable")
 		return
 	}
-	res, err := billingimport.Import(r.Request.Context(), billingimport.Options{
+	res, err := billingimport.Import(r.Request.Context(), r.Log, billingimport.Options{
 		DB:         r.State.DB,
 		MerchantID: mid,
 		Book:       book,

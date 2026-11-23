@@ -11,21 +11,20 @@ people changing or reviewing OpenRails.
 |---|---|
 | Ledger | [ledger.md](ledger.md) |
 | Catalog | [catalog.md](catalog.md) |
-| Checkout and orders | [checkout.md](checkout.md) |
+| Orders and checkout | [orders.md](orders.md) |
 | Subscriptions | [subscriptions.md](subscriptions.md) |
 | Collection and dunning | [dunning.md](dunning.md) |
 | Refunds and disputes | [refunds.md](refunds.md) |
-| Metering and usage limits | [metering.md](metering.md) |
+| Usage billing | [usage-billing.md](usage-billing.md) |
+| Entitlements and limits | [entitlements.md](entitlements.md) |
 | Prepaid credits | [prepaid-credits.md](prepaid-credits.md) |
-| Entitlements | [entitlements.md](entitlements.md) |
 | Payment providers | [payment-providers.md](payment-providers.md) |
 | Cards and payment methods | [payment-methods.md](payment-methods.md) |
 | Imports | [imports.md](imports.md) |
 | Customer directory (SCIM) | [customer-directory.md](customer-directory.md) |
 | Merchant configuration | [merchant-configuration.md](merchant-configuration.md) |
 | Events and notifications | [notifications.md](notifications.md) |
-| Metrics | [metrics.md](metrics.md) |
-| Dashboard | [dashboard.md](dashboard.md) |
+| Reporting | [reporting.md](reporting.md) |
 | UI library | [billing-ui.md](billing-ui.md) |
 | Standalone server | [standalone-server.md](standalone-server.md) |
 
@@ -47,10 +46,15 @@ Every system keeps these. A page says how, or why one does not apply.
 4. **Access control and tenant isolation.** Every route checks its permission and
    acts on the one merchant its credential is bound to; a customer route acts only
    as the signed-in customer; every tenant query names its merchant.
-5. **Stable contracts.** The system's Go API, HTTP routes and schema change only
-   by adding to them, and the in-process and remote clients answer alike.
-6. **Migrations and retention.** Schema changes are numbered migrations; every
-   table has a retention class, and partitioned reads name a time range.
+5. **Contracts match the code.** The Go API, HTTP routes and schema snapshots in
+   `api/` are regenerated with every change, and the in-process and remote clients
+   answer alike. Before v1.0.0 any of them may change; from v1.0.0 they change
+   only by adding to them ([compatibility](../compatibility.md)).
+6. **Data lifecycle.** Every table has a retention class saying how its rows leave
+   it: permanent (never), partitioned (whole months dropped), rows (deleted past an
+   age) or state (gone when the thing is). The class is stated in the table's
+   comment and `internal/retention`; reads of a partitioned table name a time
+   range. Schema migrations themselves are migratekit's (`internal/migrate`).
 7. **Work scales with activity.** Background work is driven by events, watermarks
    and indexed due work, never a routine sweep over every row.
 8. **Abuse protection.** Public and customer-facing entry points are rate-limited,

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // ErrInsufficientUSDC: the subscriber's ATA holds less than the first-period
@@ -63,11 +64,12 @@ type PrepareSubscribeService struct {
 	// authorityReadBackoff shortens the retry only in package tests; zero keeps
 	// the production default.
 	authorityReadBackoff time.Duration
+	Log                  *slog.Logger
 }
 
 // NewPrepareSubscribeService builds a PrepareSubscribeService.
-func NewPrepareSubscribeService(submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareSubscribeService {
-	return &PrepareSubscribeService{submitter: submitter, rpc: rpc, tokens: tokens}
+func NewPrepareSubscribeService(logger *slog.Logger, submitter Submitter, rpc solanaint.ChainReader, tokens Tokens) *PrepareSubscribeService {
+	return &PrepareSubscribeService{submitter: submitter, rpc: rpc, tokens: tokens, Log: logger}
 }
 
 // PrepareSubscribeInput describes the plan + subscriber to enroll. Plan terms are
@@ -308,7 +310,7 @@ func (s *PrepareSubscribeService) preflightBalance(ctx context.Context, subscrib
 			// Zero is ambiguous (no ATA OR lagging read). Treat as insufficient when
 			// the read SUCCEEDED with 0 (no ATA), but proceed on a read failure.
 			if isReadFailure(err) {
-				log.WithError(err).Warn("recurring: USDC pre-flight balance read failed; proceeding (atomic tx is the guarantee)")
+				s.Log.WarnContext(ctx, "recurring: USDC pre-flight balance read failed; proceeding (atomic tx is the guarantee)", logx.Err(err))
 				return nil
 			}
 			return &InsufficientUSDCError{HaveBaseUnits: 0, NeedBaseUnits: needBaseUnits}

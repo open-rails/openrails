@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,7 @@ import (
 // ResolveExistingCustomer shares ordinary customer authority resolution, but
 // never calls admission: no customer creation, issuer reassignment or network
 // enrollment can be a side effect of proving the existing customer.
-func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority auth.Authenticator, verified auth.Verified) (config.CustomerProof, error) {
+func ResolveExistingCustomer(ctx context.Context, logger *slog.Logger, rt *app.Runtime, authority auth.Authenticator, verified auth.Verified) (config.CustomerProof, error) {
 	refused := func(err error) (config.CustomerProof, error) { return config.CustomerProof{}, err }
 	if rt == nil || IsNilAuth(authority) {
 		return refused(auth.ErrUnavailable)
@@ -45,7 +46,7 @@ func ResolveExistingCustomer(ctx context.Context, rt *app.Runtime, authority aut
 	if scoped, ok := verified.(interface{ Scopes() []string }); ok && !slices.Contains(scoped.Scopes(), billing.ScopeSelf) {
 		return refused(billingauth.Refusal(billing.CodePermissionRequired))
 	}
-	env := &Env{Runtime: rt, live: liveMerchant(rt)}
+	env := &Env{Runtime: rt, live: liveMerchant(rt), Log: logger}
 	target, err := env.boundMerchant(ctx, authority, verified, id)
 	if err != nil {
 		return refused(err)

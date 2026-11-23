@@ -147,7 +147,7 @@ Checks:
   `401` on `/v1/app/scim/v2` once deleted.
 - `customerscope.Bind` is called only from `internal/http/routes`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 The routes are in the route catalog (`provisioningRoutes`); their bodies are the
 RFC's (`scimBody`), so `api/openapi.json` leaves them out and `docs/api/routes.md`
 lists them.
@@ -157,8 +157,8 @@ Checks:
 - `Catalog()` includes `provisioningRoutes`; no second route table exists.
 - `api/openapi.json` has no `/v1/app/scim` path.
 
-### 6. Migrations and retention
-Both tables are in the baseline and are `State` in
+### 6. Data lifecycle
+Both tables are `State` in
 `internal/retention/tables.go`. Erasure keeps an empty row on purpose. Neither table
 moves with the billing archive. Gap: a merchant purge deletes neither, so a purged
 merchant's contacts and token hashes stay.

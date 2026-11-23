@@ -6,8 +6,8 @@ retry schedule collects money owed (renewals OpenRails collects, usage orders);
 arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the
 renewal schedule and the arrears grace periods; usage orders retry on the
 built-in schedule. Renewal admission and the state machine are in
-[subscriptions](subscriptions.md), usage rating in [metering](metering.md).
-Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-admissions-and-the-gate).
+[subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
+Guides: [dunning](../dunning.md), [spend limits](../spend-limits.md).
 
 ## Concepts
 
@@ -115,7 +115,7 @@ Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
   `POST /v1/admin/orders/{id}/waive-balance`, `…/mark-uncollectible`,
   `PATCH /v1/merchant/configuration`.
 - **Customer:** `POST /v1/me/subscriptions/{id}/retry-now`,
-  `POST /v1/me/orders/{id}/pay` ([checkout](checkout.md)).
+  `POST /v1/me/orders/{id}/pay` ([orders and checkout](orders.md)).
 - **Notices:** `payment_method_failed`, `payment_method_update_required`,
   `order_overdue`, `order_collection_stopped`, `account_delinquent`,
   `account_delinquency_cleared`; host events `delinquency.*`
@@ -172,7 +172,7 @@ Checks:
   (OR-J16-S05).
 - `GetCycleCardStanding` and `GetOverdueOrderAggregate` name `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `billing.DunningPolicy`, `SubscriptionDunning`, `DeclineReason` and
 `DelinquencyHostEvent` are in `api/go.txt`. The routes are in
 `api/openapi.json` and the tables in `api/schema.txt`. A case stores its full
@@ -183,8 +183,8 @@ Checks:
   `RecordedPolicyOf` reads a missing transient list as none.
 - `internal/merchantarchive/contract/dunning_policy.go` validates them on restore.
 
-### 6. Migrations and retention
-The tables are in the baseline migration. In `internal/retention/tables.go`,
+### 6. Data lifecycle
+In `internal/retention/tables.go`,
 `payment_attempts` and `rebill_cycles` are `rows` (25 months), `subscriptions`
 and `customer_delinquency` are `state`. No partitioned table is read. A
 `customer_delinquency` row is never deleted, so its dedupe key never repeats.
@@ -232,7 +232,7 @@ Journeys:
 - OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines,
   due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits).
 - OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55 (usage collection,
-  delinquency); the rest of J26 is in [metering](metering.md).
+  delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
   S70, and OR-J12-S08 to S11 (expired-card refresh).
 

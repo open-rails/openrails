@@ -4,10 +4,9 @@ import (
 	"context"
 	"reflect"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 )
 
@@ -37,7 +36,7 @@ func (r *Runtime) followMoneyPolicy(mid billing.MerchantID, previous, current me
 			return r.MoneyService.MarkUsageAccountsDue(ctx)
 		})
 		if err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("money policy: cannot mark the merchant's due work")
+			r.Log.WarnContext(ctx, "money policy: cannot mark the merchant's due work", logx.Err(err), "merchant_id", mid.String())
 		}
 	})
 }

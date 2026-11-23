@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ func newNMICmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.NMIDeclineReport(c.Context(), hosttools.NMIDeclineReportOptions{
+			return hosttools.NMIDeclineReport(c.Context(), slog.Default(), hosttools.NMIDeclineReportOptions{
 				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, PSP: psp, Since: since, Until: until, Format: format,
 				MerchantManifest: manifest, Out: os.Stdout,
 			})

@@ -61,7 +61,6 @@ var excludedTables = map[string]string{
 	"nmi_history_reads":             "read progress: the destination backfills its own",
 	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
-	"access_cutover_approvals":      "the source deployment's cutover evidence; the archive carries the converted product access",
 
 	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
 	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
@@ -120,7 +119,6 @@ var excludedColumns = map[string]string{
 	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
-	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
 
 	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
 	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"path"
@@ -13,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	log "github.com/sirupsen/logrus"
 )
 
 // configContextKey is a distinct type so this key cannot collide with another
@@ -48,7 +49,7 @@ type Config struct {
 	// configuration, read-only; with one it seeds Vault once, when Vault
 	// holds nothing for the merchant. A request acts on the merchant its
 	// credential is bound to: see MerchantDeclaration.Issuer.
-	Merchants []MerchantDeclaration
+	Merchants []billing.MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
@@ -96,9 +97,6 @@ type Config struct {
 	// LLM is the model behind the console's catalog questions.
 	// Without an API key those features are off.
 	LLM *LLMConfig
-	// ReadCache overrides how long the engine's handles serve catalog and
-	// configuration reads from memory; nil keeps the defaults.
-	ReadCache ReadCache
 
 	// ProviderSandbox points non-live PSPs' provider clients at loopback
 	// gateways, to qualify a process against fake providers, and accepts
@@ -112,9 +110,6 @@ type Config struct {
 	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string
-
-	// Logger sets the log level.
-	Logger *LoggerConfig
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -330,7 +325,7 @@ type DatabaseConfig struct {
 	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
 	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is ErrMigrationsRequired. Call
+	// or was applied with other content, is billing.ErrMigrationsRequired. Call
 	// openrails.Migrate first.
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool
@@ -827,11 +822,6 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeReadOnly: true,
 }
 
-// LoggerConfig sets the log level: debug, info, warn or error.
-type LoggerConfig struct {
-	Level string `yaml:"level" json:"level"`
-}
-
 // RateLimit is one bucket's limit over a fixed one-minute window.
 type RateLimit struct {
 	RequestsPerMinute int
@@ -1172,22 +1162,22 @@ func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaPr
 // LogStartupStatus writes the operator-facing posture banners for long-running
 // OpenRails processes. Keep this out of Load so one-off CLIs do not look like
 // they started the payment server.
-func LogStartupStatus(cfg *Config) {
-	logOperatingModeStatus(cfg)
+func LogStartupStatus(logger *slog.Logger, cfg *Config) {
+	logOperatingModeStatus(logger, cfg)
 }
 
-func logOperatingModeStatus(cfg *Config) {
+func logOperatingModeStatus(logger *slog.Logger, cfg *Config) {
 	switch GetProviderWriteMode(cfg) {
 	case ProviderWriteModeReadOnly:
-		log.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
-		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
-		log.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
+		logger.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
+		logger.Info("   Reconciliation/forensics posture: provider reads + local serving only")
+		logger.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
 	case ProviderWriteModeLimited:
-		log.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
-		log.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
-		log.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
-		log.Info("   Set provider_write_mode=full to resume proactive operations")
+		logger.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
+		logger.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
+		logger.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
+		logger.Info("   Set provider_write_mode=full to resume proactive operations")
 	case ProviderWriteModeFull:
-		log.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
+		logger.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
 	}
 }

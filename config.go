@@ -1,195 +1,352 @@
 package openrails
 
 import (
-	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// The Config and Deps family. These are the only aliases in this package: each
-// type is defined once, in internal/config (the auth contract in
-// internal/billingauth), and named here for hosts. The field docs are on those
-// definitions; gopls and pkg.go.dev show them through the alias.
+// Config is the engine's configuration: plain data. Everything that reaches
+// outside the process is in Deps. ProviderWriteMode is required. Whether money
+// is real is each PSP's declared environment, never the deployment's.
+type Config struct {
+	// ProviderWriteMode is how much OpenRails may do against payment
+	// providers: ProviderWritesFull (normal operation), ProviderWritesLimited
+	// (no system-initiated provider writes) or ProviderWritesReadOnly (no
+	// provider writes: it never charges anyone). Required.
+	ProviderWriteMode string
+	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
+	EngineAdmissionHold bool
+	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
+	UsageBillingEnabled bool
 
-type (
-	// Config is the engine's configuration: plain data. ProviderWriteMode is
-	// required.
-	Config = config.Config
-	// Deps is everything the engine reaches outside its process: connections,
-	// credentials and the host's hooks.
-	Deps = config.Deps
-	// NotificationChannel is an optional transactional account-inbox publisher.
-	NotificationChannel = config.NotificationChannel
-	// NotificationRecipient carries the billing customer's scoped identity.
-	NotificationRecipient = config.NotificationRecipient
+	// Database names the Postgres schemas New creates or upgrades.
+	Database DatabaseConfig
+	// Merchants declares the merchants an embedded engine provisions on
+	// start; none leaves that to run time (a standalone server's are
+	// provisioned through its API). A slug declared twice provisions neither
+	// entry. Without a Vault KV mount a declaration is the merchant's
+	// configuration, read-only; with one it seeds Vault once, when Vault
+	// holds nothing for the merchant. A request acts on the merchant its
+	// credential is bound to: see billing.MerchantDeclaration.Issuer.
+	Merchants []billing.MerchantDeclaration
 
-	// Routes is the HTTP surface the adapters mount on the root router.
-	Routes = config.Routes
-	// CustomerRoutes configures a host-authorized customer-only mount.
-	CustomerRoutes = config.CustomerRoutes
-	// CustomerBinding is the existing customer a host authorizes for one request.
-	CustomerBinding = config.CustomerBinding
-	// CustomerProof is the existing customer and stored issuer proved by one request.
-	CustomerProof = config.CustomerProof
-	// RouteGroups is Routes.RouteGroups: the route groups turned on.
-	RouteGroups = config.RouteGroups
-	// MerchantDeclaration is one entry of Config.Merchants: a merchant the
-	// engine provisions on start, its document, and the issuer whose
-	// credentials are bound to it.
-	MerchantDeclaration = config.MerchantDeclaration
-	// MerchantDocument is MerchantDeclaration's document: the merchant's slug
-	// and configuration, as ParseMerchantDocument reads it.
-	MerchantDocument = config.MerchantDocument
-	// MerchantSecrets is MerchantDocument.Secrets: the merchant's own
-	// credentials (secrets.scim_token).
-	MerchantSecrets = config.MerchantSecrets
-	// AlertWebhookConfig is one of MerchantDocument.AlertWebhooks: where
-	// the merchant's operational alerts are posted.
-	AlertWebhookConfig = config.AlertWebhookConfig
-	// PSPConfig is one PSP of MerchantDocument.PSPs: the merchant's account
-	// on a rail, with its credentials and settings.
-	PSPConfig = config.PSPConfig
-	// PSPs is MerchantDocument.PSPs: the merchant's PSPs by key.
-	PSPs = config.PSPs
-	// Custodians is MerchantDocument.Custodians: its custodians by key.
-	Custodians = config.Custodians
-	// CustodianConfig is one custodian of MerchantDocument.Custodians: the
-	// merchant's account with a card custodian.
-	CustodianConfig = config.CustodianConfig
+	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
+	// used only to build provider callbacks and customer billing links.
+	PublicBillingBaseURL string
+	// ReturnOrigins are the exact origins (scheme://host[:port]) that purchase
+	// and billing-portal return URLs may name. Empty allows only the origin of
+	// PublicBillingBaseURL.
+	ReturnOrigins []string
+	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
+	// resolving a client's address. Empty trusts none: the socket peer is the
+	// client.
+	TrustedProxies []string
+	// CheckoutOrigin is the origin (https://pay.example.com) of the payment
+	// page, which Engine.CheckoutPage serves from Deps.CheckoutAssets. It is
+	// an origin of its own, apart from PublicBillingBaseURL and every
+	// declared Issuer; one that is not is refused and reported. Empty serves
+	// none.
+	CheckoutOrigin string
 
-	// DatabaseConfig is Config.Database: the Postgres schemas New creates,
-	// upgrades or validates when SkipMigrations is enabled, and the lease
-	// pool's size.
-	DatabaseConfig = config.DatabaseConfig
-	// LoggerConfig is Config.Logger: the log level.
-	LoggerConfig = config.LoggerConfig
-	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
-	RateLimitsConfig = config.RateLimitsConfig
-	// RateLimit is one bucket's requests per minute.
-	RateLimit = config.RateLimit
-	// UserActionRateLimitConfig sets the merchant-global rolling hour/day budget.
-	UserActionRateLimitConfig = config.UserActionRateLimitConfig
-	// DestructiveActionLimitsConfig sets the staff destructive-action limits.
-	DestructiveActionLimitsConfig = config.DestructiveActionLimitsConfig
-	// CaptchaConfig is Config.Captcha: the captcha account.
-	CaptchaConfig = config.CaptchaConfig
-	// VaultConfig is Config.Vault: the mounts OpenRails uses on Deps.Vault.
-	VaultConfig = config.VaultConfig
-	// SolanaConfig is Config.Solana: the deployment's Solana crankers.
-	SolanaConfig = config.SolanaConfig
-	// SolanaCrankerConfig is one of SolanaConfig.Crankers.
-	SolanaCrankerConfig = config.SolanaCrankerConfig
-	// LLMConfig is Config.LLM: the model behind the console's natural-language
-	// features.
-	LLMConfig = config.LLMConfig
-	// ProviderSandboxConfig is Config.ProviderSandbox: loopback provider
-	// gateways for sandbox runs.
-	ProviderSandboxConfig = config.ProviderSandboxConfig
-	// HyperSwitchConfig is Config.HyperSwitch: the host's HyperSwitch
-	// deployment.
-	HyperSwitchConfig = config.HyperSwitchConfig
-	// CardVaultConfig is Config.CardVault: the operator's card vault.
-	CardVaultConfig = config.CardVaultConfig
+	// RateLimits are the per-bucket request limits: nil takes the built-in
+	// limits, an empty map limits nothing (a host that fronts billing with its
+	// own limiter).
+	RateLimits RateLimitsConfig
+	// Captcha challenges a client that keeps hitting a rate limit.
+	Captcha *CaptchaConfig
+	// UserActionRateLimit bounds customer card deletes and soft cancellations
+	// across this merchant's users, actors and processes. Always enabled,
+	// including when the host owns ordinary HTTP rate limits.
+	UserActionRateLimit UserActionRateLimitConfig
+	// DestructiveActionLimits are the staff limits on refunds, revokes,
+	// cancels and the other held destructive actions. Zero fields keep the
+	// defaults.
+	DestructiveActionLimits DestructiveActionLimitsConfig
 
-	// EmailSender is Deps.Email: it delivers OpenRails' rendered email.
-	EmailSender = config.EmailSender
-	// Email is one message an EmailSender delivers.
-	Email = config.Email
-	// EmailAddress is a mailbox and its display name.
-	EmailAddress = config.EmailAddress
+	// Vault names the mounts of Deps.Vault: a KV mount makes Vault hold
+	// merchant configuration.
+	Vault *VaultConfig
+	// CardVault is the operator's card vault; nil refuses
+	// settings.card_vault platform.
+	CardVault *CardVaultConfig
+	// HyperSwitch is the host's trusted HyperSwitch deployment.
+	HyperSwitch *HyperSwitchConfig
+	// Solana is the deployment's Solana configuration: its crankers.
+	Solana *SolanaConfig
+	// LLM is the model behind the console's catalog questions.
+	// Without an API key those features are off.
+	LLM *LLMConfig
+	// ReadCache overrides how long the engine's handles serve catalog and
+	// configuration reads from memory; nil keeps the defaults.
+	ReadCache ReadCache
 
-	// UserInfo is Deps.UserInfo: authkit/userinfo's Lookup, the host's
-	// directory read in process (AuthKit's Client.UserInfo()). Email notices,
-	// the admin customer read, lists and search ask it.
-	UserInfo = config.UserInfo
+	// ProviderSandbox points non-live PSPs' provider clients at loopback
+	// gateways, to qualify a process against fake providers, and accepts
+	// extra CCBill webhook sources for sandbox accounts. A gateway is refused
+	// beside a live PSP and for anything but a literal loopback address.
+	ProviderSandbox *ProviderSandboxConfig
 
-	// Authenticator is Routes.Auth: authkit/auth's Authenticator, which says
-	// who a request is (AuthKit's ak.Authenticator()). OpenRails builds its
-	// gates from the Verified it returns.
-	Authenticator = billingauth.Authenticator
-	// Identity is who the Authenticator says a request is (authkit/auth):
-	// the Subject whose authority and money is used, the Invoker acting for
-	// it when that is someone else, and the Credential it was proven with.
-	Identity = billingauth.Identity
-	// SubjectKind is Identity.SubjectKind: SubjectUser or SubjectApplication.
-	SubjectKind = billingauth.SubjectKind
-	// Invoker is Identity.Invoker: the party acting for the subject.
-	Invoker = billingauth.Invoker
-	// Credential is Identity.Credential: how Subject proved itself.
-	Credential = billingauth.Credential
-	// CredentialKind is Credential.Kind.
-	CredentialKind = billingauth.CredentialKind
+	// EventRetention is the retained event-log lifetime, as a Go duration.
+	// Empty is 90 days. Reader progress never extends retention.
+	EventRetention string
+	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
+	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
+	WebhookSecretOverlap string
+}
 
-	// Read names a family of Client reads served from memory.
-	Read = config.Read
-	// ReadPolicy is how long a Read is served from memory.
-	ReadPolicy = config.ReadPolicy
-	// ReadCache is Config.ReadCache and RemoteOptions.ReadCache: the policy of
-	// each Read it names, replacing its default.
-	ReadCache = config.ReadCache
-)
-
-// A PSP's environment is its rail's own; omitted, it is the rail's
-// real-money one.
+// Config.ProviderWriteMode's values.
 const (
-	// EnvironmentLive moves real money on nmi, stripe and ccbill.
-	EnvironmentLive = config.EnvironmentLive
-	// EnvironmentTest is the provider's own system moving no money: an NMI
-	// account in test mode, Stripe test keys.
-	EnvironmentTest = config.EnvironmentTest
-	// EnvironmentSandbox is the provider's separate sandbox system:
-	// sandbox.nmi.com, CCBill's sandbox.
-	EnvironmentSandbox = config.EnvironmentSandbox
-	// EnvironmentMainnet is Solana's real-money network.
-	EnvironmentMainnet = config.EnvironmentMainnet
-	// EnvironmentDevnet is Solana's devnet.
-	EnvironmentDevnet = config.EnvironmentDevnet
-	// EnvironmentTestnet is Solana's testnet.
-	EnvironmentTestnet = config.EnvironmentTestnet
-
 	// ProviderWritesFull is normal operation.
-	ProviderWritesFull = config.ProviderWriteModeFull
+	ProviderWritesFull = "full"
 	// ProviderWritesLimited makes no system-initiated provider writes:
 	// dunning, invoice collection and the other proactive operations wait,
 	// while purchase and customer or staff actions run.
-	ProviderWritesLimited = config.ProviderWriteModeLimited
+	ProviderWritesLimited = "limited"
 	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
-	ProviderWritesReadOnly = config.ProviderWriteModeReadOnly
-
-	// SubjectUser is a user: a customer, or staff.
-	SubjectUser = billingauth.SubjectUser
-	// SubjectApplication is an application account.
-	SubjectApplication = billingauth.SubjectApplication
-
-	// CredentialSession is a signed-in session's token.
-	CredentialSession = billingauth.CredentialSession
-	// CredentialDeviceKey is a user's enrolled device key.
-	CredentialDeviceKey = billingauth.CredentialDeviceKey
-	// CredentialAPIKey is an API key of the subject's.
-	CredentialAPIKey = billingauth.CredentialAPIKey
-	// CredentialSignedToken is a token an application signed with its own
-	// key.
-	CredentialSignedToken = billingauth.CredentialSignedToken
-	// CredentialAccessToken is an authorization server's access token.
-	CredentialAccessToken = billingauth.CredentialAccessToken
-
-	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
-	// ListPrices.
-	ReadCatalog = config.ReadCatalog
-	// ReadMeters is GetMeter, ListMeters, GetLimit and ListLimits.
-	ReadMeters = config.ReadMeters
-	// ReadPublicConfig is GetPublicConfig.
-	ReadPublicConfig = config.ReadPublicConfig
-	// ReadMerchantConfiguration is GetMerchantConfiguration.
-	ReadMerchantConfiguration = config.ReadMerchantConfiguration
+	ProviderWritesReadOnly = "readonly"
 )
 
-// ErrUnauthenticated refuses a request without a valid credential: the
-// authkit/auth sentinel.
-var ErrUnauthenticated = billingauth.ErrUnauthenticated
+// A PSP's environment (billing.PSPConfig.Environment) is its rail's own;
+// omitted, it is the rail's real-money one.
+const (
+	// EnvironmentLive moves real money on nmi, stripe and ccbill.
+	EnvironmentLive = "live"
+	// EnvironmentTest is the provider's own system moving no money: an NMI
+	// account in test mode, Stripe test keys.
+	EnvironmentTest = "test"
+	// EnvironmentSandbox is the provider's separate sandbox system:
+	// sandbox.nmi.com, CCBill's sandbox.
+	EnvironmentSandbox = "sandbox"
+	// EnvironmentMainnet is Solana's real-money network.
+	EnvironmentMainnet = "mainnet"
+	// EnvironmentDevnet is Solana's devnet.
+	EnvironmentDevnet = "devnet"
+	// EnvironmentTestnet is Solana's testnet.
+	EnvironmentTestnet = "testnet"
+)
+
+// DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
+// The role of the pool New runs with owns every object in them.
+type DatabaseConfig struct {
+	// Schema holds OpenRails' tables. Empty is "billing".
+	Schema string
+	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
+	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
+	// host's River. Start runs OpenRails' own River client there, and a host
+	// fleet passed to Start with WithRiverClient must use the same schema.
+	RiverSchema string
+	// SkipMigrations makes New validate existing schemas without applying
+	// migrations or preparing startup partitions: a migration that is missing,
+	// or was applied with other content, is billing.ErrMigrationsRequired.
+	// Call Migrate first. Normal request-time and scheduled partition
+	// maintenance is unchanged.
+	SkipMigrations bool
+	// LeaseConns caps the separate pool, copied from Deps.Postgres's
+	// configuration, that renews idempotency leases. Zero is four
+	// connections.
+	LeaseConns int
+}
+
+// RateLimitsConfig maps a feature bucket (purchase, payment, subscribe,
+// webhook, catalog-ask) to its request limit. A bucket left out is not
+// limited; other routes never are (a per-address ceiling belongs to the proxy
+// in front of OpenRails).
+type RateLimitsConfig map[string]*RateLimit
+
+// RateLimit is one bucket's limit over a fixed one-minute window.
+type RateLimit struct {
+	RequestsPerMinute int
+}
+
+// CaptchaConfig is the captcha account. Setting both keys enables the
+// challenge, which is asked only of a client that keeps hitting a rate limit
+// on purchase, payment methods or subscriptions.
+type CaptchaConfig struct {
+	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
+	Provider  string
+	SiteKey   string
+	SecretKey string
+}
+
+// UserActionRateLimitConfig bounds distinct customers affected by manual card
+// removals and cancellations in rolling hour/day windows. Zero fields select
+// defaults.
+type UserActionRateLimitConfig struct {
+	MinimumCustomersPerHour        int64
+	PaidCustomersPerHourlyCustomer int64
+	MinimumCustomersPerDay         int64
+	PaidCustomersPerDailyCustomer  int64
+}
+
+// DestructiveActionLimitsConfig is how many destructive actions staff may
+// take in a rolling hour and day before a hold stops them: each actor's, each
+// merchant's and the deployment's. The merchant and deployment limits are
+// floors that rise with active customers. Zero fields select the defaults
+// (actor 5/15, merchant 15/25, deployment 50/100).
+type DestructiveActionLimitsConfig struct {
+	ActorPerHour      int64
+	ActorPerDay       int64
+	MerchantPerHour   int64
+	MerchantPerDay    int64
+	DeploymentPerHour int64
+	DeploymentPerDay  int64
+}
+
+// VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
+// makes Vault hold merchant configuration; CardVault.KVMount can read card
+// credentials separately.
+type VaultConfig struct {
+	// KVMount is the KV v2 mount merchant configuration lives in, under
+	// ScopePrefix. Empty: Config.Merchants holds it.
+	KVMount string
+	// ScopePrefix is the path under KVMount; empty is "openrails".
+	ScopePrefix string
+	// TransitMount is the Transit mount Solana signing keys live under; empty
+	// is "transit".
+	TransitMount string
+}
+
+// CardVaultConfig is the operator's card vault for this deployment's
+// posture: merchants with settings.card_vault platform store new cards in it,
+// each in its own partition. Its keys are in Vault, at
+// <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
+type CardVaultConfig struct {
+	// Kind is the vault vendor: basis_theory.
+	Kind string
+	// TenantID is the vendor's tenant id.
+	TenantID string
+	// KVMount holds the platform credential document. Empty uses
+	// Config.Vault's KVMount. Setting this does not select Vault as the
+	// merchant configuration source.
+	KVMount string
+}
+
+// HyperSwitchConfig identifies the one trusted custody deployment and its
+// vendor-owned browser assets. Merchant settings cannot change either target.
+// The SDK is a separate server in the vendor product, hence its explicit URL.
+type HyperSwitchConfig struct {
+	// AllowLoopbackHTTP admits an http loopback fixture; refused beside a live PSP.
+	AllowLoopbackHTTP bool
+	APIBaseURL        string
+	SDKURL            string
+}
+
+// SolanaConfig is the deployment's Solana configuration.
+type SolanaConfig struct {
+	// Crankers sign Solana rebilling, in order: the first publishes new plans,
+	// and each pulls the renewals of the plans it owns, whose owner is fixed
+	// on-chain. A plan no listed cranker owns cannot be pulled. Empty turns
+	// Solana rebilling off; one-time payments still work.
+	Crankers []SolanaCrankerConfig
+}
+
+// SolanaCrankerConfig is one cranker: a key that publishes and pulls plans and
+// pays their fees, on whichever network each Solana PSP names (it needs SOL
+// there). It never receives money: a plan pays only its merchant's treasury.
+type SolanaCrankerConfig struct {
+	// Mode is vault_transit (the key never leaves Vault Transit) or
+	// local_keypair.
+	Mode string
+	// Key names the Vault Transit key (vault_transit).
+	Key string
+	// PrivateKey is the base58 keypair (local_keypair). A secret.
+	PrivateKey string
+}
+
+// LLMConfig configures the model behind the console's catalog questions.
+type LLMConfig struct {
+	// Provider selects the API dialect: "anthropic" (the default) or
+	// "openai". Any other value is refused.
+	Provider string
+	// Model is the provider's model ID; empty is the provider's default.
+	Model string
+	// BaseURL replaces the provider's public endpoint: an absolute https URL.
+	// With openai it includes the version segment (https://host/v1); with
+	// anthropic it is the origin.
+	BaseURL string
+	// APIKey is the provider credential. Empty turns the features off.
+	APIKey string
+	// CatalogCopilotEnabled turns on read-only questions about the catalog,
+	// which send aggregate catalog and subscriber counts to the provider.
+	CatalogCopilotEnabled bool
+	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
+	// changes. Drafts are proposals; nothing is applied.
+	CatalogDraftingEnabled bool
+}
+
+// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
+// Each is an absolute http(s) URL whose host is a loopback IP literal, with no
+// userinfo; hostnames, even "localhost", are refused.
+type ProviderSandboxConfig struct {
+	// NMIGatewayURL replaces the NMI sandbox endpoints.
+	NMIGatewayURL string
+	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
+	// pinned API version still apply.
+	StripeAPIURL string
+	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
+	SolanaRPCURL string
+	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
+	CCBillDataLinkURL string
+	// CCBillWebhookSources are extra source CIDRs accepted as a sandbox
+	// CCBill account's webhook origins. CCBill signs nothing, so the source
+	// address is the authentication: a live account accepts CCBill's own
+	// ranges alone.
+	CCBillWebhookSources []string
+}
 
 // ParseMerchantDocument reads a merchant's document from YAML: a required
 // slug and the configuration beside it, refusing unknown fields. A
 // MerchantDeclaration's Issuer and Binding are set in code.
-func ParseMerchantDocument(raw []byte) (MerchantDocument, error) {
+func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	return config.ParseMerchantDocument(raw)
+}
+
+// engineConfig is cfg as the engine reads it. Each settings type converts as
+// a whole, so a field one side lacks fails to compile; ReadCache is the
+// handles', not the engine's.
+func engineConfig(cfg Config) config.Config {
+	out := config.Config{
+		ProviderWriteMode:       cfg.ProviderWriteMode,
+		EngineAdmissionHold:     cfg.EngineAdmissionHold,
+		UsageBillingEnabled:     cfg.UsageBillingEnabled,
+		Database:                config.DatabaseConfig(cfg.Database),
+		Merchants:               cfg.Merchants,
+		PublicBillingBaseURL:    cfg.PublicBillingBaseURL,
+		ReturnOrigins:           cfg.ReturnOrigins,
+		TrustedProxies:          cfg.TrustedProxies,
+		CheckoutOrigin:          cfg.CheckoutOrigin,
+		Captcha:                 convert(cfg.Captcha, func(c CaptchaConfig) config.CaptchaConfig { return config.CaptchaConfig(c) }),
+		UserActionRateLimit:     config.UserActionRateLimitConfig(cfg.UserActionRateLimit),
+		DestructiveActionLimits: config.DestructiveActionLimitsConfig(cfg.DestructiveActionLimits),
+		Vault:                   convert(cfg.Vault, func(c VaultConfig) config.VaultConfig { return config.VaultConfig(c) }),
+		CardVault:               convert(cfg.CardVault, func(c CardVaultConfig) config.CardVaultConfig { return config.CardVaultConfig(c) }),
+		HyperSwitch:             convert(cfg.HyperSwitch, func(c HyperSwitchConfig) config.HyperSwitchConfig { return config.HyperSwitchConfig(c) }),
+		LLM:                     convert(cfg.LLM, func(c LLMConfig) config.LLMConfig { return config.LLMConfig(c) }),
+		ProviderSandbox:         convert(cfg.ProviderSandbox, func(c ProviderSandboxConfig) config.ProviderSandboxConfig { return config.ProviderSandboxConfig(c) }),
+		EventRetention:          cfg.EventRetention,
+		WebhookSecretOverlap:    cfg.WebhookSecretOverlap,
+	}
+	if cfg.RateLimits != nil {
+		out.RateLimits = make(config.RateLimitsConfig, len(cfg.RateLimits))
+		for bucket, limit := range cfg.RateLimits {
+			out.RateLimits[bucket] = convert(limit, func(l RateLimit) config.RateLimit { return config.RateLimit(l) })
+		}
+	}
+	out.Solana = convert(cfg.Solana, func(s SolanaConfig) config.SolanaConfig {
+		crankers := make([]config.SolanaCrankerConfig, len(s.Crankers))
+		for i, c := range s.Crankers {
+			crankers[i] = config.SolanaCrankerConfig(c)
+		}
+		return config.SolanaConfig{Crankers: crankers}
+	})
+	return out
+}
+
+// convert is f of *p, or nil for nil.
+func convert[U, T any](p *T, f func(T) U) *U {
+	if p == nil {
+		return nil
+	}
+	u := f(*p)
+	return &u
 }

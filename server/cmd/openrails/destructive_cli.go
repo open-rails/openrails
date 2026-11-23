@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -79,7 +80,7 @@ triggering actor.`}
 				return err
 			}
 			cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
-			runtime := &app.Runtime{DB: database, Config: cfg}
+			runtime := &app.Runtime{DB: database, Config: cfg, Log: slog.Default()}
 			if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
 				return err
 			}

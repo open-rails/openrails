@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -135,7 +135,7 @@ func (s *EntitlementService) rebuildAfterMiss(merchantID billing.MerchantID, cus
 		ctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), merchantID), rebuildTimeout)
 		defer cancel()
 		if err := s.RebuildEntitlementCache(ctx, customer); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("customer_id", customer).Warn("entitlement cache rebuild failed; keys stay derived live")
+			s.Log.WarnContext(ctx, "entitlement cache rebuild failed; keys stay derived live", logx.Err(err), "customer_id", customer)
 		}
 	}()
 }

@@ -45,7 +45,7 @@ func stripePastDueMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *b
 		accounts = newStripeAccounts(t, w, "sk_test_old")
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
+		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
 	})
 	old := accounts.accounts["sk_test_old"].core
@@ -389,7 +389,7 @@ func TestDueWork(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 			m := cfgMerchant(w.cfg, "alpha")
-			m.PSPs = openrails.PSPs{}
+			m.PSPs = billing.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
 				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -212,7 +213,7 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	}
 	// A minimal runtime shares the real handlers and merchant gate without
 	// initializing credentials, providers, workers, FX refresh or control plane.
-	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock()}
+	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock(), Log: slog.Default()}
 	mux := http.NewServeMux()
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(mux, "/v1", rt), rt,
 		httproutes.HostOptions(), "/v1/merchant/billing-archive")
@@ -373,7 +374,7 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 					return err
 				}
 				defer database.Close()
-				directory, err := merchants.NewDirectoryService(database.DataPool())
+				directory, err := merchants.NewDirectoryService(slog.Default(), database.DataPool())
 				if err != nil {
 					return err
 				}

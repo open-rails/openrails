@@ -25,6 +25,36 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
+// Read names a family of Client reads served from memory.
+type Read string
+
+// The cacheable reads. Customer and money reads (orders, payments,
+// subscriptions, entitlements, balances, customers) are never cached.
+const (
+	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
+	// ListPrices.
+	ReadCatalog Read = "catalog"
+	// ReadMeters is GetMeter, ListMeters, GetLimit and ListLimits.
+	ReadMeters Read = "meters"
+	// ReadPublicConfig is GetPublicConfig.
+	ReadPublicConfig Read = "public_config"
+	// ReadMerchantConfiguration is GetMerchantConfiguration.
+	ReadMerchantConfiguration Read = "merchant_configuration"
+)
+
+// ReadPolicy is how a read is served from memory: an answer younger than
+// RefreshAfter is served as is; an older one is served while it reloads in
+// the background, and while reloads fail until it is MaxStale old. The zero
+// policy reads live.
+type ReadPolicy struct {
+	RefreshAfter time.Duration
+	MaxStale     time.Duration
+}
+
+// ReadCache is Config.ReadCache and RemoteOptions.ReadCache: the policy of
+// each Read it names, replacing its default.
+type ReadCache map[Read]ReadPolicy
+
 // transport is how a handle reaches OpenRails, which sets what a read costs.
 type transport string
 

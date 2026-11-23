@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 	"strings"
 
@@ -58,7 +59,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.Prune(c.Context(), hosttools.PruneOptions{
+			return hosttools.Prune(c.Context(), slog.Default(), hosttools.PruneOptions{
 				Config: cfg, PGXPool: pool, Vault: vault, MerchantID: mid, Rails: rails, PSP: psp, Since: since, Until: until,
 				ExpectRows: expect, Actor: cliActor(), Format: format, LogDir: logDir,
 				MerchantManifest: manifest, Out: os.Stdout,
@@ -90,7 +91,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hosttools.PruneList(c.Context(), hosttools.PruneListOptions{
+			return hosttools.PruneList(c.Context(), slog.Default(), hosttools.PruneListOptions{
 				Config: cfg, PGXPool: pool, MerchantID: mid, Limit: limit, Format: listFormat, Out: os.Stdout,
 			})
 		},

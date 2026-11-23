@@ -3,13 +3,12 @@ package routes
 import (
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -48,7 +47,7 @@ func (e *Env) merchantByOrder(route Route) router.Middleware {
 			owners, err := e.directory().GetOrderMerchant(r.Request.Context(), id.UUID())
 			switch {
 			case err != nil:
-				log.WithError(err).WithField("route", route.Key()).Error("openrails: order merchant lookup failed")
+				r.Log.ErrorContext(r.Request.Context(), "openrails: order merchant lookup failed", logx.Err(err), "route", route.Key())
 				r.AbortCode(billing.CodeInternalError, "")
 			case len(owners) != 1:
 				r.AbortCode(billing.CodeResourceNotFound, "order not found")

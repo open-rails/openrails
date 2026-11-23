@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -200,7 +200,7 @@ func (s *SubscriptionLifecycleService) SetDefaultPaymentMethod(ctx context.Conte
 			for _, id := range swaps {
 				// Durable: the executor finishes what does not settle inline.
 				if err := c.Swaps.ExecuteSwap(ctx, id); err != nil {
-					log.WithContext(ctx).WithError(err).WithField("intent_id", id).Warn("default payment method: schedule swap left to the executor")
+					s.Log.WarnContext(ctx, "default payment method: schedule swap left to the executor", logx.Err(err), "intent_id", id)
 				}
 			}
 			return nil

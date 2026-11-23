@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -44,12 +45,12 @@ type providerRuntimeOptions struct {
 	MerchantManifestPath string
 }
 
-func newProviderRuntime(ctx context.Context, opts providerRuntimeOptions) (*providerRuntime, func(), error) {
+func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerRuntimeOptions) (*providerRuntime, func(), error) {
 	cfg := opts.Config
 	if cfg == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	database, err := openEmbeddedDB(cfg, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, cfg, opts.PGXPool)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,9 +144,9 @@ func parseProviderTime(s, name string) (time.Time, error) {
 	return t, nil
 }
 
-func nmiClients(transport http.RoundTripper) *railresolve.NMIFactory {
+func nmiClients(logger *slog.Logger, transport http.RoundTripper) *railresolve.NMIFactory {
 	if transport == nil {
 		return nil
 	}
-	return &railresolve.NMIFactory{Transport: transport}
+	return &railresolve.NMIFactory{Transport: transport, Log: logger}
 }

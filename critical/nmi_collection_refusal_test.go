@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestNMICollectionRefusal(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, psps.Items, 1)
 				psp := psps.Items[0]
-				client, err := nmi.NewAccountClient(a.alpha.MerchantID().UUID(), psp.ID.UUID(), psp.GatewayID, &config.NMIProviderSettings{SecurityKey: "critical-nmi-key", Environment: config.EnvironmentTest})
+				client, err := nmi.NewAccountClient(slog.Default(), a.alpha.MerchantID().UUID(), psp.ID.UUID(), psp.GatewayID, &config.NMIProviderSettings{SecurityKey: "critical-nmi-key", Environment: config.EnvironmentTest})
 				require.NoError(t, err)
 				key := client.PostureKey()
 				restore := func() {

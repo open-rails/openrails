@@ -27,7 +27,7 @@ func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute,
 		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}
 	m, err := s.GetBySlug(ctx, slug)
-	if errors.Is(err, ErrMerchantNotFound) || errors.Is(err, ErrMerchantRetired) {
+	if errors.Is(err, billing.ErrMerchantNotFound) || errors.Is(err, ErrMerchantRetired) {
 		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}
 	if err != nil {

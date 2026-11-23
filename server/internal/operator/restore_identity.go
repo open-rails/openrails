@@ -55,7 +55,7 @@ func ProvisionMerchantForRestore(ctx context.Context, cp *controlplane.ControlPl
 	} else if err != nil {
 		return nil, err
 	}
-	directory, err := merchants.NewDirectoryService(cp.Pool())
+	directory, err := merchants.NewDirectoryService(cp.Log, cp.Pool())
 	if err != nil {
 		return nil, err
 	}

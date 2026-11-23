@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/modules/parking"
@@ -39,15 +39,15 @@ func parkSubscription(ctx context.Context, database *db.DB, findings reconcile.F
 	if err != nil {
 		return err
 	}
-	fields := log.Fields{"rail": s.Rail, "subscription_reference": s.SubscriptionRef, "reason": s.Reason, "price_ref": s.PriceRef, "customer_ref": s.CustomerRef}
+	fields := []any{"rail", s.Rail, "subscription_reference", s.SubscriptionRef, "reason", s.Reason, "price_ref", s.PriceRef, "customer_ref", s.CustomerRef}
 	if res.ImportOwned {
-		log.WithContext(ctx).WithFields(fields).Info("converge: parked a subscription the PSP's import owns; no finding while it pulls or stages it")
+		database.Log.With(fields...).InfoContext(ctx, "converge: parked a subscription the PSP's import owns; no finding while it pulls or stages it")
 		return nil
 	}
-	log.WithContext(ctx).WithFields(fields).Warn("converge: parked a live provider subscription it cannot land")
+	database.Log.With(fields...).WarnContext(ctx, "converge: parked a live provider subscription it cannot land")
 	if res.Finding != nil && findings != nil {
 		if err := findings.NotifyFinding(ctx, reconcile.FindingRecordFromRow(*res.Finding)); err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithFields(fields).Warn("converge: notifying the park's finding failed; it stays in the console")
+			database.Log.With(fields...).WarnContext(ctx, "converge: notifying the park's finding failed; it stays in the console", logx.Err(err))
 		}
 	}
 	return nil
@@ -60,15 +60,15 @@ func raisePlanless(ctx context.Context, database *db.DB, findings reconcile.Find
 	if err != nil {
 		return err
 	}
-	fields := log.Fields{"rail": s.Rail, "subscription_reference": s.SubscriptionRef, "customer_ref": s.CustomerRef}
+	fields := []any{"rail", s.Rail, "subscription_reference", s.SubscriptionRef, "customer_ref", s.CustomerRef}
 	if f == nil {
-		log.WithContext(ctx).WithFields(fields).Info("converge: unheld subscription names no plan; its PSP import lists it")
+		database.Log.With(fields...).InfoContext(ctx, "converge: unheld subscription names no plan; its PSP import lists it")
 		return nil
 	}
-	log.WithContext(ctx).WithFields(fields).Warn("converge: unheld subscription names no plan and cannot land; raised a finding")
+	database.Log.With(fields...).WarnContext(ctx, "converge: unheld subscription names no plan and cannot land; raised a finding")
 	if findings != nil {
 		if err := findings.NotifyFinding(ctx, reconcile.FindingRecordFromRow(*f)); err != nil && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithFields(fields).Warn("converge: notifying the plan-less finding failed; it stays in the console")
+			database.Log.With(fields...).WarnContext(ctx, "converge: notifying the plan-less finding failed; it stays in the console", logx.Err(err))
 		}
 	}
 	return nil

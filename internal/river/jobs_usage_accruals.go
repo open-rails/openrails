@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -30,6 +30,7 @@ const (
 type UsageAccrualWorker struct {
 	DB    *db.DB
 	Money *money.MoneyService
+	Log   *slog.Logger
 }
 
 // DueBy reports an accrual of a day before at's still unposted.
@@ -41,7 +42,7 @@ func (w UsageAccrualWorker) DueBy(ctx context.Context, at time.Time) (bool, erro
 func (w UsageAccrualWorker) Pass(ctx context.Context) error {
 	now := w.Money.Clock().Now().UTC()
 	today := now.Truncate(24 * time.Hour)
-	logger := log.WithContext(ctx).WithField("worker", KindUsageAccruals)
+	logger := w.Log.With("worker", KindUsageAccruals)
 	args := gen.ListDueUsageAccrualsParams{DayAt: today, RowLimit: usageAccrualBatch}
 	var failed error
 	for {
@@ -55,8 +56,7 @@ func (w UsageAccrualWorker) Pass(ctx context.Context) error {
 				return err
 			})
 			if err != nil {
-				logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
-					Error("usage accruals: posting failed; continuing")
+				logger.ErrorContext(ctx, "usage accruals: posting failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "customer_id", row.CustomerID, "currency", row.Currency)
 				failed = errors.Join(failed, fmt.Errorf("usage accruals: merchant %s customer %s %s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
 			}
 			if ctx.Err() != nil {

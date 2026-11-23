@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -56,6 +56,7 @@ type StripeConvergeService struct {
 	Objects *providerobjects.Observer
 	// Findings notifies an operator of the finding a park raises.
 	Findings reconcile.FindingNotifier
+	Log      *slog.Logger
 }
 
 func (s *StripeConvergeService) now() time.Time {
@@ -93,8 +94,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 			return uuid.Nil, fmt.Errorf("stripe converge: load local subscription: %w", err)
 		}
 		if !rec.Found {
-			log.WithContext(ctx).WithField("rail_subscription_id", railSubID).
-				Info("stripe converge: subscription unknown locally and gone at Stripe; nothing to do")
+			s.Log.InfoContext(ctx, "stripe converge: subscription unknown locally and gone at Stripe; nothing to do", "rail_subscription_id", railSubID)
 			return uuid.Nil, closePark(ctx, s.DB, railSubID, billing.ParkGone, now)
 		}
 		return s.createFromFetchedRecord(ctx, railSubID, rec, reader, now)
@@ -119,17 +119,11 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 	}
 
 	snap := reconcile.StripeSnapshotFromLiveness(railSubID, rec, now)
-	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
+	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.Log, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("stripe converge: %w", err)
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail_subscription_id": railSubID,
-		"transition":           res.Decision.Kind.String(),
-		"reason":               res.Decision.Reason,
-		"applied":              res.Applied,
-		"backfilled":           res.Backfilled,
-	}).Info("stripe converge: decided from fetched truth")
+	s.Log.InfoContext(ctx, "stripe converge: decided from fetched truth", "rail_subscription_id", railSubID, "transition", res.Decision.Kind.String(), "reason", res.Decision.Reason, "applied", res.Applied, "backfilled", res.Backfilled)
 
 	return sub.CustomerID, nil
 }
@@ -144,9 +138,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	if !rec.LatestInvoicePaid || (status != "active" && status != "trialing") {
 		// Nothing settled yet (incomplete signup, unpaid first invoice) — the
 		// row stays uncreated; the next event/pull re-wakes us.
-		log.WithContext(ctx).WithFields(log.Fields{
-			"rail_subscription_id": railSubID, "status": rec.Status, "invoice_paid": rec.LatestInvoicePaid,
-		}).Info("stripe converge: fetched subscription has no settled paid invoice; not creating membership")
+		s.Log.InfoContext(ctx, "stripe converge: fetched subscription has no settled paid invoice; not creating membership", "rail_subscription_id", railSubID, "status", rec.Status, "invoice_paid", rec.LatestInvoicePaid)
 		if status == "canceled" || status == "incomplete_expired" {
 			return uuid.Nil, closePark(ctx, s.DB, railSubID, billing.ParkGone, now)
 		}
@@ -242,9 +234,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	if err != nil {
 		return sub.CustomerID, err
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
-	}).Info("stripe converge: membership created from fetched record")
+	s.Log.InfoContext(ctx, "stripe converge: membership created from fetched record", "rail_subscription_id", railSubID, "subscription_id", sub.ID, "user_id", userID)
 	if price := firstDeferred(deferred); price != "" {
 		return sub.CustomerID, s.parkDeferred(ctx, sub, rec, price, deferred[price], now)
 	}
@@ -359,7 +349,7 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	ended := status == "canceled" || status == "incomplete_expired"
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		subRepo := subscriptions.NewSubscriptionRepo(txdb)
 		sub, err := subRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
 		if err != nil {
@@ -439,8 +429,7 @@ func (s *StripeConvergeService) mirrorPortalCancel(ctx context.Context, txdb *db
 func (s *StripeConvergeService) mirrorPortalResume(ctx context.Context, txdb *db.DB, sub *models.Subscription, now time.Time) error {
 	effects, err := subscriptions.Transition(sub, lifecycle.Resume{At: now}, now)
 	if errors.Is(err, lifecycle.ErrIllegal) {
-		log.WithContext(ctx).WithField("subscription_id", sub.ID).
-			Info("stripe converge: Stripe resumed a subscription whose paid period is over; waiting for a payment")
+		s.Log.InfoContext(ctx, "stripe converge: Stripe resumed a subscription whose paid period is over; waiting for a payment", "subscription_id", sub.ID)
 		return nil
 	}
 	if err != nil || len(effects) == 0 {
@@ -459,8 +448,7 @@ func (s *StripeConvergeService) mirrorPortalResume(ctx context.Context, txdb *db
 func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord) (*models.Price, bool, error) {
 	price, err := s.PriceService.GetByStripePriceID(ctx, rec.PriceID)
 	if db.IsNotFound(err) {
-		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID}).
-			Warn("stripe converge: price moved at Stripe onto an unmapped price; keeping the paid tier")
+		s.Log.WarnContext(ctx, "stripe converge: price moved at Stripe onto an unmapped price; keeping the paid tier", "stripe_price_id", rec.PriceID, "subscription_id", sub.ID)
 		return nil, true, nil
 	}
 	if err != nil {
@@ -470,8 +458,7 @@ func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.S
 		return nil, false, nil
 	}
 	if !rec.LatestInvoicePaid || !slices.Contains(rec.LatestInvoicePriceIDs, rec.PriceID) {
-		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID, "invoice": rec.LatestInvoiceID}).
-			Info("stripe converge: price moved at Stripe without a paid invoice for it; keeping the paid tier")
+		s.Log.InfoContext(ctx, "stripe converge: price moved at Stripe without a paid invoice for it; keeping the paid tier", "stripe_price_id", rec.PriceID, "subscription_id", sub.ID, "invoice", rec.LatestInvoiceID)
 		return nil, false, nil
 	}
 	return price, false, nil

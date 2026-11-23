@@ -21,6 +21,7 @@ cases = [
     ("isolated-ui", [("M", "server/web/console/src/components/button.tsx")], {"browser", "security"}),
     ("client", [("M", "sdk/billing-ui/src/client/client.ts")], source),
     ("unknown", [("A", "new-domain/new.go")], source),
+    ("fixture-module", [("M", "critical/server-fixture/server_test.go")], source),
     ("shared-dependency", [("M", "go.mod")], keys),
     ("query", [("M", "internal/db/queries/customer.sql")], source),
     ("deleted-doc", [("D", "README.md")], keys),

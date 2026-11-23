@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"reflect"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/http/wireform"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -43,10 +44,11 @@ type Request struct {
 	w         http.ResponseWriter
 	wrote     bool
 	requestID string
+	Log       *slog.Logger
 }
 
 // New builds the Request a route handler answers.
-func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
+func New(logger *slog.Logger, w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
 	var clock clockwork.Clock
 	if runtime != nil {
 		clock = runtime.Clock
@@ -56,6 +58,7 @@ func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request 
 		Request: r,
 		Clock:   timeutil.FirstClock(clock),
 		w:       w,
+		Log:     logger,
 	}
 }
 
@@ -68,7 +71,7 @@ func New(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request 
 func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) {
 	// ResponseController unwraps the middleware writers via their Unwrap.
 	if err := http.NewResponseController(r.w).SetWriteDeadline(time.Time{}); err != nil {
-		logrus.WithError(err).WithField("request_id", r.RequestID()).Debug("route budget: connection write deadline could not be lifted")
+		r.Log.DebugContext(r.Request.Context(), "route budget: connection write deadline could not be lifted", logx.Err(err), "request_id", r.RequestID())
 	}
 	return context.WithTimeout(r.Request.Context(), d)
 }
@@ -76,13 +79,13 @@ func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) 
 // logRefusal records a response the handler itself chose. A 4xx is the
 // contract answering as designed and logs at info; only a 5xx is an error an
 // operator must act on.
-func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
-	entry := logrus.WithFields(fields).WithFields(logrus.Fields{"status": code, "request_id": r.RequestID()})
+func (r *Request) logRefusal(code int, fields []any, msg string) {
+	entry := r.Log.With(fields...).With("status", code, "request_id", r.RequestID())
 	if code >= http.StatusInternalServerError {
-		entry.Error(msg)
+		entry.ErrorContext(r.Request.Context(), msg)
 		return
 	}
-	entry.Info(msg)
+	entry.InfoContext(r.Request.Context(), msg)
 }
 
 // InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
@@ -96,7 +99,7 @@ func (r *Request) InternalError(msg string, cause error) {
 		return
 	}
 	requestID := r.RequestID()
-	logrus.WithError(cause).WithField("request_id", requestID).Error(msg)
+	r.Log.ErrorContext(r.Request.Context(), msg, logx.Err(cause), "request_id", requestID)
 	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
 	response.Error.RequestID = requestID
 	r.writeJSON(http.StatusInternalServerError, response)
@@ -147,8 +150,8 @@ func (r *Request) ErrorCode(code billing.ErrorCode, message string) {
 // AbortAPIError is APIError that also stops the middleware chain.
 func (r *Request) AbortAPIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
-	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}, err.Message)
-	r.writeJSON(err.HTTPStatus, err.ToResponse())
+	r.logRefusal(err.HTTPStatus, []any{"type", err.Type, "code", err.Code, "param", paramValue(err.Param)}, err.Message)
+	r.writeAPIError(err)
 }
 
 // paramValue logs a refusal's param, not its pointer.
@@ -161,11 +164,19 @@ func paramValue(p *string) any {
 
 func (r *Request) APIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
-	fields := logrus.Fields{"type": err.Type, "code": err.Code, "param": paramValue(err.Param)}
+	fields := []any{"type", err.Type, "code", err.Code, "param", paramValue(err.Param)}
 	if cause := err.Cause(); cause != nil {
-		fields[logrus.ErrorKey] = cause
+		fields = append(fields, logx.Err(cause))
 	}
 	r.logRefusal(err.HTTPStatus, fields, err.Message)
+	r.writeAPIError(err)
+}
+
+// writeAPIError answers err, logging how it departs from the error registry.
+func (r *Request) writeAPIError(err *api.APIError) {
+	if violation := err.Violation(); violation != "" {
+		r.Log.ErrorContext(r.Request.Context(), violation, "request_id", r.RequestID())
+	}
 	r.writeJSON(err.HTTPStatus, err.ToResponse())
 }
 

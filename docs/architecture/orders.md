@@ -1,12 +1,14 @@
-# Checkout and orders
+# Orders and checkout
 
-Checkout turns the lines a customer picks into an order and takes its payment:
-carts and previews, orders and their frozen lines, one-off purchases (saved or new
+An order is every bill: a one-off purchase, a subscription renewal (provider-run
+ones included) or a period's usage, each with frozen lines and a total. Checkout
+is one way to pay an order: it turns the lines a customer picks into an order and
+takes its payment, through carts and previews, one-off purchases (saved or new
 card, a provider's hosted page, a Solana wallet) and the payment page a pay URL
 opens. Customers buy through `/v1/me` (billing-ui), a merchant's backend creates
-unpaid orders for them (`/v1/app/orders`), and staff read them. Recurring
-lines, renewals and usage orders: [subscriptions.md](subscriptions.md),
-[dunning.md](dunning.md).
+unpaid orders for them (`/v1/app/orders`), and staff read them. Renewals are
+[subscriptions](subscriptions.md), usage orders [usage billing](usage-billing.md),
+and collecting what is unpaid [collection and dunning](dunning.md).
 
 ## Concepts
 
@@ -174,7 +176,7 @@ Checks:
 - `payURLScope` refuses another order's `{id}` and saved cards the URL does not offer.
 - OR-J03-S01 to S03: a secret pays its order only; API and checkout authority stay apart.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 Every route is declared once in the route catalog; admin and app routes carry the
 `Name` of their `Client` method. The in-process `Client` calls the same handlers
 through the in-process transport, so both clients answer alike. Orders, lines,
@@ -185,8 +187,7 @@ Checks:
 - Each `Name` in `internal/http/routes/orders.go` is a `Client` method that calls
   that route.
 
-### 6. Migrations and retention
-The tables are in `0001_schema.up.sql`; `0002` added `order_lines.billing_interval_months`.
+### 6. Data lifecycle
 Retention classes (`retention.Tables`): `orders` rows (unpaid closed orders that
 never started an attempt go 90 days after closing, `DeleteClosedUnpaidOrders`),
 `order_attempts` rows (expired never-sent attempts after 90 days), `order_lines`

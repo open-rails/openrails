@@ -3,6 +3,7 @@ package embedhttp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
@@ -21,7 +22,7 @@ import (
 // wrapCustomerRoutes applies the browser-tier base chain to the customer
 // routes: permissive CORS, body limits, credential admission and the rate
 // limiter. Each route's own gate runs inside it.
-func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billingauth.Authenticator) *router.Table {
+func wrapCustomerRoutes(logger *slog.Logger, rt *app.Runtime, mux *router.Table, credentials billingauth.Authenticator) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewRoutes
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -42,11 +43,11 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billinga
 	for i := range mux.Entries {
 		mux.Entries[i].Browser = true
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, state, store, resolver)
+	limiter := middleware.RateLimitHTTP(logger, rateLimits, captchaCfg, state, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		return middleware.ChainHTTP(entry.Handler,
 			middleware.WithRoutePath(embeddedMount+entry.Path),
-			middleware.RecoverHTTP(),
+			middleware.RecoverHTTP(logger),
 			middleware.SecurityHeadersHTTP(),
 			// #765: this handler's entire surface is browser tier — always the
 			// static permissive `*` grant, no per-request source.

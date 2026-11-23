@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -60,8 +60,7 @@ func fenceExport(ctx context.Context, database *db.DB, id billing.MerchantID) (u
 			return q.SetWritePosture(ctx, gen.SetWritePostureParams{MerchantID: id.UUID(), Mode: previous.Mode, Reason: previous.Reason, SetBy: previous.SetBy, SetAt: previous.SetAt})
 		})
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", id.String()).
-				Error("billing export failed and its source stays readonly; `openrails merchant arm` restores writes")
+			database.Log.ErrorContext(ctx, "billing export failed and its source stays readonly; `openrails merchant arm` restores writes", logx.Err(err), "merchant_id", id.String())
 		}
 	}, nil
 }

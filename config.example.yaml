@@ -21,7 +21,8 @@ port: 3053
 public_billing_base_url: http://localhost:3053
 
 logger:
-  level: info       # debug | info | warn | error | fatal | panic
+  level: info       # debug | info | warn | error
+  format: json      # json | text
 
 db:
   url: ""           # optional; overrides the fields below when set

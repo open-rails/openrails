@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -113,6 +113,7 @@ type SubscriptionConvergeWorker struct {
 	Importer func() *pspimport.Importer
 	// Findings notifies an operator of the finding a park raises.
 	Findings reconcile.FindingNotifier
+	Log      *slog.Logger
 }
 
 func (SubscriptionConvergeWorker) Kind() string { return KindSubscriptionConverge }
@@ -123,9 +124,7 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		return fmt.Errorf("subscription converge: db not configured")
 	}
 	if args.PSPID == uuid.Nil || args.MerchantID == uuid.Nil || strings.TrimSpace(args.Rail) == "" || strings.TrimSpace(args.SubscriptionReference) == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": args.MerchantID, "rail": args.Rail, "reference": args.SubscriptionReference,
-		}).Warn("subscription converge: incomplete identity; dropping job")
+		w.Log.WarnContext(ctx, "subscription converge: incomplete identity; dropping job", "merchant_id", args.MerchantID, "rail", args.Rail, "reference", args.SubscriptionReference)
 		return nil
 	}
 
@@ -184,6 +183,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			OrderAttemptService: w.OrderAttemptService,
 			Objects:             w.objects(),
 			Findings:            w.Findings,
+			Log:                 w.Log,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 
@@ -210,6 +210,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			MoneyService:                 w.MoneyService,
 			Objects:                      w.objects(),
 			Findings:                     w.Findings,
+			Log:                          w.Log,
 		}
 		if w.Importer != nil {
 			if im := w.Importer(); im != nil {
@@ -219,8 +220,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 		return svc.Converge(ctx, args.SubscriptionReference)
 
 	default:
-		log.WithContext(ctx).WithField("rail", args.Rail).
-			Warn("subscription converge: rail has no fetch-and-converge implementation; dropping")
+		w.Log.WarnContext(ctx, "subscription converge: rail has no fetch-and-converge implementation; dropping", "rail", args.Rail)
 		return uuid.Nil, nil
 	}
 }

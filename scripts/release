@@ -64,7 +64,7 @@ PY
   # otherwise release qualification asks for go mod tidy before tests can run.
   (cd "$work/critical/server-fixture" &&
     go mod edit -require="github.com/open-rails/openrails@$version" -require="github.com/open-rails/openrails/server@$version" &&
-    go test -mod=readonly -c -p 2 -o "$admin/server-fixture.test" .)
+    go test -mod=readonly -tags integration -c -p 2 -o "$admin/server-fixture.test" .)
   git -C "$work" commit --quiet -S -am "Release $version: pin server, adapter and test fixture to the paired root"
   git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
   gh pr create --base master --head "$branch" --title "Release $version" \

@@ -4,17 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/balancelook"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -36,6 +37,7 @@ const (
 type BalanceWatchWorker struct {
 	DB    *db.DB
 	Money *money.MoneyService
+	Log   *slog.Logger
 }
 
 // DueBy reports a watch due since before at: a lapse, a running charge's
@@ -46,7 +48,7 @@ func (w BalanceWatchWorker) DueBy(ctx context.Context, at time.Time) (bool, erro
 
 func (w BalanceWatchWorker) Pass(ctx context.Context) error {
 	now := w.Money.Clock().Now().UTC()
-	logger := log.WithContext(ctx).WithField("worker", KindBalanceWatch)
+	logger := w.Log.With("worker", KindBalanceWatch)
 	args := gen.ListDueBalanceWatchesParams{Now: now, RowLimit: balanceWatchBatch}
 	var failed error
 	for {
@@ -62,8 +64,7 @@ func (w BalanceWatchWorker) Pass(ctx context.Context) error {
 			})
 			if err != nil {
 				// One customer's failure must not hold up the rest: its watch stays due.
-				logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
-					Error("balance watch: look failed; continuing")
+				logger.ErrorContext(ctx, "balance watch: look failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "customer_id", row.CustomerID, "currency", row.Currency)
 				failed = errors.Join(failed, fmt.Errorf("balance watch: merchant %s customer %s %s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
 			}
 		}

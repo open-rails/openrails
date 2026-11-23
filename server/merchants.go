@@ -17,7 +17,7 @@ func (s *Server) ListMerchants(ctx context.Context, params billing.MerchantListP
 	return s.graph.Runtime.Merchants.ListDirectory(ctx, params)
 }
 
-// GetMerchant is one merchant in any status; ErrMerchantNotFound when none.
+// GetMerchant is one merchant in any status; billing.ErrMerchantNotFound when none.
 func (s *Server) GetMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error) {
 	return s.graph.Runtime.Merchants.DirectoryEntry(ctx, id)
 }

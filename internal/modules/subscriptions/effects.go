@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -115,8 +114,7 @@ func (s *SubscriptionLifecycleService) queueProviderCancel(ctx context.Context, 
 		return nil
 	}
 	if s.providerCancel == nil {
-		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "rail": sub.Rail}).
-			Warn("no provider-cancel scheduler wired: the provider cancel is NOT queued (wiring gap)")
+		s.Log.WarnContext(ctx, "no provider-cancel scheduler wired: the provider cancel is NOT queued (wiring gap)", "subscription_id", sub.ID, "rail", sub.Rail)
 		return nil
 	}
 	if rails.RemoteDeleteOnTerminalCancel(sub.Rail) {

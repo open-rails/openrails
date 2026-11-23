@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -39,11 +40,12 @@ type Executor struct {
 	Config     *config.Config
 	Clock      clockwork.Clock
 	Admissions *destructive.Admissions
+	Log        *slog.Logger
 }
 
 // New builds an executor.
 func New(database *db.DB, cfg *config.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
-	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock), Admissions: admissions}
+	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock), Admissions: admissions, Log: database.Log}
 }
 
 // Request is one approve or dismiss call. Actor is who decided: the staff
@@ -67,7 +69,7 @@ func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalRe
 	if err != nil {
 		return billing.ProposalResults{}, err
 	}
-	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs), admissionActor: req.AdmissionActor}
+	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs), admissionActor: req.AdmissionActor, Log: e.Log}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(req.IDs))}
 	for _, id := range req.IDs {
 		out.Data = append(out.Data, call.one(ctx, id.UUID()))
@@ -94,7 +96,7 @@ func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes
 	if strings.TrimSpace(actor) == "" {
 		return billing.ProposalResults{}, errors.New("proposals: an approval names who decided")
 	}
-	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids), admissionActor: admissionActor}
+	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids), admissionActor: admissionActor, Log: e.Log}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(ids))}
 	for _, id := range ids {
 		out.Data = append(out.Data, call.one(ctx, id))

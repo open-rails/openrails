@@ -118,7 +118,7 @@ jobs:
           "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
 
   lint:
-    name: Lint
+    name: Build, vet, package tests and lint
     needs: scope
     if: ${{ needs.scope.outputs.core == 'true' }}
     runs-on: ubuntu-latest
@@ -137,6 +137,8 @@ jobs:
           family: plain
       # The plain build of every package, which also warms the lint's loads.
       - run: bash scripts/check.sh build
+      - run: bash scripts/check.sh vet
+      - run: bash scripts/check.sh unit
       - name: Read pinned lint version
         id: tool_versions
         shell: bash
@@ -336,7 +338,7 @@ jobs:
         run: pnpm --dir sdk/billing-ui exec playwright install --with-deps chromium
       - name: Build the real standalone fixture once
         working-directory: critical/server-fixture
-        run: GOWORK=off go test -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
+        run: GOWORK=off go test -tags integration -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
       - name: Build the public operator CLI once
         working-directory: server
         run: GOWORK=off go build -p 2 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails

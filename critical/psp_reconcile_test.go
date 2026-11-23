@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -1023,7 +1024,7 @@ func TestDeclaredAdminGrantImport(t *testing.T) {
 	t.Run("OR-J27-S11/imported-grant-ownership-and-atomicity", func(t *testing.T) {
 		a := newAuthorityWorld(t, func(w *world) {
 			declaration := cfgMerchant(w.cfg, "alpha")
-			declaration.PSPs = openrails.PSPs{"ccbill": importCCBillPSP("0001", "critical-password")}
+			declaration.PSPs = billing.PSPs{"ccbill": importCCBillPSP("0001", "critical-password")}
 			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
 		customer := customerOf(a.alice)
@@ -1033,7 +1034,7 @@ func TestDeclaredAdminGrantImport(t *testing.T) {
 		native, err := a.alpha.CreateProductAccess(t.Context(), "native-staff", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonStaff}})
 		require.NoError(t, err)
 		require.Len(t, native, 1)
-		database, err := db.NewWithPGXPool(a.pool, a.schema)
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		// Purchase/subscription sources can share a textual id with a comp.

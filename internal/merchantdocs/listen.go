@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // Channel is the Postgres notification channel an edit to a merchant's
@@ -38,7 +38,7 @@ func (c *Cache) Listen(ctx context.Context, database *db.DB, schema string) {
 	channel := pgx.Identifier{Channel(schema)}.Sanitize()
 	for ctx.Err() == nil {
 		if err := c.listenOnce(ctx, database, channel); err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("merchant config: edit notifications interrupted; reconnecting")
+			c.Log.WarnContext(ctx, "merchant config: edit notifications interrupted; reconnecting", logx.Err(err))
 			select {
 			case <-ctx.Done():
 			case <-time.After(time.Second):

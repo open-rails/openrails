@@ -2,14 +2,14 @@ package reconcile
 
 import (
 	"context"
-
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/logx"
+	"log/slog"
 )
 
 // confirmPaymentMethodFindings re-judges each vault's payment-method findings
 // against a fresh read of that vault. A vault whose re-read fails keeps no
 // finding this pass; the next pass judges it again.
-func confirmPaymentMethodFindings(ctx context.Context, provider Provider, fetcher RailFetcher, local *LocalState, findings []Finding) []Finding {
+func confirmPaymentMethodFindings(ctx context.Context, logger *slog.Logger, provider Provider, fetcher RailFetcher, local *LocalState, findings []Finding) []Finding {
 	if k, ok := fetcher.(keyedFetcher); ok {
 		fetcher = k.RailFetcher
 	}
@@ -36,7 +36,7 @@ func confirmPaymentMethodFindings(ctx context.Context, provider Provider, fetche
 	for vault := range vaults {
 		fresh, err := confirmer.ConfirmPaymentMethods(ctx, vault)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("vault_id", vault).Warn("reconcile: vault re-read failed; payment-method finding deferred to the next pass")
+			logger.WarnContext(ctx, "reconcile: vault re-read failed; payment-method finding deferred to the next pass", logx.Err(err), "vault_id", vault)
 			continue
 		}
 		scoped := &LocalState{}

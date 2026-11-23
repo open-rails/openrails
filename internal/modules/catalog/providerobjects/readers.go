@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -11,9 +12,8 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -76,12 +76,15 @@ func NMIPlan(p nmi.V5Plan) Object {
 	return obj
 }
 
-type stripeReader struct{ fetcher *reconcile.StripeFetcher }
+type stripeReader struct {
+	fetcher *reconcile.StripeFetcher
+	Log     *slog.Logger
+}
 
-func newStripeReader(secretKey string, client *http.Client) stripeReader {
+func newStripeReader(logger *slog.Logger, secretKey string, client *http.Client) stripeReader {
 	fetcher := reconcile.NewStripeFetcher(secretKey)
 	fetcher.HTTPClient = client
-	return stripeReader{fetcher: fetcher}
+	return stripeReader{fetcher: fetcher, Log: logger}
 }
 
 // List reads products and prices, active ones first, then inactive ones:
@@ -99,7 +102,7 @@ func (r stripeReader) List(ctx context.Context) ([]Object, error) {
 			for _, raw := range raws {
 				obj, ok, err := stripeObject(raw)
 				if err != nil {
-					log.WithContext(ctx).WithError(err).Warn("provider catalog: skipped an unreadable Stripe object")
+					r.Log.WarnContext(ctx, "provider catalog: skipped an unreadable Stripe object", logx.Err(err))
 					continue
 				}
 				if ok {

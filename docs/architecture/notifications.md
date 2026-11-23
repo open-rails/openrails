@@ -152,7 +152,7 @@ Checks:
 - `adapters/authkit.Notifications` skips another merchant and an unlisted issuer.
 - OR-J06-S05 refuses private and metadata alert webhook URLs.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `ListEvents` is one catalog route (`internal/http/routes/ops.go`); the in-process and
 remote `Client` both call it through `Client.do`. `billing.Event`, `EventPage` and
 `EventQuery` are in `api/go.txt`; a fact carries a `version` for payload changes.

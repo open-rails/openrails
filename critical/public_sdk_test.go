@@ -78,7 +78,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: vault.URL()}
 			merchant := cfgMerchant(w.cfg, "alpha")
-			merchant.PSPs = openrails.PSPs{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
+			merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
 			merchant.CardVault = "nmi"
 			setCfgMerchant(&w.cfg, "alpha", merchant)
 		})

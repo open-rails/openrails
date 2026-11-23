@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	log "github.com/sirupsen/logrus"
 )
 
 // Browser purchase flows — how a frontend has to drive a rail. A frontend
@@ -278,11 +278,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 				// One PSP's credential check failing never takes the others
 				// down: it is listed as temporarily unavailable, without the
 				// values a browser would drive it with.
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"merchant_id": id.String(),
-					"rail":        scope.Rail,
-					"psp":         scope.Key,
-				}).Warn("payment config: PSP credentials could not be checked; listed as temporarily unavailable")
+				s.Log.WarnContext(ctx, "payment config: PSP credentials could not be checked; listed as temporarily unavailable", logx.Err(err), "merchant_id", id.String(), "rail", scope.Rail, "psp", scope.Key)
 				cfg, _, _ := PublicPSPConfigFor(scope, custodian)
 				if cfg.PSPID.IsZero() {
 					cfg.PSPID, cfg.Rail, cfg.Key = billing.PSPID(scope.ID), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
@@ -293,11 +289,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 				continue
 			}
 			if !ok {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"merchant_id": id.String(),
-					"rail":        scope.Rail,
-					"psp":         scope.Key,
-				}).Info("payment config: declared PSP is not armed")
+				s.Log.InfoContext(ctx, "payment config: declared PSP is not armed", "merchant_id", id.String(), "rail", scope.Rail, "psp", scope.Key)
 				continue
 			}
 		}
@@ -313,12 +305,7 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, armed f
 		}
 		cfg, reason, ok := PublicPSPConfigFor(scope, custodian)
 		if !ok {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"merchant_id": id.String(),
-				"rail":        scope.Rail,
-				"psp":         scope.Key,
-				"reason":      reason,
-			}).Warn("payment config: armed PSP withheld from browsers")
+			s.Log.WarnContext(ctx, "payment config: armed PSP withheld from browsers", "merchant_id", id.String(), "rail", scope.Rail, "psp", scope.Key, "reason", reason)
 			continue
 		}
 		out = append(out, cfg)

@@ -160,11 +160,10 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 487 named SQL statements in 91 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 486 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
-| [access_cutover.sql](../internal/db/queries/access_cutover.sql) | 1 | `access_cutover_approvals` |
 | [admission_support.sql](../internal/db/queries/admission_support.sql) | 1 | `customers` |
 | [balance_watches.sql](../internal/db/queries/balance_watches.sql) | 9 | `balance_watches` |
 | [carts.sql](../internal/db/queries/carts.sql) | 3 | `carts` |
@@ -256,9 +255,9 @@ The source scan found 487 named SQL statements in 91 files with an explicit qual
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 | [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
 
-The migrations declare these 109 billing tables. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 108 billing tables. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
-- `access_cutover_approvals`, `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
+- `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
 - `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `custodians`, `customer_contacts`, `customer_delinquency`
 - `customer_entitlement_cache`, `customer_entitlement_cache_stamps`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`, `customers`, `dashboard_configs`
 - `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`

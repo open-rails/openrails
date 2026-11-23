@@ -163,7 +163,7 @@ func (s *CCBillWebhookService) lifecycleIn(d *db.DB) *subscriptions.Subscription
 // (nil changes nothing) and applies it in one transaction.
 func (s *CCBillWebhookService) ccbillMirrorEvent(ctx context.Context, railSubID string, decide func(*models.Subscription) lifecycle.Event, notice ccbillNotice) error {
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := db.NewWithPgxTx(tx)
+		d := db.NewWithPgxTx(s.Log, tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), railSubID)
 		if err != nil {
 			if db.IsNotFound(err) {

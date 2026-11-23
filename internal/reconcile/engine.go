@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -83,6 +84,7 @@ type Engine struct {
 	// merchant. Over the cap the pass applies nothing, raises a
 	// requires_review finding and halts. Zero value = the defaults.
 	CancelBudget CancelBudget
+	Log          *slog.Logger
 }
 
 // RunParams bounds one reconcile run.
@@ -314,7 +316,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		if perr != nil {
 			rep.Error = perr.Error()
 			providerErrs = append(providerErrs, fmt.Sprintf("%s: %v", p, perr))
-			log.WithError(perr).WithField("provider", p).Error("reconcile: provider run failed")
+			e.Log.ErrorContext(ctx, "reconcile: provider run failed", logx.Err(perr), "provider", p)
 		}
 		summary.Totals.Findings += rep.NewFindings + rep.UpdatedFindings
 		summary.Totals.RequiresReview += rep.RequiresReview
@@ -373,7 +375,7 @@ func (e *Engine) respell(ctx context.Context, binding PSPBinding, snap *RemoteSn
 	if err != nil {
 		return err
 	}
-	log.WithContext(ctx).WithField("respelled", n).Info("reconcile: provider subscription ids took the provider's spelling")
+	e.Log.InfoContext(ctx, "reconcile: provider subscription ids took the provider's spelling", "respelled", n)
 	return nil
 }
 
@@ -448,9 +450,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// whole book canceled as "absent from an exhaustive roster".
 	if cov, ok := params.PSPCoverage[provider]; ok && !cov.Complete() && snap.Coverage.SubscriptionsExhaustive {
 		snap.Coverage.SubscriptionsExhaustive = false
-		log.WithContext(ctx).WithFields(log.Fields{
-			"provider": provider, "active_psps": cov.Declared, "pulled_psps": cov.Pulled,
-		}).Warn("reconcile: rail is covered by only some of its active PSPs; the roster is NOT an absence proof")
+		e.Log.WarnContext(ctx, "reconcile: rail is covered by only some of its active PSPs; the roster is NOT an absence proof", "provider", provider, "active_psps", cov.Declared, "pulled_psps", cov.Pulled)
 	}
 	rep.Coverage = snap.Coverage
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
@@ -484,11 +484,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
 		// The ratio is emitted on every absence-capable pass, not only when it
 		// trips, so a roster degrading toward the threshold can be trended.
-		opsmetric.Emit(ctx, opsmetric.MetricRosterRatio, log.Fields{
-			"provider": string(provider), "remote_live": len(snap.Subscriptions),
-			"local_live": localLive, "ratio": ratioOf(len(snap.Subscriptions), localLive),
-			"threshold": e.rosterBreaker().ratio(), "tripped": tripped,
-		})
+		opsmetric.Emit(ctx, e.Log, opsmetric.MetricRosterRatio, []any{"provider", string(provider), "remote_live", len(snap.Subscriptions), "local_live", localLive, "ratio", ratioOf(len(snap.Subscriptions), localLive), "threshold", e.rosterBreaker().ratio(), "tripped", tripped})
 		if tripped {
 			rep.Aborted = true
 			return rep, nil, nil, nil, errors.New(reason)
@@ -508,11 +504,10 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		exhaustive := snap.Coverage.SubscriptionsExhaustive && traits.absenceMeansCanceled
 		res, err := e.Writer.AcceptProviderSchedules(ctx, binding.ID, snap, exhaustive, reader)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("reconcile: accepting provider schedules failed; their findings stay open")
+			e.Log.WarnContext(ctx, "reconcile: accepting provider schedules failed; their findings stay open", logx.Err(err), "provider", provider)
 		}
 		if res.Accepted+res.Unresolved > 0 {
-			log.WithContext(ctx).WithFields(log.Fields{"provider": provider, "accepted": res.Accepted, "unresolved": res.Unresolved, "receipts_placed": res.Replayed}).
-				Info("reconcile: imported schedules evaluated against the provider's recurring records")
+			e.Log.InfoContext(ctx, "reconcile: imported schedules evaluated against the provider's recurring records", "provider", provider, "accepted", res.Accepted, "unresolved", res.Unresolved, "receipts_placed", res.Replayed)
 		}
 	}
 
@@ -570,7 +565,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 	}
 	findings, deferredCharges := e.deferOperationCharges(ctx, provider, binding.ID, fetcher, snap, findings)
-	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
+	findings = confirmPaymentMethodFindings(ctx, e.Log, provider, fetcher, local, findings)
 	newChangeBuilder(buildLocalIndex(local), local, now).attach(findings)
 	bindApplyActions(findings, binding.ID, runID)
 	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
@@ -589,11 +584,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if params.Mutations != nil && !params.Mutations.Overwrite {
 		capExceeded = false
 	}
-	opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
-		"provider": string(provider), "planned_cancellations": plannedCancels,
-		"local_live": localLive, "allowed": e.CancelBudget.Limit(localLive),
-		"capped": capExceeded, "path": "pull",
-	})
+	opsmetric.Emit(ctx, e.Log, opsmetric.MetricCancellationsPerPass, []any{"provider", string(provider), "planned_cancellations", plannedCancels, "local_live", localLive, "allowed", e.CancelBudget.Limit(localLive), "capped", capExceeded, "path", "pull"})
 	if capExceeded {
 		findings = append(findings, cancellationCapFinding(provider, plannedCancels, localLive, len(snap.Subscriptions), capReason))
 	}
@@ -617,8 +608,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		records = append(records, rec)
 		if e.Notifier != nil {
 			if nerr := e.Notifier.NotifyFinding(ctx, rec); nerr != nil {
-				log.WithContext(ctx).WithError(nerr).WithField("finding_id", rec.ID).
-					Warn("reconcile: finding notification failed; continuing")
+				e.Log.WarnContext(ctx, "reconcile: finding notification failed; continuing", logx.Err(nerr), "finding_id", rec.ID)
 			}
 		}
 		if f.Apply != nil {
@@ -645,10 +635,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if capExceeded {
 		rep.Aborted = true
 		rep.ApplySkipped += len(applyByID)
-		log.WithContext(ctx).WithFields(log.Fields{
-			"provider": provider, "planned_cancellations": plannedCancels,
-			"local_live": localLive, "remote_live": len(snap.Subscriptions),
-		}).Error("reconcile: cancellation cap exceeded; applied nothing and halted this merchant's pass")
+		e.Log.ErrorContext(ctx, "reconcile: cancellation cap exceeded; applied nothing and halted this merchant's pass", "provider", provider, "planned_cancellations", plannedCancels, "local_live", localLive, "remote_live", len(snap.Subscriptions))
 		return rep, records, planned, appliedChanges, errors.New(capReason)
 	}
 
@@ -709,13 +696,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 				runAffected["provider_intents"] += n
 			}
 			appliedChanges = append(appliedChanges, mutationRecordsForFinding(provider, rec.ID, f, evidence, "applied")...)
-			log.WithFields(log.Fields{
-				"finding_id":  rec.ID,
-				"type":        f.Type,
-				"subject_key": f.SubjectKey,
-				"provider":    provider,
-				"evidence":    evidence,
-			}).Info("reconcile: enforce applied local fix")
+			e.Log.InfoContext(ctx, "reconcile: enforce applied local fix", "finding_id", rec.ID, "type", f.Type, "subject_key", f.SubjectKey, "provider", provider, "evidence", evidence)
 			if err := e.Store.MarkFindingAutoFixed(ctx, rec.ID, evidence); err != nil {
 				rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: mark auto_fixed: %v", f.Type, f.SubjectKey, err))
 				continue
@@ -733,8 +714,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 				status = "failed"
 			}
 			if ferr := e.Runs.Finish(ctx, destRunID, status, runAffected); ferr != nil {
-				log.WithContext(ctx).WithError(ferr).WithField("destructive_run_id", destRunID).
-					Error("reconcile: could not close the destructive run; it stays reversible by id")
+				e.Log.ErrorContext(ctx, "reconcile: could not close the destructive run; it stays reversible by id", logx.Err(ferr), "destructive_run_id", destRunID)
 			}
 		}
 	}
@@ -875,8 +855,7 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 	}
 	events, err := e.History.ListEvents(ctx, localRailNames(provider), params.Since, params.Until)
 	if err != nil {
-		log.WithError(err).WithField("provider", provider).
-			Warn("reconcile: history source unavailable; forensics degrade to provider + local evidence")
+		e.Log.WarnContext(ctx, "reconcile: history source unavailable; forensics degrade to provider + local evidence", logx.Err(err), "provider", provider)
 		return nil, "unavailable: " + err.Error()
 	}
 	return events, fmt.Sprintf("ok: %d events", len(events))

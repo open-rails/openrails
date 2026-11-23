@@ -287,7 +287,7 @@ func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, bo
 	if len(book.Customers) == 0 {
 		return billing.BillingImportResult{}, nil
 	}
-	return billingimport.Import(ctx, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock,
+	return billingimport.Import(ctx, im.Log, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock,
 		Authority: reconcile.ProviderFacts})
 }
 

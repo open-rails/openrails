@@ -47,9 +47,9 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
 		ProviderWriteMode: openrails.ProviderWritesFull,
-		Merchants: []openrails.MerchantDeclaration{
-			{MerchantDocument: openrails.MerchantDocument{Slug: "acme", DisplayName: "Acme"}},
-			{MerchantDocument: openrails.MerchantDocument{Slug: "globex", DisplayName: "Globex"}},
+		Merchants: []billing.MerchantDeclaration{
+			{MerchantDocument: billing.MerchantDocument{Slug: "acme", DisplayName: "Acme"}},
+			{MerchantDocument: billing.MerchantDocument{Slug: "globex", DisplayName: "Globex"}},
 		},
 	}, openrails.Deps{Postgres: db, UserInfo: directory{db}})
 	if err != nil {

@@ -2,13 +2,14 @@ package payment
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	log "github.com/sirupsen/logrus"
 )
 
 // initialMembershipVaultedMethodKey names a method this session vaulted from
@@ -17,12 +18,12 @@ const initialMembershipVaultedMethodKey = "initial_membership_vaulted_method"
 
 // discardCard removes a card a purchase saved from the buyer's token, in
 // OpenRails and at the processor.
-func discardCard(ctx context.Context, cards *paymentmethods.RailPaymentMethodService, method *models.PaymentMethod) {
+func discardCard(ctx context.Context, logger *slog.Logger, cards *paymentmethods.RailPaymentMethodService, method *models.PaymentMethod) {
 	if method == nil || cards == nil {
 		return
 	}
 	if err := cards.CleanupPaymentMethodBestEffort(context.WithoutCancel(ctx), method); err != nil {
-		log.WithError(err).WithField("payment_method_id", method.ID).Warn("discard declined card")
+		logger.WarnContext(ctx, "discard declined card", logx.Err(err), "payment_method_id", method.ID)
 	}
 }
 

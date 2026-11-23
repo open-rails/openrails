@@ -17,7 +17,7 @@ import (
 // Declared is the configuration a file declares for merchant id. Each PSP and
 // custodian is in its declared environment.
 // loaded is when the file was read.
-func Declared(id billing.MerchantID, m config.MerchantDocument, loaded time.Time) Set {
+func Declared(id billing.MerchantID, m billing.MerchantDocument, loaded time.Time) Set {
 	set := Set{}.Clone()
 	merchant := Merchant{
 		DisplayName:      strings.TrimSpace(m.DisplayName),

@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	directory "github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -37,7 +37,7 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 	if s.rt.Contacts != nil && len(ids) > 0 {
 		var err error
 		if found, err = s.rt.Contacts.Contacts(ctx, mid, ids); err != nil {
-			log.WithContext(ctx).WithError(err).Warn("customer contacts unavailable")
+			s.Log.WarnContext(ctx, "customer contacts unavailable", logx.Err(err))
 			return nil, errDirectoryUnavailable
 		}
 	}
@@ -155,7 +155,7 @@ func (s *Service) searchCustomers(ctx context.Context, mid billing.MerchantID, s
 	}
 	found, err := s.rt.Contacts.Search(ctx, mid, search, limit)
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("customer search unavailable")
+		s.Log.WarnContext(ctx, "customer search unavailable", logx.Err(err))
 		return nil, errDirectoryUnavailable
 	}
 	for _, c := range found {

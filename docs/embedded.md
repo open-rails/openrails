@@ -25,7 +25,7 @@ if err != nil {
 cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
-	Merchants: []openrails.MerchantDeclaration{{
+	Merchants: []billing.MerchantDeclaration{{
 		MerchantDocument: merchant,
 		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
 	}},

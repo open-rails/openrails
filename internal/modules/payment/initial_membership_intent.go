@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -45,10 +46,11 @@ type InitialMembershipIntentHandler struct {
 	Purchases *PurchaseService
 	Resolver  railresolve.NMIClientResolver
 	Policy    intents.BackoffPolicy
+	Log       *slog.Logger
 }
 
-func NewInitialMembershipIntentHandler(s *PurchaseService, resolvers ...railresolve.NMIClientResolver) *InitialMembershipIntentHandler {
-	h := &InitialMembershipIntentHandler{Purchases: s, Policy: intents.DefaultBackoff}
+func NewInitialMembershipIntentHandler(logger *slog.Logger, s *PurchaseService, resolvers ...railresolve.NMIClientResolver) *InitialMembershipIntentHandler {
+	h := &InitialMembershipIntentHandler{Purchases: s, Policy: intents.DefaultBackoff, Log: logger}
 	if len(resolvers) > 0 {
 		h.Resolver = resolvers[0]
 	}
@@ -590,7 +592,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 	if err != nil {
 		return intents.Ambiguous("initial receipts retained; local completion pending: " + err.Error())
 	}
-	discardCard(ctx, h.Purchases.RailPaymentMethodService, declined)
+	discardCard(ctx, h.Log, h.Purchases.RailPaymentMethodService, declined)
 	return outcome
 }
 

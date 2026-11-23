@@ -15,13 +15,13 @@ package nmiproxy
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -43,10 +43,11 @@ type Charger struct {
 	BT      *basistheory.Client
 	Gateway GatewayConfig
 	Source  Source
+	Log     *slog.Logger
 }
 
-func New(bt *basistheory.Client, gw GatewayConfig) *Charger {
-	return &Charger{BT: bt, Gateway: gw}
+func New(logger *slog.Logger, bt *basistheory.Client, gw GatewayConfig) *Charger {
+	return &Charger{BT: bt, Gateway: gw, Log: logger}
 }
 
 // WithSource returns a copy routed at one credential source.
@@ -82,8 +83,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		// pre-forward error): fall back to pan_proxy in the SAME attempt, same
 		// orderid. Ambiguous outcomes never fall back — the charge may exist.
 		if canFallBackToPAN(err) && strings.TrimSpace(src.TokenID) != "" {
-			log.WithContext(ctx).WithError(err).WithField("network_token_id", src.NetworkTokenID).
-				Warn("nmiproxy: network-token charge failed pre-forward; falling back to pan_proxy in the same attempt")
+			c.Log.WarnContext(ctx, "nmiproxy: network-token charge failed pre-forward; falling back to pan_proxy in the same attempt", logx.Err(err), "network_token_id", src.NetworkTokenID)
 			fallback := src
 			fallback.Via = ViaPANProxy
 			return c.chargeThroughProxy(ctx, req, fallback, nil)

@@ -8,9 +8,9 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -144,6 +144,6 @@ func (r *Runtime) checkSolanaCrankerGas(ctx context.Context, mid billing.Merchan
 		}))
 	}
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("Solana cranker: gas check failed")
+		r.Log.WarnContext(ctx, "Solana cranker: gas check failed", logx.Err(err), "merchant_id", mid.String())
 	}
 }

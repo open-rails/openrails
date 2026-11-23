@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -50,7 +51,7 @@ func resolveReceiptNMIClient(ctx context.Context, r railresolve.NMIClientResolve
 // from the armed rail state. Fail closed: an unarmed rail or missing datalink
 // credentials error (the caller parks/retries). endpointOverride is a test
 // seam for fake DataLink servers.
-func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src railresolve.Source, endpointOverride string) (*ccbill.DataLinkClient, error) {
+func ccbillDataLinkForMerchant(ctx context.Context, logger *slog.Logger, cfg *config.Config, src railresolve.Source, endpointOverride string) (*ccbill.DataLinkClient, error) {
 	if src == nil {
 		return nil, errors.New("ccbill rail resolution is not configured")
 	}
@@ -62,7 +63,7 @@ func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src rail
 	if strings.TrimSpace(c.DataLinkUsername) == "" || strings.TrimSpace(c.DataLinkPassword) == "" {
 		return nil, fmt.Errorf("ccbill account %s has no datalink credentials", proc.EffectiveAccountID())
 	}
-	dl := ccbill.NewDataLinkClient(c)
+	dl := ccbill.NewDataLinkClient(logger, c)
 	if cfg != nil {
 		dl.ReadOnly = config.IsProviderReadOnly(cfg)
 	}

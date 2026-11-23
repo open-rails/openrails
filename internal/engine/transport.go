@@ -62,7 +62,7 @@ func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merc
 	}
 	m, err := directory.Get(ctx, id)
 	switch {
-	case errors.Is(err, merchants.ErrMerchantNotFound):
+	case errors.Is(err, billing.ErrMerchantNotFound):
 		return nil, billing.ErrMerchantUnresolved
 	case err != nil:
 		return nil, err
@@ -78,12 +78,12 @@ func (e *Engine) LiveMerchant(ctx context.Context, id billing.MerchantID) (*merc
 // Ambient host context is stripped before it. It serves no customer routes:
 // the Go client has no customer methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
-	mux := &router.Table{}
+	mux := &router.Table{Log: rt.Log}
 	opts := httproutes.HostOptions()
 	caps := embedhttp.CapabilitiesFor(rt, opts.Groups, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
 	opts.Capabilities = &caps
-	httproutes.RegisterMetaRoutes(router.NewMux(mux, "", rt), opts)
-	httproutes.RegisterStaffRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
+	httproutes.RegisterMetaRoutes(rt.Log, router.NewMux(mux, "", rt), opts)
+	httproutes.RegisterStaffRoutes(rt.Log, router.NewMux(mux, "/v1", rt), rt, opts)
 	httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	// The same body cap the HTTP mounts apply: an oversized request gets the
 	// same 413 envelope in every deployment.

@@ -152,7 +152,7 @@ Checks:
   writer sets `Transfer.Customer` from the customer whose accounts it names.
 - OR-J22-S01 reads the customer through another merchant and gets no transactions.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `billing.Balance`, `billing.BalanceTransaction`, `billing.BalanceTransactionType`
 and the routes above are in `api/go.txt` and `api/openapi.json`; both tables are
 in `api/schema.txt`. Stored names never change: the usage order operations keep
@@ -167,8 +167,8 @@ Checks:
   `internal/modules/money/genmap.go`.
 - No rename of an `Operation` or `TransferType` value already stored.
 
-### 6. Migrations and retention
-Both tables are in the baseline; a change is a new numbered migration. Both are
+### 6. Data lifecycle
+Both tables are
 `Permanent` (`internal/retention/tables.go`, stated in each table comment), are
 not partitioned, move with the merchant archive, and are never deleted.
 
@@ -176,8 +176,7 @@ Checks:
 - `ledger_accounts` and `ledger_transfers` are `Permanent` in
   `internal/retention/tables.go`.
 - Both are in `ownedTables` (`internal/merchantarchive/owned_tables.go`) and in
-  the restore guard's table list (`0003_usage_limits.up.sql`).
-- No migration after `0001_schema.up.sql` alters either table.
+  the restore guard's table list.
 
 ### 7. Work scales with activity
 A balance or owed read is one counter row (`LedgerAccountBalance`); an insert

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -22,6 +23,7 @@ type NMIFactory struct {
 	// Transport replaces the wire at the real endpoints (test seam). Unlike
 	// the sandbox gateway it exempts nothing: posture is verified through it.
 	Transport http.RoundTripper
+	Log       *slog.Logger
 }
 
 // gateway is config.ProviderSandbox's loopback NMI gateway, or empty for NMI.
@@ -82,7 +84,7 @@ func (f *NMIFactory) Client(ctx context.Context, secrets merchants.MerchantSecre
 // ClientFor binds already-read settings to scope (callers that hold the
 // credential set, such as a custodian proxy, still get the same client).
 func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, settings)
+	client, err := nmi.NewAccountClient(f.Log, mid.UUID(), scope.ID, scope.AccountID, settings)
 	if err != nil {
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
 	}
@@ -111,5 +113,5 @@ func (f *NMIFactory) Wire(client *nmi.NMIClient) {
 // ProxyPosture is the posture identity of scope's credential forwarded by a
 // custodian proxy: the same identity, environment and destination rules.
 func (f *NMIFactory) ProxyPosture(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	return nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.gateway())
+	return nmi.ProxyPostureClient(f.Log, mid.UUID(), scope.ID, scope.AccountID, settings, f.gateway())
 }

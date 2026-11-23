@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -16,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
@@ -81,7 +81,7 @@ func CancelSubscription(r *httprequest.Request) {
 		}
 		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService, solanasubs.NewSolanaSubscriptionRepo(r.State.DB), r.State.SolanaRPCResolver.ChainReader())
 		if err := svc.Confirm(ctx, sub.ID, signature, reason); err != nil {
-			r.APIError(solanaClientError(err))
+			r.APIError(solanaClientError(r.Log, err))
 			return
 		}
 		writeMySubscription(r, userID, sub.ID, nil)
@@ -98,7 +98,7 @@ func CancelSubscription(r *httprequest.Request) {
 		}
 		prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
 		if err != nil {
-			r.APIError(solanaClientError(err))
+			r.APIError(solanaClientError(r.Log, err))
 			return
 		}
 		next = &billing.NextAction{Type: "solana_sign_transactions", Transactions: []string{prepared.Transaction}}
@@ -237,10 +237,10 @@ func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *model
 	}
 	renewable, err := recurring.RenewableOnChain(ctx, r.State.SolanaRPCResolver.ChainReader(), row)
 	if err != nil {
-		if refusal := solanaUnavailable(err); refusal != nil {
+		if refusal := solanaUnavailable(r.Log, err); refusal != nil {
 			return refusal
 		}
-		log.WithContext(ctx).WithField("detail", redact.Secrets(err.Error())).Warn("solana: resume could not read the on-chain subscription")
+		r.Log.WarnContext(ctx, "solana: resume could not read the on-chain subscription", "detail", redact.Secrets(err.Error()))
 		return api.Coded(billing.CodeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry")
 	}
 	if !renewable {
@@ -258,10 +258,9 @@ func solanaResumeRefusal(ctx context.Context, r *httprequest.Request, sub *model
 func resumeNMI(ctx context.Context, r *httprequest.Request, sub *models.Subscription) error {
 	if n, err := intents.NewStore(r.State.DB).SupersedeBySubject(ctx, intents.TypeNMIDeleteSubscription, sub.ID,
 		"cancellation undone (resume) for customer "+sub.CustomerID.String()); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-			Warn("failed to supersede the scheduled NMI delete; the executor's relevance check remains the guard")
+		r.Log.WarnContext(ctx, "failed to supersede the scheduled NMI delete; the executor's relevance check remains the guard", logx.Err(err), "subscription_id", sub.ID)
 	} else if n > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "superseded": n}).Info("superseded the deferred NMI delete on resume")
+		r.Log.InfoContext(ctx, "superseded the deferred NMI delete on resume", "subscription_id", sub.ID, "superseded", n)
 	}
 	reactivated, err := r.State.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
 		Rail:                sub.Rail,
@@ -355,7 +354,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 	if !ok {
 		return billing.Subscription{}, false
 	}
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return billing.Subscription{}, false

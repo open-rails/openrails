@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // BoundHeader is the response header naming the merchant a merchant-bound
@@ -31,11 +32,12 @@ var ErrNoMerchant = errors.New("merchant: no merchant resolved on context")
 // merchantCtxKey is the unexported context key for the resolved merchant id.
 type merchantCtxKey struct{}
 
-// WithID returns a child context carrying the resolved merchant id. Resolution
-// plumbing (the route gate, a handle's call, background job enqueue) calls
-// this once the merchant is known, before any merchant-owned DB access.
+// WithID returns a child context carrying the resolved merchant id, which
+// also labels what is logged with it. Resolution plumbing (the route gate, a
+// handle's call, background job enqueue) calls this once the merchant is
+// known, before any merchant-owned DB access.
 func WithID(ctx context.Context, id billing.MerchantID) context.Context {
-	return context.WithValue(ctx, merchantCtxKey{}, id)
+	return context.WithValue(logx.With(ctx, "merchant_id", id.String()), merchantCtxKey{}, id)
 }
 
 // FromContext extracts the resolved merchant id from the context. The boolean is

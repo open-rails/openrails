@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/paymentpagehttp"
@@ -16,7 +18,7 @@ import (
 // assets. An origin that is not its own, or assets without the page, are
 // refused alone and reported; nil assets issue pay URLs without serving the
 // page.
-func (e *Engine) serveCheckout(cfg config.Config, declarations []config.MerchantDeclaration, assets fs.FS) {
+func (e *Engine) serveCheckout(cfg config.Config, declarations []billing.MerchantDeclaration, assets fs.FS) {
 	if strings.TrimSpace(cfg.CheckoutOrigin) == "" {
 		return
 	}
@@ -35,7 +37,7 @@ func (e *Engine) serveCheckout(cfg config.Config, declarations []config.Merchant
 		e.checkoutOrigin = origin
 		return
 	}
-	limiter := middleware.RateLimitHTTP(rt.Config.RateLimits, rt.Config.Captcha, rt.AbuseState, rt.CaptchaStore, rt.TrustedProxies)
+	limiter := middleware.RateLimitHTTP(e.Log, rt.Config.RateLimits, rt.Config.Captcha, rt.AbuseState, rt.CaptchaStore, rt.TrustedProxies)
 	if e.checkoutOrigin, e.checkout, err = paymentpagehttp.New(rt, origin, assets, nil, limiter); err != nil {
 		rt.Refuse("checkout_assets", fmt.Errorf("%w; no payment page is served and orders get no pay URL", err))
 	}

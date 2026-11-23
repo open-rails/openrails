@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/authkit/auth/authtest"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/config"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -61,7 +62,7 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 func rootPermissions(g openrails.RouteGroups) []string {
 	var out []string
 	for _, r := range httproutes.Catalog() {
-		if !httproutes.Serves(g, r) {
+		if !httproutes.Serves(config.RouteGroups(g), r) {
 			continue
 		}
 		if perm := string(r.Needs().Root); perm != "" && !slices.Contains(out, perm) {

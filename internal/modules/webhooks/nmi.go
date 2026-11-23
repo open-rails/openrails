@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/jackc/pgx/v5"
@@ -28,7 +30,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/merchant"
-	log "github.com/sirupsen/logrus"
 )
 
 const NMIRailName string = "NMI"
@@ -52,6 +53,7 @@ type NMIWebhookService struct {
 	// handler marks the subscription dirty and the coalesced River job fetches
 	// provider truth and converges it.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
+	Log              *slog.Logger
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -304,10 +306,7 @@ func (s *NMIWebhookService) handleWebhook(ctx context.Context) error {
 		return s.handleChargebackComplete(ctx)
 
 	default:
-		log.WithContext(ctx).WithFields(log.Fields{
-			"rail":       s.Rail,
-			"event_type": s.Data.EventType,
-		}).Warn("Unsupported NMI webhook event type")
+		s.Log.WarnContext(ctx, "Unsupported NMI webhook event type", "rail", s.Rail, "event_type", s.Data.EventType)
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("unsupported event type: %s", s.Data.EventType))
 	}
 }
@@ -327,7 +326,7 @@ func (s *NMIWebhookService) markDirtyFromRecurringEvent(ctx context.Context) err
 			"event_type": s.Data.EventType,
 		}, nil))
 	}
-	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, s.Rail, nmiSubID, s.Data.EventType, 0)
+	return markSubscriptionDirty(ctx, s.Log, s.ConvergeEnqueuer, s.Rail, nmiSubID, s.Data.EventType, 0)
 }
 
 // markDirtyFromTransactionEvent parses only the subscription/order reference
@@ -345,7 +344,7 @@ func (s *NMIWebhookService) markDirtyFromTransactionEvent(ctx context.Context) e
 			"event_type": s.Data.EventType,
 		}, nil))
 	}
-	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, s.Rail, reference, s.Data.EventType, 0)
+	return markSubscriptionDirty(ctx, s.Log, s.ConvergeEnqueuer, s.Rail, reference, s.Data.EventType, 0)
 }
 
 type nmiChargebackMatch struct {
@@ -546,14 +545,12 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 }
 
 func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Info("Processing NMI chargeback batch notification")
+	s.Log.InfoContext(ctx, "Processing NMI chargeback batch notification", "eventType", s.Data.EventType)
 
 	body, err := s.parseChargebackBatchEventBody()
 	if err != nil {
 		// Fall back to basic logging if parsing fails
-		log.WithContext(ctx).WithError(err).Warn("Failed to parse chargeback batch body; logging basic event")
+		s.Log.WarnContext(ctx, "Failed to parse chargeback batch body; logging basic event", logx.Err(err))
 		return nil
 	}
 
@@ -646,7 +643,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				entryLedgerErr = fmt.Errorf("payment service unavailable for NMI chargeback ledger reversal")
 				if ledgerErr == nil {
 					ledgerErr = entryLedgerErr
-					log.WithContext(ctx).WithError(ledgerErr).Error("Failed to record NMI chargeback reversal; continuing entitlement revocation")
+					s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
 				}
 			} else {
 				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
@@ -659,7 +656,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					entryLedgerErr = fmt.Errorf("lookup NMI chargeback reversal: %w", lookupErr)
 					if ledgerErr == nil {
 						ledgerErr = entryLedgerErr
-						log.WithContext(ctx).WithError(ledgerErr).Error("Failed to lookup NMI chargeback reversal; continuing entitlement revocation")
+						s.Log.ErrorContext(ctx, "Failed to lookup NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
 					}
 				} else {
 					// The match is exact: the chargeback is the charge's amount in its currency.
@@ -670,7 +667,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 						entryLedgerErr = fmt.Errorf("record NMI chargeback reversal: %w", refundErr)
 						if ledgerErr == nil {
 							ledgerErr = entryLedgerErr
-							log.WithContext(ctx).WithError(ledgerErr).Error("Failed to record NMI chargeback reversal; continuing entitlement revocation")
+							s.Log.ErrorContext(ctx, "Failed to record NMI chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr))
 						}
 					} else {
 						cbMetadata["chargeback_payment_status"] = "recorded"
@@ -799,7 +796,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					if ledgerAlertErr == nil {
 						ledgerAlertErr = err
 					}
-					log.WithContext(ctx).WithError(err).Error("Failed to persist NMI chargeback ledger repair alert")
+					s.Log.ErrorContext(ctx, "Failed to persist NMI chargeback ledger repair alert", logx.Err(err))
 				} else {
 					cbMetadata["ledger_repair_alert_status"] = "recorded"
 				}
@@ -808,16 +805,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"eventID":            s.Data.EventID,
-		"eventType":          s.Data.EventType,
-		"chargeback_count":   chargebackCount,
-		"reconciled_count":   reconciledCount,
-		"canceled_count":     canceledCount,
-		"already_canceled":   alreadyCanceled,
-		"unmatched_count":    unmatchedCount,
-		"reconcile_failures": reconcileErrors,
-	}).Warn("NMI chargeback batch processed with automated reconciliation")
+	s.Log.WarnContext(ctx, "NMI chargeback batch processed with automated reconciliation", "eventID", s.Data.EventID, "eventType", s.Data.EventType, "chargeback_count", chargebackCount, "reconciled_count", reconciledCount, "canceled_count", canceledCount, "already_canceled", alreadyCanceled, "unmatched_count", unmatchedCount, "reconcile_failures", reconcileErrors)
 	if ledgerAlertErr != nil {
 		terminationErr = errors.Join(terminationErr, fmt.Errorf("persist NMI chargeback ledger repair alert: %w", ledgerAlertErr))
 	}
@@ -851,9 +839,7 @@ func nmiChargebackTransactionID(chargebackID, originalTransactionID string) stri
 // recorded against its charge and the merchant's provider_refund_access policy
 // decides whether that charge's access ends.
 func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Info("Processing NMI refund notification")
+	s.Log.InfoContext(ctx, "Processing NMI refund notification", "eventType", s.Data.EventType)
 
 	body, err := s.parseTransactionEventBody()
 	if err != nil {
@@ -874,8 +860,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		if err != nil && !db.IsNotFound(err) {
 			return fmt.Errorf("resolve subscription for NMI refund: %w", err)
 		} else if db.IsNotFound(err) {
-			log.WithContext(ctx).WithField("rail_subscription_id", nmiSubID).
-				Warn("Received refund for unknown subscription (by rail_subscription_id); continuing without lifecycle actions")
+			s.Log.WarnContext(ctx, "Received refund for unknown subscription (by rail_subscription_id); continuing without lifecycle actions", "rail_subscription_id", nmiSubID)
 		}
 	}
 
@@ -895,18 +880,14 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		case lookupErr == nil && existingRefund != nil && refundDecidedByOpenRails(existingRefund):
 			return nil
 		case lookupErr == nil && existingRefund != nil:
-			log.WithContext(ctx).WithFields(log.Fields{
-				"refund_transaction_id": txnID,
-				"payment_id":            existingRefund.ID,
-			}).Info("Refund payment already exists; skipping duplicate ledger insert")
+			s.Log.InfoContext(ctx, "Refund payment already exists; skipping duplicate ledger insert", "refund_transaction_id", txnID, "payment_id", existingRefund.ID)
 			if existingRefund.RefundedPaymentID != nil {
 				if refunded, err = s.PaymentService.GetByID(ctx, *existingRefund.RefundedPaymentID); err != nil {
 					return fmt.Errorf("lookup original NMI payment for existing refund: %w", err)
 				}
 			}
 		case lookupErr != nil && !db.IsNotFound(lookupErr):
-			log.WithContext(ctx).WithError(lookupErr).WithField("refund_transaction_id", txnID).
-				Warn("Failed to check existing refund payment by transaction ID")
+			s.Log.WarnContext(ctx, "Failed to check existing refund payment by transaction ID", logx.Err(lookupErr), "refund_transaction_id", txnID)
 			return fmt.Errorf("check existing refund payment: %w", lookupErr)
 		default:
 			refunded, err = s.recordNMIRefund(ctx, body, txnID)
@@ -922,9 +903,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"transaction_id": txnID,
-	}).Info("NMI refund processed")
+	s.Log.InfoContext(ctx, "NMI refund processed", "transaction_id", txnID)
 
 	return nil
 }
@@ -957,7 +936,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 		var err error
 		original, err = s.recordNMIRefund(ctx, body, txnID)
 		if err != nil {
-			if errors.Is(err, errNMIRefundOriginalNotFound) && quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+			if errors.Is(err, errNMIRefundOriginalNotFound) && quietUnknownObject(ctx, s.Log, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
 				return nil
 			}
 			return fmt.Errorf("record NMI refund: %w", err)
@@ -1013,9 +992,7 @@ func nmiRefundAmount(body *NMITransactionEventBody, currency string) (int64, err
 
 // handleRefundFailure logs failed refund attempts
 func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Warn("Processing NMI refund failure notification")
+	s.Log.WarnContext(ctx, "Processing NMI refund failure notification", "eventType", s.Data.EventType)
 
 	body, err := s.parseTransactionEventBody()
 	if err != nil {
@@ -1024,15 +1001,13 @@ func (s *NMIWebhookService) handleRefundFailure(ctx context.Context) error {
 
 	txnID := body.TransactionID.Trimmed()
 
-	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI refund failure logged")
+	s.Log.InfoContext(ctx, "NMI refund failure logged", "transaction_id", txnID)
 	return nil
 }
 
 // handleVoidSuccess processes NMI void.success webhooks
 func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Info("Processing NMI void notification")
+	s.Log.InfoContext(ctx, "Processing NMI void notification", "eventType", s.Data.EventType)
 
 	body, err := s.parseTransactionEventBody()
 	if err != nil {
@@ -1053,7 +1028,7 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		if originalPayment != nil {
 			reversalID := "void:" + txnID
 			if existingVoid, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), reversalID); lookupErr == nil && existingVoid != nil {
-				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("NMI void reversal already recorded")
+				s.Log.InfoContext(ctx, "NMI void reversal already recorded", "void_transaction_id", reversalID)
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)
 			} else {
@@ -1075,10 +1050,10 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		} else {
 			// The void may race the sale webhook: a retryable error (NMI
 			// redelivers on non-2xx) applies it once the sale lands.
-			if body, perr := s.parseTransactionEventBody(); perr == nil && quietUnknownObject(ctx, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
+			if body, perr := s.parseTransactionEventBody(); perr == nil && quietUnknownObject(ctx, s.Log, s.DB, nmiBookID(body.MerchantDefinedFields), txnID) {
 				return nil
 			}
-			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
+			s.Log.WarnContext(ctx, "Unable to resolve original payment for NMI void", "transaction_id", txnID)
 			return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
 		}
 	}
@@ -1096,15 +1071,13 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 		}
 	}
 
-	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI void processed")
+	s.Log.InfoContext(ctx, "NMI void processed", "transaction_id", txnID)
 	return nil
 }
 
 // handleVoidFailure logs failed void attempts
 func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Warn("Processing NMI void failure notification")
+	s.Log.WarnContext(ctx, "Processing NMI void failure notification", "eventType", s.Data.EventType)
 
 	body, err := s.parseTransactionEventBody()
 	if err != nil {
@@ -1113,6 +1086,6 @@ func (s *NMIWebhookService) handleVoidFailure(ctx context.Context) error {
 
 	txnID := body.TransactionID.Trimmed()
 
-	log.WithContext(ctx).WithField("transaction_id", txnID).Info("NMI void failure logged")
+	s.Log.InfoContext(ctx, "NMI void failure logged", "transaction_id", txnID)
 	return nil
 }

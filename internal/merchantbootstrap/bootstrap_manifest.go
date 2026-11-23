@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
@@ -13,7 +15,7 @@ const BootstrapManifestVersion = 1
 
 // CheckManifestDeclaration vets one manifest declaration as the
 // configuration API would and normalizes its PSPs in place.
-func CheckManifestDeclaration(slug string, t config.MerchantDocument) error {
+func CheckManifestDeclaration(slug string, t billing.MerchantDocument) error {
 	// The configuration API's own validator: a manifest cannot declare
 	// settings the API would refuse.
 	if _, err := merchantconfig.Normalize(t.DisplayName, t.MerchantSettings); err != nil {
@@ -32,7 +34,7 @@ func CheckManifestDeclaration(slug string, t config.MerchantDocument) error {
 // NormalizeManifestPSP checks a manifest PSP against its rail's schema and
 // returns it in its declared environment (the rail's real-money one when
 // omitted).
-func NormalizeManifestPSP(slug string, key string, cfg config.PSPConfig) (config.PSPConfig, error) {
+func NormalizeManifestPSP(slug string, key string, cfg billing.PSPConfig) (billing.PSPConfig, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return cfg, fmt.Errorf("merchant %q psps key is required", slug)

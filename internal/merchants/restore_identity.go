@@ -61,7 +61,7 @@ func (s *Service) restoreIdentity(ctx context.Context, id billing.MerchantID, sl
 	created := err == nil
 	row, err := q.GetUnretiredLiveMerchant(ctx, id.UUID())
 	m, err := toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
-	if errors.Is(err, ErrMerchantNotFound) {
+	if errors.Is(err, billing.ErrMerchantNotFound) {
 		return nil, false, ErrMerchantRestoreConflict
 	}
 	if err != nil {

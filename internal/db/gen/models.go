@@ -11,17 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Access changes an operator approved before the cutover from per-key entitlement windows to product access: a key a customer loses (their product dropped it after purchase) or gains (their product added it). The cutover refuses any change not listed. Retention: permanent, never pruned.
-type BillingAccessCutoverApproval struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	Change      string
-	ApprovedBy  string
-	ApprovedAt  time.Time
-}
-
 // One row per prepaid customer balance and per customer and currency with a running charge: when its balance is next looked at (a low line, the run-out, a credit lot lapse or the next 00:00 UTC, whichever is first) and what the last look found, including the lines a change is judged against. Its look job is queued by the change that crosses a line and for next_check_at; the billing pass looks at one whose job failed. Derived from the balance, the running charges and the billing mode; an arrears customer with no running charge has none.
 type BillingBalanceWatch struct {
 	MerchantID uuid.UUID

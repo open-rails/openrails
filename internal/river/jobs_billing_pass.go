@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -62,6 +63,7 @@ type BillingPassWorker struct {
 	DB    *db.DB
 	Scans []Scan
 	Clock clockwork.Clock
+	Log   *slog.Logger
 }
 
 func (*BillingPassWorker) Kind() string { return KindBillingPass }
@@ -71,9 +73,9 @@ func (w *BillingPassWorker) Work(ctx context.Context, _ *river.Job[BillingPassAr
 	switch {
 	case err != nil:
 		// A duplicate pass is safe; a missed one is not.
-		log.WithContext(ctx).WithError(err).Warn("billing pass: lock unavailable; running the pass")
+		w.Log.WarnContext(ctx, "billing pass: lock unavailable; running the pass", logx.Err(err))
 	case !locked:
-		log.WithContext(ctx).Warn("billing pass: the previous pass is still running; this one exits")
+		w.Log.WarnContext(ctx, "billing pass: the previous pass is still running; this one exits")
 		return nil
 	default:
 		defer release()
@@ -85,7 +87,7 @@ func (w *BillingPassWorker) Work(ctx context.Context, _ *river.Job[BillingPassAr
 			continue
 		}
 		if err := runScan(ctx, s); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("scan", s.Kind).Error("billing pass: scan failed; the next pass takes what it left due")
+			w.Log.ErrorContext(ctx, "billing pass: scan failed; the next pass takes what it left due", logx.Err(err), "scan", s.Kind)
 			errs = errors.Join(errs, fmt.Errorf("%s: %w", s.Kind, err))
 		}
 	}
@@ -96,7 +98,7 @@ func (w *BillingPassWorker) Work(ctx context.Context, _ *river.Job[BillingPassAr
 		return errors.Join(errs, fmt.Errorf("billing pass: overdue check: %w", err))
 	}
 	if len(report.Overdue) > 0 {
-		log.WithContext(ctx).WithField("overdue", report.Overdue).Error("billing pass: critical work is a day overdue")
+		w.Log.ErrorContext(ctx, "billing pass: critical work is a day overdue", "overdue", report.Overdue)
 	}
 	return errors.Join(errs, river.RecordOutput(ctx, report))
 }

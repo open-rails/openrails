@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -66,7 +65,7 @@ func evaluateCancelPass(ctx context.Context, database *db.DB, mid billing.Mercha
 		return cancelPass{held: true, reason: "the live book could not be counted: " + err.Error()}
 	}
 	if exceeded, reason := (CancelBudget{}).Exceeded(planned, int(live)); exceeded {
-		recordGuardFinding(ctx, q, mid, provider, "cancellation_cap", reason)
+		recordGuardFinding(ctx, database.Log, q, mid, provider, "cancellation_cap", reason)
 		return cancelPass{held: true, reason: reason}
 	}
 	return cancelPass{}
@@ -81,8 +80,7 @@ func cancelHeld(ctx context.Context, database *db.DB, sub *models.Subscription, 
 		}
 	}
 	if pass.held {
-		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "rail": sub.Rail, "reason": d.Reason, "held_by": pass.reason}).
-			Warn("convergence cancel held; the subscription keeps its access")
+		database.Log.WarnContext(ctx, "convergence cancel held; the subscription keeps its access", "subscription_id", sub.ID, "rail", sub.Rail, "reason", d.Reason, "held_by", pass.reason)
 	}
 	return pass.held
 }

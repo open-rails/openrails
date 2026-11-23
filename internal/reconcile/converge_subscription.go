@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,12 +52,12 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 // Repeat calls against the same truth are no-ops. Must run merchant-scoped.
 // Terminal/pending rows take no transition, but their charges are still
 // backfilled: money truth is not lifecycle truth.
-func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) (SubscriptionConvergence, error) {
+func ConvergeSubscriptionFromSnapshot(ctx context.Context, logger *slog.Logger, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) (SubscriptionConvergence, error) {
 	var floor time.Time
 	if database != nil && sub != nil {
 		floor = EvidenceFloorFor(ctx, database, sub.MerchantID)
 	}
-	return convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback, floor)
+	return convergeSubscriptionFromSnapshotLookback(ctx, logger, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback, floor)
 }
 
 // convergeSubscriptionFromSnapshotLookback is the core with a backfill
@@ -65,7 +66,7 @@ func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *
 // staleness floor: the merchant's first-pull instant live, zero for the
 // declared import, whose AsOf declaration is the observation and becomes the
 // floor (see EvidenceBundle.EvidenceFloor).
-func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration, floor time.Time) (SubscriptionConvergence, error) {
+func convergeSubscriptionFromSnapshotLookback(ctx context.Context, logger *slog.Logger, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration, floor time.Time) (SubscriptionConvergence, error) {
 	out := SubscriptionConvergence{}
 	if database == nil || lc == nil || sub == nil || snap == nil {
 		return out, fmt.Errorf("converge subscription: db, lifecycle, subscription and snapshot are required")
@@ -77,7 +78,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
 	d.Declared = snap.Provider == ProviderDeclared
 	if d.EvidenceFloored {
-		recordEvidenceStaleFinding(ctx, database.Gen(ctx), billing.MerchantID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
+		recordEvidenceStaleFinding(ctx, logger, database.Gen(ctx), billing.MerchantID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
 	}
 	// Money truth is mirrored UNCONDITIONALLY: every fetched charge event for
 	// this subscription is imported idempotently (by transaction id), even when

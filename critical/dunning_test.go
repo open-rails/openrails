@@ -188,7 +188,7 @@ func TestDunning(t *testing.T) {
 	t.Run("OR-J16-S05/a-failing-due-pass-holds-back-no-other-merchants-renewal", func(t *testing.T) {
 		a, provider, stuck := purchasedMembershipWith(t, 24, func(w *world) {
 			beta := cfgMerchant(w.cfg, "beta")
-			beta.PSPs = openrails.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e_beta", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_beta", PublishableKey: "pk_test_critical"}.PSPConfig()}
+			beta.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e_beta", Environment: openrails.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_beta", PublishableKey: "pk_test_critical"}.PSPConfig()}
 			beta.CardVault = "stripe"
 			setCfgMerchant(&w.cfg, "beta", beta)
 		})

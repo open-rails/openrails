@@ -43,20 +43,20 @@ type importWorld struct {
 	// engine's own.
 	api *openrails.Client
 	// declared are the PSPs the world's fakes serve.
-	declared openrails.PSPs
+	declared billing.PSPs
 }
 
-func importNMIPSP(gateway, securityKey string, archived bool) openrails.PSPConfig {
+func importNMIPSP(gateway, securityKey string, archived bool) billing.PSPConfig {
 	return openrails.NMIPSP{GatewayID: gateway, Environment: openrails.EnvironmentTest, SecurityKey: securityKey, WebhookSigningSecret: "critical-import-webhook",
 		TokenizationKey: "critical-import-collect", Archived: archived}.PSPConfig()
 }
 
-func importStripePSP(secretKey string) openrails.PSPConfig {
+func importStripePSP(secretKey string) billing.PSPConfig {
 	return openrails.StripePSP{AccountID: "acct_import", Environment: openrails.EnvironmentTest, SecretKey: secretKey, WebhookSigningSecret: "whsec_import",
 		PublishableKey: "pk_test_import"}.PSPConfig()
 }
 
-func importCCBillPSP(subacc, password string) openrails.PSPConfig {
+func importCCBillPSP(subacc, password string) billing.PSPConfig {
 	return openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt",
 		DatalinkUsername: "critical-datalink", DatalinkPassword: password}.PSPConfig()
 }
@@ -87,7 +87,7 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 	}
 	iw.authorityWorld = newAuthorityWorld(t, func(w *world) {
 		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		declared := openrails.PSPs{}
+		declared := billing.PSPs{}
 		sandbox := openrails.ProviderSandboxConfig{}
 		for _, key := range psps {
 			switch key {
@@ -165,7 +165,7 @@ func (iw *importWorld) start(t *testing.T) {
 // restart stops the fleet and the engine, lets change redeclare PSPs, and
 // boots a new engine and fleet on the same database: a new process loading
 // the configuration first.
-func (iw *importWorld) restart(t *testing.T, change func(openrails.PSPs)) {
+func (iw *importWorld) restart(t *testing.T, change func(billing.PSPs)) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -973,7 +973,7 @@ func TestPSPImport(t *testing.T) {
 
 		iw.restart(t, nil)
 		stays("a process loading the same credentials restarts nothing")
-		iw.restart(t, func(psps openrails.PSPs) {
+		iw.restart(t, func(psps billing.PSPs) {
 			psps["nmi"] = importNMIPSP("critical-import-gateway", "critical-import-key-rotated", false)
 			psps["stripe"] = importStripePSP("sk_test_import_rotated")
 			psps["ccbill"] = importCCBillPSP("0000", "rotated-datalink-password")

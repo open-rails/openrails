@@ -8,7 +8,6 @@ var ownedTables = []string{
 	"eventlog_pending",
 	"eventlog_migrations",
 	"user_destructive_reservations",
-	"access_cutover_approvals",
 	"balance_watches",
 	"book_identity",
 	"carts",

@@ -167,7 +167,7 @@ Checks:
 - `consoleMerchants` refuses a request without an `Authorization` header.
 - OR-J32-S03: deleting a merchant closes its credentials' authority.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 `api/go.txt` lists `pkg openrails/server` and `pkg openrails/server/web/console`. The
 HTTP surface is the engine's catalog plus AuthKit's routes and `/admin`, so the
 in-process and remote clients see the same API. The image, chart and modules share one
@@ -181,14 +181,9 @@ Checks:
   `embedhttp.ValidateRouteTable`.
 - `hostconfig` names each retired key in its refusal.
 
-### 6. Migrations and retention
-The server adds no OpenRails table. `migrate up` applies the engine's migrations, then
-AuthKit's; `server.New` migrates both unless `SkipMigrations`. AuthKit's tables are
-outside OpenRails' retention classes and the billing archive.
-
-Checks:
-- `applyStandaloneMigrations` calls `engine.Migrate` before `authkit.Migrate`.
-- `controlplane.AuthKit` copies `Database.SkipMigrations` to AuthKit.
+### 6. Data lifecycle
+The server adds no OpenRails table. AuthKit's tables are outside OpenRails'
+retention classes and the billing archive.
 
 ### 7. Work scales with activity
 The server schedules nothing of its own: the boot manifest is reconciled once, and

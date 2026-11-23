@@ -2,7 +2,7 @@
 
 Recurring agreements between a customer and one price: start, renewal, cancel
 and resume, plan and seat changes, and price migrations. Retries are in
-[dunning.md](dunning.md); the starting order is in [checkout.md](checkout.md).
+[dunning.md](dunning.md); the starting order is in [orders.md](orders.md).
 
 ## Concepts
 
@@ -174,7 +174,7 @@ Checks:
 - `ownSubscription` answers `subscription_not_found` for another's id.
 - OR-J16-S05: a failing pass holds back no other merchant's renewal.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared once (`internal/http/routes/subscriptions.go`); the
 in-process `Client` reaches the same handlers, so both answer alike. Snapshots:
@@ -186,13 +186,12 @@ Checks:
 - Each staff and migration route has one `Client` method (`remote_recovery.go`,
   `price_migrations.go`); `/v1/me` routes have none.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
 State: `subscriptions`, `subscription_verifications`. Permanent:
 `scheduled_changes`, `price_migrations`, `mandates`, `provider_schedules`. Rows
 (25 months): `subscription_status_transitions`, `subscription_billing_changes`,
-`rebill_cycles`. `0002_calendar_billing_intervals` changes the calendar cadence
-check on `prices` and adds it to `order_lines`; subscriptions soft-delete
+`rebill_cycles`. Subscriptions soft-delete
 (`deleted_at`); no partitioned table is read.
 
 Checks:

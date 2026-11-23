@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"slices"
@@ -65,6 +66,10 @@ type Config struct {
 	// AdminConsole controls the optional console at /admin and its app sign-in.
 	// Nil keeps the console available with no declared app issuers.
 	AdminConsole *ConsoleConfig
+	// Logger is the binary's logger (logger).
+	Logger LoggerConfig
+	// EnvFile is the .env file the load consumed; empty when none.
+	EnvFile string
 }
 
 type contextKey struct{}
@@ -104,7 +109,7 @@ type fileConfig struct {
 	Database                databaseFile                          `koanf:"database"`
 	DB                      *DBConfig                             `koanf:"db"`
 	Redis                   *RedisConfig                          `koanf:"redis"`
-	Logger                  *billing.LoggerConfig                 `koanf:"logger"`
+	Logger                  LoggerConfig                          `koanf:"logger"`
 	EmailSMTP               *SMTPConfig                           `koanf:"email_smtp"`
 	RateLimits              billing.RateLimitsConfig              `koanf:"rate_limits"`
 	RateLimitsDisabled      bool                                  `koanf:"rate_limits_disabled"`
@@ -152,7 +157,7 @@ func defaults() *fileConfig {
 		ShutdownTimeout: 20 * time.Second,
 		DB:              &DBConfig{},
 		Database:        databaseFile{Schema: billing.DefaultSchema},
-		Logger:          &billing.LoggerConfig{Level: "info"},
+		Logger:          LoggerConfig{Level: "info", Format: "json"},
 		RateLimits:      billing.DefaultRateLimits(),
 		Captcha:         billing.DefaultCaptcha(),
 	}
@@ -339,6 +344,9 @@ func (f *fileConfig) config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := f.Logger.Handler(io.Discard); err != nil {
+		return nil, err
+	}
 	login, mounts := f.Vault.split()
 	db := DBConfig{}
 	if f.DB != nil {
@@ -354,7 +362,6 @@ func (f *fileConfig) config() (*Config, error) {
 				SkipMigrations: f.Database.SkipMigrations, LeaseConns: db.LeaseConns,
 			},
 			PublicBillingBaseURL:    f.PublicBillingBaseURL,
-			Logger:                  f.Logger,
 			RateLimits:              f.RateLimits,
 			UserActionRateLimit:     f.UserActionRateLimit,
 			DestructiveActionLimits: f.DestructiveActionLimits,
@@ -389,6 +396,7 @@ func (f *fileConfig) config() (*Config, error) {
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole,
+		Logger:                   f.Logger,
 	}, nil
 }
 

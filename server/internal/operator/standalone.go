@@ -33,7 +33,7 @@ type Surface struct {
 // its control plane cp: the engine's routes gated by AuthKit's
 // Authenticator, AuthKit's own and the admin console.
 func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*server.Server, error) {
-	return server.New(server.Dependencies{
+	return server.New(a.Log, server.Dependencies{
 		CustomerAdmissionPolicy: s.CustomerAdmissionPolicy,
 		Config:                  a.Config,
 		Runtime:                 a.Runtime,

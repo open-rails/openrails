@@ -17,6 +17,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -27,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 const createPaymentMethodTimeout = 28 * time.Second
@@ -222,7 +222,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 	create := &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: strings.TrimSpace(req.Token),
-		Card:         req.Card,
+		Card:         (*cardguard.Card)(req.Card),
 		PSPID:        pspID,
 		NameOnCard:   details.Name,
 		Address1:     details.Line1,
@@ -241,7 +241,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 
 	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, create)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"request_id": r.RequestID(), "user_id": user.ID}).Error("Failed to create payment method")
+		r.Log.ErrorContext(ctx, "Failed to create payment method", logx.Err(err), "request_id", r.RequestID(), "user_id", user.ID)
 		switch {
 		case errors.Is(err, paymentmethods.ErrPSPRequired), errors.Is(err, paymentmethods.ErrPSPUnavailable),
 			errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
@@ -426,7 +426,7 @@ func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 		respondPaymentMethodDeleteError(r, pm, customerID, err)
 		return
 	}
-	log.WithFields(log.Fields{"payment_method_id": pm.ID, "user_id": customerID, "rail": pm.Rail}).Info("Payment method successfully deleted")
+	r.Log.InfoContext(r.Request.Context(), "Payment method successfully deleted", "payment_method_id", pm.ID, "user_id", customerID, "rail", pm.Rail)
 	r.Status(http.StatusNoContent)
 }
 
@@ -446,10 +446,10 @@ func ownedPaymentMethod(r *httprequest.Request, id uuid.UUID, customerID string)
 }
 
 func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentMethod, userID string, err error) {
-	fields := log.Fields{"payment_method_id": pm.ID, "user_id": userID, "rail": pm.Rail}
+	fields := []any{"payment_method_id", pm.ID, "user_id", userID, "rail", pm.Rail}
 	switch {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
-		log.WithError(err).WithFields(fields).Info("Payment method deletion was not confirmed; explicit retry required")
+		r.Log.With(fields...).InfoContext(r.Request.Context(), "Payment method deletion was not confirmed; explicit retry required", logx.Err(err))
 		r.ErrorCode(billing.CodeServiceUnavailable, "Card removal could not be confirmed. Please try again.")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodInUse):
 		r.ErrorCode(billing.CodeResourceConflict, "Cannot delete payment method linked to an active, pending, or past-due subscription")
@@ -462,15 +462,15 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	case errors.Is(err, intents.ErrRateCeilingTripped):
 		// #732: the operator alert is raised by the destructive-operation
 		// ceiling; this surface returns a stable refusal and never deletes locally.
-		log.WithError(err).WithFields(fields).Warn("Payment method delete refused by destructive-operation rate ceiling")
+		r.Log.With(fields...).WarnContext(r.Request.Context(), "Payment method delete refused by destructive-operation rate ceiling", logx.Err(err))
 		r.ErrorCode(billing.CodeRateLimitExceeded, "Destructive operation rate limit reached; try again later or contact support")
 	case errors.Is(err, merchants.ErrConfigUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
-		log.WithError(err).WithFields(fields).Warn("Payment method delete unavailable because provider credentials could not be loaded")
+		r.Log.With(fields...).WarnContext(r.Request.Context(), "Payment method delete unavailable because provider credentials could not be loaded", logx.Err(err))
 		r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 	default:
 		var terminal *paymentmethods.PaymentMethodDeleteFailedError
 		if errors.As(err, &terminal) {
-			log.WithError(err).WithFields(fields).Error("Payment method deletion failed permanently at the provider")
+			r.Log.With(fields...).ErrorContext(r.Request.Context(), "Payment method deletion failed permanently at the provider", logx.Err(err))
 			r.ErrorCode(billing.CodePaymentMethodDeleteFailed, "Payment method could not be deleted at the payment provider")
 			return
 		}

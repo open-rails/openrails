@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -12,7 +13,6 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/gagliardetto/solana-go/rpc/jsonrpc"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
@@ -40,6 +40,7 @@ type RPCClient struct {
 	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
 	// chain mutations) with ErrProviderReadOnly; reads always pass.
 	readOnly bool
+	Log      *slog.Logger
 }
 
 // RPCClientConfig is a Solana PSP's RPC chain.
@@ -69,7 +70,7 @@ func PublicEndpoint(network string) string {
 }
 
 // NewRPCClientWithConfig builds the RPC chain cfg declares.
-func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
+func NewRPCClientWithConfig(logger *slog.Logger, cfg RPCClientConfig) *RPCClient {
 	network := strings.ToLower(strings.TrimSpace(cfg.Network))
 	if network == "" {
 		network = "mainnet"
@@ -90,7 +91,7 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 		names[i] = ep.Name
 		clients[i] = newEndpointClient(ep)
 	}
-	log.WithFields(log.Fields{"chain": strings.Join(names, " → "), "network": network}).Debug("Solana RPC chain")
+	logger.Debug("Solana RPC chain", "chain", strings.Join(names, " → "), "network", network)
 
 	return &RPCClient{
 		readOnly:  cfg.ReadOnly,
@@ -98,6 +99,7 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 		clients:   clients,
 		network:   network,
 		failures:  make(map[int]time.Time),
+		Log:       logger,
 	}
 }
 
@@ -143,10 +145,7 @@ func (c *RPCClient) markFailed(idx int, cooldown time.Duration) {
 	}
 	c.failures[idx] = time.Now().Add(cooldown)
 
-	log.WithFields(log.Fields{
-		"endpoint": c.endpoints[idx].Name,
-		"url":      c.endpoints[idx].URL,
-	}).Warn("RPC endpoint failed, entering cooldown")
+	c.Log.Warn("RPC endpoint failed, entering cooldown", "endpoint", c.endpoints[idx].Name, "url", c.endpoints[idx].URL)
 }
 
 // markSuccess clears the failure status for an endpoint.
@@ -200,11 +199,7 @@ func (c *RPCClient) withFallback(ctx context.Context, operation string, fn func(
 
 		// Belt-and-braces over the credential-free endpoint URL: upstream error
 		// text is third-party-formatted and must never be logged verbatim.
-		log.WithFields(log.Fields{
-			"endpoint":  endpoint.Name,
-			"operation": operation,
-			"error":     redact.Secrets(err.Error()),
-		}).Info("RPC operation failed, trying next endpoint")
+		c.Log.InfoContext(ctx, "RPC operation failed, trying next endpoint", "endpoint", endpoint.Name, "operation", operation, "error", redact.Secrets(err.Error()))
 	}
 
 	return &allEndpointsFailedError{operation: operation, err: lastErr}
@@ -565,9 +560,7 @@ func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transactio
 		return nil
 	})
 	if err == nil {
-		log.WithFields(log.Fields{
-			"network": c.network,
-		}).Info("Transaction sent to Solana")
+		c.Log.InfoContext(ctx, "Transaction sent to Solana", "network", c.network)
 	}
 	return sig, err
 }

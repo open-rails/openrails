@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -45,7 +47,7 @@ func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld
 	return newAuthorityWorld(t, func(w *world) {
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = openrails.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
+		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: openrails.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		for _, change := range configure {
@@ -534,12 +536,12 @@ func (c completeRoster) Fetch(ctx context.Context, params reconcile.FetchParams)
 // policy a caller may hold that the provider refresh never does.
 func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy) *reconcile.RunResult {
 	t.Helper()
-	database, err := db.NewWithPGXPool(w.pool, w.schema)
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
 	require.NoError(t, err)
-	dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
+	dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 		DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})
 	dl.BaseURL = feed.URL
-	engine := reconcile.NewEngine(database, &w.cfg, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)
+	engine := reconcile.NewEngine(database, embedded.Graph(w.engine).Config, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderCCBill: completeRoster{reconcile.NewCCBillFetcher(dl)}}, nil)
 	engine.Now = w.clock.Now
 	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)

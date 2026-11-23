@@ -4,9 +4,8 @@ import (
 	"context"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -36,8 +35,7 @@ func (s *Service) ReportPayURLFailure(ctx context.Context, actor OrderActor, id 
 	if err != nil {
 		return err
 	}
-	log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid.String(), "order_id": order.ID.String(), "customer_id": order.CustomerID.String()}).
-		Warn("payment page: the customer's page could not frame the order's pay URL")
+	s.Log.WarnContext(ctx, "payment page: the customer's page could not frame the order's pay URL", "merchant_id", mid.String(), "order_id", order.ID.String(), "customer_id", order.CustomerID.String())
 	rec, err := (&reconcile.PGStore{DB: rt.DB}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingPayPageUnreachable, SubjectKey: "payment_page", Severity: reconcile.SeverityHigh,
 		RecommendedAction: "Customers' pages could not load the payment page. Check the checkout origin's DNS, TLS certificate and server.",
@@ -49,7 +47,7 @@ func (s *Service) ReportPayURLFailure(ctx context.Context, actor OrderActor, id 
 	if rt.AlertService != nil {
 		rt.Go("payment page alert", func(bg context.Context) {
 			if err := rt.AlertService.NotifyFinding(merchant.WithID(bg, mid), rec); err != nil && bg.Err() == nil {
-				log.WithError(err).Warn("payment page: alerting the operator failed; the finding stays in the console")
+				s.Log.WarnContext(ctx, "payment page: alerting the operator failed; the finding stays in the console", logx.Err(err))
 			}
 		})
 	}

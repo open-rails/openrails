@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	vaultapi "github.com/hashicorp/vault/api"
 
@@ -16,11 +17,11 @@ import (
 
 // openEmbeddedDB wraps the host's pool; Close leaves it open. Callers
 // provide explicit merchant scope.
-func openEmbeddedDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+func openEmbeddedDB(logger *slog.Logger, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("a database pool is required")
 	}
-	return db.NewWithPGXPool(pool, config.SchemaName(cfg))
+	return db.NewWithPGXPool(logger, pool, config.SchemaName(cfg))
 }
 
 // bindMerchantConfig binds the configuration database reads merchant settings

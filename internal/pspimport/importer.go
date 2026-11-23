@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ type Importer struct {
 	// Proposals approves an applied import's corrections.
 	Proposals *proposals.Executor
 	Clock     clockwork.Clock
+	Log       *slog.Logger
 }
 
 // ErrNotFound is an import or record the merchant does not have.

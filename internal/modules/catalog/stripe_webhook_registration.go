@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -90,7 +91,7 @@ func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool,
 	return out, true, nil
 }
 
-func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookParams) (ManagedStripeWebhookResult, error) {
+func ReconcileManagedStripeWebhook(ctx context.Context, logger *slog.Logger, p ManagedStripeWebhookParams) (ManagedStripeWebhookResult, error) {
 	if p.Config != nil && config.IsLimitedMode(p.Config) {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
 	}
@@ -156,7 +157,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 
 	rails := railresolve.FixedSet{"stripe": &config.ResolvedPSP{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
-	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails}
+	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails, Log: logger}
 	var publish func(context.Context, string, string) error
 	if writable {
 		publish = p.Publication.Publish

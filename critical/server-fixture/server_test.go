@@ -1,3 +1,5 @@
+//go:build integration
+
 package serverfixture_test
 
 import (
@@ -28,6 +30,7 @@ import (
 	"github.com/open-rails/authkit/keys"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -52,6 +55,8 @@ type ready struct {
 	DirectoryURL                         string
 	AliceID, BobID, AliceToken, BobToken string
 	Merchants                            map[string]merchant
+	// UnsetLoggers are the nil loggers server.New left reachable.
+	UnsetLoggers []string
 }
 type command struct {
 	Op, Merchant, Account, Nonce string
@@ -172,6 +177,7 @@ func TestServerFixture(t *testing.T) {
 	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}, CheckoutAssets: hostPaymentAssets(cfg.PaymentAssets)}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
+	unset := logx.Unset(srv)
 	handler := srv.Handler()
 	current.Store(&handler)
 	ak := srv.AuthKit()
@@ -182,7 +188,7 @@ func TestServerFixture(t *testing.T) {
 	alice := authtest.SignIn(t, ak, users["alice"])
 	bob := authtest.SignIn(t, ak, users["bob"])
 	as := authtest.Attach(t, ak, httpServer)
-	out := ready{DirectoryURL: httpServer.URL + "/directory/scim/v2", URL: httpServer.URL, ControlURL: httpServer.URL + controlPath, AliceID: users["alice"].ID, BobID: users["bob"].ID, AliceToken: alice.AccessToken, BobToken: bob.AccessToken, Merchants: map[string]merchant{}}
+	out := ready{DirectoryURL: httpServer.URL + "/directory/scim/v2", URL: httpServer.URL, ControlURL: httpServer.URL + controlPath, AliceID: users["alice"].ID, BobID: users["bob"].ID, AliceToken: alice.AccessToken, BobToken: bob.AccessToken, Merchants: map[string]merchant{}, UnsetLoggers: unset}
 	clients := map[string]*openrails.Client{}
 	issuerKeys := map[string]ed25519.PrivateKey{}
 	for _, slug := range []string{"alpha", "beta"} {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -47,7 +48,7 @@ func cliPool(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := hostdeps.Pool(connect, h, false)
+	pool, err := hostdeps.Pool(connect, slog.Default(), h, false)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
@@ -105,11 +106,11 @@ func openCLIDB(ctx context.Context) (*db.DB, error) {
 	}
 	connect, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := hostdeps.Pool(connect, h, false)
+	pool, err := hostdeps.Pool(connect, slog.Default(), h, false)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
-	database, err := db.NewOwningPGXPool(pool, config.SchemaName(h.Config))
+	database, err := db.NewOwningPGXPool(slog.Default(), pool, config.SchemaName(h.Config))
 	if err != nil {
 		pool.Close()
 		return nil, err

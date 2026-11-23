@@ -10,7 +10,7 @@
 //	client, err := openrails.New(ctx, openrails.Config{
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
-//		Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]openrails.PSPConfig{
+//		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
 //			"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
@@ -34,11 +34,16 @@ import (
 // Card is a card as a customer enters it in Stripe's fields. Decline ""
 // approves; a decline_code such as "insufficient_funds" declines its charges;
 // "auth" makes them wait for Authenticate.
-type Card = stripemock.Card
+type Card struct {
+	Brand, Last4, Decline string
+}
 
 // LedgerEntry is the money one succeeded PaymentIntent moved, in minor units
 // (cents), and what of it was refunded.
-type LedgerEntry = stripemock.LedgerEntry
+type LedgerEntry struct {
+	PaymentIntent, Charge, PaymentMethod string
+	Amount, Refunded                     int64
+}
 
 // Options configure a Mock.
 type Options struct {
@@ -122,7 +127,7 @@ func (s *Mock) Redeliver(ctx context.Context, id string) error { return s.m.Rede
 // CompleteSetup is the customer saving card in Stripe's fields for a
 // SetupIntent OpenRails created; it returns the payment method.
 func (s *Mock) CompleteSetup(setupIntent string, card Card) string {
-	return s.m.CompleteSetup(setupIntent, card)
+	return s.m.CompleteSetup(setupIntent, stripemock.Card(card))
 }
 
 // Authenticate is the customer passing their issuer's challenge on a
@@ -131,7 +136,7 @@ func (s *Mock) Authenticate(paymentIntent string) bool { return s.m.Authenticate
 
 // NewPaymentMethod is Stripe Elements turning a card the customer entered into
 // a payment method: the token an order's payment takes.
-func (s *Mock) NewPaymentMethod(card Card) string { return s.m.NewPaymentMethod(card) }
+func (s *Mock) NewPaymentMethod(card Card) string { return s.m.NewPaymentMethod(stripemock.Card(card)) }
 
 // AuthenticateSetup is the customer completing the bank's challenge on a
 // card being saved.
@@ -142,7 +147,13 @@ func (s *Mock) AuthenticateSetup(setupIntent string) bool { return s.m.Authentic
 func (s *Mock) SetDecline(last4, decline string) { s.m.SetDecline(last4, decline) }
 
 // Ledger is the succeeded PaymentIntents of a Stripe customer, or ("") all.
-func (s *Mock) Ledger(customer string) []LedgerEntry { return s.m.Ledger(customer) }
+func (s *Mock) Ledger(customer string) []LedgerEntry {
+	var out []LedgerEntry
+	for _, e := range s.m.Ledger(customer) {
+		out = append(out, LedgerEntry(e))
+	}
+	return out
+}
 
 // Unexpected lists requests the mock does not model; a test asserts it
 // empty.

@@ -259,6 +259,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
+- A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like
+  `critical/`; every other test needs nothing outside its process. Every PR with a Go change runs
+  `scripts/check.sh vet` (each module, every build tag) and `unit` (each module's untagged tests).
 - Static checks: `scripts/check.sh guards`, `scripts/check-embedded-auth-boundary.sh`,
   `sqlc vet` and `go run ./scripts/contracts`. `go run ./scripts/contracts -lint` (in guards)
   checks the Go API's conventions against `api/lint-baseline.txt`, which only shrinks: a new

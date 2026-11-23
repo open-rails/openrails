@@ -3,15 +3,15 @@ package merchantdocs
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // Recheck is how often an access reloads a Vault-held merchant: the bound on
@@ -47,6 +47,7 @@ type Cache struct {
 	fingerprintKey []byte
 	// hold refuses every load and write until Release.
 	hold error
+	Log  *slog.Logger
 }
 
 type entry struct {
@@ -61,9 +62,9 @@ type entry struct {
 
 // NewCache serves source. A file never changes underneath, so only a
 // writable source is rechecked.
-func NewCache(source Source) *Cache {
+func NewCache(logger *slog.Logger, source Source) *Cache {
 	base, stop := context.WithCancel(context.Background())
-	c := &Cache{source: source, now: time.Now, base: base, stop: stop, entries: map[billing.MerchantID]*entry{}}
+	c := &Cache{source: source, now: time.Now, base: base, stop: stop, entries: map[billing.MerchantID]*entry{}, Log: logger}
 	if source.Writable() {
 		c.recheck = Recheck
 	}
@@ -218,12 +219,12 @@ func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force
 	}
 	for path, why := range set.Rejected {
 		if previous.Rejected[path] != why {
-			log.WithFields(log.Fields{"merchant_id": id.String(), "document": path, "reason": why}).Error("merchant config: a document is not served")
+			c.Log.ErrorContext(ctx, "merchant config: a document is not served", "merchant_id", id.String(), "document", path, "reason", why)
 		}
 	}
 	for path, why := range set.Undeclared {
 		if previous.Undeclared[path] != why {
-			log.WithFields(log.Fields{"merchant_id": id.String(), "account": path, "reason": why}).Warn("merchant config: an undeclared account still holds billing")
+			c.Log.WarnContext(ctx, "merchant config: an undeclared account still holds billing", "merchant_id", id.String(), "account", path, "reason", why)
 		}
 	}
 	e.set, e.loaded, e.checked = set, true, now
@@ -247,7 +248,7 @@ func (c *Cache) refresh(id billing.MerchantID, e *entry) {
 			_, err := c.load(ctx, id, e, true)
 			cancel()
 			if err != nil {
-				log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: reload failed; serving the cached configuration")
+				c.Log.WarnContext(ctx, "merchant config: reload failed; serving the cached configuration", logx.Err(err), "merchant_id", id.String())
 			}
 		}
 	}()
@@ -270,7 +271,7 @@ func (c *Cache) write(ctx context.Context, id billing.MerchantID, put func() err
 	c.mu.Unlock()
 	if announce != nil {
 		if err := announce(ctx, id); err != nil {
-			log.WithError(err).WithField("merchant_id", id.String()).Warn("merchant config: announcing the edit failed; other replicas see it within the recheck")
+			c.Log.WarnContext(ctx, "merchant config: announcing the edit failed; other replicas see it within the recheck", logx.Err(err), "merchant_id", id.String())
 		}
 	}
 	return set, nil

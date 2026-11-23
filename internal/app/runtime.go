@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -21,7 +22,6 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
@@ -60,6 +60,8 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	// Log receives everything the graph logs.
+	Log            *slog.Logger
 	solanaBalances solanaint.BalanceCache
 	// DestructiveAdmissions owns logical command limits and persistent incidents.
 	DestructiveAdmissions *destructive.Admissions
@@ -344,14 +346,14 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 	// Stop Solana Pay poller
 	if r.SolanaPayPoller != nil {
-		log.Info("Stopping Solana Pay poller...")
+		r.Log.InfoContext(ctx, "Stopping Solana Pay poller...")
 		r.SolanaPayPoller.Stop()
 	}
 
 	// Only stop River client if we created it (not external)
 	if r.RiverClient != nil && r.riverStarted && !r.externalRiverClient {
 		r.workerConsumerRunning.Store(false)
-		log.Info("Stopping River background workers...")
+		r.Log.InfoContext(ctx, "Stopping River background workers...")
 		if err := r.RiverClient.Stop(ctx); err != nil {
 			// Stop may return before workers finish when ctx is canceled.
 			// Join cancellation before closing worker pools or attached services.
@@ -427,6 +429,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	_, err := riverhelpers.New(ctx, r.DB.Pool(), &river.Config{
 		Schema:   r.riverSchemaOrDefault(),
 		PollOnly: r.DB.UsesTransactionPooler(),
+		Logger:   r.Log,
 	}, r.riverJobs(false))
 	return err
 }
@@ -495,7 +498,7 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		return nil, fmt.Errorf("river client not initialized")
 	}
 	r.riverStarted = true
-	log.Info("Starting River background workers")
+	r.Log.InfoContext(ctx, "Starting River background workers")
 	if err := r.RiverClient.Start(cancelOnly(ctx)); err != nil {
 		r.riverStarted = false
 		joinLoops()
@@ -550,7 +553,7 @@ func (r *Runtime) RiverBound() bool {
 // them. Runtime construction created River's tables there.
 func (r *Runtime) BindRiverProducer(ctx context.Context) error {
 	schema := r.riverSchemaOrDefault()
-	producer, err := river.NewClient(riverpgxv5.New(r.DB.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
+	producer, err := river.NewClient(riverpgxv5.New(r.DB.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true, Logger: r.Log})
 	if err != nil {
 		return fmt.Errorf("River producer: %w", err)
 	}

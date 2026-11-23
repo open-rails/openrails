@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -201,8 +201,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		effects, err := subscriptions.Transition(cur, ev, now)
 		if err != nil {
 			if errors.Is(err, lifecycle.ErrIllegal) || errors.Is(err, lifecycle.ErrInvalid) || errors.Is(err, lifecycle.ErrTerminal) {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{"subscription_id": cur.ID, "reason": d.Reason}).
-					Warn("apply decision: the lifecycle refused the event; the row is unchanged")
+				database.Log.WarnContext(ctx, "apply decision: the lifecycle refused the event; the row is unchanged", logx.Err(err), "subscription_id", cur.ID, "reason", d.Reason)
 				return nil
 			}
 			return err

@@ -37,6 +37,7 @@ type standaloneWorld struct {
 	DirectoryURL                         string
 	AliceID, BobID, AliceToken, BobToken string
 	Merchants                            map[string]standaloneMerchant
+	UnsetLoggers                         []string
 	alpha, beta                          *openrails.Client
 }
 
@@ -60,7 +61,7 @@ func newStandaloneWorld(t *testing.T, configure ...func(map[string]any)) *standa
 	binary := os.Getenv("OPENRAILS_CRITICAL_SERVER_BINARY")
 	if binary == "" {
 		binary = filepath.Join(dir, "server-fixture.test")
-		build := exec.CommandContext(t.Context(), "go", "test", "-c", "-p", "2", "-o", binary, ".")
+		build := exec.CommandContext(t.Context(), "go", "test", "-tags", "integration", "-c", "-p", "2", "-o", binary, ".")
 		build.Dir = "server-fixture"
 		build.Env = append(os.Environ(), "GOWORK=off", "GOMAXPROCS=2")
 		output, err := build.CombinedOutput()

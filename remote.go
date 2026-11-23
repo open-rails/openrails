@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,13 +16,13 @@ import (
 	"unicode/utf8"
 
 	auth "github.com/open-rails/authkit/auth"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/wireform"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -113,6 +114,9 @@ type RemoteOptions struct {
 	// EntitlementCheckCache configures the entitlement check cache, on by
 	// default for APIKey credentials.
 	EntitlementCheckCache EntitlementCheckCacheOptions
+	// Logger receives the client's warnings. Nil is slog.Default(), read once
+	// by NewRemote.
+	Logger *slog.Logger
 }
 
 // Remote is a standalone or hosted OpenRails server reached over HTTP, for
@@ -148,7 +152,7 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	if r.reads, refused, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(id billing.MerchantID) *Client { return r.handles[id] }); err != nil {
 		return nil, err
 	}
-	warnRefused(refused)
+	warnRefused(logx.New(opts.Logger), refused)
 	for id, credential := range opts.Credentials {
 		if id.IsZero() {
 			return nil, fmt.Errorf("openrails: RemoteOptions.Credentials holds a credential under the zero merchant ID")
@@ -164,9 +168,9 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 }
 
 // warnRefused logs each RemoteOptions setting the client ignored.
-func warnRefused(refused []config.Degradation) {
+func warnRefused(logger *slog.Logger, refused []config.Degradation) {
 	for _, d := range refused {
-		log.WithField("subject", d.Field).WithError(d.Err).Warn("openrails: RemoteOptions setting ignored")
+		logger.Warn("openrails: RemoteOptions setting ignored", "subject", d.Field, logx.Err(d.Err))
 	}
 }
 
@@ -554,7 +558,7 @@ func (c *Client) send(ctx context.Context, call routeCall, out any) error {
 		}
 	}
 	if call.cache != "" {
-		return c.read(ctx, call.cache, path, out)
+		return c.read(ctx, Read(call.cache), path, out)
 	}
 	return c.doWithHeaders(ctx, call.method, path, call.body, out, idempotent(call.idempotencyKey))
 }

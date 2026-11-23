@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 410,
+  "scenario_count": 411,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2012,6 +2012,11 @@
       "id": "OR-J04-S75",
       "journey": "J04",
       "name": "The generated client gets the server's own refusals: a malformed query value is invalid_query before any handler, a batch or field the client no longer checks is the server's invalid_param, and an empty path segment is refused before any I/O"
+    },
+    {
+      "id": "OR-J04-S76",
+      "journey": "J04",
+      "name": "Every logger the engine and the standalone server reach is set, the default logger is untouched, and a refusal is logged with its route, request and merchant"
     },
     {
       "id": "OR-J25-S37",

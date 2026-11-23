@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // ListResponse is a page of Users (RFC 7644 §3.4.2).
@@ -101,7 +101,7 @@ func (s *Server) ListUsers() http.Handler {
 		out := ListResponse{Schemas: []string{ListResponseSchema}, StartIndex: start, Resources: []User{}}
 		if !f.none {
 			if err := s.list(ctx, mid, f, start, count, baseURL(r, "Users"), &out); err != nil {
-				log.WithContext(ctx).WithError(err).Error("scim: list failed")
+				s.Log.ErrorContext(ctx, "scim: list failed", logx.Err(err))
 				writeError(w, errInternal)
 				return
 			}

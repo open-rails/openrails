@@ -223,7 +223,7 @@ Checks:
 - OR-J28-S06, S07: another merchant's claim of an account is refused; live and test PSPs on one account get only events their own secret verifies.
 - OR-J15-S06: an unverified subscription is read with its own PSP, and a sibling account's absence cancels nothing.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 Routes are declared once (`internal/http/routes/psps.go`, `ops.go`,
 `merchant.go`) and snapshotted in `api/openapi.json`, `Client` methods in
@@ -235,9 +235,8 @@ Checks:
 - `go run ./scripts/contracts` reports no change under `api/`; `intent_type` is free text, so a new operation type is additive.
 - `stripeapi.guardTransport.RoundTrip` sets `Stripe-Version` on every request lacking it.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-The tables are in `0001_schema.up.sql`; a change is a new numbered migration.
 In `internal/retention/tables.go`, instruction-only operations
 (`OutboxIntentTypes`) and `provider_mutation_logs` go after 25 months;
 `webhook_events` and released parks after 90 days; resolved findings after 12

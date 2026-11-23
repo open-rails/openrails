@@ -3,12 +3,12 @@ package webhookauth
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
@@ -28,8 +28,8 @@ type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 //     the database proves the account the webhook names moves no money.
 //
 // Anything unproven (no probe, probe error, LiveRailUnknown) refuses.
-func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
-	if iputil.IsValidCCBillIP(clientIP) {
+func CCBillIPAllowed(ctx context.Context, logger *slog.Logger, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
+	if iputil.IsValidCCBillIP(logger, clientIP) {
 		return true
 	}
 	if !iputil.IPInAnyCIDR(clientIP, config.SandboxCCBillWebhookSources(cfg)) {
@@ -42,19 +42,18 @@ func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProb
 		logIP = ip.String()
 	}
 	if probe == nil {
-		log.WithField("client_ip", logIP).Warn("ccbill webhook: declared allowlist entry refused - no account probe available")
+		logger.WarnContext(ctx, "ccbill webhook: declared allowlist entry refused - no account probe available", "client_ip", logIP)
 		return false
 	}
 	presence, err := probe(ctx)
 	if err != nil {
-		log.WithError(err).WithField("client_ip", logIP).Warn("ccbill webhook: account probe failed; refusing declared allowlist entry")
+		logger.WarnContext(ctx, "ccbill webhook: account probe failed; refusing declared allowlist entry", logx.Err(err), "client_ip", logIP)
 		return false
 	}
 	if presence != merchants.LiveRailAbsent {
-		log.WithFields(log.Fields{"client_ip": logIP, "live_psps": presence.String()}).
-			Warn("ccbill webhook: declared allowlist entry refused - the account is live or could not be ruled out")
+		logger.WarnContext(ctx, "ccbill webhook: declared allowlist entry refused - the account is live or could not be ruled out", "client_ip", logIP, "live_psps", presence.String())
 		return false
 	}
-	log.WithField("client_ip", logIP).Debug("ccbill webhook: declared allowlist entry accepted - a sandbox account")
+	logger.DebugContext(ctx, "ccbill webhook: declared allowlist entry accepted - a sandbox account", "client_ip", logIP)
 	return true
 }

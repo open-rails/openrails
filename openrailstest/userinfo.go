@@ -7,19 +7,17 @@ import (
 	"sync"
 
 	"github.com/open-rails/authkit/userinfo"
-
-	"github.com/open-rails/openrails"
 )
 
 // UserInfo is an in-memory directory for a host's tests: an
-// openrails.UserInfo to pass as Deps.UserInfo in place of AuthKit. It is safe
-// for concurrent use.
+// authkit/userinfo.Lookup to pass as openrails.Deps.UserInfo in place of
+// AuthKit. It is safe for concurrent use.
 type UserInfo struct {
 	mu   sync.Mutex
 	held map[string]userinfo.User
 }
 
-var _ openrails.UserInfo = (*UserInfo)(nil)
+var _ userinfo.Lookup = (*UserInfo)(nil)
 
 // Put adds or replaces a user, by its ID.
 func (d *UserInfo) Put(u userinfo.User) {

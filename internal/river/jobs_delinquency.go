@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 )
 
@@ -32,6 +33,7 @@ const (
 type DelinquencyWorker struct {
 	DB    *db.DB
 	Clock clockwork.Clock
+	Log   *slog.Logger
 }
 
 func (w DelinquencyWorker) now() time.Time {
@@ -51,7 +53,7 @@ func (w DelinquencyWorker) Pass(ctx context.Context) error {
 	if w.DB == nil {
 		return nil
 	}
-	logger := log.WithContext(ctx).WithField("worker", KindDelinquency)
+	logger := w.Log.With("worker", KindDelinquency)
 	svc := delinquency.NewService(w.DB, w.Clock)
 	args := gen.ListDueDelinquencyParams{Now: w.now(), RowLimit: delinquencyBatch}
 	var failed error
@@ -66,8 +68,7 @@ func (w DelinquencyWorker) Pass(ctx context.Context) error {
 				return err
 			})
 			if err != nil {
-				logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
-					Error("delinquency: evaluation failed; continuing")
+				logger.ErrorContext(ctx, "delinquency: evaluation failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "customer_id", row.CustomerID, "currency", row.Currency)
 				failed = errors.Join(failed, fmt.Errorf("delinquency: merchant %s customer %s %s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
 			}
 		}

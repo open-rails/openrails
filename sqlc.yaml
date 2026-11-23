@@ -6,6 +6,7 @@ sql:
       - "internal/migrate/postgres/0001_schema.up.sql"
       - "internal/migrate/postgres/0002_calendar_billing_intervals.up.sql"
       - "internal/migrate/postgres/0003_usage_limits.up.sql"
+      - "internal/migrate/postgres/0004_drop_access_cutover_contract.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

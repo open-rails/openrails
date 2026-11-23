@@ -22,12 +22,6 @@ import (
 // unexpired aliases one namespace and releases both when a merchant leaves the
 // directory. Every time is the database's now().
 
-// ErrInvalidName reports a name that is not a legal merchant name.
-var ErrInvalidName = errors.New("merchants: invalid merchant name")
-
-// ErrRenamesDisabled reports a deployment whose naming policy forbids renames.
-var ErrRenamesDisabled = errors.New("merchants: merchant renames are disabled")
-
 // RenameTooSoonError reports a rename before the policy's interval elapsed.
 type RenameTooSoonError = billing.MerchantRenameTooSoonError
 
@@ -36,16 +30,16 @@ type RenameTooSoonError = billing.MerchantRenameTooSoonError
 func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string, policy config.NamingPolicy) (*Merchant, error) {
 	name = normalizeSlug(name)
 	if err := billing.ValidateMerchantSlug(name); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidName, err)
+		return nil, fmt.Errorf("%w: %w", billing.ErrInvalidMerchantName, err)
 	}
 	if !policy.Enabled {
-		return nil, ErrRenamesDisabled
+		return nil, billing.ErrRenamesDisabled
 	}
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, err := q.LockMerchantNameForRename(ctx, id.UUID())
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrMerchantNotFound
+			return billing.ErrMerchantNotFound
 		}
 		if err != nil || row.Slug == name {
 			return err

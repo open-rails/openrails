@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -35,7 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -54,6 +55,7 @@ type SubscriptionLifecycleService struct {
 	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
 	// when nil a terminal outcome cannot stop the provider schedule.
 	providerCancel ProviderCancelScheduler
+	Log            *slog.Logger
 }
 
 func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) *entitlements.EntitlementService {
@@ -69,12 +71,7 @@ func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context
 	}
 
 	if allowOverride {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"rail":            subscription.Rail,
-			"trigger":         trigger,
-			"reason":          reason,
-		}).Warn("Bypassing terminal transition guard via explicit manual override")
+		s.Log.WarnContext(ctx, "Bypassing terminal transition guard via explicit manual override", "subscription_id", subscription.ID, "rail", subscription.Rail, "trigger", trigger, "reason", reason)
 		return nil
 	}
 
@@ -100,6 +97,7 @@ func NewSubscriptionLifecycleService(db *db.DB, productService *catalog.ProductS
 		EntitlementService:  entitlementService,
 		NotificationService: notificationService,
 		PaymentService:      paymentService,
+		Log:                 db.Log,
 	}
 }
 
@@ -157,17 +155,10 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 
 	procSubID := normalize.FromPtr(params.RailSubscriptionID)
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"user_id":              params.UserID,
-		"price_id":             params.PriceID,
-		"rail":                 params.Rail,
-		"rail_subscription_id": procSubID,
-		"transaction_id":       params.TransactionID,
-		"amount":               suppliedAmount(params.Amount, params.Currency),
-	}).Info("Starting membership creation flow")
+	s.Log.InfoContext(ctx, "Starting membership creation flow", "user_id", params.UserID, "price_id", params.PriceID, "rail", params.Rail, "rail_subscription_id", procSubID, "transaction_id", params.TransactionID, "amount", suppliedAmount(params.Amount, params.Currency))
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		dbb := db.NewWithPgxTx(tx)
+		dbb := db.NewWithPgxTx(s.Log, tx)
 		var err error
 		subscription, _, err = s.CreateMembershipTx(ctx, dbb, params)
 		return err
@@ -315,21 +306,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		price, err = priceService.GetByID(ctx, params.PriceID)
 	}
 	if err != nil {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"user_id":  params.UserID,
-			"price_id": params.PriceID,
-		}).WithError(err).Error("Failed to load price for membership creation")
+		s.Log.ErrorContext(ctx, "Failed to load price for membership creation", "user_id", params.UserID, "price_id", params.PriceID, logx.Err(err))
 		return nil, nil, fmt.Errorf("failed to get price: %w", err)
 	}
 	canonicalPriceID := price.ID
 	if params.CanonicalPriceID != nil {
 		canonicalPriceID = *params.CanonicalPriceID
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"user_id":    params.UserID,
-		"price_id":   price.ID,
-		"product_id": price.ProductID,
-	}).Info("Loaded price for membership creation")
+	s.Log.InfoContext(ctx, "Loaded price for membership creation", "user_id", params.UserID, "price_id", price.ID, "product_id", price.ProductID)
 
 	var existingPendingSub *models.Subscription
 	if params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "" {
@@ -392,12 +376,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}
 			switch existingSubscription.Status {
 			case models.StatusActive, models.StatusPastDue:
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": existingSubscription.ID,
-					"user_id":         params.UserID,
-					"payment_id":      existingPayment.ID,
-					"transaction_id":  params.TransactionID,
-				}).Info("Membership payment already exists; skipping duplicate membership creation")
+				s.Log.InfoContext(ctx, "Membership payment already exists; skipping duplicate membership creation", "subscription_id", existingSubscription.ID, "user_id", params.UserID, "payment_id", existingPayment.ID, "transaction_id", params.TransactionID)
 				return existingSubscription, nil, nil
 			case models.StatusPending:
 				// Continue below and activate the paid pending subscription.
@@ -410,12 +389,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if existingSubscription.ProductID != price.ProductID {
 				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different product")
 			}
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": existingSubscription.ID,
-				"user_id":         params.UserID,
-				"payment_id":      existingPayment.ID,
-				"transaction_id":  params.TransactionID,
-			}).Info("Membership payment already exists for pending subscription; activating it")
+			s.Log.InfoContext(ctx, "Membership payment already exists for pending subscription; activating it", "subscription_id", existingSubscription.ID, "user_id", params.UserID, "payment_id", existingPayment.ID, "transaction_id", params.TransactionID)
 			existingPendingSub = existingSubscription
 			paymentRecorded = true
 		}
@@ -427,15 +401,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	if err == nil && (existingPendingSub == nil || activeSub.ID != existingPendingSub.ID) {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"user_id":                  params.UserID,
-			"product_id":               price.ProductID,
-			"existing_subscription_id": activeSub.ID,
-			"existing_price_id":        activeSub.PriceID,
-			"existing_status":          activeSub.Status,
-			"existing_rail":            activeSub.Rail,
-			"rail_subscription_id":     activeSub.RailSubscriptionID,
-		}).Warn("User already has an active, pending, or past_due subscription for this product; aborting membership creation")
+		s.Log.WarnContext(ctx, "User already has an active, pending, or past_due subscription for this product; aborting membership creation", "user_id", params.UserID, "product_id", price.ProductID, "existing_subscription_id", activeSub.ID, "existing_price_id", activeSub.PriceID, "existing_status", activeSub.Status, "existing_rail", activeSub.Rail, "rail_subscription_id", activeSub.RailSubscriptionID)
 		return nil, nil, fmt.Errorf("%w: user already has an active, pending, or past_due subscription for this product", ErrMembershipSlotTaken)
 	}
 
@@ -485,15 +451,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err := subService.Update(ctx, existingPendingSub); err != nil {
 			return nil, nil, fmt.Errorf("failed to update subscription: %w", err)
 		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      existingPendingSub.ID,
-			"user_id":              existingPendingSub.CustomerID.String(),
-			"price_id":             existingPendingSub.PriceID,
-			"rail":                 existingPendingSub.Rail,
-			"rail_subscription_id": existingPendingSub.RailSubscriptionID,
-			"period_start":         periodStartsAt,
-			"period_end":           periodEndsAt,
-		}).Info("Activating existing pending subscription record for membership creation")
+		s.Log.InfoContext(ctx, "Activating existing pending subscription record for membership creation", "subscription_id", existingPendingSub.ID, "user_id", existingPendingSub.CustomerID.String(), "price_id", existingPendingSub.PriceID, "rail", existingPendingSub.Rail, "rail_subscription_id", existingPendingSub.RailSubscriptionID, "period_start", periodStartsAt, "period_end", periodEndsAt)
 		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
@@ -564,15 +522,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err := subService.Create(ctx, subscription); err != nil {
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      subscription.ID,
-			"user_id":              subscription.CustomerID.String(),
-			"price_id":             subscription.PriceID,
-			"rail":                 subscription.Rail,
-			"rail_subscription_id": subscription.RailSubscriptionID,
-			"period_start":         periodStartsAt,
-			"period_end":           periodEndsAt,
-		}).Info("Created new subscription record for membership")
+		s.Log.InfoContext(ctx, "Created new subscription record for membership", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "price_id", subscription.PriceID, "rail", subscription.Rail, "rail_subscription_id", subscription.RailSubscriptionID, "period_start", periodStartsAt, "period_end", periodEndsAt)
 	}
 
 	subscription.Price = price
@@ -593,10 +543,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// backfill shapes) grants no access window — the period is over.
 		elapsed := false
 		if end := subscriptionAccessEnd(subscription, periodStartsAt); params.Prepared == nil && end != nil && !end.After(s.now().UTC()) {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"period_end":      periodEndsAt,
-			}).Warn("Membership period already elapsed; creating lifecycle records without granting access")
+			s.Log.WarnContext(ctx, "Membership period already elapsed; creating lifecycle records without granting access", "subscription_id", subscription.ID, "period_end", periodEndsAt)
 			elapsed = true
 		}
 		if !elapsed {
@@ -610,13 +557,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 					return nil, nil, fmt.Errorf("failed to grant subscription access: %w", err)
 				}
 				if window != nil {
-					log.WithContext(ctx).WithFields(log.Fields{
-						"subscription_id": subscription.ID,
-						"user_id":         subscription.CustomerID.String(),
-						"product_id":      subscription.ProductID,
-						"window_start":    window.StartsAt,
-						"window_end":      window.EndsAt,
-					}).Info("Granted subscription access")
+					s.Log.InfoContext(ctx, "Granted subscription access", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "product_id", subscription.ProductID, "window_start", window.StartsAt, "window_end", window.EndsAt)
 				}
 			}
 			var graceErr error
@@ -652,11 +593,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if !params.AmountProvided && amount == 0 {
 			// The caller supplied no charged amount: record the catalog list
 			// price, with a warning (expected, not confirmed).
-			log.WithContext(ctx).WithFields(log.Fields{
-				"price_id":       price.ID,
-				"transaction_id": params.TransactionID,
-				"user_id":        subscription.CustomerID.String(),
-			}).Warn("no charged amount supplied for membership payment; recording catalog list price")
+			s.Log.WarnContext(ctx, "no charged amount supplied for membership payment; recording catalog list price", "price_id", price.ID, "transaction_id", params.TransactionID, "user_id", subscription.CustomerID.String())
 			amount = price.Amount
 		}
 		currency := params.Currency
@@ -698,19 +635,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			payment.TokenType = &token
 		}
 		if _, err := initialBill(ctx, dbb, params, subscription, payment, now); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"transaction_id":  params.TransactionID,
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.CustomerID.String(),
-			}).Error("failed to create payment record for new membership")
+			s.Log.ErrorContext(ctx, "failed to create payment record for new membership", logx.Err(err), "transaction_id", params.TransactionID, "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String())
 			return nil, nil, fmt.Errorf("failed to create payment record for new membership: %w", err)
 		} else {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"transaction_id":  params.TransactionID,
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.CustomerID.String(),
-				"amount":          moneyutil.FormatAmount(amount, currency),
-			}).Info("Recorded payment for membership creation")
+			s.Log.InfoContext(ctx, "Recorded payment for membership creation", "transaction_id", params.TransactionID, "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "amount", moneyutil.FormatAmount(amount, currency))
 		}
 	}
 
@@ -734,7 +662,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		ctx = db.WithPSPID(ctx, psp)
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
@@ -815,9 +743,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			return validateCompletedPayment(existing, amount, currency)
 		}
 		if created && terminal {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID, "transaction_id": params.TransactionID, "status": subscription.Status,
-			}).Error("confirmed rebill charge on a canceled subscription; payment recorded without reactivation — refund review required")
+			s.Log.ErrorContext(ctx, "confirmed rebill charge on a canceled subscription; payment recorded without reactivation — refund review required", "subscription_id", subscription.ID, "transaction_id", params.TransactionID, "status", subscription.Status)
 		}
 		return nil
 	})
@@ -837,16 +763,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	}
 	renewalApplied := false
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail":                      params.Rail,
-		"rail_subscription_id":      params.RailSubscriptionID,
-		"transaction_id":            params.TransactionID,
-		"amount":                    suppliedAmount(params.Amount, params.Currency),
-		"allow_terminal_reactivate": params.AllowTerminalReactivation,
-	}).Info("Starting membership renewal flow")
+	s.Log.InfoContext(ctx, "Starting membership renewal flow", "rail", params.Rail, "rail_subscription_id", params.RailSubscriptionID, "transaction_id", params.TransactionID, "amount", suppliedAmount(params.Amount, params.Currency), "allow_terminal_reactivate", params.AllowTerminalReactivation)
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		paymentService := payments.NewPaymentService(db, s.Clock())
@@ -854,10 +774,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		// Lock before checking terminal state or preparing a full-row update.
 		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"rail":                 params.Rail,
-				"rail_subscription_id": params.RailSubscriptionID,
-			}).WithError(err).Error("Failed to load subscription for renewal")
+			s.Log.ErrorContext(ctx, "Failed to load subscription for renewal", "rail", params.Rail, "rail_subscription_id", params.RailSubscriptionID, logx.Err(err))
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
@@ -991,10 +908,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 						return fmt.Errorf("failed to get the scheduled product: %w", err)
 					}
 				}
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID, "scheduled_change_id": change.ID, "source": change.Source,
-					"old_price_id": subscription.PriceID, "new_price_id": price.ID,
-				}).Info("Applying the scheduled change on renewal")
+				s.Log.InfoContext(ctx, "Applying the scheduled change on renewal", "subscription_id", subscription.ID, "scheduled_change_id", change.ID, "source", change.Source, "old_price_id", subscription.PriceID, "new_price_id", price.ID)
 				if err := ApplyChange(ctx, db, change.ID, s.now()); err != nil {
 					return fmt.Errorf("failed to mark the scheduled change applied: %w", err)
 				}
@@ -1028,11 +942,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if !params.AmountProvided && params.Amount <= 0 {
 				// No charged amount supplied: record the catalog list price, with
 				// a warning (expected, not confirmed).
-				log.WithContext(ctx).WithFields(log.Fields{
-					"price_id":             price.ID,
-					"rail_subscription_id": params.RailSubscriptionID,
-					"transaction_id":       params.TransactionID,
-				}).Warn("no charged amount supplied for renewal payment; recording catalog list price")
+				s.Log.WarnContext(ctx, "no charged amount supplied for renewal payment; recording catalog list price", "price_id", price.ID, "rail_subscription_id", params.RailSubscriptionID, "transaction_id", params.TransactionID)
 			}
 			// The provider's transaction time when supplied; now() only as a last resort.
 			purchasedAt := now
@@ -1082,11 +992,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				if err := validateCompletedPayment(existingPayment, amount, currency); err != nil {
 					return err
 				}
-				log.WithContext(ctx).WithFields(log.Fields{
-					"transaction_id":  params.TransactionID,
-					"subscription_id": subscription.ID,
-					"rail":            params.Rail,
-				}).Info("Renewal payment already recorded")
+				s.Log.InfoContext(ctx, "Renewal payment already recorded", "transaction_id", params.TransactionID, "subscription_id", subscription.ID, "rail", params.Rail)
 				if params.Prepared == nil {
 					return nil
 				}
@@ -1277,17 +1183,12 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		return nil, fmt.Errorf("reactivation requires a future paid-through period end")
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail":                      params.Rail,
-		"rail_subscription_id":      railSubID,
-		"has_period_override":       params.CurrentPeriodEndsAt != nil,
-		"allow_terminal_reactivate": params.AllowTerminalReactivation,
-	}).Info("Starting membership reactivation flow")
+	s.Log.InfoContext(ctx, "Starting membership reactivation flow", "rail", params.Rail, "rail_subscription_id", railSubID, "has_period_override", params.CurrentPeriodEndsAt != nil, "allow_terminal_reactivate", params.AllowTerminalReactivation)
 
 	var reactivated *models.Subscription
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+		txdb := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(txdb)
 		productService := catalog.NewProductService(txdb)
 		subService := NewSubscriptionService(txdb, priceService, productService, nil, s.Clock())
@@ -1347,13 +1248,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		return nil, err
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":        reactivated.ID,
-		"user_id":                reactivated.CustomerID.String(),
-		"rail":                   reactivated.Rail,
-		"rail_subscription_id":   reactivated.RailSubscriptionID,
-		"current_period_ends_at": reactivated.CurrentPeriodEndsAt,
-	}).Info("Membership reactivation flow completed")
+	s.Log.InfoContext(ctx, "Membership reactivation flow completed", "subscription_id", reactivated.ID, "user_id", reactivated.CustomerID.String(), "rail", reactivated.Rail, "rail_subscription_id", reactivated.RailSubscriptionID, "current_period_ends_at", reactivated.CurrentPeriodEndsAt)
 
 	return reactivated, nil
 }
@@ -1370,29 +1265,19 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		subID = params.SubscriptionID.String()
 	}
 	cancelFeedback := normalize.FromPtr(params.CancelFeedback)
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":           subID,
-		"rail":                      procName,
-		"rail_subscription_id":      procSub,
-		"cancel_type":               params.CancelType,
-		"revoke_access_immediately": params.RevokeAccess,
-		"cancel_feedback_provided":  cancelFeedback != "",
-	}).Info("Starting membership cancellation flow")
+	s.Log.InfoContext(ctx, "Starting membership cancellation flow", "subscription_id", subID, "rail", procName, "rail_subscription_id", procSub, "cancel_type", params.CancelType, "revoke_access_immediately", params.RevokeAccess, "cancel_feedback_provided", cancelFeedback != "")
 
 	var result *CancelMembershipTxResult
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		result, err = s.CancelMembershipTx(ctx, db.NewWithPgxTx(tx), params)
+		result, err = s.CancelMembershipTx(ctx, db.NewWithPgxTx(s.Log, tx), params)
 		return err
 	})
 	if err != nil {
 		return err
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id": result.SubscriptionID,
-		"user_id":         result.UserID,
-	}).Info("Membership cancellation flow completed")
+	s.Log.InfoContext(ctx, "Membership cancellation flow completed", "subscription_id", result.SubscriptionID, "user_id", result.UserID)
 
 	return nil
 }
@@ -1420,7 +1305,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return nil, fmt.Errorf("either subscription_id or rail details must be provided")
 	}
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for cancellation")
+		s.Log.WarnContext(ctx, "Failed to locate subscription for cancellation", logx.Err(err))
 		return nil, fmt.Errorf("subscription not found: %w", err)
 	}
 
@@ -1502,19 +1387,13 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		RevokeSources: revokeSources,
 		Requested:     params.Requested,
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("Failed to apply local cancellation")
+		s.Log.ErrorContext(ctx, "Failed to apply local cancellation", logx.Err(err), "subscription_id", subscription.ID)
 		return nil, err
 	}
 	if subscription.LifecycleRev == previousRevision {
 		return result, nil // the locked lifecycle already reflects this cancellation
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id": subscription.ID,
-		"user_id":         subscription.CustomerID.String(),
-		"status":          subscription.Status,
-		"ended_at":        subscription.EndedAt,
-		"period_end":      subscription.CurrentPeriodEndsAt,
-	}).Info("Updated subscription record during cancellation")
+	s.Log.InfoContext(ctx, "Updated subscription record during cancellation", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "ended_at", subscription.EndedAt, "period_end", subscription.CurrentPeriodEndsAt)
 
 	reason := PremiumEndReasonAdmin
 	switch params.CancelType {
@@ -1811,9 +1690,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscriptionID,
-			}).Info("no solana_subscriptions row linked to canceled subscription; nothing to cascade")
+			d.Log.InfoContext(ctx, "no solana_subscriptions row linked to canceled subscription; nothing to cascade", "subscription_id", subscriptionID)
 			return nil
 		}
 		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
@@ -1824,10 +1701,7 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCanceled); err != nil {
 		return fmt.Errorf("set solana_subscriptions status canceled: %w", err)
 	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id":        subscriptionID,
-		"solana_subscription_id": row.ID,
-	}).Info("cascaded cancellation to solana_subscriptions row; cranker stopped")
+	d.Log.InfoContext(ctx, "cascaded cancellation to solana_subscriptions row; cranker stopped", "subscription_id", subscriptionID, "solana_subscription_id", row.ID)
 	return nil
 }
 
@@ -1852,10 +1726,10 @@ func resumeSolanaSubscription(ctx context.Context, d *db.DB, subscriptionID uuid
 func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, subscriptionID uuid.UUID) error {
 	notifications := make([]*models.NotificationEvent, 0, 1)
 
-	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Starting membership expiration flow")
+	s.Log.InfoContext(ctx, "Starting membership expiration flow", "subscription_id", subscriptionID)
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationService(db)
@@ -1864,7 +1738,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, subscriptionID)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for expiration")
+			s.Log.WarnContext(ctx, "Failed to locate subscription for expiration", logx.Err(err))
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
@@ -1883,15 +1757,10 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		subscription.CanceledAt = &now
 
 		if err := subService.Update(ctx, subscription); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-			}).Error("Failed to update subscription during expiration")
+			s.Log.ErrorContext(ctx, "Failed to update subscription during expiration", logx.Err(err), "subscription_id", subscription.ID)
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"user_id":         subscription.CustomerID.String(),
-		}).Info("Marked subscription as expired")
+		s.Log.InfoContext(ctx, "Marked subscription as expired", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String())
 
 		// Provider expiration stops billing and renewal grace, preserving paid access.
 		if entSvc != nil {
@@ -1933,7 +1802,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		return err
 	}
 
-	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Membership expiration flow completed")
+	s.Log.InfoContext(ctx, "Membership expiration flow completed", "subscription_id", subscriptionID)
 
 	return nil
 }
@@ -1960,15 +1829,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	var needsPaymentMethodUpdate bool
 	var unknownCycle uuid.UUID
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"rail":                 params.Rail,
-		"rail_subscription_id": params.SubscriptionID,
-		"failure_reason":       normalize.FromPtr(params.FailureReason),
-		"failure_code":         normalize.FromPtr(params.FailureCode),
-	}).Warn("Starting membership failure flow")
+	s.Log.WarnContext(ctx, "Starting membership failure flow", "rail", params.Rail, "rail_subscription_id", params.SubscriptionID, "failure_reason", normalize.FromPtr(params.FailureReason), "failure_code", normalize.FromPtr(params.FailureCode))
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
+		db := db.NewWithPgxTx(s.Log, tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationService(db)
@@ -1977,7 +1841,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for failure flow")
+			s.Log.WarnContext(ctx, "Failed to locate subscription for failure flow", logx.Err(err))
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
@@ -2147,12 +2011,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 		if heldTerminal != "" {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id":    subscription.ID,
-				"failure_reason":     normalize.FromPtr(params.FailureReason),
-				"terminal_certainty": params.TerminalCertainty,
-				"refusal":            heldTerminal,
-			}).Warn("Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued")
+			s.Log.WarnContext(ctx, "Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued", "subscription_id", subscription.ID, "failure_reason", normalize.FromPtr(params.FailureReason), "terminal_certainty", params.TerminalCertainty, "refusal", heldTerminal)
 		}
 		if event != nil {
 			if _, err := Transition(subscription, event, now); err != nil {
@@ -2192,18 +2051,12 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.DeletionScheduledAt = &deferredDeleteAt
 				scheduleDeferredDelete = true
 			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id":      subscription.ID,
-					"rail":                 subscription.Rail,
-					"rail_subscription_id": subscription.RailSubscriptionID,
-				}).Warn("no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription left alive (wiring gap)")
+				s.Log.WarnContext(ctx, "no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription left alive (wiring gap)", "subscription_id", subscription.ID, "rail", subscription.Rail, "rail_subscription_id", subscription.RailSubscriptionID)
 			}
 		}
 
 		if err := subService.Update(ctx, subscription); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-			}).Error("Failed to update subscription during failure flow")
+			s.Log.ErrorContext(ctx, "Failed to update subscription during failure flow", logx.Err(err), "subscription_id", subscription.ID)
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
 		// A terminal outcome the operator's switch (or a missing certainty
@@ -2233,13 +2086,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
 			}
 		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"user_id":         subscription.CustomerID.String(),
-			"status":          subscription.Status,
-			"retry_attempts":  subscription.RetryAttempts,
-			"next_retry_at":   subscription.NextRetryAt,
-		}).Warn("Updated subscription during failure flow")
+		s.Log.WarnContext(ctx, "Updated subscription during failure flow", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "retry_attempts", subscription.RetryAttempts, "next_retry_at", subscription.NextRetryAt)
 
 		// A terminal billing failure stops renewal grace; paid access keeps
 		// its own expiry.
@@ -2329,10 +2176,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	if scheduleDeferredDelete {
 		// Enqueued inside the failure-flow transaction above; this is just
 		// the operator-visible confirmation.
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": subscriptionID,
-			"user_id":         userID,
-		}).Info("scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)")
+		s.Log.InfoContext(ctx, "scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)", "subscription_id", subscriptionID, "user_id", userID)
 	}
 
 	return nil

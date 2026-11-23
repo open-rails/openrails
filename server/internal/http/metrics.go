@@ -6,11 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // PrivateHandler is the operator's private surface, never the public one:
@@ -45,7 +44,7 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	if runtime != nil && runtime.DB != nil {
 		var err error
 		if workers, err = runtime.ListWorkerHealth(ctx); err != nil {
-			log.WithError(err).Warn("metrics: job health")
+			s.Log.WarnContext(ctx, "metrics: job health", logx.Err(err))
 		}
 	}
 	writeMetrics(w, deps, abuse, workers)

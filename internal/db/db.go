@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +31,7 @@ type DB struct {
 
 	// partitions is shared by every pool-backed handle of one database.
 	partitions *partitionState
+	Log        *slog.Logger
 }
 
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
@@ -37,14 +39,14 @@ type DB struct {
 // OpenRails Postgres schema (config.SchemaName); when it differs from
 // the default, runtime queries are rewritten to it (#471) — essential here
 // because OpenRails shares the host's pool and cannot repoint its search_path.
-func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
-	return NewWithPGXPoolAndSessions(pool, schema, nil)
+func NewWithPGXPool(logger *slog.Logger, pool *pgxpool.Pool, schema string) (*DB, error) {
+	return NewWithPGXPoolAndSessions(logger, pool, schema, nil)
 }
 
 // NewOwningPGXPool wraps pool and takes it over: Close closes it. For a
 // one-off process that opened its own pool.
-func NewOwningPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
-	d, err := NewWithPGXPool(pool, schema)
+func NewOwningPGXPool(logger *slog.Logger, pool *pgxpool.Pool, schema string) (*DB, error) {
+	d, err := NewWithPGXPool(logger, pool, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +56,7 @@ func NewOwningPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 
 // NewWithPGXPoolAndSessions uses direct for session work when pool is
 // transaction-pooled. The host still owns pool.
-func NewWithPGXPoolAndSessions(pool *pgxpool.Pool, schema string, direct *pgxpool.Config) (*DB, error) {
+func NewWithPGXPoolAndSessions(logger *slog.Logger, pool *pgxpool.Pool, schema string, direct *pgxpool.Config) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
@@ -64,7 +66,7 @@ func NewWithPGXPoolAndSessions(pool *pgxpool.Pool, schema string, direct *pgxpoo
 		}
 		direct = direct.Copy()
 	}
-	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}, direct: direct}, nil
+	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}, direct: direct, Log: logger}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare
@@ -94,14 +96,14 @@ func (d *DB) Close() error {
 
 // NewWithPgxTx returns a DB scoped to an open pgx transaction: Qx/Gen return
 // the transaction, so repos called with this DB run inside it.
-func NewWithPgxTx(tx pgx.Tx) *DB {
+func NewWithPgxTx(logger *slog.Logger, tx pgx.Tx) *DB {
 	if scoped, ok := tx.(schemaTx); ok {
-		return &DB{pgtx: tx, rw: scoped.rw, river: scoped.river}
+		return &DB{pgtx: tx, rw: scoped.rw, river: scoped.river, Log: logger}
 	}
 	rw := newSchemaRewriter("")
-	return &DB{pgtx: rw.wrapTx(tx), rw: rw, river: &runtimeBinding{}}
+	return &DB{pgtx: rw.wrapTx(tx), rw: rw, river: &runtimeBinding{}, Log: logger}
 }
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {
-	return &DB{pgtx: schemaTx{Tx: tx, rw: d.rw, river: d.river}, rw: d.rw, river: d.river}
+	return &DB{pgtx: schemaTx{Tx: tx, rw: d.rw, river: d.river}, rw: d.rw, river: d.river, Log: d.Log}
 }

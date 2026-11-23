@@ -12,11 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/railresolve"
-	log "github.com/sirupsen/logrus"
 )
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
@@ -304,7 +304,7 @@ func (s *PurchaseService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config}
+	return &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
 }
 
 func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {
@@ -394,7 +394,7 @@ func (s *PurchaseService) pspKeyArchived(ctx context.Context, selector string) b
 	}
 	archived, err := resolver.PSPKeyArchived(ctx, tid, selector)
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Debug("PSP routing: archived-PSP lookup failed")
+		s.Log.DebugContext(ctx, "PSP routing: archived-PSP lookup failed", logx.Err(err))
 		return false
 	}
 	return archived

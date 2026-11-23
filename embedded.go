@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 func init() {
@@ -73,7 +72,7 @@ type Engine struct {
 // or document that cannot be served is refused alone and reported by Ready
 // and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
-	inner, err := engine.New(ctx, cfg, deps)
+	inner, err := engine.New(ctx, engineConfig(cfg), engineDeps(deps))
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +211,7 @@ type Route struct {
 // It fails when the engine lacks what a selected group needs, before anything
 // mounts. A standalone server's engine refuses: mount server.Routes.
 func (e *Engine) Routes(selection Routes) ([]Route, error) {
-	routes, err := e.engine.Routes(selection)
+	routes, err := e.engine.Routes(engineRoutes(selection))
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +229,7 @@ func (e *Engine) Routes(selection Routes) ([]Route, error) {
 // own. A standalone server's engine refuses: read the server's with
 // Client.GetPublicConfig.
 func (e *Engine) PublicConfig(selection Routes) (*billing.PublicConfig, error) {
-	doc, err := e.engine.PublicConfig(selection)
+	doc, err := e.engine.PublicConfig(engineRoutes(selection))
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +245,7 @@ func (e *Engine) CustomerConfig(selection Routes, r *http.Request) (*billing.Cus
 	if r == nil {
 		return nil, invalidErr("the host's request is required")
 	}
-	status, body, err := e.engine.CustomerConfig(selection, r)
+	status, body, err := e.engine.CustomerConfig(engineRoutes(selection), r)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +271,6 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 // RiverJobs also adds the provider_refresh queue for operator requests.
 // Hosts may set concurrency in the shared River config.
 const (
-	QueueBilling   = riverjobs.QueueBilling
-	QueuePSPImport = riverjobs.QueuePSPImport
+	QueueBilling   = "billing"
+	QueuePSPImport = "psp_import"
 )

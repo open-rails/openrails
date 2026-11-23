@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	log "github.com/sirupsen/logrus"
 )
 
 // WithPlatformVaultStore uses the engine's authenticated Vault connection.
@@ -124,7 +124,7 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 	if c.Environment == config.ClassTest {
 		base = "https://api.test.basistheory.com"
 	}
-	armed, lookahead := platformAccountUpdater(ctx, doc.Data)
+	armed, lookahead := platformAccountUpdater(ctx, s.Log, doc.Data)
 	return &config.ResolvedCustodian{Key: config.PlatformCustodianKey, Custodian: models.CustodianPlatform,
 		Environment: c.Environment,
 		APIBaseURL:  base,
@@ -136,7 +136,7 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 // platformAccountUpdater reads the Account Updater settings of the platform
 // document apart from its credentials: a malformed optional value leaves the
 // updater unarmed and every other use of the vault working.
-func platformAccountUpdater(ctx context.Context, doc []byte) (bool, int) {
+func platformAccountUpdater(ctx context.Context, logger *slog.Logger, doc []byte) (bool, int) {
 	var raw struct {
 		Armed     json.RawMessage `json:"account_updater"`
 		Lookahead json.RawMessage `json:"account_updater_lookahead_days"`
@@ -145,12 +145,12 @@ func platformAccountUpdater(ctx context.Context, doc []byte) (bool, int) {
 	lookahead := 0
 	if json.Unmarshal(doc, &raw) != nil || len(raw.Armed) == 0 || json.Unmarshal(raw.Armed, &armed) != nil {
 		if len(raw.Armed) != 0 {
-			log.WithContext(ctx).Warn("platform vault: account_updater is not a boolean; the Account Updater stays unarmed")
+			logger.WarnContext(ctx, "platform vault: account_updater is not a boolean; the Account Updater stays unarmed")
 		}
 		return false, custodians.DefaultAccountUpdaterLookaheadDays
 	}
 	if len(raw.Lookahead) != 0 && (json.Unmarshal(raw.Lookahead, &lookahead) != nil || lookahead < 1 || lookahead > custodians.MaxAccountUpdaterLookaheadDays) {
-		log.WithContext(ctx).Warnf("platform vault: account_updater_lookahead_days must be a whole number from 1 to %d; the Account Updater stays unarmed", custodians.MaxAccountUpdaterLookaheadDays)
+		logger.WarnContext(ctx, "platform vault: account_updater_lookahead_days must be a whole number from 1 to max; the Account Updater stays unarmed", "max", custodians.MaxAccountUpdaterLookaheadDays)
 		return false, custodians.DefaultAccountUpdaterLookaheadDays
 	}
 	return armed, custodians.Settings{AccountUpdaterLookaheadDays: lookahead}.LookaheadDays()

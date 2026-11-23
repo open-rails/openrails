@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -214,8 +215,8 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 // fixtureDestination (code seams and the loopback provider_sandbox only)
 // replaces the destination and skips verification: OpenRails never dials it
 // itself, only the custodian does.
-func ProxyPostureClient(merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string) (*NMIClient, error) {
-	client, err := NewAccountClient(merchantID, pspID, accountID, cfg)
+func ProxyPostureClient(logger *slog.Logger, merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string) (*NMIClient, error) {
+	client, err := NewAccountClient(logger, merchantID, pspID, accountID, cfg)
 	if err != nil {
 		return nil, err
 	}

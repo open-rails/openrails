@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -40,7 +39,7 @@ func (s *StripeWebhookService) markCatalogObjectDirty(ctx context.Context, event
 	}
 	ref := strings.TrimSpace(data.ID)
 	if ref == "" {
-		log.WithContext(ctx).WithField("event_type", eventType).Info("stripe catalog event without an object id; nothing to observe")
+		s.Log.InfoContext(ctx, "stripe catalog event without an object id; nothing to observe", "event_type", eventType)
 		return nil
 	}
 	if s.ObserveEnqueuer == nil {

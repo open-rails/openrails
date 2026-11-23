@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -180,7 +181,7 @@ func dump(ctx context.Context, dsn, schema string, chain fs.FS) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	err = migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Chain: chain})
+	err = migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Chain: chain, Logger: slog.Default()})
 	var oids [2]string
 	if err == nil {
 		err = pool.QueryRow(ctx, `SELECT d.oid::text, n.oid::text FROM pg_database d, pg_namespace n WHERE d.datname = current_database() AND n.nspname = $1`, schema).Scan(&oids[0], &oids[1])

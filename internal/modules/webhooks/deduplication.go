@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,9 +15,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -39,6 +40,7 @@ const (
 type DeduplicationService struct {
 	claims *idempotency.Store
 	db     *db.DB
+	Log    *slog.Logger
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -101,11 +103,11 @@ func WebhookRefusalCode(err error) string {
 
 // NewDeduplicationService requires the claim store and the database holding
 // webhook_events.
-func NewDeduplicationService(claims *idempotency.Store, database *db.DB) (*DeduplicationService, error) {
+func NewDeduplicationService(logger *slog.Logger, claims *idempotency.Store, database *db.DB) (*DeduplicationService, error) {
 	if claims == nil || database == nil {
 		return nil, fmt.Errorf("webhook dedup requires the idempotency store and the database")
 	}
-	return &DeduplicationService{claims: claims, db: database}, nil
+	return &DeduplicationService{claims: claims, db: database, Log: logger}, nil
 }
 
 // dedupMarkCtxKey carries the in-flight event's truth-row identity so handlers
@@ -223,13 +225,13 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	if trimmedEventID == "" {
 		return s.run(ctx, nil, nil, processingFunc)
 	}
-	fields := log.Fields{"eventID": trimmedEventID, "eventType": eventType, "source": source}
+	fields := []any{"eventID", trimmedEventID, "eventType", eventType, "source", source}
 	mark, err := s.newDedupMark(ctx, op, trimmedEventID)
 	if err != nil {
 		return err
 	}
 	if mark == nil {
-		log.WithContext(ctx).WithFields(fields).Warn("no merchant on context: processing webhook without dedupe protection")
+		s.Log.With(fields...).WarnContext(ctx, "no merchant on context: processing webhook without dedupe protection")
 		return s.run(ctx, nil, nil, processingFunc)
 	}
 	claim, rec, err := s.claim(ctx, claimOp, trimmedEventID)
@@ -238,14 +240,14 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 	if claim == nil {
 		if rec.Status == idempotency.StatusSucceeded {
-			log.WithContext(ctx).WithFields(fields).Info("Webhook already processed successfully, skipping")
+			s.Log.With(fields...).InfoContext(ctx, "Webhook already processed successfully, skipping")
 			return nil
 		}
-		log.WithContext(ctx).WithFields(fields).Info("Webhook already in progress, skipping concurrent duplicate")
+		s.Log.With(fields...).InfoContext(ctx, "Webhook already in progress, skipping concurrent duplicate")
 		return fmt.Errorf("webhook already in progress")
 	}
 	if claim.Reclaimed {
-		log.WithContext(ctx).WithFields(fields).Warn("Reclaimed webhook after a failed or abandoned delivery")
+		s.Log.With(fields...).WarnContext(ctx, "Reclaimed webhook after a failed or abandoned delivery")
 	}
 	// The claim says who processes; webhook_events says whether it was applied
 	// (a crash after the effects committed, or an earlier claim collected).
@@ -256,7 +258,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 	}
 	if done {
 		s.complete(ctx, claim, fields)
-		log.WithContext(ctx).WithFields(fields).Info("Webhook already processed (postgres truth), skipping")
+		s.Log.With(fields...).InfoContext(ctx, "Webhook already processed (postgres truth), skipping")
 		return nil
 	}
 	return s.run(ctx, claim, mark, processingFunc)
@@ -304,9 +306,9 @@ func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*
 // Every transaction the handler commits first proves the claim is still held
 // (a commit guard), so an owner whose claim lapsed can never commit effects.
 func (s *DeduplicationService) run(ctx context.Context, claim *idempotency.Claim, mark *dedupMark, processingFunc func(ctx context.Context) error) error {
-	fields := log.Fields{}
+	fields := []any{}
 	if mark != nil {
-		fields = log.Fields{"op": mark.op, "eventID": mark.eventID}
+		fields = []any{"op", mark.op, "eventID", mark.eventID}
 		ctx = context.WithValue(ctx, dedupMarkCtxKey{}, mark)
 	}
 	work, stop := ctx, func() {}
@@ -325,14 +327,14 @@ func (s *DeduplicationService) run(ctx context.Context, claim *idempotency.Claim
 		if claim != nil {
 			s.complete(ctx, claim, fields)
 		}
-		log.WithContext(ctx).WithFields(fields).Info("Webhook already applied by another delivery")
+		s.Log.With(fields...).InfoContext(ctx, "Webhook already applied by another delivery")
 		return nil
 	case processingErr != nil && lost(processingErr):
-		log.WithContext(ctx).WithFields(fields).WithError(processingErr).Warn("Webhook claim lost mid-processing; the new owner applies it")
+		s.Log.With(fields...).WarnContext(ctx, "Webhook claim lost mid-processing; the new owner applies it", logx.Err(processingErr))
 		return fmt.Errorf("webhook processing abandoned: %w", idempotency.ErrClaimLost)
 	case processingErr != nil && !IsWebhookErrorNonRetryable(processingErr):
 		stop()
-		log.WithContext(ctx).WithFields(fields).WithError(processingErr).Error("Webhook processing failed")
+		s.Log.With(fields...).ErrorContext(ctx, "Webhook processing failed", logx.Err(processingErr))
 		if claim != nil {
 			s.release(ctx, claim, fields, processingErr)
 		}
@@ -358,21 +360,21 @@ func (s *DeduplicationService) run(ctx context.Context, claim *idempotency.Claim
 		s.complete(ctx, claim, fields)
 	}
 	if processingErr != nil {
-		log.WithContext(ctx).WithFields(fields).WithError(processingErr).Warn("Webhook failed with non-retryable error; marked complete to avoid futile retries")
+		s.Log.With(fields...).WarnContext(ctx, "Webhook failed with non-retryable error; marked complete to avoid futile retries", logx.Err(processingErr))
 		return nil
 	}
-	log.WithContext(ctx).WithFields(fields).Info("Webhook processed successfully")
+	s.Log.With(fields...).InfoContext(ctx, "Webhook processed successfully")
 	return nil
 }
 
-func (s *DeduplicationService) complete(ctx context.Context, claim *idempotency.Claim, fields log.Fields) {
+func (s *DeduplicationService) complete(ctx context.Context, claim *idempotency.Claim, fields []any) {
 	if err := claim.Complete(ctx, nil); err != nil {
-		log.WithContext(ctx).WithFields(fields).WithError(err).Warn("webhook claim not completed (webhook_events holds the applied fact)")
+		s.Log.With(fields...).WarnContext(ctx, "webhook claim not completed (webhook_events holds the applied fact)", logx.Err(err))
 	}
 }
 
-func (s *DeduplicationService) release(ctx context.Context, claim *idempotency.Claim, fields log.Fields, cause error) {
+func (s *DeduplicationService) release(ctx context.Context, claim *idempotency.Claim, fields []any, cause error) {
 	if err := claim.Fail(ctx, cause); err != nil {
-		log.WithContext(ctx).WithFields(fields).WithError(err).Warn("webhook claim not released; it lapses with its lease")
+		s.Log.With(fields...).WarnContext(ctx, "webhook claim not released; it lapses with its lease", logx.Err(err))
 	}
 }

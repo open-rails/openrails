@@ -7,7 +7,7 @@ import (
 )
 
 func GetMerchantConfiguration(r *httprequest.Request) {
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return
@@ -26,7 +26,7 @@ func UpdateMerchantConfiguration(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return

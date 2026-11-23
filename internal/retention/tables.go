@@ -132,7 +132,6 @@ var Tables = map[string]Table{
 	"product_access":                    {Class: State},
 	"customer_entitlement_cache":        {Class: State},
 	"customer_entitlement_cache_stamps": {Class: State},
-	"access_cutover_approvals":          {Permanent, permanent},
 	"money_settings":                    {Class: State},
 	"balance_watches":                   {Class: State},
 	"psp_refresh_watermarks":            {Class: State},

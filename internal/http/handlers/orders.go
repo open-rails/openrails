@@ -94,7 +94,7 @@ func orderKey(r *httprequest.Request) string {
 }
 
 func orderService(r *httprequest.Request) *billingservice.Service {
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return nil

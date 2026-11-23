@@ -353,7 +353,7 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 // directory row, records a merchant_purge maintenance run and, when Vault holds
 // the merchant's configuration, queues the job that deletes it; River retries
 // that job until the merchant's subtree is empty. Purging an already purged
-// merchant returns ErrMerchantNotFound.
+// merchant returns billing.ErrMerchantNotFound.
 func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billing.PurgeMerchantParams) (billing.MerchantPurge, error) {
 	m, err := s.merchantByID(ctx, id)
 	if err != nil {
@@ -420,7 +420,7 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := gen.New(tx).LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrMerchantNotFound
+				return billing.ErrMerchantNotFound
 			}
 			return err
 		}

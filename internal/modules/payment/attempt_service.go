@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -85,6 +86,7 @@ type OrderAttemptService struct {
 	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
 	checkoutOrigin func() string
+	Log            *slog.Logger
 }
 
 // SetCheckoutOrigin wires the payment page's origin, set once it is served.
@@ -133,6 +135,7 @@ func NewOrderAttemptService(
 		config:                   cfg,
 		rails:                    rails,
 		clock:                    timeutil.FirstClock(clocks...),
+		Log:                      db.Log,
 	}
 }
 

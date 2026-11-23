@@ -4,11 +4,10 @@ import (
 	"errors"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
@@ -47,6 +46,6 @@ func modelFailure(r *httprequest.Request, err error, noAnswer bool) {
 	if noAnswer {
 		message = "the model did not answer within its lookup budget; ask a narrower question"
 	}
-	log.WithContext(r.Request.Context()).WithError(err).Warn("model request failed")
+	r.Log.WarnContext(r.Request.Context(), "model request failed", logx.Err(err))
 	r.ErrorCode(billing.CodeModelUnavailable, message)
 }

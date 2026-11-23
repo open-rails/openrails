@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -128,11 +129,12 @@ type ConfirmTierChangeService struct {
 	transactor  tierChangeTransactor
 	tokens      Tokens
 	now         func() time.Time
+	Log         *slog.Logger
 }
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(chain solanaint.ChainReader, lifecycle *submod.SubscriptionLifecycleService, store *solanasubs.SolanaSubscriptionRepo, memberships *submod.SubscriptionRepo, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(logger *slog.Logger, chain solanaint.ChainReader, lifecycle *submod.SubscriptionLifecycleService, store *solanasubs.SolanaSubscriptionRepo, memberships *submod.SubscriptionRepo, transactor tierChangeTransactor, tokens Tokens) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		chain:       chain,
 		lifecycle:   lifecycle,
@@ -141,6 +143,7 @@ func NewConfirmTierChangeService(chain solanaint.ChainReader, lifecycle *submod.
 		transactor:  transactor,
 		tokens:      tokens,
 		now:         time.Now,
+		Log:         logger,
 	}
 }
 
@@ -282,7 +285,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		notifications []*models.NotificationEvent
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txDB := db.NewWithPgxTx(tx)
+		txDB := db.NewWithPgxTx(s.Log, tx)
 		locked, err := s.memberships.LockTierChangeTx(ctx, txDB, in.OldSubscriptionID)
 		if err != nil {
 			return err

@@ -88,7 +88,7 @@ adds `draft_price_change` and `draft_catalog_diff`, which return the requests a
 person would send. The model sees aggregate catalog data and subscriber counts.
 
 `internal/catalogrules` validates charge models and rates usage in integer
-micros ([metering](metering.md)). Price migrations are
+micros ([usage billing](usage-billing.md)). Price migrations are
 [subscriptions](subscriptions.md); `StripeCatalogService` (webhook endpoints) is
 [payment providers](payment-providers.md).
 
@@ -168,7 +168,7 @@ Checks:
 - OR-J04-S02 keeps cached catalog reads bound to their merchant.
 - Every query in `products.sql` and `prices.sql` names `merchant_id`.
 
-### 5. Stable contracts
+### 5. Contracts match the code
 
 The `catalog` package, `billing` catalog types and `Client` methods are in
 `api/go.txt`, the routes in `api/openapi.json`, the tables in `api/schema.txt`;
@@ -180,10 +180,9 @@ Checks:
 - `go run ./scripts/contracts` passes with no catalog line removed.
 - A replay answers `replayed: true` with the first `application_id` (OR-J05-S03).
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-`0002` changed the cadence check on `prices`; `0003` added `catalog_limits` and
-`catalog_product_limits` and widened `catalog_field_owners`. `products`,
+`products`,
 `product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`
 and `catalog_restore_receipts` are permanent, the rest state; none is
 partitioned. Products and prices soft-delete.

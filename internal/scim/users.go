@@ -12,11 +12,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // User is the User resource this service provider returns.
@@ -362,7 +362,7 @@ func (s *Server) tx(ctx context.Context, fn func(q *gen.Queries) error) *Error {
 	case db.IsUniqueViolation(err):
 		return errorf(http.StatusConflict, "uniqueness", "another User has this userName")
 	}
-	log.WithContext(ctx).WithError(err).Error("scim: write failed")
+	s.Log.ErrorContext(ctx, "scim: write failed", logx.Err(err))
 	return errInternal
 }
 
@@ -510,7 +510,7 @@ func (s *Server) getUser(ctx context.Context, mid billing.MerchantID, raw string
 	case errors.Is(err, pgx.ErrNoRows):
 		return row, errNotFound
 	case err != nil:
-		log.WithContext(ctx).WithError(err).Error("scim: read failed")
+		s.Log.ErrorContext(ctx, "scim: read failed", logx.Err(err))
 		return row, errInternal
 	}
 	return row, nil

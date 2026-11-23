@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -307,8 +306,7 @@ func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, 
 		}
 		res.Recomputed = true
 	} else {
-		log.WithContext(ctx).WithField("run_id", runID).
-			Warn("destructive-run reversal did not re-derive: the restored subscriptions have no access until Converge runs")
+		database.Log.WarnContext(ctx, "destructive-run reversal did not re-derive: the restored subscriptions have no access until Converge runs", "run_id", runID)
 	}
 
 	// --- step 5: report --------------------------------------------------------
@@ -328,11 +326,7 @@ func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, 
 		}
 	}
 	if !res.Complete() {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"run_id":       runID,
-			"irreversible": len(res.IntentsIrreversible),
-			"ambiguous":    len(res.IntentsAmbiguous),
-		}).Error("destructive-run reversal is INCOMPLETE: provider writes escaped before the reverse reached them")
+		database.Log.ErrorContext(ctx, "destructive-run reversal is INCOMPLETE: provider writes escaped before the reverse reached them", "run_id", runID, "irreversible", len(res.IntentsIrreversible), "ambiguous", len(res.IntentsAmbiguous))
 	}
 	return res, nil
 }

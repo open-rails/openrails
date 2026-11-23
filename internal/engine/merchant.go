@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbinding"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 )
@@ -14,7 +13,7 @@ import (
 // upsertMerchantConfig provisions one declared merchant before HTTP routes or
 // workers can observe a partially configured runtime. A document it cannot
 // serve is refused alone (the cache reports it).
-func upsertMerchantConfig(ctx context.Context, a *app.App, m config.MerchantDeclaration, groups billing.MerchantGroupReader) (billing.MerchantID, error) {
+func upsertMerchantConfig(ctx context.Context, a *app.App, m billing.MerchantDeclaration, groups billing.MerchantGroupReader) (billing.MerchantID, error) {
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
 		return billing.MerchantID{}, fmt.Errorf("openrails: app database not initialized")
 	}

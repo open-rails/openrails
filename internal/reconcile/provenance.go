@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -111,7 +111,7 @@ func (e *Engine) classifyProvenance(ctx context.Context, pspID uuid.UUID, snap *
 		}
 		live, named, err := store.ObjectNamed(ctx, pspID, refs)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("reconcile: provenance check failed; finding kept as raised")
+			e.Log.WarnContext(ctx, "reconcile: provenance check failed; finding kept as raised", logx.Err(err))
 			continue
 		}
 		if named {

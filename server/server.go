@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/userinfo"
 	riverhelpers "github.com/open-rails/helpers/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
@@ -33,33 +34,98 @@ import (
 	paypage "github.com/open-rails/openrails/web/pay"
 )
 
-// The configuration family of a standalone server, defined in internal/config
-// and named here.
-type (
-	// MerchantCreationConfig is Config.MerchantCreation: the policy for
-	// merchants and names users claim.
-	MerchantCreationConfig = hostconfig.MerchantCreationConfig
-	// AdminConsole controls the optional console at /admin and its app sign-in.
-	AdminConsole = hostconfig.ConsoleConfig
-	// ConsoleIssuer is one merchant or operator authorization server.
-	ConsoleIssuer = hostconfig.ConsoleIssuer
-	// NamingConfig is Config.Naming: the rename policy for merchant names.
-	NamingConfig = config.NamingConfig
-	// FormerNamesConfig is NamingConfig.FormerNames: how long a former name
-	// keeps forwarding.
-	FormerNamesConfig = config.FormerNamesConfig
-	// FormerNamesMode is FormerNamesConfig.Mode.
-	FormerNamesMode = config.FormerNamesMode
-)
+// MerchantCreationConfig is Config.MerchantCreation: the policy for the
+// merchants and names users claim.
+type MerchantCreationConfig struct {
+	// ReservedSlugs are reserved in addition to billing.ReservedMerchantSlugs.
+	ReservedSlugs []string
+	// ReservedEscalationRole names the root-group role whose holders may claim
+	// reserved names. Empty: reserved names are never user-claimable.
+	ReservedEscalationRole string
+	// SlugPattern further restricts claimed names (an unanchored regexp).
+	SlugPattern string
+	// FreeAllowance is how many merchants a user may own before creating
+	// another requires a vaulted payment method (Deps.HasVaultedPaymentMethod).
+	// Zero admits every creation that passes the name policy.
+	FreeAllowance int
+}
+
+// AdminConsole is Config.AdminConsole: the console at /admin and its app
+// sign-in.
+type AdminConsole struct {
+	// Disabled omits the console's pages, assets and bootstrap endpoints.
+	// The default keeps the console available; billing and auth APIs are
+	// separate.
+	Disabled bool
+	// Issuers are keyed by a merchant id or name, or "root" for operators.
+	Issuers map[string]ConsoleIssuer
+}
+
+// ConsoleIssuer is an authorization server the console signs staff in at,
+// as an OAuth 2.0 public client (code flow with PKCE).
+type ConsoleIssuer struct {
+	// URL is the issuer: one of AuthKit's trusted issuers.
+	URL string
+	// ClientID is the console's public client there, registered with the
+	// console path plus /callback as a redirect URI.
+	ClientID string
+	// Name is shown on the sign-in button; empty is the trusted issuer's.
+	Name string
+	// Scope is what the console asks for; empty is "openid profile email
+	// openrails:merchant". An issuer that grants refresh tokens only for
+	// offline_access needs it added.
+	Scope string
+}
+
+// NamingConfig is Config.Naming: the rename policy for merchant names,
+// whether a name may change, how often, and how long a former name keeps
+// forwarding. Unset fields take the defaults: renames on, every 72 hours,
+// former names kept 90 days.
+type NamingConfig struct {
+	Enabled        *bool
+	RenameInterval *time.Duration
+	FormerNames    FormerNamesConfig
+}
+
+// FormerNamesConfig is NamingConfig.FormerNames: how long a former name
+// keeps forwarding. Duration applies to FormerNamesFinite only.
+type FormerNamesConfig struct {
+	Mode     FormerNamesMode
+	Duration *time.Duration
+}
+
+// FormerNamesMode is FormerNamesConfig.Mode.
+type FormerNamesMode string
 
 const (
 	// FormerNamesFinite forwards a former name for FormerNamesConfig.Duration.
-	FormerNamesFinite = config.FormerNamesFinite
+	FormerNamesFinite FormerNamesMode = "finite"
 	// FormerNamesForever forwards a former name indefinitely.
-	FormerNamesForever = config.FormerNamesForever
+	FormerNamesForever FormerNamesMode = "forever"
 	// FormerNamesImmediate releases a former name at once.
-	FormerNamesImmediate = config.FormerNamesImmediate
+	FormerNamesImmediate FormerNamesMode = "immediate"
 )
+
+// namingConfig is c as the control plane reads it.
+func namingConfig(c NamingConfig) config.NamingConfig {
+	return config.NamingConfig{Enabled: c.Enabled, RenameInterval: c.RenameInterval,
+		FormerNames: config.FormerNamesConfig{Mode: config.FormerNamesMode(c.FormerNames.Mode), Duration: c.FormerNames.Duration}}
+}
+
+// consoleConfig is c as the HTTP surface reads it.
+func consoleConfig(c *AdminConsole) *hostconfig.ConsoleConfig {
+	if c == nil {
+		return nil
+	}
+	out := &hostconfig.ConsoleConfig{Disabled: c.Disabled}
+	if c.Issuers != nil {
+		out.Issuers = make(map[string]hostconfig.ConsoleIssuer, len(c.Issuers))
+		for key, issuer := range c.Issuers {
+			out.Issuers[key] = hostconfig.ConsoleIssuer(issuer)
+		}
+	}
+	return out
+}
 
 // Config is a standalone deployment: plain data.
 type Config struct {
@@ -160,6 +226,7 @@ type Server struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	log       *slog.Logger
 }
 
 func init() {
@@ -197,7 +264,10 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if deps.Engine.UserInfo != nil {
 		return nil, errors.New("server: Engine.UserInfo reads one embedded host's directory; a standalone server's merchants' customers are AuthKit's, pushed by their issuers over SCIM")
 	}
-	s := &Server{cfg: cfg}
+	// Read once: the engine and the server log to the same logger.
+	logger := logx.New(deps.Engine.Logger)
+	deps.Engine.Logger = logger
+	s := &Server{cfg: cfg, log: logger}
 	deps.Engine.UserInfo = customerDirectory{s}
 	eng, err := openrails.New(ctx, cfg.Engine, deps.Engine)
 	if err != nil {
@@ -210,11 +280,11 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 
 	consoleEnabled := cfg.AdminConsole == nil || !cfg.AdminConsole.Disabled
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming, Console: cfg.LocalSignIn && consoleEnabled}
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: namingConfig(cfg.Naming), Console: cfg.LocalSignIn && consoleEnabled}
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {
-			admission, err := operator.MerchantCreationAdmission(func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
+			admission, err := operator.MerchantCreationAdmission(logger, func() *controlplane.ControlPlane { return s.cp }, operator.MerchantCreationPolicy{
 				FreeAllowance: c.FreeAllowance, HasVaultedPaymentMethod: deps.HasVaultedPaymentMethod,
 			})
 			if err != nil {
@@ -237,8 +307,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if akDeps.Redis == nil && s.graph.RedisClient != nil {
 		akDeps.Redis = s.graph.RedisClient
 	}
-	if akDeps.Email == nil && s.graph.Runtime.EmailSender != nil {
-		akDeps.Email = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
+	if akDeps.Email == nil && deps.Engine.Email != nil {
+		akDeps.Email = controlplane.AuthKitSender{Sender: deps.Engine.Email}
 	}
 	akCfg, err := controlplane.AuthKit(s.graph.Config, cfg.Auth, opts)
 	if err != nil {
@@ -251,7 +321,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return fail(fmt.Errorf("server: build AuthKit: %w", err))
 	}
-	if s.cp, err = controlplane.New(ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
+	if s.cp, err = controlplane.New(logger, ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
 		_ = ak.Close(context.WithoutCancel(ctx))
 		return fail(err)
 	}
@@ -263,9 +333,15 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		consoleAssets = admin.FS()
 	}
 	checkout, page := eng.CheckoutPage()
+	var admission func(context.Context, auth.Verified, config.CustomerBinding) error
+	if policy := deps.CustomerAdmissionPolicy; policy != nil {
+		admission = func(ctx context.Context, v auth.Verified, b config.CustomerBinding) error {
+			return policy(ctx, v, openrails.CustomerBinding(b))
+		}
+	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, Resource: akCfg.Resource.ID,
-		CustomerAdmissionPolicy: deps.CustomerAdmissionPolicy,
+		RouteGroups: config.RouteGroups(cfg.RouteGroups), AdminConsole: consoleConfig(cfg.AdminConsole), Resource: akCfg.Resource.ID,
+		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
@@ -366,7 +442,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	}
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
-	log.Infof("OpenRails serving on %s", ln.Addr())
+	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
 	var private *http.Server
 	if s.cfg.PrivateAddr != "" {
 		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.PrivateAddr)
@@ -376,7 +452,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		}
 		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 		go func() { served <- private.Serve(pln) }()
-		log.Infof("OpenRails private listener (metrics) on %s", pln.Addr())
+		s.log.InfoContext(ctx, "OpenRails private listener (metrics)", "addr", pln.Addr().String())
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -384,12 +460,12 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err == nil {
 		select {
 		case <-ctx.Done():
-			err = drain(s.surface.Drain, s.cfg.DrainDelay, served, hs)
+			err = drain(s.log, s.surface.Drain, s.cfg.DrainDelay, served, hs)
 		case err = <-served:
 		}
 	}
 	deadline = time.Now().Add(s.shutdownTimeout())
-	shutdown(deadline, hs, private)
+	shutdown(s.log, deadline, hs, private)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
@@ -399,7 +475,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 // drain marks the process unready and keeps serving for delay, with
 // keep-alives off so clients reconnect to another instance. A server failing
 // meanwhile ends it early.
-func drain(unready func(), delay time.Duration, served <-chan error, servers ...*http.Server) error {
+func drain(logger *slog.Logger, unready func(), delay time.Duration, served <-chan error, servers ...*http.Server) error {
 	if delay <= 0 {
 		return nil
 	}
@@ -407,7 +483,7 @@ func drain(unready func(), delay time.Duration, served <-chan error, servers ...
 	for _, hs := range servers {
 		hs.SetKeepAlivesEnabled(false)
 	}
-	log.Infof("server: draining for %s", delay)
+	logger.Info("server: draining", "delay", delay.String())
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -420,7 +496,7 @@ func drain(unready func(), delay time.Duration, served <-chan error, servers ...
 
 // shutdown stops the servers accepting and lets in-flight requests finish
 // by deadline, then closes whatever is left.
-func shutdown(deadline time.Time, servers ...*http.Server) {
+func shutdown(logger *slog.Logger, deadline time.Time, servers ...*http.Server) {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	for _, hs := range servers {
@@ -428,7 +504,7 @@ func shutdown(deadline time.Time, servers ...*http.Server) {
 			continue
 		}
 		if err := hs.Shutdown(ctx); err != nil {
-			log.WithError(err).Error("server: HTTP shutdown; closing the remaining connections")
+			logger.ErrorContext(ctx, "server: HTTP shutdown; closing the remaining connections", logx.Err(err))
 			_ = hs.Close()
 		}
 	}

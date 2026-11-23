@@ -2,9 +2,8 @@ package iputil
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // DefaultCCBillIPRanges are CCBill's documented webhook source ranges
@@ -33,14 +32,14 @@ func mustParseCIDRs(cidrs []string) []*net.IPNet {
 }
 
 // IsValidCCBillIP checks if the given IP address is within CCBill's authorized IP ranges
-func IsValidCCBillIP(clientIP string) bool {
+func IsValidCCBillIP(logger *slog.Logger, clientIP string) bool {
 	if clientIP == "" {
 		return false
 	}
 
 	ip := net.ParseIP(clientIP)
 	if ip == nil {
-		log.WithField("client_ip", clientIP).Warn("Failed to parse client IP address")
+		logger.Warn("Failed to parse client IP address", "client_ip", clientIP)
 		return false
 	}
 

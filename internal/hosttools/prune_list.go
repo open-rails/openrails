@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"strings"
 
@@ -29,7 +30,7 @@ type PruneListOptions struct {
 
 // PruneList shows this merchant's prune runs, newest first — the ids
 // `openrails undo-run --run` takes.
-func PruneList(ctx context.Context, opts PruneListOptions) error {
+func PruneList(ctx context.Context, logger *slog.Logger, opts PruneListOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -46,7 +47,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 		limit = math.MaxInt32
 	}
 	lim := int32(limit)
-	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}

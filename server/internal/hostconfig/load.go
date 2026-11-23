@@ -18,7 +18,6 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 	billing "github.com/open-rails/openrails/internal/config"
-	log "github.com/sirupsen/logrus"
 )
 
 func loadConfigIfExists(k *koanf.Koanf, path string) error {
@@ -200,15 +199,16 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	f := defaults()
 
 	// A .env in the working directory is a real config source, so consuming
-	// one is LOGGED (or#915): a deployment silently absorbing a stray .env is
-	// the quiet failure mode the env audit flagged.
+	// one is reported (Config.EnvFile): a deployment silently absorbing a
+	// stray .env is the quiet failure mode the env audit flagged.
+	var envFile string
 	if err := godotenv.Load(); err != nil {
 		var pathErr *os.PathError
 		if !errors.As(err, &pathErr) {
 			return nil, err
 		}
 	} else if abs, absErr := filepath.Abs(".env"); absErr == nil && !options.quiet {
-		log.Infof("config: loaded environment overrides from %s", abs)
+		envFile = abs
 	}
 
 	if configPath == "" {
@@ -539,6 +539,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if err != nil {
 		return nil, err
 	}
+	cfg.EnvFile = envFile
 	if cfg.DB.URL, err = databaseURL(&cfg.DB); err != nil {
 		return nil, err
 	}
