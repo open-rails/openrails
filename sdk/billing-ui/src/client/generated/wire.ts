@@ -11,7 +11,7 @@ export type AccessTenure = {
   seconds: Record<string, number> | null
 }
 
-export type AdjustLimitParams = {
+export type AdjustCustomerLimitParams = {
   limit?: string
   amount?: string
   source_id?: string
@@ -841,7 +841,7 @@ export type DashboardWidget = {
   id: string
   title: string
   viz: string
-  query: MetricsQuery
+  query: QueryMetricsParams
   grid: DashboardGrid
   fixed_range: boolean
 }
@@ -1483,7 +1483,7 @@ export type MetricsDimension = {
 
 export type MetricsExample = {
   intent: string
-  query: MetricsQuery
+  query: QueryMetricsParams
 }
 
 export type MetricsLimits = {
@@ -1505,17 +1505,6 @@ export type MetricsOrder = {
   measure?: string
   dimension?: string
   dir?: string
-}
-
-export type MetricsQuery = {
-  measures: string[]
-  by: string[]
-  grain: string
-  range: MetricsRange | null
-  filters: Record<string, string[]> | null
-  order: MetricsOrder[]
-  limit: number | null
-  compare: string
 }
 
 export type MetricsRange = {
@@ -2286,18 +2275,20 @@ export type PublicMerchant = {
   embed_origins: string[]
 }
 
-export type PutCustodianParams = {
-  expected_revision?: number
-  kind?: "basis_theory" | "hyperswitch"
-  environment?: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
-  account_id?: string
-  settings?: Record<string, unknown>
-  credentials?: Record<string, string>
-}
-
 export type Quantity = {
   min: number
   max: number
+}
+
+export type QueryMetricsParams = {
+  measures: string[]
+  by: string[]
+  grain: string
+  range: MetricsRange | null
+  filters: Record<string, string[]> | null
+  order: MetricsOrder[]
+  limit: number | null
+  compare: string
 }
 
 export type RailDefinition = {
@@ -2428,6 +2419,15 @@ export type ScheduledChange = {
 export type SetCartLineParams = {
   quantity?: number
   amount?: string
+}
+
+export type SetCustodianParams = {
+  expected_revision?: number
+  kind?: "basis_theory" | "hyperswitch"
+  environment?: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
+  account_id?: string
+  settings?: Record<string, unknown>
+  credentials?: Record<string, string>
 }
 
 export type SetDashboardParams = {

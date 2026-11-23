@@ -73,7 +73,7 @@ type RemoteCredential struct {
 	// the backend obtains from its issuer. It must be safe for concurrent
 	// use; an error or an empty token fails the call.
 	Token func(context.Context) (string, error)
-	// Assertion signs customer tokens (CustomerToken, CustomerAssertion).
+	// Assertion signs customer tokens (CreateCustomerToken, CreateCustomerAssertion).
 	// Nil leaves them unavailable.
 	Assertion *AssertionKey
 }

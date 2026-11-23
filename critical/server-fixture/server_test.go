@@ -217,7 +217,7 @@ func TestServerFixture(t *testing.T) {
 		client, err := remote.Merchant(created.MerchantID)
 		require.NoError(t, err)
 		customer := billing.CustomerID(uuid.New())
-		token, err := client.CustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: customer, Email: slug + "@critical.invalid", EmailVerified: true})
+		token, err := client.CreateCustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: customer, Email: slug + "@critical.invalid", EmailVerified: true})
 		require.NoError(t, err)
 		directoryKey, err := ak.CreateAPIKey(t.Context(), iam.SystemIdentity(), group, iam.NewAPIKey{Name: "directory provisioner", Role: owner, ProvisionsFor: app.ID})
 		require.NoError(t, err)
@@ -320,7 +320,7 @@ func TestServerFixture(t *testing.T) {
 			case "customer-token":
 				id, err := billing.ParseCustomerID(cmd.ID)
 				require.NoError(t, err)
-				token, err := clients[cmd.Merchant].CustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: id})
+				token, err := clients[cmd.Merchant].CreateCustomerToken(t.Context(), billing.CustomerTokenParams{CustomerID: id})
 				require.NoError(t, err)
 				result.Result = token
 			case "soft-delete":

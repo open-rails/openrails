@@ -76,7 +76,7 @@ func (legacyCodec) Decode(raw string) (shared.Cursor, error) {
 
 // List uses shared cursor, retention and paging mechanics over the existing
 // committed SQL journal. Domain capture/deferred flush remain unchanged.
-func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, query billing.EventQuery, retention time.Duration, now time.Time) (billing.EventPage, error) {
+func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, query billing.EventListParams, retention time.Duration, now time.Time) (billing.EventPage, error) {
 	if merchantID.IsZero() {
 		return billing.EventPage{}, apperr.Invalidf("merchant is required")
 	}

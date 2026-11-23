@@ -60,7 +60,7 @@ func hostedCustomerAdmission(t *testing.T) {
 	status, raw = w.request(t, http.MethodGet, "/v1/admin/customers", token.AccessToken, nil)
 	require.Equal(t, http.StatusForbidden, status, string(raw), "host override cannot broaden canonical self scope")
 	w.command(t, map[string]string{"Op": "legacy-account-fact", "Merchant": "alpha", "Account": "alice"}, &policy)
-	events, err := w.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"customer.network_linked"}})
+	events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"customer.network_linked"}})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 1)
 	require.Equal(t, "customer.network_linked", events.Events[0].Type)

@@ -241,7 +241,7 @@ func TestMerchantConsole(t *testing.T) {
 		iw.noImports(t)
 
 		counts := consoleBrowser(t, iw.authorityWorld,
-			map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "carol": carol.ID, "vault": vault},
+			map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "carol": carol.ID, "vault": vault, "gold": gold.ID},
 			map[string]consoleAction{"start": consoleStart(t, iw)},
 			"console-pull-link-map-apply-lands-once")
 		require.Equal(t, 1, counts["POST /v1/merchant/psp-imports"], "the console's Pull creates the import")
@@ -287,6 +287,10 @@ func TestMerchantConsole(t *testing.T) {
 		require.Equal(t, 2, counts["POST /v1/merchant/psp-imports/"+imp.ID.String()+"/apply"], "Apply and Apply again")
 		require.Equal(t, 1, counts["POST /v1/merchant/psp-imports/"+imp.ID.String()+"/link"], "the manual link")
 		require.Equal(t, 1, counts["POST /v1/catalog/provider-prices"])
+		require.Equal(t, 1, counts["GET /v1/catalog/prices/"+gold.ID.String()+"/verification"], "Verify reads the price's verification")
+		verified, err := iw.alpha.VerifyPrice(t.Context(), gold.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SyncStatusInSync, verified.Provider.SyncStatus)
 	})
 
 	t.Run("OR-J38-S31/console-mapping-upload-and-ccbill-price", func(t *testing.T) {
@@ -427,7 +431,7 @@ func TestMerchantConsole(t *testing.T) {
 		subs := tw.subscriptions(t, customerOf(tw.alice))
 		require.Len(t, subs, 1)
 		require.Equal(t, sub, *subs[0].RailSubscriptionID)
-		price, err := tw.alpha.GetPrice(t.Context(), subs[0].PriceID, billing.GetPriceParams{})
+		price, err := tw.alpha.GetPrice(t.Context(), subs[0].PriceID)
 		require.NoError(t, err)
 		require.Equal(t, product, price.ProductID)
 		require.True(t, price.Archived)

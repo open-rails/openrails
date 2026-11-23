@@ -27,7 +27,7 @@ import (
 // keeps each allowed key's answer, never a denial: a check is answered from
 // the cache only when every requested key is allowed there. A newly held key
 // is therefore seen at once, while a change to a held key, such as its seats
-// or a revocation, can take up to MaxAge unless CheckEntitlementsLive sees it.
+// or a revocation, can take up to MaxAge unless an Uncached check sees it.
 type EntitlementCheckCacheOptions struct {
 	// MaxAge bounds the age of an allowed answer, including unscheduled
 	// changes such as a revocation, a refund or the API key's permissions.

@@ -3,7 +3,7 @@
 import type {
   MetricsCell,
   MetricsColumn,
-  MetricsQuery,
+  QueryMetricsParams,
   MetricsRange,
   MetricsResult,
 } from "#orck/admin/lib/api/metrics"
@@ -85,7 +85,9 @@ export interface PivotSeries {
   currency?: string
 }
 
-export function filteredCurrency(query?: MetricsQuery): string | undefined {
+export function filteredCurrency(
+  query?: QueryMetricsParams
+): string | undefined {
   const currencies = query?.filters?.currency
   return currencies?.length === 1 ? currencies[0].trim() : undefined
 }
@@ -334,7 +336,7 @@ const HEALTH_MEASURES = new Set([
 // measures in any viz open the health page, count stats open their list. Null
 // = no sensible link.
 export function deepLinkFor(
-  query: MetricsQuery,
+  query: QueryMetricsParams,
   viz: string = "stat"
 ): string | null {
   const measures = query.measures ?? []

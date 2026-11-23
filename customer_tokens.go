@@ -36,11 +36,11 @@ const (
 )
 
 var (
-	errInprocessCustomerToken = errors.New("openrails: an in-process host mints customer tokens with its own AuthKit; CustomerToken and CustomerAssertion are a remote handle's")
+	errInprocessCustomerToken = errors.New("openrails: an in-process host mints customer tokens with its own AuthKit; CreateCustomerToken and CreateCustomerAssertion are a remote handle's")
 	errNoAssertionKey         = errors.New("openrails: the handle's credential has no assertion key (RemoteCredential.Assertion)")
 )
 
-// customerAssertion is CustomerAssertion.
+// customerAssertion is CreateCustomerAssertion.
 func (c *Client) customerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error) {
 	key, err := c.assertionKey()
 	if err != nil {
@@ -77,7 +77,7 @@ func (c *Client) customerAssertion(ctx context.Context, params billing.CustomerT
 	return signed, nil
 }
 
-// customerToken is CustomerToken.
+// customerToken is CreateCustomerToken.
 func (c *Client) customerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error) {
 	assertion, err := c.customerAssertion(ctx, params)
 	if err != nil {

@@ -201,7 +201,7 @@ func nmiRenewalReadback(t *testing.T, a *authorityWorld, p *nmiJournal, sub *bil
 	access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: sub.CustomerID, Entitlements: []string{"nmi:member"}})
 	require.NoError(t, err)
 	require.True(t, access.Entitlements["nmi:member"])
-	events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+	events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2, "imported initial receipt and exactly one renewed receipt")
 	p.money(t, 2, 2000)

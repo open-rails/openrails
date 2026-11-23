@@ -50,8 +50,13 @@ func (c *Client) ActingFor(invoker auth.Invoker) (*Client, error) {
 
 // Uncached is the handle reading everything from OpenRails: no catalog or
 // configuration read and no entitlement check is answered from memory. Its
-// answers still refresh the entitlement cache (CheckEntitlementsLive), and its
-// writes drop what the shared caches hold for the merchant.
+// writes drop what the shared caches hold for the merchant. Its entitlement
+// checks still refresh the cache: an answer replaces allowed keys' entries and
+// drops denied ones, and a fill begun before it cannot restore them. The drop
+// reaches this client's own memory at once, or the shared Redis within a
+// bounded wait; if Redis fails, other replicas may serve the old answer for
+// up to MaxAge. Check through it when a revocation or credential change must
+// be visible immediately.
 func (c *Client) Uncached() *Client {
 	if c == nil {
 		return nil
@@ -61,25 +66,25 @@ func (c *Client) Uncached() *Client {
 	return d
 }
 
-// CustomerAssertion signs the assertion that names params.CustomerID as the
+// CreateCustomerAssertion signs the assertion that names params.CustomerID as the
 // merchant's customer, for a frontend to redeem itself at the token endpoint
 // (grant_type urn:ietf:params:oauth:grant-type:jwt-bearer, scope
 // openrails:self), with its own DPoP proof when it binds the token to a key.
 // It is valid for two minutes and redeems once. It makes no request. It fails
 // on a handle whose credential has no Assertion and on an in-process handle,
 // whose host mints with its own AuthKit.
-func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error) {
+func (c *Client) CreateCustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error) {
 	return c.customerAssertion(ctx, params)
 }
 
-// CustomerToken mints an access token for params.CustomerID as the merchant's
-// customer: it signs a CustomerAssertion and redeems it at the credential's
+// CreateCustomerToken mints an access token for params.CustomerID as the
+// merchant's customer: it signs a CreateCustomerAssertion and redeems it at the credential's
 // Assertion.TokenURL. The backend hands the token to its frontend, which sends
 // it to the customer routes as its Bearer. It fails on a handle whose
 // credential has no Assertion and on an in-process handle, whose host mints
 // with its own AuthKit. A refusal is a *billing.StatusError carrying the token
 // endpoint's status and its OAuth error as the message, with no code.
-func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error) {
+func (c *Client) CreateCustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error) {
 	return c.customerToken(ctx, params)
 }
 
@@ -92,7 +97,7 @@ func (c *Client) EventReader() eventlog.Reader {
 		if err != nil {
 			return eventlog.Page{}, err
 		}
-		p, err := c.ListEvents(ctx, billing.EventQuery{After: normalized.After, Types: normalized.Types, Limit: normalized.Limit})
+		p, err := c.ListEvents(ctx, billing.EventListParams{After: normalized.After, Types: normalized.Types, Limit: normalized.Limit})
 		if err != nil {
 			var status *billing.StatusError
 			if errors.As(err, &status) {
@@ -126,16 +131,6 @@ func (c *Client) EventReader() eventlog.Reader {
 // always asks OpenRails.
 func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
 	return c.checkEntitlements(ctx, params, c == nil || !c.uncached)
-}
-
-// CheckEntitlementsLive checks access against OpenRails, never answering from
-// the SDK cache. Its answer replaces allowed keys' entries and drops denied
-// ones; a fill begun before it cannot restore them. The drop reaches this
-// client's own memory at once, or the shared Redis within a bounded wait; if
-// Redis fails, other replicas may serve the old answer for up to MaxAge. Use
-// it when a revocation or credential change must be visible immediately.
-func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
-	return c.checkEntitlements(ctx, params, false)
 }
 
 func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, useCache bool) (*billing.EntitlementCheck, error) {
@@ -184,20 +179,6 @@ func (c *Client) ListProducts(ctx context.Context, params billing.ProductListPar
 	}
 	var out billing.ListPage[billing.Product]
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products", query: params, cache: config.ReadCatalog}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetPrice reads a price; params.Verify also reads a provider price's terms
-// at its provider and reports their drift, never from memory.
-func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billing.GetPriceParams) (*billing.Price, error) {
-	call := routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, query: params, cache: config.ReadCatalog}
-	if params.Verify {
-		call.cache = ""
-	}
-	var out billing.Price
-	if err := c.send(ctx, call, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

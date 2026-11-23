@@ -104,7 +104,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrNotFound)
 		_, err = a.alpha.GetCustomer(t.Context(), other)
 		require.ErrorIs(t, err, billing.ErrNotFound, "proof resolution must not admit an absent customer")
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"customer.network_linked"}, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"customer.network_linked"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, events.Events, "proof resolution must not announce platform enrollment")
 		stale := authtest.StaleSession(t, a.auth, a.aliceToken)

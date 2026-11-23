@@ -75,14 +75,14 @@ type LimitOverride struct {
 	Capacity int64  `json:"capacity,string"`
 }
 
-// AdjustLimitParams adds Amount (negative takes away) to the capacity of
+// AdjustCustomerLimitParams adds Amount (negative takes away) to the capacity of
 // the customer's current window of Limit only; the next window starts from
 // the products' capacity again. It opens a session or first-use window not
 // yet open. A rate limit takes no adjustment. SourceID identifies the
 // adjustment per customer for 61 days: a retry with the same terms answers
 // the customer's line without adding again, one with another limit or
 // amount is ErrIdempotencyKeyReused.
-type AdjustLimitParams struct {
+type AdjustCustomerLimitParams struct {
 	Limit    string `json:"limit"`
 	Amount   int64  `json:"amount,string"`
 	SourceID string `json:"source_id"`

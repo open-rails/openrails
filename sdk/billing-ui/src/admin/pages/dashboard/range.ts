@@ -2,7 +2,7 @@
 // span of UTC dates (?from=2026-09-01&to=2026-09-30, both inclusive). Every
 // widget runs over it except one that keeps its own (fixed_range).
 import type {
-  MetricsQuery,
+  QueryMetricsParams,
   MetricsRange,
   Widget,
 } from "#orck/admin/lib/api/metrics"
@@ -130,9 +130,12 @@ export function fitGrain(
 export function widgetQuery(
   widget: Widget,
   range: DashboardRange
-): MetricsQuery {
+): QueryMetricsParams {
   if (widget.fixed_range) return widget.query
-  const query: MetricsQuery = { ...widget.query, range: metricsRange(range) }
+  const query: QueryMetricsParams = {
+    ...widget.query,
+    range: metricsRange(range),
+  }
   if (query.grain) query.grain = fitGrain(query.grain, range)
   return query
 }

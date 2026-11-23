@@ -28,7 +28,7 @@ func SelfAccessTenure(r *httprequest.Request) {
 }
 
 func accessTenure(r *httprequest.Request, customer billing.CustomerID) {
-	var params billing.AccessTenureParams
+	var params billing.GetAccessTenureParams
 	if !r.BindQuery(&params) {
 		return
 	}

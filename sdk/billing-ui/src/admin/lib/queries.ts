@@ -13,7 +13,7 @@ import {
 } from "#orck/admin/lib/api/endpoints"
 import {
   type MetricsCell,
-  type MetricsQuery,
+  type QueryMetricsParams,
   type MetricsResult,
 } from "#orck/admin/lib/api/metrics"
 
@@ -531,7 +531,7 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryFn: ({ signal }) => getDashboard(signal),
         meta: { errorAction: "Load dashboard" },
       }),
-    widgetMetrics: (query?: MetricsQuery) =>
+    widgetMetrics: (query?: QueryMetricsParams) =>
       queryOptions({
         queryKey: [...queryKeys.dashboard(), "metrics", query ?? "unselected"],
         queryFn: ({ signal }) => metricsQuery(query!, signal),

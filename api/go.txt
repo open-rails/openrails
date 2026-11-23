@@ -16,7 +16,7 @@ pkg openrails, func ParseMerchantDocument([]byte) (billing.MerchantDocument, err
 pkg openrails, func WithRiverClient(*river.Client[pgx.Tx]) StartOption
 pkg openrails, method (*BoundMerchantError) Error() string
 pkg openrails, method (*Client) ActingFor(auth.Invoker) (*Client, error)
-pkg openrails, method (*Client) AdjustCustomerLimit(context.Context, billing.CustomerID, billing.AdjustLimitParams) (*billing.CustomerLimit, error)
+pkg openrails, method (*Client) AdjustCustomerLimit(context.Context, billing.CustomerID, billing.AdjustCustomerLimitParams) (*billing.CustomerLimit, error)
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams) ([]billing.AdmissionVerdict, error)
 pkg openrails, method (*Client) ApplyCatalog(context.Context, *catalog.Application, billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*Client) ApplyPSPImport(context.Context, billing.PSPImportID) (*billing.PSPImport, error)
@@ -27,10 +27,11 @@ pkg openrails, method (*Client) CancelSubscription(context.Context, billing.Subs
 pkg openrails, method (*Client) CaptureAdmissions(context.Context, []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error)
 pkg openrails, method (*Client) ChangeSubscription(context.Context, string, billing.SubscriptionID, billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)
 pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)
-pkg openrails, method (*Client) CheckEntitlementsLive(context.Context, billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)
 pkg openrails, method (*Client) ClearDestructiveHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)
+pkg openrails, method (*Client) CreateCustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
+pkg openrails, method (*Client) CreateCustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (*Client) CreateOrder(context.Context, string, billing.CreateOrderParams) (*billing.Order, error)
 pkg openrails, method (*Client) CreatePSP(context.Context, billing.CreatePSPParams) (*billing.PSP, error)
 pkg openrails, method (*Client) CreatePSPImport(context.Context, billing.CreatePSPImportParams) (*billing.PSPImport, error)
@@ -40,8 +41,6 @@ pkg openrails, method (*Client) CreateProduct(context.Context, billing.CreatePro
 pkg openrails, method (*Client) CreateProductAccess(context.Context, string, []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error)
 pkg openrails, method (*Client) CreateProviderPrice(context.Context, billing.CreateProviderPriceParams) (*billing.Price, error)
 pkg openrails, method (*Client) CreateProvisioningToken(context.Context, billing.CreateProvisioningTokenParams) (*billing.CreatedProvisioningToken, error)
-pkg openrails, method (*Client) CustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
-pkg openrails, method (*Client) CustomerToken(context.Context, billing.CustomerTokenParams) (*billing.CustomerToken, error)
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID) error
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID) error
 pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID) error
@@ -51,7 +50,7 @@ pkg openrails, method (*Client) DismissProposals(context.Context, billing.Dismis
 pkg openrails, method (*Client) EventReader() eventlog.Reader
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams) ([]billing.AdmissionResult, error)
-pkg openrails, method (*Client) GetAccessTenure(context.Context, billing.CustomerID, billing.AccessTenureParams) (*billing.AccessTenure, error)
+pkg openrails, method (*Client) GetAccessTenure(context.Context, billing.CustomerID, billing.GetAccessTenureParams) (*billing.AccessTenure, error)
 pkg openrails, method (*Client) GetAdminAccess(context.Context) (*billing.AdminAccess, error)
 pkg openrails, method (*Client) GetAdmission(context.Context, string) (*billing.Admission, error)
 pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, billing.GetBalanceParams) (*billing.Balance, error)
@@ -69,7 +68,7 @@ pkg openrails, method (*Client) GetPSP(context.Context, billing.PSPID) (*billing
 pkg openrails, method (*Client) GetPSPImport(context.Context, billing.PSPImportID) (*billing.PSPImport, error)
 pkg openrails, method (*Client) GetPayment(context.Context, billing.PaymentID) (*billing.Payment, error)
 pkg openrails, method (*Client) GetPaymentAttempt(context.Context, billing.PaymentAttemptID) (*billing.PaymentAttempt, error)
-pkg openrails, method (*Client) GetPrice(context.Context, billing.PriceID, billing.GetPriceParams) (*billing.Price, error)
+pkg openrails, method (*Client) GetPrice(context.Context, billing.PriceID) (*billing.Price, error)
 pkg openrails, method (*Client) GetPriceMigration(context.Context, billing.PriceMigrationID) (*billing.PriceMigration, error)
 pkg openrails, method (*Client) GetProduct(context.Context, billing.ProductID) (*billing.Product, error)
 pkg openrails, method (*Client) GetPublicConfig(context.Context) (*billing.PublicConfig, error)
@@ -89,7 +88,7 @@ pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.Cust
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error)
-pkg openrails, method (*Client) ListEvents(context.Context, billing.EventQuery) (*billing.EventPage, error)
+pkg openrails, method (*Client) ListEvents(context.Context, billing.EventListParams) (*billing.EventPage, error)
 pkg openrails, method (*Client) ListFindings(context.Context, billing.FindingListParams) (*billing.ListPage[billing.Finding], error)
 pkg openrails, method (*Client) ListLimits(context.Context, billing.PageRequest) (*billing.ListPage[billing.Limit], error)
 pkg openrails, method (*Client) ListMeters(context.Context, billing.PageRequest) (*billing.ListPage[billing.Meter], error)
@@ -119,8 +118,7 @@ pkg openrails, method (*Client) PreviewOrder(context.Context, billing.PreviewOrd
 pkg openrails, method (*Client) PreviewPSPRouting(context.Context, billing.PreviewPSPRoutingParams) (*billing.PSPRoutingPreview, error)
 pkg openrails, method (*Client) PreviewPriceMigration(context.Context, billing.CreatePriceMigrationParams) (*billing.PriceMigrationPreview, error)
 pkg openrails, method (*Client) PreviewSubscriptionChange(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams) (*billing.SubscriptionChangePreview, error)
-pkg openrails, method (*Client) PutCustodian(context.Context, string, billing.PutCustodianParams) (*billing.Custodian, error)
-pkg openrails, method (*Client) QueryMetrics(context.Context, billing.MetricsQuery) (*billing.MetricsResult, error)
+pkg openrails, method (*Client) QueryMetrics(context.Context, billing.QueryMetricsParams) (*billing.MetricsResult, error)
 pkg openrails, method (*Client) RecordExternalPayment(context.Context, billing.RecordExternalPaymentParams) (*billing.Payment, error)
 pkg openrails, method (*Client) RefundPayment(context.Context, string, billing.PaymentID, billing.RefundPaymentParams) (*billing.Payment, error)
 pkg openrails, method (*Client) ReleaseAdmissions(context.Context, []string) ([]billing.AdmissionResult, error)
@@ -128,6 +126,7 @@ pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingI
 pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.SubscriptionID) (*billing.Subscription, error)
 pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.CreditGrantID, billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams) error
+pkg openrails, method (*Client) SetCustodian(context.Context, string, billing.SetCustodianParams) (*billing.Custodian, error)
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams) (*billing.Dashboard, error)
 pkg openrails, method (*Client) SetLimit(context.Context, string, billing.SetLimitParams) (*billing.Limit, error)
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams) (*billing.Meter, error)
@@ -144,6 +143,7 @@ pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billin
 pkg openrails, method (*Client) UpdatePSPImport(context.Context, billing.PSPImportID, billing.UpdatePSPImportParams) (*billing.PSPImport, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams) (*billing.Product, error)
+pkg openrails, method (*Client) VerifyPrice(context.Context, billing.PriceID) (*billing.Price, error)
 pkg openrails, method (*Client) WaiveOrderBalance(context.Context, billing.OrderID) (*billing.Order, error)
 pkg openrails, method (*Engine) CheckoutPage() (string, http.Handler)
 pkg openrails, method (*Engine) Close(context.Context) error
@@ -1210,13 +1210,10 @@ pkg openrails/billing, type AccessLevel string
 pkg openrails/billing, type AccessTenure struct
 pkg openrails/billing, type AccessTenure struct, AsOf time.Time `json:"as_of"`
 pkg openrails/billing, type AccessTenure struct, Seconds map[string]int64 `json:"seconds"`
-pkg openrails/billing, type AccessTenureParams struct
-pkg openrails/billing, type AccessTenureParams struct, At time.Time `form:"at"`
-pkg openrails/billing, type AccessTenureParams struct, Entitlements []string `form:"entitlement"`
-pkg openrails/billing, type AdjustLimitParams struct
-pkg openrails/billing, type AdjustLimitParams struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type AdjustLimitParams struct, Limit string `json:"limit"`
-pkg openrails/billing, type AdjustLimitParams struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type AdjustCustomerLimitParams struct
+pkg openrails/billing, type AdjustCustomerLimitParams struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type AdjustCustomerLimitParams struct, Limit string `json:"limit"`
+pkg openrails/billing, type AdjustCustomerLimitParams struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type AdminAccess struct
 pkg openrails/billing, type AdminAccess struct, Admin AccessLevel `json:"admin"`
 pkg openrails/billing, type AdminAccess struct, ApplicationPermissions []Permission `json:"application_permissions"`
@@ -1820,7 +1817,7 @@ pkg openrails/billing, type DashboardWidget struct
 pkg openrails/billing, type DashboardWidget struct, FixedRange bool `json:"fixed_range"`
 pkg openrails/billing, type DashboardWidget struct, Grid DashboardGrid `json:"grid"`
 pkg openrails/billing, type DashboardWidget struct, ID string `json:"id"`
-pkg openrails/billing, type DashboardWidget struct, Query MetricsQuery `json:"query"`
+pkg openrails/billing, type DashboardWidget struct, Query QueryMetricsParams `json:"query"`
 pkg openrails/billing, type DashboardWidget struct, Title string `json:"title"`
 pkg openrails/billing, type DashboardWidget struct, Viz string `json:"viz"`
 pkg openrails/billing, type DeclaredAdminGrant struct
@@ -2071,15 +2068,15 @@ pkg openrails/billing, type Event struct, Source string `json:"source"`
 pkg openrails/billing, type Event struct, Subject EventSubject `json:"subject"`
 pkg openrails/billing, type Event struct, Type string `json:"type"`
 pkg openrails/billing, type Event struct, Version int `json:"version"`
+pkg openrails/billing, type EventListParams struct
+pkg openrails/billing, type EventListParams struct, After string `form:"after"`
+pkg openrails/billing, type EventListParams struct, Limit int `form:"limit"`
+pkg openrails/billing, type EventListParams struct, Types []string `form:"type"`
 pkg openrails/billing, type EventPage struct
 pkg openrails/billing, type EventPage struct, Events []Event `json:"events"`
 pkg openrails/billing, type EventPage struct, HasMore bool `json:"has_more"`
 pkg openrails/billing, type EventPage struct, NextCursor string `json:"next_cursor"`
 pkg openrails/billing, type EventPage struct, RetentionSeconds int64 `json:"retention_seconds"`
-pkg openrails/billing, type EventQuery struct
-pkg openrails/billing, type EventQuery struct, After string `form:"after"`
-pkg openrails/billing, type EventQuery struct, Limit int `form:"limit"`
-pkg openrails/billing, type EventQuery struct, Types []string `form:"type"`
 pkg openrails/billing, type EventSubject struct
 pkg openrails/billing, type EventSubject struct, ID string `json:"id"`
 pkg openrails/billing, type EventSubject struct, Type string `json:"type"`
@@ -2174,10 +2171,11 @@ pkg openrails/billing, type FleetWeeklyVolume struct, Currency catalog.Currency 
 pkg openrails/billing, type FleetWeeklyVolume struct, Payments int64 `json:"payments"`
 pkg openrails/billing, type FleetWeeklyVolume struct, SettledAmount int64 `json:"settled_amount,string"`
 pkg openrails/billing, type FleetWeeklyVolume struct, WeekStart time.Time `json:"week_start"`
+pkg openrails/billing, type GetAccessTenureParams struct
+pkg openrails/billing, type GetAccessTenureParams struct, At time.Time `form:"at"`
+pkg openrails/billing, type GetAccessTenureParams struct, Entitlements []string `form:"entitlement"`
 pkg openrails/billing, type GetBalanceParams struct
 pkg openrails/billing, type GetBalanceParams struct, Currency catalog.Currency `form:"currency"`
-pkg openrails/billing, type GetPriceParams struct
-pkg openrails/billing, type GetPriceParams struct, Verify bool `form:"verify"`
 pkg openrails/billing, type GetUsageParams struct
 pkg openrails/billing, type GetUsageParams struct, Currency catalog.Currency `form:"currency"`
 pkg openrails/billing, type GetUsageParams struct, From time.Time `form:"from"`
@@ -2515,7 +2513,7 @@ pkg openrails/billing, type MetricsDimension struct, Name string `json:"name"`
 pkg openrails/billing, type MetricsDimension struct, Values []string `json:"values,omitempty"`
 pkg openrails/billing, type MetricsExample struct
 pkg openrails/billing, type MetricsExample struct, Intent string `json:"intent"`
-pkg openrails/billing, type MetricsExample struct, Query MetricsQuery `json:"query"`
+pkg openrails/billing, type MetricsExample struct, Query QueryMetricsParams `json:"query"`
 pkg openrails/billing, type MetricsLimits struct
 pkg openrails/billing, type MetricsLimits struct, MaxBuckets int `json:"max_buckets"`
 pkg openrails/billing, type MetricsLimits struct, MaxLimit int `json:"max_limit"`
@@ -2531,15 +2529,6 @@ pkg openrails/billing, type MetricsOrder struct
 pkg openrails/billing, type MetricsOrder struct, Dimension string `json:"dimension,omitempty"`
 pkg openrails/billing, type MetricsOrder struct, Dir string `json:"dir,omitempty"`
 pkg openrails/billing, type MetricsOrder struct, Measure string `json:"measure,omitempty"`
-pkg openrails/billing, type MetricsQuery struct
-pkg openrails/billing, type MetricsQuery struct, By []string `json:"by"`
-pkg openrails/billing, type MetricsQuery struct, Compare string `json:"compare"`
-pkg openrails/billing, type MetricsQuery struct, Filters map[string][]string `json:"filters"`
-pkg openrails/billing, type MetricsQuery struct, Grain string `json:"grain"`
-pkg openrails/billing, type MetricsQuery struct, Limit *int `json:"limit"`
-pkg openrails/billing, type MetricsQuery struct, Measures []string `json:"measures"`
-pkg openrails/billing, type MetricsQuery struct, Order []MetricsOrder `json:"order"`
-pkg openrails/billing, type MetricsQuery struct, Range *MetricsRange `json:"range"`
 pkg openrails/billing, type MetricsRange struct
 pkg openrails/billing, type MetricsRange struct, From string `json:"from,omitempty"`
 pkg openrails/billing, type MetricsRange struct, Last string `json:"last,omitempty"`
@@ -3412,13 +3401,15 @@ pkg openrails/billing, type PurgeMerchantParams struct, Actor string
 pkg openrails/billing, type PurgeMerchantParams struct, ConfirmPhrase string
 pkg openrails/billing, type PurgeMerchantParams struct, ExpectRows int
 pkg openrails/billing, type PurgeMerchantParams struct, InventoryID RunID
-pkg openrails/billing, type PutCustodianParams struct
-pkg openrails/billing, type PutCustodianParams struct, AccountID string `json:"account_id"`
-pkg openrails/billing, type PutCustodianParams struct, Credentials map[string]string `json:"credentials,omitempty"`
-pkg openrails/billing, type PutCustodianParams struct, Environment Environment `json:"environment"`
-pkg openrails/billing, type PutCustodianParams struct, ExpectedRevision int64 `json:"expected_revision"`
-pkg openrails/billing, type PutCustodianParams struct, Kind CardVaultKind `json:"kind"`
-pkg openrails/billing, type PutCustodianParams struct, Settings map[string]any `json:"settings,omitempty"`
+pkg openrails/billing, type QueryMetricsParams struct
+pkg openrails/billing, type QueryMetricsParams struct, By []string `json:"by"`
+pkg openrails/billing, type QueryMetricsParams struct, Compare string `json:"compare"`
+pkg openrails/billing, type QueryMetricsParams struct, Filters map[string][]string `json:"filters"`
+pkg openrails/billing, type QueryMetricsParams struct, Grain string `json:"grain"`
+pkg openrails/billing, type QueryMetricsParams struct, Limit *int `json:"limit"`
+pkg openrails/billing, type QueryMetricsParams struct, Measures []string `json:"measures"`
+pkg openrails/billing, type QueryMetricsParams struct, Order []MetricsOrder `json:"order"`
+pkg openrails/billing, type QueryMetricsParams struct, Range *MetricsRange `json:"range"`
 pkg openrails/billing, type Rail string
 pkg openrails/billing, type RailDefinition struct
 pkg openrails/billing, type RailDefinition struct, AccountFields []string `json:"account_fields"`
@@ -3524,6 +3515,13 @@ pkg openrails/billing, type ScheduledChangeSource string
 pkg openrails/billing, type SetCartLineParams struct
 pkg openrails/billing, type SetCartLineParams struct, Amount *int64 `json:"amount,omitempty,string"`
 pkg openrails/billing, type SetCartLineParams struct, Quantity *int `json:"quantity,omitempty"`
+pkg openrails/billing, type SetCustodianParams struct
+pkg openrails/billing, type SetCustodianParams struct, AccountID string `json:"account_id"`
+pkg openrails/billing, type SetCustodianParams struct, Credentials map[string]string `json:"credentials,omitempty"`
+pkg openrails/billing, type SetCustodianParams struct, Environment Environment `json:"environment"`
+pkg openrails/billing, type SetCustodianParams struct, ExpectedRevision int64 `json:"expected_revision"`
+pkg openrails/billing, type SetCustodianParams struct, Kind CardVaultKind `json:"kind"`
+pkg openrails/billing, type SetCustodianParams struct, Settings map[string]any `json:"settings,omitempty"`
 pkg openrails/billing, type SetDashboardParams struct
 pkg openrails/billing, type SetDashboardParams struct, Widgets []DashboardWidget `json:"widgets"`
 pkg openrails/billing, type SetDefaultPaymentMethodParams struct
@@ -4306,7 +4304,7 @@ pkg openrails/server, method (*Server) FleetTimeseries(context.Context, billing.
 pkg openrails/server, method (*Server) GetMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) Handler() http.Handler
 pkg openrails/server, method (*Server) ListActiveMerchantIDs(context.Context, billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)
-pkg openrails/server, method (*Server) ListEvents(context.Context, billing.MerchantID, billing.EventQuery) (*billing.EventPage, error)
+pkg openrails/server, method (*Server) ListEvents(context.Context, billing.MerchantID, billing.EventListParams) (*billing.EventPage, error)
 pkg openrails/server, method (*Server) ListMerchantRetirementCandidates(context.Context, billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)
 pkg openrails/server, method (*Server) ListMerchants(context.Context, billing.MerchantListParams) (*billing.ListPage[billing.Merchant], error)
 pkg openrails/server, method (*Server) ListMerchantsForSubject(context.Context, string) ([]billing.MerchantRef, error)

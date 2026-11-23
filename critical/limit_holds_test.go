@@ -112,7 +112,7 @@ func requireDenied(t *testing.T, v billing.AdmissionVerdict, code billing.DenyCo
 
 func limitsReached(t *testing.T, client *openrails.Client, from, to time.Time) int64 {
 	t.Helper()
-	result, err := client.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"limits_reached"},
+	result, err := client.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"limits_reached"},
 		Range: &billing.MetricsRange{From: from.Format(time.RFC3339), To: to.Format(time.RFC3339)}})
 	require.NoError(t, err)
 	var total int64
@@ -322,7 +322,7 @@ func TestLimitHolds(t *testing.T) {
 		requireLimitReached(t, admitOne(t, w.alpha, usageAdmission(w, customer, "refused", "work", units(1), nil)), "quota")
 
 		// A refill lets holds grow again; a second overrun records nothing new.
-		_, err := w.alpha.AdjustCustomerLimit(t.Context(), customer, billing.AdjustLimitParams{Limit: "quota", Amount: 50, SourceID: "refill"})
+		_, err := w.alpha.AdjustCustomerLimit(t.Context(), customer, billing.AdjustCustomerLimitParams{Limit: "quota", Amount: 50, SourceID: "refill"})
 		require.NoError(t, err)
 		require.True(t, admitOne(t, w.alpha, usageAdmission(w, customer, "after-refill", "work", units(10), nil)).Allowed())
 		captureUsage(t, w.alpha, "after-refill", "work", units(40), nil)

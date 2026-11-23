@@ -48,7 +48,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 	oneUsage(t, a.alpha, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EventType: "sdk-compute",
 		Dimensions: map[string]int64{"units": 2}, Source: "critical-sdk", SourceID: "worked-usage"})
 	for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
-		known, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		known, err := client.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 9_990_000, known.UnitAmount)
 		require.Equal(t, catalog.Currency("USD"), known.Currency)

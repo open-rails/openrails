@@ -16,7 +16,7 @@ import (
 // caller authorizes and audits access. It rechecks directory existence on
 // every call; cursors remain bound to this merchant and filter. Ordinary
 // Client/HTTP calls still require a live merchant.
-func (s *Server) ListEvents(ctx context.Context, id billing.MerchantID, query billing.EventQuery) (*billing.EventPage, error) {
+func (s *Server) ListEvents(ctx context.Context, id billing.MerchantID, query billing.EventListParams) (*billing.EventPage, error) {
 	if scoped, ok := merchant.FromContext(ctx); ok && scoped != id {
 		return nil, apperr.Invalidf("event merchant differs from the authorized scope")
 	}

@@ -183,7 +183,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, payment.Status)
 		require.EqualValues(t, 90_000_000, payment.Amount)
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"order.expired", "order.completed"}, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order.expired", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		var trail []string
 		for _, e := range events.Events {

@@ -27,7 +27,7 @@ const (
 )
 
 // Query is the POST /v1/metrics/query body.
-type Query = billing.MetricsQuery
+type Query = billing.QueryMetricsParams
 
 // QueryRange bounds the query window. Date-only values are inclusive UTC days;
 // RFC3339 timestamps are taken verbatim as [from, to). Last ("7d", "12w", "6m",

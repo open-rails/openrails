@@ -82,7 +82,7 @@ func TestDueWork(t *testing.T) {
 			return list.Items
 		}
 		missed := func() int64 {
-			result, err := a.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"rebills_missed"},
+			result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"rebills_missed"},
 				Range: &billing.MetricsRange{From: due.Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}})
 			require.NoError(t, err)
 			var total int64

@@ -15,7 +15,7 @@ export interface OrderTerm {
   dir?: "asc" | "desc"
 }
 
-export interface MetricsQuery {
+export interface QueryMetricsParams {
   measures: string[]
   by?: string[]
   grain?: string
@@ -65,7 +65,7 @@ export interface Widget {
   id: string
   title: string
   viz: WidgetViz
-  query: MetricsQuery
+  query: QueryMetricsParams
   grid: WidgetGrid
   // fixed_range keeps the query's own range; other widgets follow the
   // dashboard's range picker.
@@ -81,7 +81,7 @@ export interface Dashboard {
 
 export function createMetrics(client: AdminClient) {
   const { api } = client
-  const metricsQuery = (query: MetricsQuery, signal?: AbortSignal) =>
+  const metricsQuery = (query: QueryMetricsParams, signal?: AbortSignal) =>
     api<MetricsResult>("/metrics/query", {
       method: "POST",
       body: query,

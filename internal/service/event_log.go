@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-func (s *Service) ListEvents(ctx context.Context, q billing.EventQuery) (billing.EventPage, error) {
+func (s *Service) ListEvents(ctx context.Context, q billing.EventListParams) (billing.EventPage, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.EventPage{}, err

@@ -257,7 +257,7 @@ func (s *solanaWorld) noAccess(t *testing.T, order billing.Order) {
 	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: order.CustomerID, Entitlements: []string{"chain:paid"}})
 	require.NoError(t, err)
 	require.False(t, access.Entitlements["chain:paid"])
-	events, err := s.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 	require.NoError(t, err)
 	require.Empty(t, events.Events)
 }
@@ -277,7 +277,7 @@ func (s *solanaWorld) paid(t *testing.T, order billing.Order, signature string) 
 	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: order.CustomerID, Entitlements: []string{"chain:paid"}})
 	require.NoError(t, err)
 	require.True(t, access.Entitlements["chain:paid"])
-	events, err := s.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2)
 }
@@ -350,7 +350,7 @@ func (s *solanaWorld) renewed(t *testing.T, sub *billing.Subscription, end time.
 	}
 	require.EqualValues(t, 20_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	require.EqualValues(t, 80_000_000, s.node.Balance(s.payer.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
-	facts, err := s.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+	facts, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, facts.Events, 2)
 }
@@ -544,7 +544,7 @@ func TestSolanaContracts(t *testing.T) {
 				require.Len(t, payments.Items, 1)
 				require.EqualValues(t, 10_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 				require.EqualValues(t, 90_000_000, s.node.Balance(s.payer.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
-				facts, err := s.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled"}, Limit: 100})
+				facts, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled"}, Limit: 100})
 				require.NoError(t, err)
 				require.Len(t, facts.Events, 1)
 			})

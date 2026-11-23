@@ -79,7 +79,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, access.Entitlements["sale:owned"])
 		require.Empty(t, p.effects(t))
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 

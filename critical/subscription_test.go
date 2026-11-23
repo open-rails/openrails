@@ -79,7 +79,7 @@ func TestSubscriptions(t *testing.T) {
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"membership:paid"}})
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["membership:paid"])
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		settled, completed := 0, 0
 		for _, event := range facts.Events {
@@ -103,7 +103,7 @@ func TestSubscriptions(t *testing.T) {
 	t.Run("OR-J17-S01/cancel-resume-keeps-the-purchased-window", func(t *testing.T) {
 		a, provider, sub := purchasedMembership(t)
 		mrr := func() int64 {
-			result, err := a.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"mrr"},
+			result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"mrr"},
 				Range: &billing.MetricsRange{From: a.clock.Now().Add(-time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}})
 			require.NoError(t, err)
 			var total int64

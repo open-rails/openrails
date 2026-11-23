@@ -22,7 +22,7 @@ func TestCheckout(t *testing.T) {
 		require.NoError(t, err)
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
-		before, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Limit: 100})
+		before, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 		require.NoError(t, err)
 		token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
 		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}, ExpectedTotal: ptr(int64(29_970_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
@@ -51,7 +51,7 @@ func TestCheckout(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["download:owned"])
 		require.False(t, access.Entitlements["another:unowned"])
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{After: before.NextCursor, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{After: before.NextCursor, Limit: 100})
 		require.NoError(t, err)
 		settled, completed := 0, 0
 		for _, event := range events.Events {

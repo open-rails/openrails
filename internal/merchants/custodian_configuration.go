@@ -71,7 +71,7 @@ func (s *Service) validatePSPCustodian(ctx context.Context, mid billing.Merchant
 	return nil
 }
 
-func (s *Service) PutCustodianConfiguration(ctx context.Context, mid billing.MerchantID, key string, request billing.PutCustodianParams) (billing.Custodian, error) {
+func (s *Service) SetCustodianConfiguration(ctx context.Context, mid billing.MerchantID, key string, request billing.SetCustodianParams) (billing.Custodian, error) {
 	var zero billing.Custodian
 	if !s.config.Writable() {
 		return zero, ErrConfigReadOnly

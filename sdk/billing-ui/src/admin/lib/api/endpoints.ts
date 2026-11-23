@@ -9,7 +9,7 @@ import type {
   CreateAlertWebhookParams,
   CreatePSPParams,
   Custodian,
-  PutCustodianParams,
+  SetCustodianParams,
   CreatePriceParams,
   Customer,
   CustomerSettingsResult,
@@ -472,14 +472,15 @@ export function createEndpoints(client: AdminClient) {
   const createPrice = (body: CreatePriceParams) =>
     api<Price>("/catalog/prices", { method: "POST", body })
 
-  // getPrice returns the price with its state on each linked PSP. verify=true
-  // also reads every PSP's copy and reports its drift: a read, never a write,
-  // and slow enough that it stays opt-in.
+  // getPrice returns the price with its state on each linked PSP. verify
+  // reads its verification instead, which also reads the provider's copy and
+  // reports its drift: a read, never a write, and slow enough that it stays
+  // opt-in.
   const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-    api<Price>(`/catalog/prices/${encodeURIComponent(id)}`, {
-      query: verify ? { verify: true } : undefined,
-      signal,
-    })
+    api<Price>(
+      `/catalog/prices/${encodeURIComponent(id)}${verify ? "/verification" : ""}`,
+      { signal }
+    )
 
   // getProductByKey reads the product a key names, with its current prices:
   // a products list filtered by key.
@@ -637,7 +638,7 @@ export function createEndpoints(client: AdminClient) {
       { method: "DELETE" }
     )
 
-  const putCustodian = (key: string, body: PutCustodianParams) =>
+  const putCustodian = (key: string, body: SetCustodianParams) =>
     api<Custodian>(`/merchant/custodians/${encodeURIComponent(key)}`, {
       method: "PUT",
       body,

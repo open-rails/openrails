@@ -519,14 +519,14 @@ func TestPSPImport(t *testing.T) {
 		_, err = iw.alpha.ChangeSubscription(t.Context(), "retired-target", subs[0].ID, billing.ChangeSubscriptionParams{PriceID: &prices["old"].ID, Reason: "retired target"})
 		_, code = refusalCode(t, err)
 		require.Equal(t, billing.CodeSubscriptionChangeTargetInactive, code)
-		old, err := iw.alpha.GetPrice(t.Context(), prices["old"].ID, billing.GetPriceParams{})
+		old, err := iw.alpha.GetPrice(t.Context(), prices["old"].ID)
 		require.NoError(t, err)
 		require.True(t, old.Provider.Retired)
 		require.False(t, old.Archived, "retired is the provider's; archived stays ours")
 
 		iw.stripe.SetPriceActive("price_pro", false)
 		reads := iw.stripe.Reads("/v1/prices/")
-		pro, err := iw.alpha.GetPrice(t.Context(), prices["pro"].ID, billing.GetPriceParams{Verify: true})
+		pro, err := iw.alpha.VerifyPrice(t.Context(), prices["pro"].ID)
 		require.NoError(t, err)
 		require.Equal(t, reads+1, iw.stripe.Reads("/v1/prices/"), "verify reads the price once by id")
 		require.True(t, pro.Provider.Retired)
@@ -726,7 +726,7 @@ func TestPSPImport(t *testing.T) {
 		// A 404 without NMI's own not-found answer (a proxy, a moved route) is
 		// no evidence the plan is gone.
 		iw.nmi.FailRequests(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/plans/current") }, http.StatusNotFound, 1)
-		unknown, err := iw.alpha.GetPrice(t.Context(), mapped["current"].ID, billing.GetPriceParams{Verify: true})
+		unknown, err := iw.alpha.VerifyPrice(t.Context(), mapped["current"].ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SyncStatusUnknown, unknown.Provider.SyncStatus)
 		require.False(t, unknown.Provider.Retired)
@@ -736,11 +736,11 @@ func TestPSPImport(t *testing.T) {
 			require.NoError(t, err)
 			iw.nmi.RemovePlan(plan)
 		}
-		verified, err := iw.alpha.GetPrice(t.Context(), mapped["spare"].ID, billing.GetPriceParams{Verify: true})
+		verified, err := iw.alpha.VerifyPrice(t.Context(), mapped["spare"].ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.SyncStatusMissing, verified.Provider.SyncStatus)
 		require.True(t, verified.Provider.Retired)
-		stored, err := iw.alpha.GetPrice(t.Context(), mapped["spare"].ID, billing.GetPriceParams{})
+		stored, err := iw.alpha.GetPrice(t.Context(), mapped["spare"].ID)
 		require.NoError(t, err)
 		require.True(t, stored.Provider.Retired, "verify records the vanished plan from the price's own terms")
 		require.Equal(t, "read", iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP.String()})["price:spare"].ObservedVia)
@@ -751,7 +751,7 @@ func TestPSPImport(t *testing.T) {
 		for plan, amount := range map[string]string{"current": "12.00", "spare": "8.00"} {
 			require.NotNil(t, retired["price:"+plan].DeletedAt, plan)
 			require.Equal(t, amount, *retired["price:"+plan].Terms.StatedAmount, plan)
-			price, err := iw.alpha.GetPrice(t.Context(), mapped[plan].ID, billing.GetPriceParams{})
+			price, err := iw.alpha.GetPrice(t.Context(), mapped[plan].ID)
 			require.NoError(t, err)
 			require.True(t, price.Provider.Retired, "%s: the pull reads every bound plan", plan)
 		}
@@ -832,7 +832,7 @@ func TestPSPImport(t *testing.T) {
 
 		verify := func(key string) *billing.Price {
 			t.Helper()
-			price, err := iw.alpha.GetPrice(t.Context(), prices[key].ID, billing.GetPriceParams{Verify: true})
+			price, err := iw.alpha.VerifyPrice(t.Context(), prices[key].ID)
 			require.NoError(t, err)
 			return price
 		}

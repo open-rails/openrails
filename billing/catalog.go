@@ -185,7 +185,7 @@ func BuyerPrices(prices []Price) []Price {
 }
 
 // SyncStatus is whether a provider's copy of a provider price matches
-// OpenRails. Only a verifying read (GetPriceParams.Verify) knows; otherwise it
+// OpenRails. Only a verifying read (VerifyPrice) knows; otherwise it
 // is unknown.
 type SyncStatus string
 
@@ -300,12 +300,6 @@ type UpdatePriceParams struct {
 	// ExpectedRevision refuses the edit with revision_mismatch unless the
 	// price key is still at this revision.
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
-}
-
-// GetPriceParams reads a price. Verify asks a provider price's provider for
-// its terms and reports any drift; it is a read, never a write.
-type GetPriceParams struct {
-	Verify bool `form:"verify"`
 }
 
 // PriceListParams filters ListPrices. Nil Archived and Recurring list both.

@@ -12,6 +12,3 @@ untyped-const server.ConsoleClientID
 untyped-const server.MerchantRolesManage
 untyped-const server.MerchantRolesRead
 var billing.ReservedMerchantSlugs
-verb openrails.Client.CustomerAssertion
-verb openrails.Client.CustomerToken
-verb openrails.Client.PutCustodian

@@ -181,7 +181,7 @@ func TestRunningChargeContracts(t *testing.T) {
 		require.Equal(t, input.Reference, list.Items[0].Reference)
 		fleet := startFleet(t, w)
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
-		events, err := w.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"balance.depleted"}, Limit: 100})
+		events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"balance.depleted"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 1)
 		// The host owns stopping the resource. OpenRails reports depletion and
@@ -196,7 +196,7 @@ func TestRunningChargeContracts(t *testing.T) {
 		require.Equal(t, billing.RunningChargeStopped, final.State)
 		require.EqualValues(t, 1000, final.ChargedAmount)
 		balance(t, w.alpha, customer, 0, 0, 0)
-		events, err = w.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"balance.depleted"}, Limit: 100})
+		events, err = w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"balance.depleted"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 1)
 	})

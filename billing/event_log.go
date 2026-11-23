@@ -7,9 +7,9 @@ import (
 
 const CodeEventCursorExpired ErrorCode = "event_cursor_expired"
 
-// EventQuery reads committed facts after a caller-owned cursor. Types is fixed
+// EventListParams reads committed facts after a caller-owned cursor. Types is fixed
 // for that cursor; an empty cursor starts at the oldest retained fact.
-type EventQuery struct {
+type EventListParams struct {
 	After string   `form:"after"`
 	Limit int      `form:"limit"`
 	Types []string `form:"type"`

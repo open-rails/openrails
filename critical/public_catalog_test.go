@@ -48,7 +48,7 @@ func TestPublicCatalog(t *testing.T) {
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		product, price := publicSale(t, a, "exact-usd", 9_990_000, nil)
-		read, err := a.alphaRemote.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+		read, err := a.alphaRemote.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
 		require.Equal(t, product.ID, read.ProductID)
 		require.EqualValues(t, 9_990_000, read.UnitAmount)

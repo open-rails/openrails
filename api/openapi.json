@@ -2597,7 +2597,7 @@
           "catalog"
         ],
         "operationId": "GetPrice",
-        "description": "GetPrice reads a price; params.Verify also reads a provider price's terms at its provider and reports their drift.",
+        "description": "GetPrice reads a price.",
         "parameters": [
           {
             "name": "id",
@@ -2605,13 +2605,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "verify",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
             }
           },
           {
@@ -2661,8 +2654,7 @@
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       },
       "patch": {
@@ -2739,6 +2731,73 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      }
+    },
+    "/v1/catalog/prices/{id}/verification": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "operationId": "VerifyPrice",
+        "description": "VerifyPrice reads a price and, for a provider price, its terms at its provider: Provider.SyncStatus and Drift say whether they still match. It never writes, and is never answered from memory.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Price"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:catalog:read",
+          "root": "root:catalog:read"
+        },
+        "x-openrails-errors": [
+          "catalog_benefit_overlap",
+          "price_key_cadence_conflict",
+          "price_key_not_found",
+          "price_not_found",
+          "price_not_sellable",
+          "product_not_found",
+          "resource_conflict",
+          "revision_mismatch",
+          "trial_unsupported_on_rail"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -7634,7 +7693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdjustLimitParams"
+                "$ref": "#/components/schemas/AdjustCustomerLimitParams"
               }
             }
           }
@@ -9481,8 +9540,8 @@
         "tags": [
           "merchant_config"
         ],
-        "operationId": "PutCustodian",
-        "description": "PutCustodian configures one merchant vault at its explicit revision.",
+        "operationId": "SetCustodian",
+        "description": "SetCustodian configures one merchant vault at its explicit revision.",
         "parameters": [
           {
             "name": "key",
@@ -9506,7 +9565,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PutCustodianParams"
+                "$ref": "#/components/schemas/SetCustodianParams"
               }
             }
           }
@@ -11898,7 +11957,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MetricsQuery"
+                "$ref": "#/components/schemas/QueryMetricsParams"
               }
             }
           }
@@ -12881,7 +12940,7 @@
           "seconds"
         ]
       },
-      "AdjustLimitParams": {
+      "AdjustCustomerLimitParams": {
         "type": "object",
         "properties": {
           "limit": {
@@ -16785,7 +16844,7 @@
             "type": "string"
           },
           "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
+            "$ref": "#/components/schemas/QueryMetricsParams"
           },
           "grid": {
             "$ref": "#/components/schemas/DashboardGrid"
@@ -19745,7 +19804,7 @@
             "type": "string"
           },
           "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
+            "$ref": "#/components/schemas/QueryMetricsParams"
           }
         },
         "required": [
@@ -19818,81 +19877,6 @@
             "type": "string"
           }
         }
-      },
-      "MetricsQuery": {
-        "type": "object",
-        "properties": {
-          "measures": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "by": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/MetricsRange"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "filters": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "order": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsOrder"
-            }
-          },
-          "limit": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compare": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "measures",
-          "by",
-          "grain",
-          "range",
-          "filters",
-          "order",
-          "limit",
-          "compare"
-        ]
       },
       "MetricsRange": {
         "type": "object",
@@ -24357,45 +24341,6 @@
           "embed_origins"
         ]
       },
-      "PutCustodianParams": {
-        "type": "object",
-        "properties": {
-          "expected_revision": {
-            "type": "integer"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "basis_theory",
-              "hyperswitch"
-            ]
-          },
-          "environment": {
-            "type": "string",
-            "enum": [
-              "devnet",
-              "live",
-              "mainnet",
-              "sandbox",
-              "test",
-              "testnet"
-            ]
-          },
-          "account_id": {
-            "type": "string"
-          },
-          "settings": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "credentials": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "Quantity": {
         "type": "object",
         "properties": {
@@ -24409,6 +24354,81 @@
         "required": [
           "min",
           "max"
+        ]
+      },
+      "QueryMetricsParams": {
+        "type": "object",
+        "properties": {
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grain": {
+            "type": "string"
+          },
+          "range": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filters": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsOrder"
+            }
+          },
+          "limit": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "measures",
+          "by",
+          "grain",
+          "range",
+          "filters",
+          "order",
+          "limit",
+          "compare"
         ]
       },
       "RailDefinition": {
@@ -24968,6 +24988,45 @@
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          }
+        }
+      },
+      "SetCustodianParams": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "basis_theory",
+              "hyperswitch"
+            ]
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },

@@ -64,7 +64,7 @@ func TestFinancialFailures(t *testing.T) {
 		for _, payment := range payments.Items {
 			require.NotEqual(t, billing.PaymentSucceeded, payment.Status)
 		}
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sale:owned"}})
@@ -110,7 +110,7 @@ func TestFinancialFailures(t *testing.T) {
 			require.NoError(t, err)
 			return p
 		}(), func() any {
-			e, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Limit: 100})
+			e, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 			require.NoError(t, err)
 			return e
 		}()} {

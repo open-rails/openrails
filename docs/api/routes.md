@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (181), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (182), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -109,7 +109,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
-| POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustLimitParams` | 200 `CustomerLimit` | limit `grant` |
+| POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant` |
 | POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
@@ -141,6 +141,7 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | POST | `/v1/catalog/provider-prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProviderPriceParams` | 201 `Price` | catalog update |
 | GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Price>` |  |
 | GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |
+| GET | `/v1/catalog/prices/{id}/verification` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Price` |  |
 | GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | catalog update |
 | POST | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | catalog update |
@@ -158,7 +159,7 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| PUT | `/v1/merchant/custodians/{key}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PutCustodianParams` | 200 `Custodian` | when `merchant_config_edits` |
+| PUT | `/v1/merchant/custodians/{key}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetCustodianParams` | 200 `Custodian` | when `merchant_config_edits` |
 | GET | `/v1/merchant/custodians` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Custodian>` |  |
 | GET | `/v1/merchant/psps` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<PSP>` |  |
 | POST | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits` |
@@ -204,7 +205,7 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/metrics/query` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
+| POST | `/v1/metrics/query` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `QueryMetricsParams` | 200 `MetricsResult` |  |
 | GET | `/v1/metrics/schema` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/metrics/dashboard` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `Dashboard` |  |
 
