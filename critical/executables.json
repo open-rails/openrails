@@ -1343,7 +1343,7 @@
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words",
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/the-customer-canceled",
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/staff-canceled",
-      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/payments-failed"
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/a-usage-orders-collection-stopped-after-failed-payments"
     ],
     "OR-J39-S10": [
       "TestCustomerMessages/OR-J39-S10/a-scheduled-price-change-sends-its-notice"

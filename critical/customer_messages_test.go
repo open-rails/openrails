@@ -236,7 +236,7 @@ func TestCustomerMessages(t *testing.T) {
 			require.Contains(t, confirmation.Text, "If you didn't expect this, please contact us: https://alpha.example/help")
 			require.NotContains(t, confirmation.Text, "resume")
 		})
-		t.Run("payments-failed", func(t *testing.T) {
+		t.Run("a-usage-orders-collection-stopped-after-failed-payments", func(t *testing.T) {
 			mail := &alertMailbox{}
 			a, p, customer := usageBillingWorld(t, true, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
 			p.core.SetDecline("4242", "252")
@@ -255,6 +255,17 @@ func TestCustomerMessages(t *testing.T) {
 			confirmation := sentAbout(t, a, mail, "order_collection_stopped", "We stopped charging your card for Alpha")
 			require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so we have stopped trying to collect the 30.00 USD you owe.")
 			require.Contains(t, confirmation.Text, "Pay it or add another payment method: https://alpha.example/billing")
+			// The collection attempt names its outcome's fact, so a replayed
+			// outcome records the same one.
+			log, err := customerMessages(t, a.alpha, customer)
+			require.NoError(t, err)
+			stopped := ofType(log, "order_collection_stopped")[0].EventID.UUID()
+			rows, err := a.pool.Query(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID())
+			require.NoError(t, err)
+			intents, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+			require.NoError(t, err)
+			require.True(t, slices.ContainsFunc(intents, func(id uuid.UUID) bool { return uuid.NewSHA1(id, []byte("collection_outcome")) == stopped }),
+				"the fact's id derives from its collection attempt")
 		})
 	})
 	t.Run("OR-J39-S10/a-scheduled-price-change-sends-its-notice", func(t *testing.T) {

@@ -1836,6 +1836,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
 	}
+	if params.FailureID == uuid.Nil {
+		return fmt.Errorf("failure_id is required")
+	}
 
 	notifications := make([]*models.NotificationEvent, 0, 1)
 
@@ -2179,12 +2182,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.RetryStatus, data.RecoveryAction = billing.NotificationRetryUnknown, billing.NotificationRecoveryUpdatePaymentMethod
 			data.NextAttemptAt = nil
 		}
-		noticeID := uuidutil.NewV7()
-		if params.FailureID != uuid.Nil {
-			noticeID = uuid.NewSHA1(params.FailureID, []byte("payment_failure"))
-		}
 		notification := &models.NotificationEvent{
-			ID:         noticeID,
+			ID:         uuid.NewSHA1(params.FailureID, []byte("payment_failure")),
 			CustomerID: subscription.CustomerID,
 			EventType:  eventType,
 			Data:       data,

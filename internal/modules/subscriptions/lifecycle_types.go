@@ -143,6 +143,16 @@ type CancelMembershipParams struct {
 	Requested bool
 }
 
+// RenewalFailureID is the FailureID of a renewal that failed for cause
+// before any provider attempt: one per subscription, cause and period.
+func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
+	key := "renewal_failure:" + cause
+	if sub.CurrentPeriodEndsAt != nil {
+		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuid.NewSHA1(sub.ID, []byte(key))
+}
+
 type FailMembershipParams struct {
 	// Prepared preserves the accepted engine charge cadence for retry policy.
 	// Native provider failures leave this nil.
@@ -153,8 +163,9 @@ type FailMembershipParams struct {
 	SubscriptionID    *uuid.UUID
 	FailureReason     *string
 	FailureCode       *string
-	// FailureID is the durable identity of the provider attempt or intent. A
-	// replay keeps the same notification; distinct retries use distinct IDs.
+	// FailureID is the durable identity of the provider attempt, intent or
+	// decline, required: a replay keeps the same notification; distinct
+	// retries use distinct IDs.
 	FailureID uuid.UUID
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.
