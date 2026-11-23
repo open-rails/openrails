@@ -285,7 +285,10 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 
 	consoleEnabled := cfg.AdminConsole == nil || !cfg.AdminConsole.Disabled
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: namingConfig(cfg.Naming), Console: cfg.LocalSignIn && consoleEnabled}
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: namingConfig(cfg.Naming)}
+	if cfg.LocalSignIn && consoleEnabled {
+		opts.ConsoleClientID = ConsoleClientID
+	}
 	if c := cfg.MerchantCreation; c != nil {
 		policy := controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 		if c.FreeAllowance > 0 {

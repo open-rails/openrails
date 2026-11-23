@@ -49,8 +49,8 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 // deleting its custom roles. The routes' own permissions are
 // billing.Permissions.
 const (
-	MerchantRolesRead   = "merchant:roles:read"
-	MerchantRolesManage = "merchant:roles:manage"
+	MerchantRolesRead   billing.Permission = "merchant:roles:read"
+	MerchantRolesManage billing.Permission = "merchant:roles:manage"
 )
 
 // MerchantRoles are the roles the server declares for a merchant's team

@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/server/internal/adminconsole"
-	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
@@ -46,7 +45,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		}
 	}
 	if cfg.LocalSignIn && s.resource != "" {
-		cfg.Exchange = &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: controlplane.ConsoleClientID, Resource: s.resource, Scope: billing.ScopeMerchant}
+		cfg.Exchange = &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: s.controlPlane.ConsoleClientID(), Resource: s.resource, Scope: billing.ScopeMerchant}
 	}
 	console, err := adminconsole.Handler(s.Log, path, cfg, s.consoleAssets)
 	if err != nil {

@@ -168,7 +168,7 @@ func (s *Service) refusePSPForCardVault(settings billing.MerchantSettings, psps 
 func platformUnreachable(vault *config.CardVaultConfig, psps map[string]merchantdocs.PSP) []string {
 	var proxy custodians.Descriptor
 	if vault != nil {
-		proxy, _ = custodians.Get(vault.Kind)
+		proxy, _ = custodians.Get(string(vault.Kind))
 	}
 	var out []string
 	for key, p := range psps {

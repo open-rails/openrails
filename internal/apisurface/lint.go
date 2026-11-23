@@ -52,15 +52,6 @@ var verbs = []string{
 // stringParams are the names a *Client method's positional string may have.
 var stringParams = []string{"key", "reference", "requestID", "requestIDs", "idempotencyKey"}
 
-// Enums that fields are named after, beyond the string types with constants
-// the public packages declare.
-var plannedEnums = []string{"ProviderWriteMode"}
-
-// enumFields are string fields whose name does not spell their enum.
-var enumFields = []string{
-	"billing.AlertWebhookConfig.Format", // AlertWebhookFormat
-}
-
 // An exception allows the findings of rule whose identifier matches pattern
 // (path.Match). One that allows nothing fails Lint.
 type exception struct {
@@ -74,6 +65,7 @@ var exceptions = []exception{
 	{"untyped-const", "billing.*GroupPersona", "AuthKit permission-group personas, which AuthKit takes as strings"},
 	{"untyped-const", "catalog.AccessForever", "a value of the catalog document's access duration string"},
 	{"untyped-const", "catalog.BalanceLimit", "the built-in limit key; limit keys are strings"},
+	{"untyped-const", "server.ConsoleClientID", "an OAuth client_id, an identifier like the host-chosen keys"},
 	{"untyped-const", "billing.CardVaultPlatform", "a value of settings.card_vault, whose other values are PSP keys"},
 	{"untyped-const", "adapters/fiber.RouteNamePrefix", "a prefix of Fiber's string route names"},
 	{"untyped-const", "openrailstest/nmimock.InsufficientFunds", "NMI's response code, a string on NMI's wire"},
@@ -88,7 +80,7 @@ var exceptions = []exception{
 // those exceptions allow. An exception that allows nothing is an error.
 func (s *Surface) Lint() ([]string, error) {
 	l := &linter{found: map[string]bool{}}
-	enums := slices.Clone(plannedEnums)
+	var enums []string
 	for _, p := range s.pkgs {
 		if err := l.pkg(p, s.pkgNames); err != nil {
 			return nil, err
@@ -345,8 +337,6 @@ func (l *linter) field(f field, enums []string) {
 	switch {
 	case strings.HasSuffix(f.name, "Currency"):
 		l.add("currency-field", id)
-	case slices.Contains(enumFields, id):
-		l.add("enum-field", id)
 	default:
 		for _, e := range enums {
 			if strings.HasSuffix(f.name, e) {

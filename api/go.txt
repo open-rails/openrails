@@ -1,7 +1,7 @@
 pkg openrails, const DefaultEntitlementCheckMaxAge time.Duration = 120000000000
-pkg openrails, const ProviderWritesFull untyped string = "full"
-pkg openrails, const ProviderWritesLimited untyped string = "limited"
-pkg openrails, const ProviderWritesReadOnly untyped string = "readonly"
+pkg openrails, const ProviderWritesFull ProviderWriteMode = "full"
+pkg openrails, const ProviderWritesLimited ProviderWriteMode = "limited"
+pkg openrails, const ProviderWritesReadOnly ProviderWriteMode = "readonly"
 pkg openrails, const QueueBilling untyped string = "billing"
 pkg openrails, const QueuePSPImport untyped string = "psp_import"
 pkg openrails, const ReadCatalog Read = "catalog"
@@ -206,7 +206,7 @@ pkg openrails, type CaptchaConfig struct, SecretKey string
 pkg openrails, type CaptchaConfig struct, SiteKey string
 pkg openrails, type CardVaultConfig struct
 pkg openrails, type CardVaultConfig struct, KVMount string
-pkg openrails, type CardVaultConfig struct, Kind string
+pkg openrails, type CardVaultConfig struct, Kind billing.CardVaultKind
 pkg openrails, type CardVaultConfig struct, TenantID string
 pkg openrails, type Client struct
 pkg openrails, type Config struct
@@ -221,7 +221,7 @@ pkg openrails, type Config struct, HyperSwitch *HyperSwitchConfig
 pkg openrails, type Config struct, LLM *LLMConfig
 pkg openrails, type Config struct, Merchants []billing.MerchantDeclaration
 pkg openrails, type Config struct, ProviderSandbox *ProviderSandboxConfig
-pkg openrails, type Config struct, ProviderWriteMode string
+pkg openrails, type Config struct, ProviderWriteMode ProviderWriteMode
 pkg openrails, type Config struct, PublicBillingBaseURL string
 pkg openrails, type Config struct, RateLimits RateLimitsConfig
 pkg openrails, type Config struct, ReadCache ReadCache
@@ -332,6 +332,7 @@ pkg openrails, type ProviderSandboxConfig struct, CCBillWebhookSources []string
 pkg openrails, type ProviderSandboxConfig struct, NMIGatewayURL string
 pkg openrails, type ProviderSandboxConfig struct, SolanaRPCURL string
 pkg openrails, type ProviderSandboxConfig struct, StripeAPIURL string
+pkg openrails, type ProviderWriteMode string
 pkg openrails, type RateLimit struct
 pkg openrails, type RateLimit struct, RequestsPerMinute int
 pkg openrails, type RateLimitsConfig map[string]*RateLimit
@@ -1310,7 +1311,7 @@ pkg openrails/billing, type AlertWebhook struct, Name *string `json:"name"`
 pkg openrails/billing, type AlertWebhook struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type AlertWebhookConfig struct
 pkg openrails/billing, type AlertWebhookConfig struct, Enabled *bool `yaml:"enabled,omitempty"`
-pkg openrails/billing, type AlertWebhookConfig struct, Format string `yaml:"format,omitempty"`
+pkg openrails/billing, type AlertWebhookConfig struct, Format AlertWebhookFormat `yaml:"format,omitempty"`
 pkg openrails/billing, type AlertWebhookConfig struct, Name string `yaml:"name,omitempty"`
 pkg openrails/billing, type AlertWebhookConfig struct, URL string `yaml:"url"`
 pkg openrails/billing, type AlertWebhookFormat string
@@ -1735,8 +1736,8 @@ pkg openrails/billing, type CustodianCaptureReference struct, Token string `json
 pkg openrails/billing, type CustodianConfig struct
 pkg openrails/billing, type CustodianConfig struct, AccountID string `yaml:"account_id,omitempty"`
 pkg openrails/billing, type CustodianConfig struct, Archived bool `yaml:"archived,omitempty"`
-pkg openrails/billing, type CustodianConfig struct, Environment string `yaml:"environment,omitempty"`
-pkg openrails/billing, type CustodianConfig struct, Kind string `yaml:"kind"`
+pkg openrails/billing, type CustodianConfig struct, Environment Environment `yaml:"environment,omitempty"`
+pkg openrails/billing, type CustodianConfig struct, Kind CardVaultKind `yaml:"kind"`
 pkg openrails/billing, type CustodianConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
 pkg openrails/billing, type CustodianConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails/billing, type Custodians map[string]CustodianConfig
@@ -2821,7 +2822,7 @@ pkg openrails/billing, type PSPConfig struct
 pkg openrails/billing, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
 pkg openrails/billing, type PSPConfig struct, Archived bool `yaml:"archived,omitempty"`
 pkg openrails/billing, type PSPConfig struct, Custodian string `yaml:"custodian,omitempty"`
-pkg openrails/billing, type PSPConfig struct, Environment string `yaml:"environment,omitempty"`
+pkg openrails/billing, type PSPConfig struct, Environment Environment `yaml:"environment,omitempty"`
 pkg openrails/billing, type PSPConfig struct, Rail Rail `yaml:"rail"`
 pkg openrails/billing, type PSPConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
 pkg openrails/billing, type PSPConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
@@ -4268,8 +4269,8 @@ pkg openrails/server, const ConsoleClientID untyped string = "openrails-console"
 pkg openrails/server, const FormerNamesFinite FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate FormerNamesMode = "immediate"
-pkg openrails/server, const MerchantRolesManage untyped string = "merchant:roles:manage"
-pkg openrails/server, const MerchantRolesRead untyped string = "merchant:roles:read"
+pkg openrails/server, const MerchantRolesManage billing.Permission = "merchant:roles:manage"
+pkg openrails/server, const MerchantRolesRead billing.Permission = "merchant:roles:read"
 pkg openrails/server, func MerchantRole(string) (iam.Role, bool)
 pkg openrails/server, func MerchantRoles() []iam.Role
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)

@@ -284,7 +284,7 @@ func seams(deps Deps) []string {
 func declaredLive(declarations []billing.MerchantDeclaration) string {
 	for _, m := range declarations {
 		for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
-			if p := m.PSPs[key]; config.LiveEnvironment(string(p.Rail), p.Environment) {
+			if p := m.PSPs[key]; config.LiveEnvironment(string(p.Rail), string(p.Environment)) {
 				return m.Slug + "/" + strings.ToLower(strings.TrimSpace(key))
 			}
 		}

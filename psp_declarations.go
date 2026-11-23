@@ -48,7 +48,7 @@ type NMIPSP struct {
 // PSPConfig returns the declaration.
 func (p NMIPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailNMI, Environment: string(p.Environment), AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
+		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
 		Secrets: secretSlots(map[string]string{
 			"security_key":                    p.SecurityKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -89,7 +89,7 @@ type StripePSP struct {
 // PSPConfig returns the declaration.
 func (p StripePSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailStripe, Environment: string(p.Environment), AccountID: p.AccountID, Archived: p.Archived,
+		Rail: billing.RailStripe, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{
 			"secret_key":                      p.SecretKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -122,7 +122,7 @@ type CCBillPSP struct {
 // PSPConfig returns the declaration.
 func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailCCBill, Environment: string(p.Environment), Archived: p.Archived,
+		Rail: billing.RailCCBill, Environment: p.Environment, Archived: p.Archived,
 		AccountID: rails.Account(models.RailCCBill, map[string]string{"client_accnum": p.ClientAccnum, "client_subacc": p.ClientSubacc}),
 		Secrets: secretSlots(map[string]string{
 			"salt":              p.Salt,
@@ -152,7 +152,7 @@ type SolanaPSP struct {
 // PSPConfig returns the declaration.
 func (p SolanaPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailSolana, Environment: string(p.Environment), AccountID: p.Treasury, Archived: p.Archived,
+		Rail: billing.RailSolana, Environment: p.Environment, AccountID: p.Treasury, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{"rpc_url": p.RPCURL}),
 	}
 }

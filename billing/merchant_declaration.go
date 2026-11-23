@@ -53,7 +53,7 @@ type AlertWebhookConfig struct {
 	Name string `yaml:"name,omitempty"`
 	URL  string `yaml:"url"`
 	// Format is generic (the default), discord or slack.
-	Format string `yaml:"format,omitempty"`
+	Format AlertWebhookFormat `yaml:"format,omitempty"`
 	// Enabled defaults to true.
 	Enabled *bool `yaml:"enabled,omitempty"`
 }
@@ -79,7 +79,7 @@ type PSPConfig struct {
 	// test, ccbill live | sandbox, solana mainnet | devnet | testnet. Omitted
 	// is the rail's real-money one. It is verified with the provider before
 	// the PSP is used.
-	Environment string `yaml:"environment,omitempty"`
+	Environment Environment `yaml:"environment,omitempty"`
 	// AccountID is the card rails' own id for the account (NMI Gateway ID,
 	// Stripe acct_…, CCBill clientAccnum-clientSubacc). A Solana PSP has none:
 	// its account is its signer's public key.
@@ -104,9 +104,9 @@ type Custodians map[string]CustodianConfig
 // card custodian.
 type CustodianConfig struct {
 	// Kind is the vendor: basis_theory.
-	Kind string `yaml:"kind"`
+	Kind CardVaultKind `yaml:"kind"`
 	// Environment is the tenant's money class: live (the default) or test.
-	Environment string `yaml:"environment,omitempty"`
+	Environment Environment `yaml:"environment,omitempty"`
 	// AccountID is the custodian-native tenant identity (Basis Theory: the
 	// tenant id). Operator-declared: there is no runtime lookup.
 	AccountID string `yaml:"account_id,omitempty"`

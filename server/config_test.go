@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/mirror"
-	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
@@ -29,7 +28,6 @@ func TestServerConfigCopiesEveryField(t *testing.T) {
 		t.Errorf("%s has no field in the server's internals", field)
 	}
 	for public, internal := range map[string]string{
-		ConsoleClientID:              controlplane.ConsoleClientID,
 		string(FormerNamesFinite):    string(config.FormerNamesFinite),
 		string(FormerNamesForever):   string(config.FormerNamesForever),
 		string(FormerNamesImmediate): string(config.FormerNamesImmediate),

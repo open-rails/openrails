@@ -13,7 +13,7 @@ type Config struct {
 	// providers: ProviderWritesFull (normal operation), ProviderWritesLimited
 	// (no system-initiated provider writes) or ProviderWritesReadOnly (no
 	// provider writes: it never charges anyone). Required.
-	ProviderWriteMode string
+	ProviderWriteMode ProviderWriteMode
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
@@ -94,16 +94,18 @@ type Config struct {
 	WebhookSecretOverlap string
 }
 
-// Config.ProviderWriteMode's values.
+// ProviderWriteMode is how much OpenRails may do against payment providers.
+type ProviderWriteMode string
+
 const (
 	// ProviderWritesFull is normal operation.
-	ProviderWritesFull = "full"
+	ProviderWritesFull ProviderWriteMode = "full"
 	// ProviderWritesLimited makes no system-initiated provider writes:
 	// dunning, invoice collection and the other proactive operations wait,
 	// while purchase and customer or staff actions run.
-	ProviderWritesLimited = "limited"
+	ProviderWritesLimited ProviderWriteMode = "limited"
 	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
-	ProviderWritesReadOnly = "readonly"
+	ProviderWritesReadOnly ProviderWriteMode = "readonly"
 )
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
@@ -193,7 +195,7 @@ type VaultConfig struct {
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type CardVaultConfig struct {
 	// Kind is the vault vendor: basis_theory.
-	Kind string
+	Kind billing.CardVaultKind
 	// TenantID is the vendor's tenant id.
 	TenantID string
 	// KVMount holds the platform credential document. Empty uses
@@ -287,7 +289,7 @@ func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 // handles', not the engine's.
 func engineConfig(cfg Config) config.Config {
 	out := config.Config{
-		ProviderWriteMode:       cfg.ProviderWriteMode,
+		ProviderWriteMode:       string(cfg.ProviderWriteMode),
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),
