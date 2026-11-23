@@ -130,4 +130,4 @@ func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit i
 // session token for one bound to the merchant they act on (RFC 8693, the
 // merchant's id as group_id), with a DPoP proof. It is declared automatically
 // only when local sign-in and the console are enabled.
-const ConsoleClientID = controlplane.ConsoleClientID
+const ConsoleClientID = "openrails-console"
