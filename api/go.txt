@@ -2528,6 +2528,7 @@ pkg openrails/billing, type MessageEvent struct, RetryStatus NotificationRetrySt
 pkg openrails/billing, type MessageEvent struct, RunwayEndsAt string
 pkg openrails/billing, type MessageEvent struct, SubscriptionID string
 pkg openrails/billing, type MessageEvent struct, ToProductName string
+pkg openrails/billing, type MessageEvent struct, Voided bool
 pkg openrails/billing, type MessageEventSettings struct
 pkg openrails/billing, type MessageEventSettings struct, Enabled *bool `json:"enabled,omitempty"`
 pkg openrails/billing, type MessageEventSettings struct, Templates map[string]MessageTemplate `json:"templates,omitempty"`
@@ -2680,6 +2681,7 @@ pkg openrails/billing, type NotificationData struct, OverdueAmount *int64 `json:
 pkg openrails/billing, type NotificationData struct, OverdueOrders int `json:"overdue_orders,omitempty"`
 pkg openrails/billing, type NotificationData struct, OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, OwedAmount *int64 `json:"owed_amount,omitempty,string"`
+pkg openrails/billing, type NotificationData struct, PSPID PSPID `json:"psp_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, PaymentID PaymentID `json:"payment_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, PaymentMethod string `json:"payment_method,omitempty"`
 pkg openrails/billing, type NotificationData struct, PeriodEndsAt *time.Time `json:"period_ends_at,omitempty"`
@@ -2702,6 +2704,7 @@ pkg openrails/billing, type NotificationData struct, ToProductID ProductID `json
 pkg openrails/billing, type NotificationData struct, ToProductName string `json:"to_product_name,omitempty"`
 pkg openrails/billing, type NotificationData struct, ToState string `json:"to_state,omitempty"`
 pkg openrails/billing, type NotificationData struct, TransactionID string `json:"transaction_id,omitempty"`
+pkg openrails/billing, type NotificationData struct, Voided bool `json:"voided,omitempty"`
 pkg openrails/billing, type NotificationEvent struct
 pkg openrails/billing, type NotificationEvent struct, ActionRequested bool `json:"action_requested,omitempty"`
 pkg openrails/billing, type NotificationEvent struct, CreatedAt time.Time `json:"created_at"`

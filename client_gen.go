@@ -1119,7 +1119,8 @@ func (c *Client) PreviewMessage(ctx context.Context, params billing.PreviewMessa
 }
 
 // CreateTestMessage sends one sample message, as PreviewMessage renders it,
-// to the merchant's alert email address. It is sent to no other address.
+// to the merchant's alert email address. It is sent to no other address, at
+// most ten an hour.
 func (c *Client) CreateTestMessage(ctx context.Context, params billing.CreateTestMessageParams) (*billing.TestMessage, error) {
 	var out billing.TestMessage
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/messages/test", body: params}, &out); err != nil {

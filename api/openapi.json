@@ -11799,7 +11799,7 @@
           "merchant_config"
         ],
         "operationId": "CreateTestMessage",
-        "description": "CreateTestMessage sends one sample message, as PreviewMessage renders it, to the merchant's alert email address. It is sent to no other address.",
+        "description": "CreateTestMessage sends one sample message, as PreviewMessage renders it, to the merchant's alert email address. It is sent to no other address, at most ten an hour.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11850,6 +11850,7 @@
           "invalid_param",
           "message_send_failed",
           "message_template_invalid",
+          "rate_limit_exceeded",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
