@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -26,6 +27,8 @@ type entitlementServer struct {
 	merchant billing.MerchantID
 	requests atomic.Int32
 	validity atomic.Int32
+	// stall, when set, runs once after an answer is evaluated, before it is sent.
+	stall atomic.Pointer[func()]
 
 	mu     sync.Mutex
 	answer func(billing.CheckEntitlementsParams) billing.EntitlementCheck
@@ -63,6 +66,9 @@ func newEntitlementServer(t *testing.T, answer func(billing.CheckEntitlementsPar
 		} else {
 			out.EvaluatedAt, out.ValidUntil = nil, nil
 		}
+		if stall := s.stall.Swap(nil); stall != nil {
+			(*stall)()
+		}
 		w.Header().Set(merchant.BoundHeader, s.merchant.String())
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			t.Errorf("encode response: %v", err)
@@ -92,9 +98,15 @@ func grants(held map[string]*int) func(billing.CheckEntitlementsParams) billing.
 	}
 }
 
+// cachedClient's handle knows its merchant, so its first check can fill.
 func cachedClient(t *testing.T, server *entitlementServer, cache EntitlementCheckCacheOptions) *Client {
 	t.Helper()
-	client, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "test-key"}, RemoteMerchantOptions{EntitlementCheckCache: cache})
+	remote, err := NewRemote(server.URL, RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{server.merchant: {APIKey: "test-key"}}, EntitlementCheckCache: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remote.Close(context.Background()) })
+	client, err := remote.Merchant(server.merchant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,9 +180,6 @@ func TestEntitlementCheckCachesAllowedKeysOnly(t *testing.T) {
 	mixed := check(t, client, customer, "rental", "premium")
 	if mixed.EvaluatedAt == nil || !mixed.Entitlements["premium"] || mixed.Entitlements["rental"] {
 		t.Fatalf("mixed check = %+v", mixed)
-	}
-	if client.MerchantID() != server.merchant {
-		t.Fatal("handle did not adopt the merchant from the first response")
 	}
 	// The denied key is never cached, so the same check asks again.
 	check(t, client, customer, "premium", "rental")
@@ -460,28 +469,59 @@ func TestEntitlementCheckCacheExpiresAndEvicts(t *testing.T) {
 		entry := func(key string, lifetime time.Duration) entitlementCacheEntry {
 			return entitlementCacheEntry{key: key, value: entitlementCacheValue{EvaluatedAt: now}, deadline: now.Add(lifetime)}
 		}
+		scope := func(keys ...string) entitlementCacheScope {
+			return entitlementCacheScope{generation: "scope", keys: keys}
+		}
 		hit := func(keys ...string) bool {
-			entries, _ := cache.lookup(t.Context(), keys)
+			entries, _ := cache.lookup(t.Context(), scope(keys...))
 			return entries != nil
 		}
-		cache.record(t.Context(), []entitlementCacheEntry{entry("expiring", time.Second), entry("kept", time.Minute)}, nil, entitlementRedisClock{}, false)
+		fill := func(entries ...entitlementCacheEntry) {
+			_, state := cache.lookup(t.Context(), scope())
+			cache.record(t.Context(), scope(), state, entries, nil, false)
+		}
+		fill(entry("expiring", time.Second), entry("kept", time.Minute))
 		time.Sleep(time.Second)
 		if hit("expiring") || hit("kept", "expiring") || !hit("kept") {
 			t.Fatal("cache hit at the exclusive deadline")
 		}
 
 		// The bound is bytes, not a count, and evicts the least recently used.
-		cache.record(t.Context(), nil, []string{"kept"}, entitlementRedisClock{}, false)
+		_, state := cache.lookup(t.Context(), scope())
+		cache.record(t.Context(), scope(), state, nil, []string{"kept"}, false)
 		fits := entitlementCacheMaxBytes / entry("k00000", 0).size()
 		for i := range fits {
-			cache.record(t.Context(), []entitlementCacheEntry{entry(fmt.Sprintf("k%05d", i), time.Minute)}, nil, entitlementRedisClock{}, false)
+			fill(entry(fmt.Sprintf("k%05d", i), time.Minute))
 		}
 		if len(cache.entries) != fits || !hit("k00000") {
 			t.Fatalf("entries = %d, want all %d within the byte budget", len(cache.entries), fits)
 		}
-		cache.record(t.Context(), []entitlementCacheEntry{entry("next", time.Minute)}, nil, entitlementRedisClock{}, false)
+		fill(entry("next", time.Minute))
 		if hit("k00001") || !hit("k00000") || !hit("next") || cache.bytes > entitlementCacheMaxBytes {
 			t.Fatal("cache did not evict the least recently used entry at its byte budget")
+		}
+
+		// A live denial refuses fills that read the scope before it, even once
+		// byte pressure has evicted its generation record.
+		_, before := cache.lookup(t.Context(), scope())
+		cache.record(t.Context(), scope(), before, nil, []string{"next"}, true)
+		cache.record(t.Context(), scope(), before, []entitlementCacheEntry{entry("stale", time.Minute)}, nil, false)
+		if hit("stale") {
+			t.Fatal("a fill begun before a live denial was stored")
+		}
+		for i := range fits {
+			fill(entry(fmt.Sprintf("p%05d", i), time.Minute))
+		}
+		if cache.entries["scope"] != nil {
+			t.Fatal("the generation record outlived a full byte budget")
+		}
+		cache.record(t.Context(), scope(), before, []entitlementCacheEntry{entry("stale", time.Minute)}, nil, false)
+		if hit("stale") {
+			t.Fatal("evicting a generation record let an older fill through")
+		}
+		fill(entry("fresh", time.Minute))
+		if !hit("fresh") {
+			t.Fatal("a fill begun after the live denial was refused")
 		}
 	})
 }
@@ -495,16 +535,145 @@ func TestEntitlementRedisBudgetLimitsOutstandingWork(t *testing.T) {
 			return 1
 		}
 		started := time.Now()
-		if got := withEntitlementRedisBudget(t.Context(), pending, ignoreCancellation); got != 0 {
+		if got := withEntitlementRedisBudget(t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 {
 			t.Fatalf("lookup = %d, want miss", got)
 		}
 		if elapsed := time.Since(started); elapsed != entitlementCacheRedisTimeout {
 			t.Fatalf("blocked lookup waited %v, want %v", elapsed, entitlementCacheRedisTimeout)
 		}
 		started = time.Now()
-		if got := withEntitlementRedisBudget(t.Context(), pending, ignoreCancellation); got != 0 || time.Since(started) != 0 {
+		if got := withEntitlementRedisBudget(t.Context(), pending, entitlementCacheRedisTimeout, ignoreCancellation); got != 0 || time.Since(started) != 0 {
 			t.Fatal("a full Redis work budget must fail immediately")
 		}
 		close(release)
 	})
+}
+
+func TestEntitlementCheckCacheFillsOnlyKnownScope(t *testing.T) {
+	server := newEntitlementServer(t, grants(map[string]*int{"premium": nil}))
+	client, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "test-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	customer := billing.CustomerID(uuid.New())
+	// The first answer resolves the handle, too late to have read the scope's
+	// generation, so the second check fills and the third is a hit.
+	for range 3 {
+		check(t, client, customer, "premium")
+	}
+	if client.MerchantID() != server.merchant {
+		t.Fatal("handle did not adopt the merchant from the first response")
+	}
+	wantRequests(t, server, 2)
+}
+
+func TestEntitlementCheckLiveDenialRefusesInFlightFill(t *testing.T) {
+	server := newEntitlementServer(t, grants(map[string]*int{"premium": nil}))
+	client := cachedClient(t, server, EntitlementCheckCacheOptions{MaxAge: time.Minute})
+	customer := billing.CustomerID(uuid.New())
+	evaluated, release := make(chan struct{}), make(chan struct{})
+	stall := func() {
+		close(evaluated)
+		<-release
+	}
+	server.stall.Store(&stall)
+	type result struct {
+		out *billing.EntitlementCheck
+		err error
+	}
+	inFlight := make(chan result, 1)
+	go func() {
+		out, err := client.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"premium"}})
+		inFlight <- result{out, err}
+	}()
+	<-evaluated
+	server.setAnswer(grants(nil))
+	if checkLive(t, client, customer, "premium").Entitlements["premium"] {
+		t.Fatal("live check missed the revocation")
+	}
+	close(release)
+	if got := <-inFlight; got.err != nil || !got.out.Entitlements["premium"] {
+		t.Fatalf("in-flight check = %+v, %v; want its answer from before the revocation", got.out, got.err)
+	}
+	if check(t, client, customer, "premium").Entitlements["premium"] {
+		t.Fatal("a fill begun before the live denial restored the entry")
+	}
+	wantRequests(t, server, 3)
+
+	// Fills begun after the denial are kept.
+	server.setAnswer(grants(map[string]*int{"premium": nil}))
+	check(t, client, customer, "premium")
+	check(t, client, customer, "premium")
+	wantRequests(t, server, 4)
+}
+
+// slowRedis stands in for Redis: it answers the lookup script after delay with
+// every entry at ttl milliseconds, and accepts every other script.
+type slowRedis struct {
+	delay time.Duration
+	ttl   int64
+	value string
+}
+
+func (slowRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (slowRedis) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+func (r slowRedis) ProcessHook(redis.ProcessHook) redis.ProcessHook {
+	return func(_ context.Context, cmd redis.Cmder) error {
+		reply, ok := cmd.(*redis.Cmd)
+		args := cmd.Args()
+		if !ok || len(args) < 3 {
+			return errors.New("unexpected Redis command")
+		}
+		now := time.Now()
+		values := []any{now.Unix(), int64(now.Nanosecond() / 1000), ""}
+		switch args[1] {
+		case entitlementRedisLookup.Hash():
+			time.Sleep(r.delay)
+			for range args[2].(int) - 1 {
+				values = append(values, r.ttl, r.value)
+			}
+			reply.SetVal(values)
+		case entitlementRedisProbe.Hash():
+			reply.SetVal(values)
+		default:
+			reply.SetVal(int64(1))
+		}
+		return nil
+	}
+}
+
+func TestEntitlementCheckRedisReplyPastDeadlineGoesLive(t *testing.T) {
+	server := newEntitlementServer(t, grants(map[string]*int{"premium": nil}))
+	value, err := json.Marshal(entitlementCacheValue{EvaluatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name     string
+		delay    time.Duration
+		ttl      int64
+		requests int32
+	}{
+		{name: "current reply", ttl: time.Minute.Milliseconds()},
+		// Redis measured 2 ms left; the reply arrives after that.
+		{name: "reply delayed past its deadline", delay: 5 * time.Millisecond, ttl: 2, requests: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+			store.AddHook(slowRedis{delay: test.delay, ttl: test.ttl, value: string(value)})
+			t.Cleanup(func() { _ = store.Close() })
+			client := cachedClient(t, server, EntitlementCheckCacheOptions{MaxAge: time.Minute, Redis: store})
+			before := server.requests.Load()
+			if !check(t, client, billing.CustomerID(uuid.New()), "premium").Entitlements["premium"] {
+				t.Fatal("premium denied")
+			}
+			if got := server.requests.Load() - before; got != test.requests {
+				t.Fatalf("requests = %d, want %d", got, test.requests)
+			}
+		})
+	}
 }

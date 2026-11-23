@@ -177,15 +177,24 @@ deadline short.
 **Cache entitlement checks.** A client using a merchant API key caches
 `CheckEntitlements` by default. It keeps each allowed key's answer, never a
 denial: a check is answered from the cache only when every requested key is
-allowed there, and otherwise asks OpenRails for the whole set, so a purchase is
-visible on the next check. An allowed answer is reused for up to `MaxAge`
-(10 s by default, `DefaultEntitlementCheckMaxAge`) and expires sooner at the
-next scheduled access change, such as a rental's end. A revocation, refund or
-API key permission change can therefore take up to `MaxAge` to appear.
-`CheckEntitlementsLive` always asks OpenRails; its answer replaces each allowed
-key's entry and drops each denied one, so later checks see a revocation too.
-Configure it on `RemoteMerchantOptions.EntitlementCheckCache` (or the same
-field on `RemoteOptions`); `Disabled: true` makes every check ask OpenRails:
+allowed there, and otherwise asks OpenRails for the whole set. A newly held key
+is therefore visible at once. A change to a held key, such as its seats or a
+revocation, can take up to `MaxAge` (10 s by default,
+`DefaultEntitlementCheckMaxAge`) unless `CheckEntitlementsLive` sees it, and so
+can an API key permission change. An allowed answer also expires at the next
+scheduled access change, such as a rental's end.
+
+`CheckEntitlementsLive` always asks OpenRails. Its answer replaces allowed
+keys' entries and drops denied ones, and an ordinary check already in flight
+cannot restore a dropped entry. In process, only that client's own memory is
+affected: other processes keep their entries for up to `MaxAge`. With Redis,
+every replica sees the drop once it is written; the live check waits up to
+250 ms for that, and if Redis fails, replicas may serve the old answer for up
+to `MaxAge`.
+
+Configure the cache on `RemoteMerchantOptions.EntitlementCheckCache` (or the
+same field on `RemoteOptions`); `Disabled: true` makes every check ask
+OpenRails:
 
 ```go
 client, err := openrails.NewRemoteMerchant(billingURL,
@@ -205,11 +214,15 @@ lifecycle. Use a trusted Redis 6.2+ instance with synchronized clocks across
 its failover nodes. Set short socket timeouts and `ContextTimeoutEnabled` on
 the Redis client so timed-out lookups release connections promptly. A client
 created with `NewRemoteMerchant` learns its merchant in an authenticated
-response before it can reuse shared entries. Prefix or historical requests,
+response before it can fill or reuse entries. Prefix or historical requests,
 calls with request options and token-backed credentials always ask OpenRails,
-as does any check when Redis fails. The cache needs a server of this release
-or later; against an older one, set `Disabled`. See
+as does any check when Redis fails. See
 [entitlement windows](entitlements_timeline.md#reading-access).
+
+**Deploy the server before the SDK.** The cache sends `include_validity`,
+which an older server refuses: every exact-key check from an API-key client,
+`CheckEntitlementsLive` included, then fails with 400 `unknown_field`. Until
+the server is upgraded, set `Disabled: true`.
 
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application sets `RemoteCredential.Assertion` (issuer, `kid`, a `crypto.Signer`,

@@ -501,9 +501,11 @@ func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEnti
 }
 
 // CheckEntitlementsLive checks access against OpenRails, never answering from
-// the SDK cache. Its answer refreshes the cache: an allowed key's entry is
-// replaced and a denied key's dropped, so later checks see a revocation too.
-// Use it when a revocation or credential change must be visible immediately.
+// the SDK cache. Its answer replaces allowed keys' entries and drops denied
+// ones; a fill begun before it cannot restore them. The drop reaches this
+// client's own memory at once, or the shared Redis within a bounded wait; if
+// Redis fails, other replicas may serve the old answer for up to MaxAge. Use
+// it when a revocation or credential change must be visible immediately.
 func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	return c.checkEntitlements(ctx, params, false, requestOptions)
 }

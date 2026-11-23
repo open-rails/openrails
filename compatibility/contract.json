@@ -2429,6 +2429,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "entitlement_check_cache.go": {
+      "atomic": "sync/atomic",
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/catalog",
       "context": "context",
@@ -2438,6 +2439,7 @@
       "json": "encoding/json",
       "list": "container/list",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "rand": "crypto/rand",
       "sha256": "crypto/sha256",
       "slices": "slices",
       "strings": "strings",
