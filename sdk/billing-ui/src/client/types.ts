@@ -639,8 +639,7 @@ export const accountSchema = z.object({
 export type Account = z.infer<typeof accountSchema>
 
 /**
- * One group of a usage report: its events and their total `amount`.
- * `dimensions` are the summed event dimensions when grouped by event type.
+ * One group of a usage report: its usage items and their total `amount`.
  * Grouped by meter, `key` is the meter, `cell` its matrix cell and
  * `quantity` what it priced.
  */
@@ -650,7 +649,6 @@ export const usageRowSchema = z.object({
   event_count: z.number(),
   amount,
   quantity: z.number().nullish(),
-  dimensions: z.record(z.string(), z.number()).nullish(),
 })
 export type UsageRow = z.infer<typeof usageRowSchema>
 
@@ -664,7 +662,7 @@ export const usageSchema = z.object({
   currency: z.string(),
   from: time,
   to: time,
-  /** `event_type | resource | invoker`; kept open for new values. */
+  /** `event_type | invoker | meter`; kept open for new values. */
   group_by: z.string(),
   rows: z.array(usageRowSchema),
   next_cursor: z

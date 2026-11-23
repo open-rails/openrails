@@ -376,7 +376,7 @@ export function MeterDetailPage() {
               }
             />{" "}
             <code className="text-foreground">
-              <AdminMessage id={"/app/usage-events"} />
+              <AdminMessage id={"/app/leases/sync"} />
             </code>
             <AdminMessage id={" with this shape."} />
           </p>

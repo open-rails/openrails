@@ -70,7 +70,7 @@ export const billingAdminMessages = {
     ". Active holds may prevent revocation. Payment refunds are managed separately.",
   ". Currency and interval stay locked to the current price.":
     ". Currency and interval stay locked to the current price.",
-  "/app/usage-events": "/app/usage-events",
+  "/app/leases/sync": "/app/leases/sync",
   "1 day": "1 day",
   "30 days": "30 days",
   "365 days": "365 days",
