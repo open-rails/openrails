@@ -88,13 +88,13 @@ sender's own.
 `layout`) are a `billing.MessageSettings` the merchant's document overlays per
 event type and language. Subject and text are `text/template`, HTML
 `html/template`, over `billing.MessageData` (version `MessageDataVersion`), with
-`missingkey=error` and `functions` (comparisons, logic, `len`, `index`, `slice`,
-`default`, `upper`, `lower`); amounts are `moneyutil.FormatAmount`. `compile`
+`missingkey=error` and `functions` (comparisons, logic, `len`, `default`,
+`upper`, `lower`); amounts are `moneyutil.FormatAmount`. `compile`
 parses each part alone and `vet` refuses `range`, `define`/`block`, variables, a
 `template` call but the layout's one body, and every other function; a part's
 source is at most `maxSource` (64 KiB) and renders through `capped` (256 KiB).
 `typecheck` walks every branch's field chains against `billing.MessageData` by
-reflection. A document is checked by `Check` (every event type against
+reflection, refusing arguments to a field and comparisons of unlike kinds. A document is checked by `Check` (every event type against
 its `Sample` in every language it names) where it loads: `checkMessages` in the
 app's merchant configuration sync and `merchantbootstrap.ScopeDeclaration`; a
 refused one is `Rejected` under `merchantdocs.MessagesDoc` and the version served

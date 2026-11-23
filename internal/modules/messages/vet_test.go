@@ -29,6 +29,16 @@ func TestCheckTypesEveryBranch(t *testing.T) {
 		{`{{upper .Event.AccessEnded}}`, "wrong type for value; expected string; got bool"},
 		{`{{upper .Event.RetryStatus}}`, "wrong type for value; expected string; got billing.NotificationRetryStatus"},
 		{`{{default "x"}}`, "wrong number of args for default: want 2 got 1"},
+		{`{{if eq .Event.AccessEnded "x"}}y{{end}}`, "incompatible types for comparison: bool and string"},
+		{`{{if eq .Event.Reason "a" true}}y{{end}}`, "incompatible types for comparison: string and bool"},
+		{`{{if ne .Event.Amount 1}}y{{end}}`, "incompatible types for comparison: string and int"},
+		{`{{if lt .Event.AccessEnded true}}y{{end}}`, "lt cannot order a bool"},
+		{`{{if gt .Event .Event}}y{{end}}`, "gt cannot order a billing.MessageEvent"},
+		{`{{if eq .Event .Merchant}}y{{end}}`, "incompatible types for comparison: billing.MessageEvent and billing.MessageMerchant"},
+		{`{{if eq .Event.Reason}}y{{end}}`, "wrong number of args for eq: got 1"},
+		{`{{.Customer.Name "x"}}`, ".Customer.Name is not a function: it takes no arguments"},
+		{`{{"x" | .Customer.Name}}`, ".Customer.Name is not a function"},
+		{`{{with .Event}}{{. "x"}}{{end}}`, ". is not a function"},
 	} {
 		err := Check(receiptWith(billing.MessageTemplate{Subject: "Receipt", Text: c.body}))
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "events.one_off_purchase_completed: text: template: body:1:") {
@@ -38,8 +48,8 @@ func TestCheckTypesEveryBranch(t *testing.T) {
 	valid := []string{
 		`{{if eq .Event.Reason "never"}}{{.Event.Amount}}{{else}}{{.Customer.Name}}{{end}}`,
 		`{{with .Event}}{{.Amount}} {{$.Merchant.Name}}{{end}}{{.Event.Amount | default "free" | upper}}`,
-		`{{if and .Event.AccessEnded (not .Event.DowngradeApplied)}}{{len .Event.ProductName}}{{slice .Event.ProductName 0 1}}{{end}}`,
-		`{{if eq .Event.RetryStatus "scheduled"}}{{index .Event.ProductName 0}}{{end}}{{/* a comment */}}`,
+		`{{if and .Event.AccessEnded (not .Event.DowngradeApplied)}}{{len .Event.ProductName}}{{end}}`,
+		`{{if eq .Event.RetryStatus "scheduled" "stopped"}}x{{end}}{{if gt (len .Event.ProductName) 3}}y{{end}}{{if ne .Event.AccessEnded true}}z{{end}}{{/* a comment */}}`,
 	}
 	for _, body := range valid {
 		if err := Check(receiptWith(billing.MessageTemplate{Subject: "Receipt", Text: body, HTML: "<p>" + body + "</p>"})); err != nil {
@@ -68,6 +78,8 @@ func TestTemplatesCannotGrowWithoutBound(t *testing.T) {
 		{"printf", billing.MessageTemplate{Subject: "x", Text: `{{printf "%[1]s%[1]s" .Event.Amount}}`}, `function "printf" is not allowed`},
 		{"html", billing.MessageTemplate{Subject: "x", Text: `{{html (html .Event.Amount)}}`}, `function "html" is not allowed`},
 		{"print in a parenthesis", billing.MessageTemplate{Subject: "x", Text: `{{default "x" (print .Event.Amount)}}`}, `function "print" is not allowed`},
+		{"slice", billing.MessageTemplate{Subject: "x", Text: `{{slice .Event.Amount 0 1}}`}, `function "slice" is not allowed`},
+		{"index", billing.MessageTemplate{Subject: "x", Text: `{{index .Event.Amount 0}}`}, `function "index" is not allowed`},
 		{"a long source", billing.MessageTemplate{Subject: "x", Text: strings.Repeat("x", maxSource+1)}, "text: is 65537 bytes; a template part is at most 64 KiB"},
 	} {
 		err := Check(receiptWith(c.tmpl))

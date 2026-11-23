@@ -20,12 +20,13 @@ const (
 	maxOutput = 256 << 10
 )
 
-// functions are what a template may call: Go's comparisons and logic, len,
-// index and slice, and funcs. print, printf, println, html, js, urlquery and
-// call are refused, since each can repeat or grow what it is given.
+// functions are what a template may call: Go's comparisons and logic, len
+// and funcs. print, printf, println, html, js, urlquery and call are refused,
+// since each can repeat or grow what it is given; index and slice, since
+// version 1 data needs neither.
 var functions = map[string]bool{
 	"and": true, "or": true, "not": true, "eq": true, "ne": true, "lt": true, "le": true, "gt": true, "ge": true,
-	"len": true, "index": true, "slice": true, "default": true, "upper": true, "lower": true,
+	"len": true, "default": true, "upper": true, "lower": true,
 }
 
 var (
@@ -247,7 +248,36 @@ func (c *checker) command(cmd *parse.CommandNode, dot reflect.Type, piped bool, 
 		}
 		return c.call(fn, args)
 	}
-	return c.operand(cmd.Args[0], dot)
+	t, err := c.operand(cmd.Args[0], dot)
+	if err == nil && (len(args) > 0 || piped) && !c.method(cmd.Args[0], dot) {
+		err = c.errorf(cmd.Args[0], "%s is not a function: it takes no arguments", cmd.Args[0])
+	}
+	return t, err
+}
+
+// method reports whether n names a method, which may take arguments.
+func (c *checker) method(n parse.Node, dot reflect.Type) bool {
+	t, idents := dot, []string(nil)
+	switch n := n.(type) {
+	case *parse.FieldNode:
+		idents = n.Ident
+	case *parse.VariableNode:
+		t, idents = c.root, n.Ident[1:]
+	case *parse.ChainNode:
+		t, _ = c.operand(n.Node, dot)
+		idents = n.Field
+	}
+	if len(idents) == 0 {
+		return false
+	}
+	for _, name := range idents[:len(idents)-1] {
+		t, _ = member(t, name)
+	}
+	if t == nil {
+		return false
+	}
+	_, ok := t.MethodByName(idents[len(idents)-1])
+	return ok
 }
 
 func (c *checker) operand(n parse.Node, dot reflect.Type) (reflect.Type, error) {
@@ -274,8 +304,11 @@ func (c *checker) operand(n parse.Node, dot reflect.Type) (reflect.Type, error) 
 	case *parse.BoolNode:
 		return boolType, nil
 	case *parse.NumberNode:
-		if n.IsInt {
+		switch {
+		case n.IsInt:
 			return intType, nil
+		case n.IsFloat:
+			return reflect.TypeFor[float64](), nil
 		}
 	}
 	return nil, nil
@@ -327,8 +360,10 @@ func member(t reflect.Type, name string) (reflect.Type, bool) {
 // known.
 func (c *checker) call(fn *parse.IdentifierNode, args []reflect.Type) (reflect.Type, error) {
 	switch fn.Ident {
-	case "not", "eq", "ne", "lt", "le", "gt", "ge":
+	case "not":
 		return boolType, nil
+	case "eq", "ne", "lt", "le", "gt", "ge":
+		return boolType, c.compared(fn, args)
 	case "len":
 		return intType, nil
 	case "and", "or":
@@ -342,22 +377,6 @@ func (c *checker) call(fn *parse.IdentifierNode, args []reflect.Type) (reflect.T
 			}
 		}
 		return args[0], nil
-	case "slice":
-		if len(args) > 0 {
-			return args[0], nil
-		}
-		return nil, nil
-	case "index":
-		if len(args) == 0 || args[0] == nil {
-			return nil, nil
-		}
-		switch args[0].Kind() {
-		case reflect.String:
-			return reflect.TypeFor[uint8](), nil
-		case reflect.Slice, reflect.Array, reflect.Map:
-			return args[0].Elem(), nil
-		}
-		return nil, nil
 	}
 	f, ok := funcs[fn.Ident]
 	if !ok {
@@ -373,6 +392,49 @@ func (c *checker) call(fn *parse.IdentifierNode, args []reflect.Type) (reflect.T
 		}
 	}
 	return ft.Out(0), nil
+}
+
+// compared refuses what fn cannot compare: a value with one of another kind
+// (int and uint compare with each other), and for an ordering a bool, a
+// complex number or a value of no basic kind. eq takes two values or more,
+// the others two.
+func (c *checker) compared(fn *parse.IdentifierNode, args []reflect.Type) error {
+	ordered := fn.Ident != "eq" && fn.Ident != "ne"
+	if len(args) < 2 || ordered && len(args) != 2 {
+		return c.errorf(fn, "wrong number of args for %s: got %d", fn.Ident, len(args))
+	}
+	first := args[0]
+	for _, t := range args {
+		if t == nil || first == nil {
+			continue
+		}
+		k, kb := comparison(t)
+		k0, k0b := comparison(first)
+		switch {
+		case ordered && (!kb || k == reflect.Bool || k == reflect.Complex128):
+			return c.errorf(fn, "%s cannot order a %s", fn.Ident, t)
+		case kb && k0b && k != k0, kb != k0b, !kb && (t != first || !t.Comparable()):
+			return c.errorf(fn, "incompatible types for comparison: %s and %s", first, t)
+		}
+	}
+	return nil
+}
+
+// comparison is t's kind as a comparison sees it: every integer is Int, every
+// float Float64, every complex Complex128; false for no basic kind.
+func comparison(t reflect.Type) (reflect.Kind, bool) {
+	switch t.Kind() {
+	case reflect.Bool, reflect.String:
+		return t.Kind(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return reflect.Int, true
+	case reflect.Float32, reflect.Float64:
+		return reflect.Float64, true
+	case reflect.Complex64, reflect.Complex128:
+		return reflect.Complex128, true
+	}
+	return reflect.Invalid, false
 }
 
 // capped is a rendering that fails past maxOutput.
