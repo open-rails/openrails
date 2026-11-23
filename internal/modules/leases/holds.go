@@ -1,7 +1,6 @@
 package leases
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -231,7 +230,7 @@ func (r *syncRun) holdSlots(k holdKey, h *hold, w admission.Want, at time.Time) 
 // its gate applies the new answer.
 func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bool, room moneyRoom, cards []byte, terms holdTerms) (*billing.Refusal, error) {
 	live := h != nil && !h.released
-	reissue := !live || h.row.CreatedAt.Before(r.now.Add(-reissueAge)) || !bytes.Equal(h.row.RateCards, cards) || len(h.parts) != len(slots)
+	reissue := !live || h.row.CreatedAt.Before(r.now.Add(-reissueAge)) || !sameCards(h.row.RateCards, cards) || len(h.parts) != len(slots)
 	same := make([]*part, len(slots))
 	for j, s := range slots {
 		if !live {

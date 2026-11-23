@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -592,7 +593,27 @@ func (r *syncRun) cardsChanged(h *hold) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return !bytes.Equal(current, h.row.RateCards), nil
+	return !sameCards(current, h.row.RateCards), nil
+}
+
+// sameCards reports whether two pinned card lists say the same: a hold's
+// were stored as jsonb, which keeps neither key order nor spacing.
+func sameCards(a, b []byte) bool {
+	decode := func(raw []byte) (any, bool) {
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil, true
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return nil, false
+		}
+		return v, true
+	}
+	x, okA := decode(a)
+	y, okB := decode(b)
+	return okA && okB && reflect.DeepEqual(x, y)
 }
 
 func (r *syncRun) cardsFor(eventType, currency string) ([]byte, error) {
