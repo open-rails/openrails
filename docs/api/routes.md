@@ -218,7 +218,7 @@ The caller's none/read/update access to staff areas and effective application pe
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, usage uses source identity and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group; they name no permission.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group; they name no permission.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|

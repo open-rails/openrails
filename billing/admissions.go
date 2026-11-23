@@ -69,7 +69,7 @@ type UsageEstimate struct {
 // ReleaseAdmissions or ExtendAdmissions call.
 const MaxAdmissionBatchItems = 1000
 
-// AdmitBatchParams is the body of POST /v1/admin/admissions.
+// AdmitBatchParams is the body of POST /v1/app/admissions.
 type AdmitBatchParams struct {
 	Items []AdmitParams `json:"items"`
 }
@@ -151,7 +151,7 @@ func (v AdmissionVerdict) Allowed() bool {
 	return v.Status == 200 && v.Admission.Active()
 }
 
-// AdmitBatchResult answers POST /v1/admin/admissions: one verdict per
+// AdmitBatchResult answers POST /v1/app/admissions: one verdict per
 // item, in order.
 type AdmitBatchResult struct {
 	Items []AdmissionVerdict `json:"items"`

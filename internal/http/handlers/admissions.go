@@ -16,9 +16,6 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do.
-const maxSourceIDBytes = 255
-
 func admitInput(p billing.AdmitParams) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
 		CustomerID:              p.CustomerID,

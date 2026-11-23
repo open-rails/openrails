@@ -273,20 +273,6 @@ func (h Holder) Settle(ctx context.Context, settlements []Settlement) error {
 	return nil
 }
 
-// Standing reads where a limit stands in window w, without locking.
-func (h Holder) Standing(ctx context.Context, key string, reset catalog.LimitReset, w Window, capacity int64) (Standing, error) {
-	row, err := h.Q.GetLimitWindow(ctx, gen.GetLimitWindowParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, WindowStartsAt: w.StartsAt})
-	var locked *gen.GetLimitWindowForUpdateRow
-	switch {
-	case err == nil:
-		locked = &gen.GetLimitWindowForUpdateRow{LimitKey: row.LimitKey, WindowStartsAt: row.WindowStartsAt, WindowEndsAt: row.WindowEndsAt,
-			Settled: row.Settled, Adjusted: row.Adjusted, UpdatedAt: row.UpdatedAt}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return Standing{}, err
-	}
-	return h.standing(ctx, key, reset, w, capacity, locked)
-}
-
 // Held is what live holds set aside of a limit from window from through to.
 func (h Holder) Held(ctx context.Context, key string, from, to time.Time, countsExpired bool) (int64, error) {
 	return h.Q.SumWindowHeld(ctx, gen.SumWindowHeldParams{

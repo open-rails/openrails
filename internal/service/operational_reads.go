@@ -34,7 +34,7 @@ func invalidInspectionQuery(param, message string) error {
 	return apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, message).WithParam(param)
 }
 
-func readInspectionPage(kind string, page billing.PageRequest, from, to, defaultFrom, now time.Time, maxSpan time.Duration) (inspectionPage, error) {
+func readInspectionPage(kind string, page billing.PageRequest, from, to, defaultFrom, now time.Time) (inspectionPage, error) {
 	out := inspectionPage{from: from.UTC(), to: to.UTC()}
 	var err error
 	if out.limit, err = pagination.Limit(page); err != nil {
@@ -57,15 +57,9 @@ func readInspectionPage(kind string, page billing.PageRequest, from, to, default
 	}
 	if out.from.IsZero() {
 		out.from = defaultFrom.UTC()
-		if maxSpan > 0 {
-			out.from = out.to.Add(-maxSpan)
-		}
 	}
 	if !out.from.Before(out.to) {
 		return out, invalidInspectionQuery("from", "from must be before to")
-	}
-	if maxSpan > 0 && out.to.Sub(out.from) > maxSpan+time.Microsecond {
-		return out, invalidInspectionQuery("from", "a usage event list covers at most 31 days; request successive windows")
 	}
 	if out.after != nil && (out.after.At.Before(out.from) || !out.after.At.Before(out.to)) {
 		return out, pagination.ErrInvalidCursor
@@ -110,7 +104,7 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 	defer release()
 	now := s.now().UTC()
 	oldest := retention.AdmissionsDropBefore(now)
-	page, err := readInspectionPage("admissions", params.PageRequest, params.From, params.To, oldest, now, 0)
+	page, err := readInspectionPage("admissions", params.PageRequest, params.From, params.To, oldest, now)
 	if err != nil {
 		return nil, err
 	}

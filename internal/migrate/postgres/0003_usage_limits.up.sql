@@ -647,3 +647,8 @@ BEGIN
     RETURN NEW;
 END;
 $_$;
+
+-- Usage settles in groups and keeps no events.
+COMMENT ON TABLE billing.meter_period_quantities IS 'A customer''s quantity of one meter (and matrix cell) in one billing period, as priced so far: a settled group of usage is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.';
+COMMENT ON COLUMN billing.balance_watches.usage_rate_per_hour IS 'Exponentially weighted rate of usage spend, one-hour time constant, in native units per hour: each look adds the per-minute spend (usage_minutes) of the minutes ended since rate_sampled_at.';
+COMMENT ON COLUMN billing.balance_watches.rate_sampled_at IS 'The instant usage_rate_per_hour was sampled at; minutes before it are not read again.';

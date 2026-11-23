@@ -37,7 +37,6 @@ type UsageParams struct {
 	Amount *int64 `json:"amount,omitempty,string"`
 	// Outcome is succeeded when empty.
 	Outcome  UsageOutcome   `json:"outcome,omitempty"`
-	Resource string         `json:"resource,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 	Source   string         `json:"source"`
 	SourceID string         `json:"source_id"`

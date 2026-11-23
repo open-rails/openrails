@@ -374,29 +374,6 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 	return out, nil
 }
 
-// Settlements are where usage the customer's declared limits count settles
-// when no hold of theirs names the window: their current windows, opening a
-// session or first-use window. skip names the limits a hold already settles.
-func (c Customer) Settlements(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage Usage, skip map[string]bool) ([]Settlement, error) {
-	claims, err := c.Claims(ctx, defs, meters, currency, amount, &usage)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Settlement, 0, len(claims))
-	for _, claim := range claims {
-		if !skip[claim.Key] {
-			out = append(out, Settlement{Key: claim.Key, Reset: claim.Reset, Window: claim.Window, Capacity: claim.Capacity, Units: claim.Cost})
-		}
-	}
-	return out, nil
-}
-
-// Capacities are the customer's base capacity per limit.
-func (c Customer) Capacities(ctx context.Context) (map[string]int64, error) {
-	c.Now = c.Now.UTC()
-	return c.capacities(ctx)
-}
-
 // MaxAdjustment bounds one adjustment's units.
 const MaxAdjustment = int64(1) << 53
 

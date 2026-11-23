@@ -95,7 +95,6 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpMeteredRating  Operation = "metered_rating"  // a meter's charge for one usage event
 	OpUsageAccrual   Operation = "usage_accrual"   // one posting of a customer's day of usage
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.

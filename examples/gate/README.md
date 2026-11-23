@@ -2,7 +2,8 @@
 
 An API whose requests count toward usage limits, decided in process by
 `openrails.Gate` (`main.go`). OpenRails runs elsewhere (hosted or
-standalone); the API holds a key with `merchant:usage:manage`.
+standalone); the API holds a key with `merchant:usage:manage` and
+`merchant:usage:read`.
 
 ```sh
 openrails catalog apply catalog.yaml   # or Client.ApplyCatalog

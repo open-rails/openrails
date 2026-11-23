@@ -6,9 +6,9 @@
 // unreachable.
 //
 // Run it with OPENRAILS_URL and OPENRAILS_API_KEY, a key holding
-// merchant:usage:manage. REDIS_URL makes the API's replicas one gate. ADDR
-// is the listen address (default :8080). The catalog declares the limits
-// (catalog.yaml).
+// merchant:usage:manage and merchant:usage:read. REDIS_URL makes the API's
+// replicas one gate. ADDR is the listen address (default :8080). The catalog
+// declares the limits (catalog.yaml).
 package main
 
 import (

@@ -43,7 +43,6 @@ const (
 	OpCreditReinstate = ledger.OpCreditReinstate
 
 	OpArrearsAccrual     = ledger.OpArrearsAccrual
-	OpMeteredRating      = ledger.OpMeteredRating
 	OpUsageAccrual       = ledger.OpUsageAccrual
 	OpOrderPayment       = ledger.OpOrderPayment
 	OpManualOrderPayment = ledger.OpManualOrderPayment

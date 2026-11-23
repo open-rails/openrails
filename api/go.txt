@@ -4031,7 +4031,6 @@ pkg openrails/billing, type UsageParams struct, InvokerType InvokerType `json:"i
 pkg openrails/billing, type UsageParams struct, Metadata map[string]any `json:"metadata,omitempty"`
 pkg openrails/billing, type UsageParams struct, OccurredAt *time.Time `json:"occurred_at,omitempty"`
 pkg openrails/billing, type UsageParams struct, Outcome UsageOutcome `json:"outcome,omitempty"`
-pkg openrails/billing, type UsageParams struct, Resource string `json:"resource,omitempty"`
 pkg openrails/billing, type UsageParams struct, Source string `json:"source"`
 pkg openrails/billing, type UsageParams struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type UsageRow struct
