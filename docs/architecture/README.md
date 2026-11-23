@@ -11,21 +11,20 @@ people changing or reviewing OpenRails.
 |---|---|
 | Ledger | [ledger.md](ledger.md) |
 | Catalog | [catalog.md](catalog.md) |
-| Checkout and orders | [checkout.md](checkout.md) |
+| Orders and checkout | [orders.md](orders.md) |
 | Subscriptions | [subscriptions.md](subscriptions.md) |
 | Collection and dunning | [dunning.md](dunning.md) |
 | Refunds and disputes | [refunds.md](refunds.md) |
-| Metering and usage limits | [metering.md](metering.md) |
+| Usage billing | [usage-billing.md](usage-billing.md) |
+| Entitlements and limits | [entitlements.md](entitlements.md) |
 | Prepaid credits | [prepaid-credits.md](prepaid-credits.md) |
-| Entitlements | [entitlements.md](entitlements.md) |
 | Payment providers | [payment-providers.md](payment-providers.md) |
 | Cards and payment methods | [payment-methods.md](payment-methods.md) |
 | Imports | [imports.md](imports.md) |
 | Customer directory (SCIM) | [customer-directory.md](customer-directory.md) |
 | Merchant configuration | [merchant-configuration.md](merchant-configuration.md) |
 | Events and notifications | [notifications.md](notifications.md) |
-| Metrics | [metrics.md](metrics.md) |
-| Dashboard | [dashboard.md](dashboard.md) |
+| Reporting | [reporting.md](reporting.md) |
 | UI library | [billing-ui.md](billing-ui.md) |
 | Standalone server | [standalone-server.md](standalone-server.md) |
 

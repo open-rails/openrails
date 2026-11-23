@@ -1,12 +1,14 @@
-# Checkout and orders
+# Orders and checkout
 
-Checkout turns the lines a customer picks into an order and takes its payment:
-carts and previews, orders and their frozen lines, one-off purchases (saved or new
+An order is every bill: a one-off purchase, a subscription renewal (provider-run
+ones included) or a period's usage, each with frozen lines and a total. Checkout
+is one way to pay an order: it turns the lines a customer picks into an order and
+takes its payment, through carts and previews, one-off purchases (saved or new
 card, a provider's hosted page, a Solana wallet) and the payment page a pay URL
 opens. Customers buy through `/v1/me` (billing-ui), a merchant's backend creates
-unpaid orders for them (`/v1/app/orders`), and staff read them. Recurring
-lines, renewals and usage orders: [subscriptions.md](subscriptions.md),
-[dunning.md](dunning.md).
+unpaid orders for them (`/v1/app/orders`), and staff read them. Renewals are
+[subscriptions](subscriptions.md), usage orders [usage billing](usage-billing.md),
+and collecting what is unpaid [collection and dunning](dunning.md).
 
 ## Concepts
 
