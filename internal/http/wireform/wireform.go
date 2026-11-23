@@ -1,5 +1,6 @@
-// Package wireform puts a response in OpenRails' wire form before it is
-// marshaled: every time in UTC and every list [] rather than null.
+// Package wireform is OpenRails' wire form: a response before it is
+// marshaled (every time in UTC, every list [] rather than null), and the
+// query codec the Go client and the server share (query.go).
 package wireform
 
 import (
