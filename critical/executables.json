@@ -666,9 +666,6 @@
     "OR-J04-S07": [
       "TestBackgroundJobs/OR-J04-S07/host-worker-on-the-composed-fleet-is-rescued-after-a-crash"
     ],
-    "OR-J23-S06": [
-      "TestBackgroundJobs/OR-J23-S06/denials-count-each-closed-hour-once"
-    ],
     "OR-J29-S07": [
       "TestBackgroundJobs/OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish"
     ],
@@ -848,7 +845,7 @@
       "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
     ],
     "OR-J29-S08": [
-      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state"
+      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-and-orphan-state"
     ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"

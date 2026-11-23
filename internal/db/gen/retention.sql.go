@@ -65,31 +65,6 @@ func (q *Queries) DeleteAbandonedOrderAttemptsBefore(ctx context.Context, arg De
 	return result.RowsAffected(), nil
 }
 
-const deleteAdmissionDenialsBefore = `-- name: DeleteAdmissionDenialsBefore :execrows
-DELETE FROM billing.admission_denials_hourly d
-WHERE (d.merchant_id, d.customer_id, d.denial_reason, d.hour_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.denial_reason, e.hour_at
-    FROM billing.admission_denials_hourly e
-    WHERE e.merchant_id = $1::uuid AND e.hour_at < $2::timestamptz
-    ORDER BY e.hour_at
-    LIMIT $3::int
-)
-`
-
-type DeleteAdmissionDenialsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteAdmissionDenialsBefore(ctx context.Context, arg DeleteAdmissionDenialsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAdmissionDenialsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteEndedFailedUsageWindows = `-- name: DeleteEndedFailedUsageWindows :execrows
 DELETE FROM billing.failed_usage_windows w
 WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
@@ -521,12 +496,6 @@ FROM (
        FROM billing.meter_period_quantities mq
       WHERE ($1::uuid IS NULL OR mq.merchant_id > $1::uuid)
         AND mq.period_starts_at < $10::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
-    (SELECT DISTINCT ad.merchant_id AS mid
-       FROM billing.admission_denials_hourly ad
-      WHERE ($1::uuid IS NULL OR ad.merchant_id > $1::uuid)
-        AND ad.hour_at < $11::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT wh.merchant_id AS mid

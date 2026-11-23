@@ -22,16 +22,6 @@ type BillingAccessCutoverApproval struct {
 	ApprovedAt  time.Time
 }
 
-// Hourly admission-denial aggregates (merchant x payer x reason), flushed from Redis counters once each hour closes; the hot path never writes PG per-request. Retention: rows are deleted 13 months (397 days) after hour_at.
-type BillingAdmissionDenialsHourly struct {
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	DenialReason string
-	HourAt       time.Time
-	Denials      int64
-	UpdatedAt    time.Time
-}
-
 // One row per admitted spend request: its estimated hold until the request is captured or released. Retention: monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days.
 type BillingAdmissionOperation struct {
 	MerchantID         uuid.UUID

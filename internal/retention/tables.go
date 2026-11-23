@@ -83,7 +83,6 @@ var Tables = map[string]Table{
 	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
-	"admission_denials_hourly":        {Rows, "rows are deleted 13 months (397 days) after hour_at."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
 
 	"merchants":                         {Class: State},

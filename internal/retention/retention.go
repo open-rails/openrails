@@ -59,8 +59,8 @@ const (
 	// UnpaidOrders keeps an unpaid closed order that never started a payment
 	// attempt 90 days past its close.
 	UnpaidOrders = 90 * Day
-	// MetricCounters keeps an hourly admission-denial count and a daily
-	// webhook-health count 13 months: a month is compared with a year before.
+	// MetricCounters keeps a daily webhook-health count 13 months: a month is
+	// compared with a year before.
 	MetricCounters = 397 * Day
 	// OrphanState keeps the deployment-global lease of a periodic kind no
 	// fleet has scheduled for 30 days.

@@ -135,7 +135,6 @@ BEGIN
               -- (former names, host claims); a test keeps this list complete.
               AND c.relname = ANY(ARRAY[
                   'access_cutover_approvals',
-                  'admission_denials_hourly',
                   'admission_operations',
                   'balance_watches',
                   'carts',
@@ -241,3 +240,6 @@ BEGIN
     RETURN NEW;
 END;
 $_$;
+
+-- Denial statistics are gone: a limit window records when it was reached.
+DROP TABLE billing.admission_denials_hourly;

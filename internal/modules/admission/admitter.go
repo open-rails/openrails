@@ -73,10 +73,6 @@ type Admitter struct {
 	// nil disables it.
 	failedCutoff FailedUsageCutoff
 
-	// denials is the optional #733 denial counter (Redis hourly aggregates);
-	// nil disables recording.
-	denials *DenialRecorder
-
 	// rates is the optional or#897 accrual-rate meter; nil makes an
 	// accrual_rate_cap policy unenforceable, so Admit refuses rather than
 	// silently admitting past a quota nobody is measuring.
@@ -110,18 +106,6 @@ type FailedUsageCutoff interface {
 func (a *Admitter) WithFailedUsageCutoff(c FailedUsageCutoff) *Admitter {
 	a.failedCutoff = c
 	return a
-}
-
-// WithDenialRecorder enables aggregated denial counting (#733).
-func (a *Admitter) WithDenialRecorder(r *DenialRecorder) *Admitter {
-	a.denials = r
-	return a
-}
-
-func (a *Admitter) recordDenial(ctx context.Context, merchantID string, customer identity.CustomerID, code string) {
-	if a.denials != nil {
-		a.denials.Record(ctx, merchantID, customer.UUID().String(), code, a.gate.Now())
-	}
 }
 
 // AdmitRequest is one admission decision input.
@@ -201,11 +185,10 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 }
 
 func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitRequest, capacity money.AdmissionCapacity) (AdmitDecision, error) {
-	tid, err := merchant.Require(ctx) // #336: no default merchant
+	_, err := merchant.Require(ctx) // #336: no default merchant
 	if err != nil {
 		return AdmitDecision{}, err
 	}
-	merchantID := tid.UUID().String()
 
 	terms := spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
 		Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour}
@@ -257,7 +240,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 			return AdmitDecision{}, werr
 		}
 		if over {
-			a.recordDenial(ctx, merchantID, req.CustomerID, DenyFailureRateLimited)
 			return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
 		}
 	}
@@ -281,7 +263,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 			return AdmitDecision{}, derr
 		}
 		if delinquent {
-			a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelinquent)
 			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
 		}
 	}
@@ -306,7 +287,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	// Only the customer's own credential spends its balance: nothing grants a
 	// delegated invoker spend.
 	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelegatedSpendNotAllowed)
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
 	}
 
@@ -327,7 +307,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 			return AdmitDecision{}, rerr
 		}
 		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
-			a.recordDenial(ctx, merchantID, req.CustomerID, DenyAccrualRateCap)
 			return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
 		}
 	}
@@ -373,7 +352,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 			code = DenyOutstandingCap
 		}
 	}
-	a.recordDenial(ctx, merchantID, req.CustomerID, code)
 	seconds := int64(dec.RetryAfter / time.Second)
 	if dec.RetryAfter%time.Second > 0 {
 		seconds++

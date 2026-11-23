@@ -83,7 +83,7 @@ var merchantCols = map[Family]string{
 	FamGrants:         "g.merchant_id",
 	FamUsage:          "ue.merchant_id",
 	FamTransitions:    "st.merchant_id",
-	FamDenials:        "ad.merchant_id",
+	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
 	FamEntitlSnapshot: "e.merchant_id",
 	FamBalance:        "lt.merchant_id",

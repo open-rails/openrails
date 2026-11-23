@@ -143,7 +143,6 @@ type CleanupResult struct {
 	FailedUsageWindows         int64
 	MeterPeriodQuantities      int64
 	LimitWindows               int64
-	AdmissionDenials           int64
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
 	ProviderIntents            int64
@@ -270,7 +269,6 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"failed_usage_windows":         result.FailedUsageWindows,
 		"meter_period_quantities":      result.MeterPeriodQuantities,
 		"limit_windows":                result.LimitWindows,
-		"admission_denials":            result.AdmissionDenials,
 		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
 		"provider_intents":             result.ProviderIntents,
@@ -509,11 +507,6 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	})
 
 	// Metric counters.
-	sweep("delete admission denials", &result.AdmissionDenials, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteAdmissionDenialsBefore(ctx, gen.DeleteAdmissionDenialsBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-retention.MetricCounters), RowLimit: limit,
-		})
-	})
 	sweep("delete webhook health days", &result.WebhookHealthDays, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteWebhookHealthDaysBefore(ctx, gen.DeleteWebhookHealthDaysBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.MetricCounters), RowLimit: limit,

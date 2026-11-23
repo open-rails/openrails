@@ -14,8 +14,6 @@ const (
 	Always Gate = iota
 	// WithUsageBilling: on hosts that enable usage billing.
 	WithUsageBilling
-	// WithRedis: on fleets with their own Redis.
-	WithRedis
 )
 
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
@@ -27,10 +25,6 @@ type Periodic struct {
 	// the last one.
 	Hourly bool
 	Gate   Gate
-	// PerFleet passes tend the fleet's own state (its Redis): every fleet runs
-	// them. The others are leased, so one fleet sharing the database queues
-	// each pass.
-	PerFleet bool
 }
 
 // Periodics are OpenRails' recurring passes.
@@ -44,8 +38,6 @@ var Periodics = []Periodic{
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
-	// Each fleet flushes the closed hours of its own Redis's denial counters.
-	{Args: AdmissionDenialFlushArgs{}, Every: AdmissionDenialFlushInterval, Gate: WithRedis, PerFleet: true},
 }
 
 // topOfHour is the cron schedule 0 * * * * in UTC.

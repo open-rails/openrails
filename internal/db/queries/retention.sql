@@ -77,12 +77,6 @@ FROM (
         AND mq.period_starts_at < sqlc.arg(meter_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    (SELECT DISTINCT ad.merchant_id AS mid
-       FROM billing.admission_denials_hourly ad
-      WHERE (sqlc.narg(after)::uuid IS NULL OR ad.merchant_id > sqlc.narg(after)::uuid)
-        AND ad.hour_at < sqlc.arg(counter_cutoff)::timestamptz
-      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
-    UNION
     (SELECT DISTINCT wh.merchant_id AS mid
        FROM billing.webhook_health_daily wh
       WHERE (sqlc.narg(after)::uuid IS NULL OR wh.merchant_id > sqlc.narg(after)::uuid)
@@ -289,16 +283,6 @@ WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_s
     ORDER BY e.period_starts_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
-);
-
--- name: DeleteAdmissionDenialsBefore :execrows
-DELETE FROM billing.admission_denials_hourly d
-WHERE (d.merchant_id, d.customer_id, d.denial_reason, d.hour_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.denial_reason, e.hour_at
-    FROM billing.admission_denials_hourly e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.hour_at < sqlc.arg(cutoff)::timestamptz
-    ORDER BY e.hour_at
-    LIMIT sqlc.arg(row_limit)::int
 );
 
 -- name: DeleteWebhookHealthDaysBefore :execrows

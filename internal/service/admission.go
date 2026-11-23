@@ -116,7 +116,6 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 	loader := admission.NewSpendgatePolicyLoader(admission.NewBillingPolicyStore(database), s.rt.FXProvider)
 	adm := admission.NewAdmitter(s.moneyService().WithDatabase(database), gate, loader).
 		WithFailedUsageCutoff(failedUsageCutoff{s}).
-		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
 		WithDelinquency(s.delinquencyService()).
 		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
 

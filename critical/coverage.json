@@ -954,11 +954,6 @@
       "name": "Host workers on a composed fleet keep River's job timeout and crash rescue"
     },
     {
-      "id": "OR-J23-S06",
-      "journey": "J23",
-      "name": "Admission denial statistics count each closed hour once"
-    },
-    {
       "id": "OR-J23-S07",
       "journey": "J23",
       "name": "Limits declare in documents and edits with field ownership and refuse invalid terms"
@@ -1301,7 +1296,7 @@
     {
       "id": "OR-J29-S08",
       "journey": "J29",
-      "name": "Retention cleanup alone ages out unpaid orders, metric counters and orphan state; order expiry alone expires abandoned attempts"
+      "name": "Retention cleanup alone ages out unpaid orders and orphan state; order expiry alone expires abandoned attempts"
     },
     {
       "id": "OR-J19-S05",

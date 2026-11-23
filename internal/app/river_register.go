@@ -115,15 +115,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.BalanceLookWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance look worker: %w", err)
 	}
-	// Flushes closed hours of the Redis admission-denial counters to PG.
-	// Redis may be nil (no-admission deployments); the worker no-ops then.
-	if err := addWorker(workers, &riverjobs.AdmissionDenialFlushWorker{
-		DB:    r.DB,
-		Redis: r.RedisClient,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add admission denial flush worker: %w", err)
-	}
 	// A customer's convergence, queued by each mutation that changed it.
 	if err := addWorker(workers, &riverjobs.CustomerConvergeWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
@@ -416,8 +407,6 @@ func (r *Runtime) declares(gate riverjobs.Gate) bool {
 	switch gate {
 	case riverjobs.WithUsageBilling:
 		return r.Config != nil && r.Config.UsageBillingEnabled
-	case riverjobs.WithRedis:
-		return r.RedisClient != nil
 	}
 	return true
 }

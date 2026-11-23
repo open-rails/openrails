@@ -92,21 +92,6 @@ func runRegisteredFails(t *testing.T, fleet *river.Client[pgx.Tx], kind string) 
 	}
 }
 
-func deniedAdmissions(t *testing.T, w *world, from time.Time) int64 {
-	t.Helper()
-	result, err := w.alpha.QueryMetrics(t.Context(), billing.MetricsQuery{Measures: []string{"admission_denials"},
-		Range: &billing.MetricsRange{From: from.Format(time.RFC3339), To: from.Add(time.Hour).Format(time.RFC3339)}})
-	require.NoError(t, err)
-	var total int64
-	for _, row := range result.Rows {
-		var n int64
-		_, err := fmt.Sscan(fmt.Sprint(row[len(row)-1]), &n)
-		require.NoError(t, err)
-		total += n
-	}
-	return total
-}
-
 func TestBackgroundJobs(t *testing.T) {
 	t.Run("OR-J04-S07/host-worker-on-the-composed-fleet-is-rescued-after-a-crash", func(t *testing.T) {
 		w := newWorld(t)
@@ -245,28 +230,6 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, progress(t.Context()), "a fresh leader and no overrunning job")
 	})
-	t.Run("OR-J23-S06/denials-count-each-closed-hour-once", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
-		customer := billing.CustomerID(uuid.New())
-		hour := w.clock.Now().UTC().Truncate(time.Hour)
-		for i := range 3 {
-			results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, fmt.Sprintf("denied-%d", i), 500)})
-			require.NoError(t, err)
-			require.False(t, results[0].Allowed(), "an unfunded customer is denied")
-		}
-		fleet := startFleet(t, w)
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.Zero(t, deniedAdmissions(t, w, hour), "an open hour is not flushed")
-		// A count whose customer no longer exists is dropped alone.
-		key := fmt.Sprintf("or:mdeny:%s:%d", w.alpha.MerchantID().UUID(), hour.Unix())
-		require.NoError(t, w.deps.Redis.HIncrBy(t.Context(), key, uuid.NewString()+"|insufficient_balance", 2).Err())
-		w.clock.Advance(hour.Add(time.Hour + 10*time.Minute).Sub(w.clock.Now()))
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 2)
-		require.EqualValues(t, 3, deniedAdmissions(t, w, hour))
-		require.Zero(t, w.deps.Redis.Exists(t.Context(), key).Val(), "a flushed hour leaves Redis")
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.EqualValues(t, 3, deniedAdmissions(t, w, hour), "a flushed hour is counted once")
-	})
 	t.Run("OR-J29-S07/one-merchants-failed-pass-fails-the-job-after-the-others-finish", func(t *testing.T) {
 		w := newWorld(t)
 		customer := billing.CustomerID(uuid.New())
@@ -292,7 +255,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
 	})
-	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-counters-and-orphan-state", func(t *testing.T) {
+	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-and-orphan-state", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		w := a.world
 		fleet := hostFleet(t, w)
@@ -318,10 +281,6 @@ func TestBackgroundJobs(t *testing.T) {
 			return state
 		}
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
-		hour := w.clock.Now().UTC().Truncate(time.Hour)
-		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, billing.CustomerID(uuid.New()), "denied", 500)})
-		require.NoError(t, err)
-		require.False(t, denied[0].Allowed())
 		// The lease of a periodic kind no fleet runs any more.
 		orphans := func() int {
 			var n int
@@ -333,8 +292,6 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Equal(t, 1, orphans())
 
 		w.clock.Advance(25 * time.Hour)
-		runRegistered(t, fleet, "openrails.admission_denial_flush", 1)
-		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
 		require.Zero(t, orphans())
@@ -348,10 +305,6 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound)
-		require.EqualValues(t, 1, deniedAdmissions(t, w, hour))
-		w.clock.Advance(397 * 24 * time.Hour)
-		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		require.Zero(t, deniedAdmissions(t, w, hour))
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
 		w := newWorld(t)
