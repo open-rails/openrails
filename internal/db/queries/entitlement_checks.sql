@@ -25,6 +25,29 @@ CROSS JOIN LATERAL (
 WHERE held.windows > 0
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: CheckDerivedEntitlementsWithBoundary :many
+-- For each exact key, answer access, seats, and the next possible change in
+-- one snapshot. A grant can contribute only during the intersection of the
+-- customer's access window and the interval when that product gives the key.
+-- A boundary equal to at_time means that no future boundary exists.
+SELECT k.key::text AS entitlement, held.allowed, held.quantity, held.valid_until
+FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE span.starts_at <= sqlc.arg(at_time)::timestamptz) > 0 AS allowed,
+           COALESCE(max(pa.quantity) FILTER (WHERE span.starts_at <= sqlc.arg(at_time)::timestamptz), 0)::int AS quantity,
+           COALESCE(min(CASE WHEN span.starts_at > sqlc.arg(at_time)::timestamptz THEN span.starts_at ELSE span.ends_at END),
+                    sqlc.arg(at_time)::timestamptz) AS valid_until
+    FROM billing.product_entitlements pe
+    JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
+    CROSS JOIN LATERAL (
+        SELECT greatest(pa.starts_at, pe.added_at) AS starts_at, least(pa.ends_at, pe.removed_at) AS ends_at
+    ) span
+    WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = k.key
+      AND pa.customer_id = sqlc.arg(customer_id)::uuid
+      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+      AND (span.ends_at IS NULL OR (span.ends_at > sqlc.arg(at_time)::timestamptz AND span.ends_at > span.starts_at))
+) held;
+
 -- name: ListDerivedEntitlementsPage :many
 -- One keyset page of the keys customers hold at at_time, with the most seats
 -- a live window gives (0: none per seat), in (customer, key) byte order: after (after_customer, after_key), from low_key and below

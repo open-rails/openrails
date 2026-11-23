@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 350,
+  "scenario_count": 356,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1642,6 +1642,11 @@
       "id": "OR-J27-S12",
       "journey": "J27",
       "name": "Concurrent imported grant declarations and lost responses replay once"
+    },
+    {
+      "id": "OR-J27-S13",
+      "journey": "J27",
+      "name": "The merchant SDK reuses scoped current entitlement checks through their scheduled cutoff"
     },
     {
       "id": "OR-J04-S42",

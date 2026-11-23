@@ -80,6 +80,74 @@ func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerived
 	return items, nil
 }
 
+const checkDerivedEntitlementsWithBoundary = `-- name: CheckDerivedEntitlementsWithBoundary :many
+SELECT k.key::text AS entitlement, held.allowed, held.quantity, held.valid_until
+FROM unnest($1::text[]) AS k(key)
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE span.starts_at <= $2::timestamptz) > 0 AS allowed,
+           COALESCE(max(pa.quantity) FILTER (WHERE span.starts_at <= $2::timestamptz), 0)::int AS quantity,
+           COALESCE(min(CASE WHEN span.starts_at > $2::timestamptz THEN span.starts_at ELSE span.ends_at END),
+                    $2::timestamptz) AS valid_until
+    FROM billing.product_entitlements pe
+    JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
+    CROSS JOIN LATERAL (
+        SELECT greatest(pa.starts_at, pe.added_at) AS starts_at, least(pa.ends_at, pe.removed_at) AS ends_at
+    ) span
+    WHERE pe.merchant_id = $3::uuid AND pe.entitlement = k.key
+      AND pa.customer_id = $4::uuid
+      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+      AND (span.ends_at IS NULL OR (span.ends_at > $2::timestamptz AND span.ends_at > span.starts_at))
+) held
+`
+
+type CheckDerivedEntitlementsWithBoundaryParams struct {
+	Entitlements []string
+	AtTime       time.Time
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+}
+
+type CheckDerivedEntitlementsWithBoundaryRow struct {
+	Entitlement string
+	Allowed     bool
+	Quantity    int32
+	ValidUntil  *time.Time
+}
+
+// For each exact key, answer access, seats, and the next possible change in
+// one snapshot. A grant can contribute only during the intersection of the
+// customer's access window and the interval when that product gives the key.
+// A boundary equal to at_time means that no future boundary exists.
+func (q *Queries) CheckDerivedEntitlementsWithBoundary(ctx context.Context, arg CheckDerivedEntitlementsWithBoundaryParams) ([]CheckDerivedEntitlementsWithBoundaryRow, error) {
+	rows, err := q.db.Query(ctx, checkDerivedEntitlementsWithBoundary,
+		arg.Entitlements,
+		arg.AtTime,
+		arg.MerchantID,
+		arg.CustomerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CheckDerivedEntitlementsWithBoundaryRow
+	for rows.Next() {
+		var i CheckDerivedEntitlementsWithBoundaryRow
+		if err := rows.Scan(
+			&i.Entitlement,
+			&i.Allowed,
+			&i.Quantity,
+			&i.ValidUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDerivedEntitlementHolders = `-- name: ListDerivedEntitlementHolders :many
 SELECT x.customer_id, COALESCE(max(x.quantity), 0)::int AS quantity FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (

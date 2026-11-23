@@ -120,7 +120,8 @@ func queryCustomerIDs(r *httprequest.Request, name string) ([]billing.CustomerID
 
 // AppCheckEntitlements answers an application's content gate: which of the
 // requested keys the body's customer holds, and the keys they hold under each
-// requested prefix, at one instant (zero: now).
+// requested prefix, at one instant (zero: now). A current exact-key check with
+// include_validity also answers evaluated_at and valid_until.
 func AppCheckEntitlements(r *httprequest.Request) {
 	var req billing.CheckEntitlementsParams
 	if !r.BindJSON(&req) {

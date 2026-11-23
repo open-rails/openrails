@@ -47,7 +47,9 @@ type Client struct {
 	token     func(context.Context) (string, error)
 	assertion *AssertionKey
 	// reads answers cached reads; nil reads everything live.
-	reads *reads
+	reads                 *reads
+	entitlementChecks     *entitlementCheckCache
+	entitlementCacheScope string
 }
 
 // MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
@@ -109,6 +111,8 @@ type RemoteOptions struct {
 	// ReadCache overrides how long catalog and configuration reads are
 	// served from memory; nil keeps the defaults.
 	ReadCache ReadCache
+	// EntitlementCheckCache opts in to caching current exact-key checks.
+	EntitlementCheckCache EntitlementCheckCacheOptions
 }
 
 // Remote is a standalone or hosted OpenRails server reached over HTTP, for
@@ -135,7 +139,10 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	if r.client == nil {
 		r.client = &http.Client{}
 	}
-	var err error
+	entitlementChecks, err := newEntitlementCheckCache(opts.EntitlementCheckCache)
+	if err != nil {
+		return nil, err
+	}
 	var refused []config.Degradation
 	if r.reads, refused, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(id billing.MerchantID) *Client { return r.handles[id] }); err != nil {
 		return nil, err
@@ -145,7 +152,7 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 		if id.IsZero() {
 			return nil, fmt.Errorf("openrails: RemoteOptions.Credentials holds a credential under the zero merchant ID")
 		}
-		handle, err := newRemoteHandle(baseURL, r.client, opts.Timeout, id, credential)
+		handle, err := newRemoteHandle(baseURL, r.client, opts.Timeout, id, credential, entitlementChecks)
 		if err != nil {
 			return nil, fmt.Errorf("openrails: credential of merchant %s: %w", id, err)
 		}
@@ -165,6 +172,8 @@ type RemoteMerchantOptions struct {
 	// ReadCache overrides how long catalog and configuration reads are
 	// served from memory; nil keeps the defaults.
 	ReadCache ReadCache
+	// EntitlementCheckCache opts in to caching current exact-key checks.
+	EntitlementCheckCache EntitlementCheckCacheOptions
 }
 
 // NewRemoteMerchant is the handle of the one merchant credential is bound
@@ -191,7 +200,11 @@ func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...R
 	if err := validateBaseURL(baseURL); err != nil {
 		return nil, err
 	}
-	handle, err := newRemoteHandle(baseURL, client, opts.Timeout, billing.MerchantID{}, credential)
+	entitlementChecks, err := newEntitlementCheckCache(opts.EntitlementCheckCache)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := newRemoteHandle(baseURL, client, opts.Timeout, billing.MerchantID{}, credential, entitlementChecks)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: credential: %w", err)
 	}
@@ -210,7 +223,7 @@ func warnRefused(refused []config.Degradation) {
 	}
 }
 
-func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration, id billing.MerchantID, credential RemoteCredential) (*Client, error) {
+func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration, id billing.MerchantID, credential RemoteCredential, entitlementChecks *entitlementCheckCache) (*Client, error) {
 	key := strings.TrimSpace(credential.APIKey)
 	token := credential.Token
 	switch {
@@ -224,7 +237,12 @@ func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration,
 	if err := credential.Assertion.validate(); err != nil {
 		return nil, err
 	}
-	return &Client{baseURL: baseURL, client: client, timeout: timeout, merchantID: id, token: token, assertion: credential.Assertion}, nil
+	handle := &Client{baseURL: baseURL, client: client, timeout: timeout, merchantID: id, token: token, assertion: credential.Assertion}
+	if entitlementChecks != nil && key != "" {
+		handle.entitlementChecks = entitlementChecks
+		handle.entitlementCacheScope = entitlementDigest([]byte(key))
+	}
+	return handle, nil
 }
 
 // Merchant is the handle of merchant id, acting with the credential filed
@@ -473,8 +491,21 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 // billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
 // prefixes; more is refused with invalid_param, not split. It needs an
 // application holding billing.MerchantEntitlementsRead or RootEntitlementsRead
-// (RouteGroups.Programmatic).
+// (RouteGroups.Programmatic). If configured, a remote client may serve a
+// current exact-key check from its entitlement cache.
 func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
+	return c.checkEntitlements(ctx, params, true, requestOptions)
+}
+
+// CheckEntitlementsLive checks access against OpenRails, never answering from
+// the SDK cache; with a cache configured its answer replaces the cached one.
+// Use it when a recent grant, revocation or credential change must be visible
+// immediately.
+func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
+	return c.checkEntitlements(ctx, params, false, requestOptions)
+}
+
+func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, useCache bool, options []RequestOption) (*billing.EntitlementCheck, error) {
 	switch {
 	case params.CustomerID.IsZero():
 		return nil, invalidErr("customer_id is required")
@@ -493,10 +524,19 @@ func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEnti
 	if params.Entitlements == nil {
 		params.Entitlements = []string{}
 	}
+	if c != nil && c.entitlementChecks != nil && len(options) == 0 {
+		if keys := cacheableEntitlementKeys(params); keys != nil {
+			return c.checkEntitlementsCached(ctx, params, keys, !useCache)
+		}
+	}
 	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, "/v1/app/entitlements/check", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, entitlementCheckPath, params, &out, options...); err != nil {
 		return nil, err
 	}
+	return normalizeEntitlementCheck(&out), nil
+}
+
+func normalizeEntitlementCheck(out *billing.EntitlementCheck) *billing.EntitlementCheck {
 	if out.Entitlements == nil {
 		out.Entitlements = map[string]bool{}
 	}
@@ -506,7 +546,7 @@ func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEnti
 	if out.Held == nil {
 		out.Held = map[string]billing.HeldEntitlements{}
 	}
-	return &out, nil
+	return out
 }
 
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service

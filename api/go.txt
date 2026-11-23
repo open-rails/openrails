@@ -44,6 +44,7 @@ pkg openrails, method (*Client) CancelSubscription(context.Context, billing.Subs
 pkg openrails, method (*Client) CaptureAdmissions(context.Context, []billing.CaptureAdmissionParams, ...RequestOption) ([]billing.CaptureResult, error)
 pkg openrails, method (*Client) ChangeSubscription(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChange, error)
 pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
+pkg openrails, method (*Client) CheckEntitlementsLive(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
 pkg openrails, method (*Client) ClearDestructiveHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams, ...RequestOption) (*billing.DestructiveHold, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams, ...RequestOption) ([]billing.CreditGrant, error)
@@ -203,6 +204,7 @@ pkg openrails, method (LocalClient) CancelSubscription(context.Context, billing.
 pkg openrails, method (LocalClient) CaptureAdmissions(context.Context, []billing.CaptureAdmissionParams, ...RequestOption) ([]billing.CaptureResult, error)
 pkg openrails, method (LocalClient) ChangeSubscription(context.Context, billing.SubscriptionID, billing.ChangeSubscriptionParams, ...RequestOption) (*billing.SubscriptionChange, error)
 pkg openrails, method (LocalClient) CheckEntitlements(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
+pkg openrails, method (LocalClient) CheckEntitlementsLive(context.Context, billing.CheckEntitlementsParams, ...RequestOption) (*billing.EntitlementCheck, error)
 pkg openrails, method (LocalClient) ClearDestructiveHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams, ...RequestOption) (*billing.DestructiveHold, error)
 pkg openrails, method (LocalClient) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
 pkg openrails, method (LocalClient) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams, ...RequestOption) ([]billing.CreditGrant, error)
@@ -478,6 +480,9 @@ pkg openrails, type EmailSender interface
 pkg openrails, type EmailSender interface, CheckHealth(context.Context) error
 pkg openrails, type EmailSender interface, Send(context.Context, config.Email) error
 pkg openrails, type Engine struct
+pkg openrails, type EntitlementCheckCacheOptions struct
+pkg openrails, type EntitlementCheckCacheOptions struct, MaxAge time.Duration
+pkg openrails, type EntitlementCheckCacheOptions struct, Redis redis.UniversalClient
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string `yaml:"api_base_url" json:"api_base_url"`
@@ -581,11 +586,13 @@ pkg openrails, type RemoteCredential struct, APIKey string
 pkg openrails, type RemoteCredential struct, Assertion *AssertionKey
 pkg openrails, type RemoteCredential struct, Token func(context.Context) (string, error)
 pkg openrails, type RemoteMerchantOptions struct
+pkg openrails, type RemoteMerchantOptions struct, EntitlementCheckCache EntitlementCheckCacheOptions
 pkg openrails, type RemoteMerchantOptions struct, HTTPClient *http.Client
 pkg openrails, type RemoteMerchantOptions struct, ReadCache ReadCache
 pkg openrails, type RemoteMerchantOptions struct, Timeout time.Duration
 pkg openrails, type RemoteOptions struct
 pkg openrails, type RemoteOptions struct, Credentials map[billing.MerchantID]RemoteCredential
+pkg openrails, type RemoteOptions struct, EntitlementCheckCache EntitlementCheckCacheOptions
 pkg openrails, type RemoteOptions struct, HTTPClient *http.Client
 pkg openrails, type RemoteOptions struct, ReadCache ReadCache
 pkg openrails, type RemoteOptions struct, Timeout time.Duration
@@ -1745,6 +1752,7 @@ pkg openrails/billing, type CheckEntitlementsParams struct
 pkg openrails/billing, type CheckEntitlementsParams struct, At time.Time `json:"at,omitzero"`
 pkg openrails/billing, type CheckEntitlementsParams struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type CheckEntitlementsParams struct, Entitlements []string `json:"entitlements"`
+pkg openrails/billing, type CheckEntitlementsParams struct, IncludeValidity bool `json:"include_validity,omitempty"`
 pkg openrails/billing, type CheckEntitlementsParams struct, PrefixLimit int `json:"prefix_limit,omitempty"`
 pkg openrails/billing, type CheckEntitlementsParams struct, Prefixes []string `json:"prefixes,omitempty"`
 pkg openrails/billing, type ClearDestructiveHoldParams struct
@@ -2219,8 +2227,10 @@ pkg openrails/billing, type EntitlementChange struct, ProductKey string `json:"p
 pkg openrails/billing, type EntitlementChange struct, Removed []string `json:"removed"`
 pkg openrails/billing, type EntitlementCheck struct
 pkg openrails/billing, type EntitlementCheck struct, Entitlements map[string]bool `json:"entitlements"`
+pkg openrails/billing, type EntitlementCheck struct, EvaluatedAt *time.Time `json:"evaluated_at"`
 pkg openrails/billing, type EntitlementCheck struct, Held map[string]HeldEntitlements `json:"held"`
 pkg openrails/billing, type EntitlementCheck struct, Quantities map[string]*int `json:"quantities"`
+pkg openrails/billing, type EntitlementCheck struct, ValidUntil *time.Time `json:"valid_until"`
 pkg openrails/billing, type EntitlementListParams struct
 pkg openrails/billing, type EntitlementListParams struct, At time.Time
 pkg openrails/billing, type EntitlementListParams struct, CustomerIDs []CustomerID

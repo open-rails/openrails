@@ -174,6 +174,38 @@ status and code ([errors](api/errors.md)). For admission, honor every clean deny
 decide per endpoint whether `ErrUnreachable` fails open or closed; keep the
 deadline short.
 
+**Cache entitlement checks.** For a backend using a merchant API key, set
+`RemoteMerchantOptions.EntitlementCheckCache` (or the same field on
+`RemoteOptions`) to opt in:
+
+```go
+client, err := openrails.NewRemoteMerchant(billingURL,
+    openrails.RemoteCredential{APIKey: apiKey},
+    openrails.RemoteMerchantOptions{
+        EntitlementCheckCache: openrails.EntitlementCheckCacheOptions{
+            MaxAge: 30 * time.Second,
+        },
+    })
+```
+
+`CheckEntitlements` caches exact-key checks for the present in bounded process
+memory. If you supply your own go-redis client as `EntitlementCheckCache.Redis`,
+replicas using the same OpenRails endpoint, merchant, API key and cache age
+can share answers. Your backend owns that Redis client and its connection
+lifecycle. Use a trusted Redis 6.2+ instance with synchronized clocks across
+its failover nodes. Set short socket timeouts and `ContextTimeoutEnabled` on
+the Redis client so timed-out lookups release connections promptly. A client
+created with `NewRemoteMerchant` learns its merchant in an authenticated
+response before it can reuse shared entries.
+
+An answer can be reused for up to `MaxAge` and expires by the next scheduled
+access change. A new purchase, early revocation or API key permission change
+can take up to `MaxAge` to appear. Call `CheckEntitlementsLive` when you require a
+fresh decision; its answer also replaces the cached one, so the next
+`CheckEntitlements` sees it too. Prefix or historical requests and token-backed
+credentials use live checks. Redis failures also fall back to OpenRails. The
+cache needs a server of the same release. See [entitlement windows](entitlements_timeline.md#reading-access).
+
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application sets `RemoteCredential.Assertion` (issuer, `kid`, a `crypto.Signer`,
 the token endpoint): `CustomerToken` redeems an RFC 7523 assertion for a short

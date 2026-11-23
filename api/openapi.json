@@ -15162,6 +15162,9 @@
           "at": {
             "type": "string",
             "format": "date-time"
+          },
+          "include_validity": {
+            "type": "boolean"
           }
         }
       },
@@ -17292,12 +17295,36 @@
                 "type": "null"
               }
             ]
+          },
+          "evaluated_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "valid_until": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "entitlements",
           "quantities",
-          "held"
+          "held",
+          "evaluated_at",
+          "valid_until"
         ]
       },
       "EntitlementReplacement": {
