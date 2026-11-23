@@ -139,7 +139,7 @@ and closes none.
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
 | `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault` logs in and renews). |
 | `Email` | Your `EmailSender` for operator alerts (`helpers/smtp` is one). Customer notices are events, not email ([events](client.md#events)). |
-| `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. |
+| `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
 | `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
 | `Notifications` | An account-inbox channel for selected customer notices ([account inbox](#account-inbox)). |
 | `MerchantGroups` | Live group metadata for tenant-bound merchants ([merchants](#merchants)). |

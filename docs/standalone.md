@@ -202,7 +202,8 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 | `private_port` | unset | the private listener for `/metrics`; unset serves none |
 | `drain_delay` | `5s` | on SIGTERM readiness fails at once and serving continues this long |
 | `shutdown_timeout` | `20s` | then in-flight requests and workers finish within this |
-| `logger.level` | `info` | `debug`, `info`, `warn`, `error`, `fatal` or `panic` |
+| `logger.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `logger.format` | `json` | `json` or `text`; logs go to stderr |
 
 **Billing**
 
@@ -837,7 +838,7 @@ with the command ([provider refresh](#provider-refresh)).
 | `GET /metrics` on `private_port` | `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Never route it publicly; `Server.PrivateHandler` mounts it in your own binary |
 | probes | `openrails_vault`, `openrails_psp_posture`, `openrails_configuration` (what is not served and why) and `openrails_job_progress` |
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
-| logs | structured, to stdout, at `logger.level` |
+| logs | structured (`logger.format`), to stderr, at `logger.level`. Secrets, card data and SQL arguments are never logged |
 
 `openrails_job_progress` fails with no River leader, an overrunning job, or a
 billing pass that has not finished within a day or left critical work (usage

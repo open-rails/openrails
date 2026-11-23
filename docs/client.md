@@ -43,6 +43,8 @@ params struct. Amounts are `int64` native units: micros for USD
   On a remote handle it is an error: there the credential names the caller.
 - `Client.Uncached()` returns a handle that skips the read caches
   ([caching](#caching)).
+- `RemoteOptions.Logger` is the handle's `*slog.Logger`, under the same rule as
+  `Deps.Logger`: nil is `slog.Default()`, read once, never changed.
 - A remote handle's `RemoteOptions.Timeout` bounds each request; `HTTPClient`
   replaces the transport. In-process calls run as long as their context allows.
 
