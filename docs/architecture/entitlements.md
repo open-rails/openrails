@@ -82,7 +82,7 @@ scope's generation, so a fill begun before it cannot restore a dropped entry.
   keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant.
 - **Cache**: `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on
   `RemoteOptions`; `DefaultEntitlementCheckMaxAge`
-  (2 minutes). See [backend](../standalone.md#backend).
+  (2 minutes). See [backend](../client.md#caching).
 - **Staff** (`merchant:customer:read`, `merchant:customer:manage`):
   `ListEntitlements` (`GET /v1/admin/entitlements`), `ListProductAccess`
   (`GET /v1/admin/product-access`), `CreateProductAccess`
@@ -92,7 +92,7 @@ scope's generation, so a fill begun before it cannot restore a dropped entry.
 - **Customer**: `GET /v1/me/entitlements`, `GET /v1/me/access-tenure`.
 - **Catalog and events**: a product's `entitlements`, an application's
   `entitlement_replacements`; `product.entitlements_changed`. Guide:
-  [entitlements follow the product](../entitlements_timeline.md).
+  [entitlements follow the product](../client.md#entitlements-and-access).
 
 ## Guarantees
 

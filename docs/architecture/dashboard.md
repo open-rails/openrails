@@ -58,7 +58,7 @@ picker to widgets without `fixed_range`, and edits widgets
   `PUT /v1/merchant/dashboard` (`MerchantConfig` group, update level,
   `merchant:config:manage`).
 - Errors: `dashboard_invalid`, `service_unavailable`, `authentication_required`.
-- Guide: [billing administration](../billing-admin.md).
+- Guide: [billing administration](../../sdk/billing-ui/README.md#staff-administration).
 
 ## Guarantees
 

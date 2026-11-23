@@ -15,7 +15,7 @@ lines, renewals and usage orders: [subscriptions.md](subscriptions.md),
   Status `open`, `processing`, `complete`, or closed unpaid as `canceled` or
   `expired`; a renewal or usage order can also end `void` or `uncollectible`.
   Only `collection_owner = engine` orders are charged here
-  ([provider-managed orders](../provider-managed-orders.md)).
+  ([provider-managed orders](../client.md#orders-and-checkout)).
 - **Line** (`order_lines`): price, product, quantity, amounts, ownership rule and
   cadence as sold; later catalog edits never reprice it.
 - **Ownership claim** (`ownership_claims`): one live holder per customer and
@@ -107,7 +107,7 @@ pins `{id}` to the secret's order. Framing follows `checkout.embed_origins`.
   settings `checkout.embed_origins`.
 - Events: `order.completed` (fulfil on it), `order.payment_failed`,
   `order.requires_action`, `order.canceled`, `order.expired`.
-- Guides: [payment-page.md](../payment-page.md), [provider-uncertainty.md](../provider-uncertainty.md).
+- Guides: [payment-page.md](../client.md#orders-and-checkout), [provider-uncertainty.md](../standalone.md#provider-intents).
 
 ## Guarantees
 
@@ -211,7 +211,7 @@ Checks:
 - OR-J08-S70, OR-J08-S71, OR-J09-S70: expired orders act expired before any pass.
 
 ### 8. Abuse protection
-The `purchase` bucket ([limits.md](../limits.md)) covers `POST /v1/me/orders`,
+The `purchase` bucket ([limits.md](../standalone.md#abuse-limits)) covers `POST /v1/me/orders`,
 `…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and
 its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay
 URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10

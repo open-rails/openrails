@@ -6,7 +6,7 @@ own tables. An in-code registry of measures and dimensions validates a JSON quer
 and compiles it to parameterized SQL, so no client string ever becomes SQL. It
 serves the console's [dashboard](dashboard.md), reports and findings bell, hosts through the
 Go client, and any agent holding a metrics credential. Integration guide:
-[metrics for LLMs](../metrics-for-llms.md).
+[metrics for LLMs](../client.md#metrics).
 
 ## Concepts
 

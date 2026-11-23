@@ -46,7 +46,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    is read back and matched to the frozen terms; `--not-executed` needs the
    type's own non-execution proof.
 
-Per rail ([provider uncertainty](../provider-uncertainty.md) has the full rules):
+Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full rules):
 
 - **NMI** has no idempotency key. Local refusals return `nmi.ErrNotDispatched`;
   any error after sending is ambiguous. A charge settles only from the exact
@@ -67,7 +67,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 `manual_rebill`, `order_collection`, `stripe_tier_change`, `nmi_refund` and
 `solana_pull`. Provider-run renewals are orders with `collection_owner`
 `nmi_schedule` or `provider`, matched to accepted schedule versions
-([provider-managed orders](../provider-managed-orders.md)).
+([provider-managed orders](../client.md#orders-and-checkout)).
 
 ### Callbacks
 
@@ -154,7 +154,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **Configuration**: `provider_write_mode`, `webhook_secret_overlap`,
   `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
   probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs:
-  [rails](../rails/README.md), [PSP environments](../psp-environments.md).
+  [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 
 ## Guarantees
 
@@ -313,7 +313,7 @@ package test here is `internal/reconcile/solana_discovery_test.go`.
 Gaps:
 
 - CI runs against deterministic fakes, not providers; a wire change is
-  unverified until exercised against the provider ([evidence](../rails/README.md#evidence)).
+  unverified until exercised against the provider ([evidence](../../.claude/CLAUDE.md#rails-and-psps)).
 - `reconcile.Decide` is pure but has no table test of its own.
 - No scenario refuses a CCBill delivery from an unlisted address; the CCBill
   tests allowlist loopback. J28 covers Stripe and NMI; CCBill callbacks only

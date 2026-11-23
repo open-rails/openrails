@@ -105,8 +105,8 @@ conservation, currencies and customer agreement before the restore commits.
   `GET /v1/me/balance/transactions`; `GET /v1/config` lists `currencies`.
 - Error codes: `currency_unsupported`, `invalid_cursor`, `invalid_customer_id`.
 - CLI: `openrails ledger-audit [--merchant=…] [--format=table|json]`.
-- Docs: [glossary](../glossary.md), [prepaid credits](../prepaid-credits.md),
-  [usage billing](../usage-billing.md).
+- Docs: [glossary](../guide.md), [prepaid credits](../client.md#credits),
+  [usage billing](../client.md#usage-and-running-charges).
 
 ## Guarantees
 
@@ -196,7 +196,7 @@ Checks:
 ### 8. Abuse protection
 The ledger has no write route; it moves only through the systems above, which
 carry their own limits. Its customer reads (`GET /v1/me`,
-`GET /v1/me/balance/transactions`) are in no rate-limit bucket: [limits](../limits.md)
+`GET /v1/me/balance/transactions`) are in no rate-limit bucket: [limits](../standalone.md#abuse-limits)
 leaves a per-address ceiling to the proxy. Pages are capped by `pagination.Limit`.
 
 Checks:

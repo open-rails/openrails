@@ -51,7 +51,7 @@ hours (`payment.SetupAbandonAfter`).
   re-validates the lineage under a share lock before sending.
 - One live mandate per scope (`mandates_recurring_live_key` and its twins);
   lineage is write-once (`guard_mandate_update`). A revoked agreement emits
-  `mandate.revoked` ([charge agreements](../agreements.md)).
+  `mandate.revoked` ([charge agreements](../client.md#payments-and-refunds)).
 
 ### Card changes
 
@@ -112,7 +112,7 @@ Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 - **Configuration**: `card_vault`, `charge_psps`, a PSP's `custodian` and
   `card_entry`, the deployment's `card_vault` (`kind`, `tenant_id`, `kv_mount`),
   `user_action_rate_limit`.
-- **Docs**: [custody](../payment-method-custody.md), [agreements](../agreements.md), [limits](../limits.md).
+- **Docs**: [custody](../client.md#merchant-configuration-and-psps), [agreements](../client.md#payments-and-refunds), [limits](../standalone.md#abuse-limits).
 
 ## Guarantees
 
@@ -195,7 +195,7 @@ Checks:
 `/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute)
 with captcha escalation. NMI, Stripe and Basis Theory saves and order payments
 check the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`)
-before any provider call; a HyperSwitch save does not ([limits](../limits.md)).
+before any provider call; a HyperSwitch save does not ([limits](../standalone.md#abuse-limits)).
 The firewall above refuses card numbers.
 
 Checks:

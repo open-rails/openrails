@@ -36,7 +36,7 @@ status change to `subscription_status_transitions`.
 recurring `mandates` row; it is engine-owned unless the provider enrolled it
 (`charge.Enrolled`). `subscriptions_customer_id_tier_group_key` and its product
 twin allow one live membership per tier group. A calendar price fixes its anchor
-at the first payment ([billing intervals](../billing-intervals.md)); trial
+at the first payment ([billing intervals](../client.md#catalog)); trial
 prices are refused (`order_line_unavailable`).
 
 **Engine renewal.** The hourly billing pass's `openrails.dunning` scan
@@ -111,7 +111,7 @@ schedules to release (`RailReleaseRequired`); an admitted renewal keeps its term
 - `/v1/me/subscriptions`: `GET`, `GET /{id}`, `GET /{id}/change/options`,
   `PUT /{id}/payment-method`, `POST` on `/{id}/cancel`, `/{id}/resume`,
   `/{id}/change`, `/{id}/confirm`, `/{id}/change/preview`, `/{id}/retry-now`.
-- Events ([events](../events.md)): `premium_started`, `premium_renewed`,
+- Events ([events](../client.md#events)): `premium_started`, `premium_renewed`,
   `premium_ended`, `subscription_canceled`, `subscription_changed`,
   `subscription_reprice_scheduled`, `subscription_plan_change_scheduled`,
   `payment_method_failed`, `payment_method_update_required`.
@@ -213,7 +213,7 @@ Checks:
 ### 8. Abuse protection
 
 `/v1/me/subscriptions` writes share the `subscribe` bucket (20 per minute, 64
-KiB, captcha when configured; [limits](../limits.md)). Customer cancels spend
+KiB, captcha when configured; [limits](../standalone.md#abuse-limits)). Customer cancels spend
 the merchant-wide budget (`destructive.NewUserActionLimiter`). `retry-now` passes
 the card-testing ledger; `AdminOperationOffChannel` caps staff changes.
 

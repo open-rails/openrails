@@ -101,14 +101,14 @@ movements (`postRunningChargesThrough`).
 
 - **Gate**: `openrails.NewGate(client, GateDeps{Redis, Outbox})`; `Gate.Admit`,
   `Consume`, `Record`, `Limits`, `Flush`, `Close`; `Ticket.Capture`, `Release`,
-  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../usage-billing.md#the-gate)).
+  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-admissions-and-the-gate)).
 - **Usage** (`merchant:usage:manage`, reads `merchant:usage:read`): `SyncLeases`
   (`POST /v1/app/leases/sync`); `Admit` (`POST /v1/app/admissions`),
   `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, `GetAdmission`,
   `ListAdmissions`; `ListCustomerLimits` (`GET /v1/app/limits`).
 - **Running charges**: `StartRunningCharge` (`POST /v1/app/running-charges`),
   `StopRunningCharge`, `GetRunningCharge`, `ListRunningCharges`; `GetBalance`
-  ([running charges](../running-charges.md)).
+  ([running charges](../client.md#usage-and-running-charges)).
 - **In a host transaction** (`LocalClient`): `AdmitTx`, `CaptureAdmissionsTx`,
   `ReleaseAdmissionsTx`, `StartRunningChargeTx`, `StopRunningChargeTx`.
 - **Catalog**: `ListLimits`, `GetLimit`, `SetLimit` (`PUT /v1/catalog/limits/{key}`),
@@ -124,8 +124,8 @@ movements (`postRunningChargesThrough`).
   `order_collection_stopped`.
 - **Configuration**: `usage_billing_enabled` (`Config.UsageBillingEnabled`);
   merchant `usage_billing`, `billing_period_boundary`, `billing_policies`,
-  `usage_gate_safe_spend` ([usage billing](../usage-billing.md),
-  [spend limits](../spend-limits.md)).
+  `usage_gate_safe_spend` ([usage billing](../client.md#usage-and-running-charges),
+  [spend limits](../client.md#limits-admissions-and-the-gate)).
 
 ## Guarantees
 
@@ -238,7 +238,7 @@ meters each invoker by item: 10 a minute, shared by `UpdateCustomer`,
 `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over
 locks the invoker out for an hour. An application acting as itself is not
 metered. `/v1/me/limits` and `/v1/me/usage` take no OpenRails rate limit; the
-proxy owns a generic ceiling ([limits](../limits.md)).
+proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)).
 Checks:
 - `validate` (`internal/modules/leases/sync.go`) and `Client.SyncLeases` refuse an
   oversize sync before any I/O.

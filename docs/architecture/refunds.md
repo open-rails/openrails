@@ -122,9 +122,9 @@ never refundable through OpenRails.
   `payment_exceeds_due`, `order_not_payable`, `order_has_recurring_line`.
 - Merchant setting: `provider_refund_access` (`revoke_on_full`, `revoke_on_any`,
   `keep`). Events: none of its own; `payment.settled` fires only for charges.
-- Docs: [merchant operations](../merchant-operations.md#refunds),
-  [provider uncertainty](../provider-uncertainty.md),
-  [destructive actions](../destructive-actions.md).
+- Docs: [merchant operations](../client.md#payments-and-refunds),
+  [provider uncertainty](../standalone.md#provider-intents),
+  [destructive actions](../standalone.md#destructive-holds).
 
 ## Guarantees
 
@@ -221,7 +221,7 @@ Checks:
 
 ### 8. Abuse protection
 Refunds are staff-only. Provider webhooks use the `webhook` bucket and per-rail
-body caps ([limits](../limits.md)). Staff refunds are bounded by destructive
+body caps ([limits](../standalone.md#abuse-limits)). Staff refunds are bounded by destructive
 admission, external payments by `middleware.AdminOperationOffChannel` (10 a
 minute).
 

@@ -4,8 +4,8 @@ This system registers merchants and runs their lifecycle; serves each merchant's
 configuration (display name, settings, alert webhooks, PSPs and custodians with
 credentials) from a file or Vault, never PostgreSQL; records the identities history
 points at; routes callbacks to their PSP; and moves a book between deployments. Guides:
-[merchant configuration](../merchant-configuration.md), [Vault](../vault.md),
-[portability](../merchant-portability.md), [tenant binding](../embedding-tenant-binding.md).
+[merchant configuration](../client.md#merchant-configuration-and-psps), [Vault](../standalone.md#vault),
+[portability](../client.md#imports-and-archives), [tenant binding](../embedded.md#merchants).
 
 ## Concepts
 
@@ -220,7 +220,7 @@ Checks:
 
 ### 8. Abuse protection
 The only unauthenticated entry is the webhook route: the `webhook` bucket
-([limits](../limits.md)), per-rail body caps and the CCBill source check. Staff inputs
+([limits](../standalone.md#abuse-limits)), per-rail body caps and the CCBill source check. Staff inputs
 are bounded, and outbound URLs cannot reach private peers.
 
 Checks:
