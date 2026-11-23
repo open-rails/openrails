@@ -511,7 +511,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
-		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock}
+		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock, Log: logger}
 
 	return runtime, nil
 }

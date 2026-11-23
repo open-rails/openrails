@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // channel is what billing.queue_customer_message notifies; its payload is
@@ -58,7 +58,7 @@ func (s *Service) Run(ctx context.Context) {
 		case <-wake:
 		}
 		if err := s.Drain(ctx); err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("customer messages: dispatch failed; the periodic pass queues them")
+			s.Log.WarnContext(ctx, "customer messages: dispatch failed; the periodic pass queues them", logx.Err(err))
 		}
 	}
 }
@@ -94,7 +94,7 @@ func (s *Service) listen(ctx context.Context, wake chan<- struct{}) {
 			}
 		}()
 		if err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("customer messages: wake notifications interrupted; reconnecting")
+			s.Log.WarnContext(ctx, "customer messages: wake notifications interrupted; reconnecting", logx.Err(err))
 			select {
 			case <-ctx.Done():
 			case <-time.After(time.Second):

@@ -7,6 +7,7 @@ package messages
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -155,4 +156,5 @@ type Service struct {
 	// Abuse counts test messages.
 	Abuse *abusestate.Store
 	Clock clockwork.Clock
+	Log   *slog.Logger
 }
