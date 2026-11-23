@@ -50,6 +50,10 @@ const (
 	// reissueAge is how old a lease's hold row grows before it is issued
 	// again, well inside the hold lifetime.
 	reissueAge = 7 * retention.Day
+	// urgentAge is how old a hold row grows before its reissue goes ahead
+	// of any other work: well before the hold lifetime, past which it counts
+	// nowhere.
+	urgentAge = retention.AdmissionMaxHold - reissueAge
 	// rolloverAhead is how soon before a fixed window closes an active hold
 	// gets its next window's hold.
 	rolloverAhead = 2 * limits.SyncInterval
@@ -57,6 +61,14 @@ const (
 	// clock: an id with no lease older than the replay horizon less it names
 	// a lease that may already be forgotten.
 	leaseIDSkew = retention.Day
+	// maxRenewals bounds the holds one sync renews, reissues, rolls ahead or
+	// releases on close beyond what its own items name, most urgent first:
+	// the rest wait for later syncs, so a window that closes for every
+	// customer at once never runs a sync past its timeout.
+	maxRenewals = 64
+	// commitMargin is how far inside limits.SyncTimeout a sync must reach its
+	// commit; one that ran longer is refused and retried.
+	commitMargin = time.Second
 )
 
 // Syncer syncs leases of the context's merchant.
@@ -191,10 +203,27 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(u.Currency)}]
 			}}
 		var err error
-		out, err = run.sync()
-		return err
+		if out, err = run.sync(); err != nil {
+			return err
+		}
+		return run.withinTimeout()
 	})
 	return out, err
+}
+
+// withinTimeout is a sync's last statement: one that ran past its timeout
+// less the margin rolls back, since readers count its lease dead only that
+// long after its lifetime. Elapsed is the transaction's real time, which a
+// test's clock does not move.
+func (r *syncRun) withinTimeout() error {
+	elapsed, err := r.q.SyncElapsed(r.ctx)
+	if err != nil {
+		return err
+	}
+	if time.Duration(elapsed)*time.Microsecond > limits.SyncTimeout-commitMargin {
+		return apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync ran too long to commit; retry it")
+	}
+	return nil
 }
 
 // syncRun is one sync's transaction.
@@ -232,6 +261,13 @@ type syncRun struct {
 	answered map[holdKey]int
 	// safe is the merchant's usage_gate_safe_spend once read.
 	safe *bool
+	// usedBefore is each part's unsized usage before this sync settled.
+	usedBefore map[partRef]int64
+}
+
+type partRef struct {
+	hold uuid.UUID
+	key  string
 }
 
 type holdKey struct {
@@ -268,20 +304,6 @@ type hold struct {
 	fresh    bool
 	// versionDirty is a version or applied version to write.
 	versionDirty bool
-}
-
-// stale reports a hold that must be issued again: a window of it closed, or
-// its row grew old.
-func (h *hold) stale(now time.Time) bool {
-	if h.row.CreatedAt.Before(now.Add(-reissueAge)) {
-		return true
-	}
-	for _, p := range h.parts {
-		if p.end != nil && !now.Before(*p.end) {
-			return true
-		}
-	}
-	return false
 }
 
 // part is one limit of a hold: held is what it sets aside, answered the size
@@ -365,6 +387,15 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	r.touched, r.answered = map[uuid.UUID]bool{}, map[holdKey]int{}
 	r.result = &billing.SyncLeasesResult{Wants: make([]billing.LeaseWantResult, len(r.p.Wants)), Holds: []billing.Hold{}, Limits: []billing.CustomerLimit{},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}}
+	r.usedBefore = map[partRef]int64{}
+	for _, holds := range r.holds {
+		for _, h := range holds {
+			for _, p := range h.parts {
+				r.usedBefore[partRef{h.row.ID, p.key}] = p.used
+			}
+		}
+	}
+	// Usage settles first, always.
 	through, receipts, err := r.settle()
 	if err != nil {
 		return nil, err
@@ -378,18 +409,24 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		for _, holds := range r.holds {
 			for _, h := range holds {
 				for _, p := range h.parts {
-					if p.used > 0 && r.locked[h.row.CustomerID] {
+					if p.used > r.usedBefore[partRef{h.row.ID, p.key}] && r.locked[h.row.CustomerID] {
 						h.changed, h.active = true, true
 					}
 				}
 			}
 		}
+	}
+	// What the gate gave up is released before wants are sized, so no want
+	// is refused capacity its own gate already returned: acknowledged
+	// shrinks, a close and returns.
+	if r.live {
 		if err := r.confirm(); err != nil {
 			return nil, err
 		}
 	}
 	if r.p.Close {
-		// A closing sync, its usage settled, returns every hold of the lease.
+		// A closing sync, its usage settled, returns the holds of the
+		// customers it locked; the closed lease's others count nowhere.
 		if err := r.releaseEvery(); err != nil {
 			return nil, err
 		}
@@ -534,16 +571,13 @@ func (r *syncRun) lockCustomers() error {
 				add(a.CustomerID)
 			}
 		}
-		for k, holds := range r.holds {
-			for _, h := range holds {
-				needs, err := r.needsWork(k, h)
-				if err != nil {
-					return err
-				}
-				if needs {
-					add(billing.CustomerID(k.customer))
-				}
-			}
+		// Of the holds no item names, the most urgent few, within the bound.
+		tasks, err := r.rank(func(holdKey) bool { return true })
+		if err != nil {
+			return err
+		}
+		for _, t := range tasks[:min(len(tasks), maxRenewals)] {
+			add(billing.CustomerID(t.key.customer))
 		}
 	}
 	slices.SortFunc(ids, compareUUID)
@@ -558,23 +592,122 @@ func (r *syncRun) lockCustomers() error {
 	return nil
 }
 
-// needsWork reports a hold this sync may change: a closing sync's, or a live
-// lease's hold that is stale, whose customer moved, that another lease waits
-// for, that its gate confirmed above what it needs, that usage took from or
-// that an idle sync shrinks.
-func (r *syncRun) needsWork(k holdKey, h *hold) (bool, error) {
-	if r.p.Close {
-		return true, nil
-	}
-	if h.stale(r.now) || r.moved[k.customer] || h.pending() {
-		return true, nil
-	}
-	for _, p := range h.parts {
-		if p.used > 0 || r.contended(p) || p.answered > satAdd(p.committed, p.request) {
-			return true, nil
+// task is a hold the sync may change beyond what its items name, or a key's
+// roll-ahead, ranked by urgency.
+type task struct {
+	key  holdKey
+	hold *hold
+	// class: 0 a window closed or closes before the next sync, another
+	// lease waits for it, its gate gave capacity up, its row nears the hold
+	// lifetime, or the lease closes; 1 usage took from it; 2 it grew old or
+	// its cards changed; 3 its customer's standing moved; 4 it shrinks while
+	// idle.
+	class int
+	// left is how many requests a used hold still covers.
+	left int64
+}
+
+// rank lists the work the lease's open holds need, of the keys in, most
+// urgent first: a used hold the fewer requests it still covers, any other
+// the older.
+func (r *syncRun) rank(in func(holdKey) bool) ([]task, error) {
+	var tasks []task
+	for k, holds := range r.holds {
+		if !in(k) {
+			continue
+		}
+		for _, h := range holds {
+			if h.released || h.wanted || h.fresh {
+				continue
+			}
+			class, ok, err := r.urgency(k, h)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				tasks = append(tasks, task{key: k, hold: h, class: class, left: requestsLeft(h)})
+			}
+		}
+		if r.live && !r.p.Close && r.rollAheadDue(k) {
+			tasks = append(tasks, task{key: k, class: 0})
 		}
 	}
-	return r.cardsChanged(h)
+	slices.SortFunc(tasks, func(a, b task) int {
+		if c := cmp.Compare(a.class, b.class); c != 0 {
+			return c
+		}
+		if a.class == 1 {
+			if c := cmp.Compare(a.left, b.left); c != 0 {
+				return c
+			}
+		}
+		return cmp.Or(compareTasks(a, b), compareUUID(a.key.customer, b.key.customer), strings.Compare(a.key.limitSet, b.key.limitSet))
+	})
+	return tasks, nil
+}
+
+// compareTasks orders holds oldest first, a roll-ahead after its key's holds.
+func compareTasks(a, b task) int {
+	switch {
+	case a.hold == nil && b.hold == nil:
+		return 0
+	case a.hold == nil:
+		return 1
+	case b.hold == nil:
+		return -1
+	}
+	return cmp.Or(a.hold.row.CreatedAt.Compare(b.hold.row.CreatedAt), compareUUID(a.hold.row.ID, b.hold.row.ID))
+}
+
+// urgency is a hold's task class; ok is false when the sync has nothing to
+// do for it, as for a hold answered empty that waits for its gate to apply
+// that.
+func (r *syncRun) urgency(k holdKey, h *hold) (int, bool, error) {
+	if r.p.Close || h.pending() {
+		return 0, true, nil
+	}
+	ended, contended, used, shrinks, empty := false, false, false, false, true
+	for _, p := range h.parts {
+		ended = ended || (p.end != nil && !r.now.Before(*p.end))
+		contended = contended || (r.contended(p) && p.answered > max(p.committed, p.used))
+		used = used || p.used > 0
+		shrinks = shrinks || p.answered > satAdd(p.committed, p.request)
+		empty = empty && p.answered == 0 && p.used == 0
+	}
+	switch {
+	case empty:
+		return 0, false, nil
+	case ended || contended || h.row.CreatedAt.Before(r.now.Add(-urgentAge)):
+		return 0, true, nil
+	case used:
+		return 1, true, nil
+	case h.row.CreatedAt.Before(r.now.Add(-reissueAge)):
+		return 2, true, nil
+	}
+	changed, err := r.cardsChanged(h)
+	switch {
+	case err != nil:
+		return 0, false, err
+	case changed:
+		return 2, true, nil
+	case r.touched[k.customer] || r.moved[k.customer]:
+		return 3, true, nil
+	case shrinks:
+		return 4, true, nil
+	}
+	return 0, false, nil
+}
+
+// requestsLeft is how many more requests the hold's parts cover beyond its
+// tickets, the fewest of any part that prices one.
+func requestsLeft(h *hold) int64 {
+	left := int64(^uint64(0) >> 1)
+	for _, p := range h.parts {
+		if p.request > 0 {
+			left = min(left, max(p.answered-p.committed, 0)/p.request)
+		}
+	}
+	return left
 }
 
 // contended reports a part another lease was refused capacity_held for
@@ -981,10 +1114,13 @@ func (r *syncRun) giveBack() error {
 	return nil
 }
 
-// releaseEvery returns every open hold of the lease; each is answered with
-// nothing held.
+// releaseEvery returns the closing lease's open holds of the customers the
+// sync locked; each is answered with nothing held.
 func (r *syncRun) releaseEvery() error {
-	for _, holds := range r.holds {
+	for k, holds := range r.holds {
+		if !r.locked[k.customer] {
+			continue
+		}
 		for _, h := range holds {
 			if h.released {
 				continue

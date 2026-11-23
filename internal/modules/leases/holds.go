@@ -507,27 +507,29 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 // the limit an idle one is taken back), one another lease waits for
 // shrinks, and an idle one shrinks toward one request. Before a fixed window
 // closes, an active hold gets its next window's hold. Only the holds of
-// customers the sync locked are touched.
+// customers the sync locked are touched, and at most maxRenewals of them,
+// most urgent first; the rest wait for later syncs.
 func (r *syncRun) renew() error {
-	keys := make([]holdKey, 0, len(r.holds))
-	for k := range r.holds {
-		if r.locked[k.customer] {
-			keys = append(keys, k)
-		}
+	tasks, err := r.rank(func(k holdKey) bool { return r.locked[k.customer] })
+	if err != nil {
+		return err
 	}
-	slices.SortFunc(keys, func(a, b holdKey) int {
-		return cmp.Or(compareUUID(a.customer, b.customer), strings.Compare(a.limitSet, b.limitSet))
+	tasks = tasks[:min(len(tasks), maxRenewals)]
+	// The chosen run in key order, each key's holds before its roll-ahead.
+	slices.SortFunc(tasks, func(a, b task) int {
+		return cmp.Or(compareUUID(a.key.customer, b.key.customer), strings.Compare(a.key.limitSet, b.key.limitSet), compareTasks(a, b))
 	})
-	for _, k := range keys {
-		for _, h := range slices.Clone(r.holds[k]) {
-			if h.released || h.wanted || h.fresh {
-				continue
-			}
-			if err := r.renewHold(k, h); err != nil {
+	for _, t := range tasks {
+		if t.hold == nil {
+			if err := r.rollAhead(t.key); err != nil {
 				return err
 			}
+			continue
 		}
-		if err := r.rollAhead(k); err != nil {
+		if t.hold.released || t.hold.wanted || t.hold.fresh {
+			continue
+		}
+		if err := r.renewHold(t.key, t.hold); err != nil {
 			return err
 		}
 	}
@@ -632,14 +634,17 @@ func (r *syncRun) retire(h *hold) error {
 	return nil
 }
 
-// rollAhead issues an active hold's next-window hold when one of its fixed
-// windows closes before the lease syncs again, so the reset does not send
-// every active customer to a want at once. It opens no window, and a hold
-// whose checks now refuse it gets none.
-func (r *syncRun) rollAhead(k holdKey) error {
+// rollAheadDue reports a key whose active hold has a fixed window closing
+// before the lease syncs again that no other hold of the key covers.
+func (r *syncRun) rollAheadDue(k holdKey) bool {
+	_, closes := r.rollAheadOf(k)
+	return closes != nil
+}
+
+func (r *syncRun) rollAheadOf(k holdKey) (*hold, *time.Time) {
 	h := r.current(k, r.now)
 	if h == nil || h.released || !h.active {
-		return nil
+		return nil, nil
 	}
 	var closes *time.Time
 	for _, p := range h.parts {
@@ -652,12 +657,24 @@ func (r *syncRun) rollAhead(k holdKey) error {
 		}
 	}
 	if closes == nil {
-		return nil
+		return nil, nil
 	}
 	for _, other := range r.holds[k] {
 		if other != h && !other.released && other.contains(*closes) {
-			return nil
+			return nil, nil
 		}
+	}
+	return h, closes
+}
+
+// rollAhead issues an active hold's next-window hold when one of its fixed
+// windows closes before the lease syncs again, so the reset does not send
+// every active customer to a want at once. It opens no window, and a hold
+// whose checks now refuse it gets none.
+func (r *syncRun) rollAhead(k holdKey) error {
+	h, closes := r.rollAheadOf(k)
+	if closes == nil {
+		return nil
 	}
 	w, room, err := r.resolveHold(k, h)
 	if err != nil || w.Refusal != nil {

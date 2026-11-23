@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/retention"
@@ -58,6 +60,20 @@ limits:
     rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
 products:
   plan: {display_name: Plan, limits: {quarter: "100"}}
+  metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
+`
+
+// minuteQuota counts work units toward one-minute windows on the epoch's
+// tiles: every customer's window closes at the same instant.
+const minuteQuota = `schema_version: 1
+meters:
+  work: {event_type: work, value_property: units, aggregation: sum}
+limits:
+  minute:
+    unit: units
+    reset: {kind: fixed, window_seconds: 60, anchor: subscription}
+    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
@@ -530,6 +546,92 @@ func TestLeaseVersions(t *testing.T) {
 			require.LessOrEqual(t, quota.Used+quota.Held, quota.Capacity, "no hold takes the limit past its capacity")
 		}
 	})
+
+	t.Run("OR-J24-S30/a-window-closing-for-every-customer-renews-a-bounded-few-holds-per-sync", func(t *testing.T) {
+		w := newWorld(t)
+		applyLimits(t, w.alpha, minuteQuota)
+		customers := make([]billing.CustomerID, 80)
+		for i := range customers {
+			customers[i] = billing.CustomerID(uuid.New())
+			overrideLimit(t, w, customers[i], "minute", 1000)
+		}
+		lease := newLease()
+		var ends *time.Time
+		for _, batch := range [][]billing.CustomerID{customers[:40], customers[40:]} {
+			wants := make([]billing.LeaseWant, len(batch))
+			for i, c := range batch {
+				wants[i] = workWant(c, 1)
+			}
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: wants})
+			require.Len(t, out.Wants, len(batch))
+			for i, c := range batch {
+				require.Nil(t, out.Wants[i].Error)
+				require.Nil(t, out.Wants[i].Refusal)
+				end := answeredLimit(t, answeredHold(t, out, c, *out.Wants[i].LimitSet), "minute").WindowEndsAt
+				require.NotNil(t, end)
+				if ends == nil {
+					ends = end
+				}
+				require.Equal(t, *ends, *end, "every window closes at once")
+			}
+		}
+		// The lease lives up to the close.
+		for w.clock.Now().Before(ends.Add(-time.Second)) {
+			w.clock.Advance(min(5*time.Second, ends.Add(-time.Second).Sub(w.clock.Now())))
+			syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
+		}
+		w.clock.Advance(2 * time.Second)
+		retired := map[billing.CustomerID]bool{}
+		retire := func(out *billing.SyncLeasesResult) int {
+			n := 0
+			for _, h := range out.Holds {
+				l := answeredLimit(t, h, "minute")
+				if l.Held == 0 && l.WindowEndsAt != nil && !l.WindowEndsAt.After(*ends) && !retired[h.CustomerID] {
+					retired[h.CustomerID] = true
+					n++
+				}
+			}
+			return n
+		}
+		first := retire(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}))
+		require.Positive(t, first, "the most urgent holds are renewed at once")
+		require.Less(t, first, len(customers), "one sync renews a bounded few; the rest wait")
+		for range 3 {
+			if len(retired) == len(customers) {
+				break
+			}
+			retire(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}))
+		}
+		require.Len(t, retired, len(customers), "the next syncs renew the rest")
+	})
+
+	t.Run("OR-J24-S31/a-sync-that-ran-past-its-timeout-commits-nothing", func(t *testing.T) {
+		w := newWorld(t)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		lease := newLease()
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
+		// Another transaction holds the customer's spend lock until the sync,
+		// waiting for it, would commit inside its timeout but past its margin
+		// (one second).
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
+			w.alpha.MerchantID().UUID(), customer.UUID())
+		require.NoError(t, err)
+		unlock := time.AfterFunc(limits.SyncTimeout-700*time.Millisecond, func() { _ = tx.Rollback(context.Background()) })
+		defer unlock.Stop()
+		items := numbered(1, usageInput(customer, "slow", 1))
+		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		failure := requireCode(t, err, billing.CodeServiceUnavailable)
+		require.Equal(t, http.StatusServiceUnavailable, failure.Status)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+		out := settleUsage(t, w.alpha, lease, items...)
+		require.EqualValues(t, 1, out.Usage.ThroughN, "the retry settles what the refused sync rolled back")
+		balance(t, w.alpha, customer, 900, 100, 1000)
+	})
+
 }
 
 func TestLimitArchive(t *testing.T) {

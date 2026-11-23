@@ -616,6 +616,19 @@ func (q *Queries) SumOtherLeaseHeld(ctx context.Context, arg SumOtherLeaseHeldPa
 	return held, err
 }
 
+const syncElapsed = `-- name: SyncElapsed :one
+SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 1000000)::bigint AS elapsed_micros
+`
+
+// How long the sync's transaction has run in real time, in microseconds:
+// the transaction's own clock, which a test's business clock leaves alone.
+func (q *Queries) SyncElapsed(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, syncElapsed)
+	var elapsed_micros int64
+	err := row.Scan(&elapsed_micros)
+	return elapsed_micros, err
+}
+
 const updateLeaseSettlement = `-- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
 SET settled_through_n = $1::bigint, receipts = $2::jsonb,

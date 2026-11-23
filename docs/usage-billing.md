@@ -23,7 +23,9 @@ batch job calls it directly with `usage` alone.
   `404 lease_not_found`, so a forgotten lease's usage never posts twice: start a
   new one. A sync renews its lease only within 10 seconds of its last one;
   `lease.live: false` says it had already ended and the sync renewed nothing.
-  Its holds still count for 5 seconds more, longer than any sync runs. A sync
+  Its holds still count for 5 seconds more, longer than any sync runs: a sync
+  that would commit later is refused `503 service_unavailable` and changes
+  nothing, so retry it. A sync
   with `close: true` settles its usage, returns every hold of the lease and ends
   it, a dead lease's too. An ended lease answers wants `409 lease_not_held`, and
   usage against it still settles, in full.

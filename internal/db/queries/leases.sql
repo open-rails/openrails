@@ -25,6 +25,11 @@ SET last_sync_at = GREATEST(last_sync_at, sqlc.arg(now)::timestamptz)
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND closed_at IS NULL
   AND last_sync_at > sqlc.arg(live_since)::timestamptz + (clock_timestamp() - transaction_timestamp());
 
+-- name: SyncElapsed :one
+-- How long the sync's transaction has run in real time, in microseconds:
+-- the transaction's own clock, which a test's business clock leaves alone.
+SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 1000000)::bigint AS elapsed_micros;
+
 -- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
 SET settled_through_n = sqlc.arg(settled_through_n)::bigint, receipts = sqlc.arg(receipts)::jsonb,

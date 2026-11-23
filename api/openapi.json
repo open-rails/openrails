@@ -7368,6 +7368,7 @@
           "invalid_param",
           "lease_not_found",
           "lease_not_held",
+          "service_unavailable",
           "usage_not_priced",
           "usage_out_of_order"
         ],

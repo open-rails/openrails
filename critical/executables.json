@@ -550,6 +550,12 @@
     "OR-J24-S29": [
       "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
     ],
+    "OR-J24-S30": [
+      "TestLeaseVersions/OR-J24-S30/a-window-closing-for-every-customer-renews-a-bounded-few-holds-per-sync"
+    ],
+    "OR-J24-S31": [
+      "TestLeaseVersions/OR-J24-S31/a-sync-that-ran-past-its-timeout-commits-nothing"
+    ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
     ],

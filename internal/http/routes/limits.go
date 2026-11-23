@@ -27,7 +27,7 @@ var limitsRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
 	{Method: POST, Path: "/v1/app/leases/sync", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
 		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
-		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeLeaseNotFound, billing.CodeLeaseNotHeld, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
+		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeLeaseNotFound, billing.CodeLeaseNotHeld, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Request: billing.AdjustLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("idempotency_key_reused", "invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
 }
