@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -136,7 +137,11 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	var settleErr error
 	switch {
 	case sendErr == nil:
-		return s.settle(ctx, m, settled{status: statusSent, attempts: attempts, sentAt: &now})
+		if err := s.settle(ctx, m, settled{status: statusSent, attempts: attempts, sentAt: &now}); err != nil {
+			return err
+		}
+		s.senderAccepted(ctx, profile.FromEmail)
+		return nil
 	case refusal == recipientRefused:
 		return s.settle(ctx, m, settled{status: statusFailed, attempts: attempts, code: errRefused})
 	case last:
@@ -216,6 +221,16 @@ func (s *Service) settle(ctx context.Context, m gen.GetCustomerMessageRow, v set
 	defer cancel()
 	_, err := s.DB.Gen(ctx).SettleCustomerMessage(ctx, v.params(m, s.Clock.Now().UTC()))
 	return err
+}
+
+// senderAccepted resolves the merchant's sender-refused finding: the sender
+// took a message from from. A failure waits for the next message.
+func (s *Service) senderAccepted(ctx context.Context, from string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
+	if err := alerting.ResolveMessageSenderRefused(ctx, s.DB, from); err != nil {
+		s.Log.WarnContext(ctx, "customer messages: the sender-refused finding was not resolved", logx.Err(err))
+	}
 }
 
 // senderRefused raises the merchant's finding for a mail server that refused

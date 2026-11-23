@@ -20,7 +20,10 @@ was sent (`customer_messages`) keeps no body.
 - A failed send is retried with backoff, ten attempts in all. Only a mail
   server's 5xx to the recipient (`RCPT TO`) is final (`refused`). A 5xx to the
   sender (`AUTH` or `MAIL FROM`) is retried and opens a
-  `life.customer.messages_sender_refused` finding naming the from address.
+  `life.customer.messages_sender_refused` finding naming the from address,
+  which the next message or test the sender accepts resolves. Its alert email
+  goes through the refusing sender, so it may not arrive: the console and
+  webhooks show it.
 
 ## Event types and defaults
 

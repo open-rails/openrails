@@ -2156,7 +2156,7 @@
     {
       "id": "OR-J39-S19",
       "journey": "J39",
-      "name": "Only a mail server's refusal of the recipient is final: a refused sender is retried and opens the merchant's finding"
+      "name": "Only a mail server's refusal of the recipient is final: a refused sender is retried and opens the merchant's finding, which its next send resolves"
     },
     {
       "id": "OR-J39-S20",

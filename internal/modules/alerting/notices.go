@@ -182,15 +182,26 @@ type MessageSenderRefusal struct {
 	EventType string
 }
 
+// senderSubject is the sender-refused finding's subject for from, the
+// merchant's from address; empty is the deployment's sender.
+func senderSubject(from string) string {
+	if from == "" {
+		return "deployment_sender"
+	}
+	return from
+}
+
 // RecordMessageSenderRefused raises the merchant's sender-refused finding,
-// one per from address; a later refusal observes it again.
+// one per from address; a later refusal observes it again. Its alert email
+// goes through the sender that refused, so it may not arrive; the console
+// and webhooks show it.
 func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.Time, r MessageSenderRefusal) error {
 	if database == nil {
 		return fmt.Errorf("message sender refused: database is required")
 	}
-	subject, sender := r.From, "from_email "+r.From
-	if subject == "" {
-		subject, sender = "deployment_sender", "the deployment's sender"
+	subject, sender := senderSubject(r.From), "from_email "+r.From
+	if r.From == "" {
+		sender = "the deployment's sender"
 	}
 	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerMessagesSenderRefused, SubjectKey: subject, Severity: reconcile.SeverityHigh,
@@ -201,6 +212,15 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 	})
 	if err != nil {
 		return fmt.Errorf("message sender refused: %w", err)
+	}
+	return nil
+}
+
+// ResolveMessageSenderRefused closes the sender-refused finding of from once
+// the sender accepts a message from it.
+func ResolveMessageSenderRefused(ctx context.Context, database *db.DB, from string) error {
+	if err := (&reconcile.PGStore{DB: database}).ResolveRaisedFinding(ctx, FindingCustomerMessagesSenderRefused, senderSubject(from)); err != nil {
+		return fmt.Errorf("message sender recovered: %w", err)
 	}
 	return nil
 }

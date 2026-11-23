@@ -79,7 +79,9 @@ past `RateCap` (ten an hour), `rate_limited` with
 `queued` for a retry, or `failed`: `refused` on a 5xx to `RCPT TO` (`refusalOf`
 reads helpers/smtp's step text), `send_failed` or `unavailable` on the last
 attempt. A 5xx to `AUTH` or `MAIL FROM` retries and raises
-`alerting.RecordMessageSenderRefused`'s `life.customer.messages_sender_refused`.
+`alerting.RecordMessageSenderRefused`'s `life.customer.messages_sender_refused`,
+which `alerting.ResolveMessageSenderRefused` closes on the next send or test the
+sender accepts.
 `settle` runs on `context.WithoutCancel` with its own timeout, so a timed-out last
 attempt still ends. From is the profile's `from_email` and display name, else the
 sender's own.

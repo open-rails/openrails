@@ -584,7 +584,8 @@ func TestCustomerMessages(t *testing.T) {
 		})
 		t.Run("sender-refused", func(t *testing.T) {
 			server := smtptest.Start(t, smtptest.Options{Username: "openrails", Password: "the-right-one"})
-			a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = smtpSender(t, server, "a-wrong-one") })
+			sender := &swappableSender{to: smtpSender(t, server, "a-wrong-one")}
+			a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = sender })
 			alice := customerOf(a.alice)
 			paidExternally(t, a, alice, messageSale(t, a), "refused-sender")
 			startFleet(t, a.world)
@@ -600,6 +601,14 @@ func TestCustomerMessages(t *testing.T) {
 			require.Equal(t, "AUTH", findings.Items[0].Evidence["step"])
 			require.EqualValues(t, 535, findings.Items[0].Evidence["reply_code"])
 			require.Empty(t, server.Messages())
+			// Its credentials fixed, the sender takes a retry, which resolves
+			// the finding.
+			sender.set(smtpSender(t, server, "the-right-one"))
+			require.Equal(t, billing.MessageSent, settledMessages(t, a.world, alice, 1)[0].Status)
+			require.Len(t, server.Messages(), 1)
+			findings, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer.messages_sender_refused"})
+			require.NoError(t, err)
+			require.Empty(t, findings.Items, "the next send resolves it")
 		})
 	})
 	t.Run("OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed", func(t *testing.T) {
@@ -986,6 +995,30 @@ func (s helpersSMTP) Send(ctx context.Context, m openrails.Email) error {
 	from.Name = m.From.Name
 	return s.Sender.Send(ctx, smtp.Message{From: from, To: m.To, Subject: m.Subject, Text: m.Text, HTML: m.HTML})
 }
+
+// swappableSender sends through to, which a scenario replaces.
+type swappableSender struct {
+	mu sync.Mutex
+	to openrails.EmailSender
+}
+
+func (s *swappableSender) sender() openrails.EmailSender {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.to
+}
+
+func (s *swappableSender) set(to openrails.EmailSender) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.to = to
+}
+
+func (s *swappableSender) Send(ctx context.Context, m openrails.Email) error {
+	return s.sender().Send(ctx, m)
+}
+
+func (s *swappableSender) CheckHealth(ctx context.Context) error { return s.sender().CheckHealth(ctx) }
 
 // stalledMailbox refuses its first refuse sends, then holds the next until
 // its context ends.

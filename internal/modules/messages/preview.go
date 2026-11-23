@@ -66,6 +66,7 @@ func (s *Service) Test(ctx context.Context, eventType, language string, candidat
 	if err != nil {
 		return billing.TestMessage{}, fmt.Errorf("%w: %w", ErrTestNotSent, err)
 	}
+	s.senderAccepted(ctx, cfg.Profile.FromEmail)
 	return billing.TestMessage{Recipient: to.Address, Message: preview}, nil
 }
 
