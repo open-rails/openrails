@@ -7,7 +7,9 @@ app's AuthKit is the server's trusted issuer ([standalone guide](../../docs/stan
 - `main.go`: the app's AuthKit (it mints the browser's and the backend's tokens
   and pushes users over SCIM) and the remote billing client.
 - `openrails/config.yaml`, `openrails/merchant.example.yaml`: the server's
-  configuration and its merchant manifest.
+  configuration and its merchant manifest. The server makes the merchant at
+  first boot; Compose's `merchant-id` step hands its id to the app
+  (`OPENRAILS_MERCHANT_ID`).
 
 ```sh
 cp openrails/merchant.example.yaml openrails/merchant.yaml   # your NMI sandbox keys

@@ -63,18 +63,37 @@ services:
     depends_on:
       openrails: { condition: service_healthy }
 
+  merchant-id: # the id the server gave the merchant at its first boot, for the app
+    build: *server
+    image: openrails-example-server
+    user: root # writes the shared volume
+    entrypoint: [sh, -c]
+    command:
+      - >-
+        openrails --config /etc/openrails/config.yaml merchants get onlydemo
+        | sed -n 's/^  "id": "\(.*\)",$$/\1/p' > /shared/merchant-id && test -s /shared/merchant-id
+    volumes:
+      - ./openrails:/etc/openrails:ro
+      - merchant-id:/shared
+    depends_on:
+      openrails: { condition: service_healthy }
+
   app:
     build:
       context: ../..
       dockerfile: examples/standalone/Dockerfile
     network_mode: service:openrails
+    entrypoint: [sh, -c, 'OPENRAILS_MERCHANT_ID=$$(cat /shared/merchant-id) exec /app/courses']
     environment:
       DATABASE_URL: postgres://openrails:openrails@postgres:5432/courses?sslmode=disable
       OPENRAILS_CLIENT_SECRET: ${OPENRAILS_CLIENT_SECRET:?set OPENRAILS_CLIENT_SECRET to 32 or more random bytes}
       EMAIL_SMTP_HOST: mailpit
+    volumes:
+      - merchant-id:/shared:ro
     depends_on:
-      openrails: { condition: service_healthy }
+      merchant-id: { condition: service_completed_successfully }
 
 volumes:
   postgres:
   openrails-keys:
+  merchant-id:
