@@ -15,6 +15,7 @@ import (
 // prints what changed and fails when the file skipped an object an edit
 // changed; applying the same file again changes nothing.
 func applyCatalog(ctx context.Context, shop *openrails.Client, path string, out io.Writer) error {
+	// guide:catalog-apply
 	products, err := catalog.ReadFile(path)
 	if err != nil {
 		return err
@@ -30,4 +31,5 @@ func applyCatalog(ctx context.Context, shop *openrails.Client, path string, out 
 		return fmt.Errorf("%s skipped %d object(s) an edit changed", path, n)
 	}
 	return nil
+	// guide:end
 }

@@ -1,3 +1,4 @@
+# guide:gate-catalog
 schema_version: 1
 meters:
   work: {event_type: work, value_property: units, aggregation: sum}
@@ -16,3 +17,9 @@ products:
   usage:
     display_name: Usage
     rate_cards: [{meter: work, price: {model: per_unit, currency: USD, per_unit: {unit_amount: "100"}}}]
+  credits-10:
+    display_name: $10 of usage
+    credit_grant: {currency: USD, amount: "10000000"} # a balance usage draws down; expires after 365 days
+    prices:
+      purchase: {amount: 10 USD}
+# guide:end

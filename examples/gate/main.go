@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// guide:gate-new
 	var cfg openrails.GateConfig
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		opts, err := redis.ParseURL(url)
@@ -54,6 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// guide:end
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/work", func(w http.ResponseWriter, r *http.Request) { work(w, r, gate) })
@@ -115,6 +117,7 @@ func work(w http.ResponseWriter, r *http.Request, gate *openrails.Gate) {
 		http.Error(w, "units is a positive estimate", http.StatusBadRequest)
 		return
 	}
+	// guide:gate-admit
 	ticket, err := gate.Admit(r.Context(), billing.AdmitParams{
 		RequestID: uuid.NewString(), CustomerID: customer, Invoker: customer.String(), Currency: "USD",
 		Usage: &billing.UsageEstimate{EventType: "work", Dimensions: map[string]int64{"units": estimate}},
@@ -142,6 +145,7 @@ func work(w http.ResponseWriter, r *http.Request, gate *openrails.Gate) {
 	if err := ticket.Capture(r.Context(), billing.CaptureUsage{Dimensions: map[string]int64{"units": used}}); err != nil {
 		log.Print(err)
 	}
+	// guide:end
 	_ = json.NewEncoder(w).Encode(map[string]int64{"units": used})
 }
 

@@ -4,6 +4,7 @@
 # file is the local stack in ../compose.yaml; README.md says what production
 # changes.
 
+# guide:standalone-config
 provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
 # The merchant's configuration, its PSPs and their keys, is merchant.yaml: read
 # at boot and read-only. To change it in the console instead, name a Vault KV
@@ -50,3 +51,4 @@ email_smtp:
   host: mailpit
   port: 1025
   from: "OnlyDemo Billing <billing@onlydemo.example>"
+# guide:end

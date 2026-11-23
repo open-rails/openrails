@@ -59,6 +59,7 @@ func (c course) product() string {
 // read. Each AuthKit user is their own customer. A signed-out visitor holds
 // nothing and costs no call.
 func held(c *gin.Context, bill *openrails.Client, entitlements ...string) (map[string]bool, error) {
+	// guide:entitlement-check
 	claims, signedIn := verify.ClaimsFromContext(c.Request.Context()) // set by authkitgin.Optional
 	if !signedIn {
 		return map[string]bool{}, nil
@@ -72,6 +73,7 @@ func held(c *gin.Context, bill *openrails.Client, entitlements ...string) (map[s
 		return nil, err
 	}
 	return check.Entitlements, nil
+	// guide:end
 }
 
 // courseRoutes are the app's API: the course list, with prices and what the
@@ -94,21 +96,25 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 				entitlements = append(entitlements, course.Entitlement)
 			}
 		}
+		// guide:buyer-prices
 		listed, err := bill.ListProducts(c, billing.ProductListParams{Archived: new(false), ForSale: new(true), Keys: keys, PageRequest: billing.PageRequest{Limit: len(keys)}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
+		// guide:hide
 		owned, err := held(c, bill, entitlements...)
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
+		// guide:show
 		// Each product's prices as a buyer sees them, for the page's BuyButtons.
 		prices := map[string][]billing.Price{} // by product key
 		for _, product := range listed.Items {
 			prices[product.Key] = billing.BuyerPrices(product.Prices)
 		}
+		// guide:end
 		data := []gin.H{}
 		for _, course := range page {
 			data = append(data, gin.H{"slug": course.Slug, "title": course.Title, "members_only": course.MembersOnly,

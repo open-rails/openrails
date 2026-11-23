@@ -1,0 +1,37 @@
+# A merchant with one PSP on each rail, as Config.Merchants reads it (in a
+# standalone manifest, under merchants.<slug>). Real secrets go in an overlay
+# or in Vault, never in a committed file.
+slug: shop
+display_name: Shop
+# guide:psps
+psps:
+  mobius: # your name for the account; any key
+    rail: nmi
+    environment: sandbox # live (the default) | test | sandbox
+    gateway_id: "1234567" # the NMI dashboard's Gateway ID
+    tokenization_key: your-public-collect-js-key
+    secrets:
+      security_key: your-private-security-key
+      webhook_signing_secret: your-webhook-signing-key
+  stripe:
+    rail: stripe
+    environment: test # live | test; the keys' prefixes must agree
+    account_id: acct_1Example0Account0
+    publishable_key: pk_test_your-key # Elements, Apple Pay and Google Pay
+    secrets:
+      secret_key: sk_test_your-key # or a restricted rk_test_ key
+      webhook_signing_secret: whsec_your-secret
+  ccbill:
+    rail: ccbill
+    environment: sandbox # live | sandbox
+    client_accnum: "900000" # quoted: YAML reads 0000 as 0
+    client_subacc: "0000"
+    secrets:
+      salt: your-flexform-salt
+      datalink_username: your-datalink-user # optional pair: cancels and reads
+      datalink_password: your-datalink-password
+  solana:
+    rail: solana
+    environment: devnet # mainnet | devnet | testnet
+    treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu # where every payment lands
+# guide:end

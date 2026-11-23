@@ -2,6 +2,7 @@
 # --merchant-manifest merchant.yaml`. Copy this file to merchant.yaml and fill
 # in your NMI sandbox gateway's IDs and keys; merchant.yaml holds secrets, so
 # keep it out of version control.
+# guide:standalone-merchant
 version: 1
 merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
@@ -20,3 +21,4 @@ merchants:
         secrets:
           security_key: your-private-security-key
           webhook_signing_secret: your-webhook-signing-key
+# guide:end

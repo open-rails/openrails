@@ -92,6 +92,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
 		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 
+		// guide:standalone-issuer
 		// OpenRails is a resource server this AuthKit mints tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{
 			Resources: []authkit.ResourceServerConfig{{
@@ -116,6 +117,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 			}},
 		},
+		// guide:end
 
 		// Customer contacts: every user, pushed to the merchant's directory in
 		// the server's AuthKit with the backend client's tokens, so receipts
@@ -147,6 +149,7 @@ func backendCredentials(s settings) *authkit.ProvisioningClientCredentials {
 // over HTTP, with a client-credentials token from this app's AuthKit. The
 // server trusts that issuer for one merchant, the one every call acts on.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
+	// guide:standalone-client
 	cc := backendCredentials(s)
 	tokens := (&clientcredentials.Config{
 		ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
@@ -161,6 +164,7 @@ func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
 			return t.AccessToken, nil
 		},
 	})
+	// guide:end
 }
 
 // newApp builds the app: its AuthKit (started: its River workers push the
