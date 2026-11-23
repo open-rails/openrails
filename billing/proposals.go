@@ -147,13 +147,13 @@ type ChangeEvidence struct {
 // named proposals in one page.
 type ProposalListParams struct {
 	PageRequest
-	IDs    []FindingID
-	PSPID  PSPID
-	Kind   ChangeKind
-	Source ProposalSource
-	Status FindingStatus
+	IDs    []FindingID    `form:"ids,comma"`
+	PSPID  PSPID          `form:"psp_id"`
+	Kind   ChangeKind     `form:"kind"`
+	Source ProposalSource `form:"source"`
+	Status FindingStatus  `form:"status"`
 	// Pull is the PSP import whose pull last raised them.
-	Pull PSPImportID
+	Pull PSPImportID `form:"pull_id"`
 }
 
 // ApproveProposalsParams approves 1 to MaxBatchItems proposals, each applied

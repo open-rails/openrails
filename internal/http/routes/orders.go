@@ -27,7 +27,7 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
 		Request: billing.CreateMyOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}}, Errors: orderCreateErrors, Handler: h(handlers.CreateMyOrder)},
 	{Method: GET, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer,
-		Query: params(cursorPage, idsParam, text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
+		Query: handlers.MyOrderListQuery{}, Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
 	{Method: GET, Path: "/v1/me/orders/{id}", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetMyOrder)},
 	{Method: GET, Path: "/v1/me/orders/{id}/payment-attempt", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
@@ -51,20 +51,41 @@ var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/orders/{id}/solana-pay", Group: Payment, Auth: AuthPublic, Merchant: MerchantOrder, When: FeatureSolana,
 		Request: handlers.SolanaPayPostRequest{}, Responses: []Reply{{200, handlers.SolanaPayPostResponse{}}}, Errors: codes("invalid_param", "order_not_payable", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.PostOrderSolanaPay)},
 	{Method: POST, Path: "/v1/app/orders/preview", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "PreviewOrder", Level: LevelRead,
+		Doc: "PreviewOrder prices lines for one customer, as a merchant order would freeze them: per-line " +
+			"refusals, the total and what can pay it.",
 		Request: billing.PreviewOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMerchantOrder)},
 	{Method: GET, Path: "/v1/app/orders/{id}/payment-attempt", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "GetOrderPaymentAttempt", IdempotencyKey: true,
+		Args: []any{billing.OrderID{}},
+		Doc: "GetOrderPaymentAttempt reads one retained purchase payment attempt by idempotencyKey, its original " +
+			"POST /me/orders/{id}/pay Idempotency-Key. It does not look up create-order-with-payment or " +
+			"renewal/usage keys, retry or perform a provider write.",
 		Responses: []Reply{{200, billing.OrderPaymentAttempt{}}}, Errors: codes("idempotency_key_required", "invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetOrderPaymentAttempt)},
 	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CreateOrder", IdempotencyKey: true,
+		Doc: "CreateOrder creates a merchant order: an unpaid order for one customer, which they pay on your site " +
+			"(POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges. idempotencyKey is " +
+			"required: a retry with it answers the same order.",
 		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}},
 		Errors: codes("already_owned", "embed_origins_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
 	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CancelOrder",
+		Args:      []any{billing.OrderID{}},
+		Doc:       "CancelOrder withdraws an open order you created.",
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMerchantOrder)},
 	{Method: GET, Path: "/v1/admin/orders", Group: Admin, Auth: AuthMerchant, Name: "ListOrders", Level: LevelRead,
-		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
+		Doc: "ListOrders is one page of the merchant's orders, newest first. Status complete with PriceID answers " +
+			"whether a customer bought a price.",
+		Query: billing.OrderListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
+		Args:      []any{billing.OrderID{}},
+		Doc:       "GetOrder reads one order. Staff never pay, so it carries no next_action.",
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
 	{Method: POST, Path: "/v1/admin/orders/{id}/waive-balance", Group: Admin, Auth: AuthMerchant, Name: "WaiveOrderBalance", Level: LevelUpdate,
+		Args: []any{billing.OrderID{}},
+		Doc: "WaiveOrderBalance forgives the unpaid balance of a usage order. Existing payments remain recorded. " +
+			"Repeating it changes nothing.",
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.WaiveOrderBalance)},
 	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate,
+		Args: []any{billing.OrderID{}},
+		Doc: "MarkOrderUncollectible stops scheduled collection while retaining the debt. A customer payment can " +
+			"reopen it. Repeating it changes nothing.",
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.MarkOrderUncollectible)},
 }

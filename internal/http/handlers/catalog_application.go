@@ -10,15 +10,9 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-// CatalogApplicationQuery is ApplyCatalog's query: force overwrites the
-// fields an edit set.
-type CatalogApplicationQuery struct {
-	Force bool `form:"force"`
-}
-
 // ApplyCatalog applies a catalog document, JSON or YAML.
 func ApplyCatalog(r *httprequest.Request) {
-	var query CatalogApplicationQuery
+	var query billing.ApplyCatalogParams
 	if !r.BindQuery(&query) {
 		return
 	}
@@ -46,7 +40,7 @@ func ApplyCatalog(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	receipt, err := svc.ApplyCatalog(r.Request.Context(), *application, billing.ApplyCatalogParams{Force: query.Force})
+	receipt, err := svc.ApplyCatalog(r.Request.Context(), *application, query)
 	if err != nil {
 		writeCatalogError(r, err)
 		return

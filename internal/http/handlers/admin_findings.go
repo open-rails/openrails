@@ -37,14 +37,6 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 // findingView is a finding as the admin API answers it.
 func findingView(rec reconcile.FindingRecord) billing.Finding { return rec.View() }
 
-// FindingsQuery is the findings list's filters. Type is one finding type or a
-// prefix ending in ".*" (pull.*: the pull's proposals).
-type FindingsQuery struct {
-	Status   string `form:"status"`
-	Severity string `form:"severity"`
-	Type     string `form:"type"`
-}
-
 // AdminListFindings handles GET /v1/merchant/findings: the operator work
 // list, open findings by default, most severe first, then oldest.
 func AdminListFindings(r *httprequest.Request) {
@@ -52,20 +44,16 @@ func AdminListFindings(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var q FindingsQuery
-	if !r.BindQuery(&q) {
+	var q billing.FindingListParams
+	if !bindList(r, &q, &q.PageRequest) {
 		return
 	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	ids, ok := listIDs(r, billing.ParseFindingID)
+	ids, ok := listIDs(r, q.IDs)
 	if !ok {
 		return
 	}
 	items, err := store.ListQueueFindings(r.Request.Context(), reconcile.QueueFilter{
-		IDs: uuidutil.Of(ids), Severity: strings.TrimSpace(q.Severity), Type: strings.TrimSpace(q.Type), Status: strings.TrimSpace(q.Status), Page: page,
+		IDs: uuidutil.Of(ids), Severity: strings.TrimSpace(q.Severity), Type: strings.TrimSpace(q.Type), Status: strings.TrimSpace(string(q.Status)), Page: q.PageRequest,
 	})
 	if err != nil {
 		writeRefusal(r, err, "list findings failed")

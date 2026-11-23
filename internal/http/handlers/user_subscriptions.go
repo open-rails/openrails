@@ -7,9 +7,10 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 )
 
-// MySubscriptionsQuery filters the customer's own subscriptions; status
+// MySubscriptionListQuery filters the customer's own subscriptions; status
 // "all" (or none) lists every status.
-type MySubscriptionsQuery struct {
+type MySubscriptionListQuery struct {
+	billing.PageRequest
 	Status string `form:"status"`
 }
 
@@ -21,14 +22,11 @@ func GetMySubscriptions(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return
 	}
-	var q MySubscriptionsQuery
-	if !r.BindQuery(&q) {
+	var q MySubscriptionListQuery
+	if !bindList(r, &q, &q.PageRequest) {
 		return
 	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
+	page := q.PageRequest
 	var filters subscriptions.GetSubscriptionsFilters
 	if q.Status != "all" {
 		filters.Status = q.Status

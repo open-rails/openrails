@@ -56,7 +56,11 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 
 // ListAlertWebhooks handles GET /v1/merchant/alert-webhooks.
 func ListAlertWebhooks(r *httprequest.Request) {
-	ids, ok := listIDs(r, billing.ParseAlertWebhookID)
+	var query billing.AlertWebhookListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}

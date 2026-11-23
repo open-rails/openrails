@@ -1435,7 +1435,7 @@ func (g *localGate) limits(ctx context.Context, customer billing.CustomerID) ([]
 	}
 	g.mu.Unlock()
 	if !ok {
-		page, err := g.c.ListCustomerLimits(ctx, customer)
+		page, err := g.c.ListCustomerLimits(ctx, billing.CustomerLimitListParams{CustomerID: customer})
 		if errors.Is(err, billing.ErrUnreachable) {
 			return nil, unavailable(err)
 		}

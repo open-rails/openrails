@@ -9,7 +9,7 @@ import (
 // unknown ones are absent.
 type PaymentMethodListParams struct {
 	PageRequest
-	IDs []PaymentMethodID
+	IDs []PaymentMethodID `form:"ids,comma"`
 }
 
 // PaymentMethodStatus is where a saved card stands. Only an active card is

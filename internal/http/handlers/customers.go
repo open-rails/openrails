@@ -15,7 +15,7 @@ func ListCustomers(r *httprequest.Request) {
 	if params.PageRequest, ok = r.Page(); !ok {
 		return
 	}
-	if params.IDs, ok = listIDs(r, billing.ParseCustomerID); !ok {
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
 	svc, ok := billingService(r)

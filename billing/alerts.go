@@ -86,7 +86,7 @@ type AlertWebhook struct {
 // AlertWebhookListParams lists every alert webhook, or reads the 1 to
 // MaxBatchItems IDs names; unknown ones are absent.
 type AlertWebhookListParams struct {
-	IDs []AlertWebhookID
+	IDs []AlertWebhookID `form:"ids,comma"`
 }
 
 // CreateAlertWebhookParams adds an alert webhook. Format defaults to

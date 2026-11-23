@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -50,38 +49,21 @@ func writePSPImportRefusal(r *httprequest.Request, err error, internalMessage st
 	writeRefusal(r, err, internalMessage)
 }
 
-// PSPImportQuery filters ListPSPImports: psp names one PSP by id or key.
-type PSPImportQuery struct {
-	PSP string `form:"psp"`
-}
-
 func ListPSPImports(r *httprequest.Request) {
-	var query PSPImportQuery
-	if !r.BindQuery(&query) {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
+	var params billing.PSPImportListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
 	im, ok := pspImporter(r)
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePSPImportID)
-	if !ok {
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
-	params := billing.PSPImportListParams{PageRequest: page, IDs: ids}
-	if psp := strings.TrimSpace(query.PSP); strings.HasPrefix(psp, billing.PSPIDPrefix) {
-		id, err := billing.ParsePSPID(psp)
-		if err != nil {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "psp names a PSP by id or key").WithParam("psp"))
-			return
-		}
-		params.PSP.ID = &id
-	} else {
-		params.PSP.Key = psp
+	if _, err := billing.ParsePSPRef(params.PSP); err != nil {
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "psp names a PSP by id or key").WithParam("psp"))
+		return
 	}
 	out, err := im.List(r.Request.Context(), params)
 	if err != nil {
@@ -145,34 +127,23 @@ func DeletePSPImport(r *httprequest.Request) {
 	r.NoContent()
 }
 
-// PSPImportRecordQuery filters ListPSPImportRecords.
-type PSPImportRecordQuery struct {
-	State billing.PSPImportRecordState `form:"state"`
-	Kind  billing.PSPImportRecordKind  `form:"kind"`
-}
-
 func ListPSPImportRecords(r *httprequest.Request) {
 	id, ok := pathID(r, billing.ParsePSPImportID)
 	if !ok {
 		return
 	}
-	var query PSPImportRecordQuery
-	if !r.BindQuery(&query) {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
+	var params billing.PSPImportRecordListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
 	im, ok := pspImporter(r)
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePSPImportRecordID)
-	if !ok {
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
-	out, err := im.ListRecords(r.Request.Context(), id, billing.PSPImportRecordListParams{PageRequest: page, IDs: ids, State: query.State, Kind: query.Kind})
+	out, err := im.ListRecords(r.Request.Context(), id, params)
 	if err != nil {
 		writeRefusal(r, err, "PSP import record list failed")
 		return
@@ -241,35 +212,12 @@ func SetPSPImportMappings(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// ProviderCatalogQuery filters ListProviderCatalog.
-type ProviderCatalogQuery struct {
-	// PSP is the PSP's id or key.
-	PSP     string                      `form:"psp"`
-	Kind    billing.ProviderCatalogKind `form:"kind"`
-	Mapped  *bool                       `form:"mapped"`
-	Retired *bool                       `form:"retired"`
-	Import  *billing.PSPImportID        `form:"import"`
-}
-
-// pspRef reads a PSP named by id (psp_…) or key.
-func pspRef(v string) billing.PSPRef {
-	v = strings.TrimSpace(v)
-	if id, err := billing.ParsePSPID(v); err == nil {
-		return billing.PSPRef{ID: &id}
-	}
-	return billing.PSPRef{Key: v}
-}
-
 // ListProviderCatalog handles GET /v1/merchant/provider-catalog: one PSP's
 // catalog as OpenRails last observed it, each price with the provider price
 // mapping it.
 func ListProviderCatalog(r *httprequest.Request) {
-	var query ProviderCatalogQuery
-	if !r.BindQuery(&query) {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
+	var params billing.ProviderCatalogListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
 	objects := r.State.ProviderObjects()
@@ -277,7 +225,7 @@ func ListProviderCatalog(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "provider catalog unavailable")
 		return
 	}
-	out, err := objects.List(r.Request.Context(), billing.ProviderCatalogListParams{PageRequest: page, PSP: pspRef(query.PSP), Kind: query.Kind, Mapped: query.Mapped, Retired: query.Retired, Import: query.Import})
+	out, err := objects.List(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "provider catalog list failed")
 		return

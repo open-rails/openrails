@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +31,11 @@ func ListPaymentAttempts(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePaymentAttemptID)
+	var query billing.PaymentAttemptListParams
+	if !bindList(r, &query, &query.PageRequest) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}
@@ -45,26 +48,14 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		r.SuccessJSON(pagination.Map(billing.ListPage[gen.BillingPaymentAttempt]{Items: rows}, paymentAttemptToAPI))
 		return
 	}
-	q := queryReader{r: r}
 	params := gen.ListPaymentAttemptsParams{
-		MerchantID: mid, Kinds: q.list("kind"), Owners: q.list("owner"), Categories: q.list("category"), Reasons: q.list("reason"),
-		ResponseCodes: q.list("response_code"), CardEntries: q.list("card_entry"), Sources: q.list("source"), ObservedVias: q.list("observed_via"),
-		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.typed("psp_id", parsePSPID), CustomerID: q.uuid("customer_id"),
-		PaymentID: q.typed("payment_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParsePaymentID(s)
-			return id.UUID(), err
-		}), OrderID: q.typed("order_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseOrderID(s)
-			return id.UUID(), err
-		}), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseSubscriptionID(s)
-			return id.UUID(), err
-		}), CycleID: q.typed("cycle_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseRenewalID(s)
-			return id.UUID(), err
-		}), Since: q.time("since"), Until: q.time("until"),
+		MerchantID: mid, Kinds: filled(query.Kind), Owners: filled(query.Owner), Categories: filled(query.Category), Reasons: filled(query.Reason),
+		ResponseCodes: filled(query.ResponseCode), CardEntries: filled(query.CardEntry), Sources: filled(query.Source), ObservedVias: filled(query.ObservedVia),
+		AvsResults: filled(query.AVSResult), CvvResults: filled(query.CVVResult), PspID: idOf(query.PSPID), CustomerID: idOf(query.CustomerID),
+		PaymentID: idOf(query.PaymentID), OrderID: idOf(query.OrderID), SubscriptionID: idOf(query.SubscriptionID), CycleID: idOf(query.CycleID),
+		Since: instant(query.Since), Until: instant(query.Until),
 	}
-	limit, ok := q.keyset(&params.AfterAt, &params.AfterID)
+	limit, ok := keyset(r, query.PageRequest, &params.AfterAt, &params.AfterID)
 	if !ok {
 		return
 	}
@@ -119,7 +110,11 @@ func ListRenewals(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseRenewalID)
+	var query billing.RenewalListParams
+	if !bindList(r, &query, &query.PageRequest) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}
@@ -137,8 +132,7 @@ func ListRenewals(r *httprequest.Request) {
 		}))
 		return
 	}
-	q := queryReader{r: r}
-	outcomes := q.list("outcome")
+	outcomes := filled(query.Outcome)
 	for _, o := range outcomes {
 		if o != "collected" && o != "lost" && o != "open" {
 			r.APIError(api.Coded(billing.CodeInvalidQuery, `outcome must be "collected", "lost" or "open"`).WithParam("outcome"))
@@ -147,13 +141,10 @@ func ListRenewals(r *httprequest.Request) {
 	}
 	now := r.Clock.Now()
 	params := gen.ListRebillCyclesParams{
-		MerchantID: mid, Now: now, EngineDeadlineSeconds: engineRenewalDeadline, SolanaDeadlineSeconds: solanaRenewalDeadline, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
-		PspID: q.typed("psp_id", parsePSPID), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseSubscriptionID(s)
-			return id.UUID(), err
-		}), DueSince: q.time("due_since"), DueUntil: q.time("due_until"),
+		MerchantID: mid, Now: now, EngineDeadlineSeconds: engineRenewalDeadline, SolanaDeadlineSeconds: solanaRenewalDeadline, Owners: filled(query.Owner), FirstOutcomes: filled(query.FirstOutcome), MissReasons: filled(query.MissReason), Outcomes: outcomes,
+		PspID: idOf(query.PSPID), SubscriptionID: idOf(query.SubscriptionID), DueSince: instant(query.DueSince), DueUntil: instant(query.DueUntil),
 	}
-	limit, ok := q.keyset(&params.AfterAt, &params.AfterID)
+	limit, ok := keyset(r, query.PageRequest, &params.AfterAt, &params.AfterID)
 	if !ok {
 		return
 	}
@@ -277,79 +268,34 @@ func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.Renewal 
 	return out
 }
 
-// queryReader reads optional list filters, keeping the first error.
-type queryReader struct {
-	r   *httprequest.Request
-	err error
-}
-
-// list is a filter's values, comma-separated; nil when absent.
-func (q *queryReader) list(key string) []string {
+// filled is a comma-separated filter's values without empty ones; nil
+// when none.
+func filled(values []string) []string {
 	var out []string
-	for _, v := range strings.Split(q.r.Query(key), ",") {
-		if v = strings.TrimSpace(v); v != "" {
+	for _, v := range values {
+		if v != "" {
 			out = append(out, v)
 		}
 	}
 	return out
 }
 
-func (q *queryReader) uuid(key string) *uuid.UUID {
-	return q.typed(key, uuid.Parse)
+// idOf is a typed id's UUID, nil when zero.
+func idOf(id interface{ UUID() uuid.UUID }) *uuid.UUID {
+	u := id.UUID()
+	if u == uuid.Nil {
+		return nil
+	}
+	return &u
 }
 
-func (q *queryReader) typed(key string, parse func(string) (uuid.UUID, error)) *uuid.UUID {
-	v := strings.TrimSpace(q.r.Query(key))
-	if v == "" {
-		return nil
-	}
-	id, err := parse(v)
-	if err != nil || id == uuid.Nil {
-		q.fail(errors.New("invalid " + key))
-		return nil
-	}
-	return &id
-}
-
-func (q *queryReader) time(key string) *time.Time {
-	v := strings.TrimSpace(q.r.Query(key))
-	if v == "" {
-		return nil
-	}
-	t, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		q.fail(errors.New(key + " must be an RFC3339 time"))
-		return nil
-	}
-	return &t
-}
-
-// keyset reads the page after the filters, writing the first refusal: the
-// limit, and the (time, id) cursor into the query's nullable arguments.
-func (q *queryReader) keyset(afterAt **time.Time, afterID **uuid.UUID) (int, bool) {
-	if q.err != nil {
-		q.r.APIError(api.Coded(billing.CodeInvalidQuery, q.err.Error()))
-		return 0, false
-	}
-	page, ok := q.r.Page()
-	if !ok {
-		return 0, false
-	}
+// keyset reads the (time, id) cursor of page into the query's nullable
+// arguments, and answers its limit.
+func keyset(r *httprequest.Request, page billing.PageRequest, afterAt **time.Time, afterID **uuid.UUID) (int, bool) {
 	var err error
 	if *afterAt, *afterID, err = pagination.After(page.Cursor); err != nil {
-		writeRefusal(q.r, err, "invalid cursor")
+		writeRefusal(r, err, "invalid cursor")
 		return 0, false
 	}
 	return page.Limit, true
-}
-
-func (q *queryReader) fail(err error) {
-	if q.err == nil {
-		q.err = err
-	}
-}
-
-func parsePSPID(s string) (uuid.UUID, error) {
-	id, err := billing.ParsePSPID(s)
-	return id.UUID(), err
 }

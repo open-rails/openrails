@@ -254,7 +254,7 @@ func TestLeaseSyncs(t *testing.T) {
 				require.Empty(t, out.Usage.Refused)
 				var refusal *billing.Refusal
 				set, refusal = wanted(t, out)
-				b, err := w.alpha.GetBalance(t.Context(), customer, "USD")
+				b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 				require.NoError(t, err)
 				require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "no hold takes the balance past what it holds")
 				if refusal != nil {
@@ -273,7 +273,7 @@ func TestLeaseSyncs(t *testing.T) {
 			}
 		}
 		require.Positive(t, refused, "the balance runs out")
-		b, err := w.alpha.GetBalance(t.Context(), customer, "USD")
+		b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.LessOrEqual(t, b.HeldAmount, b.BalanceAmount, "settled and held never pass the balance")
 	})

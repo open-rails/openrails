@@ -5,9 +5,8 @@ import "time"
 // AccessTenureParams asks how long a customer held each of 1 to
 // MaxEntitlementChecks keys. At is a past instant; zero uses the service clock.
 type AccessTenureParams struct {
-	CustomerID   CustomerID
-	Entitlements []string
-	At           time.Time
+	Entitlements []string  `form:"entitlement"`
+	At           time.Time `form:"at"`
 }
 
 // AccessTenure is elapsed access as of AsOf, in whole seconds per requested

@@ -48,7 +48,11 @@ func ListMyBalanceTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listBalanceTransactions(r, payer, nil)
+	var query MyBalanceTransactionListQuery
+	if !bindList(r, &query, &query.PageRequest) {
+		return
+	}
+	listBalanceTransactions(r, payer, billing.BalanceTransactionListParams{PageRequest: query.PageRequest, Currency: query.Currency})
 }
 
 // SetMyLowBalanceLine sets the customer's own low-balance line in one

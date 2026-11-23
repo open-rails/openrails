@@ -16,15 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/proposals"
 )
 
-// ProposalsQuery filters the proposals list.
-type ProposalsQuery struct {
-	PSPID  string `form:"psp_id"`
-	PullID string `form:"pull_id"`
-	Kind   string `form:"kind"`
-	Source string `form:"source"`
-	Status string `form:"status"`
-}
-
 func proposalExecutor(r *httprequest.Request) (*proposals.Executor, bool) {
 	if r.State == nil || r.State.DB == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "proposals unavailable")
@@ -45,36 +36,17 @@ func personActor(r *httprequest.Request) string {
 // ListProposals handles GET /v1/merchant/proposals: open pull.* proposals
 // unless a status is named, most severe first.
 func ListProposals(r *httprequest.Request) {
-	var q ProposalsQuery
-	if !r.BindQuery(&q) {
+	var p billing.ProposalListParams
+	if !bindList(r, &p, &p.PageRequest) {
 		return
 	}
-	page, ok := r.Page()
-	if !ok {
+	var ok bool
+	if p.IDs, ok = listIDs(r, p.IDs); !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseFindingID)
-	if !ok {
-		return
-	}
-	p := billing.ProposalListParams{PageRequest: page, IDs: ids, Kind: billing.ChangeKind(strings.TrimSpace(q.Kind)),
-		Source: billing.ProposalSource(strings.TrimSpace(q.Source)), Status: billing.FindingStatus(strings.TrimSpace(q.Status))}
-	if v := strings.TrimSpace(q.PSPID); v != "" {
-		id, err := billing.ParsePSPID(v)
-		if err != nil {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id is a PSP id").WithParam("psp_id"))
-			return
-		}
-		p.PSPID = id
-	}
-	if v := strings.TrimSpace(q.PullID); v != "" {
-		id, err := billing.ParsePSPImportID(v)
-		if err != nil {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "pull_id is a PSP import id").WithParam("pull_id"))
-			return
-		}
-		p.Pull = id
-	}
+	p.Kind = billing.ChangeKind(strings.TrimSpace(string(p.Kind)))
+	p.Source = billing.ProposalSource(strings.TrimSpace(string(p.Source)))
+	p.Status = billing.FindingStatus(strings.TrimSpace(string(p.Status)))
 	x, ok := proposalExecutor(r)
 	if !ok {
 		return

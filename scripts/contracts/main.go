@@ -1,8 +1,9 @@
 // contracts verifies or rewrites the reviewed contracts: the Go API list
 // (api/go.txt), the schema list (api/schema.txt), the Go wire snapshot
 // (compatibility/contract.json) and the files generated from the route
-// catalog (api/openapi.json, the TypeScript wire types, the route and
-// error-code tables in docs/api).
+// catalog (the Go Client in client_gen.go, api/openapi.json, the TypeScript
+// wire types, the route and error-code tables in docs/api). The generated
+// files come first: the Go API is read from the package they complete.
 //
 // The schema list is read from a real PostgreSQL: -dsn, or OPENRAILS_E2E_DSN,
 // names a disposable server. Without one the list is only checked against the
@@ -61,11 +62,14 @@ func run(write bool, dsn string) error {
 	}
 	defer root.Close()
 	ctx := context.Background()
-	surface, err := apisurface.Load(ctx, ".")
-	if err != nil {
-		return err
-	}
 	if !write {
+		if err := contract.Verify(root.FS()); err != nil {
+			return err
+		}
+		surface, err := apisurface.Load(ctx, ".")
+		if err != nil {
+			return err
+		}
 		listed, err := root.ReadFile(apisurface.File)
 		if err != nil {
 			return err
@@ -76,10 +80,23 @@ func run(write bool, dsn string) error {
 		if err := contractaudit.Verify(root.FS()); err != nil {
 			return err
 		}
-		if err := contract.Verify(root.FS()); err != nil {
+		return schema(ctx, root, dsn, false)
+	}
+	files, err := contract.Files(root.FS())
+	if err != nil {
+		return err
+	}
+	for name, body := range files {
+		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
 			return err
 		}
-		return schema(ctx, root, dsn, false)
+		if err := root.WriteFile(name, body, 0o644); err != nil {
+			return err
+		}
+	}
+	surface, err := apisurface.Load(ctx, ".")
+	if err != nil {
+		return err
 	}
 	if err := root.MkdirAll("api", 0o755); err != nil {
 		return err
@@ -93,18 +110,6 @@ func run(write bool, dsn string) error {
 	}
 	if err := root.WriteFile(contractaudit.SnapshotPath, snapshot, 0o644); err != nil {
 		return err
-	}
-	files, err := contract.Files(root.FS())
-	if err != nil {
-		return err
-	}
-	for name, body := range files {
-		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
-			return err
-		}
-		if err := root.WriteFile(name, body, 0o644); err != nil {
-			return err
-		}
 	}
 	return schema(ctx, root, dsn, true)
 }

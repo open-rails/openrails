@@ -1299,6 +1299,9 @@
     "OR-J04-S74": [
       "TestHostDeps/OR-J04-S74/a-slug-declared-twice-provisions-neither-entry"
     ],
+    "OR-J04-S75": [
+      "TestPublicSDK/OR-J04-S75/the-generated-client-gets-the-servers-own-refusals"
+    ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
     ],

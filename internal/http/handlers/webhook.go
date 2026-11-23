@@ -602,8 +602,18 @@ func stripeLivemodeMatches(psp merchants.PSPIdentity, signed stripeSigned) bool 
 	return *event.Livemode == config.LiveEnvironment(psp.Rail, psp.Environment)
 }
 
+// WebhookQuery is a provider callback's query: CCBill names its event type
+// there.
+type WebhookQuery struct {
+	EventType string `form:"eventType"`
+}
+
 func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (webhookutil.Prepared, string, bool) {
-	prepared, err := webhookutil.PrepareCCBill(body, r.Query("eventType"))
+	var query WebhookQuery
+	if !r.BindQuery(&query) {
+		return webhookutil.Prepared{}, "", false
+	}
+	prepared, err := webhookutil.PrepareCCBill(body, query.EventType)
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):

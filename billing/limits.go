@@ -42,6 +42,11 @@ type SetLimitParams struct {
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
+// CustomerLimitListParams names the customer whose limits are listed.
+type CustomerLimitListParams struct {
+	CustomerID CustomerID `form:"customer_id"`
+}
+
 // CustomerLimit is where one customer stands on one limit in its current
 // window. Capacity is its products' sum (or its override) plus the window's
 // adjustments; Used is settled usage and Held what open holds set aside;

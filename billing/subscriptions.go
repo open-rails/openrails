@@ -40,15 +40,22 @@ type SubscriptionListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named subscriptions in one page,
 	// whatever their state; unknown ones are absent.
-	IDs        []SubscriptionID
-	CustomerID CustomerID
-	Status     SubscriptionStatus
+	IDs        []SubscriptionID   `form:"ids,comma"`
+	CustomerID CustomerID         `form:"customer_id"`
+	Status     SubscriptionStatus `form:"status"`
 	// Dunning keeps the subscriptions in dunning: past_due or
 	// awaiting_method, each with its Dunning.
-	Dunning bool
-	Rail    string
-	PriceID PriceID
-	Sort    SubscriptionSort
+	Dunning bool             `form:"dunning"`
+	Rail    string           `form:"rail"`
+	PriceID PriceID          `form:"price_id"`
+	Sort    SubscriptionSort `form:"sort"`
+	// CreatedAfter through ExpiresBefore bound the instants they name; zero
+	// bounds nothing.
+	CreatedAfter   time.Time `form:"created_after"`
+	CreatedBefore  time.Time `form:"created_before"`
+	CanceledAfter  time.Time `form:"canceled_after"`
+	CanceledBefore time.Time `form:"canceled_before"`
+	ExpiresBefore  time.Time `form:"expires_before"`
 }
 
 // Subscription is one subscription's lifecycle and recovery state. The

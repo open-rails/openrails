@@ -182,6 +182,10 @@ func (m *model) body(v any) *obj {
 
 func (m *model) operation(r routes.Route) *obj {
 	op := newObj("tags", []string{string(r.Group)})
+	if r.ClientMethod() {
+		op.set("operationId", r.Name)
+		op.set("description", r.Doc)
+	}
 	if r.ConsoleOnly {
 		op.set("x-openrails-console-only", true)
 	}
@@ -189,25 +193,21 @@ func (m *model) operation(r routes.Route) *obj {
 	for _, p := range pathParams(r.Path) {
 		params = append(params, newObj("name", p, "in", "path", "required", true, "schema", newObj("type", "string")))
 	}
-	for _, q := range r.Query {
+	query, err := r.QueryParams()
+	if err != nil {
+		panic(err) // the catalog refuses it at init
+	}
+	for _, q := range query {
 		param := newObj("name", q.Name, "in", "query")
-		if q.Required {
-			param.set("required", true)
-		}
-		schema := newObj("type", "string")
-		switch q.Kind {
-		case "integer", "boolean":
-			schema = newObj("type", q.Kind)
-		case "date-time":
-			schema = newObj("type", "string", "format", "date-time")
-		case "ids":
-			schema = newObj("type", "array", "items", newObj("type", "string"), "minItems", 1, "maxItems", billing.MaxBatchItems)
+		schema := m.schema(q.Type)
+		if q.List {
+			schema = newObj("type", "array", "items", schema)
+			if q.Name == "ids" {
+				schema.set("minItems", 1)
+			}
+			schema.set("maxItems", billing.MaxBatchItems)
 			param.set("style", "form")
-			param.set("explode", false)
-		case "strings":
-			schema = newObj("type", "array", "items", newObj("type", "string"), "maxItems", billing.MaxBatchItems)
-			param.set("style", "form")
-			param.set("explode", true)
+			param.set("explode", !q.Comma)
 		}
 		param.set("schema", schema)
 		params = append(params, param)

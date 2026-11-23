@@ -3,9 +3,10 @@
 //
 // Every route is declared once, as a Route in its resource's file. The
 // declaration mounts the route (its gates are built from it), and generates
-// api/openapi.json, the TypeScript wire types of billing-ui and the admin
-// console, and the route tables under docs/api (go run ./scripts/contracts
-// -write). A route that is not in the catalog cannot be mounted.
+// the Go Client's method (client_gen.go), api/openapi.json, the TypeScript
+// wire types of billing-ui and the admin console, and the route tables under
+// docs/api (go run ./scripts/contracts -write). A route that is not in the
+// catalog cannot be mounted.
 package routes
 
 //go:generate go run ../../../scripts/contracts -write
@@ -15,13 +16,14 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/wireform"
 )
 
 const (
@@ -152,6 +154,13 @@ const (
 	PayURLSavedCards PayURLAccess = "saved_cards"
 )
 
+// ClientSource is how a route's Go Client method is written.
+type ClientSource string
+
+// HandWritten: the method is client_handwritten.go's, not generated: a
+// stream, or a read the client answers from memory itself.
+const HandWritten ClientSource = "hand_written"
+
 // Reply is one success outcome of a route: its status and body. Body is a
 // zero value of the body's type; nil for none.
 type Reply struct {
@@ -161,93 +170,6 @@ type Reply struct {
 
 // Stream is a body that is not JSON: an archive, a script.
 type Stream struct{ ContentType string }
-
-// Param is one query parameter.
-type Param struct {
-	Name string
-	// Kind is string, integer, boolean, date-time, ids or strings (a
-	// repeated parameter).
-	Kind string
-	// Checked: the mount refuses a value that is not a non-negative integer
-	// (400 invalid_query) before the handler reads it.
-	Checked bool
-	// Required: the route refuses a request without it.
-	Required bool
-}
-
-func text(name string) Param    { return Param{Name: name, Kind: "string"} }
-func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
-
-// repeated is a parameter given once per value, for values that may hold a
-// comma.
-func repeated(name string) Param { return Param{Name: name, Kind: "strings"} }
-
-// pageParams are a cursor-paged list's query: Request.Page reads them.
-var pageParams = []Param{text("cursor"), integer("limit")}
-
-// idsParam names up to billing.MaxBatchItems records of a list, comma
-// separated. The mount refuses a longer list, and any other parameter beside
-// it: the answer is the named records, whatever their state, in one page.
-var idsParam = Param{Name: "ids", Kind: "ids"}
-
-// params lists a route's query parameters, sorted by name.
-func params(parts ...any) []Param {
-	var out []Param
-	for _, part := range parts {
-		switch p := part.(type) {
-		case Param:
-			out = append(out, p)
-		case []Param:
-			out = append(out, p...)
-		default:
-			panic(fmt.Sprintf("routes: query part %T", part))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
-// queryOf lists the parameters a handler binds from v's `form` tags
-// (Request.BindQuery), which refuses a malformed one itself.
-func queryOf(v any) []Param {
-	var out []Param
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		for t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() != reflect.Struct {
-			return
-		}
-		for i := range t.NumField() {
-			f := t.Field(i)
-			name, _, _ := strings.Cut(f.Tag.Get("form"), ",")
-			ft := f.Type
-			for ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-			if name == "" || name == "-" {
-				if ft.Kind() == reflect.Struct && ft.String() != "time.Time" {
-					walk(ft)
-				}
-				continue
-			}
-			kind := "string"
-			switch {
-			case ft.String() == "time.Time":
-				kind = "date-time"
-			case ft.Kind() == reflect.Bool:
-				kind = "boolean"
-			case ft.Kind() >= reflect.Int && ft.Kind() <= reflect.Uint64:
-				kind = "integer"
-			}
-			out = append(out, Param{Name: name, Kind: kind})
-		}
-	}
-	walk(reflect.TypeOf(v))
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
 
 // codes lists a route's error codes; each must be in billing's registry.
 func codes(list ...billing.ErrorCode) []billing.ErrorCode {
@@ -274,6 +196,16 @@ type Route struct {
 	// Name is the route's Go client method. ConsoleOnly is the explicit
 	// exception for optional console assistance, not a merchant operation.
 	Name string
+	// Doc is a client route's method comment and OpenAPI description: a
+	// sentence beginning with Name.
+	Doc string
+	// Args holds a zero value of each path wildcard's type, in path order:
+	// the client method's arguments, each a string or a Stringer.
+	Args []any
+	// Cache is the read cache that may answer a client GET; empty reads live.
+	Cache config.Read
+	// Client is how the client method is written: generated, or HandWritten.
+	Client ClientSource
 	// ConsoleOnly marks optional catalog assistance owned by the console UI.
 	// It keeps its ordinary merchant auth, feature and rate-limit gates but
 	// is not a Go Client method; it does not require the bundled console UI.
@@ -305,9 +237,10 @@ type Route struct {
 	// checkout origin; none is not served there.
 	PayURL PayURLAccess
 
-	// Query lists the query parameters; Request is a zero value of the JSON
-	// body's type (nil for none); Responses is every success outcome.
-	Query     []Param
+	// Query is a zero value of the query's type, its parameters the type's
+	// `form` fields (wireform), nil for none; Request is a zero value of the
+	// JSON body's type (nil for none); Responses is every success outcome.
+	Query     any
 	Request   any
 	Responses []Reply
 	// Errors lists the codes the route's handler and the services it calls
@@ -318,6 +251,14 @@ type Route struct {
 	// when it needs more than the request. Exactly one is set.
 	Handler router.Handler
 	Bind    func(*Env) router.Handler
+}
+
+// QueryParams lists the route's query parameters, sorted by name.
+func (r Route) QueryParams() ([]wireform.Param, error) {
+	if r.Query == nil {
+		return nil, nil
+	}
+	return wireform.Params(reflect.TypeOf(r.Query))
 }
 
 // Key is the route's identity: "GET /v1/admin/payments/{id}".
@@ -336,6 +277,50 @@ func (r Route) ClientMethod() bool {
 		return false
 	}
 	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Name == "GetPublicConfig"
+}
+
+// clientShape requires a client route's method to be declared whole, and
+// leaves the client fields of any other route empty.
+func (r Route) clientShape() error {
+	if !r.ClientMethod() {
+		if r.Doc != "" || r.Args != nil || r.Cache != "" || r.Client != "" {
+			return fmt.Errorf("Doc, Args, Cache and Client are a client route's")
+		}
+		return nil
+	}
+	if !strings.HasPrefix(r.Doc, r.Name+" ") {
+		return fmt.Errorf("a client route's Doc is a sentence beginning with its Name, %s", r.Name)
+	}
+	wildcards := strings.Count(r.Path, "{")
+	if len(r.Args) != wildcards {
+		return fmt.Errorf("Args holds %d values for %d path wildcards", len(r.Args), wildcards)
+	}
+	for _, arg := range r.Args {
+		if _, ok := arg.(fmt.Stringer); !ok && reflect.TypeOf(arg).Kind() != reflect.String {
+			return fmt.Errorf("Args: %T is neither a string nor a Stringer", arg)
+		}
+	}
+	if r.Cache != "" && r.Method != GET {
+		return fmt.Errorf("only a GET is cached")
+	}
+	switch r.Client {
+	case "", HandWritten:
+	default:
+		return fmt.Errorf("unknown Client %q", r.Client)
+	}
+	stream := false
+	if _, ok := r.Request.(Stream); ok {
+		stream = true
+	}
+	for _, reply := range r.Responses {
+		if _, ok := reply.Body.(Stream); ok {
+			stream = true
+		}
+	}
+	if stream && r.Client != HandWritten {
+		return fmt.Errorf("a streamed body's client method is HandWritten")
+	}
+	return nil
 }
 
 // consoleOwnership refuses exemptions that could hide ordinary SDK routes.
@@ -374,6 +359,12 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			panic("routes: declared twice: " + r.Key())
 		}
 		if err := r.consoleOwnership(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
+		}
+		if _, err := r.QueryParams(); err != nil {
+			panic("routes: " + r.Key() + ": " + err.Error())
+		}
+		if err := r.clientShape(); err != nil {
 			panic("routes: " + r.Key() + ": " + err.Error())
 		}
 		if (r.Handler == nil) == (r.Bind == nil) {
@@ -482,7 +473,7 @@ func sortedCodes(codes []billing.ErrorCode) []billing.ErrorCode {
 // where they apply. ErrorSet lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
-	if r.Request != nil || len(r.Query) > 0 {
+	if r.Request != nil || r.Query != nil {
 		sets = append(sets, "request")
 	}
 	return sets

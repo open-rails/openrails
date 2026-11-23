@@ -256,14 +256,11 @@ func (r *Request) PageOf(size pagination.Size) (billing.PageRequest, bool) {
 	return page, true
 }
 
-// BindQuery reads the query string into data's `form` fields. A value that
-// does not parse as its field's type is 400 invalid_query on that parameter.
+// BindQuery reads the query string into data's `form` fields, as the route
+// declares them (wireform). A value that does not parse as its field's type
+// is 400 invalid_query on that parameter.
 func (r *Request) BindQuery(data any) bool {
-	err := decodeTaggedValues(data, "form", func(k string) string { return r.Request.URL.Query().Get(k) })
-	if err == nil {
-		err = validateBinding(data)
-	}
-	if err != nil {
+	if err := wireform.Decode(r.Request.URL.Query(), data); err != nil {
 		r.APIError(QueryError(err))
 		return false
 	}
@@ -423,19 +420,14 @@ func BindError(err error) *api.APIError {
 
 // QueryError is the refusal for a query string BindQuery could not accept.
 func QueryError(err error) *api.APIError {
-	var field *fieldError
+	var field *wireform.FieldError
 	if errors.As(err, &field) {
-		return api.Coded(billing.CodeInvalidQuery, field.name+" is invalid").WithParam(field.name)
-	}
-	var verr validator.ValidationErrors
-	if errors.As(err, &verr) && len(verr) > 0 {
-		name := strings.ToLower(verr[0].Field())
-		return api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name)
+		return api.Coded(billing.CodeInvalidQuery, field.Name+" is invalid").WithParam(field.Name)
 	}
 	return api.Coded(billing.CodeInvalidQuery, "")
 }
 
-// fieldError is a query or path value that does not parse as its field's type.
+// fieldError is a path value that does not parse as its field's type.
 type fieldError struct {
 	name string
 	err  error
@@ -548,7 +540,7 @@ func validateBinding(data any) error {
 }
 
 // decodeTaggedValues populates dst's fields from get(), matched by the given
-// struct tag ("form" for query, "uri" for path). It recurses into nested and
+// struct tag ("uri" for path). It recurses into nested and
 // embedded struct fields, parses
 // time.Time by its `time_format` tag (default RFC 3339), and decodes
 // encoding.TextUnmarshaler fields (uuid.UUID etc.).

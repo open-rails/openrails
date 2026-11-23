@@ -90,6 +90,7 @@ currency-field billing.EffectiveLowBalanceLine.Currency
 currency-field billing.FleetCurrencyRevenue.Currency
 currency-field billing.FleetMRR.Currency
 currency-field billing.FleetWeeklyVolume.Currency
+currency-field billing.GetBalanceParams.Currency
 currency-field billing.GetUsageParams.Currency
 currency-field billing.Hold.Currency
 currency-field billing.LeaseUsage.Currency
@@ -248,7 +249,6 @@ reexport server.ErrRenamesDisabled
 reexport server.FormerNamesFinite
 reexport server.FormerNamesForever
 reexport server.FormerNamesImmediate
-string-param openrails.Client.GetBalance.currency
 untyped-const billing.AlertWebhookIDPrefix
 untyped-const billing.BalanceTransactionIDPrefix
 untyped-const billing.CardVaultPlatform

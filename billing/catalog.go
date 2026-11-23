@@ -88,12 +88,12 @@ type UpdateProductParams struct {
 // page, whatever their state; unknown ones are absent.
 type ProductListParams struct {
 	PageRequest
-	IDs          []ProductID
-	Keys         []string
-	Archived     *bool
-	TierGroup    string
-	Entitlements []string
-	ForSale      *bool
+	IDs          []ProductID `form:"ids,comma"`
+	Keys         []string    `form:"keys"`
+	Archived     *bool       `form:"archived"`
+	TierGroup    string      `form:"tier_group"`
+	Entitlements []string    `form:"entitlement"`
+	ForSale      *bool       `form:"for_sale"`
 }
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
@@ -312,7 +312,7 @@ type UpdatePriceParams struct {
 // GetPriceParams reads a price. Verify asks a provider price's provider for
 // its terms and reports any drift; it is a read, never a write.
 type GetPriceParams struct {
-	Verify bool
+	Verify bool `form:"verify"`
 }
 
 // PriceListParams filters ListPrices. Nil Archived and Recurring list both.
@@ -322,13 +322,13 @@ type GetPriceParams struct {
 // are absent.
 type PriceListParams struct {
 	PageRequest
-	IDs        []PriceID
-	ProductID  ProductID
-	ProductKey string
-	Key        string
-	Currency   string
-	Recurring  *bool
-	Archived   *bool
+	IDs        []PriceID `form:"ids,comma"`
+	ProductID  ProductID `form:"product_id"`
+	ProductKey string    `form:"product_key"`
+	Key        string    `form:"key"`
+	Currency   string    `form:"currency"`
+	Recurring  *bool     `form:"recurring"`
+	Archived   *bool     `form:"archived"`
 }
 
 // PriceKeyMovement is one point in a price key's history: from EffectiveAt

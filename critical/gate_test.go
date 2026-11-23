@@ -647,7 +647,7 @@ func TestGate(t *testing.T) {
 		g := newGate(t, client, openrails.GateDeps{})
 		require.NoError(t, gateAdmit(t, g, spend(customer, "warm", 0, 100)).Release(t.Context()))
 		require.Eventually(t, func() bool {
-			page, err := a.alpha.ListCustomerLimits(t.Context(), customer)
+			page, err := a.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 			if err != nil {
 				return false
 			}
@@ -752,7 +752,7 @@ func TestGate(t *testing.T) {
 				// The first sync after the lost reply: the gate has not applied
 				// the shrink, so the server keeps what it held.
 				checked, afterLoss = true, p.Applied
-				page, err := a.alpha.ListCustomerLimits(context.Background(), customer)
+				page, err := a.alpha.ListCustomerLimits(context.Background(), billing.CustomerLimitListParams{CustomerID: customer})
 				readErr = err
 				if err == nil {
 					for _, line := range page.Items {

@@ -79,14 +79,14 @@ type Payment struct {
 // optional. IDs instead reads 1 to MaxBatchItems named payments in one page,
 // whatever their state; unknown ones are absent.
 type PaymentListParams struct {
-	IDs            []PaymentID
-	CustomerID     CustomerID
-	SubscriptionID SubscriptionID
-	OrderID        OrderID
-	Status         PaymentStatus
-	Rail           string
-	Kind           PaymentKind
-	TransactionID  string
+	IDs            []PaymentID    `form:"ids,comma"`
+	CustomerID     CustomerID     `form:"customer_id"`
+	SubscriptionID SubscriptionID `form:"subscription_id"`
+	OrderID        OrderID        `form:"order_id"`
+	Status         PaymentStatus  `form:"status"`
+	Rail           string         `form:"rail"`
+	Kind           PaymentKind    `form:"kind"`
+	TransactionID  string         `form:"transaction_id"`
 	PageRequest
 }
 

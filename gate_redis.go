@@ -2016,7 +2016,7 @@ func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([
 	}
 	var lines []billing.CustomerLimit
 	if err != nil || json.Unmarshal([]byte(raw), &lines) != nil {
-		page, err := s.c.ListCustomerLimits(ctx, customer)
+		page, err := s.c.ListCustomerLimits(ctx, billing.CustomerLimitListParams{CustomerID: customer})
 		if errors.Is(err, billing.ErrUnreachable) {
 			return nil, unavailable(err)
 		}

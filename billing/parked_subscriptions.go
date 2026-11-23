@@ -80,7 +80,7 @@ type ParkedSubscription struct {
 // or id; Released lists closed parks instead of open ones.
 type ParkedSubscriptionListParams struct {
 	PageRequest
-	PSP      string
-	Reason   ParkReason
-	Released bool
+	PSP      string     `form:"psp"`
+	Reason   ParkReason `form:"reason"`
+	Released bool       `form:"released"`
 }

@@ -1,29 +1,15 @@
 package handlers
 
 import (
-	"strconv"
-
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/service"
 )
 
-type EventLogQuery struct {
-	After string   `form:"after"`
-	Limit int      `form:"limit"`
-	Types []string `form:"type"`
-}
-
 func ListEvents(r *httprequest.Request) {
-	query := billing.EventQuery{After: r.Query("after"), Types: r.Request.URL.Query()["type"]}
-	if raw := r.Query("limit"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "invalid limit").WithParam("limit"))
-			return
-		}
-		query.Limit = value
+	var query billing.EventQuery
+	if !r.BindQuery(&query) {
+		return
 	}
 	svc, err := service.New(r.State)
 	if err != nil {

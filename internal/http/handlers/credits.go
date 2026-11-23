@@ -126,19 +126,16 @@ func CreateCreditGrants(r *httprequest.Request) {
 // ListCreditGrants lists a customer's credit grants, newest first.
 func ListCreditGrants(r *httprequest.Request) {
 	var params billing.CreditGrantListParams
-	if !r.BindQuery(&params) {
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
 	var ok bool
-	if params.PageRequest, ok = r.Page(); !ok {
-		return
-	}
-	if params.IDs, ok = listIDs(r, billing.ParseCreditGrantID); !ok {
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
 		return
 	}
 	if params.IDs == nil {
-		id, err := billing.ParseCustomerID(strings.TrimSpace(r.Query("customer_id")))
-		if err != nil || id.IsZero() {
+		id := params.CustomerID
+		if id.IsZero() {
 			r.APIError(api.Coded(billing.CodeInvalidCustomerID, "customer_id is required").WithParam("customer_id"))
 			return
 		}
@@ -223,23 +220,23 @@ func ListBalanceTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseBalanceTransactionID)
-	if !ok {
+	var params billing.BalanceTransactionListParams
+	if !bindList(r, &params, &params.PageRequest) {
 		return
 	}
-	listBalanceTransactions(r, customer, ids)
+	if params.IDs, ok = listIDs(r, params.IDs); !ok {
+		return
+	}
+	listBalanceTransactions(r, customer, params)
 }
 
-func listBalanceTransactions(r *httprequest.Request, customer billing.CustomerID, ids []billing.BalanceTransactionID) {
-	var params billing.BalanceTransactionListParams
-	if !r.BindQuery(&params) {
-		return
-	}
-	var ok bool
-	if params.PageRequest, ok = r.Page(); !ok {
-		return
-	}
-	params.IDs = ids
+// MyBalanceTransactionListQuery is a customer's own ledger's query.
+type MyBalanceTransactionListQuery struct {
+	billing.PageRequest
+	Currency string `form:"currency"`
+}
+
+func listBalanceTransactions(r *httprequest.Request, customer billing.CustomerID, params billing.BalanceTransactionListParams) {
 	svc, ok := billingService(r)
 	if !ok {
 		return
@@ -252,11 +249,6 @@ func listBalanceTransactions(r *httprequest.Request, customer billing.CustomerID
 	r.SuccessJSON(page)
 }
 
-// currencyQuery is a route's ?currency=.
-type currencyQuery struct {
-	Currency string `form:"currency"`
-}
-
 // GetBalance returns a customer's money in one currency.
 func GetBalance(r *httprequest.Request) {
 	customer, ok := customerParam(r)
@@ -267,7 +259,7 @@ func GetBalance(r *httprequest.Request) {
 }
 
 func getBalance(r *httprequest.Request, customer billing.CustomerID) {
-	var q currencyQuery
+	var q billing.GetBalanceParams
 	if !r.BindQuery(&q) {
 		return
 	}

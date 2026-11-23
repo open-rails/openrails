@@ -22,21 +22,21 @@ import (
 )
 
 type GetSubscriptionsFilters struct {
-	CustomerID     billing.CustomerID `form:"customer_id"`
-	Status         string             `form:"status"`
-	PriceID        billing.PriceID    `form:"price_id"`
-	Rail           string             `form:"rail"`
-	CreatedAfter   *time.Time         `form:"created_after" time_format:"2006-01-02"`
-	CreatedBefore  *time.Time         `form:"created_before" time_format:"2006-01-02"`
-	CanceledAfter  *time.Time         `form:"canceled_after" time_format:"2006-01-02"`
-	CanceledBefore *time.Time         `form:"canceled_before" time_format:"2006-01-02"`
-	ExpiresBefore  *time.Time         `form:"expires_before" time_format:"2006-01-02"`
+	CustomerID     billing.CustomerID
+	Status         string
+	PriceID        billing.PriceID
+	Rail           string
+	CreatedAfter   *time.Time
+	CreatedBefore  *time.Time
+	CanceledAfter  *time.Time
+	CanceledBefore *time.Time
+	ExpiresBefore  *time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
-	Dunning bool `form:"dunning"`
+	Dunning bool
 	// Sort is the list's order; empty is created_at.
-	Sort billing.SubscriptionSort `form:"sort"`
+	Sort billing.SubscriptionSort
 	// IDs, when not nil, reads those subscriptions instead, in one page.
-	IDs []uuid.UUID `form:"-"`
+	IDs []uuid.UUID
 }
 
 type SubscriptionService struct {

@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/inprocess"
+	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -53,43 +54,6 @@ type Client struct {
 	entitlementCacheScope string
 	// uncached reads everything live (Uncached).
 	uncached bool
-}
-
-// MerchantID is the handle's merchant.
-func (c *Client) MerchantID() billing.MerchantID { return c.merchantID }
-
-// ActingFor is the in-process handle whose calls act for invoker, the person
-// signed in at the host, by issuer and subject as the host's identity
-// provider verified them. Each call is then theirs, as their own HTTP call
-// would be: their destructive-action limits and holds apply, and a route
-// that needs a person, such as ClearDestructiveHold, admits them. A handle
-// naming no one is the host's own work: audited, never counted or held. An
-// issuer beginning "openrails:" or an empty name is refused at the call
-// (host_principal_invalid). A remote handle refuses: its credential names
-// its caller.
-func (c *Client) ActingFor(invoker auth.Invoker) (*Client, error) {
-	switch {
-	case c == nil || c.client == nil:
-		return nil, fmt.Errorf("openrails: a Client comes from Engine.Merchant or Remote.Merchant")
-	case !c.inprocess:
-		return nil, fmt.Errorf("openrails: ActingFor is for an in-process handle; a remote handle's credential names its caller")
-	}
-	d := c.derive()
-	d.invoker = &invoker
-	return d, nil
-}
-
-// Uncached is the handle reading everything from OpenRails: no catalog or
-// configuration read and no entitlement check is answered from memory. Its
-// answers still refresh the entitlement cache (CheckEntitlementsLive), and its
-// writes drop what the shared caches hold for the merchant.
-func (c *Client) Uncached() *Client {
-	if c == nil {
-		return nil
-	}
-	d := c.derive()
-	d.uncached = true
-	return d
 }
 
 // derive is a copy of the handle, sharing its transport and caches.
@@ -329,81 +293,6 @@ func invalidErr(msg string) error {
 	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeInvalidParam, Message: msg}}
 }
 
-// batchSize refuses an empty batch or one longer than limit before any I/O.
-func batchSize(n, limit int) error {
-	if n == 0 || n > limit {
-		return invalidErr(fmt.Sprintf("a batch holds 1 to %d items", limit))
-	}
-	return nil
-}
-
-// batchIDs refuses an empty, oversized or zero-holding id list before any I/O.
-func batchIDs[T interface{ IsZero() bool }](field string, ids []T, limit int) error {
-	if err := batchSize(len(ids), limit); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if id.IsZero() {
-			return invalidErr(field + " must be nonzero ids")
-		}
-	}
-	return nil
-}
-
-// setIDs adds a List's ids filter to q: 1 to billing.MaxBatchItems nonzero
-// ids, or nothing when ids is nil. The server refuses ids beside any other
-// parameter.
-func setIDs[T wireID](q url.Values, ids []T) error {
-	if ids == nil {
-		return nil
-	}
-	if err := batchIDs("ids", ids, billing.MaxBatchItems); err != nil {
-		return err
-	}
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = id.String()
-	}
-	q.Set("ids", strings.Join(parts, ","))
-	return nil
-}
-
-// requireID trims a caller-supplied identifier and refuses a blank one with
-// the server's invalid_param refusal before any I/O, so embedded and remote
-// callers observe the same error. Dot segments name nothing and would be
-// rewritten by path cleaning.
-func requireID(field, value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" || value == "." || value == ".." {
-		return "", invalidErr(field + " is required")
-	}
-	return value, nil
-}
-
-// pathID is requireID escaped as one URL path segment.
-func pathID(field, value string) (string, error) {
-	value, err := requireID(field, value)
-	if err != nil {
-		return "", err
-	}
-	return url.PathEscape(value), nil
-}
-
-// wireID is any typed identifier of the id family (ids.go).
-type wireID interface {
-	IsZero() bool
-	String() string
-}
-
-// requireTypedID is requireID for a typed identifier: the zero id names
-// nothing; the result is the id's wire spelling, safe as one path segment.
-func requireTypedID(field string, id wireID) (string, error) {
-	if id.IsZero() {
-		return "", invalidErr(field + " is required")
-	}
-	return url.PathEscape(id.String()), nil
-}
-
 // bearer mints the credential for the next call. There is no fallback; a mint
 // failure or empty token errors the call so the issue surfaces.
 func (c *Client) bearer(ctx context.Context) (string, error) {
@@ -418,129 +307,6 @@ func (c *Client) bearer(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("openrails: the credential's Token returned an empty token")
 	}
 	return tok, nil
-}
-
-// ListEntitlements returns one page of the keys customers hold at params.At
-// (zero: now), by customer then key in byte order: of params.CustomerIDs (1
-// to billing.MaxBatchItems), only params.Entitlements and keys under
-// params.Prefix. A key absent from the answer is not held. Without
-// customers, params.Entitlements names one key and the page is its holders.
-func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error) {
-	switch {
-	case len(params.CustomerIDs) > billing.MaxBatchItems:
-		return nil, invalidErr(fmt.Sprintf("at most %d customers per read", billing.MaxBatchItems))
-	case len(params.Entitlements) > billing.MaxBatchItems:
-		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per read", billing.MaxBatchItems))
-	case len(params.CustomerIDs) == 0 && (len(params.Entitlements) != 1 || params.Prefix != ""):
-		return nil, invalidErr("without customer ids, name exactly one entitlement")
-	}
-	query := pageValues(nil, params.PageRequest)
-	if len(params.CustomerIDs) > 0 {
-		parts := make([]string, len(params.CustomerIDs))
-		for i, id := range params.CustomerIDs {
-			if id.IsZero() {
-				return nil, invalidErr("customer ids must be nonzero")
-			}
-			parts[i] = id.String()
-		}
-		query.Set("customer_id", strings.Join(parts, ","))
-	}
-	for _, key := range params.Entitlements {
-		if strings.TrimSpace(key) == "" {
-			return nil, invalidErr("entitlements must not contain a blank key")
-		}
-		query.Add("entitlement", key)
-	}
-	if params.Prefix != "" {
-		query.Set("prefix", params.Prefix)
-	}
-	if !params.At.IsZero() {
-		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
-	}
-	var out billing.ListPage[billing.CustomerEntitlement]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements?"+query.Encode(), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CheckEntitlements is the programmatic content gate: which of
-// params.Entitlements params.CustomerID holds, and the keys they hold under
-// each of params.Prefixes, at params.At (zero: now); every requested key and
-// prefix is in the answer. One call checks at most
-// billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
-// prefixes; more is refused with invalid_param, not split. It needs an
-// application holding billing.MerchantEntitlementsRead or RootEntitlementsRead
-// (RouteGroups.Programmatic). A remote client answers a current exact-key
-// check from its entitlement cache when every key is allowed there
-// (EntitlementCheckCacheOptions), unless the handle is Uncached; a denial
-// always asks OpenRails.
-func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
-	return c.checkEntitlements(ctx, params, c == nil || !c.uncached)
-}
-
-// CheckEntitlementsLive checks access against OpenRails, never answering from
-// the SDK cache. Its answer replaces allowed keys' entries and drops denied
-// ones; a fill begun before it cannot restore them. The drop reaches this
-// client's own memory at once, or the shared Redis within a bounded wait; if
-// Redis fails, other replicas may serve the old answer for up to MaxAge. Use
-// it when a revocation or credential change must be visible immediately.
-func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error) {
-	return c.checkEntitlements(ctx, params, false)
-}
-
-func (c *Client) checkEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, useCache bool) (*billing.EntitlementCheck, error) {
-	switch {
-	case params.CustomerID.IsZero():
-		return nil, invalidErr("customer_id is required")
-	case len(params.Entitlements) == 0 && len(params.Prefixes) == 0:
-		return nil, invalidErr("entitlements or prefixes is required")
-	case len(params.Entitlements) > billing.MaxEntitlementChecks:
-		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per check", billing.MaxEntitlementChecks))
-	case len(params.Prefixes) > billing.MaxEntitlementPrefixes:
-		return nil, invalidErr(fmt.Sprintf("at most %d prefixes per check", billing.MaxEntitlementPrefixes))
-	}
-	for _, key := range params.Entitlements {
-		if strings.TrimSpace(key) == "" {
-			return nil, invalidErr("entitlements must not contain a blank key")
-		}
-	}
-	if params.Entitlements == nil {
-		params.Entitlements = []string{}
-	}
-	if c != nil && c.entitlementChecks != nil {
-		if keys := cacheableEntitlementKeys(params); keys != nil {
-			return c.checkEntitlementsCached(ctx, params, keys, !useCache)
-		}
-	}
-	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, entitlementCheckPath, params, &out); err != nil {
-		return nil, err
-	}
-	return normalizeEntitlementCheck(&out), nil
-}
-
-func normalizeEntitlementCheck(out *billing.EntitlementCheck) *billing.EntitlementCheck {
-	if out.Entitlements == nil {
-		out.Entitlements = map[string]bool{}
-	}
-	if out.Quantities == nil {
-		out.Quantities = map[string]*int{}
-	}
-	if out.Held == nil {
-		out.Held = map[string]billing.HeldEntitlements{}
-	}
-	return out
-}
-
-// normalizeCurrency preserves non-empty currency/unit codes and lets the service
-// reject missing values consistently.
-func normalizeCurrency(currency string) string {
-	currency = strings.TrimSpace(currency)
-	if strings.ContainsAny(currency, ":/") {
-		return currency // a qualified unit keeps its exact spelling
-	}
-	return strings.ToUpper(currency)
 }
 
 // statusErrorFromBody decodes the one canonical error envelope. Foreign proxy
@@ -758,4 +524,59 @@ func (c *Client) doResponse(ctx context.Context, method, path string, body any, 
 		return nil, failure
 	}
 	return response, nil
+}
+
+// routeCall is one call of a route: what the generated methods send.
+type routeCall struct {
+	method string
+	// path is the route's, its wildcards filled from args in order.
+	path           string
+	args           []string
+	idempotencyKey string
+	body, query    any
+	// cache is the read that may answer it from memory.
+	cache config.Read
+}
+
+// send makes call and decodes its answer into out, nil for none.
+func (c *Client) send(ctx context.Context, call routeCall, out any) error {
+	path, err := fillPath(call.path, call.args)
+	if err != nil {
+		return err
+	}
+	if call.query != nil {
+		q, err := wireform.Encode(call.query)
+		if err != nil {
+			return fmt.Errorf("openrails: encode query: %w", err)
+		}
+		if len(q) > 0 {
+			path += "?" + q.Encode()
+		}
+	}
+	if call.cache != "" {
+		return c.read(ctx, call.cache, path, out)
+	}
+	return c.doWithHeaders(ctx, call.method, path, call.body, out, idempotent(call.idempotencyKey))
+}
+
+// fillPath sets each {wildcard} of route to the next of args, escaped as one
+// segment. A segment no path can carry, empty or a dot segment that path
+// cleaning would remove, is refused before any I/O.
+func fillPath(route string, args []string) (string, error) {
+	segments := strings.Split(route, "/")
+	next := 0
+	for i, segment := range segments {
+		name, ok := strings.CutPrefix(segment, "{")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSuffix(name, "}")
+		value := args[next]
+		next++
+		if value == "" || value == "." || value == ".." {
+			return "", invalidErr(name + " is required")
+		}
+		segments[i] = url.PathEscape(value)
+	}
+	return strings.Join(segments, "/"), nil
 }

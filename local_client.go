@@ -56,7 +56,6 @@ func (c *LocalClient) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, param
 	if err != nil {
 		return nil, err
 	}
-	params.Currency = normalizeCurrency(params.Currency)
 	return e.StartRunningChargeTx(ctx, merchant, tx, params)
 }
 
@@ -81,9 +80,6 @@ func (c *LocalClient) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing
 	if err != nil {
 		return nil, err
 	}
-	if err := batchSize(len(requests), billing.MaxAdmissionBatchItems); err != nil {
-		return nil, err
-	}
 	return e.AdmitTx(ctx, merchant, tx, requests)
 }
 
@@ -94,9 +90,6 @@ func (c *LocalClient) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items 
 	if err != nil {
 		return nil, err
 	}
-	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
-		return nil, err
-	}
 	return e.CaptureAdmissionsTx(ctx, merchant, tx, items)
 }
 
@@ -105,9 +98,6 @@ func (c *LocalClient) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items 
 func (c *LocalClient) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
 	e, merchant, err := c.local()
 	if err != nil {
-		return nil, err
-	}
-	if err := batchSize(len(requestIDs), billing.MaxAdmissionBatchItems); err != nil {
 		return nil, err
 	}
 	return e.ReleaseAdmissionsTx(ctx, merchant, tx, requestIDs)

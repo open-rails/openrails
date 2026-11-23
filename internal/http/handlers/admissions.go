@@ -119,7 +119,8 @@ func Admit(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	if !batchItems(r, len(params.Items), billing.MaxAdmissionBatchItems) {
+	if err := params.Validate(); err != nil {
+		writeRefusal(r, err, "admit batch refused")
 		return
 	}
 	if !requireMerchantRoutePrincipal(r) {
@@ -173,10 +174,14 @@ func admissionRefusal(err *api.APIError) billing.AdmissionResult {
 	return billing.AdmissionResult{Status: err.HTTPStatus, Error: &details}
 }
 
-// admissionBatch answers one result per item, in order: each runs on its own,
-// exactly as it would alone.
-func admissionBatch(r *httprequest.Request, n int, run func(*billingservice.Service, int) billing.AdmissionResult) {
-	if !batchItems(r, n, billing.MaxAdmissionBatchItems) || !requireMerchantRoutePrincipal(r) {
+// admissionBatch answers one result per item of a valid batch, in order:
+// each runs on its own, exactly as it would alone.
+func admissionBatch(r *httprequest.Request, valid error, n int, run func(*billingservice.Service, int) billing.AdmissionResult) {
+	if valid != nil {
+		writeRefusal(r, valid, "admission batch refused")
+		return
+	}
+	if !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, ok := billingService(r)
@@ -200,7 +205,11 @@ func CaptureAdmissions(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	if !batchItems(r, len(params.Items), billing.MaxAdmissionBatchItems) || !requireMerchantRoutePrincipal(r) {
+	if err := params.Validate(); err != nil {
+		writeRefusal(r, err, "capture batch refused")
+		return
+	}
+	if !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, ok := billingService(r)
@@ -263,7 +272,7 @@ func ReleaseAdmissions(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	admissionBatch(r, len(params.RequestIDs), func(svc *billingservice.Service, i int) billing.AdmissionResult {
+	admissionBatch(r, params.Validate(), len(params.RequestIDs), func(svc *billingservice.Service, i int) billing.AdmissionResult {
 		requestID := strings.TrimSpace(params.RequestIDs[i])
 		if refusal := admissionItemScope(r, svc, requestID); refusal != nil {
 			return admissionRefusal(refusal)
@@ -295,7 +304,7 @@ func ExtendAdmissions(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	admissionBatch(r, len(params.Items), func(svc *billingservice.Service, i int) billing.AdmissionResult {
+	admissionBatch(r, params.Validate(), len(params.Items), func(svc *billingservice.Service, i int) billing.AdmissionResult {
 		item := params.Items[i]
 		requestID := strings.TrimSpace(item.RequestID)
 		if item.ExpiresAt.IsZero() {

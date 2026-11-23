@@ -11,8 +11,8 @@ const (
 // PageRequest asks for one page of a list: at most Limit items after Cursor.
 // A zero Limit is DefaultPageLimit; an empty Cursor is the first page.
 type PageRequest struct {
-	Limit  int
-	Cursor string
+	Limit  int    `form:"limit"`
+	Cursor string `form:"cursor"`
 }
 
 // ListPage is one page of a list, in the list's own order. Next is the opaque

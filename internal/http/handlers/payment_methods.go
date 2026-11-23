@@ -49,7 +49,11 @@ func ListCustomerPaymentMethods(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParsePaymentMethodID)
+	var query billing.PaymentMethodListParams
+	if !r.BindQuery(&query) {
+		return
+	}
+	ids, ok := listIDs(r, query.IDs)
 	if !ok {
 		return
 	}

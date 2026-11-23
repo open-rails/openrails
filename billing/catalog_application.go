@@ -15,7 +15,7 @@ import (
 // fields an edit set and takes them; without it an object with such a field
 // is skipped and reported in Conflicts.
 type ApplyCatalogParams struct {
-	Force bool
+	Force bool `form:"force"`
 }
 
 // CatalogApplicationReceipt is the result of applying a catalog document:
