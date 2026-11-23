@@ -469,7 +469,7 @@ func ImportDeclaredSubscriptions(
 				factSnap.Transactions = kept
 				return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 					txdb := db.NewWithPgxTx(logger, tx)
-					_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, &factSnap, asOf, 0, declaredImportLookback, time.Time{})
+					_, err := convergeSubscriptionFromSnapshotLookback(ctx, logger, txdb, lc, sub, &factSnap, asOf, 0, declaredImportLookback, time.Time{})
 					if err != nil || outcome != DeclaredImported {
 						return err
 					}

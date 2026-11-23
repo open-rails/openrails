@@ -87,7 +87,7 @@ func NMIDeclineReport(ctx context.Context, logger *slog.Logger, opts NMIDeclineR
 			pins[provider] = binding.AccountID
 		}
 		armed := reconcile.MerchantFetcherBuilder{StripeClients: rt.StripeClients, Config: rt.Config, Merchants: rt.Merchants, DB: rt.DB,
-			AccountIDs: pins, NMIClients: nmiClients(opts.NMITransport)}.Build(ctx, opts.MerchantID)
+			AccountIDs: pins, NMIClients: nmiClients(opts.NMITransport), Log: logger}.Build(ctx, opts.MerchantID)
 		client, psp := reconcile.NMIReader(armed)
 		if client == nil {
 			return errors.New("no armed NMI account for this merchant")

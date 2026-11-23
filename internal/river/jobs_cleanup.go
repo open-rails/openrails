@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/eventlog"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -22,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 )
 
 const KindCleanupExpiredData = "openrails.cleanup_expired_data"
@@ -117,6 +118,7 @@ type CleanupExpiredDataWorker struct {
 	// can show a backlog draining over several bounded passes without seeding
 	// tens of thousands of rows; registration never sets it.
 	RowBudget int
+	Log       *slog.Logger
 }
 
 func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
@@ -200,7 +202,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 	result := CleanupResult{}
 	var cleanupErr error
 
-	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+	logger := w.Log.With("worker", KindCleanupExpiredData)
 
 	directory := w.DB.GenDirectory()
 	if after == nil {
@@ -246,48 +248,12 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 			return nil
 		}); err != nil {
 			// One merchant's failure must not abort the rest of the sweep.
-			logger.WithError(err).WithField("merchant_id", merchantID).Error("Cleanup: merchant pass failed; continuing")
+			logger.ErrorContext(ctx, "Cleanup: merchant pass failed; continuing", logx.Err(err), "merchant_id", merchantID)
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
 
-	opsmetric.Emit(ctx, opsmetric.MetricRetentionSweep, log.Fields{
-		"worker":                       KindCleanupExpiredData,
-		"merchants_with_work":          len(merchantIDs),
-		"merchants_budget_capped":      result.MerchantsBudgetCapped,
-		"continued":                    after != nil,
-		"more_work_queued":             next != nil,
-		"duration_ms":                  clock.Now().Sub(started).Milliseconds(),
-		"carts":                        result.Carts,
-		"idempotency_keys":             result.IdempotencyKeys,
-		"solana_pay_references":        result.SolanaPayReferences,
-		"periodic_leases":              result.PeriodicLeases,
-		"notification_events":          result.NotificationEvents,
-		"event_log":                    result.EventLog,
-		"webhook_events":               result.WebhookEvents,
-		"host_outbox":                  result.HostOutbox,
-		"payment_attempts":             result.PaymentAttempts,
-		"rebill_cycles":                result.RebillCycles,
-		"nmi_history_months":           result.NMIHistoryMonths,
-		"subscription_transitions":     result.SubscriptionTransitions,
-		"subscription_billing_changes": result.SubscriptionBillingChanges,
-		"order_attempts":               result.OrderAttempts,
-		"unpaid_orders":                result.UnpaidOrders,
-		"failed_usage_windows":         result.FailedUsageWindows,
-		"meter_period_quantities":      result.MeterPeriodQuantities,
-		"limit_windows":                result.LimitWindows,
-		"leases":                       result.Leases,
-		"limit_adjustments":            result.LimitAdjustments,
-		"usage_daily":                  result.UsageDaily,
-		"usage_minutes":                result.UsageMinutes,
-		"webhook_health_days":          result.WebhookHealthDays,
-		"reconciliation_findings":      result.ReconciliationFindings,
-		"provider_intents":             result.ProviderIntents,
-		"provider_mutation_logs":       result.ProviderMutationLogs,
-		"released_parks":               result.ReleasedParks,
-		"partitions_created":           result.PartitionsCreated,
-		"partitions_dropped":           result.PartitionsDropped,
-	})
+	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "order_attempts", result.OrderAttempts, "unpaid_orders", result.UnpaidOrders, "failed_usage_windows", result.FailedUsageWindows, "meter_period_quantities", result.MeterPeriodQuantities, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "usage_daily", result.UsageDaily, "usage_minutes", result.UsageMinutes, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "provider_mutation_logs", result.ProviderMutationLogs, "released_parks", result.ReleasedParks, "partitions_created", result.PartitionsCreated, "partitions_dropped", result.PartitionsDropped})
 
 	if cleanupErr != nil {
 		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
@@ -297,7 +263,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 
 // sweepDeployment runs the deployment-wide sweeps, once per pass.
 func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.Time, config CleanupConfig, result *CleanupResult, cleanupErr *error) {
-	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+	logger := w.Log.With("worker", KindCleanupExpiredData)
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
 		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
 		if err != nil {
@@ -321,7 +287,7 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 			break
 		}
 		if batch == cleanupIndexedMaxBatches-1 {
-			logger.Warn("Cleanup: notification event retention reached its pass budget")
+			logger.WarnContext(ctx, "Cleanup: notification event retention reached its pass budget")
 		}
 	}
 
@@ -341,13 +307,13 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	// Partitioned tables are pruned by the calendar: whole months are created
 	// ahead and dropped behind, and no row is read.
 	if n, err := retention.EnsurePartitions(ctx, directory, now); err != nil {
-		logger.WithError(err).Error("Cleanup: ensure partitions failed")
+		logger.ErrorContext(ctx, "Cleanup: ensure partitions failed", logx.Err(err))
 		*cleanupErr = errors.Join(*cleanupErr, err)
 	} else {
 		result.PartitionsCreated = n
 	}
 	if n, err := retention.DropExpiredPartitions(ctx, directory, now); err != nil {
-		logger.WithError(err).Error("Cleanup: drop expired partitions failed")
+		logger.ErrorContext(ctx, "Cleanup: drop expired partitions failed", logx.Err(err))
 		*cleanupErr = errors.Join(*cleanupErr, err)
 	} else {
 		result.PartitionsDropped = n
@@ -358,7 +324,7 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 		for range cleanupIndexedMaxBatches {
 			n, err := fn(cleanupDeleteBatch)
 			if err != nil {
-				logger.WithError(err).Error("Cleanup: " + name + " failed")
+				logger.ErrorContext(ctx, "Cleanup: "+name+" failed", logx.Err(err))
 				*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("%s: %w", name, err))
 				return
 			}
@@ -392,9 +358,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	ctx context.Context, mid uuid.UUID, now time.Time, config CleanupConfig,
 	result *CleanupResult, cleanupErr *error,
 ) {
-	logger := log.WithContext(ctx).WithFields(log.Fields{
-		"worker": KindCleanupExpiredData, "merchant_id": mid,
-	})
+	logger := w.Log.With("worker", KindCleanupExpiredData, "merchant_id", mid)
 
 	budget := cleanupMerchantRowBudget
 	if w.RowBudget > 0 {
@@ -418,7 +382,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 				n, err = fn(tctx, gen.New(tx), clampInt32(limit))
 				return err
 			}); err != nil {
-				logger.WithError(err).Error("Cleanup: " + name + " failed")
+				logger.ErrorContext(ctx, "Cleanup: "+name+" failed", logx.Err(err))
 				*cleanupErr = errors.Join(*cleanupErr, fmt.Errorf("%s for merchant %s: %w", name, mid, err))
 				return
 			}
@@ -573,7 +537,6 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 
 	if capped {
 		result.MerchantsBudgetCapped++
-		logger.WithField("row_budget", rowBudget).
-			Warn("Cleanup: merchant hit this pass's row budget; the rest drains on the next pass")
+		logger.WarnContext(ctx, "Cleanup: merchant hit this pass's row budget; the rest drains on the next pass", "row_budget", rowBudget)
 	}
 }

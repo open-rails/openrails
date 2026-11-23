@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -96,8 +96,7 @@ func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, p
 	for _, charge := range candidates {
 		id, err := reader.OperationOf(ctx, charges[charge])
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"provider": provider, "transaction_id": charge}).
-				Warn("reconcile: the operation behind a charge is unreadable; the charge stays a finding")
+			e.Log.WarnContext(ctx, "reconcile: the operation behind a charge is unreadable; the charge stays a finding", logx.Err(err), "provider", provider, "transaction_id", charge)
 			continue
 		}
 		if id != uuid.Nil {
@@ -110,15 +109,14 @@ func (e *Engine) deferOperationCharges(ctx context.Context, provider Provider, p
 	}
 	executing, err := e.Local.ExecutingOperations(ctx, pspID, ids, e.now())
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("reconcile: executing operations unreadable; charges stay findings")
+		e.Log.WarnContext(ctx, "reconcile: executing operations unreadable; charges stay findings", logx.Err(err), "provider", provider)
 		return findings, nil
 	}
 	out := findings[:0]
 	deferred := map[string]bool{}
 	for _, f := range findings {
 		if f.Type == FindingChargeMissingLocal && executing[operations[f.SubjectKey]] && operations[f.SubjectKey] != uuid.Nil {
-			log.WithContext(ctx).WithFields(log.Fields{"provider": provider, "transaction_id": f.SubjectKey, "operation_id": operations[f.SubjectKey]}).
-				Info("reconcile: charge left to the operation executing it")
+			e.Log.InfoContext(ctx, "reconcile: charge left to the operation executing it", "provider", provider, "transaction_id", f.SubjectKey, "operation_id", operations[f.SubjectKey])
 			deferred[f.SubjectKey] = true
 			continue
 		}

@@ -31,6 +31,7 @@ func NewEngine(d *db.DB, cfg *config.Config, contacts identity.Directory, fetche
 		// destructive run with before-images, so `openrails undo-run --run <id>`
 		// can put the book back.
 		Runs: &PGDestructiveRunRecorder{DB: d},
+		Log:  d.Log,
 	}
 	// Third dunning-forensics evidence source: failed payment attempts.
 	e.History = NewPGHistorySource(d)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -106,6 +107,7 @@ type ProviderRefreshWorker struct {
 	Overlap   time.Duration
 	SafetyLag time.Duration
 	Batch     time.Duration
+	Log       *slog.Logger
 }
 
 func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshRequested }
@@ -126,7 +128,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		return fmt.Errorf("provider refresh: merchant_id required")
 	}
 
-	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshRequested).WithField("merchant_id", mid)
+	logger := w.Log.With("worker", KindProviderRefreshRequested, "merchant_id", mid)
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
@@ -148,25 +150,12 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Merchants:     w.Merchants,
 		DB:            w.DB,
 		NMIClients:    w.NMIClients,
+		Log:           w.Log,
 	}
 
 	err = w.refreshMerchant(ctx, mid, builder, &stats, logger)
 
-	logger.WithFields(log.Fields{
-		"merchants":        stats.Merchants,
-		"windows":          stats.Windows,
-		"providers":        stats.Providers,
-		"applied_changes":  stats.AppliedChanges,
-		"new_findings":     stats.NewFindings,
-		"updated_findings": stats.UpdatedFindings,
-		"watermark_errors": stats.WatermarkErrors,
-		"provider_errors":  stats.ProviderErrors,
-		"converge_errors":  stats.ConvergeErrors,
-		"lane_errors":      stats.LaneErrors,
-		"gated":            stats.Gated,
-		"held":             stats.Held,
-		"unarmed":          stats.Unarmed,
-	}).Info("Provider Refresh: pass completed")
+	logger.InfoContext(ctx, "Provider Refresh: pass completed", "merchants", stats.Merchants, "windows", stats.Windows, "providers", stats.Providers, "applied_changes", stats.AppliedChanges, "new_findings", stats.NewFindings, "updated_findings", stats.UpdatedFindings, "watermark_errors", stats.WatermarkErrors, "provider_errors", stats.ProviderErrors, "converge_errors", stats.ConvergeErrors, "lane_errors", stats.LaneErrors, "gated", stats.Gated, "held", stats.Held, "unarmed", stats.Unarmed)
 	if err != nil {
 		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
 	}
@@ -186,14 +175,14 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if stats.Held > 0 {
 		// Every read completed. Unresolved financial observations remain in
 		// the findings list for review; they do not pause ordinary billing.
-		logger.WithField("psps_with_unresolved_findings", stats.Held).Warn("Provider Refresh: unresolved financial observations need review")
+		logger.WarnContext(ctx, "Provider Refresh: unresolved financial observations need review", "psps_with_unresolved_findings", stats.Held)
 	}
 	return nil
 }
 
 // refreshMerchant reads and repairs each account's financial mirror first.
 // Policy-held lifecycle repairs remain separate from that observation phase.
-func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *log.Entry) error {
+func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *slog.Logger) error {
 	gate := destructive.New(w.DB)
 	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
@@ -225,7 +214,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				// Not armed (its WARN names the missing secret): nothing to read,
 				// so nothing incomplete. It joins the first pass after arming.
 				stats.Unarmed++
-				logger.WithFields(log.Fields{"psp_id": account.ID, "rail": account.Rail}).Debug("Provider Refresh: PSP not armed; not refreshable")
+				logger.DebugContext(ctx, "Provider Refresh: PSP not armed; not refreshable", "psp_id", account.ID, "rail", account.Rail)
 				continue
 			case armed.Coverage[provider].Binding.ID != account.ID:
 				stats.ProviderErrors++
@@ -252,27 +241,27 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		if len(res.Proofs) > 0 {
 			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs); err != nil {
 				stats.LaneErrors++
-				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: mark reconciled domains failed")
+				logger.WarnContext(ctx, "Provider Refresh: mark reconciled domains failed", logx.Err(err), "merchant_id", mid)
 			} else if len(flipped) > 0 {
-				logger.WithFields(log.Fields{"merchant_id": mid, "domains": flipped}).Info("Provider Refresh: source domains proven reconciled")
+				logger.InfoContext(ctx, "Provider Refresh: source domains proven reconciled", "merchant_id", mid, "domains", flipped)
 			}
 		}
 		if res.Changed {
 			if err := w.runConvergence(tctx, mid); err != nil {
 				stats.ConvergeErrors++
-				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
+				logger.WarnContext(ctx, "Provider Refresh: scoped convergence failed", logx.Err(err), "merchant_id", mid)
 			}
 		}
 		// Reconcile the `unknown` cohort against the provider, each row with
 		// its own PSP. A PSP that cannot arm leaves its rows `unknown`.
 		if err := w.runUnknownReconcile(tctx, mid, builder); err != nil {
 			stats.LaneErrors++
-			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
+			logger.WarnContext(ctx, "Provider Refresh: unknown-cohort reconcile failed", logx.Err(err), "merchant_id", mid)
 		}
 		return nil
 	}); err != nil {
 		stats.LaneErrors++
-		logger.WithError(err).WithField("merchant_id", mid).Error("Provider Refresh: merchant connection failed")
+		logger.ErrorContext(ctx, "Provider Refresh: merchant connection failed", logx.Err(err), "merchant_id", mid)
 		return err
 	}
 	return nil
@@ -308,15 +297,10 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		err = errors.Join(err, fmt.Errorf("verification incomplete for %d provider rails", len(res.RailErrors)))
 	}
 	if res.Held > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
-			Warn("Provider Refresh: unknown-cohort cancellations held by the cancel gate (kill switch, arming or budget); the rows stay unverified")
+		w.Log.WarnContext(ctx, "Provider Refresh: unknown-cohort cancellations held by the cancel gate (kill switch, arming or budget); the rows stay unverified", "merchant_id", mid, "held", res.Held)
 	}
 	if res.Renewed+res.Adopted+res.PastDue+res.Canceled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
-			"canceled": res.Canceled, "still_unknown": res.StillUnknown, "probed": res.Probed,
-			"backfilled": res.Backfilled, "psp_customers": res.RailCustomers, "rail_errors": len(res.RailErrors),
-		}).Info("Provider Refresh: unknown-cohort reconcile")
+		w.Log.InfoContext(ctx, "Provider Refresh: unknown-cohort reconcile", "merchant_id", mid, "renewed", res.Renewed, "adopted", res.Adopted, "past_due", res.PastDue, "canceled", res.Canceled, "still_unknown", res.StillUnknown, "probed", res.Probed, "backfilled", res.Backfilled, "psp_customers", res.RailCustomers, "rail_errors", len(res.RailErrors))
 	}
 	return err
 }
@@ -342,8 +326,7 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 		binding := coverage[provider].Binding
 		if binding.ID == uuid.Nil {
 			result.ProviderErrors++
-			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "provider": provider}).
-				Error("Provider Refresh: rail armed without a resolved PSP; refusing an unattributed pull")
+			w.Log.ErrorContext(ctx, "Provider Refresh: rail armed without a resolved PSP; refusing an unattributed pull", "merchant_id", mid, "provider", provider)
 			continue
 		}
 		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, mutations, coverage, binding, fetchers)
@@ -395,7 +378,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	}
 	if err != nil {
 		out.WatermarkErrors++
-		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
+		w.Log.WarnContext(ctx, "Provider Refresh: load watermark failed", logx.Err(err), "provider", provider)
 		return out
 	}
 	// Repeat a bounded overlap for late provider indexing. This is recovery
@@ -438,11 +421,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			out.ProviderErrors++
 			// The unadvanced watermark is the durable record that this window
 			// still needs reading; the job's log and error report the failure.
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"provider": provider,
-				"since":    since,
-				"until":    until,
-			}).Warn("Provider Refresh: provider event window failed; watermark unchanged")
+			w.Log.WarnContext(ctx, "Provider Refresh: provider event window failed; watermark unchanged", logx.Err(err), "provider", provider, "since", since, "until", until)
 			return false
 		}
 		out.Windows++
@@ -459,12 +438,12 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		// are changes a webhook should have announced. Best-effort telemetry.
 		if n := len(res.AppliedChanges); n > 0 {
 			if _, derr := webhookhealth.Drift(ctx, w.DB, pspID, now, n); derr != nil {
-				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
+				w.Log.WarnContext(ctx, "Provider Refresh: record webhook drift failed", logx.Err(derr), "provider", provider)
 			}
 		}
 		if err := w.recordWatermarkSuccess(ctx, mid, provider, pspID, until); err != nil {
 			out.WatermarkErrors++
-			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
+			w.Log.WarnContext(ctx, "Provider Refresh: advance watermark failed", logx.Err(err), "provider", provider)
 			return false
 		}
 		if qualifiedRecovery {
@@ -492,7 +471,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
 		if err != nil {
 			out.WatermarkErrors++
-			log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: read open financial findings failed")
+			w.Log.WarnContext(ctx, "Provider Refresh: read open financial findings failed", logx.Err(err), "psp_id", pspID)
 		} else if conflicts {
 			out.Held++
 		}
@@ -501,7 +480,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	// compares against this pull.
 	if out.Windows > 0 {
 		if err := webhookhealth.StampPull(ctx, w.DB, pspID, now); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: stamp webhook pull watermark failed")
+			w.Log.WarnContext(ctx, "Provider Refresh: stamp webhook pull watermark failed", logx.Err(err), "provider", provider)
 		}
 	}
 	return out
@@ -519,7 +498,7 @@ func (w *ProviderRefreshWorker) runReversals(ctx context.Context, engine *reconc
 	res, err := engine.Run(ctx, params)
 	if err != nil {
 		out.LaneErrors++
-		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: reversals read failed; the full read still runs")
+		w.Log.WarnContext(ctx, "Provider Refresh: reversals read failed; the full read still runs", logx.Err(err), "provider", provider)
 		return
 	}
 	if rep := res.Summary.Providers[string(provider)]; rep != nil {
@@ -530,7 +509,7 @@ func (w *ProviderRefreshWorker) runReversals(ctx context.Context, engine *reconc
 		out.AppliedChanges += n
 		out.Changed = true
 		if _, err := webhookhealth.Drift(ctx, w.DB, pspID, now, n); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
+			w.Log.WarnContext(ctx, "Provider Refresh: record webhook drift failed", logx.Err(err), "provider", provider)
 		}
 	}
 }

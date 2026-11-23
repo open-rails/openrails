@@ -3,12 +3,12 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -33,6 +33,7 @@ const (
 type OperationWakes struct {
 	DB    *db.DB
 	Clock clockwork.Clock
+	Log   *slog.Logger
 }
 
 func (w *OperationWakes) Pass(ctx context.Context) error {
@@ -67,8 +68,7 @@ func (w *OperationWakes) Pass(ctx context.Context) error {
 			afterAt, afterID = last.NextAttemptAt, last.ID
 		}
 		for _, op := range queued {
-			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": op.MerchantID, "intent_id": op.ID, "due_at": op.NextAttemptAt}).
-				Warn("provider operation an hour past due; its wake is queued again")
+			w.Log.WarnContext(ctx, "provider operation an hour past due; its wake is queued again", "merchant_id", op.MerchantID, "intent_id", op.ID, "due_at", op.NextAttemptAt)
 		}
 		if len(overdue) < operationWakeBatch {
 			return nil

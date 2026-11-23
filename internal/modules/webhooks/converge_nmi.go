@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -55,6 +56,7 @@ type NMIConvergeService struct {
 	Findings reconcile.FindingNotifier
 	// Adopter lands a live subscription OpenRails does not hold.
 	Adopter *pspimport.Importer
+	Log     *slog.Logger
 }
 
 func (s *NMIConvergeService) now() time.Time {
@@ -112,7 +114,7 @@ func (s *NMIConvergeService) convergeHeld(ctx context.Context, rail string, sub 
 	}
 
 	periodEnd, fetched := sub.CurrentPeriodEndsAt, len(snap.Transactions)
-	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
+	res, err := reconcile.ConvergeSubscriptionFromSnapshot(ctx, s.Log, s.DB, s.SubscriptionLifecycleService, sub, snap, now, 0)
 	if err != nil {
 		return sub.CustomerID, fmt.Errorf("nmi converge: %w", err)
 	}

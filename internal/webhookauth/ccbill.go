@@ -29,7 +29,7 @@ type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 //
 // Anything unproven (no probe, probe error, LiveRailUnknown) refuses.
 func CCBillIPAllowed(ctx context.Context, logger *slog.Logger, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
-	if iputil.IsValidCCBillIP(clientIP) {
+	if iputil.IsValidCCBillIP(logger, clientIP) {
 		return true
 	}
 	if !iputil.IPInAnyCIDR(clientIP, config.SandboxCCBillWebhookSources(cfg)) {

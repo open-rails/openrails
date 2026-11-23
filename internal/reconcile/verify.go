@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -12,12 +13,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -57,6 +58,7 @@ type Verifier struct {
 	sem     chan struct{}
 	ctx     context.Context
 	stop    context.CancelFunc
+	Log     *slog.Logger
 }
 
 const (
@@ -200,7 +202,7 @@ func (v *Verifier) runBatch(mid billing.MerchantID, ids []uuid.UUID) {
 			return
 		}
 		if attempt+1 >= v.Retries {
-			log.WithError(err).WithField("merchant_id", mid.String()).Warn("verify: provider read failed; the rows stay unverified for the next pass")
+			v.Log.WarnContext(ctx, "verify: provider read failed; the rows stay unverified for the next pass", logx.Err(err), "merchant_id", mid.String())
 			return
 		}
 		select {
@@ -243,7 +245,7 @@ func (v *Verifier) Listen(ctx context.Context) {
 	channel := pgx.Identifier{unverifiedChannel + v.DB.DataPool().Schema()}.Sanitize()
 	for ctx.Err() == nil {
 		if err := recovered(func() error { return v.listenOnce(ctx, channel) }); err != nil && ctx.Err() == nil {
-			log.WithError(err).Warn("verify: unverified notifications interrupted; reconnecting")
+			v.Log.WarnContext(ctx, "verify: unverified notifications interrupted; reconnecting", logx.Err(err))
 			select {
 			case <-ctx.Done():
 			case <-time.After(time.Second):
@@ -385,7 +387,7 @@ func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, s
 	if err := database.Gen(ctx).RecordSubscriptionVerificationReads(ctx, gen.RecordSubscriptionVerificationReadsParams{
 		MerchantID: mid.UUID(), SubscriptionIds: ids, ReadAt: now, LastError: msg,
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("verify: could not record the reads")
+		database.Log.WarnContext(ctx, "verify: could not record the reads", logx.Err(err))
 	}
 }
 

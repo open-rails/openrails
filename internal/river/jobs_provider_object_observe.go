@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -45,6 +45,7 @@ func (e ProviderObjectObserveEnqueuer) EnqueueProviderObjectObserve(ctx context.
 type ProviderObjectObserveWorker struct {
 	WorkerDefaults[wakejobs.ProviderObjectObserveArgs]
 	Objects func() *providerobjects.Observer
+	Log     *slog.Logger
 }
 
 func (ProviderObjectObserveWorker) Kind() string { return KindProviderObjectObserve }
@@ -53,7 +54,7 @@ func (w *ProviderObjectObserveWorker) Work(ctx context.Context, job *river.Job[w
 	args := job.Args
 	kind := providerobjects.Kind(args.ObjectKind)
 	if args.MerchantID == uuid.Nil || args.PSPID == uuid.Nil || args.Ref == "" || (kind != providerobjects.Product && kind != providerobjects.Price) {
-		log.WithContext(ctx).WithFields(log.Fields{"kind": args.ObjectKind, "ref": args.Ref}).Warn("provider object observe: incomplete identity; dropping job")
+		w.Log.WarnContext(ctx, "provider object observe: incomplete identity; dropping job", "kind", args.ObjectKind, "ref", args.Ref)
 		return nil
 	}
 	if args.After != 0 && predecessorRunning(ctx, args.After) {
@@ -70,7 +71,7 @@ func (w *ProviderObjectObserveWorker) Work(ctx context.Context, job *river.Job[w
 			return err
 		}
 		if !found {
-			log.WithContext(ctx).WithField("psp_id", args.PSPID).Info("provider object observe: PSP no longer declared; dropping job")
+			w.Log.InfoContext(ctx, "provider object observe: PSP no longer declared; dropping job", "psp_id", args.PSPID)
 			return nil
 		}
 		before, err := objects.Get(ctx, psp, kind, args.Ref)

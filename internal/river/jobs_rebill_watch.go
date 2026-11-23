@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -61,6 +62,7 @@ type RebillWatchWorker struct {
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
 	Lifecycle   *subscriptions.SubscriptionLifecycleService
+	Log         *slog.Logger
 }
 
 func (w *RebillWatchWorker) Pass(ctx context.Context) error {
@@ -108,8 +110,7 @@ func (w *RebillWatchWorker) watchMerchant(ctx context.Context, cutoff, now time.
 		for _, sub := range subs {
 			if err := w.watch(ctx, sub, now); err != nil {
 				next, rerr := w.backOff(ctx, sub, now)
-				log.WithContext(ctx).WithError(errors.Join(err, rerr)).WithFields(log.Fields{"subscription_id": sub.ID, "next_look_at": next}).
-					Warn("rebill watch: subscription left open; looked at again after a backoff")
+				w.Log.WarnContext(ctx, "rebill watch: subscription left open; looked at again after a backoff", logx.Err(errors.Join(err, rerr)), "subscription_id", sub.ID, "next_look_at", next)
 				if rerr != nil {
 					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, rerr))
 				}
@@ -185,7 +186,7 @@ func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscripti
 	if err != nil {
 		return "", nil, false, err
 	}
-	if _, err := reconcile.ConvergeSubscriptionFromSnapshot(attempts.ObservedVia(ctx, "pull"), w.DB, w.Lifecycle, sub, snap, now, 0); err != nil {
+	if _, err := reconcile.ConvergeSubscriptionFromSnapshot(attempts.ObservedVia(ctx, "pull"), w.Log, w.DB, w.Lifecycle, sub, snap, now, 0); err != nil {
 		return "", nil, false, err
 	}
 	attempted, err := w.DB.Gen(ctx).CycleHasAttempt(ctx, gen.CycleHasAttemptParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, DueAt: due})

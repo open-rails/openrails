@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -78,10 +79,11 @@ type OrderCollectionHandler struct {
 	Config   intents.ModeView
 	Clock    clockwork.Clock
 	Policy   intents.BackoffPolicy
+	Log      *slog.Logger
 }
 
 func NewOrderCollectionHandler(database *db.DB, charger *ScopedCharger, verifier *MerchantCollectionAdapterBuilder, cfg intents.ModeView, clock clockwork.Clock) *OrderCollectionHandler {
-	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff}
+	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff, Log: database.Log}
 }
 
 func (h *OrderCollectionHandler) Type() string { return TypeOrderCollection }
@@ -619,7 +621,7 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 		return intents.AmbiguousWithEvidence("collection refused, but local record failed: "+err.Error(), evidence)
 	}
 	if order != nil {
-		logCollectionDecline(ctx, p.OrderID, rail, &failureCode, action)
+		logCollectionDecline(ctx, h.Log, p.OrderID, rail, &failureCode, action)
 	}
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
@@ -687,8 +689,8 @@ func usageCycleHours(order gen.BillingOrder) int {
 
 // logCollectionDecline names the bucket and its consequence on every
 // refusal. Nothing here cancels anything.
-func logCollectionDecline(ctx context.Context, orderID uuid.UUID, rail string, failureCode *string, action collection.Action) {
-	decline.AlertUnmapped(ctx, action.Decline)
+func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+	decline.AlertUnmapped(ctx, logger, action.Decline)
 	entry := log.WithContext(ctx).WithFields(log.Fields{
 		"order_id": orderID, "rail": rail, "failure_code": derefStr(failureCode),
 		"decline_outcome": action.Decline.Action.String(), "decline_coverage": string(action.Decline.Coverage),

@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,7 +55,7 @@ func TestSolanaPlanDiscoveryOnBulkRead(t *testing.T) {
 	defer server.Close()
 
 	rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{PublicURL: server.URL, ReadOnly: true})
-	fetcher := NewSolanaFetcher(rpc, func(context.Context) ([]SolanaSubscriptionRef, error) { return nil, nil })
+	fetcher := NewSolanaFetcher(slog.Default(), rpc, func(context.Context) ([]SolanaSubscriptionRef, error) { return nil, nil })
 	fetcher.Plans = func(context.Context) ([]string, error) { return []string{first, second, first}, nil }
 
 	morning := time.Date(2026, time.November, 19, 0, 0, 0, 0, time.UTC)

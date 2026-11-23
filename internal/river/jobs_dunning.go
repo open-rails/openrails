@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -30,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/writeposture"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -89,6 +90,7 @@ type DunningWorker struct {
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService
 	Lifecycle         *subscriptions.SubscriptionLifecycleService
+	Log               *slog.Logger
 }
 
 // storeArmsNMI reports whether the merchant-secrets store can arm an NMI
@@ -125,7 +127,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 	// or restored merchant, a copied book).
 	postures := writeposture.View{Config: w.Config, DB: w.DB}
 	if w.NMIResolver == nil && w.EngineCollections == nil {
-		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
+		w.Log.WarnContext(ctx, "NMI client resolver not configured; skipping dunning run")
 		return nil
 	}
 
@@ -151,7 +153,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 		after = page[len(page)-1]
 	}
 	if len(merchantIDs) == 0 {
-		log.WithContext(ctx).Debug("Dunning: no subscriptions due for retry")
+		w.Log.DebugContext(ctx, "Dunning: no subscriptions due for retry")
 		return nil
 	}
 
@@ -188,14 +190,12 @@ func (w *DunningWorker) due(ctx context.Context) error {
 			posture := postures.Posture(mctx, mid)
 			if posture.ReadOnly() {
 				total += len(dueSubscriptions)
-				log.WithContext(mctx).WithFields(log.Fields{"count": len(dueSubscriptions), "reason": posture.Reason}).
-					Warn("Readonly: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
+				w.Log.WarnContext(mctx, "Readonly: dunning observes due subscriptions only (no charges, no cancellations, no intents)", "count", len(dueSubscriptions), "reason", posture.Reason)
 				return nil
 			}
 			materialize := posture.Limited()
 			if materialize {
-				log.WithContext(mctx).WithField("reason", posture.Reason).
-					Warn("Limited: dunning materializes decisions — stale subscriptions park as unknown, charge intents enqueue parked")
+				w.Log.WarnContext(mctx, "Limited: dunning materializes decisions — stale subscriptions park as unknown, charge intents enqueue parked", "reason", posture.Reason)
 			}
 
 			var merchantErr error
@@ -203,9 +203,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 			// the cursor, so it never hides later due work.
 			for len(dueSubscriptions) > 0 {
 				total += len(dueSubscriptions)
-				log.WithContext(mctx).WithFields(log.Fields{
-					"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
-				}).Info("Dunning: processing due subscriptions")
+				w.Log.InfoContext(mctx, "Dunning: processing due subscriptions", "count", len(dueSubscriptions), "merchant_id", merchantID.String())
 				for _, sub := range dueSubscriptions {
 					outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 					// One subscription's refusal never fails the pass: it becomes a
@@ -244,21 +242,12 @@ func (w *DunningWorker) due(ctx context.Context) error {
 			return merchantErr
 		}); err != nil {
 			// One merchant's failure must not abort the rest of the run.
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
-				Error("Dunning: merchant pass failed; continuing")
+			w.Log.ErrorContext(ctx, "Dunning: merchant pass failed; continuing", logx.Err(err), "merchant_id", merchantID.String())
 			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", merchantID, err))
 		}
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"merchants":      len(merchantIDs),
-		"total":          total,
-		"success":        successCount,
-		"failed":         failCount,
-		"window_expired": windowExpiredCount,
-		"materialized":   materializedCount,
-		"settled":        settledCount,
-	}).Info("Dunning: run completed")
+	w.Log.InfoContext(ctx, "Dunning: run completed", "merchants", len(merchantIDs), "total", total, "success", successCount, "failed", failCount, "window_expired", windowExpiredCount, "materialized", materializedCount, "settled", settledCount)
 
 	return workErr
 }
@@ -354,8 +343,7 @@ func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *mode
 		_, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: sub.MerchantID, FindingType: FindingDuePassRefused, SubjectKey: sub.ID.String()})
 		return err
 	}
-	log.WithContext(ctx).WithError(processErr).WithField("subscription_id", sub.ID).
-		Error("Dunning: subscription refused; recorded for review, the pass continues")
+	w.Log.ErrorContext(ctx, "Dunning: subscription refused; recorded for review, the pass continues", logx.Err(processErr), "subscription_id", sub.ID)
 	evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "collection_policy": sub.CollectionPolicy, "rail": sub.Rail, "status": sub.Status, "error": processErr.Error()})
 	action := fmt.Sprintf("the scheduled due pass could not renew or retry subscription %s (%s). It retries every pass; until the cause is fixed this member is neither charged nor extended: %s", sub.ID, sub.CollectionPolicy, processErr.Error())
 	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
@@ -422,7 +410,7 @@ func (w *DunningWorker) processSubscription(
 			// Only the member can fix this: their renewal is an open order
 			// they pay with a usable card, on the dunning clock, under the
 			// merchant's dunning access policy.
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("renewal: the payment method cannot be charged; the member pays the renewal order")
+			w.Log.WarnContext(ctx, "renewal: the payment method cannot be charged; the member pays the renewal order", logx.Err(err), "subscription_id", sub.ID)
 			opened := w.EngineCollections.OpenDueRenewalOrder(ctx, sub.ID, w.now())
 			reason, code := "payment_method_unusable", "payment_method_unusable"
 			if errors.Is(err, charge.ErrAgreementRequired) {
@@ -443,13 +431,13 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeMaterialized, err
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
-	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
+	logEntry := w.Log.With("subscription_id", sub.ID)
 
 	railName := resolveSubscriptionRail(sub)
 	providerKey := railName
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
+		logEntry.WarnContext(ctx, "Dunning: past_due subscription has no current period end; skipping rebill")
 		return dunningOutcomeRefused, nil
 	}
 
@@ -476,7 +464,7 @@ func (w *DunningWorker) processSubscription(
 	window, err := policy.Window(cycleHours)
 	if err != nil {
 		// Fail closed: no charge on a guessed cadence; the operator decides.
-		logEntry.WithError(err).WithField("price_id", sub.PriceID).Error("Dunning: subscription has no billing cycle; refusing to rebill")
+		logEntry.ErrorContext(ctx, "Dunning: subscription has no billing cycle; refusing to rebill", logx.Err(err), "price_id", sub.PriceID)
 		if ferr := collection.RecordUnknownCycle(ctx, w.DB.Gen(ctx), sub.MerchantID, sub.ID.String(), "subscription", err); ferr != nil {
 			return dunningOutcomeRefused, errors.Join(err, ferr)
 		}
@@ -489,13 +477,12 @@ func (w *DunningWorker) processSubscription(
 	// The provider charges a provider-auto-billed subscription itself: never
 	// manual-rebill it.
 	if providerAutoBilled {
-		logEntry.WithField("rail", railName).
-			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation")
+		logEntry.InfoContext(ctx, "Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation", "rail", railName)
 		return dunningOutcomeRefused, nil
 	}
 
 	if !w.storeArmsNMI(ctx, sub) {
-		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI rail is not armed for this merchant; skipping")
+		logEntry.WarnContext(ctx, "NMI rail is not armed for this merchant; skipping", "rail", railName, "provider", providerKey)
 		return dunningOutcomeRefused, nil
 	}
 
@@ -503,13 +490,10 @@ func (w *DunningWorker) processSubscription(
 		pm := sub.PaymentMethod
 		if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
 			if err := lifecycle.ApplyLocalUnknown(ctx, w.DB, sub); err != nil {
-				logEntry.WithError(err).Error("Dunning: failed to park subscription with unusable payment method")
+				logEntry.ErrorContext(ctx, "Dunning: failed to park subscription with unusable payment method", logx.Err(err))
 				return dunningOutcomeFailed, nil
 			}
-			logEntry.WithFields(log.Fields{
-				"payment_method_present": pm != nil,
-				"rail":                   railName,
-			}).Error("Dunning: local payment-method data unusable for rebill (OUR row, not a provider decline); subscription PARKED as unknown — no attempt counted, no cancellation, no provider delete. Operator: reconcile the vault refs")
+			logEntry.ErrorContext(ctx, "Dunning: local payment-method data unusable for rebill (OUR row, not a provider decline); subscription PARKED as unknown — no attempt counted, no cancellation, no provider delete. Operator: reconcile the vault refs", "payment_method_present", pm != nil, "rail", railName)
 			return dunningOutcomeFailed, nil
 		}
 
@@ -525,11 +509,11 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed, nil
 	}
 	if err != nil {
-		logEntry.WithError(err).Warn("Dunning: subscription has no admissible recurring attempt")
+		logEntry.WarnContext(ctx, "Dunning: subscription has no admissible recurring attempt", logx.Err(err))
 		return dunningOutcomeRefused, nil
 	}
 	if materialize {
-		logEntry.WithField("intent_id", intent.ID).Info("Dunning: accepted intent is parked until provider writes are enabled")
+		logEntry.InfoContext(ctx, "Dunning: accepted intent is parked until provider writes are enabled", "intent_id", intent.ID)
 	}
 	return dunningOutcomeMaterialized, nil
 }
@@ -540,20 +524,17 @@ func (w *DunningWorker) processSubscription(
 // provider result is unknown.
 func (w *DunningWorker) parkStaleSubscription(
 	ctx context.Context,
-	logEntry *log.Entry,
+	logEntry *slog.Logger,
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	periodEnd time.Time,
 	window time.Duration,
 ) dunningOutcome {
 	if err := lifecycle.ApplyLocalUnknown(ctx, w.DB, sub); err != nil {
-		logEntry.WithError(err).Error("Dunning: failed to park stale subscription as unknown")
+		logEntry.ErrorContext(ctx, "Dunning: failed to park stale subscription as unknown", logx.Err(err))
 		return dunningOutcomeFailed
 	}
-	logEntry.WithFields(log.Fields{
-		"period_end": periodEnd,
-		"window":     cadence.FormatDuration(window),
-	}).Warn("Dunning: rebill is older than the staleness window; charge skipped and subscription PARKED as unknown (access intact) for provider verification")
+	logEntry.WarnContext(ctx, "Dunning: rebill is older than the staleness window; charge skipped and subscription PARKED as unknown (access intact) for provider verification", "period_end", periodEnd, "window", cadence.FormatDuration(window))
 	return dunningOutcomeWindowExpired
 }
 

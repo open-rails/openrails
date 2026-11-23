@@ -114,7 +114,7 @@ func TestTransactionPooler(t *testing.T) {
 	t.Run("listener-reconnects-on-the-direct-endpoint", func(t *testing.T) {
 		listenCtx, stop := context.WithCancel(ctx)
 		defer stop()
-		verifier := &reconcile.Verifier{DB: database}
+		verifier := &reconcile.Verifier{DB: database, Log: slog.Default()}
 		finished := make(chan struct{})
 		go func() {
 			defer close(finished)

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 type orderCaptchaSubjectsKey struct{}
@@ -34,7 +34,7 @@ func (r *Runner) recordOrderCardDecline(ctx context.Context, in gen.BillingProvi
 		OrderCaptchaSubjects []string `json:"order_captcha_subjects"`
 	}
 	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("intent_id", in.ID).Error("cannot read order captcha subjects")
+		r.Log.ErrorContext(ctx, "cannot read order captcha subjects", logx.Err(err), "intent_id", in.ID)
 		return
 	}
 	r.CardAbuseGuard.RecordOrderDecline(ctx, in.MerchantID, in.ID, payload.OrderCaptchaSubjects, r.CardFailureLedger.AttackMode(ctx, in.MerchantID))

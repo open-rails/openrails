@@ -263,7 +263,7 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 // (webhookauth.CCBillIPAllowed) that the embedded Service surface also calls.
 func ccbillWebhookIPAllowed(logger *slog.Logger, r *httprequest.Request, clientIP string) bool {
 	if r == nil || r.State == nil {
-		return iputil.IsValidCCBillIP(clientIP)
+		return iputil.IsValidCCBillIP(logger, clientIP)
 	}
 	return webhookauth.CCBillIPAllowed(r.Request.Context(), logger, r.State.Config, ccbillAccountProbe(r), clientIP)
 }

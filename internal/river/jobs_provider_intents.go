@@ -4,19 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/intents/wake"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 func workerNow(c clockwork.Clock) time.Time {
@@ -38,6 +39,7 @@ type ProviderOperationWorker struct {
 	// card-abuse accounting every executor uses. Each job runs a copy that
 	// carries its own successor hook.
 	Runner *intents.Runner
+	Log    *slog.Logger
 }
 
 func (ProviderOperationWorker) Kind() string { return wake.Kind }
@@ -50,7 +52,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[wake.A
 	// active without spending its finite infrastructure-crash rescue attempts.
 	defer func() {
 		if p := recover(); p != nil {
-			log.WithContext(ctx).WithError(fmt.Errorf("panic: %v", p)).Error("provider operation panicked; retained for retry")
+			w.Log.ErrorContext(ctx, "provider operation panicked; retained for retry", logx.Err(fmt.Errorf("panic: %v", p)))
 			if successorCommitted {
 				result = nil
 			} else {
@@ -141,7 +143,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[wake.A
 		return nil
 	}
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("intent_id", args.IntentID).Error("provider operation unresolved; River will retry")
+		w.Log.ErrorContext(ctx, "provider operation unresolved; River will retry", logx.Err(err), "intent_id", args.IntentID)
 		return river.JobSnooze(operationInfrastructureRetry)
 	}
 	if terminal {

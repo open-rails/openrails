@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -34,6 +35,7 @@ type approval struct {
 	// version they found and the one they left. A proposal computed on the
 	// same basis still holds after them.
 	moved map[uuid.UUID]versionMove
+	Log   *slog.Logger
 }
 
 type versionMove struct{ from, to int64 }
@@ -89,7 +91,7 @@ func (a *approval) one(ctx context.Context, id uuid.UUID) billing.ProposalResult
 			_, err := gen.New(tx).AppendReconciliationFindingNotes(ctx, gen.AppendReconciliationFindingNotesParams{ID: id, Note: note})
 			return err
 		}); nerr != nil {
-			log.WithContext(ctx).WithError(nerr).WithField("finding_id", id).Error("proposals: the failure note could not be recorded")
+			a.Log.ErrorContext(ctx, "proposals: the failure note could not be recorded", logx.Err(nerr), "finding_id", id)
 		}
 	}
 	a.e.attachFinding(ctx, a.mid, &result)
