@@ -242,7 +242,6 @@ pkg openrails, type Config struct, EngineAdmissionHold bool
 pkg openrails, type Config struct, EventRetention string
 pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
 pkg openrails, type Config struct, LLM *config.LLMConfig
-pkg openrails, type Config struct, Logger *config.LoggerConfig
 pkg openrails, type Config struct, Merchants []config.MerchantDeclaration
 pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig
 pkg openrails, type Config struct, ProviderWriteMode string
@@ -295,6 +294,7 @@ pkg openrails, type Deps struct, CheckoutAssets fs.FS
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
+pkg openrails, type Deps struct, Logger *slog.Logger
 pkg openrails, type Deps struct, MerchantGroups billing.MerchantGroupReader
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Notifications *config.NotificationChannel
@@ -352,9 +352,6 @@ pkg openrails, type LLMConfig struct, CatalogDraftingEnabled bool
 pkg openrails, type LLMConfig struct, Model string
 pkg openrails, type LLMConfig struct, Provider string
 pkg openrails, type LocalClient struct
-pkg openrails, type LoggerConfig = config.LoggerConfig
-pkg openrails, type LoggerConfig struct
-pkg openrails, type LoggerConfig struct, Level string `yaml:"level" json:"level"`
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, Binding *billing.MerchantBinding `yaml:"-"`
@@ -436,6 +433,7 @@ pkg openrails, type RemoteOptions struct
 pkg openrails, type RemoteOptions struct, Credentials map[billing.MerchantID]RemoteCredential
 pkg openrails, type RemoteOptions struct, EntitlementCheckCache EntitlementCheckCacheOptions
 pkg openrails, type RemoteOptions struct, HTTPClient *http.Client
+pkg openrails, type RemoteOptions struct, Logger *slog.Logger
 pkg openrails, type RemoteOptions struct, ReadCache ReadCache
 pkg openrails, type RemoteOptions struct, Timeout time.Duration
 pkg openrails, type Route struct
