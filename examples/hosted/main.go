@@ -9,7 +9,8 @@
 // Run it from this directory with DATABASE_URL, after building the app
 // (cd web && pnpm install && pnpm build) and connecting it (README.md):
 // OPENRAILS_URL is the platform's API, OPENRAILS_RESOURCE its resource
-// identifier, OPENRAILS_SERVICE_TOKEN the service token.
+// identifier, OPENRAILS_MERCHANT_ID the merchant's ID and
+// OPENRAILS_SERVICE_TOKEN the service token.
 // PUBLIC_URL is this app's origin (default http://localhost:8080), which is
 // AuthKit's issuer. ADDR is the listen address (default :8080);
 // EXAMPLE_CHECK_ONLY=1 boots, checks the platform and exits.
@@ -42,14 +43,15 @@ import (
 // settings are the app's deployment: where it is, its merchant on the
 // platform, and its mail server.
 type settings struct {
-	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
-	OpenRailsURL string        // the platform's API
-	Resource     string        // the platform's resource identifier: its tokens' aud
-	ServiceToken string        // the console's service token for this app, bound to its registration
-	Directory    string        // the platform's directory for this app's users (its AuthKit's /directory/scim/v2)
-	SCIMInterval time.Duration // how often AuthKit pushes user changes to the platform
-	SMTP         smtp.Server   // AuthKit's mail: the codes that prove each user's email
-	KeysPath     string        // AuthKit's signing key, kept across restarts: the platform trusts it
+	PublicURL    string             // this app: AuthKit's issuer and the browser's origin
+	OpenRailsURL string             // the platform's API
+	Resource     string             // the platform's resource identifier: its tokens' aud
+	Merchant     billing.MerchantID // this app's merchant on the platform
+	ServiceToken string             // the console's service token for this app, bound to its registration
+	Directory    string             // the platform's directory for this app's users (its AuthKit's /directory/scim/v2)
+	SCIMInterval time.Duration      // how often AuthKit pushes user changes to the platform
+	SMTP         smtp.Server        // AuthKit's mail: the codes that prove each user's email
+	KeysPath     string             // AuthKit's signing key, kept across restarts: the platform trusts it
 }
 
 // webClient is the OAuth client the React app trades the user's session
@@ -111,7 +113,13 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 // over HTTP to the platform, with the service token, which is the
 // merchant's: every call acts on that merchant.
 func newBilling(s settings) (*openrails.Client, error) {
-	return openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{APIKey: s.ServiceToken})
+	remote, err := openrails.NewRemote(s.OpenRailsURL, openrails.RemoteOptions{
+		Credentials: map[billing.MerchantID]openrails.RemoteCredential{s.Merchant: {APIKey: s.ServiceToken}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return remote.Merchant(s.Merchant)
 }
 
 // newApp builds the app: its AuthKit (started: its River workers push the
@@ -165,9 +173,11 @@ func run(ctx context.Context) error {
 			From: "OnlyDemo <hello@onlydemo.example>",
 		},
 	}
-	if s.OpenRailsURL == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
-		return errors.New("OPENRAILS_URL, OPENRAILS_RESOURCE, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
+	merchant, err := billing.ParseMerchantID(os.Getenv("OPENRAILS_MERCHANT_ID"))
+	if err != nil || s.OpenRailsURL == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
+		return errors.New("OPENRAILS_URL, OPENRAILS_RESOURCE, OPENRAILS_MERCHANT_ID, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
 	}
+	s.Merchant = merchant
 	if len(os.Args) == 4 && os.Args[1] == "catalog" && os.Args[2] == "apply" {
 		bill, err := newBilling(s)
 		if err != nil {

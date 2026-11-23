@@ -36,8 +36,11 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 		Short: "Read or update merchant configuration through the Client",
 		Args:  cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(slug) == "" {
+				return fmt.Errorf("--merchant is required")
+			}
 			if serverURL != "" {
-				for _, flag := range []string{"config", "provider-write-mode", "merchant"} {
+				for _, flag := range []string{"config", "provider-write-mode"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s is local-only and cannot be used with --server-url", flag)
 					}
@@ -49,9 +52,6 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			}
 			if tokenFile != "" {
 				return fmt.Errorf("--token-file requires --server-url")
-			}
-			if strings.TrimSpace(slug) == "" {
-				return fmt.Errorf("--merchant is required")
 			}
 			path, _ := cmd.Flags().GetString("config")
 			cfg, err := hostconfig.LoadDatabase(path)
@@ -85,10 +85,14 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			var client *openrails.Client
 			var err error
 			if serverURL != "" {
-				if _, err := readTokenFile(tokenFile); err != nil {
+				var mid billing.MerchantID
+				if mid, err = parseBillingArchiveMerchant(slug); err != nil {
 					return err
 				}
-				client, err = openrails.NewRemoteMerchant(serverURL, tokenFileCredential(tokenFile))
+				var release func()
+				if client, release, err = remoteMerchant(cmd.Context(), serverURL, tokenFile, mid); err == nil {
+					defer release()
+				}
 			} else {
 				cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 				var cleanup func()
@@ -112,7 +116,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 		},
 	}
-	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug, for a local run; with --server-url the token's merchant is the one")
+	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug for a local run; with --server-url, the exact UUID of the merchant the token is bound to")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file holding an access token from the merchant's trusted issuer (client credentials), read on every call")
 	if apply {

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -27,8 +26,8 @@ import (
 
 // Client is a handle on one merchant: every admin, catalog-edit,
 // merchant-config and programmatic operation, acting on that merchant alone.
-// Engine.Merchant makes one in process, Remote.Merchant and NewRemoteMerchant
-// over HTTP; a handle is cheap, safe for concurrent use and owns no lifecycle.
+// Engine.Merchant makes one in process, Remote.Merchant over HTTP; a handle
+// is cheap, safe for concurrent use and owns no lifecycle.
 // Applications may define narrow interfaces for the methods they use.
 type Client struct {
 	// engine is the in-process engine behind an Engine's handle; nil otherwise.
@@ -39,13 +38,11 @@ type Client struct {
 	// invoker is the person an in-process handle's calls act for (ActingFor);
 	// nil is the host's own work.
 	invoker *auth.Invoker
-	baseURL   string
-	client    *http.Client
-	timeout   time.Duration
-	// merchantID is the handle's merchant; zero on a NewRemoteMerchant handle,
-	// which adopts the one its credential's first answer names.
+	baseURL string
+	client  *http.Client
+	timeout time.Duration
+	// merchantID is the handle's merchant.
 	merchantID billing.MerchantID
-	adopted    atomic.Pointer[billing.MerchantID]
 	// token mints the per-call Bearer of a remote handle. It is the sole
 	// credential; a mint failure fails the call.
 	token     func(context.Context) (string, error)
@@ -58,14 +55,8 @@ type Client struct {
 	uncached bool
 }
 
-// MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
-// until a response names the merchant its credential is bound to.
-func (c *Client) MerchantID() billing.MerchantID {
-	if adopted := c.adopted.Load(); c.merchantID.IsZero() && adopted != nil {
-		return *adopted
-	}
-	return c.merchantID
-}
+// MerchantID is the handle's merchant.
+func (c *Client) MerchantID() billing.MerchantID { return c.merchantID }
 
 // ActingFor is the in-process handle whose calls act for invoker, the person
 // signed in at the host, by issuer and subject as the host's identity
@@ -103,9 +94,8 @@ func (c *Client) Uncached() *Client {
 
 // derive is a copy of the handle, sharing its transport and caches.
 func (c *Client) derive() *Client {
-	return &Client{engine: c.engine, inprocess: c.inprocess, invoker: c.invoker, baseURL: c.baseURL, client: c.client, timeout: c.timeout,
-		merchantID: c.MerchantID(), token: c.token, assertion: c.assertion, reads: c.reads,
-		entitlementChecks: c.entitlementChecks, entitlementCacheScope: c.entitlementCacheScope, uncached: c.uncached}
+	d := *c
+	return &d
 }
 
 // RemoteCredential is how a remote handle proves itself: exactly one of
@@ -142,11 +132,9 @@ type AssertionKey struct {
 // RemoteOptions configures NewRemote.
 type RemoteOptions struct {
 	// Credentials holds one credential per merchant the process acts on, by
-	// merchant ID. Each call sends OpenRails-Expected-Merchant: a server
-	// supporting this precondition rejects a misfiled credential before the
-	// operation runs. The handle also verifies OpenRails-Bound-Merchant on
-	// the response. Older servers may ignore the precondition; a response
-	// mismatch then detects, but cannot prevent, a write at another merchant.
+	// merchant ID. Each call sends OpenRails-Expected-Merchant, so the server
+	// refuses a misfiled credential before the operation runs, and each
+	// success must name the merchant in OpenRails-Bound-Merchant.
 	Credentials map[billing.MerchantID]RemoteCredential
 	// HTTPClient is the transport (custom TLS or connection pooling). Nil
 	// uses Go's default.
@@ -173,8 +161,9 @@ type Remote struct {
 	reads   *reads
 }
 
-// NewRemote builds the client of a standalone or hosted server. It validates
-// static configuration without I/O; Ready checks reachability.
+// NewRemote builds the client of a standalone or hosted server, the one this
+// module ships with. It validates static configuration without I/O; Ready
+// checks reachability.
 func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if err := validateBaseURL(baseURL); err != nil {
@@ -208,61 +197,6 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 		r.handles[id] = handle
 	}
 	return r, nil
-}
-
-// RemoteMerchantOptions configures a single merchant's HTTP client.
-type RemoteMerchantOptions struct {
-	// HTTPClient is the transport; nil uses a default http.Client.
-	HTTPClient *http.Client
-	// Timeout bounds each request, including token acquisition, without
-	// extending the caller's deadline. Zero leaves the caller in charge.
-	Timeout time.Duration
-	// ReadCache overrides how long catalog and configuration reads are
-	// served from memory; nil keeps the defaults.
-	ReadCache ReadCache
-	// EntitlementCheckCache configures the entitlement check cache, on by
-	// default for APIKey credentials.
-	EntitlementCheckCache EntitlementCheckCacheOptions
-}
-
-// NewRemoteMerchant is the handle of the one merchant credential is bound
-// to, on the server at baseURL: NewRemote and Merchant for a process that
-// acts on a single merchant. Its MerchantID is the one the server's first
-// merchant-bound response names (zero until then); a later response naming
-// another fails the call with a *BoundMerchantError. The caller's context
-// and optional Timeout bound each call. After adoption every call sends the
-// merchant as a precondition. Use NewRemote with a known merchant ID to guard
-// the first write as well.
-func NewRemoteMerchant(baseURL string, credential RemoteCredential, options ...RemoteMerchantOptions) (*Client, error) {
-	if len(options) > 1 {
-		return nil, fmt.Errorf("openrails: supply at most one RemoteMerchantOptions")
-	}
-	var opts RemoteMerchantOptions
-	if len(options) == 1 {
-		opts = options[0]
-	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{}
-	}
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if err := validateBaseURL(baseURL); err != nil {
-		return nil, err
-	}
-	entitlementChecks, err := newEntitlementCheckCache(opts.EntitlementCheckCache)
-	if err != nil {
-		return nil, err
-	}
-	handle, err := newRemoteHandle(baseURL, client, opts.Timeout, billing.MerchantID{}, credential, entitlementChecks)
-	if err != nil {
-		return nil, fmt.Errorf("openrails: credential: %w", err)
-	}
-	var refused []config.Degradation
-	if handle.reads, refused, err = newReads(overHTTP, opts.ReadCache, opts.Timeout, func(billing.MerchantID) *Client { return handle }); err != nil {
-		return nil, err
-	}
-	warnRefused(refused)
-	return handle, nil
 }
 
 // warnRefused logs each RemoteOptions setting the client ignored.
@@ -333,13 +267,11 @@ func (r *Remote) Close(context.Context) error {
 }
 
 // BoundMerchantError reports a credential bound to another merchant than
-// its handle's. Servers supporting OpenRails-Expected-Merchant reject the
-// operation before execution. Older servers may already have acted at Bound.
-// The response is discarded rather than exposed as the handle's result.
+// its handle's. The server refused the operation before it ran; the response
+// is discarded.
 type BoundMerchantError struct {
 	// Merchant is the handle's: the ID the credential was filed under in
-	// RemoteOptions.Credentials, or the one a NewRemoteMerchant handle first
-	// saw.
+	// RemoteOptions.Credentials.
 	Merchant billing.MerchantID
 	// Bound is the merchant the credential is bound to.
 	Bound billing.MerchantID
@@ -351,22 +283,21 @@ func (e *BoundMerchantError) Error() string {
 }
 
 // checkBound compares the merchant a response says it acted on with the
-// handle's; a NewRemoteMerchant handle adopts the first it sees. A response
-// without the header is not checked.
-func (c *Client) checkBound(header http.Header) error {
-	values := header.Values(merchant.BoundHeader)
+// handle's. A remote success must name it; a refusal may precede binding.
+func (c *Client) checkBound(resp *http.Response) error {
+	values := resp.Header.Values(merchant.BoundHeader)
 	if len(values) == 0 {
-		return nil
+		if c.inprocess || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil
+		}
+		return fmt.Errorf("%w: the response names no merchant in %s", billing.ErrUnreachable, merchant.BoundHeader)
 	}
 	bound, err := billing.ParseMerchantID(strings.TrimSpace(values[0]))
 	if len(values) != 1 || err != nil || bound.IsZero() {
 		return fmt.Errorf("%w: malformed %s response header", billing.ErrUnreachable, merchant.BoundHeader)
 	}
-	if c.merchantID.IsZero() {
-		c.adopted.CompareAndSwap(nil, &bound)
-	}
-	if mine := c.MerchantID(); mine != bound {
-		return &BoundMerchantError{Merchant: mine, Bound: bound}
+	if bound != c.merchantID {
+		return &BoundMerchantError{Merchant: c.merchantID, Bound: bound}
 	}
 	return nil
 }
@@ -715,7 +646,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // response decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
 	if c == nil || c.client == nil {
-		return fmt.Errorf("openrails: a Client comes from Engine.Merchant, Remote.Merchant or NewRemoteMerchant")
+		return fmt.Errorf("openrails: a Client comes from Engine.Merchant or Remote.Merchant")
 	}
 	if changesReads(method, path) {
 		// Even a failed write may have landed, or found the cache stale.
@@ -763,8 +694,8 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	}
 	// Expectations come from the handle, never caller-supplied headers.
 	req.Header.Del(merchant.ExpectedHeader)
-	if expected := c.MerchantID(); !c.inprocess && path != "/v1/config" && !expected.IsZero() {
-		req.Header.Set(merchant.ExpectedHeader, expected.String())
+	if !c.inprocess && path != "/v1/config" {
+		req.Header.Set(merchant.ExpectedHeader, c.merchantID.String())
 	}
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
@@ -775,7 +706,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if path != "/v1/config" {
-		if err := c.checkBound(resp.Header); err != nil {
+		if err := c.checkBound(resp); err != nil {
 			return err
 		}
 	}

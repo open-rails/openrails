@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -28,6 +29,7 @@ import (
 // money, balance counts 1000 micros per unit.
 type fakeSync struct {
 	mu        sync.Mutex
+	merchant  billing.MerchantID
 	capacity  map[string]int64
 	balance   int64
 	money     bool
@@ -75,7 +77,7 @@ type fakeLease struct {
 const fakeSet = "standard"
 
 func newFakeSync(capacity map[string]int64) *fakeSync {
-	return &fakeSync{capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{}, versions: map[fakeHold]int64{},
+	return &fakeSync{merchant: billing.MerchantID(uuid.New()), capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{}, versions: map[fakeHold]int64{},
 		leases: map[billing.LeaseID]*fakeLease{}, dead: map[billing.LeaseID]bool{}}
 }
 
@@ -96,7 +98,11 @@ func (f *fakeSync) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (f *fakeSync) client(t *testing.T) *Client {
 	t.Helper()
-	c, err := NewRemoteMerchant("http://openrails.test", RemoteCredential{APIKey: "test-key"}, RemoteMerchantOptions{HTTPClient: &http.Client{Transport: f}})
+	remote, err := NewRemote("http://openrails.test", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{f.merchant: {APIKey: "test-key"}}, HTTPClient: &http.Client{Transport: f}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := remote.Merchant(f.merchant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +158,7 @@ func (f *fakeSync) heldBy(customer billing.CustomerID, limit string, except bill
 }
 
 func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(merchant.BoundHeader, f.merchant.String())
 	if r.URL.Path != "/v1/app/leases/sync" {
 		http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 		return

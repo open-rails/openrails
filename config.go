@@ -198,4 +198,3 @@ var ErrUnauthenticated = billingauth.ErrUnauthenticated
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
 }
-

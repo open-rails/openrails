@@ -826,4 +826,3 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	}
 	return nil
 }
-

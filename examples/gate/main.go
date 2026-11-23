@@ -5,9 +5,9 @@
 // network call, so the API keeps deciding while OpenRails is briefly
 // unreachable.
 //
-// Run it with OPENRAILS_URL, the merchant's API URL, and OPENRAILS_API_KEY,
-// a merchant API key holding merchant:usage:manage and merchant:usage:read
-// (README.md). REDIS_URL makes the API's replicas one gate. ADDR is the
+// Run it with OPENRAILS_URL, the merchant's API URL, OPENRAILS_MERCHANT_ID,
+// its ID, and OPENRAILS_API_KEY, a merchant API key holding
+// merchant:usage:manage and merchant:usage:read (README.md). REDIS_URL makes the API's replicas one gate. ADDR is the
 // listen address (default :8080). The catalog declares the limits
 // (catalog.yaml).
 package main
@@ -35,8 +35,18 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client, err := openrails.NewRemoteMerchant(os.Getenv("OPENRAILS_URL"), openrails.RemoteCredential{APIKey: os.Getenv("OPENRAILS_API_KEY")},
-		openrails.RemoteMerchantOptions{Timeout: 5 * time.Second})
+	merchant, err := billing.ParseMerchantID(os.Getenv("OPENRAILS_MERCHANT_ID"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	remote, err := openrails.NewRemote(os.Getenv("OPENRAILS_URL"), openrails.RemoteOptions{
+		Credentials: map[billing.MerchantID]openrails.RemoteCredential{merchant: {APIKey: os.Getenv("OPENRAILS_API_KEY")}},
+		Timeout:     5 * time.Second,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	client, err := remote.Merchant(merchant)
 	if err != nil {
 		log.Fatal(err)
 	}

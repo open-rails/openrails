@@ -153,4 +153,3 @@ func logMount(sel config.Routes, routes int) {
 	}
 	log.WithFields(fields).Info("openrails: routes mounted")
 }
-

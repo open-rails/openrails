@@ -5,7 +5,7 @@
 // and Probes, and Engine.Merchant(id) is a merchant's handle, served by the
 // same handlers the HTTP server mounts. NewRemote(baseURL, opts) is a
 // standalone OpenRails over HTTP, holding a credential per merchant:
-// Remote.Merchant(id) is the same handle, and NewRemoteMerchant one
-// merchant's directly.
+// Remote.Merchant(id) is the same handle. ActingFor and Uncached derive a
+// handle acting for a person or reading live.
 // Request, response and identifier types, errors and codes live in package billing.
 package openrails
