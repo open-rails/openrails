@@ -36,14 +36,16 @@ const (
 	MaxSyncWants      = 1000
 	MaxSyncReturns    = 1000
 	MaxSyncCommitted  = 10_000
+	MaxSyncApplied    = 10_000
 )
 
 // SyncLeasesParams is one gate's sync: the usage it settles, the holds it
 // wants and the holds it gives back. The first sync under a new LeaseID
-// creates the lease; every later one renews it, until one with Close: that
-// sync settles its usage, returns every hold of the lease and ends it. A
-// closed lease answers its wants lease_not_held; usage against it still
-// settles.
+// creates the lease (its id must be a UUIDv7 no older than the replay
+// horizon); every later one renews it while it is live, until one with Close:
+// that sync settles its usage, returns every hold of the lease and ends it. A
+// closed or dead lease answers its wants lease_not_held; usage against it
+// still settles. A process resending an earlier lease's usage sends Close.
 type SyncLeasesParams struct {
 	LeaseID LeaseID      `json:"lease_id"`
 	Usage   []LeaseUsage `json:"usage"`
@@ -52,11 +54,21 @@ type SyncLeasesParams struct {
 	Close   bool         `json:"close,omitempty"`
 	// Committed is what the gate's open tickets have taken of its holds, as
 	// the sync was built: every hold with open tickets, none for the rest.
-	// A want asks for its estimate beyond its hold's commitment. A hold
-	// shrinks in two steps: an answer gives the gate the smaller size, and
-	// the next sync releases only what that sync's commitment leaves above
-	// it, so capacity a ticket took is never given to another gate.
+	// A want asks for its estimate beyond its hold's commitment.
 	Committed []HoldCommitment `json:"committed"`
+	// Applied is the latest hold version the gate has applied, for each hold
+	// whose answer it received since its last answered sync. A smaller size
+	// is released only once the gate has applied the version that carried
+	// it, and never below what that sync's commitment holds, so capacity a
+	// ticket took is never given to another gate, even after a lost reply.
+	Applied []HoldApplied `json:"applied"`
+}
+
+// HoldApplied is the hold version a gate has applied.
+type HoldApplied struct {
+	CustomerID CustomerID `json:"customer_id"`
+	LimitSet   string     `json:"limit_set"`
+	Version    int64      `json:"version"`
 }
 
 // HoldCommitment is what open tickets have taken of one hold.
@@ -115,6 +127,9 @@ type LeaseWant struct {
 	Resource    *string        `json:"resource"`
 	Currency    string         `json:"currency"`
 	Usage       *UsageEstimate `json:"usage"`
+	// EstimatedAmount is a host-stated money estimate, for a want with no
+	// Usage, as AdmitParams states one.
+	EstimatedAmount *int64 `json:"estimated_amount,string"`
 }
 
 // HoldReturn gives a lease's hold for a customer and limit set back.
@@ -141,6 +156,10 @@ type SyncLeasesResult struct {
 type Lease struct {
 	ID        LeaseID   `json:"id"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Live is false when the lease had already died or closed before this
+	// sync, which renewed nothing: the gate starts a new lease and uses the
+	// old one only to report usage.
+	Live bool `json:"live"`
 }
 
 // LeaseUsageResult is the lease's highest settled item and the items the
@@ -180,6 +199,9 @@ type Hold struct {
 	RateCards   []HoldRateCard `json:"rate_cards"`
 	PriceBounds []PriceBound   `json:"price_bounds"`
 	Safe        *int64         `json:"safe,string"`
+	// Version increases each time the server answers this hold a new size;
+	// the gate reports the latest it applied in SyncLeasesParams.Applied.
+	Version int64 `json:"version"`
 }
 
 // HoldLimit is what a hold sets aside of one limit, in the window it was
