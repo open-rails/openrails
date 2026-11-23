@@ -14,7 +14,7 @@ import (
 
 const listRequestHolds = `-- name: ListRequestHolds :many
 
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND request_id IS NOT NULL
   AND created_at >= $2::timestamptz
   AND created_at < $3::timestamptz
@@ -87,6 +87,8 @@ func (q *Queries) ListRequestHolds(ctx context.Context, arg ListRequestHoldsPara
 			&i.ReleasedAt,
 			&i.UpdatedAt,
 			&i.CapturedCharges,
+			&i.Version,
+			&i.AppliedVersion,
 		); err != nil {
 			return nil, err
 		}

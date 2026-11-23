@@ -446,11 +446,11 @@ func (q *Queries) DeleteUsageDailyBefore(ctx context.Context, arg DeleteUsageDai
 
 const deleteUsageMinutesBefore = `-- name: DeleteUsageMinutesBefore :execrows
 DELETE FROM billing.usage_minutes m
-WHERE (m.merchant_id, m.customer_id, m.currency, m.minute) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.minute
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute_at
     FROM billing.usage_minutes e
-    WHERE e.merchant_id = $1::uuid AND e.minute < $2::timestamptz
-    ORDER BY e.minute
+    WHERE e.merchant_id = $1::uuid AND e.minute_at < $2::timestamptz
+    ORDER BY e.minute_at
     LIMIT $3::int
     FOR UPDATE SKIP LOCKED
 )
@@ -664,7 +664,7 @@ FROM (
     (SELECT DISTINCT um.merchant_id AS mid
        FROM billing.usage_minutes um
       WHERE ($1::uuid IS NULL OR um.merchant_id > $1::uuid)
-        AND um.minute < $18::timestamptz
+        AND um.minute_at < $18::timestamptz
       ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid

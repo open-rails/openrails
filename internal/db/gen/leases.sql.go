@@ -60,11 +60,11 @@ func (q *Queries) ConsumeLeaseHoldPart(ctx context.Context, arg ConsumeLeaseHold
 }
 
 const insertLease = `-- name: InsertLease :one
-INSERT INTO billing.leases (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts)
+INSERT INTO billing.leases (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts, hold_version)
 VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz,
-    $4::bigint, '[]'::jsonb)
+    $4::bigint, '[]'::jsonb, 0)
 ON CONFLICT (merchant_id, id) DO NOTHING
-RETURNING merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts
+RETURNING merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts, hold_version
 `
 
 type InsertLeaseParams struct {
@@ -92,25 +92,31 @@ func (q *Queries) InsertLease(ctx context.Context, arg InsertLeaseParams) (Billi
 		&i.SettledThroughN,
 		&i.ClosedAt,
 		&i.Receipts,
+		&i.HoldVersion,
 	)
 	return i, err
 }
 
 const insertLeaseHold = `-- name: InsertLeaseHold :one
-INSERT INTO billing.limit_holds (merchant_id, created_at, customer_id, currency, lease_id, limit_set, rate_cards, state, updated_at)
+INSERT INTO billing.limit_holds (merchant_id, created_at, customer_id, currency, lease_id, limit_set, terms, rate_cards, state, updated_at,
+    version, applied_version)
 VALUES ($1::uuid, $2::timestamptz, $3::uuid, $4::text,
-    $5::uuid, $6::text, $7::jsonb, 'open', $2::timestamptz)
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges
+    $5::uuid, $6::text, $7::jsonb, $8::jsonb, 'open', $2::timestamptz,
+    $9::bigint, $10::bigint)
+RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version
 `
 
 type InsertLeaseHoldParams struct {
-	MerchantID uuid.UUID
-	CreatedAt  time.Time
-	CustomerID uuid.UUID
-	Currency   string
-	LeaseID    uuid.UUID
-	LimitSet   string
-	RateCards  []byte
+	MerchantID     uuid.UUID
+	CreatedAt      time.Time
+	CustomerID     uuid.UUID
+	Currency       string
+	LeaseID        uuid.UUID
+	LimitSet       string
+	Terms          []byte
+	RateCards      []byte
+	Version        int64
+	AppliedVersion int64
 }
 
 func (q *Queries) InsertLeaseHold(ctx context.Context, arg InsertLeaseHoldParams) (BillingLimitHold, error) {
@@ -121,7 +127,10 @@ func (q *Queries) InsertLeaseHold(ctx context.Context, arg InsertLeaseHoldParams
 		arg.Currency,
 		arg.LeaseID,
 		arg.LimitSet,
+		arg.Terms,
 		arg.RateCards,
+		arg.Version,
+		arg.AppliedVersion,
 	)
 	var i BillingLimitHold
 	err := row.Scan(
@@ -147,6 +156,8 @@ func (q *Queries) InsertLeaseHold(ctx context.Context, arg InsertLeaseHoldParams
 		&i.ReleasedAt,
 		&i.UpdatedAt,
 		&i.CapturedCharges,
+		&i.Version,
+		&i.AppliedVersion,
 	)
 	return i, err
 }
@@ -304,7 +315,7 @@ func (q *Queries) ListLeaseHoldParts(ctx context.Context, arg ListLeaseHoldParts
 }
 
 const listLeaseHolds = `-- name: ListLeaseHolds :many
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
   AND state = 'open' AND created_at >= $3::timestamptz
 ORDER BY created_at, id
@@ -350,6 +361,8 @@ func (q *Queries) ListLeaseHolds(ctx context.Context, arg ListLeaseHoldsParams) 
 			&i.ReleasedAt,
 			&i.UpdatedAt,
 			&i.CapturedCharges,
+			&i.Version,
+			&i.AppliedVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -362,7 +375,7 @@ func (q *Queries) ListLeaseHolds(ctx context.Context, arg ListLeaseHoldsParams) 
 }
 
 const lockLease = `-- name: LockLease :one
-SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts FROM billing.leases
+SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts, hold_version FROM billing.leases
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -383,6 +396,7 @@ func (q *Queries) LockLease(ctx context.Context, arg LockLeaseParams) (BillingLe
 		&i.SettledThroughN,
 		&i.ClosedAt,
 		&i.Receipts,
+		&i.HoldVersion,
 	)
 	return i, err
 }
@@ -416,7 +430,8 @@ type MarkLeaseHoldsContendedParams struct {
 }
 
 // Other live leases' parts holding capacity of a limit a want or an
-// admission was refused capacity_held for shrink on their next sync.
+// admission was refused capacity_held for shrink on their next sync. The
+// caller holds the customer's lock.
 func (q *Queries) MarkLeaseHoldsContended(ctx context.Context, arg MarkLeaseHoldsContendedParams) error {
 	_, err := q.db.Exec(ctx, markLeaseHoldsContended,
 		arg.Now,
@@ -457,12 +472,44 @@ func (q *Queries) ReleaseLeaseHold(ctx context.Context, arg ReleaseLeaseHoldPara
 	return err
 }
 
+const renewLease = `-- name: RenewLease :execrows
+UPDATE billing.leases
+SET last_sync_at = GREATEST(last_sync_at, $1::timestamptz)
+WHERE merchant_id = $2::uuid AND id = $3::uuid AND closed_at IS NULL
+  AND last_sync_at > $4::timestamptz + (clock_timestamp() - transaction_timestamp())
+`
+
+type RenewLeaseParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	LiveSince  time.Time
+}
+
+// A sync renews its lease only while it is live as the statement runs: the
+// business clock moved on by the transaction's own elapsed time. Readers
+// count a lease live for its lifetime and a grace longer than any sync
+// transaction, so a renewal that commits never revives holds a reader has
+// already counted dead.
+func (q *Queries) RenewLease(ctx context.Context, arg RenewLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewLease,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.LiveSince,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resizeLeaseHoldPart = `-- name: ResizeLeaseHoldPart :exec
 UPDATE billing.limit_hold_parts
 SET held = $1::bigint, request_units = $2::bigint, used_units = $3::bigint,
-    answered_units = $4::bigint, contended_at = $5::timestamptz
-WHERE merchant_id = $6::uuid AND hold_id = $7::uuid
-  AND hold_created_at = $8::timestamptz AND limit_key = $9::text
+    answered_units = $4::bigint
+WHERE merchant_id = $5::uuid AND hold_id = $6::uuid
+  AND hold_created_at = $7::timestamptz AND limit_key = $8::text
 `
 
 type ResizeLeaseHoldPartParams struct {
@@ -470,24 +517,53 @@ type ResizeLeaseHoldPartParams struct {
 	RequestUnits  int64
 	UsedUnits     int64
 	AnsweredUnits int64
-	ContendedAt   *time.Time
 	MerchantID    uuid.UUID
 	HoldID        uuid.UUID
 	HoldCreatedAt time.Time
 	LimitKey      string
 }
 
+// A sync writes its own parts only under their customer's lock, and never
+// contended_at: another lease's refusal marks it under the same lock.
 func (q *Queries) ResizeLeaseHoldPart(ctx context.Context, arg ResizeLeaseHoldPartParams) error {
 	_, err := q.db.Exec(ctx, resizeLeaseHoldPart,
 		arg.Held,
 		arg.RequestUnits,
 		arg.UsedUnits,
 		arg.AnsweredUnits,
-		arg.ContendedAt,
 		arg.MerchantID,
 		arg.HoldID,
 		arg.HoldCreatedAt,
 		arg.LimitKey,
+	)
+	return err
+}
+
+const setLeaseHoldVersions = `-- name: SetLeaseHoldVersions :exec
+UPDATE billing.limit_holds
+SET version = $1::bigint, applied_version = $2::bigint, updated_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND id = $5::uuid
+  AND created_at = $6::timestamptz AND lease_id IS NOT NULL
+`
+
+type SetLeaseHoldVersionsParams struct {
+	Version        int64
+	AppliedVersion int64
+	AsOf           time.Time
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	CreatedAt      time.Time
+}
+
+// A lease's hold answered a new size, or its gate reported an answer applied.
+func (q *Queries) SetLeaseHoldVersions(ctx context.Context, arg SetLeaseHoldVersionsParams) error {
+	_, err := q.db.Exec(ctx, setLeaseHoldVersions,
+		arg.Version,
+		arg.AppliedVersion,
+		arg.AsOf,
+		arg.MerchantID,
+		arg.ID,
+		arg.CreatedAt,
 	)
 	return err
 }
@@ -538,26 +614,26 @@ func (q *Queries) SumOtherLeaseHeld(ctx context.Context, arg SumOtherLeaseHeldPa
 	return held, err
 }
 
-const updateLeaseSync = `-- name: UpdateLeaseSync :exec
+const updateLeaseSettlement = `-- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
-SET last_sync_at = $1::timestamptz, settled_through_n = $2::bigint,
-    receipts = $3::jsonb
+SET settled_through_n = $1::bigint, receipts = $2::jsonb,
+    hold_version = $3::bigint
 WHERE merchant_id = $4::uuid AND id = $5::uuid
 `
 
-type UpdateLeaseSyncParams struct {
-	LastSyncAt      time.Time
+type UpdateLeaseSettlementParams struct {
 	SettledThroughN int64
 	Receipts        []byte
+	HoldVersion     int64
 	MerchantID      uuid.UUID
 	ID              uuid.UUID
 }
 
-func (q *Queries) UpdateLeaseSync(ctx context.Context, arg UpdateLeaseSyncParams) error {
-	_, err := q.db.Exec(ctx, updateLeaseSync,
-		arg.LastSyncAt,
+func (q *Queries) UpdateLeaseSettlement(ctx context.Context, arg UpdateLeaseSettlementParams) error {
+	_, err := q.db.Exec(ctx, updateLeaseSettlement,
 		arg.SettledThroughN,
 		arg.Receipts,
+		arg.HoldVersion,
 		arg.MerchantID,
 		arg.ID,
 	)

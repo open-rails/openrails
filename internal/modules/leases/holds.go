@@ -1,9 +1,10 @@
 package leases
 
 import (
+	"bytes"
 	"cmp"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -38,11 +38,15 @@ import (
 //   - a hold another lease was refused capacity_held for shrinks to what it
 //     used.
 //
-// Whatever the size, no hold takes settled + held past capacity plus the
-// overdraft (the credit line, for balance).
+// A hold grows at once. A smaller size is answered with a new version and
+// set aside until the gate reports that version applied, and never below
+// what its open tickets took: capacity a ticket took is never given to
+// another gate, even after a lost reply. Whatever the size, no hold takes
+// settled + held past capacity plus the overdraft (the credit line, for
+// balance).
 
-// slot is one limit of a hold's limit set: its claim in the current window
-// (none for balance), one request's cost there, and its overrun.
+// slot is one limit of a hold's limit set: its claim in its window (none for
+// balance), one request's cost there, and its overrun.
 type slot struct {
 	key     string
 	unit    string
@@ -52,12 +56,11 @@ type slot struct {
 	overrun catalog.Overrun
 }
 
-// moneyRoom is what the customer may set aside of its balance: the room
-// counts the hold's own balance part as it stood when it was read.
+// moneyRoom is what the customer may set aside of its balance beyond every
+// live hold, and the code a want that does not fit it is refused with.
 type moneyRoom struct {
-	room    int64
-	counted int64
-	code    string
+	room int64
+	code string
 }
 
 func (r *syncRun) want(i int) error {
@@ -81,15 +84,30 @@ func (r *syncRun) want(i int) error {
 	case moneyutil.ValidateCurrency(currency) != nil:
 		fail(apperr.New(http.StatusBadRequest, "currency_unsupported", "currency is not supported").WithParam("currency"))
 		return nil
+	case w.Usage != nil && w.EstimatedAmount != nil:
+		fail(invalid("usage", "usage and estimated_amount are exclusive: the rate cards price usage"))
+		return nil
+	case w.EstimatedAmount != nil && *w.EstimatedAmount < 0:
+		fail(invalid("estimated_amount", "estimated_amount must be nonnegative"))
+		return nil
 	case !r.live || r.p.Close:
 		fail(apperr.New(http.StatusConflict, billing.CodeLeaseNotHeld, "the lease is closed or stopped syncing; start a new lease"))
 		return nil
 	}
 	customer := w.CustomerID.UUID()
 	r.touched[customer] = true
-	resolved, room, err := r.resolve(identity.CustomerID(w.CustomerID), admission.AdmitRequest{
-		CustomerID: identity.CustomerID(w.CustomerID), Invoker: strings.TrimSpace(w.Invoker), InvokerType: string(cmp.Or(w.InvokerType, billing.InvokerTypeCustomer)),
-		TrustLevel: strings.TrimSpace(deref(w.TrustLevel)), Resource: strings.TrimSpace(deref(w.Resource)), Roles: w.Roles, Currency: currency, Usage: w.Usage, Source: "lease",
+	terms := holdTerms{Invoker: strings.TrimSpace(w.Invoker), InvokerType: string(cmp.Or(w.InvokerType, billing.InvokerTypeCustomer)),
+		TrustLevel: strings.TrimSpace(deref(w.TrustLevel)), Roles: w.Roles, Resource: strings.TrimSpace(deref(w.Resource))}
+	if w.Usage != nil {
+		terms.EventType = strings.TrimSpace(w.Usage.EventType)
+	}
+	req := terms.request(identity.CustomerID(w.CustomerID), currency)
+	req.Usage = w.Usage
+	if w.EstimatedAmount != nil {
+		req.EstimatedAmount = *w.EstimatedAmount
+	}
+	resolved, room, err := r.resolve(req, func(capacity money.AdmissionCapacity) (admission.Want, error) {
+		return r.admitter.ResolveWant(r.ctx, r.q, req, capacity, r.now)
 	})
 	if err != nil {
 		if _, coded := asCoded(err); coded {
@@ -113,94 +131,117 @@ func (r *syncRun) want(i int) error {
 	for _, c := range resolved.Limits {
 		slots = append(slots, slot{key: c.Key, unit: c.Unit, claim: c, request: c.Cost, overrun: c.Overrun})
 	}
-	eventType := ""
-	if w.Usage != nil {
-		eventType = strings.TrimSpace(w.Usage.EventType)
-	}
-	keys := make([]string, len(slots))
-	for j, s := range slots {
-		keys[j] = s.key
-	}
-	set := LimitSet(currency+"\x00"+eventType, keys)
-	res.Status, res.LimitSet = http.StatusOK, &set
+	set := LimitSet(currency, terms.EventType, resolved.MoneyTerms(), slotKeys(slots))
 	k := holdKey{customer, set}
-	h := r.current(k, r.now)
-	if h != nil && h.wanted {
+	if j, ok := r.answered[k]; ok {
 		// A second want for the hold in one sync is the first's answer.
-		for j := 0; j < i; j++ {
-			if prev := r.result.Wants[j]; prev.LimitSet != nil && *prev.LimitSet == set && prev.Error == nil {
-				*res = prev
-				return nil
-			}
-		}
+		*res = r.result.Wants[j]
+		return nil
 	}
-	refusal, err := r.size(h, k, currency, slots, true, room, resolved.Cards)
+	res.Status, res.LimitSet = http.StatusOK, &set
+	refusal, err := r.size(r.current(k, r.now), k, currency, slots, true, room, resolved.Cards, terms)
 	if err != nil {
 		return err
 	}
 	res.Refusal = refusal
+	r.answered[k] = i
 	return nil
 }
 
-// resolve makes a want's checks and reads the customer's money room. A hold
-// sized without a want resolves the customer's own credential.
-func (r *syncRun) resolve(customer identity.CustomerID, req admission.AdmitRequest) (admission.Want, moneyRoom, error) {
-	capacity, err := r.money.AdmissionCapacityTx(r.ctx, r.q, customer, req.Currency)
-	if err != nil {
-		return admission.Want{}, moneyRoom{}, err
-	}
-	w, err := r.admitter.ResolveWant(r.ctx, r.q, req, capacity, r.now)
-	if err != nil {
-		return admission.Want{}, moneyRoom{}, err
-	}
-	room := moneyRoom{room: satAdd(w.Available, w.CreditLine), code: w.BalanceRefusal()}
-	return w, room, nil
+// request is the admission request the terms resolve as.
+func (t holdTerms) request(customer identity.CustomerID, currency string) admission.AdmitRequest {
+	return admission.AdmitRequest{CustomerID: customer, Invoker: t.Invoker, InvokerType: cmp.Or(t.InvokerType, string(billing.InvokerTypeCustomer)),
+		TrustLevel: t.TrustLevel, Resource: t.Resource, Roles: t.Roles, Currency: currency, Source: "lease"}
 }
 
-// counted is what of the hold's balance part the money room already counts
-// as held: all of it, while the hold is live.
-func counted(h *hold) int64 {
-	if h == nil || h.released {
+func slotKeys(slots []slot) []string {
+	keys := make([]string, len(slots))
+	for j, s := range slots {
+		keys[j] = s.key
+	}
+	return keys
+}
+
+// resolve reads the customer's money capacity under its lock and makes a
+// want's or a renewal's checks with it.
+func (r *syncRun) resolve(req admission.AdmitRequest, check func(money.AdmissionCapacity) (admission.Want, error)) (admission.Want, moneyRoom, error) {
+	capacity, err := r.money.AdmissionCapacityTx(r.ctx, r.q, req.CustomerID, req.Currency)
+	if err != nil {
+		return admission.Want{}, moneyRoom{}, err
+	}
+	w, err := check(capacity)
+	if err != nil {
+		return admission.Want{}, moneyRoom{}, err
+	}
+	return w, moneyRoom{room: satAdd(w.Available, w.CreditLine), code: w.BalanceRefusal()}, nil
+}
+
+// resolveHold makes a renewed hold's checks again, as the invoker it was
+// resolved for, with the rate cards in force.
+func (r *syncRun) resolveHold(k holdKey, h *hold) (admission.Want, moneyRoom, error) {
+	req := h.terms.request(identity.CustomerID(k.customer), h.row.Currency)
+	return r.resolve(req, func(capacity money.AdmissionCapacity) (admission.Want, error) {
+		return r.admitter.ResolveHold(r.ctx, r.q, req, h.terms.EventType, capacity, r.now)
+	})
+}
+
+// holdSlots are a renewed hold's limits as its terms resolve now, in their
+// windows at an instant: the declared limits and spend windows in force,
+// each costing the request its part last recorded. ok is false when a
+// limit's window would have to open, which only a want or a settlement
+// does.
+func (r *syncRun) holdSlots(k holdKey, h *hold, w admission.Want, at time.Time) (slots []slot, set string, ok bool, err error) {
+	spend, claims := w.Spend, w.Limits
+	if !at.Equal(r.now) {
+		if spend, err = w.SpendAt(r.merchant, k.customer, h.row.Currency, at); err != nil {
+			return nil, "", false, err
+		}
+		reader := limits.Customer{Q: r.q, MerchantID: r.merchant, CustomerID: k.customer, Now: at,
+			Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
+				return r.money.PricingPeriod(ctx, r.q, r.merchant, k.customer, unit, at)
+			}}
+		if claims, err = reader.ClaimsFor(r.ctx, r.defs, r.meters, h.row.Currency, h.terms.EventType); err != nil {
+			return nil, "", false, err
+		}
+	}
+	request := func(key string) int64 {
+		if p := h.part(key); p != nil {
+			return p.request
+		}
 		return 0
 	}
-	if p := h.part(catalog.BalanceLimit); p != nil {
-		return p.held
+	slots = []slot{{key: catalog.BalanceLimit, unit: h.row.Currency, balance: true, request: request(catalog.BalanceLimit), overrun: catalog.OverrunRequireEstimate}}
+	for _, c := range spend {
+		slots = append(slots, slot{key: c.Key, unit: c.Unit, claim: c, request: request(c.Key), overrun: catalog.OverrunRequireEstimate})
 	}
-	return 0
+	for _, c := range claims {
+		if c.Opens {
+			return nil, "", false, nil
+		}
+		slots = append(slots, slot{key: c.Key, unit: c.Unit, claim: c, request: request(c.Key), overrun: c.Overrun})
+	}
+	return slots, LimitSet(h.row.Currency, h.terms.EventType, w.MoneyTerms(), slotKeys(slots)), true, nil
 }
 
-// size sizes the hold of k for slots (a fresh hold when h is nil, released,
-// too old or in windows that ended) and answers the refusal a wanted hold
-// that cannot cover one request beyond its commitment gets. dry is a want:
-// the hold ran dry. A hold grows at once; it shrinks in two steps: the
-// answer gives its gate the smaller size, and the next sync releases what
-// that sync's commitment leaves above it (release).
-func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bool, room moneyRoom, cards []byte) (*billing.Refusal, error) {
-	room.counted = counted(h)
-	reissue := h == nil || h.released || h.row.CreatedAt.Before(r.now.Add(-reissueAge)) || len(h.parts) != len(slots)
-	if !reissue {
-		for _, s := range slots {
-			p := h.part(s.key)
-			if p == nil || (!s.balance && !p.start.Equal(s.claim.Window.StartsAt)) {
-				reissue = true
-				break
-			}
+// size sizes the hold of k for slots and answers the refusal a wanted hold
+// that cannot cover one request beyond its commitment gets; dry is a want.
+// The hold is issued again (a fresh hold when h is nil or released) when it
+// grew old, its cards changed or a window moved: each part still in its
+// window moves to the new hold whole, and the old hold keeps the rest until
+// its gate applies the new answer.
+func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bool, room moneyRoom, cards []byte, terms holdTerms) (*billing.Refusal, error) {
+	live := h != nil && !h.released
+	reissue := !live || h.row.CreatedAt.Before(r.now.Add(-reissueAge)) || !bytes.Equal(h.row.RateCards, cards) || len(h.parts) != len(slots)
+	same := make([]*part, len(slots))
+	for j, s := range slots {
+		if !live {
+			continue
 		}
-	}
-	carried := map[string]*part{}
-	if h != nil {
-		for _, p := range h.parts {
-			carried[p.key] = p
+		if p := h.part(s.key); p != nil && (s.balance || p.start.Equal(s.claim.Window.StartsAt)) {
+			same[j] = p
+		} else {
+			reissue = true
 		}
-		if cards == nil {
-			cards = h.row.RateCards
-		}
-	}
-	if reissue && h != nil && !h.released {
-		if err := r.release(h); err != nil {
-			return nil, err
-		}
-		h.changed = true
 	}
 	holder := limits.Holder{Q: r.q, MerchantID: r.merchant, CustomerID: k.customer, Now: r.now}
 	var claims []limits.Claim
@@ -220,40 +261,34 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 		standing[j] = &locked.Standings[c]
 	}
 	n := len(slots)
-	helds, answers, mines, requests, needs, rooms, commits := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
+	helds, answers, mines, requests, rooms, commits := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
 	var failing []int
 	for j, s := range slots {
-		p := carried[s.key]
-		mine, used, prev, committed := int64(0), int64(0), int64(0), int64(0)
-		request := s.request
+		p := same[j]
+		mine, used, prev, committed, request := int64(0), int64(0), int64(0), int64(0), s.request
 		if p != nil {
-			used, prev, committed = p.used, satAdd(p.answered, p.used), p.committed
-			if !reissue {
-				mine = p.held
-			}
+			mine, used, prev, committed = p.held, p.used, satAdd(p.answered, p.used), p.committed
 			if !dry {
 				request = p.request
 			}
 		}
-		var room0 int64
-		if s.balance {
-			room0 = satAdd(room.room, room.counted)
-		} else {
+		room0 := satAdd(room.room, mine)
+		if !s.balance {
 			st := standing[j]
 			room0 = st.Capacity - st.Settled - (st.Held - mine)
 		}
 		// A want asks for one request beyond what open tickets took.
 		need := satAdd(committed, request)
-		target := need
+		var target int64
 		switch {
 		case dry:
-			target = max(2*prev, satAdd(committed, used), need)
+			target = max(satAdd(prev, prev), satAdd(committed, used), need)
 		case used > 0:
-			target = max((prev+used)/2, need)
+			target = max(satAdd(prev, used)/2, need)
 		default:
 			target = max(prev/2, need)
 		}
-		if p != nil && p.contended != nil && p.contended.After(r.prevSync.Add(-limits.SyncInterval)) {
+		if p != nil && r.contended(p) {
 			target = min(target, max(committed, used))
 			if dry {
 				target = max(target, need)
@@ -273,31 +308,26 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 		if want := max(target, committed); want > mine {
 			held = min(want, max(room0, mine))
 		}
+		// require_estimate takes the whole request beyond what tickets took;
+		// admit_while_positive takes any capacity free beyond them.
 		fits := held >= need
 		if s.overrun == catalog.OverrunAdmitWhilePositive {
-			fits = room0 > committed || request == 0
+			fits = room0-committed > 0 || request == 0
 		}
 		if dry && !fits {
 			failing = append(failing, j)
 		}
-		helds[j], answers[j], mines[j], requests[j], needs[j], rooms[j], commits[j] = held, min(target, held), mine, request, need, room0, committed
+		helds[j], answers[j], mines[j], requests[j], rooms[j], commits[j] = held, min(target, held), mine, request, room0, committed
 	}
 	var refusal *billing.Refusal
 	if len(failing) > 0 {
-		if refusal, err = r.refusal(holder, currency, slots, standing, failing, rooms, needs, commits, room); err != nil {
+		if refusal, err = r.refusal(holder, currency, slots, standing, failing, rooms, requests, commits, room); err != nil {
 			return nil, err
 		}
 		// A refused hold grows nothing and keeps only what tickets took.
-		for j, s := range slots {
-			committed := int64(0)
-			if p := carried[s.key]; p != nil {
-				committed = p.committed
-			}
+		for j := range slots {
 			helds[j] = mines[j]
-			if reissue {
-				helds[j] = min(committed, max(rooms[j], 0))
-			}
-			answers[j] = min(committed, helds[j])
+			answers[j] = min(commits[j], helds[j])
 		}
 	}
 	added := make([]int64, len(claims))
@@ -307,51 +337,97 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 	if err := holder.Commit(r.ctx, locked, added); err != nil {
 		return nil, err
 	}
-	if reissue {
-		total := int64(0)
-		for _, held := range helds {
-			total = satAdd(total, held)
+	if !reissue {
+		changed := false
+		for j := range slots {
+			p := same[j]
+			changed = changed || answers[j] != p.answered
+			p.held, p.answered, p.request, p.used = helds[j], answers[j], requests[j], 0
+			if err := r.write(h, p); err != nil {
+				return nil, err
+			}
 		}
-		if total == 0 && (refusal != nil || !dry) {
-			return refusal, nil
-		}
-		fresh, err := r.issue(k, currency, slots, helds, answers, requests, cards)
-		if err != nil {
-			return nil, err
-		}
-		fresh.wanted, fresh.active = dry, dry || p0used(carried)
+		h.wanted = h.wanted || dry
+		h.active = h.active || dry || anyUsed(h)
+		h.changed = h.changed || changed
 		return refusal, nil
 	}
-	changed := false
-	for j, s := range slots {
-		p := h.part(s.key)
-		changed = changed || answers[j] != p.answered || helds[j] != p.held
-		p.held, p.answered, p.request, p.used, p.contended = helds[j], answers[j], requests[j], 0, nil
-		p.overrun = s.overrun
-		if err := r.write(h, p); err != nil {
-			return nil, err
-		}
+	total := int64(0)
+	for _, held := range helds {
+		total = satAdd(total, held)
 	}
-	h.wanted = h.wanted || dry
-	h.active = h.active || dry || p0used(carried)
-	h.changed = h.changed || changed
-	return refusal, nil
-}
-
-// write stores a part as sized; its usage since the last sync is counted.
-func (r *syncRun) write(h *hold, p *part) error {
-	return r.q.ResizeLeaseHoldPart(r.ctx, gen.ResizeLeaseHoldPartParams{Held: p.held, RequestUnits: p.request, UsedUnits: 0, AnsweredUnits: p.answered,
-		MerchantID: r.merchant, HoldID: h.row.ID, HoldCreatedAt: h.row.CreatedAt, LimitKey: p.key})
-}
-
-// issue writes a new hold of the lease.
-func (r *syncRun) issue(k holdKey, currency string, slots []slot, helds, answers, requests []int64, cards []byte) (*hold, error) {
-	row, err := r.q.InsertLeaseHold(r.ctx, gen.InsertLeaseHoldParams{MerchantID: r.merchant, CreatedAt: r.now, CustomerID: k.customer, Currency: currency,
-		LeaseID: r.lease.ID, LimitSet: k.limitSet, RateCards: cards})
+	if total == 0 {
+		if live {
+			return refusal, r.retire(h)
+		}
+		return refusal, nil
+	}
+	fresh, err := r.issue(k, currency, slots, helds, answers, requests, cards, terms)
 	if err != nil {
 		return nil, err
 	}
-	h := &hold{row: row, changed: true, fresh: true}
+	fresh.wanted, fresh.active = dry, dry || (live && anyUsed(h))
+	for j, p := range fresh.parts {
+		p.committed = commits[j]
+	}
+	if !live {
+		return refusal, nil
+	}
+	// What moved to the new hold leaves the old one; the old one is
+	// answered empty and keeps the rest until its gate applies the answer.
+	moved := map[*part]bool{}
+	for _, p := range same {
+		if p != nil {
+			moved[p] = true
+		}
+	}
+	empty := true
+	for _, p := range h.parts {
+		if moved[p] {
+			p.held = 0
+		}
+		p.answered, p.used = 0, 0
+		if err := r.write(h, p); err != nil {
+			return nil, err
+		}
+		empty = empty && p.held == 0
+	}
+	h.changed = true
+	if empty {
+		h.replaced = true
+		return refusal, r.release(h)
+	}
+	return refusal, nil
+}
+
+func anyUsed(h *hold) bool {
+	for _, p := range h.parts {
+		if p.used > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// write stores a part as sized.
+func (r *syncRun) write(h *hold, p *part) error {
+	return r.q.ResizeLeaseHoldPart(r.ctx, gen.ResizeLeaseHoldPartParams{Held: p.held, RequestUnits: p.request, UsedUnits: p.used, AnsweredUnits: p.answered,
+		MerchantID: r.merchant, HoldID: h.row.ID, HoldCreatedAt: h.row.CreatedAt, LimitKey: p.key})
+}
+
+// issue writes a new hold of the lease, at the sync's version.
+func (r *syncRun) issue(k holdKey, currency string, slots []slot, helds, answers, requests []int64, cards []byte, terms holdTerms) (*hold, error) {
+	encoded, err := json.Marshal(terms)
+	if err != nil {
+		return nil, err
+	}
+	version := r.nextVersion()
+	row, err := r.q.InsertLeaseHold(r.ctx, gen.InsertLeaseHoldParams{MerchantID: r.merchant, CreatedAt: r.now, CustomerID: k.customer, Currency: currency,
+		LeaseID: r.lease.ID, LimitSet: k.limitSet, Terms: encoded, RateCards: cards, Version: version, AppliedVersion: 0})
+	if err != nil {
+		return nil, err
+	}
+	h := &hold{row: row, terms: terms, version: version, changed: true, fresh: true}
 	for j, s := range slots {
 		p := &part{key: s.key, unit: s.unit, held: helds[j], answered: answers[j], request: requests[j], overrun: s.overrun, start: limits.Epoch}
 		if !s.balance {
@@ -371,8 +447,10 @@ func (r *syncRun) issue(k holdKey, currency string, slots []slot, helds, answers
 // refusal is why a want does not fit: the first failing slot that would not
 // fit even were other leases' holds, committed or not, returned refuses it
 // with its limit's own code; when every one would, it is capacity_held and
-// those holds shrink on their next sync.
-func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, standing []*limits.Standing, failing []int, free, need, committed []int64, room moneyRoom) (*billing.Refusal, error) {
+// those holds shrink on their next sync. A request fits by its overrun: the
+// whole request beyond what tickets took (require_estimate), or any capacity
+// free beyond them (admit_while_positive).
+func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, standing []*limits.Standing, failing []int, free, request, committed []int64, room moneyRoom) (*billing.Refusal, error) {
 	var short []limits.Returnable
 	for _, j := range failing {
 		s := slots[j]
@@ -384,9 +462,10 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 		if err != nil {
 			return nil, err
 		}
-		fits := need[j] <= satAdd(free[j], others)
+		beyond := satAdd(satAdd(free[j], others), -committed[j])
+		fits := request[j] <= beyond
 		if s.overrun == catalog.OverrunAdmitWhilePositive {
-			fits = satAdd(free[j], others) > committed[j]
+			fits = beyond > 0
 		}
 		if others > 0 && fits {
 			short = append(short, ret)
@@ -421,15 +500,18 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 }
 
 // renew keeps the live lease's other holds sized: one that reported usage is
-// topped up, one whose window closed or that grew old is issued again, one
-// whose customer's standing moved is sized again (near the limit an idle one
-// is taken back), one another lease waits for shrinks, and an idle one
-// shrinks toward one request. Before a fixed window closes, an active hold
-// gets its next window's hold.
+// topped up, one whose window closed, that grew old or whose cards changed
+// is issued again, one whose customer's standing moved is sized again (near
+// the limit an idle one is taken back), one another lease waits for
+// shrinks, and an idle one shrinks toward one request. Before a fixed window
+// closes, an active hold gets its next window's hold. Only the holds of
+// customers the sync locked are touched.
 func (r *syncRun) renew() error {
 	keys := make([]holdKey, 0, len(r.holds))
 	for k := range r.holds {
-		keys = append(keys, k)
+		if r.locked[k.customer] {
+			keys = append(keys, k)
+		}
 	}
 	slices.SortFunc(keys, func(a, b holdKey) int {
 		return cmp.Or(compareUUID(a.customer, b.customer), strings.Compare(a.limitSet, b.limitSet))
@@ -454,33 +536,40 @@ func (r *syncRun) renewHold(k holdKey, h *hold) error {
 	used, contended, ended := false, false, false
 	for _, p := range h.parts {
 		used = used || p.used > 0
-		contended = contended || (p.contended != nil && p.contended.After(r.prevSync.Add(-limits.SyncInterval)))
+		contended = contended || r.contended(p)
 		ended = ended || (p.end != nil && !r.now.Before(*p.end))
 	}
 	old := h.row.CreatedAt.Before(r.now.Add(-reissueAge))
 	if ended && !used && !old && !committed(h) {
 		// An idle hold whose window closed is not carried into the next.
-		h.changed = true
-		return r.release(h)
+		return r.retire(h)
 	}
-	if used || old || ended || r.touched[k.customer] || r.moved[k.customer] {
-		slots, err := r.slotsAt(k, h, r.now)
-		if err != nil {
-			return err
-		}
-		if slots == nil {
-			h.changed = true
-			return r.release(h)
-		}
-		w, room, err := r.resolve(identity.CustomerID(k.customer), admission.AdmitRequest{CustomerID: identity.CustomerID(k.customer),
-			InvokerType: string(billing.InvokerTypeCustomer), Currency: h.row.Currency, Source: "lease"})
+	cardsChanged, err := r.cardsChanged(h)
+	if err != nil {
+		return err
+	}
+	if used || old || ended || cardsChanged || r.touched[k.customer] || r.moved[k.customer] {
+		w, room, err := r.resolveHold(k, h)
 		if err != nil {
 			return err
 		}
 		if w.Refusal != nil {
 			return r.shrink(h, func(p *part) int64 { return p.committed })
 		}
-		_, err = r.size(h, k, h.row.Currency, slots, false, room, nil)
+		if h.terms.EventType != "" && len(w.Cards) == 0 {
+			// No card prices the hold's event type any more.
+			return r.retire(h)
+		}
+		slots, set, ok, err := r.holdSlots(k, h, w, r.now)
+		if err != nil {
+			return err
+		}
+		if !ok || set != k.limitSet {
+			// Its limits changed, or a window would have to open: the next
+			// want resolves the hold afresh.
+			return r.retire(h)
+		}
+		_, err = r.size(h, k, h.row.Currency, slots, false, room, w.Cards, h.terms)
 		return err
 	}
 	// Shrinking never needs room: a contended hold gives back what its
@@ -504,17 +593,16 @@ func committed(h *hold) bool {
 }
 
 // shrink answers each part at most what to says, never below what its
-// tickets took; what it set aside is released at the next sync.
+// tickets took; what it set aside beyond is released once its gate applies
+// the answer.
 func (r *syncRun) shrink(h *hold, to func(*part) int64) error {
 	for _, p := range h.parts {
 		answered := min(p.answered, max(to(p), p.committed))
-		if answered == p.answered && p.used == 0 && p.contended == nil {
+		if answered == p.answered && p.used == 0 {
 			continue
 		}
-		if answered != p.answered {
-			h.changed = true
-		}
-		p.answered, p.used, p.contended = answered, 0, nil
+		h.changed = h.changed || answered != p.answered
+		p.answered, p.used = answered, 0
 		if err := r.write(h, p); err != nil {
 			return err
 		}
@@ -522,85 +610,33 @@ func (r *syncRun) shrink(h *hold, to func(*part) int64) error {
 	return nil
 }
 
-// releaseAll is the second step of every live hold's last shrink: what it set
-// aside beyond the size its gate was told, past what this sync's tickets
-// took, is given back.
-func (r *syncRun) releaseAll() error {
-	for _, holds := range r.holds {
-		for _, h := range holds {
-			for _, p := range h.parts {
-				if keep := max(p.answered, p.committed); p.held > keep {
-					p.held = keep
-					if err := r.q.ResizeLeaseHoldPart(r.ctx, gen.ResizeLeaseHoldPartParams{Held: p.held, RequestUnits: p.request, UsedUnits: p.used,
-						AnsweredUnits: p.answered, ContendedAt: p.contended, MerchantID: r.merchant, HoldID: h.row.ID, HoldCreatedAt: h.row.CreatedAt, LimitKey: p.key}); err != nil {
-						return err
-					}
-				}
+// retire answers a hold empty: it is released once its gate applies the
+// answer, down to what its open tickets took until they settle.
+func (r *syncRun) retire(h *hold) error {
+	empty := true
+	for _, p := range h.parts {
+		if p.answered != 0 || p.used != 0 {
+			h.changed = h.changed || p.answered != 0
+			p.answered, p.used = 0, 0
+			if err := r.write(h, p); err != nil {
+				return err
 			}
 		}
+		empty = empty && p.held == 0
+	}
+	if empty {
+		return r.release(h)
 	}
 	return nil
 }
 
-// slotsAt are a hold's limits in their windows at an instant: a declared
-// limit's current window, a spend window's tile; nil when a limit the hold
-// names is no longer declared.
-func (r *syncRun) slotsAt(k holdKey, h *hold, at time.Time) ([]slot, error) {
-	reader := limits.Customer{Q: r.q, MerchantID: r.merchant, CustomerID: k.customer, Now: at,
-		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
-			return r.money.PricingPeriod(ctx, r.q, r.merchant, k.customer, unit, at)
-		}}
-	var windows map[string]limits.Claim
-	if len(r.defs) > 0 {
-		var err error
-		if windows, err = reader.Windows(r.ctx, r.defs); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]slot, 0, len(h.parts))
-	for _, p := range h.parts {
-		s := slot{key: p.key, unit: p.unit, request: p.request, overrun: catalog.OverrunRequireEstimate}
-		switch {
-		case p.key == catalog.BalanceLimit:
-			s.balance = true
-		case strings.HasPrefix(p.key, limits.SpendKeyPrefix):
-			if p.end == nil {
-				return nil, nil
-			}
-			width := p.end.Sub(p.start)
-			start := p.start
-			if !at.Before(*p.end) {
-				start = p.start.Add(at.Sub(p.start) / width * width)
-			}
-			end := start.Add(width)
-			capacity := int64(0)
-			row, err := r.q.GetLimitWindowForUpdate(r.ctx, gen.GetLimitWindowForUpdateParams{MerchantID: r.merchant, CustomerID: k.customer, LimitKey: p.key, WindowStartsAt: p.start})
-			switch {
-			case err == nil:
-				capacity = row.Capacity
-			case !errors.Is(err, pgx.ErrNoRows):
-				return nil, err
-			}
-			s.claim = limits.Claim{Key: p.key, Unit: p.unit, Reset: catalog.LimitReset{Kind: catalog.ResetFixed, WindowSeconds: int(width / time.Second)},
-				Window: limits.Window{StartsAt: start, EndsAt: &end, Open: true}, Capacity: capacity, Overrun: catalog.OverrunRequireEstimate}
-		default:
-			c, ok := windows[p.key]
-			if !ok {
-				return nil, nil
-			}
-			s.claim, s.overrun = c, c.Overrun
-		}
-		out = append(out, s)
-	}
-	return out, nil
-}
-
 // rollAhead issues an active hold's next-window hold when one of its fixed
 // windows closes before the lease syncs again, so the reset does not send
-// every active customer to a want at once.
+// every active customer to a want at once. It opens no window, and a hold
+// whose checks now refuse it gets none.
 func (r *syncRun) rollAhead(k holdKey) error {
 	h := r.current(k, r.now)
-	if h == nil || h.released {
+	if h == nil || h.released || !h.active {
 		return nil
 	}
 	var closes *time.Time
@@ -608,12 +644,12 @@ func (r *syncRun) rollAhead(k holdKey) error {
 		if p.end == nil || p.key == catalog.BalanceLimit {
 			continue
 		}
-		if d, fixed := r.fixedKind(p.key); fixed && d && p.end.After(r.now) && !p.end.After(r.now.Add(rolloverAhead)) && (closes == nil || p.end.Before(*closes)) {
+		if r.tiles(p.key) && p.end.After(r.now) && !p.end.After(r.now.Add(rolloverAhead)) && (closes == nil || p.end.Before(*closes)) {
 			end := *p.end
 			closes = &end
 		}
 	}
-	if !h.active || closes == nil {
+	if closes == nil {
 		return nil
 	}
 	for _, other := range r.holds[k] {
@@ -621,54 +657,36 @@ func (r *syncRun) rollAhead(k holdKey) error {
 			return nil
 		}
 	}
-	// The limits whose windows close take their next window; the rest keep
-	// the current one.
-	slots, err := r.slotsAt(k, h, r.now)
-	if err != nil || slots == nil {
+	w, room, err := r.resolveHold(k, h)
+	if err != nil || w.Refusal != nil {
 		return err
 	}
-	next, err := r.slotsAt(k, h, *closes)
-	if err != nil || next == nil {
+	if h.terms.EventType != "" && len(w.Cards) == 0 {
+		return nil
+	}
+	slots, set, ok, err := r.holdSlots(k, h, w, *closes)
+	if err != nil || !ok || set != k.limitSet {
 		return err
 	}
-	for j := range slots {
-		if p := h.part(slots[j].key); p != nil && p.end != nil && !p.end.After(*closes) {
-			if fixed, known := r.fixedKind(p.key); fixed && known {
-				slots[j] = next[j]
-			}
-		}
-	}
-	_, room, err := r.resolve(identity.CustomerID(k.customer), admission.AdmitRequest{CustomerID: identity.CustomerID(k.customer),
-		InvokerType: string(billing.InvokerTypeCustomer), Currency: h.row.Currency, Source: "lease"})
-	if err != nil {
-		return err
-	}
-	// The next window's hold starts from one request's worth of each limit.
-	for j := range slots {
-		if p := h.part(slots[j].key); p != nil && p.request > 0 {
-			slots[j].request = p.request
-		}
-	}
-	_, err = r.size(nil, k, h.row.Currency, slots, false, room, h.row.RateCards)
+	_, err = r.size(nil, k, h.row.Currency, slots, false, room, w.Cards, h.terms)
 	return err
 }
 
-// fixedKind reports whether a limit's windows tile the clock (a fixed or
+// tiles reports whether a limit's windows tile the clock (a fixed or
 // billing-period limit, or a spend window), so the next one is known before
 // the current one closes.
-func (r *syncRun) fixedKind(key string) (bool, bool) {
+func (r *syncRun) tiles(key string) bool {
 	if strings.HasPrefix(key, limits.SpendKeyPrefix) {
-		return true, true
+		return true
 	}
-	for _, d := range r.defs {
-		if d.Key == key {
-			return d.Reset.Kind == catalog.ResetFixed || d.Reset.Kind == catalog.ResetBillingPeriod, true
-		}
-	}
-	return false, false
+	d, ok := r.def(key)
+	return ok && (d.Reset.Kind == catalog.ResetFixed || d.Reset.Kind == catalog.ResetBillingPeriod)
 }
 
-// answer lists the holds the sync changed and the customers' limits.
+// answer lists the holds the sync changed, and while the lease lives every
+// hold whose latest answer its gate has not reported applied, then the
+// customers' limits. A hold whose capacity moved to a new one is answered by
+// it.
 func (r *syncRun) answer() error {
 	keys := make([]holdKey, 0, len(r.holds))
 	for k := range r.holds {
@@ -678,18 +696,17 @@ func (r *syncRun) answer() error {
 		return cmp.Or(compareUUID(a.customer, b.customer), strings.Compare(a.limitSet, b.limitSet))
 	})
 	for _, k := range keys {
-		// A hold issued again stands for the one it replaced.
-		replaced := false
 		for _, h := range r.holds[k] {
-			replaced = replaced || (h.changed && !h.released)
-		}
-		for _, h := range r.holds[k] {
-			if !h.changed || (h.released && replaced) {
+			listed := h.changed || (r.live && !h.released && h.version > h.applied)
+			if !listed || h.replaced {
 				continue
 			}
-			out, err := r.wire(k, h)
+			out, ok, err := r.wire(k, h)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				continue
 			}
 			r.result.Holds = append(r.result.Holds, out)
 			r.touched[k.customer] = true
@@ -717,19 +734,23 @@ func (r *syncRun) answer() error {
 	return nil
 }
 
-// wire is a hold as its gate reads it; a released hold holds nothing. With
-// the merchant's usage_gate_safe_spend, its safe amount is its money size.
-func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, error) {
+// wire is a hold as its gate reads it, at its version; a released hold
+// holds nothing. With the merchant's usage_gate_safe_spend, its safe amount
+// is its money size. A hold without a balance part is never answered.
+func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
+	if h.part(catalog.BalanceLimit) == nil {
+		return billing.Hold{}, false, nil
+	}
 	cards, bounds, err := money.HoldCards(h.row.RateCards)
 	if err != nil {
-		return billing.Hold{}, err
+		return billing.Hold{}, false, err
 	}
 	safe, err := r.safeSpend()
 	if err != nil {
-		return billing.Hold{}, err
+		return billing.Hold{}, false, err
 	}
 	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: h.row.Currency,
-		Limits: make([]billing.HoldLimit, 0, len(h.parts)), RateCards: cards, PriceBounds: bounds}
+		Limits: make([]billing.HoldLimit, 0, len(h.parts)), RateCards: cards, PriceBounds: bounds, Version: h.version}
 	for _, p := range h.parts {
 		line := billing.HoldLimit{Limit: p.key, Unit: p.unit, Held: p.answered, Overrun: cmp.Or(p.overrun, catalog.OverrunRequireEstimate)}
 		if h.released {
@@ -756,7 +777,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, error) {
 		}
 		out.Limits = append(out.Limits, line)
 	}
-	return out, nil
+	return out, true, nil
 }
 
 // safeSpend reports the merchant's usage_gate_safe_spend, read once a sync.
@@ -778,17 +799,6 @@ func (r *syncRun) def(key string) (limits.Definition, bool) {
 		}
 	}
 	return limits.Definition{}, false
-}
-
-// p0used reports whether usage took anything from the hold's parts since the
-// previous sync.
-func p0used(parts map[string]*part) bool {
-	for _, p := range parts {
-		if p.used > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func ceilSeconds(d time.Duration) int64 {

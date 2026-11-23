@@ -14,12 +14,18 @@ func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams
 	switch {
 	case params.LeaseID.IsZero():
 		return nil, invalidErr("lease_id is required")
+	case params.LeaseID.UUID().Version() != 7:
+		return nil, invalidErr("lease_id must be a UUIDv7")
 	case len(params.Usage) > billing.MaxSyncUsageItems:
 		return nil, invalidErr("a sync carries at most 1000 usage items")
 	case len(params.Wants) > billing.MaxSyncWants:
 		return nil, invalidErr("a sync carries at most 1000 wants")
 	case len(params.Returns) > billing.MaxSyncReturns:
 		return nil, invalidErr("a sync carries at most 1000 returns")
+	case len(params.Committed) > billing.MaxSyncCommitted:
+		return nil, invalidErr("a sync carries at most 10000 commitments")
+	case len(params.Applied) > billing.MaxSyncApplied:
+		return nil, invalidErr("a sync carries at most 10000 applied versions")
 	}
 	var out billing.SyncLeasesResult
 	if err := c.do(ctx, http.MethodPost, "/v1/app/leases/sync", params, &out, requestOptions...); err != nil {

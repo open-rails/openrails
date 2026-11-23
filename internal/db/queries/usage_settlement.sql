@@ -82,11 +82,11 @@ ON CONFLICT (merchant_id, customer_id, day_at, currency, event_type, meter_key, 
 
 -- name: UpsertUsageMinutes :exec
 -- Adds one sync's per-minute spend, sorted by key as UpsertUsageDaily.
-INSERT INTO billing.usage_minutes AS m (merchant_id, customer_id, currency, minute, amount)
-SELECT sqlc.arg(merchant_id)::uuid, r.customer_id, r.currency, r.minute, r.amount
+INSERT INTO billing.usage_minutes AS m (merchant_id, customer_id, currency, minute_at, amount)
+SELECT sqlc.arg(merchant_id)::uuid, r.customer_id, r.currency, r.minute_at, r.amount
 FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(currencies)::text[], sqlc.arg(minutes)::timestamptz[], sqlc.arg(amounts)::bigint[])
-    AS r(customer_id, currency, minute, amount)
-ON CONFLICT (merchant_id, customer_id, currency, minute) DO UPDATE SET amount = m.amount + EXCLUDED.amount;
+    AS r(customer_id, currency, minute_at, amount)
+ON CONFLICT (merchant_id, customer_id, currency, minute_at) DO UPDATE SET amount = m.amount + EXCLUDED.amount;
 
 -- name: SumUsageMinutesSince :one
 -- accrual_rate_cap: what the customer's usage charged in the minutes from
@@ -94,7 +94,7 @@ ON CONFLICT (merchant_id, customer_id, currency, minute) DO UPDATE SET amount = 
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_minutes
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text AND minute >= date_trunc('minute', sqlc.arg(since)::timestamptz);
+  AND currency = sqlc.arg(currency)::text AND minute_at >= date_trunc('minute', sqlc.arg(since)::timestamptz);
 
 -- name: SumUsageMinutesBetween :one
 -- A balance watch's usage rate: what the customer's usage charged in the
@@ -104,7 +104,7 @@ SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_minutes
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
-  AND minute >= date_trunc('minute', sqlc.arg(since)::timestamptz) AND minute < date_trunc('minute', sqlc.arg(until)::timestamptz);
+  AND minute_at >= date_trunc('minute', sqlc.arg(since)::timestamptz) AND minute_at < date_trunc('minute', sqlc.arg(until)::timestamptz);
 
 -- name: UsageDailyReport :many
 -- One page of a customer's usage on the days overlapping [from, to) in one

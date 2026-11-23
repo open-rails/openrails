@@ -138,7 +138,7 @@ FROM (
     (SELECT DISTINCT um.merchant_id AS mid
        FROM billing.usage_minutes um
       WHERE (sqlc.narg(after)::uuid IS NULL OR um.merchant_id > sqlc.narg(after)::uuid)
-        AND um.minute < sqlc.arg(usage_minute_cutoff)::timestamptz
+        AND um.minute_at < sqlc.arg(usage_minute_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
@@ -334,11 +334,11 @@ WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter
 
 -- name: DeleteUsageMinutesBefore :execrows
 DELETE FROM billing.usage_minutes m
-WHERE (m.merchant_id, m.customer_id, m.currency, m.minute) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.minute
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute_at) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute_at
     FROM billing.usage_minutes e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.minute < sqlc.arg(cutoff)::timestamptz
-    ORDER BY e.minute
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.minute_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.minute_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
 );

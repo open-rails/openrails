@@ -111,10 +111,11 @@ type MonthlyPartitions struct {
 	DropBefore func(now time.Time) time.Time
 }
 
-// Partitioned lists the partitioned tables.
+// Partitioned lists the partitioned tables. A month of hold parts drops
+// before the month of holds its foreign key references.
 var Partitioned = []MonthlyPartitions{
-	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
 	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
+	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
 }
 
 // MonthStart is the first instant of t's UTC month.

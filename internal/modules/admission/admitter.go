@@ -440,6 +440,24 @@ func (a *Admitter) limitClaims(ctx context.Context, q *gen.Queries, merchantID u
 	return reader.Claims(ctx, defs, meters, money.NormalizeCurrency(req.Currency), req.EstimatedAmount, usage)
 }
 
+// limitClaimsFor are a renewed hold's claims on the declared limits a
+// request of eventType counts toward, with no cost.
+func (a *Admitter) limitClaimsFor(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, req AdmitRequest, eventType string) ([]limits.Claim, error) {
+	defs, err := limits.Definitions(ctx, q, merchantID)
+	if err != nil || len(defs) == 0 {
+		return nil, err
+	}
+	meters, err := limits.Meters(ctx, q, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	reader := limits.Customer{Q: q, MerchantID: merchantID, CustomerID: req.CustomerID.UUID(), Now: a.gate.Now(),
+		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
+			return a.money.PricingPeriod(ctx, q, merchantID, req.CustomerID.UUID(), unit, at)
+		}}
+	return reader.ClaimsFor(ctx, defs, meters, money.NormalizeCurrency(req.Currency), eventType)
+}
+
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role
 // scope matches on (a role scope key is the role uuid string).
 func roleStrings(roles []uuid.UUID) []string {

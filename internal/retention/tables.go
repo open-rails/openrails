@@ -61,7 +61,7 @@ var Tables = map[string]Table{
 	"scheduled_changes":             {Permanent, permanent},
 
 	"limit_holds":      {PartitionedMonthly, "monthly partitions on created_at, dropped once older than the 61-day replay horizon."},
-	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's."},
+	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's, each month before the holds it references."},
 
 	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},

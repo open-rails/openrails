@@ -4,6 +4,7 @@
 package leases
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -41,18 +42,20 @@ const (
 	// HeadroomShare: one customer's holds on a limit take at most
 	// 1/HeadroomShare of what is free there.
 	HeadroomShare = 2
-	// maxReceipts is how many settlements' receipts a lease keeps: a gate
-	// resends only what its lost replies left unacknowledged.
-	maxReceipts = 64
+	// maxReceipts and maxReceiptBytes bound the receipts a lease keeps: a
+	// gate resends only what its lost replies left unacknowledged.
+	maxReceipts     = 64
+	maxReceiptBytes = 128 << 10
 	// reissueAge is how old a lease's hold row grows before it is issued
 	// again, well inside the hold lifetime.
 	reissueAge = 7 * retention.Day
 	// rolloverAhead is how soon before a fixed window closes an active hold
 	// gets its next window's hold.
 	rolloverAhead = 2 * limits.SyncInterval
-	// leaseIDHorizon is how old a UUIDv7 lease id may be and still create a
-	// lease: past it, a lease that synced may already be forgotten.
-	leaseIDHorizon = retention.Leases - retention.Day
+	// leaseIDSkew is how far a lease id's time may run ahead of the server
+	// clock: an id with no lease older than the replay horizon less it names
+	// a lease that may already be forgotten.
+	leaseIDSkew = retention.Day
 )
 
 // Syncer syncs leases of the context's merchant.
@@ -68,12 +71,34 @@ type Syncer struct {
 	Now    func() time.Time
 }
 
-// receipt is what one settlement of a lease answered.
+// receipt is what one settlement of a lease answered. A refused item keeps
+// only its number and code.
 type receipt struct {
-	FromN    int64                       `json:"from_n"`
-	ThroughN int64                       `json:"through_n"`
-	Digest   string                      `json:"digest"`
-	Refused  []billing.LeaseUsageRefusal `json:"refused"`
+	FromN    int64          `json:"from_n"`
+	ThroughN int64          `json:"through_n"`
+	Digest   string         `json:"digest"`
+	Refused  []refusedEntry `json:"refused"`
+}
+
+type refusedEntry struct {
+	N    int64  `json:"n"`
+	Code string `json:"code"`
+}
+
+// answer is a refused item's answer rebuilt from its receipt.
+func (e refusedEntry) answer() billing.LeaseUsageRefusal {
+	status, typ, meaning := http.StatusUnprocessableEntity, "", "the usage item was refused when it settled"
+	if info, ok := billing.LookupErrorCode(e.Code); ok {
+		status, typ = info.Status, info.Type
+		if info.Meaning != "" {
+			meaning = info.Meaning
+		}
+	}
+	if typ == "" {
+		typ = api.TypeForCode(status, e.Code)
+	}
+	return billing.LeaseUsageRefusal{N: e.N, Status: status, Error: &billing.ErrorDetails{Type: typ, Code: e.Code,
+		Message: fmt.Sprintf("usage item %d was refused when it settled: %s", e.N, meaning)}}
 }
 
 func invalid(param, format string, args ...any) error {
@@ -85,6 +110,8 @@ func validate(p billing.SyncLeasesParams) error {
 	switch {
 	case p.LeaseID.IsZero():
 		return invalid("lease_id", "lease_id is required")
+	case p.LeaseID.UUID().Version() != 7:
+		return invalid("lease_id", "lease_id must be a UUIDv7")
 	case len(p.Usage) > billing.MaxSyncUsageItems:
 		return invalid("usage", "a sync carries at most %d usage items", billing.MaxSyncUsageItems)
 	case len(p.Wants) > billing.MaxSyncWants:
@@ -93,12 +120,19 @@ func validate(p billing.SyncLeasesParams) error {
 		return invalid("returns", "a sync carries at most %d returns", billing.MaxSyncReturns)
 	case len(p.Committed) > billing.MaxSyncCommitted:
 		return invalid("committed", "a sync carries at most %d commitments", billing.MaxSyncCommitted)
+	case len(p.Applied) > billing.MaxSyncApplied:
+		return invalid("applied", "a sync carries at most %d applied versions", billing.MaxSyncApplied)
 	}
 	for i, c := range p.Committed {
 		for j, l := range c.Limits {
 			if l.Committed < 0 {
 				return invalid(fmt.Sprintf("committed[%d].limits[%d].committed", i, j), "committed must be nonnegative")
 			}
+		}
+	}
+	for i, a := range p.Applied {
+		if a.Version < 0 {
+			return invalid(fmt.Sprintf("applied[%d].version", i), "version must be nonnegative")
 		}
 	}
 	for i, u := range p.Usage {
@@ -121,7 +155,6 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	if err != nil {
 		return nil, err
 	}
-	now := s.Now().UTC().Truncate(time.Microsecond)
 	// A failed report's windows come from the merchant's policies.
 	type windowKey struct {
 		customer    billing.CustomerID
@@ -141,11 +174,18 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 			return nil, err
 		}
 	}
-	s.DB.EnsurePartitions(ctx, now)
+	s.DB.EnsurePartitions(ctx, s.Now().UTC())
 	var out *billing.SyncLeasesResult
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		// A sync's transaction is bounded: readers count a lease live for
+		// this much longer than its lifetime.
+		if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "transaction_timeout", Value: strconv.Itoa(int(limits.SyncTimeout / time.Millisecond)), IsLocal: true}); err != nil {
+			return err
+		}
+		now := s.Now().UTC().Truncate(time.Microsecond)
 		d := s.DB.NewWithPgxTx(tx)
-		run := &syncRun{Syncer: s, ctx: ctx, q: gen.New(tx), d: d, merchant: mid.UUID(), now: now, p: p,
+		run := &syncRun{Syncer: s, ctx: ctx, q: q, d: d, merchant: mid.UUID(), now: now, p: p,
 			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d, func() time.Time { return now }), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
 				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(u.Currency)}]
 			}}
@@ -177,9 +217,18 @@ type syncRun struct {
 	meters   map[string]limits.Meter
 	result   *billing.SyncLeasesResult
 	touched  map[uuid.UUID]bool
+	// locked are the customers whose locks the sync holds: it writes only
+	// their holds' parts.
+	locked map[uuid.UUID]bool
 	// moved are the customers of the lease's holds whose standing moved
 	// since its previous sync: their idle holds are sized again.
 	moved map[uuid.UUID]bool
+	// cards caches the rate cards in force per event type and currency.
+	cards map[[2]string][]byte
+	// version is the version this sync's answers carry, once one changed.
+	version int64
+	// answered maps a hold key to the want that answered it first.
+	answered map[holdKey]int
 	// safe is the merchant's usage_gate_safe_spend once read.
 	safe *bool
 }
@@ -189,15 +238,35 @@ type holdKey struct {
 	limitSet string
 }
 
+// holdTerms are the invoker attributes a lease's hold was resolved for,
+// which its renewals resolve again.
+type holdTerms struct {
+	Invoker     string      `json:"invoker"`
+	InvokerType string      `json:"invoker_type"`
+	TrustLevel  string      `json:"trust_level"`
+	Roles       []uuid.UUID `json:"roles"`
+	Resource    string      `json:"resource"`
+	EventType   string      `json:"event_type"`
+}
+
 // hold is one of the lease's holds as the sync sees and changes it.
 type hold struct {
-	row      gen.BillingLimitHold
-	parts    []*part
-	wanted   bool
-	active   bool
+	row     gen.BillingLimitHold
+	terms   holdTerms
+	parts   []*part
+	version int64
+	applied int64
+	wanted  bool
+	active  bool
+	// changed is an answered size that changed: the hold takes the sync's
+	// version and is answered.
 	changed  bool
 	released bool
+	// replaced is a hold whose capacity moved to the one issued after it.
+	replaced bool
 	fresh    bool
+	// versionDirty is a version or applied version to write.
+	versionDirty bool
 }
 
 // stale reports a hold that must be issued again: a window of it closed, or
@@ -253,20 +322,25 @@ func (h *hold) contains(at time.Time) bool {
 	return true
 }
 
+// pending reports a confirmed hold that sets aside more than its answer and
+// its tickets need: the sync releases the rest.
+func (h *hold) pending() bool {
+	if h.applied < h.version {
+		return false
+	}
+	for _, p := range h.parts {
+		if p.held > max(p.answered, p.committed) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	if err := r.lockLease(); err != nil {
 		return nil, err
 	}
 	if _, err := r.q.ReadMerchantSettingsLock(r.ctx, r.merchant); err != nil {
-		return nil, err
-	}
-	if err := r.loadHolds(); err != nil {
-		return nil, err
-	}
-	if err := r.findMoved(); err != nil {
-		return nil, err
-	}
-	if err := r.lockCustomers(); err != nil {
 		return nil, err
 	}
 	var err error
@@ -278,7 +352,16 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 			return nil, err
 		}
 	}
-	r.touched = map[uuid.UUID]bool{}
+	if err := r.loadHolds(); err != nil {
+		return nil, err
+	}
+	if err := r.findMoved(); err != nil {
+		return nil, err
+	}
+	if err := r.lockCustomers(); err != nil {
+		return nil, err
+	}
+	r.touched, r.answered = map[uuid.UUID]bool{}, map[holdKey]int{}
 	r.result = &billing.SyncLeasesResult{Wants: make([]billing.LeaseWantResult, len(r.p.Wants)), Holds: []billing.Hold{}, Limits: []billing.CustomerLimit{},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}}
 	through, receipts, err := r.settle()
@@ -286,7 +369,7 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		return nil, err
 	}
 	// Settlement took what the usage used from the holds; each one it took
-	// from is answered.
+	// from is answered. The holds are read again under the customer locks.
 	if err := r.loadHolds(); err != nil {
 		return nil, err
 	}
@@ -294,19 +377,19 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		for _, holds := range r.holds {
 			for _, h := range holds {
 				for _, p := range h.parts {
-					h.changed = h.changed || p.used > 0
+					if p.used > 0 && r.locked[h.row.CustomerID] {
+						h.changed, h.active = true, true
+					}
 				}
 			}
 		}
-	}
-	switch {
-	case r.p.Close:
-		// A closing sync, its usage settled, returns every hold of the lease.
-		if err := r.releaseEvery(); err != nil {
+		if err := r.confirm(); err != nil {
 			return nil, err
 		}
-	case r.live:
-		if err := r.releaseAll(); err != nil {
+	}
+	if r.p.Close {
+		// A closing sync, its usage settled, returns every hold of the lease.
+		if err := r.releaseEvery(); err != nil {
 			return nil, err
 		}
 	}
@@ -323,16 +406,20 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 			return nil, err
 		}
 	}
-	encoded, err := json.Marshal(receipts)
+	if err := r.writeVersions(); err != nil {
+		return nil, err
+	}
+	encoded, err := encodeReceipts(receipts)
 	if err != nil {
 		return nil, err
 	}
-	lastSync := r.lease.LastSyncAt
-	if r.live {
-		lastSync = r.now
-	}
-	if err := r.q.UpdateLeaseSync(r.ctx, gen.UpdateLeaseSyncParams{LastSyncAt: lastSync, SettledThroughN: through, Receipts: encoded, MerchantID: r.merchant, ID: r.lease.ID}); err != nil {
+	if err := r.q.UpdateLeaseSettlement(r.ctx, gen.UpdateLeaseSettlementParams{SettledThroughN: through, Receipts: encoded,
+		HoldVersion: max(r.lease.HoldVersion, r.version), MerchantID: r.merchant, ID: r.lease.ID}); err != nil {
 		return nil, err
+	}
+	lastSync := r.prevSync
+	if r.live && !r.p.Close && r.now.After(lastSync) {
+		lastSync = r.now
 	}
 	expires, closedAt := lastSync.Add(limits.LeaseLifetime), r.lease.ClosedAt
 	if r.p.Close && closedAt == nil {
@@ -347,7 +434,7 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	if closedAt != nil && closedAt.Before(expires) {
 		expires = *closedAt
 	}
-	r.result.Lease = billing.Lease{ID: r.p.LeaseID, ExpiresAt: expires}
+	r.result.Lease = billing.Lease{ID: r.p.LeaseID, ExpiresAt: expires, Live: r.live}
 	r.result.Usage.ThroughN = through
 	if err := r.answer(); err != nil {
 		return nil, err
@@ -355,19 +442,19 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	return r.result, nil
 }
 
-// lockLease locks the lease, creating it on its first sync. A dead lease is
-// not renewed: its holds never reopen.
+// lockLease locks the lease, creating it on its first sync, and renews it
+// while it is live. A dead lease is not renewed: its holds never reopen. An
+// id older than the replay horizon with no lease names one that may already
+// be forgotten: its usage must not post again.
 func (r *syncRun) lockLease() error {
 	id := r.p.LeaseID.UUID()
 	row, err := r.q.LockLease(r.ctx, gen.LockLeaseParams{MerchantID: r.merchant, ID: id})
 	switch {
 	case err == nil:
 	case errors.Is(err, pgx.ErrNoRows):
-		if id.Version() == 7 {
-			sec, nsec := id.Time().UnixTime()
-			if time.Unix(sec, nsec).Before(r.now.Add(-leaseIDHorizon)) {
-				return apperr.New(http.StatusNotFound, billing.CodeLeaseNotFound, "the lease is older than the replay horizon and no longer kept").WithParam("lease_id")
-			}
+		sec, nsec := id.Time().UnixTime()
+		if time.Unix(sec, nsec).Before(r.now.Add(-(retention.Leases - leaseIDSkew))) {
+			return apperr.New(http.StatusNotFound, billing.CodeLeaseNotFound, "the lease is older than the replay horizon and no longer kept").WithParam("lease_id")
 		}
 		// A batch job numbers its items from its own cursor: a new lease
 		// starts just before its first item.
@@ -386,8 +473,13 @@ func (r *syncRun) lockLease() error {
 		return err
 	}
 	r.lease, r.prevSync = row, row.LastSyncAt
-	r.live = row.ClosedAt == nil && row.LastSyncAt.After(r.now.Add(-limits.LeaseLifetime))
-	return nil
+	if r.p.Close {
+		r.live = row.ClosedAt == nil && row.LastSyncAt.After(r.now.Add(-limits.LeaseLifetime))
+		return nil
+	}
+	renewed, err := r.q.RenewLease(r.ctx, gen.RenewLeaseParams{Now: r.now, MerchantID: r.merchant, ID: id, LiveSince: r.now.Add(-limits.LeaseLifetime)})
+	r.live = renewed == 1
+	return err
 }
 
 // findMoved reads which customers of the live lease's holds settled or
@@ -413,16 +505,17 @@ func (r *syncRun) findMoved() error {
 	return err
 }
 
-// lockCustomers locks every customer the sync names or sizes a hold of, in
-// id order.
+// lockCustomers locks, in id order, every customer the sync names and every
+// customer whose holds it may change: it writes a lease's parts only under
+// their customer's lock, as every other writer of them does.
 func (r *syncRun) lockCustomers() error {
-	seen := map[uuid.UUID]bool{}
+	r.locked = map[uuid.UUID]bool{}
 	var ids []uuid.UUID
 	add := func(c billing.CustomerID) {
-		if c.IsZero() || seen[c.UUID()] || (r.Allows != nil && !r.Allows(c)) {
+		if c.IsZero() || r.locked[c.UUID()] || (r.Allows != nil && !r.Allows(c)) {
 			return
 		}
-		seen[c.UUID()] = true
+		r.locked[c.UUID()] = true
 		ids = append(ids, c.UUID())
 	}
 	for _, u := range r.p.Usage {
@@ -434,12 +527,21 @@ func (r *syncRun) lockCustomers() error {
 	for _, ret := range r.p.Returns {
 		add(ret.CustomerID)
 	}
-	// A hold whose window closed or that grew old, or whose customer's
-	// standing moved, is sized again; a closing sync returns every hold.
-	for k, holds := range r.holds {
-		for _, h := range holds {
-			if r.p.Close || h.stale(r.now) || r.moved[k.customer] {
-				add(billing.CustomerID(k.customer))
+	if r.live || r.p.Close {
+		for _, a := range r.p.Applied {
+			if len(r.holds[holdKey{a.CustomerID.UUID(), a.LimitSet}]) > 0 {
+				add(a.CustomerID)
+			}
+		}
+		for k, holds := range r.holds {
+			for _, h := range holds {
+				needs, err := r.needsWork(k, h)
+				if err != nil {
+					return err
+				}
+				if needs {
+					add(billing.CustomerID(k.customer))
+				}
 			}
 		}
 	}
@@ -455,9 +557,64 @@ func (r *syncRun) lockCustomers() error {
 	return nil
 }
 
-// loadHolds reads the lease's open holds, which a live lease keeps alive.
+// needsWork reports a hold this sync may change: a closing sync's, or a live
+// lease's hold that is stale, whose customer moved, that another lease waits
+// for, that its gate confirmed above what it needs, that usage took from or
+// that an idle sync shrinks.
+func (r *syncRun) needsWork(k holdKey, h *hold) (bool, error) {
+	if r.p.Close {
+		return true, nil
+	}
+	if h.stale(r.now) || r.moved[k.customer] || h.pending() {
+		return true, nil
+	}
+	for _, p := range h.parts {
+		if p.used > 0 || r.contended(p) || p.answered > satAdd(p.committed, p.request) {
+			return true, nil
+		}
+	}
+	return r.cardsChanged(h)
+}
+
+// contended reports a part another lease was refused capacity_held for
+// since the lease's previous sync.
+func (r *syncRun) contended(p *part) bool {
+	return p.contended != nil && p.contended.After(r.prevSync.Add(-limits.SyncInterval))
+}
+
+// cardsChanged reports a hold whose event type's rate cards are no longer
+// the ones it pinned: it is issued again with the cards in force.
+func (r *syncRun) cardsChanged(h *hold) (bool, error) {
+	if h.terms.EventType == "" {
+		return false, nil
+	}
+	current, err := r.cardsFor(h.terms.EventType, h.row.Currency)
+	if err != nil {
+		return false, err
+	}
+	return !bytes.Equal(current, h.row.RateCards), nil
+}
+
+func (r *syncRun) cardsFor(eventType, currency string) ([]byte, error) {
+	if r.cards == nil {
+		r.cards = map[[2]string][]byte{}
+	}
+	k := [2]string{eventType, currency}
+	if c, ok := r.cards[k]; ok {
+		return c, nil
+	}
+	c, err := r.money.PinnedCards(r.ctx, r.q, eventType, currency)
+	if err != nil {
+		return nil, err
+	}
+	r.cards[k] = c
+	return c, nil
+}
+
+// loadHolds reads the lease's open holds and gives each part what the gate
+// reports its open tickets took.
 func (r *syncRun) loadHolds() error {
-	since := r.now.Add(-retention.AdmissionMaxHold)
+	since := limits.HeldSince(r.now)
 	rows, err := r.q.ListLeaseHolds(r.ctx, gen.ListLeaseHoldsParams{MerchantID: r.merchant, LeaseID: r.lease.ID, HeldSince: since})
 	if err != nil {
 		return err
@@ -469,7 +626,12 @@ func (r *syncRun) loadHolds() error {
 	byID := map[uuid.UUID]*hold{}
 	r.holds = map[holdKey][]*hold{}
 	for _, row := range rows {
-		h := &hold{row: row}
+		h := &hold{row: row, version: deref(row.Version), applied: deref(row.AppliedVersion)}
+		if len(row.Terms) > 0 {
+			if err := json.Unmarshal(row.Terms, &h.terms); err != nil {
+				return fmt.Errorf("decode hold terms: %w", err)
+			}
+		}
 		byID[row.ID] = h
 		k := holdKey{row.CustomerID, deref(row.LimitSet)}
 		r.holds[k] = append(r.holds[k], h)
@@ -484,27 +646,34 @@ func (r *syncRun) loadHolds() error {
 			answered = *p.AnsweredUnits
 		}
 		h.parts = append(h.parts, &part{key: p.LimitKey, unit: p.Unit, start: p.WindowStartsAt.UTC(), end: p.WindowEndsAt, held: p.Held,
-			answered: answered, request: deref(p.RequestUnits), used: deref(p.UsedUnits), contended: p.ContendedAt})
+			answered: answered, request: deref(p.RequestUnits), used: deref(p.UsedUnits), contended: p.ContendedAt, overrun: r.overrunOf(p.LimitKey)})
 	}
 	r.commit()
 	return nil
 }
 
+func (r *syncRun) overrunOf(key string) catalog.Overrun {
+	if d, ok := r.def(key); ok {
+		return d.Overrun
+	}
+	return catalog.OverrunRequireEstimate
+}
+
 // commit gives each part what the gate reports its open tickets took of it:
-// the part of that window, else the part of the hold that covers now. A hold
-// the sync does not list has none.
+// the newest hold's part of that window, else the part of the hold that
+// covers now. A hold the sync does not list has none.
 func (r *syncRun) commit() {
 	for _, c := range r.p.Committed {
 		if c.CustomerID.IsZero() || (r.Allows != nil && !r.Allows(c.CustomerID)) {
 			continue
 		}
 		k := holdKey{c.CustomerID.UUID(), c.LimitSet}
+		holds := r.holds[k]
 		for _, l := range c.Limits {
 			var target *part
-			for _, h := range r.holds[k] {
-				if p := h.part(l.Limit); p != nil && sameWindow(p, l.WindowStartsAt) {
+			for i := len(holds) - 1; i >= 0 && target == nil; i-- {
+				if p := holds[i].part(l.Limit); p != nil && sameWindow(p, l.WindowStartsAt) {
 					target = p
-					break
 				}
 			}
 			if target == nil {
@@ -529,21 +698,23 @@ func sameWindow(p *part, start *time.Time) bool {
 }
 
 // current is the lease's hold for a customer and limit set whose windows
-// cover at, else its newest.
+// cover at, the newest of them, else its newest.
 func (r *syncRun) current(k holdKey, at time.Time) *hold {
-	var newest *hold
+	var best *hold
 	for _, h := range r.holds[k] {
 		if h.released {
 			continue
 		}
-		if h.contains(at) {
-			return h
+		if best == nil {
+			best = h
+			continue
 		}
-		if newest == nil || h.row.CreatedAt.After(newest.row.CreatedAt) {
-			newest = h
+		in, bestIn := h.contains(at), best.contains(at)
+		if (in && !bestIn) || (in == bestIn && h.row.CreatedAt.After(best.row.CreatedAt)) {
+			best = h
 		}
 	}
-	return newest
+	return best
 }
 
 // settle settles the sync's usage in order and answers what it resent.
@@ -587,7 +758,7 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 		for _, ref := range rc.Refused {
 			for _, i := range covered {
 				if r.p.Usage[i].N == ref.N {
-					r.result.Usage.Refused = append(r.result.Usage.Refused, ref)
+					r.result.Usage.Refused = append(r.result.Usage.Refused, ref.answer())
 				}
 			}
 		}
@@ -646,23 +817,44 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 	slices.SortFunc(refusals, func(a, b billing.LeaseUsageRefusal) int { return cmp.Compare(a.N, b.N) })
 	r.result.Usage.Refused = append(r.result.Usage.Refused, refusals...)
 	slices.SortFunc(r.result.Usage.Refused, func(a, b billing.LeaseUsageRefusal) int { return cmp.Compare(a.N, b.N) })
-	rc := receipt{FromN: through + 1, ThroughN: last, Refused: refusals}
+	rc := receipt{FromN: through + 1, ThroughN: last, Refused: make([]refusedEntry, 0, len(refusals))}
+	for _, ref := range refusals {
+		code := billing.CodeInternalError
+		if ref.Error != nil {
+			code = ref.Error.Code
+		}
+		rc.Refused = append(rc.Refused, refusedEntry{N: ref.N, Code: code})
+	}
 	var newDigests []string
 	for i := first; i < len(r.p.Usage) && r.p.Usage[i].N <= last; i++ {
 		newDigests = append(newDigests, digests[i])
 	}
 	rc.Digest = settlementDigest(newDigests)
-	if rc.Refused == nil {
-		rc.Refused = []billing.LeaseUsageRefusal{}
-	}
 	receipts = append(receipts, rc)
-	if len(receipts) > maxReceipts {
-		receipts = receipts[len(receipts)-maxReceipts:]
-	}
 	return last, receipts, nil
 }
 
-// usageItem is a lease's usage report as settlement takes it.
+// encodeReceipts keeps the newest receipts within maxReceipts and
+// maxReceiptBytes; the newest one always stays.
+func encodeReceipts(receipts []receipt) ([]byte, error) {
+	if len(receipts) > maxReceipts {
+		receipts = receipts[len(receipts)-maxReceipts:]
+	}
+	for {
+		if len(receipts) == 0 {
+			return []byte("[]"), nil
+		}
+		encoded, err := json.Marshal(receipts)
+		if err != nil || len(encoded) <= maxReceiptBytes || len(receipts) == 1 {
+			return encoded, err
+		}
+		receipts = receipts[1:]
+	}
+}
+
+// usageItem is a lease's usage report as settlement takes it. Usage decided
+// against a hold of its event type is priced by the cards the hold pinned,
+// which its gate decided with; any other is priced by the cards in force.
 func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 	switch {
 	case u.CustomerID.IsZero():
@@ -699,10 +891,55 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 			for _, p := range h.parts {
 				sh.Parts = append(sh.Parts, money.HoldPart{Key: p.key, Unit: p.unit, WindowStartsAt: p.start, WindowEndsAt: p.end, Held: p.held})
 			}
-			item.Hold, item.Cards = sh, h.row.RateCards
+			item.Hold = sh
+			if h.terms.EventType == strings.TrimSpace(u.EventType) {
+				item.Cards = h.row.RateCards
+			}
 		}
 	}
 	return item, nil
+}
+
+// confirm records the versions the gate reports applied and releases what
+// each confirmed hold sets aside beyond its answer and this sync's
+// commitment. A hold left with nothing is released.
+func (r *syncRun) confirm() error {
+	for _, a := range r.p.Applied {
+		if a.CustomerID.IsZero() || !r.locked[a.CustomerID.UUID()] {
+			continue
+		}
+		for _, h := range r.holds[holdKey{a.CustomerID.UUID(), a.LimitSet}] {
+			if v := min(a.Version, h.version); v > h.applied {
+				h.applied, h.versionDirty = v, true
+			}
+		}
+	}
+	for k, holds := range r.holds {
+		if !r.locked[k.customer] {
+			continue
+		}
+		for _, h := range holds {
+			if h.released || h.applied < h.version {
+				continue
+			}
+			empty := true
+			for _, p := range h.parts {
+				if keep := max(p.answered, p.committed); p.held > keep {
+					p.held = keep
+					if err := r.write(h, p); err != nil {
+						return err
+					}
+				}
+				empty = empty && p.held == 0 && p.answered == 0 && p.used == 0
+			}
+			if empty {
+				if err := r.release(h); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // giveBack releases the holds the sync returns.
@@ -723,7 +960,8 @@ func (r *syncRun) giveBack() error {
 	return nil
 }
 
-// releaseEvery returns every open hold of the lease.
+// releaseEvery returns every open hold of the lease; each is answered with
+// nothing held.
 func (r *syncRun) releaseEvery() error {
 	for _, holds := range r.holds {
 		for _, h := range holds {
@@ -740,14 +978,38 @@ func (r *syncRun) releaseEvery() error {
 }
 
 func (r *syncRun) release(h *hold) error {
-	if h.fresh && h.row.ID == uuid.Nil {
-		h.released = true
-		return nil
-	}
 	if err := r.q.ReleaseLeaseHold(r.ctx, gen.ReleaseLeaseHoldParams{AsOf: r.now, MerchantID: r.merchant, ID: h.row.ID, CreatedAt: h.row.CreatedAt}); err != nil {
 		return err
 	}
 	h.released = true
+	return nil
+}
+
+// nextVersion is the version this sync's answers carry.
+func (r *syncRun) nextVersion() int64 {
+	if r.version == 0 {
+		r.version = r.lease.HoldVersion + 1
+	}
+	return r.version
+}
+
+// writeVersions gives every hold whose answer changed the sync's version
+// and stores the versions that moved.
+func (r *syncRun) writeVersions() error {
+	for _, holds := range r.holds {
+		for _, h := range holds {
+			if h.changed && !h.fresh {
+				h.version, h.versionDirty = r.nextVersion(), true
+			}
+			if !h.versionDirty || h.released || h.fresh {
+				continue
+			}
+			if err := r.q.SetLeaseHoldVersions(r.ctx, gen.SetLeaseHoldVersionsParams{Version: h.version, AppliedVersion: min(h.applied, h.version), AsOf: r.now,
+				MerchantID: r.merchant, ID: h.row.ID, CreatedAt: h.row.CreatedAt}); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -813,11 +1075,13 @@ func settlementDigest(digests []string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// LimitSet is the opaque key of a set of limits in one currency.
-func LimitSet(currency string, keys []string) string {
+// LimitSet is the opaque key of a set of limits in one currency, for one
+// event type ("" for host-stated requests) and the resolved policy's money
+// terms.
+func LimitSet(currency, eventType, moneyTerms string, keys []string) string {
 	sorted := slices.Clone(keys)
 	slices.Sort(sorted)
-	sum := sha256.Sum256([]byte(currency + "\x00" + strings.Join(sorted, "\x00")))
+	sum := sha256.Sum256([]byte(currency + "\x00" + eventType + "\x00" + moneyTerms + "\x00" + strings.Join(sorted, "\x00")))
 	return "ls_" + hex.EncodeToString(sum[:16])
 }
 

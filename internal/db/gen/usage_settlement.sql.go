@@ -417,7 +417,7 @@ SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_minutes
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text
-  AND minute >= date_trunc('minute', $4::timestamptz) AND minute < date_trunc('minute', $5::timestamptz)
+  AND minute_at >= date_trunc('minute', $4::timestamptz) AND minute_at < date_trunc('minute', $5::timestamptz)
 `
 
 type SumUsageMinutesBetweenParams struct {
@@ -448,7 +448,7 @@ const sumUsageMinutesSince = `-- name: SumUsageMinutesSince :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_minutes
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND currency = $3::text AND minute >= date_trunc('minute', $4::timestamptz)
+  AND currency = $3::text AND minute_at >= date_trunc('minute', $4::timestamptz)
 `
 
 type SumUsageMinutesSinceParams struct {
@@ -526,11 +526,11 @@ func (q *Queries) UpsertUsageDaily(ctx context.Context, arg UpsertUsageDailyPara
 }
 
 const upsertUsageMinutes = `-- name: UpsertUsageMinutes :exec
-INSERT INTO billing.usage_minutes AS m (merchant_id, customer_id, currency, minute, amount)
-SELECT $1::uuid, r.customer_id, r.currency, r.minute, r.amount
+INSERT INTO billing.usage_minutes AS m (merchant_id, customer_id, currency, minute_at, amount)
+SELECT $1::uuid, r.customer_id, r.currency, r.minute_at, r.amount
 FROM unnest($2::uuid[], $3::text[], $4::timestamptz[], $5::bigint[])
-    AS r(customer_id, currency, minute, amount)
-ON CONFLICT (merchant_id, customer_id, currency, minute) DO UPDATE SET amount = m.amount + EXCLUDED.amount
+    AS r(customer_id, currency, minute_at, amount)
+ON CONFLICT (merchant_id, customer_id, currency, minute_at) DO UPDATE SET amount = m.amount + EXCLUDED.amount
 `
 
 type UpsertUsageMinutesParams struct {

@@ -551,8 +551,10 @@ type BillingLease struct {
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
 	ClosedAt        *time.Time
-	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the items it refused.
+	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the numbers and codes of the items it refused.
 	Receipts []byte
+	// The latest version the lease's hold answers carry: each sync that answers a hold a new size takes the next one.
+	HoldVersion int64
 }
 
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
@@ -626,7 +628,8 @@ type BillingLimitHold struct {
 	EstimatedAmount *int64
 	// A request's hold: what the customer could spend when it was admitted, before the hold.
 	AvailableAmount *int64
-	Terms           []byte
+	// A request's admission terms, or the invoker attributes a lease's hold was resolved for ({invoker, invoker_type, trust_level, roles, resource, event_type}), which its renewals resolve again.
+	Terms []byte
 	// The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.
 	EstimateUsage []byte
 	// The rate cards that priced the money estimate, pinned: the capture is priced by them, whatever the catalog says later.
@@ -642,9 +645,13 @@ type BillingLimitHold struct {
 	UpdatedAt      time.Time
 	// What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].
 	CapturedCharges []byte
+	// A lease's hold: the lease's hold_version of its latest answer; null for a request's hold.
+	Version *int64
+	// A lease's hold: the latest version its gate reported applied. Below version, a smaller answered size is not yet released.
+	AppliedVersion *int64
 }
 
-// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. Retention: monthly partitions on hold_created_at, dropped with their hold's.
+// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. Its foreign key to limit_holds cascades. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before the holds it references.
 type BillingLimitHoldPart struct {
 	MerchantID uuid.UUID
 	HoldID     uuid.UUID
@@ -658,11 +665,11 @@ type BillingLimitHoldPart struct {
 	Held           int64
 	// A lease's hold: what one request of its customer last cost in the limit; null for a request's hold.
 	RequestUnits *int64
-	// A lease's hold: the units its usage took from the part since the lease's previous sync; null for a request's hold.
+	// A lease's hold: the units its usage took from the part since the hold was last sized; null for a request's hold.
 	UsedUnits *int64
-	// When another lease was refused capacity_held for capacity this part holds; it shrinks on its lease's next sync.
+	// When an admission or another lease was refused capacity_held for capacity of this limit the part holds: it shrinks on its lease's next sync. Written only under the customer's lock.
 	ContendedAt *time.Time
-	// A lease's hold: the size its last sync answered, less what usage took since. A shrink is answered first and released at the next sync, down to this or what the gate's open tickets took, whichever is more; null for a request's hold.
+	// A lease's hold: the size its latest answer gave, less what usage took since. held stays above it until the gate reports the answer's version applied, and never below what the gate's open tickets took; null for a request's hold.
 	AnsweredUnits *int64
 }
 
@@ -2096,7 +2103,7 @@ type BillingUsageMinute struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	Minute     time.Time
+	MinuteAt   time.Time
 	Amount     int64
 }
 

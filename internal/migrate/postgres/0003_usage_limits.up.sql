@@ -105,151 +105,9 @@ ALTER TABLE billing.catalog_field_owners ADD CONSTRAINT catalog_field_owners_fie
 COMMENT ON COLUMN billing.catalog_field_owners.key IS 'The product, meter or limit key; a price''s product key.';
 COMMENT ON COLUMN billing.catalog_field_owners.price_key IS 'A price''s key; empty for a product, meter or limit.';
 
--- A billing restore's destination holds none of the merchant's limits, holds
--- or leases.
-CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
-DECLARE item record; occupied boolean;
-BEGIN
-    IF TG_OP='DELETE' THEN
-        IF OLD.kind='billing_restore' THEN
-            RAISE EXCEPTION 'billing restore receipts are immutable' USING ERRCODE='23514';
-        END IF;
-        RETURN OLD;
-    END IF;
-    IF NEW.kind<>'billing_restore' AND (TG_OP='INSERT' OR OLD.kind<>'billing_restore') THEN RETURN NEW; END IF;
-    IF NEW.merchant_id IS DISTINCT FROM billing.current_merchant_id() THEN
-        RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
-    END IF;
-    -- The merchant row is the serialization point used by begin_billing_restore
-    -- and by FK-backed first writes. No database-owner exemption or GUC-only
-    -- permission can create a receipt for an occupied destination.
-    PERFORM 1 FROM billing.merchants WHERE id=NEW.merchant_id AND status='active' AND deleted_at IS NULL FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'billing restore merchant missing or inactive' USING ERRCODE='P0002'; END IF;
-    IF TG_OP='INSERT' THEN
-        IF NEW.status<>'running' OR NEW.finished_at IS NOT NULL OR NEW.summary IS NOT NULL THEN
-            RAISE EXCEPTION 'billing restore receipts must begin running and unfinished' USING ERRCODE='23514';
-        END IF;
-        FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-            WHERE n.nspname=TG_TABLE_SCHEMA AND c.relkind IN ('r','p')
-              -- Every merchant-scoped table but the directory's own identity rows
-              -- (former names, host claims); a test keeps this list complete.
-              AND c.relname = ANY(ARRAY[
-                  'access_cutover_approvals',
-                  'balance_watches',
-                  'carts',
-                  'catalog_applications',
-                  'catalog_field_owners',
-                  'catalog_limits',
-                  'catalog_meters',
-                  'catalog_product_limits',
-                  'catalog_rate_cards',
-                  'catalog_restore_receipts',
-                  'custodians',
-                  'customer_delinquency',
-                  'customer_entitlement_cache',
-                  'customer_entitlement_cache_stamps',
-                  'customer_invoice_profiles',
-                  'customer_limit_overrides',
-                  'customer_low_balance_lines',
-                  'customers',
-                  'dashboard_configs',
-                  'destructive_actions',
-                  'destructive_holds',
-                  'destructive_run_before_images',
-                  'eventlog_events',
-                  'failed_usage_windows',
-                  'grants',
-                  'host_outbox',
-                  'idempotency_keys',
-                  'leases',
-                  'ledger_accounts',
-                  'ledger_transfers',
-                  'limit_adjustments',
-                  'limit_hold_parts',
-                  'limit_holds',
-                  'limit_windows',
-                  'maintenance_runs',
-                  'mandates',
-                  'merchant_destructive_policy',
-                  'meter_period_quantities',
-                  'money_settings',
-                  'nmi_bulk_checkpoints',
-                  'nmi_history_months',
-                  'nmi_history_reads',
-                  'notification_events',
-                  'order_attempts',
-                  'order_lines',
-                  'orders',
-                  'owed_items',
-                  'ownership_claims',
-                  'payment_attempts',
-                  'payment_method_versions',
-                  'payment_methods',
-                  'payments',
-                  'price_key_movements',
-                  'price_keys',
-                  'price_migrations',
-                  'price_psp_bindings',
-                  'prices',
-                  'product_access',
-                  'product_entitlements',
-                  'products',
-                  'provider_bills',
-                  'provider_charge_attributions',
-                  'provider_cycle_receipts',
-                  'provider_intents',
-                  'provider_mutation_logs',
-                  'provider_schedules',
-                  'psp_customers',
-                  'psp_refresh_watermarks',
-                  'psps',
-                  'rebill_cycles',
-                  'reconciliation_findings',
-                  'reconciliation_state',
-                  'running_charges',
-                  'scheduled_changes',
-                  'solana_pay_receipts',
-                  'solana_pay_references',
-                  'solana_subscriptions',
-                  'stored_card_checks',
-                  'subscription_status_transitions',
-                  'subscription_billing_changes',
-                  'subscription_verifications',
-                  'subscriptions',
-                  'usage_events',
-                  'webhook_events',
-                  'webhook_health',
-                  'webhook_health_daily']::text[])
-        LOOP
-            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',TG_TABLE_SCHEMA,item.relname)
-                INTO occupied USING NEW.merchant_id;
-            IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
-        END LOOP;
-    ELSE
-        IF OLD.kind<>'billing_restore' OR NEW.kind<>'billing_restore'
-           OR OLD.status<>'running' OR NEW.status<>'completed'
-           OR NEW.finished_at IS NULL
-           OR (to_jsonb(NEW)-ARRAY['status','finished_at','summary','run_class']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','finished_at','summary','run_class'])
-           OR NOT EXISTS (SELECT 1 FROM billing.maintenance_runs r WHERE r.id=OLD.id AND r.merchant_id=OLD.merchant_id
-               AND r.xmin=pg_current_xact_id_if_assigned()::xid)
-           OR OLD.id::text IS DISTINCT FROM current_setting('openrails.billing_restore_id',true)
-           OR NEW.summary->>'digest' IS NULL OR NEW.summary->>'digest' !~ '^[0-9a-f]{64}$'
-           OR jsonb_typeof(NEW.summary->'rows') IS DISTINCT FROM 'number'
-           OR (NEW.summary->>'rows')::numeric < 0
-           OR (NEW.summary->>'rows')::numeric <> trunc((NEW.summary->>'rows')::numeric) THEN
-            RAISE EXCEPTION 'invalid billing restore receipts transition' USING ERRCODE='23514';
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$_$;
-
 -- Holds and leases. A hold sets capacity aside for one customer: one admitted
 -- request owns it, or a gate's lease does. Holds replace admission_operations,
 -- and denial statistics are gone: a limit window records when it was reached.
-
 
 CREATE TABLE billing.leases (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
@@ -258,6 +116,8 @@ CREATE TABLE billing.leases (
     last_sync_at timestamptz NOT NULL,
     settled_through_n bigint NOT NULL CHECK (settled_through_n >= 0),
     closed_at timestamptz,
+    receipts jsonb NOT NULL CHECK (jsonb_typeof(receipts) = 'array' AND octet_length(receipts::text) <= 262144),
+    hold_version bigint NOT NULL CHECK (hold_version >= 0),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT leases_last_sync_at_check CHECK (last_sync_at >= created_at),
     CONSTRAINT leases_closed_at_check CHECK (closed_at IS NULL OR closed_at >= created_at)
@@ -266,6 +126,8 @@ COMMENT ON TABLE billing.leases IS 'One gate''s lease: a running process, or the
 COMMENT ON COLUMN billing.leases.id IS 'The UUID the client chose; lse_ on the wire.';
 COMMENT ON COLUMN billing.leases.settled_through_n IS 'The highest usage item number settled. Items are numbered once per lease and settle in order.';
 COMMENT ON COLUMN billing.leases.closed_at IS 'When a sync with close ended the lease and returned its holds. A closed lease takes no want; usage against it still settles.';
+COMMENT ON COLUMN billing.leases.receipts IS 'The receipts of the lease''s latest settlements, oldest first: each one''s from_n, through_n, the digest of its items and the numbers and codes of the items it refused.';
+COMMENT ON COLUMN billing.leases.hold_version IS 'The latest version the lease''s hold answers carry: each sync that answers a hold a new size takes the next one.';
 
 CREATE INDEX leases_last_sync_at_idx ON billing.leases (merchant_id, last_sync_at);
 
@@ -291,6 +153,9 @@ CREATE TABLE billing.limit_holds (
     captured_at timestamptz,
     released_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
+    captured_charges jsonb,
+    version bigint,
+    applied_version bigint,
     PRIMARY KEY (merchant_id, id, created_at),
     CONSTRAINT limit_holds_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CONSTRAINT limit_holds_lease_id_fkey FOREIGN KEY (merchant_id, lease_id) REFERENCES billing.leases (merchant_id, id) ON DELETE CASCADE,
@@ -299,7 +164,7 @@ CREATE TABLE billing.limit_holds (
             AND estimated_amount IS NOT NULL AND available_amount IS NOT NULL AND terms IS NOT NULL
             AND (estimate_usage IS NULL) = (rate_cards IS NULL))
         OR (lease_id IS NOT NULL AND limit_set IS NOT NULL AND request_id IS NULL
-            AND estimated_amount IS NULL AND available_amount IS NULL AND terms IS NULL AND estimate_usage IS NULL
+            AND estimated_amount IS NULL AND available_amount IS NULL AND terms IS NOT NULL AND estimate_usage IS NULL
             AND requested_expires_at IS NULL AND expires_at IS NULL AND state <> 'captured')
     ),
     CONSTRAINT limit_holds_requested_expires_at_check CHECK (
@@ -316,7 +181,11 @@ CREATE TABLE billing.limit_holds (
     CONSTRAINT limit_holds_estimate_usage_check CHECK (
         (estimate_usage IS NULL OR (jsonb_typeof(estimate_usage) = 'object' AND octet_length(estimate_usage::text) <= 65536))
         AND (rate_cards IS NULL OR (jsonb_typeof(rate_cards) = 'array' AND octet_length(rate_cards::text) <= 262144))
-    )
+    ),
+    CONSTRAINT limit_holds_captured_charges_check CHECK (captured_charges IS NULL OR (state = 'captured' AND jsonb_typeof(captured_charges) = 'array')),
+    CONSTRAINT limit_holds_version_check CHECK (
+        (version IS NULL) = (lease_id IS NULL) AND (applied_version IS NULL) = (lease_id IS NULL)
+        AND applied_version >= 0 AND applied_version <= version)
 ) PARTITION BY RANGE (created_at);
 COMMENT ON TABLE billing.limit_holds IS 'Capacity set aside for one customer, in one currency: an admitted request''s hold (request_id, until it is captured, released or reaches expires_at) or a gate lease''s hold for one limit set (live while its lease is). What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.';
 COMMENT ON COLUMN billing.limit_holds.created_at IS 'When the hold was issued; the partition key. A hold row is live at most 30 days past it: a request''s deadline is at most that, and a lease''s hold is issued again before then. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.';
@@ -326,6 +195,10 @@ COMMENT ON COLUMN billing.limit_holds.available_amount IS 'A request''s hold: wh
 COMMENT ON COLUMN billing.limit_holds.estimate_usage IS 'The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.';
 COMMENT ON COLUMN billing.limit_holds.rate_cards IS 'The rate cards that priced the money estimate, pinned: the capture is priced by them, whatever the catalog says later.';
 COMMENT ON COLUMN billing.limit_holds.expires_at IS 'A request''s deadline: past it the hold reserves no money and no end-less limit, and still counts in its windows until it is captured or released.';
+COMMENT ON COLUMN billing.limit_holds.terms IS 'A request''s admission terms, or the invoker attributes a lease''s hold was resolved for ({invoker, invoker_type, trust_level, roles, resource, event_type}), which its renewals resolve again.';
+COMMENT ON COLUMN billing.limit_holds.captured_charges IS 'What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].';
+COMMENT ON COLUMN billing.limit_holds.version IS 'A lease''s hold: the lease''s hold_version of its latest answer; null for a request''s hold.';
+COMMENT ON COLUMN billing.limit_holds.applied_version IS 'A lease''s hold: the latest version its gate reported applied. Below version, a smaller answered size is not yet released.';
 
 CREATE INDEX limit_holds_request_id_idx ON billing.limit_holds (merchant_id, request_id, created_at DESC)
     WHERE request_id IS NOT NULL;
@@ -335,12 +208,13 @@ CREATE INDEX limit_holds_lease_id_idx ON billing.limit_holds (merchant_id, lease
     WHERE lease_id IS NOT NULL;
 CREATE INDEX limit_holds_created_at_request_id_idx ON billing.limit_holds (merchant_id, created_at DESC, request_id COLLATE "C" DESC)
     WHERE request_id IS NOT NULL;
+CREATE INDEX limit_holds_customer_id_idx ON billing.limit_holds (merchant_id, customer_id);
 CREATE INDEX limit_holds_customer_created_at_request_id_idx ON billing.limit_holds (merchant_id, customer_id, created_at DESC, request_id COLLATE "C" DESC)
     WHERE request_id IS NOT NULL;
 
 CREATE TRIGGER immutable_request_hold_facts BEFORE DELETE OR UPDATE ON billing.limit_holds
     FOR EACH ROW WHEN (OLD.request_id IS NOT NULL)
-    EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'released_at', 'updated_at');
+    EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'captured_charges', 'released_at', 'updated_at');
 
 CREATE TABLE billing.limit_hold_parts (
     merchant_id uuid NOT NULL,
@@ -352,12 +226,21 @@ CREATE TABLE billing.limit_hold_parts (
     window_starts_at timestamptz NOT NULL,
     window_ends_at timestamptz,
     held bigint NOT NULL CHECK (held >= 0),
+    request_units bigint CHECK (request_units >= 0),
+    used_units bigint CHECK (used_units >= 0),
+    contended_at timestamptz,
+    answered_units bigint CHECK (answered_units >= 0),
     PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at),
+    CONSTRAINT limit_hold_parts_hold_id_fkey FOREIGN KEY (merchant_id, hold_id, hold_created_at) REFERENCES billing.limit_holds (merchant_id, id, created_at) ON DELETE CASCADE,
     CONSTRAINT limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CONSTRAINT limit_hold_parts_window_check CHECK (window_ends_at IS NULL OR window_ends_at > window_starts_at)
 ) PARTITION BY RANGE (hold_created_at);
-COMMENT ON TABLE billing.limit_hold_parts IS 'What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window''s held units are its live holds'' parts. Retention: monthly partitions on hold_created_at, dropped with their hold''s.';
+COMMENT ON TABLE billing.limit_hold_parts IS 'What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window''s held units are its live holds'' parts. Its foreign key to limit_holds cascades. Retention: monthly partitions on hold_created_at, dropped with their hold''s, each month before the holds it references.';
 COMMENT ON COLUMN billing.limit_hold_parts.hold_created_at IS 'The hold''s created_at: the partition key, shared with the hold so both drop together.';
+COMMENT ON COLUMN billing.limit_hold_parts.request_units IS 'A lease''s hold: what one request of its customer last cost in the limit; null for a request''s hold.';
+COMMENT ON COLUMN billing.limit_hold_parts.used_units IS 'A lease''s hold: the units its usage took from the part since the hold was last sized; null for a request''s hold.';
+COMMENT ON COLUMN billing.limit_hold_parts.contended_at IS 'When an admission or another lease was refused capacity_held for capacity of this limit the part holds: it shrinks on its lease''s next sync. Written only under the customer''s lock.';
+COMMENT ON COLUMN billing.limit_hold_parts.answered_units IS 'A lease''s hold: the size its latest answer gave, less what usage took since. held stays above it until the gate reports the answer''s version applied, and never below what the gate''s open tickets took; null for a request''s hold.';
 
 CREATE INDEX limit_hold_parts_window_idx ON billing.limit_hold_parts (merchant_id, customer_id, limit_key, window_starts_at);
 
@@ -371,7 +254,8 @@ SELECT billing.ensure_month_partitions('limit_hold_parts', now() - interval '61 
 INSERT INTO billing.limit_holds (merchant_id, created_at, customer_id, currency, request_id, estimated_amount, available_amount,
     terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at)
 SELECT merchant_id, admitted_at, customer_id, currency, request_id, estimated_amount, available_amount,
-    terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at,
+    terms, estimate_usage, rate_cards, CASE WHEN requested_expires_at > admitted_at THEN requested_expires_at END,
+    expires_at, state, capture_terms, captured_amount, captured_at, released_at,
     COALESCE(captured_at, released_at, admitted_at)
 FROM billing.admission_operations
 WHERE admitted_at >= now() - interval '61 days';
@@ -403,34 +287,6 @@ CREATE INDEX limit_adjustments_limit_key_idx ON billing.limit_adjustments (merch
 -- customer's daily accrual, which posts once to the ledger, a daily rollup
 -- per meter for reports, and per-minute spend for rate measures.
 
--- A lease keeps the receipts of its latest settlements, so a resent item
--- answers its receipt and a changed one conflicts.
-ALTER TABLE billing.leases ADD COLUMN receipts jsonb NOT NULL DEFAULT '[]'::jsonb
-    CHECK (jsonb_typeof(receipts) = 'array' AND octet_length(receipts::text) <= 262144);
-ALTER TABLE billing.leases ALTER COLUMN receipts DROP DEFAULT;
-COMMENT ON COLUMN billing.leases.receipts IS 'The receipts of the lease''s latest settlements, oldest first: each one''s from_n, through_n, the digest of its items and the items it refused.';
-
--- A captured request keeps what each meter charged it, for its replay.
-ALTER TABLE billing.limit_holds ADD COLUMN captured_charges jsonb
-    CHECK (captured_charges IS NULL OR (state = 'captured' AND jsonb_typeof(captured_charges) = 'array'));
-COMMENT ON COLUMN billing.limit_holds.captured_charges IS 'What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].';
-DROP TRIGGER immutable_request_hold_facts ON billing.limit_holds;
-CREATE TRIGGER immutable_request_hold_facts BEFORE DELETE OR UPDATE ON billing.limit_holds
-    FOR EACH ROW WHEN (OLD.request_id IS NOT NULL)
-    EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'captured_charges', 'released_at', 'updated_at');
-
--- A lease's hold is sized from its traffic: one request's worth, what it
--- used since the lease's previous sync, when another lease was refused for
--- capacity it holds, and the size its gate was last told.
-ALTER TABLE billing.limit_hold_parts ADD COLUMN request_units bigint CHECK (request_units >= 0);
-ALTER TABLE billing.limit_hold_parts ADD COLUMN used_units bigint CHECK (used_units >= 0);
-ALTER TABLE billing.limit_hold_parts ADD COLUMN contended_at timestamptz;
-ALTER TABLE billing.limit_hold_parts ADD COLUMN answered_units bigint CHECK (answered_units >= 0);
-COMMENT ON COLUMN billing.limit_hold_parts.request_units IS 'A lease''s hold: what one request of its customer last cost in the limit; null for a request''s hold.';
-COMMENT ON COLUMN billing.limit_hold_parts.used_units IS 'A lease''s hold: the units its usage took from the part since the lease''s previous sync; null for a request''s hold.';
-COMMENT ON COLUMN billing.limit_hold_parts.answered_units IS 'A lease''s hold: the size its last sync answered, less what usage took since. A shrink is answered first and released at the next sync, down to this or what the gate''s open tickets took, whichever is more; null for a request''s hold.';
-COMMENT ON COLUMN billing.limit_hold_parts.contended_at IS 'When another lease was refused capacity_held for capacity this part holds; it shrinks on its lease''s next sync.';
-
 CREATE TABLE billing.usage_accruals (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
     id uuid NOT NULL DEFAULT uuidv7(),
@@ -447,7 +303,7 @@ CREATE TABLE billing.usage_accruals (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT usage_accruals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
-    CONSTRAINT usage_accruals_posted_amount_check CHECK (posted_amount <= amount),
+    CONSTRAINT usage_accruals_posted_within_amount_check CHECK (posted_amount <= amount),
     CONSTRAINT usage_accruals_posted_at_check CHECK ((posted_at IS NULL) = (postings = 0))
 );
 COMMENT ON TABLE billing.usage_accruals IS 'What one customer''s usage charged in one currency on one UTC day of one pricing period. It posts to the ledger after its day ends, or before any other movement of the customer''s balance in the currency: one credit_spend per lot drawn and one owed_accrual for the rest, at (usage_accrual, usage_accrual:<id>, <posting>). Until posted, the balance holds amount - posted_amount. Retention: permanent, never pruned.';
@@ -469,9 +325,9 @@ CREATE TABLE billing.usage_daily (
     day_at timestamptz NOT NULL CHECK (day_at = date_trunc('day', day_at, 'UTC')),
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     event_type text NOT NULL CHECK (octet_length(event_type) BETWEEN 1 AND 255),
-    meter_key text NOT NULL,
-    cell text NOT NULL,
-    invoker text NOT NULL,
+    meter_key text NOT NULL CHECK (octet_length(meter_key) <= 255),
+    cell text NOT NULL CHECK (octet_length(cell) <= 255),
+    invoker text NOT NULL CHECK (octet_length(invoker) <= 255),
     outcome text NOT NULL CHECK (outcome IN ('succeeded', 'failed')),
     requests bigint NOT NULL CHECK (requests >= 0),
     quantity bigint NOT NULL CHECK (quantity >= 0),
@@ -495,19 +351,49 @@ CREATE TABLE billing.usage_minutes (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
     customer_id uuid NOT NULL,
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
-    minute timestamptz NOT NULL CHECK (minute = date_trunc('minute', minute)),
+    minute_at timestamptz NOT NULL CHECK (minute_at = date_trunc('minute', minute_at, 'UTC')),
     amount bigint NOT NULL CHECK (amount >= 0),
-    PRIMARY KEY (merchant_id, customer_id, currency, minute),
+    PRIMARY KEY (merchant_id, customer_id, currency, minute_at),
     CONSTRAINT usage_minutes_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE
 );
 COMMENT ON TABLE billing.usage_minutes IS 'What a customer''s usage charged in one currency in one UTC minute it occurred in: the accrual-rate meter and the balance watch read it. Retention: rows are deleted 25 hours after their minute, past the longest accrual-rate window.';
 
-CREATE INDEX usage_minutes_minute_idx ON billing.usage_minutes (merchant_id, minute);
+CREATE INDEX usage_minutes_minute_at_idx ON billing.usage_minutes (merchant_id, minute_at);
 
--- Usage rollups replace raw events.
+-- Usage rollups replace raw events: every retained event is rolled up into
+-- its day, one row with no meter for the event and one for each meter and
+-- cell its charges name, before the events go. An invoker too long for a
+-- rollup key reads as none.
+INSERT INTO billing.usage_daily (merchant_id, customer_id, day_at, currency, event_type, meter_key, cell, invoker, outcome,
+    requests, quantity, amount, forgiven_amount, created_at, updated_at)
+SELECT r.merchant_id, r.customer_id, r.day_at, r.currency, r.event_type, r.meter_key, r.cell, r.invoker, r.outcome,
+    sum(r.requests), sum(r.quantity), sum(r.amount), sum(r.forgiven_amount), now(), now()
+FROM (
+    SELECT e.merchant_id, e.customer_id, date_trunc('day', e.occurred_at, 'UTC') AS day_at, e.currency, e.event_type,
+        ''::text AS meter_key, ''::text AS cell,
+        CASE WHEN octet_length(e.invoker_id) <= 255 THEN e.invoker_id ELSE '' END AS invoker, e.outcome,
+        1::bigint AS requests, 0::bigint AS quantity,
+        GREATEST(e.amount - COALESCE((SELECT sum((c.value->>'amount')::bigint) FROM jsonb_array_elements(e.charges) c), 0), 0)::bigint AS amount,
+        e.forgiven_amount
+    FROM billing.usage_events e
+    WHERE octet_length(e.event_type) BETWEEN 1 AND 255
+    UNION ALL
+    SELECT e.merchant_id, e.customer_id, date_trunc('day', e.occurred_at, 'UTC'), e.currency, e.event_type,
+        c.value->>'meter_key', COALESCE(c.value->>'cell', ''),
+        CASE WHEN octet_length(e.invoker_id) <= 255 THEN e.invoker_id ELSE '' END, e.outcome,
+        1::bigint, COALESCE((c.value->>'quantity')::bigint, 0), COALESCE((c.value->>'amount')::bigint, 0), 0::bigint
+    FROM billing.usage_events e
+    CROSS JOIN LATERAL jsonb_array_elements(e.charges) c
+    WHERE octet_length(e.event_type) BETWEEN 1 AND 255
+      AND COALESCE(c.value->>'meter_key', '') <> '' AND octet_length(c.value->>'meter_key') <= 255
+      AND octet_length(COALESCE(c.value->>'cell', '')) <= 255
+) r
+GROUP BY r.merchant_id, r.customer_id, r.day_at, r.currency, r.event_type, r.meter_key, r.cell, r.invoker, r.outcome;
+
 DROP TABLE billing.usage_events;
 
--- A billing restore's destination holds none of the merchant's usage either.
+-- A billing restore's destination holds none of the merchant's limits,
+-- holds, leases or usage.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
