@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 344,
+  "scenario_count": 350,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -957,6 +957,36 @@
       "id": "OR-J23-S06",
       "journey": "J23",
       "name": "Admission denial statistics count each closed hour once"
+    },
+    {
+      "id": "OR-J23-S07",
+      "journey": "J23",
+      "name": "Limits declare in documents and edits with field ownership and refuse invalid terms"
+    },
+    {
+      "id": "OR-J23-S08",
+      "journey": "J23",
+      "name": "A customer's limit capacity is the sum over its live products"
+    },
+    {
+      "id": "OR-J23-S09",
+      "journey": "J23",
+      "name": "A customer override replaces its products' capacity and inherit restores it"
+    },
+    {
+      "id": "OR-J23-S10",
+      "journey": "J23",
+      "name": "A limit adjustment adds to the current window only"
+    },
+    {
+      "id": "OR-J23-S11",
+      "journey": "J23",
+      "name": "Limit reads and adjustments stay within their merchant, customer and permission"
+    },
+    {
+      "id": "OR-J23-S12",
+      "journey": "J23",
+      "name": "A customer reads its own limits at /v1/me/limits"
     },
     {
       "id": "OR-J29-S07",

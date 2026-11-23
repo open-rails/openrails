@@ -391,6 +391,24 @@
     "OR-J23-S05": [
       "TestHostTransactions/OR-J23-S05/host-transaction-owns-financial-commit"
     ],
+    "OR-J23-S07": [
+      "TestUsageLimits/OR-J23-S07/limits-declare-apply-and-refuse-invalid-terms"
+    ],
+    "OR-J23-S08": [
+      "TestUsageLimits/OR-J23-S08/capacity-sums-the-customers-live-products"
+    ],
+    "OR-J23-S09": [
+      "TestUsageLimits/OR-J23-S09/an-override-replaces-the-products-capacity"
+    ],
+    "OR-J23-S10": [
+      "TestUsageLimits/OR-J23-S10/an-adjustment-adds-to-the-current-window-only"
+    ],
+    "OR-J23-S11": [
+      "TestUsageLimits/OR-J23-S11/limit-reads-stay-within-their-merchant-and-customer"
+    ],
+    "OR-J23-S12": [
+      "TestUsageLimits/OR-J23-S12/a-customer-reads-its-own-limits"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
