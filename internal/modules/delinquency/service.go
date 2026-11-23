@@ -10,13 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
@@ -33,7 +33,7 @@ func init() {
 		if !errors.Is(err, errPolicyUnavailable) {
 			return err
 		}
-		log.WithContext(ctx).WithError(err).WithField("customer_id", order.CustomerID).Warn("Delinquency: evaluation deferred to the next pass")
+		d.Log.WarnContext(ctx, "Delinquency: evaluation deferred to the next pass", logx.Err(err), "customer_id", order.CustomerID)
 		return d.Gen(ctx).ScheduleDelinquency(ctx, gen.ScheduleDelinquencyParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID, Currency: order.Currency, Now: now})
 	}
 }
@@ -225,10 +225,7 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 		return Transition{}, false, err
 	}
 	// One line per transition: the decision an operator is asked to explain.
-	log.WithContext(ctx).WithFields(log.Fields{
-		"merchant_id": tid.String(), "customer_id": customerID.String(), "currency": currency,
-		"from_state": transition.From.String(), "to_state": transition.To.String(),
-	}).Info("Delinquency: state transition recorded and signalled to the host")
+	d.Log.InfoContext(ctx, "Delinquency: state transition recorded and signalled to the host", "merchant_id", tid.String(), "customer_id", customerID.String(), "currency", currency, "from_state", transition.From.String(), "to_state", transition.To.String())
 	return transition, true, nil
 }
 

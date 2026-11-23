@@ -50,7 +50,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	customer := identity.CustomerIDFromString(user.ID)
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return

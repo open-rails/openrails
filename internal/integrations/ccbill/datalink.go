@@ -5,12 +5,11 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -29,6 +28,7 @@ type DataLinkClient struct {
 	// LoopbackFixture marks an explicitly declared loopback fake DataLink.
 	LoopbackFixture bool
 	HTTPClient      *http.Client
+	Log             *slog.Logger
 }
 
 const defaultDataLinkBaseURL = "https://datalink.ccbill.com"
@@ -48,7 +48,7 @@ type CCBillRecord struct {
 	ExpiryDate      string
 }
 
-func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
+func NewDataLinkClient(logger *slog.Logger, cfg *config.CCBillConfig) *DataLinkClient {
 	cfg = requireConfig(cfg)
 	return &DataLinkClient{
 		BaseURL:      defaultDataLinkBaseURL,
@@ -60,6 +60,7 @@ func NewDataLinkClient(cfg *config.CCBillConfig) *DataLinkClient {
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Minute,
 		},
+		Log: logger,
 	}
 }
 
@@ -76,7 +77,7 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 	}
 
 	if !strings.HasPrefix(content, `"ACTIVEMEMBERS"`) {
-		log.WithContext(ctx).WithField("response_length", len(content)).Error("Invalid response format from CCBill")
+		c.Log.ErrorContext(ctx, "Invalid response format from CCBill", "response_length", len(content))
 		return nil, fmt.Errorf("invalid response format from CCBill: expected ACTIVEMEMBERS data")
 	}
 
@@ -112,10 +113,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 	maxRetries := 5
 
 	for tries := 1; tries <= maxRetries; tries++ {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"try":      tries,
-			"endpoint": apiURL,
-		}).Info("Requesting data from CCBill DataLink API (POST)")
+		c.Log.InfoContext(ctx, "Requesting data from CCBill DataLink API (POST)", "try", tries, "endpoint", apiURL)
 
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(formData.Encode()))
@@ -128,10 +126,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 
 		resp, err = c.HTTPClient.Do(req)
 		if err != nil {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"try":   tries,
-				"error": err.Error(),
-			}).Warn("Request failed")
+			c.Log.WarnContext(ctx, "Request failed", "try", tries, "error", err.Error())
 
 			if tries == maxRetries {
 				return "", fmt.Errorf("failed after %d retries: %w: %w", maxRetries, transient.ErrUnavailable, err)
@@ -151,10 +146,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			return "", fmt.Errorf("%w: status %d", ErrDataLinkAuth, resp.StatusCode)
 		}
 
-		log.WithContext(ctx).WithFields(log.Fields{
-			"status_code": resp.StatusCode,
-			"try":         tries,
-		}).Warn("Non-200 response from CCBill")
+		c.Log.WarnContext(ctx, "Non-200 response from CCBill", "status_code", resp.StatusCode, "try", tries)
 
 		if tries == maxRetries {
 			resp.Body.Close()
@@ -186,7 +178,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			return "", fmt.Errorf("%w: it answered an authentication error", ErrDataLinkAuth)
 		}
 		if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "invalid") {
-			log.WithContext(ctx).WithField("response_length", len(content)).Error("Error response from CCBill")
+			c.Log.ErrorContext(ctx, "Error response from CCBill", "response_length", len(content))
 			return "", fmt.Errorf("ccbill api returned an error payload")
 		}
 	}
@@ -217,31 +209,21 @@ func (c *DataLinkClient) ProcessCSVData(ctx context.Context, csvData string) ([]
 
 		if len(record) < 10 {
 			skippedRecords++
-			log.WithContext(ctx).WithFields(log.Fields{
-				"record_number": recordNumber,
-				"fields":        len(record),
-			}).Warn("Incomplete CSV record, skipping")
+			c.Log.WarnContext(ctx, "Incomplete CSV record, skipping", "record_number", recordNumber, "fields", len(record))
 			continue
 		}
 
 		ccbillRecord, err := c.parseRecord(record)
 		if err != nil {
 			skippedRecords++
-			log.WithContext(ctx).WithFields(log.Fields{
-				"record_number": recordNumber,
-				"error":         err.Error(),
-			}).Warn("Failed to parse record, skipping")
+			c.Log.WarnContext(ctx, "Failed to parse record, skipping", "record_number", recordNumber, "error", err.Error())
 			continue
 		}
 
 		records = append(records, *ccbillRecord)
 	}
 
-	log.WithContext(ctx).WithFields(log.Fields{
-		"total_records":   recordNumber,
-		"parsed_records":  len(records),
-		"skipped_records": skippedRecords,
-	}).Info("Completed CSV processing")
+	c.Log.InfoContext(ctx, "Completed CSV processing", "total_records", recordNumber, "parsed_records", len(records), "skipped_records", skippedRecords)
 	if skippedRecords > 0 {
 		return nil, fmt.Errorf("ccbill datalink response contained %d skipped records", skippedRecords)
 	}

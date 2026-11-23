@@ -10,11 +10,11 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
-	log "github.com/sirupsen/logrus"
 )
 
 // effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
@@ -54,7 +54,7 @@ func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailC
 		mint := strings.TrimSpace(t.Mint)
 		decimals, err := solanamodule.RequireMintDecimals(r.Request.Context(), r.State.SolanaMintDecimals, mint)
 		if err != nil {
-			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			r.Log.WarnContext(r.Request.Context(), "solana token dropped: mint decimals unreadable on-chain", logx.Err(err), "token", symbol)
 			continue
 		}
 		tokens = append(tokens, billing.SolanaPaymentToken{

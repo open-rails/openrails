@@ -8,12 +8,12 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -78,7 +78,7 @@ func (r *Runtime) followStripeWebhooks(mid billing.MerchantID, previous, current
 			return nil
 		})
 		if err != nil && !errors.Is(err, db.ErrNoRiverProducer) && ctx.Err() == nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("stripe webhook: cannot queue the endpoint pass; the daily pass registers it")
+			r.Log.WarnContext(ctx, "stripe webhook: cannot queue the endpoint pass; the daily pass registers it", logx.Err(err), "merchant_id", mid.String())
 		}
 	})
 }

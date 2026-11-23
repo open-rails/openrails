@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -59,7 +60,7 @@ func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, 
 	// Resolving a recorded review only needs the attempt service's ledger; it
 	// never quotes, charges or talks to a chain/provider.
 	attempts := payment.NewOrderAttemptService(database, nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil)
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{DB: database, Config: cfg, OrderAttemptService: attempts}}
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{DB: database, Config: cfg, OrderAttemptService: attempts, Log: slog.Default()}, Log: slog.Default()}
 	if err := hosttools.ResolveSolanaPayReview(ctx, graph, mid, signature, resolution); err != nil {
 		return err
 	}

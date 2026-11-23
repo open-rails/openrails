@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -111,11 +112,12 @@ type Service struct {
 	// Abandon closes, at the provider, the attempt of an order that closed
 	// while its payment awaited the customer.
 	Abandon func(ctx context.Context, attemptID uuid.UUID) error
+	Log     *slog.Logger
 }
 
 // New is the orders service.
 func New(database *db.DB, memberships *subscriptions.SubscriptionLifecycleService, clocks ...clockwork.Clock) *Service {
-	return &Service{DB: database, Memberships: memberships, Clock: timeutil.FirstClock(clocks...)}
+	return &Service{DB: database, Memberships: memberships, Clock: timeutil.FirstClock(clocks...), Log: database.Log}
 }
 
 func (s *Service) now() time.Time {

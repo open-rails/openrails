@@ -12,6 +12,7 @@ package engine
 
 import (
 	"context"
+	"log/slog"
 	"maps"
 	"slices"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/service"
 )
@@ -60,6 +62,7 @@ type Engine struct {
 
 	closeOnce sync.Once
 	closeErr  error
+	Log       *slog.Logger
 }
 
 // Of returns the engine behind an openrails.Engine or one of its handles, nil
@@ -99,11 +102,13 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if deps.Postgres == nil {
 		return nil, fmt.Errorf("openrails: Deps.Postgres is required")
 	}
+	logger := logx.New(deps.Logger)
 	declarations, refused, err := validate(&cfg, deps)
 	if err != nil {
 		return nil, err
 	}
 	bootstrap := &app.BootstrapOptions{
+		Logger:               logger,
 		PGXPool:              deps.Postgres,
 		PostgresSession:      deps.PostgresSession,
 		Redis:                deps.Redis,
@@ -121,7 +126,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}}
+	e := &Engine{App: application, merchantGroups: deps.MerchantGroups, declared: map[string]billing.MerchantID{}, issuers: map[string]billing.MerchantID{}, bySlug: map[billing.MerchantID]config.MerchantDeclaration{}, Log: logger}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -149,7 +154,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		e.admit(m, id, false)
 	}
 	e.publishDeclared()
-	if e.svc, err = service.New(rt); err != nil {
+	if e.svc, err = service.New(logger, rt); err != nil {
 		return fail(err)
 	}
 	e.serveCheckout(cfg, declarations, deps.CheckoutAssets)

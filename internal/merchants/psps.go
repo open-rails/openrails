@@ -814,7 +814,7 @@ func (s *Service) verifyNMIEnvironment(ctx context.Context, id billing.MerchantI
 	if securityKey == "" {
 		return nil
 	}
-	client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
+	client, err := nmi.NewAccountClient(s.Log, id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, Environment: p.Environment})
 	if err != nil {
 		return fmt.Errorf("construct NMI environment qualification client: %w", err)
 	}

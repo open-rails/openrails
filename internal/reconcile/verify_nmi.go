@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -146,13 +145,12 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if snap == nil {
 			continue
 		}
-		res, err := ConvergeSubscriptionFromSnapshot(ctx, database, lc, sub, snap, now, 0)
+		res, err := ConvergeSubscriptionFromSnapshot(ctx, database.Log, database, lc, sub, snap, now, 0)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("verify %s: %w", sub.ID, err))
 			continue
 		}
-		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "transition": res.Decision.Kind.String(), "reason": res.Decision.Reason, "applied": res.Applied}).
-			Debug("verify: decided from the provider read")
+		database.Log.DebugContext(ctx, "verify: decided from the provider read", "subscription_id", sub.ID, "transition", res.Decision.Kind.String(), "reason", res.Decision.Reason, "applied", res.Applied)
 	}
 	return errs
 }
@@ -317,7 +315,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 		return err
 	}
 	v.cover(mid, subs)
-	log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid.String(), "rows": len(subs)}).Info("verify: bulk read of the account's unverified rows")
+	v.Log.InfoContext(ctx, "verify: bulk read of the account's unverified rows", "merchant_id", mid.String(), "rows", len(subs))
 	if len(subs) == 0 {
 		return clearCheckpoint(ctx, v.DB, mid, psp)
 	}

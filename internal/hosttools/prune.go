@@ -8,6 +8,7 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -73,7 +74,7 @@ type pruneConverge struct {
 // provider no longer lists. It reads the provider and never writes it. An
 // applied prune stamps every row with a destructive run, which
 // `openrails undo-run` reverses.
-func Prune(ctx context.Context, opts PruneOptions) error {
+func Prune(ctx context.Context, logger *slog.Logger, opts PruneOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
@@ -85,7 +86,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 	if err != nil {
 		return err
 	}
-	rt, cleanup, err := newProviderRuntime(ctx, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
+	rt, cleanup, err := newProviderRuntime(ctx, logger, providerRuntimeOptions{Config: opts.Config, PGXPool: opts.PGXPool, Vault: opts.Vault, MerchantID: opts.MerchantID,
 		MerchantManifest: opts.MerchantManifest, MerchantManifestPath: opts.MerchantManifestPath})
 	if err != nil {
 		return err
@@ -101,7 +102,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 	apply := opts.ExpectRows != nil
 	started := time.Now().UTC()
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		targets, err := pruneTargets(ctx, rt, opts.PSP, opts.Rails)
+		targets, err := pruneTargets(ctx, logger, rt, opts.PSP, opts.Rails)
 		if err != nil {
 			return err
 		}
@@ -140,7 +141,7 @@ func Prune(ctx context.Context, opts PruneOptions) error {
 
 // pruneTargets arms the PSPs a prune reads: the --psp one, else the PSP each
 // armed rail (narrowed by --rail) armed from.
-func pruneTargets(ctx context.Context, rt *providerRuntime, psp string, rails []string) ([]pruneTarget, error) {
+func pruneTargets(ctx context.Context, logger *slog.Logger, rt *providerRuntime, psp string, rails []string) ([]pruneTarget, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -149,7 +150,7 @@ func pruneTargets(ctx context.Context, rt *providerRuntime, psp string, rails []
 	for _, r := range rails {
 		selected[reconcile.Provider(strings.ToLower(strings.TrimSpace(r)))] = true
 	}
-	builder := reconcile.MerchantFetcherBuilder{StripeClients: rt.StripeClients, Config: rt.Config, Merchants: rt.Merchants, DB: rt.DB}
+	builder := reconcile.MerchantFetcherBuilder{StripeClients: rt.StripeClients, Config: rt.Config, Merchants: rt.Merchants, DB: rt.DB, Log: logger}
 	if strings.TrimSpace(psp) != "" {
 		provider, binding, err := resolvePSPTarget(ctx, rt.DB, psp)
 		if err != nil {

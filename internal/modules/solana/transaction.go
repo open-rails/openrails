@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // SolanaTransactionService builds real Solana transactions for payments.
@@ -30,6 +30,7 @@ type SolanaTransactionService struct {
 	priceService *catalog.PriceService
 	fxProvider   *fx.Rates
 	clock        clockwork.Clock
+	Log          *slog.Logger
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -49,6 +50,7 @@ func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *confi
 		priceService: price,
 		fxProvider:   fxProvider,
 		clock:        timeutil.FirstClock(clocks...),
+		Log:          db.Log,
 	}
 }
 
@@ -140,14 +142,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	// a built transaction can land, and a landing is verified by content.
 	expiresAt := s.now().Add(10 * time.Minute)
 
-	log.WithFields(log.Fields{
-		"user_id":      req.UserID,
-		"price_id":     req.PriceID,
-		"amount":       moneyutil.FormatAmount(req.Amount, req.Currency),
-		"token_amount": moneyutil.FormatBaseUnits(req.TokenAmount, req.TokenSymbol),
-		"from_wallet":  req.UserWallet,
-		"to_wallet":    req.Recipient,
-	}).Info("Built Solana payment transaction from purchase quote")
+	s.Log.InfoContext(ctx, "Built Solana payment transaction from purchase quote", "user_id", req.UserID, "price_id", req.PriceID, "amount", moneyutil.FormatAmount(req.Amount, req.Currency), "token_amount", moneyutil.FormatBaseUnits(req.TokenAmount, req.TokenSymbol), "from_wallet", req.UserWallet, "to_wallet", req.Recipient)
 
 	return &TransactionBuildResponse{
 		TransactionBase64:    txResp.TransactionBase64,

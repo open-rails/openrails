@@ -6,6 +6,7 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -49,7 +50,7 @@ type UndoRunOptions struct {
 // A complete rollback is rollback → pull → converge. The derive half runs
 // here; the provider pull is the operator's next step and is advisory until
 // enforcement is re-armed by hand.
-func UndoRun(ctx context.Context, opts UndoRunOptions) error {
+func UndoRun(ctx context.Context, logger *slog.Logger, opts UndoRunOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -60,7 +61,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if err != nil {
 		return fmt.Errorf("undo-run: --run must be a run id, run_<uuid> or the bare UUID (see `openrails prune list` / `openrails proposals runs`): %w", err)
 	}
-	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // Sandbox qualification probe (the regular gateway answers test_mode_status
@@ -123,9 +123,6 @@ func (c *NMIClient) voidProbe(ctx context.Context, txnID string) {
 		return
 	}
 	if err := c.Void(ctx, txnID); err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"provider":       c.providerName,
-			"transaction_id": txnID,
-		}).Warn("nmi test-mode probe: failed to void probe authorization")
+		c.Log.WarnContext(ctx, "nmi test-mode probe: failed to void probe authorization", logx.Err(err), "provider", c.providerName, "transaction_id", txnID)
 	}
 }

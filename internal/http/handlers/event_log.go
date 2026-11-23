@@ -11,7 +11,7 @@ func ListEvents(r *httprequest.Request) {
 	if !r.BindQuery(&query) {
 		return
 	}
-	svc, err := service.New(r.State)
+	svc, err := service.New(r.Log, r.State)
 	if err != nil {
 		writeRefusal(r, err, "events could not be listed")
 		return

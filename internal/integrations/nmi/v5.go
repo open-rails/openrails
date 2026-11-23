@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/transient"
-	log "github.com/sirupsen/logrus"
 )
 
 // v5 JSON API transport. The classic endpoints remain where v5 lacks a route
@@ -89,11 +88,7 @@ func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
 // ErrV5NotFound so callers can treat "gone at NMI" as a state, not a failure.
 func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body any, out any) (err error) {
 	if method != http.MethodGet && c.ReadOnly {
-		log.WithFields(log.Fields{
-			"provider": c.providerName,
-			"method":   method,
-			"path":     path,
-		}).Warn("NMI v5 request blocked: provider is read-only (mode=readonly)")
+		c.Log.WarnContext(ctx, "NMI v5 request blocked: provider is read-only (mode=readonly)", "provider", c.providerName, "method", method, "path", path)
 		return ErrProviderReadOnly
 	}
 

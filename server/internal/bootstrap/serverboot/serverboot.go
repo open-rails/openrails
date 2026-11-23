@@ -9,11 +9,10 @@ import (
 	"os"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
@@ -61,11 +60,11 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 				return nil
 			}, func(attempt int, err error) {
 				if attempt == 0 {
-					log.WithError(err).Warn("merchant startup: retrying in the background")
+					application.Log.WarnContext(ctx, "merchant startup: retrying in the background", logx.Err(err))
 				}
 			})
 			if err == nil {
-				log.Info("merchant startup: every merchant the manifest declares is provisioned")
+				application.Log.InfoContext(ctx, "merchant startup: every merchant the manifest declares is provisioned")
 			}
 		})
 	}
@@ -149,10 +148,10 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		return nil, fmt.Errorf("merchant startup requires the merchant configuration")
 	}
 	opts := bootstrap.ReconcileOptions{Insert: true, Merchants: rt.Merchants, Refuse: refuse}
-	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, opts); err != nil {
+	if err := bootstrap.ReconcileMerchantManifestData(ctx, application.Log, cfg, cp, manifest, opts); err != nil {
 		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
-	log.WithField("file", path).Info("merchant startup: manifest applied")
+	application.Log.InfoContext(ctx, "merchant startup: manifest applied", "file", path)
 	slugs := make([]string, 0, len(manifest.Merchants))
 	for slug := range manifest.Merchants {
 		slugs = append(slugs, slug)

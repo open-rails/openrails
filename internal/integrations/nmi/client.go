@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,11 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/shared/transient"
 )
 
@@ -57,6 +57,7 @@ type NMIClient struct {
 	proxyFixture    bool
 	// httpClient is timeout-bounded; http.DefaultClient has no timeout.
 	httpClient *http.Client
+	Log        *slog.Logger
 }
 
 // Per-request deadlines, split mutation vs read. A mutation that times out is
@@ -108,7 +109,7 @@ func (e *CustomerVaultError) Error() string {
 // newClient builds an unbound client. Callers outside this package use
 // NewAccountClient: an NMI client never exists without the merchant, PSP,
 // account and environment its credential belongs to.
-func newClient(provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
+func newClient(logger *slog.Logger, provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
 	if cfg == nil {
 		return nil, errors.New("nmi provider configuration is required")
 	}
@@ -134,13 +135,7 @@ func newClient(provider string, cfg *config.NMIProviderSettings) (*NMIClient, er
 		return nil, fmt.Errorf("nmi provider '%s' environment %q must be live, test or sandbox", provider, cfg.Environment)
 	}
 
-	log.WithFields(log.Fields{
-		"provider":    provider,
-		"environment": cfg.Environment,
-		"v5":          v5BaseURL,
-		"direct_post": directPostURL,
-		"query":       queryURL,
-	}).Info("NMI endpoint selection")
+	logger.Info("NMI endpoint selection", "provider", provider, "environment", cfg.Environment, "v5", v5BaseURL, "direct_post", directPostURL, "query", queryURL)
 
 	return &NMIClient{
 		providerName:  provider,
@@ -164,6 +159,7 @@ func newClient(provider string, cfg *config.NMIProviderSettings) (*NMIClient, er
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		},
+		Log: logger,
 	}, nil
 }
 
@@ -322,10 +318,7 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (str
 // sendDirectBody posts an already-encoded form. requestType only labels logs.
 func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body []byte) (_ string, err error) {
 	if c.ReadOnly {
-		log.WithFields(log.Fields{
-			"provider":     c.providerName,
-			"request_type": requestType,
-		}).Warn("NMI direct request blocked: provider is read-only (mode=readonly)")
+		c.Log.WarnContext(ctx, "NMI direct request blocked: provider is read-only (mode=readonly)", "provider", c.providerName, "request_type", requestType)
 		return "", errors.Join(ErrNotDispatched, ErrProviderReadOnly)
 	}
 
@@ -347,10 +340,7 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"provider":     c.providerName,
-			"request_type": requestType,
-		}).Warn("NMI direct request failed")
+		c.Log.WarnContext(ctx, "NMI direct request failed", logx.Err(err), "provider", c.providerName, "request_type", requestType)
 		return "", ambiguous(fmt.Errorf("failed to send request: %w", err))
 	}
 	defer func() {
@@ -361,11 +351,7 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		log.WithFields(log.Fields{
-			"provider":     c.providerName,
-			"request_type": requestType,
-			"status_code":  resp.StatusCode,
-		}).Warn("NMI direct request returned non-200 status")
+		c.Log.WarnContext(ctx, "NMI direct request returned non-200 status", "provider", c.providerName, "request_type", requestType, "status_code", resp.StatusCode)
 		return "", ambiguous(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	}
 
@@ -440,14 +426,14 @@ func (c *NMIClient) Live() bool { return config.LiveEnvironment("nmi", c.Environ
 // NewAccountClient is the only exported NMI client constructor. It binds the
 // credential to its merchant, PSP, account and environment, which is also the
 // identity its posture verdict is keyed by.
-func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
+func NewAccountClient(logger *slog.Logger, merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings) (*NMIClient, error) {
 	if merchantID == uuid.Nil || pspID == uuid.Nil {
 		return nil, errors.New("provider account identity is required")
 	}
 	if strings.TrimSpace(provider) == "" || cfg == nil || strings.TrimSpace(cfg.SecurityKey) == "" {
 		return nil, errors.New("provider account and security key are required")
 	}
-	client, err := newClient(provider, cfg)
+	client, err := newClient(logger, provider, cfg)
 	if err != nil {
 		return nil, err
 	}

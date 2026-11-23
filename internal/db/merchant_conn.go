@@ -40,7 +40,7 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn requires a merchant in context")
 	}
 
-	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil, Log: d.Log}
 	newCtx := context.WithValue(ctx, merchantPgxConnKey{}, lazy)
 	return newCtx, lazy.release, nil
 }
@@ -61,7 +61,7 @@ func (d *DB) WithIndependentMerchantConn(ctx context.Context) (context.Context, 
 		(inherited.pool != d.pool || inherited.tenantID != id.String() || inherited.schema != d.rw.schema()) {
 		return ctx, func() {}, fmt.Errorf("db: inherited merchant connection does not match database, schema or merchant")
 	}
-	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema(), transactionLocal: d.direct != nil, Log: d.Log}
 	return context.WithValue(ctx, merchantPgxConnKey{}, lazy), lazy.release, nil
 }
 

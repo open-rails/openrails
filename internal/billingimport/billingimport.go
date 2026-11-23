@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"math"
 	"slices"
@@ -83,7 +84,7 @@ type Options struct {
 // by (rail, transaction_id). One merchant-scoped transaction: infrastructure
 // failures roll back the whole book; per-source business refusals stay
 // ordinary outcomes for the other rows.
-func Import(ctx context.Context, opts Options) (Result, error) {
+func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, error) {
 	res := Result{Reasons: map[string]string{}}
 	if ctx == nil {
 		ctx = context.Background()
@@ -433,7 +434,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			facts = append(facts, f)
 		}
 
-		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
+		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, logger, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
 			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
 			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
 		}, asOf, history, authority)

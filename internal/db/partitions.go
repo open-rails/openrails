@@ -6,8 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/retention"
 )
 
@@ -43,7 +42,7 @@ func (d *DB) EnsurePartitions(ctx context.Context, now time.Time) {
 	}
 	if _, err := retention.EnsurePartitions(ctx, d.GenDirectory(), now); err != nil {
 		d.partitions.retry = time.Now().Add(time.Minute)
-		logrus.WithError(err).Error("ensure monthly partitions failed; retrying in a minute")
+		d.Log.ErrorContext(ctx, "ensure monthly partitions failed; retrying in a minute", logx.Err(err))
 		return
 	}
 	d.partitions.month.Store(month)

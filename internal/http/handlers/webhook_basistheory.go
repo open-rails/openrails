@@ -6,12 +6,11 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 )
 
@@ -60,7 +59,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
 	if err := basisTheoryVerifier(environment).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context())
-		log.Warn("basistheory webhook signature verification failed")
+		r.Log.WarnContext(r.Request.Context(), "basistheory webhook signature verification failed")
 		r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
 		return false
 	}
@@ -92,7 +91,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}
-		log.WithError(err).Error("merchant basistheory webhook processing failed")
+		r.Log.ErrorContext(r.Request.Context(), "merchant basistheory webhook processing failed", logx.Err(err))
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return false
 	}

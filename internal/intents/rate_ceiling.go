@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/cadence"
@@ -115,12 +116,13 @@ func (e *RateCeilingError) Is(target error) bool { return target == ErrRateCeili
 // and its findings must persist on an INDEPENDENT transaction — the operator
 // alert has to survive the refused op rolling back the caller's transaction.
 type RateCeiling struct {
-	db *db.DB
+	db  *db.DB
+	Log *slog.Logger
 }
 
 // NewRateCeiling builds the gate from the root pool-backed DB. nil-safe: a nil
 // gate (or nil DB) fails CLOSED at Check time.
-func NewRateCeiling(d *db.DB) *RateCeiling { return &RateCeiling{db: d} }
+func NewRateCeiling(d *db.DB) *RateCeiling { return &RateCeiling{db: d, Log: d.Log} }
 
 // CheckParams is one destructive op awaiting admission.
 type CheckParams struct {
@@ -261,29 +263,13 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 // typed refusal. The refusal is returned REGARDLESS of whether the finding
 // write succeeded — the wall is the safety; the alert is best-effort.
 func (c *RateCeiling) trip(ctx context.Context, p CheckParams, which ceilingKind, counts ceilingCounts, now time.Time) error {
-	fields := log.Fields{
-		"gate":                  "destructive_rate_ceiling",
-		"ceiling":               string(which),
-		"actor":                 p.Actor,
-		"merchant_id":           p.MerchantID,
-		"intent_type":           p.IntentType,
-		"origin":                string(p.Origin),
-		"actor_count":           counts.actor,
-		"merchant_count":        counts.merchant,
-		"system_merchant_count": counts.systemMerchant,
-		"per_actor_max":         PerActorHourlyCeiling,
-		"per_merchant_max":      PerMerchantHourlyCeiling,
-		"system_merchant_max":   PerMerchantSystemHourlyCeiling,
-		"window":                cadence.FormatDuration(RateCeilingWindow),
-	}
-	log.WithContext(ctx).WithFields(fields).Error(
-		"destructive-operation rate ceiling TRIPPED — refusing op; possible credential compromise or runaway automation, verify before resuming")
+	fields := []any{"gate", "destructive_rate_ceiling", "ceiling", string(which), "actor", p.Actor, "merchant_id", p.MerchantID, "intent_type", p.IntentType, "origin", string(p.Origin), "actor_count", counts.actor, "merchant_count", counts.merchant, "system_merchant_count", counts.systemMerchant, "per_actor_max", PerActorHourlyCeiling, "per_merchant_max", PerMerchantHourlyCeiling, "system_merchant_max", PerMerchantSystemHourlyCeiling, "window", cadence.FormatDuration(RateCeilingWindow)}
+	c.Log.With(fields...).ErrorContext(ctx, "destructive-operation rate ceiling TRIPPED — refusing op; possible credential compromise or runaway automation, verify before resuming")
 
 	subjectKey, action := c.trippedSubjectAction(which, p, counts)
 	evidence := c.evidence(which, p, counts, now, true)
 	if err := c.emitFinding(ctx, p.MerchantID, RateCeilingTrippedFindingType, subjectKey, "critical", action, evidence); err != nil {
-		log.WithContext(ctx).WithFields(fields).WithError(err).Error(
-			"destructive-rate ceiling: failed to raise tripped finding (op still refused)")
+		c.Log.With(fields...).ErrorContext(ctx, "destructive-rate ceiling: failed to raise tripped finding (op still refused)", logx.Err(err))
 	}
 	return &RateCeilingError{
 		Ceiling:             which,
@@ -303,13 +289,9 @@ func (c *RateCeiling) warn(ctx context.Context, p CheckParams, which ceilingKind
 		p.MerchantID, which, counts.actor, PerActorHourlyCeiling, counts.merchant, PerMerchantHourlyCeiling,
 		counts.systemMerchant, PerMerchantSystemHourlyCeiling, RateCeilingWindow)
 	evidence := c.evidence(which, p, counts, now, false)
-	log.WithContext(ctx).WithFields(log.Fields{
-		"gate": "destructive_rate_ceiling", "ceiling": string(which), "actor": p.Actor,
-		"merchant_id": p.MerchantID, "actor_count": counts.actor, "merchant_count": counts.merchant,
-		"system_merchant_count": counts.systemMerchant,
-	}).Warn("destructive-operation rate ceiling: burst crossing 50% of a ceiling")
+	c.Log.WarnContext(ctx, "destructive-operation rate ceiling: burst crossing 50% of a ceiling", "gate", "destructive_rate_ceiling", "ceiling", string(which), "actor", p.Actor, "merchant_id", p.MerchantID, "actor_count", counts.actor, "merchant_count", counts.merchant, "system_merchant_count", counts.systemMerchant)
 	if err := c.emitFinding(ctx, p.MerchantID, RateCeilingWarningFindingType, subjectKey, "high", action, evidence); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("destructive-rate ceiling: failed to raise early-warning finding")
+		c.Log.WarnContext(ctx, "destructive-rate ceiling: failed to raise early-warning finding", logx.Err(err))
 	}
 }
 

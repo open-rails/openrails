@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"log/slog"
 	"slices"
 	"sort"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -172,22 +173,15 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 	if snap != nil {
 		remoteLive := len(snap.Subscriptions)
 		tripped, reason := opts.Breaker.Implausible(provider, remoteLive, int(localLive))
-		opsmetric.Emit(ctx, opsmetric.MetricRosterRatio, log.Fields{
-			"provider": rail, "merchant_id": merchantID.String(), "rail": rail, "psp_id": psp.String(),
-			"remote_live": remoteLive, "local_live": localLive,
-			"ratio": ratioOf(remoteLive, int(localLive)), "tripped": tripped,
-		})
+		opsmetric.Emit(ctx, database.Log, opsmetric.MetricRosterRatio, []any{"provider", rail, "merchant_id", merchantID.String(), "rail", rail, "psp_id", psp.String(), "remote_live", remoteLive, "local_live", localLive, "ratio", ratioOf(remoteLive, int(localLive)), "tripped", tripped})
 		if tripped {
 			// The roster is not believable, so it proves nothing about absence.
 			// Strip the proof rather than abort: the rows stay `unknown`,
 			// entitlements stay intact, and a per-sub probe can still resolve
 			// them individually on real evidence.
 			snap.Coverage.SubscriptionsExhaustive = false
-			log.WithContext(ctx).WithFields(log.Fields{
-				"merchant_id": merchantID.String(), "rail": rail, "psp_id": psp.String(),
-				"remote_live": remoteLive, "local_live": localLive,
-			}).Error("reconcile unknown: roster ratio breaker tripped; absence will not be read as cancellation")
-			recordGuardFinding(ctx, q, merchantID, provider, "roster_ratio", reason)
+			database.Log.ErrorContext(ctx, "reconcile unknown: roster ratio breaker tripped; absence will not be read as cancellation", "merchant_id", merchantID.String(), "rail", rail, "psp_id", psp.String(), "remote_live", remoteLive, "local_live", localLive)
+			recordGuardFinding(ctx, database.Log, q, merchantID, provider, "roster_ratio", reason)
 		}
 	}
 
@@ -222,9 +216,7 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 				LocalID: r.ID, RailSubscriptionID: models.DerefStr(r.RailSubscriptionID), PeriodStart: r.CurrentPeriodStartsAt, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
 			})
 			if perr != nil {
-				log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
-					"subscription_id": r.ID, "rail": rail,
-				}).Warn("reconcile unknown: per-subscription probe failed; staying unknown")
+				database.Log.WarnContext(ctx, "reconcile unknown: per-subscription probe failed; staying unknown", logx.Err(perr), "subscription_id", r.ID, "rail", rail)
 				res.StillUnknown++
 				continue
 			}
@@ -234,18 +226,13 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 			cancels++
 		}
 		if decision.EvidenceFloored {
-			recordEvidenceStaleFinding(ctx, q, merchantID, provider, r.ID.String(), decision.Reason)
+			recordEvidenceStaleFinding(ctx, database.Log, q, merchantID, provider, r.ID.String(), decision.Reason)
 		}
 		decisions = append(decisions, pendingDecision{id: r.ID, decision: decision})
 	}
 
 	ctx = GateCancelPass(ctx, database, merchantID, provider, psp, cancels)
-	opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
-		"provider": rail, "merchant_id": merchantID.String(), "rail": rail, "psp_id": psp.String(),
-		"planned_cancellations": cancels, "local_live": localLive,
-		"allowed": CancelBudget{}.Limit(int(localLive)), "capped": CancelsHeld(ctx),
-		"path": "unknown_cohort",
-	})
+	opsmetric.Emit(ctx, database.Log, opsmetric.MetricCancellationsPerPass, []any{"provider", rail, "merchant_id", merchantID.String(), "rail", rail, "psp_id", psp.String(), "planned_cancellations", cancels, "local_live", localLive, "allowed", CancelBudget{}.Limit(int(localLive)), "capped", CancelsHeld(ctx), "path", "unknown_cohort"})
 	for _, d := range decisions {
 		if err := applyUnknownDecision(ctx, database, lc, d.id, d.decision, now, opts.LookbackCap, res); err != nil {
 			return err
@@ -334,7 +321,7 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 		}
 		if t.StripeBill == nil && !chargeAttempt(t.Type) {
 			if t.Type == TransactionTypeRefund || t.Type == TransactionTypeChargeback {
-				recordUnlinkedReversalFinding(ctx, database.Gen(ctx), sub, *t)
+				recordUnlinkedReversalFinding(ctx, database.Log, database.Gen(ctx), sub, *t)
 			}
 			continue
 		}
@@ -490,7 +477,7 @@ func chargeAttempt(t TransactionType) bool {
 
 // recordUnlinkedReversalFinding surfaces a refund or chargeback the mirror
 // could not attach to its original sale. Best-effort, like every finding.
-func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *models.Subscription, t RemoteTransaction) {
+func recordUnlinkedReversalFinding(ctx context.Context, logger *slog.Logger, q *gen.Queries, sub *models.Subscription, t RemoteTransaction) {
 	action := fmt.Sprintf("a %s of %s (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.formatAmount(), t.TransactionID, billing.SubscriptionID(sub.ID).String())
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        sub.MerchantID,
@@ -501,7 +488,7 @@ func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *mod
 		RecommendedAction: &action,
 		Source:            verificationSource(),
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("transaction_id", t.TransactionID).Error("reconcile backfill: could not persist the unlinked reversal finding")
+		logger.ErrorContext(ctx, "reconcile backfill: could not persist the unlinked reversal finding", logx.Err(err), "transaction_id", t.TransactionID)
 	}
 }
 
@@ -528,7 +515,7 @@ func evidenceStaleAction(reason string) string {
 // the staleness floor withheld. Best-effort: the floor already acted in
 // memory, and a failed write must never turn a safe outcome into an error that
 // retries into an unsafe one.
-func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subscriptionID, reason string) {
+func recordEvidenceStaleFinding(ctx context.Context, logger *slog.Logger, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subscriptionID, reason string) {
 	action := evidenceStaleAction(reason)
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
@@ -539,9 +526,7 @@ func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID 
 		RecommendedAction: &action,
 		Source:            verificationSource(),
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"merchant_id": merchantID.String(), "rail": string(provider), "subscription_id": subscriptionID,
-		}).Error("reconcile: could not persist the evidence-staleness finding (the floor still held; the row is parked `unknown`)")
+		logger.ErrorContext(ctx, "reconcile: could not persist the evidence-staleness finding (the floor still held; the row is parked `unknown`)", logx.Err(err), "merchant_id", merchantID.String(), "rail", string(provider), "subscription_id", subscriptionID)
 	}
 }
 
@@ -555,7 +540,7 @@ func evidenceStaleSubjectKey(provider Provider, subscriptionID string) string {
 // that withheld cancellations. Best-effort: the guard already acted in memory,
 // and a failed write must never turn a safe outcome into an error that retries
 // into an unsafe one.
-func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subject, reason string) {
+func recordGuardFinding(ctx context.Context, logger *slog.Logger, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subject, reason string) {
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
 		FindingType:       string(FindingCancellationCapped),
@@ -565,8 +550,6 @@ func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID billing.
 		RecommendedAction: &reason,
 		Source:            verificationSource(),
 	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"merchant_id": merchantID.String(), "rail": string(provider), "guard": subject,
-		}).Error("reconcile unknown: could not persist the guard finding (the guard still held; investigate the roster)")
+		logger.ErrorContext(ctx, "reconcile unknown: could not persist the guard finding (the guard still held; investigate the roster)", logx.Err(err), "merchant_id", merchantID.String(), "rail", string(provider), "guard", subject)
 	}
 }

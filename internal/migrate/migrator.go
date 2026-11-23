@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
-	log "github.com/sirupsen/logrus"
 )
 
 // Options selects what Apply migrates.
@@ -29,6 +29,9 @@ type Options struct {
 	RiverSchema string
 	// Chain is the migration files; nil is this build's.
 	Chain fs.FS
+	// Logger receives the migrations' progress and migratekit's and River's
+	// warnings; required.
+	Logger *slog.Logger
 }
 
 // Apply creates or upgrades OpenRails' tables in Schema, this month's
@@ -39,6 +42,10 @@ type Options struct {
 func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return fmt.Errorf("missing postgres pool")
+	}
+	logger := opts.Logger
+	if logger == nil {
+		return fmt.Errorf("migrate: a logger is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -53,7 +60,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	render := func(schema string) ([]migratekit.Migration, error) { return loadChain(chain, schema) }
 
-	log.Infof("Running OpenRails migrations (schema %q)...", schema)
+	logger.InfoContext(ctx, "running OpenRails migrations", "schema", schema)
 	migrations, err := render(schema)
 	if err != nil {
 		return err
@@ -66,7 +73,9 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	defer m.Close()
 	// Strict integrity: an applied migration whose content changed is refused
 	// unless the live schema still equals a fresh build of it.
-	m.WithSchema(schema).WithStrictIntegrity().WithRender(render)
+	m.WithSchema(schema).WithStrictIntegrity().WithRender(render).WithWarnFunc(func(d migratekit.Discrepancy) {
+		logger.WarnContext(ctx, "migratekit: "+d.OneLine(), "kind", string(d.Kind), "migration", d.File, "key", d.Key)
+	})
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
@@ -76,14 +85,14 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	contracts, others := newerMigrations(status.Applied, migrations)
 	if len(contracts) > 0 {
-		log.Warnf("OpenRails schema %q has contract migrations from a newer build (%s): this build runs only if it no longer uses what they removed", schema, strings.Join(contracts, ", "))
+		logger.WarnContext(ctx, "OpenRails schema has contract migrations from a newer build: this build runs only if it no longer uses what they removed", "schema", schema, "migrations", strings.Join(contracts, ", "))
 	}
 	if len(others) > 0 {
-		log.Infof("OpenRails schema %q carries migrations from a newer build (%s)", schema, strings.Join(others, ", "))
+		logger.InfoContext(ctx, "OpenRails schema carries migrations from a newer build", "schema", schema, "migrations", strings.Join(others, ", "))
 	}
 	// Partitions follow the calendar, not the migration chain: a database
 	// migrated months ago still needs this month's.
-	data, err := db.NewWithPGXPool(pool, schema)
+	data, err := db.NewWithPGXPool(logger, pool, schema)
 	if err != nil {
 		return err
 	}
@@ -91,11 +100,11 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		return fmt.Errorf("openrails: %w", err)
 	}
 	if opts.RiverSchema != "" {
-		if err := applyRiver(ctx, pool, opts.RiverSchema); err != nil {
+		if err := applyRiver(ctx, logger, pool, opts.RiverSchema); err != nil {
 			return fmt.Errorf("openrails: River migrations in %s: %w", opts.RiverSchema, err)
 		}
 	}
-	log.Info("✓ OpenRails migrations completed successfully")
+	logger.InfoContext(ctx, "OpenRails migrations applied", "schema", schema)
 	return nil
 }
 
@@ -115,14 +124,14 @@ func loadChain(chain fs.FS, schema string) ([]migratekit.Migration, error) {
 
 // applyRiver migrates River's tables in schema, serialized with AuthKit and
 // riverhelpers on the lock they share.
-func applyRiver(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+func applyRiver(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, schema string) error {
 	return locked(ctx, pool, "river-migrations:"+schema, func() error {
 		if _, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
 			return err
 		}
 		// Always the declared namespace, even public: the caller's search_path
 		// must not redirect River away from the schema locked.
-		migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: schema})
+		migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: schema, Logger: logger})
 		if err != nil {
 			return fmt.Errorf("create River migrator: %w", err)
 		}
@@ -130,7 +139,7 @@ func applyRiver(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 		if err != nil {
 			return fmt.Errorf("run River migrations: %w", err)
 		}
-		log.Infof("Applied %d River migration(s)", len(res.Versions))
+		logger.InfoContext(ctx, "River migrations applied", "schema", schema, "count", len(res.Versions))
 		return nil
 	})
 }

@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -156,7 +157,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		releaseCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		if _, err := r.Store.ReleaseUnknownClaim(releaseCtx, claimed.ID); err != nil {
-			logEntry.WithError(err).Error("operator resolution: lease release failed; lease expiry will re-surface the operation")
+			logEntry.ErrorContext(ctx, "operator resolution: lease release failed; lease expiry will re-surface the operation", logx.Err(err))
 		}
 		return claimed, rerr
 	}
@@ -191,20 +192,18 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.BillingProviderInten
 	stopBeat()
 	if rerr != nil {
 		if err := r.Store.Park(ctx, claimed.ID, now.Add(ParkRetryInterval), "operator release rejected: "+rerr.Error()); err != nil {
-			logEntry.WithError(err).Error("operator release: park failed; lease expiry will re-surface the operation")
+			logEntry.ErrorContext(ctx, "operator release: park failed; lease expiry will re-surface the operation", logx.Err(err))
 		}
 		return claimed, rerr
 	}
 	return r.applyResolution(ctx, logEntry, claimed, resolution, outcome, now)
 }
 
-func (r *Runner) resolutionLog(ctx context.Context, claimed gen.BillingProviderIntent, resolution Resolution) *log.Entry {
-	return log.WithContext(ctx).WithFields(log.Fields{
-		"intent_id": claimed.ID, "intent_type": claimed.IntentType, "provider": claimed.Rail, "actor": resolution.Actor,
-	})
+func (r *Runner) resolutionLog(ctx context.Context, claimed gen.BillingProviderIntent, resolution Resolution) *slog.Logger {
+	return r.Log.With("intent_id", claimed.ID, "intent_type", claimed.IntentType, "provider", claimed.Rail, "actor", resolution.Actor)
 }
 
-func (r *Runner) applyResolution(ctx context.Context, logEntry *log.Entry, claimed gen.BillingProviderIntent, resolution Resolution, outcome Outcome, now time.Time) (gen.BillingProviderIntent, error) {
+func (r *Runner) applyResolution(ctx context.Context, logEntry *slog.Logger, claimed gen.BillingProviderIntent, resolution Resolution, outcome Outcome, now time.Time) (gen.BillingProviderIntent, error) {
 	record := resolution.Record(now)
 	evidence := map[string]any{"operator_resolution": record}
 	for k, v := range outcome.Evidence {
@@ -215,7 +214,7 @@ func (r *Runner) applyResolution(ctx context.Context, logEntry *log.Entry, claim
 	if outcome.Reason != "" {
 		reason += "; " + outcome.Reason
 	}
-	logEntry.WithField("outcome", outcome.Class.String()).Warn("operator resolution applied")
+	logEntry.WarnContext(ctx, "operator resolution applied", "outcome", outcome.Class.String())
 	var stats Stats
 	r.record(ctx, logEntry, &stats, r.Registry.Lookup(claimed.IntentType), claimed, outcome, reason, true)
 	return r.Store.Get(ctx, claimed.ID)

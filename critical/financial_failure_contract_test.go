@@ -6,14 +6,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,12 +75,19 @@ func TestFinancialFailures(t *testing.T) {
 		recoverSale(t, a, p, fleet, orders.Items[0].ID)
 	})
 	t.Run("OR-J12-S05/capture-values-and-private-provider-secrets-never-escape", func(t *testing.T) {
+		// Every record at debug, and every statement through the SQL tracer
+		// sql_trace installs, on the host's pool.
 		logs := &capturedLogs{}
-		previous, level := log.StandardLogger().Out, log.GetLevel()
-		log.SetOutput(logs)
-		log.SetLevel(log.DebugLevel)
-		t.Cleanup(func() { log.SetOutput(previous); log.SetLevel(level) })
-		a, p := newPaymentWorld(t)
+		a, p := newPaymentWorld(t, func(w *world) {
+			logger := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			w.deps.Logger = logger
+			pc := w.pool.Config().Copy()
+			pc.ConnConfig.Tracer = db.NewSQLTracer(logger)
+			traced, err := pgxpool.NewWithConfig(t.Context(), pc)
+			require.NoError(t, err)
+			t.Cleanup(traced.Close)
+			w.deps.Postgres = traced
+		})
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
@@ -109,12 +118,17 @@ func TestFinancialFailures(t *testing.T) {
 			require.NoError(t, err)
 			outputs.Write(data)
 		}
+		logged := logs.text()
+		require.Contains(t, logged, `"sql":`, "the SQL tracer logged the statements")
+		require.NotContains(t, logged, `"args":`, "the SQL tracer logs no statement arguments")
 		for _, secret := range []string{pan, "sk_test_critical", "whsec_critical_fixture"} {
 			require.NotContains(t, outputs.String(), secret)
-			require.NotContains(t, logs.text(), secret)
+			require.NotContains(t, logged, secret)
 		}
 		require.NotContains(t, outputs.String(), `"cvc":"`+cvc+`"`)
-		require.NotContains(t, logs.text(), `"cvc":"`+cvc+`"`)
+		for _, spelled := range []string{`"cvc":"` + cvc + `"`, `"cvc":` + cvc, "cvc=" + cvc} {
+			require.NotContains(t, logged, spelled)
+		}
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 3000, p.effects(t)[0].Amount)
 	})

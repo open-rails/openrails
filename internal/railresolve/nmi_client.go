@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ type NMIArmer struct {
 	// Factory, when set, is the runtime's shared NMI factory (it carries the
 	// runtime's seams); otherwise one is built from Config.
 	Factory *NMIFactory
+	Log     *slog.Logger
 }
 
 var _ NMIClientResolver = (*NMIArmer)(nil)
@@ -103,7 +105,7 @@ func (a *NMIArmer) factory() *NMIFactory {
 	if a.Factory != nil {
 		return a.Factory
 	}
-	return &NMIFactory{Config: a.Config}
+	return &NMIFactory{Config: a.Config, Log: a.Log}
 }
 
 // Secret loads one scoped secret honouring the PSP row's rotation floor.

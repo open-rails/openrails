@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
@@ -58,7 +59,7 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		if err != nil {
 			return nil, err
 		}
-		dl := ccbill.NewDataLinkClient(&config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
+		dl := ccbill.NewDataLinkClient(im.Log, &config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
 			Sandbox: scope.Environment == config.EnvironmentSandbox})
 		dl.ReadOnly = true
 		if im.CCBillDataLinkURL != "" {
@@ -248,6 +249,7 @@ type catalogPull struct {
 	at             time.Time
 	objects        []providerobjects.Object
 	listed, absent map[string]bool
+	Log            *slog.Logger
 }
 
 func catalogKey(kind providerobjects.Kind, ref string) string { return providerobjects.Key(kind, ref) }
@@ -271,7 +273,7 @@ func (im *Importer) listCatalog(ctx context.Context, scope merchants.PSPScope) (
 	if err != nil {
 		return nil, fmt.Errorf("provider catalog: %w", err)
 	}
-	c := &catalogPull{im: im, scope: scope, reader: reader, at: at, objects: objects, listed: map[string]bool{}, absent: map[string]bool{}}
+	c := &catalogPull{im: im, scope: scope, reader: reader, at: at, objects: objects, listed: map[string]bool{}, absent: map[string]bool{}, Log: im.Log}
 	for _, obj := range objects {
 		c.listed[catalogKey(obj.Kind, obj.Ref)] = true
 	}
@@ -316,7 +318,7 @@ func (c *catalogPull) fill(ctx context.Context, recs []staged) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"psp": c.scope.Key, "kind": kind, "ref": ref}).Warn("psp import: provider catalog object not read; left for the next read")
+			c.Log.WarnContext(ctx, "psp import: provider catalog object not read; left for the next read", logx.Err(err), "psp", c.scope.Key, "kind", kind, "ref", ref)
 		}
 		return nil
 	}

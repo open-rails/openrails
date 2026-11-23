@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -139,7 +140,7 @@ type ProvisionMerchantParams struct {
 // manifest names merchants only (slug, remote_application) and is
 // refused when it declares more. Issuer registration is declarative and does
 // not fetch the JWKS.
-func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
+func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")
 	}
@@ -167,10 +168,10 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	defer release()
 
 	if len(manifest.Merchants) == 0 {
-		log.Info("merchant bootstrap manifest has no merchants")
+		logger.InfoContext(ctx, "merchant bootstrap manifest has no merchants")
 		return nil
 	}
-	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
+	database, err := db.NewWithPGXPool(logger, cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}
@@ -183,7 +184,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		defer opened.Close()
 		directory = opened.Service
 		if _, ok := directory.Config().Source().(*merchantdocs.FileSource); ok {
-			log.Info("merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
+			logger.InfoContext(ctx, "merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
 		}
 	}
 	for _, slug := range slices.Sorted(maps.Keys(manifest.Merchants)) {
@@ -199,7 +200,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		if err != nil {
 			return err
 		}
-		log.WithFields(log.Fields{"merchant": tn.Slug, "merchant_id": tn.ID.String()}).Info("merchant bootstrap: merchant ensured")
+		logger.InfoContext(ctx, "merchant bootstrap: merchant ensured", "merchant", tn.Slug, "merchant_id", tn.ID.String())
 	}
 	return nil
 }
@@ -345,7 +346,7 @@ func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 	conn := pooled.Hijack()
 	release := func() {
 		if err := conn.Close(context.WithoutCancel(ctx)); err != nil {
-			log.WithError(err).Warn("merchant bootstrap: close advisory-lock session failed")
+			cp.Log.WarnContext(ctx, "merchant bootstrap: close advisory-lock session failed", logx.Err(err))
 		}
 	}
 	if err := gen.New(conn).LockMerchantManifestBootstrap(ctx, merchantManifestAdvisoryLock); err != nil {

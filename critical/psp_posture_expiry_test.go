@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -134,7 +135,7 @@ func TestPSPPostureExpiry(t *testing.T) {
 			t.Cleanup(providerposture.Process().SetClock(clock.Now))
 			gateway := nmimock.NewUnstarted(nmimock.Options{Clock: clock.Now})
 			gateway.SetTestMode(false)
-			client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "critical-live-gateway", &config.NMIProviderSettings{SecurityKey: "critical-live-key", Environment: config.EnvironmentLive})
+			client, err := nmi.NewAccountClient(slog.Default(), uuid.New(), uuid.New(), "critical-live-gateway", &config.NMIProviderSettings{SecurityKey: "critical-live-key", Environment: config.EnvironmentLive})
 			require.NoError(t, err)
 			client.UseTransport(gateway)
 			sale := func() error {

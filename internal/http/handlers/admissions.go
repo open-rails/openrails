@@ -3,15 +3,15 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
@@ -63,7 +63,7 @@ func admitRefusal(code billing.ErrorCode, message, param string) billing.Admissi
 // AdmitVerdicts admits each item on its own: one item's bad input, scope
 // denial, refusal or backend error never fails another.
 func AdmitVerdicts(
-	ctx context.Context,
+	ctx context.Context, logger *slog.Logger,
 	items []billing.AdmitParams,
 	allows func(billing.CustomerID) bool,
 	admit func(context.Context, billingservice.AdmitInput) (*billing.Admission, error),
@@ -104,8 +104,7 @@ func AdmitVerdicts(
 				continue
 			}
 			// The wire stays non-leaky; the cause reaches the operator log.
-			log.WithError(err).WithFields(log.Fields{"customer_id": item.CustomerID, "invoker": item.Invoker, "request_id": item.RequestID}).
-				Error("admission check failed")
+			logger.ErrorContext(ctx, "admission check failed", logx.Err(err), "customer_id", item.CustomerID, "invoker", item.Invoker, "request_id", item.RequestID)
 			out[i] = admitRefusal(billing.CodeInternalError, "admission check failed", "")
 		}
 	}
@@ -130,7 +129,7 @@ func Admit(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	verdicts := AdmitVerdicts(r.Request.Context(), params.Items,
+	verdicts := AdmitVerdicts(r.Request.Context(), r.Log, params.Items,
 		func(c billing.CustomerID) bool { return serviceCustomerScopeAllows(r, c) }, svc.Admit)
 	for i := range verdicts {
 		if verdicts[i].Error != nil {
@@ -165,7 +164,7 @@ func admissionLookupRefusal(r *httprequest.Request, requestID string, err error)
 	if out := refusalOf(err); out != nil {
 		return out
 	}
-	log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error("admission lookup failed")
+	r.Log.ErrorContext(r.Request.Context(), "admission lookup failed", logx.Err(err), "request_id", requestID)
 	return api.Coded(billing.CodeInternalError, "admission lookup failed")
 }
 
@@ -216,7 +215,7 @@ func CaptureAdmissions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out := CaptureResults(r.Request.Context(), params.Items, func(requestID string) *api.APIError {
+	out := CaptureResults(r.Request.Context(), r.Log, params.Items, func(requestID string) *api.APIError {
 		return admissionItemScope(r, svc, requestID)
 	}, svc.CaptureAdmission)
 	for i := range out {
@@ -230,7 +229,7 @@ func CaptureAdmissions(r *httprequest.Request) {
 // CaptureResults captures each item on its own. scope, when set, refuses an
 // item the credential may not settle.
 func CaptureResults(
-	ctx context.Context,
+	ctx context.Context, logger *slog.Logger,
 	items []billing.CaptureAdmissionParams,
 	scope func(requestID string) *api.APIError,
 	capture func(context.Context, billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error),
@@ -259,7 +258,7 @@ func CaptureResults(
 		case errors.Is(err, spendgate.ErrNotFound):
 			out[i] = refused(api.Coded(billing.CodeAdmissionNotFound, ""))
 		default:
-			out[i] = refused(admissionFailure(ctx, err, item.RequestID, "capture failed"))
+			out[i] = refused(admissionFailure(ctx, logger, err, item.RequestID, "capture failed"))
 		}
 	}
 	return out
@@ -277,12 +276,12 @@ func ReleaseAdmissions(r *httprequest.Request) {
 		if refusal := admissionItemScope(r, svc, requestID); refusal != nil {
 			return admissionRefusal(refusal)
 		}
-		return ReleaseResult(r.Request.Context(), requestID, svc.ReleaseAdmission)
+		return ReleaseResult(r.Request.Context(), r.Log, requestID, svc.ReleaseAdmission)
 	})
 }
 
 // ReleaseResult releases one admission.
-func ReleaseResult(ctx context.Context, requestID string, release func(context.Context, string) (*billing.Admission, error)) billing.AdmissionResult {
+func ReleaseResult(ctx context.Context, logger *slog.Logger, requestID string, release func(context.Context, string) (*billing.Admission, error)) billing.AdmissionResult {
 	if requestID == "" {
 		return admissionRefusal(api.Coded(billing.CodeInvalidParam, "request_id required").WithParam("request_id"))
 	}
@@ -295,7 +294,7 @@ func ReleaseResult(ctx context.Context, requestID string, release func(context.C
 	case errors.Is(err, spendgate.ErrCaptured):
 		return admissionRefusal(api.Coded(billing.CodeAdmissionCaptured, ""))
 	}
-	return admissionRefusal(admissionFailure(ctx, err, requestID, "release failed"))
+	return admissionRefusal(admissionFailure(ctx, logger, err, requestID, "release failed"))
 }
 
 // ExtendAdmissions moves open holds' deadlines later, one result per item.
@@ -327,16 +326,16 @@ func ExtendAdmissions(r *httprequest.Request) {
 		case errors.As(err, &invalid):
 			return admissionRefusal(api.Coded(billing.CodeInvalidParam, invalid.Message).WithParam(invalid.Param))
 		}
-		return admissionRefusal(admissionFailure(r.Request.Context(), err, requestID, "extend failed"))
+		return admissionRefusal(admissionFailure(r.Request.Context(), r.Log, err, requestID, "extend failed"))
 	})
 }
 
 // admissionFailure is a money refusal, or an internal error whose cause
 // reaches the operator log and never the wire.
-func admissionFailure(ctx context.Context, err error, requestID, message string) *api.APIError {
+func admissionFailure(ctx context.Context, logger *slog.Logger, err error, requestID, message string) *api.APIError {
 	if refusal := moneyRefusal(err); refusal != nil {
 		return refusal
 	}
-	log.WithContext(ctx).WithError(err).WithField("request_id", requestID).Error(message)
+	logger.ErrorContext(ctx, message, logx.Err(err), "request_id", requestID)
 	return api.Coded(billing.CodeInternalError, message)
 }

@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 
@@ -23,7 +24,7 @@ import (
 // so alert webhooks are omitted; a redacted dump re-applies without a
 // placeholder standing in for a real value. With a manifest as the
 // configuration, the manifest is the dump.
-func DumpMerchantConfig(ctx context.Context, cfg *config.Config, vault *vaultapi.Client, cp *controlplane.ControlPlane, slug string) (*BillingConfig, error) {
+func DumpMerchantConfig(ctx context.Context, logger *slog.Logger, cfg *config.Config, vault *vaultapi.Client, cp *controlplane.ControlPlane, slug string) (*BillingConfig, error) {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
 	}
@@ -34,7 +35,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, vault *vaultapi
 	if config.MerchantConfigKVMount(cfg) == "" {
 		return nil, fmt.Errorf("merchant configuration is read from the manifest; the manifest is the dump")
 	}
-	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
+	database, err := db.NewWithPGXPool(logger, cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return nil, fmt.Errorf("wrap control-plane db: %w", err)
 	}

@@ -4,6 +4,7 @@ package db_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -44,10 +45,10 @@ func TestTransactionPooler(t *testing.T) {
 	baselinePool, err := pgxpool.NewWithConfig(ctx, direct.Copy())
 	require.NoError(t, err)
 	t.Cleanup(baselinePool.Close)
-	baseline, err := db.NewWithPGXPool(baselinePool, "billing")
+	baseline, err := db.NewWithPGXPool(slog.Default(), baselinePool, "billing")
 	require.NoError(t, err)
 	direct.ConnConfig.RuntimeParams["application_name"] = "openrails-pooler-test-session"
-	database, err := db.NewWithPGXPoolAndSessions(pool, "billing", direct)
+	database, err := db.NewWithPGXPoolAndSessions(slog.Default(), pool, "billing", direct)
 	require.NoError(t, err)
 
 	ids := []billing.MerchantID{billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())}
@@ -113,7 +114,7 @@ func TestTransactionPooler(t *testing.T) {
 	t.Run("listener-reconnects-on-the-direct-endpoint", func(t *testing.T) {
 		listenCtx, stop := context.WithCancel(ctx)
 		defer stop()
-		verifier := &reconcile.Verifier{DB: database}
+		verifier := &reconcile.Verifier{DB: database, Log: slog.Default()}
 		finished := make(chan struct{})
 		go func() {
 			defer close(finished)

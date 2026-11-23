@@ -3,11 +3,11 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -71,6 +72,7 @@ type MerchantFetcherBuilder struct {
 	// NMIClients is the runtime's shared NMI client factory; its transport
 	// (the fake-provider seam) carries over to pull clients.
 	NMIClients *railresolve.NMIFactory
+	Log        *slog.Logger
 }
 
 // Build resolves the merchant's pull credentials and returns the armed plane.
@@ -103,8 +105,7 @@ func (b MerchantFetcherBuilder) BuildPSP(ctx context.Context, mid billing.Mercha
 		if err == nil {
 			err = errors.New("PSP is not declared for this merchant")
 		}
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{"merchant_id": mid.String(), "psp_id": pspID.String()}).
-			Warn("provider pull: PSP not armed — its objects are not read")
+		b.Log.WarnContext(ctx, "provider pull: PSP not armed — its objects are not read", logx.Err(err), "merchant_id", mid.String(), "psp_id", pspID.String())
 		return out, "", false
 	}
 	provider := Provider(scope.Rail)
@@ -156,18 +157,14 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid bi
 	declared := 1
 	if b.Merchants != nil {
 		if n, err := b.Merchants.CountActivePSPsForRail(ctx, mid, string(provider)); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"merchant_id": mid.String(), "rail": string(provider),
-			}).Warn("provider pull: active-PSP count failed; treating the rail as partially covered (absence proves nothing)")
+			b.Log.WarnContext(ctx, "provider pull: active-PSP count failed; treating the rail as partially covered (absence proves nothing)", logx.Err(err), "merchant_id", mid.String(), "rail", string(provider))
 			declared = 2 // fail safe: unknown coverage is INCOMPLETE coverage
 		} else if n > 0 {
 			declared = n
 		}
 	}
 	if declared > 1 {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": mid.String(), "rail": string(provider), "active_psps": declared,
-		}).Warn("provider pull: rail has multiple active PSPs but a pull arms from ONE — its roster cannot prove absence for the siblings it did not read")
+		b.Log.WarnContext(ctx, "provider pull: rail has multiple active PSPs but a pull arms from ONE — its roster cannot prove absence for the siblings it did not read", "merchant_id", mid.String(), "rail", string(provider), "active_psps", declared)
 	}
 	out.Coverage[provider] = PSPCoverage{
 		Declared: declared,
@@ -185,9 +182,7 @@ func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid billi
 	if pin := strings.TrimSpace(b.AccountIDs[provider]); pin != "" {
 		scope, ok, err := b.Merchants.PSPScopeByAccountID(ctx, mid, rail, pin)
 		if err == nil && !ok {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"merchant_id": mid.String(), "rail": rail, "account_id": pin,
-			}).Warn("provider pull: pinned PSP is not declared for this merchant")
+			b.Log.WarnContext(ctx, "provider pull: pinned PSP is not declared for this merchant", "merchant_id", mid.String(), "rail", rail, "account_id", pin)
 		}
 		return scope, ok, err
 	}
@@ -203,9 +198,7 @@ func (out *MerchantPullClients) markUnavailable(provider Provider, err error) {
 }
 
 func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid billing.MerchantID, provider Provider, err error) {
-	log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-		"merchant_id": mid.String(), "rail": string(provider),
-	}).Warn("provider pull: rail not armed — PSP resolution failed")
+	b.Log.WarnContext(ctx, "provider pull: rail not armed — PSP resolution failed", logx.Err(err), "merchant_id", mid.String(), "rail", string(provider))
 }
 
 // secret loads one scoped secret. found=false with nil err means the secret is
@@ -240,16 +233,12 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.M
 	if err != nil {
 		out.markUnavailable(Provider(scope.Rail), err)
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
-		}).Warn("provider pull: rail not armed — merchant configuration unavailable (retried next pass)")
+		b.Log.WarnContext(ctx, "provider pull: rail not armed — merchant configuration unavailable (retried next pass)", logx.Err(err), "merchant_id", mid.String(), "rail", scope.Rail, "secret", name)
 		return "", false
 	}
 	if !found {
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
-		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
-		}).Warn("provider pull: rail not armed — merchant secret missing")
+		b.Log.WarnContext(ctx, "provider pull: rail not armed — merchant secret missing", "merchant_id", mid.String(), "rail", scope.Rail, "secret", name)
 		return "", false
 	}
 	return value, true
@@ -259,7 +248,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config}
+	factory := &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}
@@ -267,9 +256,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if err != nil {
 		out.markUnavailable(ProviderNMI, err)
 		// Fail closed: a declared account never falls back across planes.
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"merchant_id": mid.String(), "rail": "nmi",
-		}).Warn("provider pull: rail not armed — NMI client build failed")
+		b.Log.WarnContext(ctx, "provider pull: rail not armed — NMI client build failed", logx.Err(err), "merchant_id", mid.String(), "rail", "nmi")
 		return
 	}
 	out.Fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(client), key: scope.AccountID}
@@ -281,9 +268,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 	// 999999-0000). Both parts are numeric, so the first dash splits.
 	acc, sub, cut := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 	if !cut || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"merchant_id": mid.String(), "rail": "ccbill", "account_id": scope.AccountID,
-		}).Warn("provider pull: rail not armed — CCBill account_id must be clientAccnum-clientSubacc (e.g. 999999-0000)")
+		b.Log.WarnContext(ctx, "provider pull: rail not armed — CCBill account_id must be clientAccnum-clientSubacc (e.g. 999999-0000)", "merchant_id", mid.String(), "rail", "ccbill", "account_id", scope.AccountID)
 		return
 	}
 	username, ok := b.requireSecret(ctx, mid, scope, "datalink_username", out)
@@ -294,7 +279,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 	if !ok {
 		return
 	}
-	dl := ccbill.NewDataLinkClient(&config.CCBillConfig{
+	dl := ccbill.NewDataLinkClient(b.Log, &config.CCBillConfig{
 		ClientAccNum:     strings.TrimSpace(acc),
 		ClientSubAcc:     strings.TrimSpace(sub),
 		DataLinkUsername: username,
@@ -338,13 +323,13 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 	}
 	// A sandbox run's loopback RPC replaces the public one here as it does
 	// for the runtime's own Solana clients (hermetic CI never reaches devnet).
-	rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
+	rpc := solanaint.NewRPCClientWithConfig(b.Log, solanaint.RPCClientConfig{
 		Network:   scope.Environment,
 		URL:       rpcURL,
 		PublicURL: config.SandboxSolanaRPCURL(b.Config),
 		ReadOnly:  true,
 	})
-	fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
+	fetcher := NewSolanaFetcher(b.Log, rpc, SolanaSubscriptionSourceFromDB(b.DB))
 	// The PSP's treasury is the wallet the discovery lanes scan.
 	fetcher.MerchantWallet = scope.AccountID
 	plans := SolanaPlanSourceFromDB(b.DB)

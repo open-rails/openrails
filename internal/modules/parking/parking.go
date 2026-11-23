@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -190,7 +189,7 @@ func Wake(ctx context.Context, d *db.DB, pspID uuid.UUID, reason billing.ParkRea
 	}
 	if !d.RiverProducerBound() {
 		// A host tool without a job queue: the next provider event wakes it.
-		log.WithContext(ctx).WithFields(log.Fields{"psp_id": pspID, "reason": reason, "ref": ref}).Warn("park wake skipped: no River producer is bound")
+		d.Log.WarnContext(ctx, "park wake skipped: no River producer is bound", "psp_id", pspID, "reason", reason, "ref", ref)
 		return 0, nil
 	}
 	q := d.Gen(ctx)
@@ -244,7 +243,7 @@ func WakeImportOwned(ctx context.Context, d *db.DB, pspID uuid.UUID) (int, error
 		return 0, err
 	}
 	if !d.RiverProducerBound() {
-		log.WithContext(ctx).WithField("psp_id", pspID).Warn("import-owned park wake skipped: no River producer is bound")
+		d.Log.WarnContext(ctx, "import-owned park wake skipped: no River producer is bound", "psp_id", pspID)
 		return 0, nil
 	}
 	q := d.Gen(ctx)

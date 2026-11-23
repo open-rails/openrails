@@ -14,6 +14,7 @@ guards() {
   go run ./scripts/business-time
   bash scripts/check-one-pull-entry.sh
   bash scripts/check-borrowed-connections.sh
+  bash scripts/check-logging.sh
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   gofmt_clean

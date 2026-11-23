@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -97,6 +98,7 @@ func (r *WebhookHandlerRegistry) Handler(rail string) (WebhookHandler, bool) {
 type StripeWebhookHandler struct {
 	Secret    string
 	Tolerance time.Duration
+	Log       *slog.Logger
 }
 
 func (StripeWebhookHandler) Rail() string { return "stripe" }
@@ -187,7 +189,9 @@ func mapStripeEventType(t string) WebhookEventType {
 
 // NMIWebhookHandler verifies + normalizes NMI webhooks with the message's
 // secret: the routed account's.
-type NMIWebhookHandler struct{}
+type NMIWebhookHandler struct {
+	Log *slog.Logger
+}
 
 func (NMIWebhookHandler) Rail() string { return "nmi" }
 
@@ -266,7 +270,9 @@ func mapNMIEventType(t string) WebhookEventType {
 // CCBillWebhookHandler normalizes CCBill webhooks. CCBill signs nothing:
 // ingestion gates the source IP and the service matches the armed account,
 // so there is no per-message HMAC to re-check.
-type CCBillWebhookHandler struct{}
+type CCBillWebhookHandler struct {
+	Log *slog.Logger
+}
 
 func (CCBillWebhookHandler) Rail() string { return "ccbill" }
 

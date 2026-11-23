@@ -8,10 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -23,6 +22,7 @@ import (
 type VaultSource struct {
 	kv     *vault.KVv2Adapter
 	prefix string
+	Log    *slog.Logger
 }
 
 // DefaultPrefix is the path under the KV mount OpenRails owns.
@@ -30,7 +30,7 @@ const DefaultPrefix = "openrails"
 
 // NewVaultSource keeps configuration in kv under prefix ("" is
 // DefaultPrefix).
-func NewVaultSource(kv *vault.KVv2Adapter, prefix string) (*VaultSource, error) {
+func NewVaultSource(logger *slog.Logger, kv *vault.KVv2Adapter, prefix string) (*VaultSource, error) {
 	if kv == nil {
 		return nil, fmt.Errorf("merchantdocs: Vault source needs a KV client")
 	}
@@ -41,7 +41,7 @@ func NewVaultSource(kv *vault.KVv2Adapter, prefix string) (*VaultSource, error) 
 	if path.Clean(prefix) != prefix || strings.Contains(prefix, "..") {
 		return nil, fmt.Errorf("merchantdocs: invalid Vault path prefix %q", prefix)
 	}
-	return &VaultSource{kv: kv, prefix: prefix}, nil
+	return &VaultSource{kv: kv, prefix: prefix, Log: logger}, nil
 }
 
 // Prefix is where the source keeps documents under the KV mount.
@@ -128,7 +128,7 @@ func (v *VaultSource) keys(ctx context.Context, dir string) ([]string, error) {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
 		if !KeyShape.MatchString(name) {
-			log.WithField("path", dir+name).Warn("merchant config: a Vault entry that is not a key is ignored (keys are 1-63 lowercase letters, digits, - or _)")
+			v.Log.WarnContext(ctx, "merchant config: a Vault entry that is not a key is ignored (keys are 1-63 lowercase letters, digits, - or _)", "path", dir+name)
 			continue
 		}
 		out = append(out, name)

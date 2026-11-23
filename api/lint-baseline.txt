@@ -23,7 +23,6 @@ alias openrails.HyperSwitchConfig
 alias openrails.Identity
 alias openrails.Invoker
 alias openrails.LLMConfig
-alias openrails.LoggerConfig
 alias openrails.MerchantDeclaration
 alias openrails.MerchantDocument
 alias openrails.MerchantSecrets
@@ -176,7 +175,6 @@ internal openrails.Config.Database
 internal openrails.Config.DestructiveActionLimits
 internal openrails.Config.HyperSwitch
 internal openrails.Config.LLM
-internal openrails.Config.Logger
 internal openrails.Config.Merchants
 internal openrails.Config.ProviderSandbox
 internal openrails.Config.RateLimits

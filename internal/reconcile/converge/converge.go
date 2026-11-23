@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -127,6 +128,7 @@ type ConvergeEngine struct {
 	// the remediation loop.
 	notify *notifyPass
 	health *healthPass
+	Log    *slog.Logger
 }
 
 // NewConvergeEngine wires the engine with the DERIVE → CON passes, the
@@ -134,7 +136,7 @@ type ConvergeEngine struct {
 // when one is given.
 func NewConvergeEngine(database *db.DB, clocks ...clockwork.Clock) *ConvergeEngine {
 	clock := timeutil.FirstClock(clocks...)
-	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
+	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }, Log: database.Log}
 	e.passes = []Pass{&derivePass{e: e}, &conPass{e: e}}
 	e.notify = &notifyPass{e: e, lookback: accessEndedLookback}
 	e.health = &healthPass{e: e}
@@ -239,8 +241,7 @@ func (e *ConvergeEngine) run(ctx context.Context, scope Scope, collect func(cont
 			}
 			if e.Notifier != nil {
 				if nerr := e.Notifier.NotifyFinding(ctx, reconcile.FindingRecordFromRow(row)); nerr != nil {
-					log.WithContext(ctx).WithError(nerr).WithField("finding_id", row.ID).
-						Warn("converge: finding notification failed; continuing")
+					e.Log.WarnContext(ctx, "converge: finding notification failed; continuing", logx.Err(nerr), "finding_id", row.ID)
 				}
 			}
 			res.Findings++

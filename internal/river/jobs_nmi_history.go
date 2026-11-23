@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
@@ -50,6 +51,7 @@ type NMIHistoryWorker struct {
 	DB          *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
+	Log         *slog.Logger
 }
 
 func (w *NMIHistoryWorker) Pass(ctx context.Context) error {
@@ -106,8 +108,7 @@ func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, now 
 		err := w.read(rctx, mid, psp.ID, psp.ReadAt, now)
 		cancel()
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{"merchant_id": mid, "psp_id": psp.ID}).
-				Warn("nmi history: read failed; the stored months stand and the next pass tries again")
+			w.Log.WarnContext(ctx, "nmi history: read failed; the stored months stand and the next pass tries again", logx.Err(err), "merchant_id", mid, "psp_id", psp.ID)
 			errs = errors.Join(errs, fmt.Errorf("psp %s: %w", psp.ID, err))
 		}
 	}
@@ -131,8 +132,7 @@ func (w *NMIHistoryWorker) read(ctx context.Context, mid, psp uuid.UUID, last *t
 		return err
 	}
 	if history.Undated > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "psp_id": psp, "undated": history.Undated}).
-			Warn("nmi history: authorizations with no readable date are in no month")
+		w.Log.WarnContext(ctx, "nmi history: authorizations with no readable date are in no month", "merchant_id", mid, "psp_id", psp, "undated", history.Undated)
 	}
 	n := len(history.Counts)
 	months, kinds, categories, reasons, counts := make([]time.Time, n), make([]string, n), make([]string, n), make([]string, n), make([]int64, n)

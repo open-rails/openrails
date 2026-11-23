@@ -10,10 +10,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	log "github.com/sirupsen/logrus"
 )
 
 // AdminChangeSubscription schedules price or seat changes at the next renewal.
@@ -100,12 +100,12 @@ func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*pay
 			r.ErrorCode(billing.CodeResourceNotFound, "subscription not found")
 			return nil, nil, false
 		}
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: load subscription")
+		r.Log.ErrorContext(r.Request.Context(), "admin subscription change: load subscription", logx.Err(err), "subscription_id", subscriptionID)
 		r.ErrorCode(billing.CodeInternalError, "failed to retrieve subscription")
 		return nil, nil, false
 	}
 	if subscription.CustomerID == uuid.Nil {
-		log.WithField("subscription_id", subscriptionID).Error("admin subscription change: subscription has no customer")
+		r.Log.ErrorContext(r.Request.Context(), "admin subscription change: subscription has no customer", "subscription_id", subscriptionID)
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, false
 	}
@@ -113,7 +113,7 @@ func adminChangeCustomer(r *httprequest.Request, subscriptionID uuid.UUID) (*pay
 	if r.State.Contacts != nil {
 		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
 		if err != nil {
-			log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: customer contact")
+			r.Log.ErrorContext(r.Request.Context(), "admin subscription change: customer contact", logx.Err(err), "subscription_id", subscriptionID)
 			r.ErrorCode(billing.CodeServiceUnavailable, "the customer directory is unavailable")
 			return nil, nil, false
 		}
@@ -155,7 +155,7 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	}
 	pending, err := subscriptions.PendingChange(r.Request.Context(), r.State.SubscriptionService.Database(), subscriptionID)
 	if err != nil {
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: check the scheduled change")
+		r.Log.ErrorContext(r.Request.Context(), "admin subscription change: check the scheduled change", logx.Err(err), "subscription_id", subscriptionID)
 		r.ErrorCode(billing.CodeInternalError, "failed to check the scheduled change")
 		return false
 	}
@@ -180,27 +180,21 @@ func logAdminTierChange(
 	resp *payment.TierChangeResponse,
 	err error,
 ) {
-	fields := log.Fields{
-		"actor":           resolveActorIdentity(r),
-		"event":           "admin_subscription_change",
-		"subscription_id": req.SubscriptionID,
-		"target_price_id": req.PriceID,
-		"reason":          req.Reason,
-	}
+	fields := []any{"actor", resolveActorIdentity(r), "event", "admin_subscription_change", "subscription_id", req.SubscriptionID, "target_price_id", req.PriceID, "reason", req.Reason}
 	if req.Quantity != nil {
-		fields["target_quantity"] = *req.Quantity
+		fields = append(fields, "target_quantity", *req.Quantity)
 	}
 	if merchantID, merchantErr := merchant.Require(r.Request.Context()); merchantErr == nil {
-		fields["merchant_id"] = merchantID
+		fields = append(fields, "merchant_id", merchantID)
 	}
 	if resp != nil {
-		fields["effective"] = resp.Effective
-		fields["rail"] = resp.Rail
-		fields["status"] = resp.Status
+		fields = append(fields, "effective", resp.Effective)
+		fields = append(fields, "rail", resp.Rail)
+		fields = append(fields, "status", resp.Status)
 	}
 	if err != nil {
-		log.WithError(err).WithFields(fields).Warn("admin subscription change failed")
+		r.Log.With(fields...).WarnContext(r.Request.Context(), "admin subscription change failed", logx.Err(err))
 		return
 	}
-	log.WithFields(fields).Info("admin subscription change processed")
+	r.Log.With(fields...).InfoContext(r.Request.Context(), "admin subscription change processed")
 }

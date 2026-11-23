@@ -2,6 +2,7 @@ package app
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -9,6 +10,7 @@ import (
 	"github.com/open-rails/authkit/userinfo"
 
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/writeposture"
 
@@ -22,7 +24,6 @@ import (
 
 	"github.com/ccoveille/go-safecast/v2"
 	redis "github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/abusestate"
@@ -76,6 +77,7 @@ const (
 )
 
 type runtimeOverrides struct {
+	Logger          *slog.Logger
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
 	BasisTheoryTransport http.RoundTripper
@@ -99,6 +101,7 @@ type runtimeOverrides struct {
 type devnetParityPriceProvider struct {
 	inner   solanamodule.TokenPriceProvider
 	network func(context.Context) string
+	Log     *slog.Logger
 }
 
 func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) (float64, error) {
@@ -109,14 +112,13 @@ func (p devnetParityPriceProvider) PriceUSD(ctx context.Context, symbol string) 
 		if price, err := p.inner.PriceUSD(ctx, symbol); err == nil && price > 0 {
 			return price, nil
 		} else if err != nil {
-			log.WithError(err).WithField("token", symbol).
-				Debug("solana devnet/testnet: pyth price unavailable; using $1.00 parity (fake money)")
+			p.Log.DebugContext(ctx, "solana devnet/testnet: pyth price unavailable; using $1.00 parity (fake money)", logx.Err(err), "token", symbol)
 		}
 	}
 	return 1.0, nil
 }
 
-func createPythPriceProvider(network func(context.Context) string) (solanamodule.TokenPriceProvider, error) {
+func createPythPriceProvider(logger *slog.Logger, network func(context.Context) string) (solanamodule.TokenPriceProvider, error) {
 	// Always constructed (#788): whether a merchant's Solana rail is armed is
 	// per-merchant runtime state, not boot config; the client is a cheap
 	// lazily-used HTTP wrapper.
@@ -139,13 +141,14 @@ func createPythPriceProvider(network func(context.Context) string) (solanamodule
 	if err != nil {
 		return nil, fmt.Errorf("create pyth client: %w", err)
 	}
-	return devnetParityPriceProvider{inner: client, network: network}, nil
+	return devnetParityPriceProvider{inner: client, network: network, Log: logger}, nil
 }
 
 func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	logger := overrides.Logger
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
@@ -169,15 +172,14 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, fmt.Errorf("the database is required")
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
-	prepare := migrate.Apply
-	if cfg.Database.SkipMigrations {
-		prepare = migrate.Validate
-	}
 	migrationPool, releaseMigrationPool, err := database.MigrationPool(ctx)
 	if err == nil {
-		err = prepare(ctx, migrationPool, migrate.Options{
-			Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
-		})
+		opts := migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger}
+		if cfg.Database.SkipMigrations {
+			err = migrate.Validate(ctx, migrationPool, opts)
+		} else {
+			err = migrate.Apply(ctx, migrationPool, opts)
+		}
 		releaseMigrationPool()
 	}
 	if err != nil {
@@ -214,7 +216,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	stripeClients := stripeapi.NewFactory(stripeTransport)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg}
+	nmiClients := &railresolve.NMIFactory{Config: cfg, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -226,6 +228,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DB:            database,
 		MerchantsFn:   merchantsFn,
 		NMIClients:    nmiClients,
+		Log:           logger,
 	}
 	if overrides != nil {
 		collectionResolver.BasisTheoryTransport = overrides.BasisTheoryTransport
@@ -236,8 +239,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Log:         logger,
 	}
-	solanaPriceProvider, err := createPythPriceProvider(solanaRPCResolver.Network)
+	solanaPriceProvider, err := createPythPriceProvider(logger, solanaRPCResolver.Network)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +268,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		fxTransport = overrides.FXTransport
 	}
-	fxRates := fx.NewRates(fx.NewSource(fxTransport), clock.Now)
+	fxRates := fx.NewRates(logger, fx.NewSource(fxTransport), clock.Now)
 	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, fxRates, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
@@ -286,11 +290,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
 	// It needs a captcha to solve; nil (safe no-op) otherwise, and the
 	// ledger's blocks are the whole policy.
-	abuseState := abusestate.New(redisClient)
-	captchaStore := captcha.NewChallengeStore(abuseState)
+	abuseState := abusestate.New(logger, redisClient)
+	captchaStore := captcha.NewChallengeStore(logger, abuseState)
 	var cardAbuseGuard *abuse.CardAbuseGuard
 	if config.CaptchaEnabled(cfg.Captcha) {
-		cardAbuseGuard = abuse.NewCardAbuseGuard(abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
+		cardAbuseGuard = abuse.NewCardAbuseGuard(logger, abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
 	}
 
 	// SEC-30: the card-testing ledger, in the abuse state.
@@ -302,6 +306,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	moneyCharger := money.NewScopedCharger(database, nil)
 
 	runtime := &Runtime{
+		Log:           logger,
 		StripeClients: stripeClients,
 		DB:            database,
 		leaseDB:       leaseDB,
@@ -350,7 +355,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DashboardService:    serviceInstances.DashboardService,
 		CopilotService:      serviceInstances.CopilotService,
 		AlertService:        alertService,
-		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock},
+		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
 		MoneyCharger:        moneyCharger,
 		RailCustomerService: serviceInstances.RailCustomerService,
 	}
@@ -646,17 +651,17 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService, err := idempotency.NewStore(database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
+	idempotencyService, err := idempotency.NewStore(database.Log, database, leaseDB, payment.IdempotencyTTL, payment.IdempotencyLease)
 	if err != nil {
 		return nil, err
 	}
-	webhookClaims, err := idempotency.NewStore(database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
+	webhookClaims, err := idempotency.NewStore(database.Log, database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
 	if err != nil {
 		return nil, err
 	}
 
 	postures := writeposture.View{Config: cfg, DB: database}
-	userSubscriptionService := subscriptions.NewUserSubscriptionService(
+	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
 		subscriptionService,
 		productService,
 		priceService,
@@ -681,7 +686,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}
 
 	// #1099: deliveries are claimed in Postgres; webhook_events is the applied fact (#678).
-	deduplicationService, err := webhooks.NewDeduplicationService(webhookClaims, database)
+	deduplicationService, err := webhooks.NewDeduplicationService(database.Log, webhookClaims, database)
 	if err != nil {
 		return nil, err
 	}
@@ -702,10 +707,11 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		RailConfigs:                  railConfigs,
 		NMIResolver:                  collectionResolver,
 		MoneyService:                 moneyService,
+		Log:                          database.Log,
 	}
 
 	// Create purchase service for unified purchase endpoint
-	purchaseService := payment.NewPurchaseService(
+	purchaseService := payment.NewPurchaseService(database.Log,
 		subscriptionService,
 		productService,
 		priceService,

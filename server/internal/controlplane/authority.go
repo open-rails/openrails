@@ -134,7 +134,7 @@ func (c *ControlPlane) directory() (*merchants.Service, error) {
 	if c.merchants != nil {
 		return c.merchants, nil
 	}
-	return merchants.NewDirectoryService(c.pool)
+	return merchants.NewDirectoryService(c.Log, c.pool)
 }
 
 // BindMerchants gives the control plane the runtime's merchants service: the

@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/railresolve"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type StripeCatalogService struct {
@@ -21,6 +21,7 @@ type StripeCatalogService struct {
 	Config        *config.Config
 	// Rails resolves the ctx merchant's armed Stripe account.
 	Rails railresolve.Source
+	Log   *slog.Logger
 }
 
 // stripeRail resolves the ctx merchant's armed Stripe credentials. nil (not
@@ -33,7 +34,7 @@ func (s *StripeCatalogService) stripeRail(ctx context.Context) *config.StripeRai
 	proc, err := s.Rails.RailConfig(ctx, string(models.RailStripe), "")
 	if err != nil {
 		if !errors.Is(err, railresolve.ErrRailNotArmed) {
-			log.WithContext(ctx).WithError(err).Warn("stripe catalog: rail resolution failed; refusing to act")
+			s.Log.WarnContext(ctx, "stripe catalog: rail resolution failed; refusing to act", logx.Err(err))
 		}
 		return nil
 	}

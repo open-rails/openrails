@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/custodians"
@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -58,6 +59,7 @@ type StoredCardRefreshWorker struct {
 	Updaters  paymentmethods.AccountUpdaters
 	Intents   *intents.Runner
 	Lifecycle *subscriptions.SubscriptionLifecycleService
+	Log       *slog.Logger
 }
 
 func (StoredCardRefreshWorker) Kind() string { return paymentmethods.KindStoredCardRefresh }
@@ -72,7 +74,7 @@ func (w *StoredCardRefreshWorker) Work(ctx context.Context, job *river.Job[payme
 		err := w.refresh(ctx, args, final)
 		if err != nil && args.Declined && final {
 			// A declined card's customer always hears, whatever failed.
-			log.WithContext(ctx).WithError(err).WithField("payment_method_id", args.PaymentMethodID).Warn("stored card refresh: gave up; asking the customer")
+			w.Log.WarnContext(ctx, "stored card refresh: gave up; asking the customer", logx.Err(err), "payment_method_id", args.PaymentMethodID)
 			return w.askUnlessReissued(ctx, args)
 		}
 		return err
@@ -110,7 +112,7 @@ func (w *StoredCardRefreshWorker) refresh(ctx context.Context, args paymentmetho
 	}
 	if armed {
 		if blocked, reason := intents.GateExecution(ctx, w.Intents.Config, args.MerchantID, intents.OriginSystem); blocked {
-			log.WithContext(ctx).WithFields(log.Fields{"payment_method_id": method.ID, "reason": reason}).Info("stored card refresh: provider writes are held")
+			w.Log.InfoContext(ctx, "stored card refresh: provider writes are held", "payment_method_id", method.ID, "reason", reason)
 			armed = false
 		}
 	}
@@ -198,6 +200,7 @@ type AccountUpdaterHandler struct {
 	Updaters  paymentmethods.AccountUpdaters
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	Policy    intents.BackoffPolicy
+	Log       *slog.Logger
 }
 
 func (h *AccountUpdaterHandler) Type() string { return TypeAccountUpdater }
@@ -278,13 +281,13 @@ func (h *AccountUpdaterHandler) Execute(ctx context.Context, in gen.BillingProvi
 		if err := h.stamp(ctx, m); err != nil {
 			return intents.Retryable("record refused account update: " + err.Error())
 		}
-		log.WithContext(ctx).WithError(err).WithField("payment_method_id", m.ID).Warn("account updater: request refused; nothing changed")
+		h.Log.WarnContext(ctx, "account updater: request refused; nothing changed", logx.Err(err), "payment_method_id", m.ID)
 		return intents.Terminal(err.Error())
 	case err != nil:
 		return intents.Retryable(err.Error())
 	}
 	if _, err := h.DB.Gen(ctx).ResolveStoredCardVaultHold(ctx, gen.ResolveStoredCardVaultHoldParams{MerchantID: m.MerchantID, FindingType: FindingAccountUpdaterUnauthorized, SubjectKey: m.CustodianID.String()}); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("account updater: could not resolve the vault's refused-key finding")
+		h.Log.WarnContext(ctx, "account updater: could not resolve the vault's refused-key finding", logx.Err(err))
 	}
 	change, err := h.apply(ctx, in, m, update)
 	if err != nil {
@@ -317,7 +320,7 @@ func (h *AccountUpdaterHandler) apply(ctx context.Context, in gen.BillingProvide
 		return err
 	})
 	if err == nil && (life.Change != "" || update.ResultCode != basistheory.AUNoUpdate) {
-		log.WithContext(ctx).WithFields(log.Fields{"payment_method_id": m.ID, "result_code": update.ResultCode, "change": life.Change}).Info("account updater: card answered")
+		h.Log.InfoContext(ctx, "account updater: card answered", "payment_method_id", m.ID, "result_code", update.ResultCode, "change", life.Change)
 	}
 	return life.Change, err
 }
@@ -336,7 +339,7 @@ func (h *AccountUpdaterHandler) holdVault(ctx context.Context, m gen.BillingPaym
 		SubjectKey: m.CustodianID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 		return intents.Retryable("record refused vault key: " + err.Error())
 	}
-	log.WithContext(ctx).WithError(cause).WithField("custodian_id", m.CustodianID).Error("account updater: the vault refused the merchant's key; its checks are held")
+	h.Log.ErrorContext(ctx, "account updater: the vault refused the merchant's key; its checks are held", logx.Err(cause), "custodian_id", m.CustodianID)
 	return intents.Terminal(cause.Error())
 }
 
@@ -357,7 +360,7 @@ func (h *AccountUpdaterHandler) unapplied(ctx context.Context, m gen.BillingPaym
 	if err != nil {
 		return intents.Retryable("record unapplied account update: " + err.Error())
 	}
-	log.WithContext(ctx).WithError(cause).WithField("payment_method_id", m.ID).Error("account updater: answer could not be applied; operator finding raised")
+	h.Log.ErrorContext(ctx, "account updater: answer could not be applied; operator finding raised", logx.Err(cause), "payment_method_id", m.ID)
 	return intents.Terminal("unapplied: " + cause.Error())
 }
 
@@ -400,6 +403,7 @@ type StoredCardRefreshDueWorker struct {
 	Merchants func() *merchants.Service
 	// Posture holds a merchant's checks while its provider writes are held.
 	Posture intents.ModeView
+	Log     *slog.Logger
 }
 
 // Pass looks at the due checks. Each round reads a page of marked cards and a
@@ -409,7 +413,7 @@ func (w StoredCardRefreshDueWorker) Pass(ctx context.Context) error {
 	if w.DB == nil || w.Merchants == nil || w.Merchants() == nil {
 		return errors.New("stored card refresh pass: DB and merchant configuration are required")
 	}
-	logger := log.WithContext(ctx).WithField("worker", KindStoredCardRefreshDue)
+	logger := w.Log.With("worker", KindStoredCardRefreshDue)
 	now := workerNow(w.Clock)
 	q := w.DB.GenDirectory()
 	failed := map[uuid.UUID]bool{}
@@ -452,7 +456,7 @@ func (w StoredCardRefreshDueWorker) Pass(ctx context.Context) error {
 		passErr = errors.Join(passErr, err)
 	}
 	if queued > 0 {
-		logger.WithFields(log.Fields{"checks": looked, "queued": queued}).Info("stored card refresh pass: refreshes queued")
+		logger.InfoContext(ctx, "stored card refresh pass: refreshes queued", "checks", looked, "queued", queued)
 	}
 	return passErr
 }
@@ -463,7 +467,7 @@ type dueCheck struct{ merchant, card uuid.UUID }
 // lookAt looks at one page of due checks, merchant by merchant. A merchant
 // that fails is recorded in failed and skipped for the rest of the pass.
 func (w StoredCardRefreshDueWorker) lookAt(ctx context.Context, due []dueCheck, now time.Time, failed map[uuid.UUID]bool) (int, error) {
-	logger := log.WithContext(ctx).WithField("worker", KindStoredCardRefreshDue)
+	logger := w.Log.With("worker", KindStoredCardRefreshDue)
 	var order []uuid.UUID
 	cards := map[uuid.UUID][]uuid.UUID{}
 	for _, check := range due {
@@ -485,7 +489,7 @@ func (w StoredCardRefreshDueWorker) lookAt(ctx context.Context, due []dueCheck, 
 		})
 		if err != nil {
 			failed[mid] = true
-			logger.WithError(err).WithField("merchant_id", mid).Error("stored card refresh pass: merchant failed; continuing")
+			logger.ErrorContext(ctx, "stored card refresh pass: merchant failed; continuing", logx.Err(err), "merchant_id", mid)
 			passErr = errors.Join(passErr, err)
 		}
 	}
@@ -502,7 +506,7 @@ type vaultPlan struct {
 }
 
 func (w StoredCardRefreshDueWorker) vault(ctx context.Context, mid, custodianID uuid.UUID, now time.Time) vaultPlan {
-	logger := log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "custodian_id": custodianID})
+	logger := w.Log.With("merchant_id", mid, "custodian_id", custodianID)
 	later := func(d time.Duration) vaultPlan { at := now.Add(d); return vaultPlan{retryAt: &at} }
 	if w.Posture != nil {
 		if blocked, _ := intents.GateExecution(ctx, w.Posture, mid, intents.OriginSystem); blocked {
@@ -514,7 +518,7 @@ func (w StoredCardRefreshDueWorker) vault(ctx context.Context, mid, custodianID 
 	case errors.Is(err, merchants.ErrCustodianNotDeclared) || errors.Is(err, merchants.ErrPlatformVaultUnavailable):
 		return vaultPlan{}
 	case err != nil:
-		logger.WithError(err).Warn("stored card refresh pass: vault configuration unreadable; retrying later")
+		logger.WarnContext(ctx, "stored card refresh pass: vault configuration unreadable; retrying later", logx.Err(err))
 		return later(storedCardVaultRetry)
 	case !custody.AccountUpdater:
 		return vaultPlan{}

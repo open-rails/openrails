@@ -3,6 +3,7 @@ package embedhttp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	auth "github.com/open-rails/authkit/auth"
 
@@ -34,14 +35,14 @@ func ValidateRoutes(sel config.Routes) error {
 }
 
 // ConfiguredRoutes is the embedded HTTP surface sel selects, under /billing.
-func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
+func ConfiguredRoutes(logger *slog.Logger, a *app.App, sel config.Routes) (*router.Table, error) {
 	if a == nil || a.Runtime == nil || a.Config == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
 	if err := ValidateRoutes(sel); err != nil {
 		return nil, err
 	}
-	asm := FromApp(a)
+	asm := FromApp(logger, a)
 	asm.Auth = sel.Auth
 	providers, err := mountedProviderRoutes(a)
 	if err != nil {

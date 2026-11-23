@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -42,6 +43,7 @@ type MerchantCollectionAdapterBuilder struct {
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients *railresolve.NMIFactory
+	Log        *slog.Logger
 }
 
 func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
@@ -57,7 +59,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {
 	if b == nil {
 		return nil
 	}
-	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Factory: b.nmiFactory()}
+	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Factory: b.nmiFactory(), Log: b.Log}
 }
 
 // nmiFactory is the runtime's shared factory.
@@ -65,7 +67,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory 
 	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: b.Config}
+	return &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential

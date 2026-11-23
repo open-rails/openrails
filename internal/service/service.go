@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -41,9 +42,10 @@ type Service struct {
 	// catalogApplying marks a document application: it records ownership
 	// itself, as the apply manager.
 	catalogApplying bool
+	Log             *slog.Logger
 }
 
-func New(rt *app.Runtime) (*Service, error) {
+func New(logger *slog.Logger, rt *app.Runtime) (*Service, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("billing service: runtime is nil")
 	}
@@ -53,7 +55,7 @@ func New(rt *app.Runtime) (*Service, error) {
 	if rt.EntitlementService == nil {
 		return nil, fmt.Errorf("billing service: entitlement service unavailable")
 	}
-	return &Service{rt: rt}, nil
+	return &Service{rt: rt, Log: logger}, nil
 }
 
 // spendGate is the admission gate on the engine's clock: an admission is

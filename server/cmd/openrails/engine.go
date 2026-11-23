@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 
@@ -56,7 +57,7 @@ func openServer(ctx context.Context) (_ *server.Server, _ *app.App, _ *controlpl
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	opened, err := hostdeps.Open(ctx, h)
+	opened, err := hostdeps.Open(ctx, slog.Default(), h)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

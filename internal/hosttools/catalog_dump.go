@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"strconv"
 
@@ -34,7 +35,7 @@ type CatalogDumpOptions struct {
 	Out      io.Writer
 }
 
-func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
+func DumpMerchantCatalog(ctx context.Context, logger *slog.Logger, opts CatalogDumpOptions) error {
 	if opts.Config == nil {
 		return fmt.Errorf("config not loaded; in-process mode requires config")
 	}
@@ -42,11 +43,11 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if out == nil {
 		out = io.Discard
 	}
-	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
-	directory, err := merchants.NewDirectoryService(database.DataPool())
+	directory, err := merchants.NewDirectoryService(logger, database.DataPool())
 	if err != nil {
 		return err
 	}

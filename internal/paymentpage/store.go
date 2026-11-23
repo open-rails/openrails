@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -17,9 +18,12 @@ import (
 )
 
 // Store keeps pay URLs on their orders.
-type Store struct{ db *db.DB }
+type Store struct {
+	db  *db.DB
+	Log *slog.Logger
+}
 
-func NewStore(d *db.DB) *Store { return &Store{db: d} }
+func NewStore(d *db.DB) *Store { return &Store{db: d, Log: d.Log} }
 
 // Attach gives an open merchant order its pay URL, in the caller's
 // transaction (q), and answers the pay URL on origin. It is refused

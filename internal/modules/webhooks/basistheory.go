@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -27,7 +27,9 @@ import (
 // Verify trusts the ingestion-set flag. The event source is the custodian, not
 // a rail. Custody-side problems park the instrument: nothing is terminally
 // canceled and nothing rail-side is deleted.
-type BasisTheoryWebhookHandler struct{}
+type BasisTheoryWebhookHandler struct {
+	Log *slog.Logger
+}
 
 func (BasisTheoryWebhookHandler) Rail() string { return string(models.EventSourceBasisTheory) }
 
@@ -84,7 +86,7 @@ func (h BasisTheoryWebhookHandler) Apply(ctx context.Context, d *WebhookDispatch
 	if strings.TrimSpace(evt.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory webhook has no event id"))
 	}
-	svc := &basisTheoryWebhookService{d: d, accountID: msg.CustodianAccountID}
+	svc := &basisTheoryWebhookService{d: d, accountID: msg.CustodianAccountID, Log: h.Log}
 	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.EventSourceBasisTheory, func(ctx context.Context) error {
 		return svc.apply(ctx, evt)
 	})
@@ -93,6 +95,7 @@ func (h BasisTheoryWebhookHandler) Apply(ctx context.Context, d *WebhookDispatch
 type basisTheoryWebhookService struct {
 	d         *WebhookDispatcher
 	accountID string
+	Log       *slog.Logger
 }
 
 // btClient arms the merchant's BT client from the resolved custodian, never a
@@ -153,7 +156,7 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 	case basistheory.EventNetworkTokenDeleted:
 		return s.foldNetworkTokenStatus(ctx, evt, basistheory.NetworkTokenDeleted)
 	default:
-		log.WithContext(ctx).Debug("basistheory webhook: unhandled event type")
+		s.Log.DebugContext(ctx, "basistheory webhook: unhandled event type")
 		return nil
 	}
 }
@@ -182,7 +185,7 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 	if len(rows) > 0 {
 		// Renewals on a parked instrument fail loudly until re-collection or
 		// vault repair.
-		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-canceled)")
+		s.Log.ErrorContext(ctx, "basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-canceled)")
 	}
 	return nil
 }
@@ -246,7 +249,7 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 	if !db.IsNotFound(err) {
 		return fmt.Errorf("basistheory token-intent.converted: lookup instrument: %w", err)
 	}
-	log.WithContext(ctx).Warn("basistheory webhook: converted token has no instrument row (purchase crash window); repair via purchase replay or manual re-link")
+	s.Log.WarnContext(ctx, "basistheory webhook: converted token has no instrument row (purchase crash window); repair via purchase replay or manual re-link")
 	return nil
 }
 

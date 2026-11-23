@@ -14,15 +14,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -58,15 +59,16 @@ type Store struct {
 	leases *db.DB
 	ttl    time.Duration
 	lease  time.Duration
+	Log    *slog.Logger
 }
 
 // NewStore claims on database; leases is the small pool lease renewals use,
 // and nothing else.
-func NewStore(database, leases *db.DB, ttl, lease time.Duration) (*Store, error) {
+func NewStore(logger *slog.Logger, database, leases *db.DB, ttl, lease time.Duration) (*Store, error) {
 	if database == nil || leases == nil || ttl <= 0 || lease <= 0 || lease > ttl {
 		return nil, fmt.Errorf("idempotency store needs a database, a lease pool and 0 < lease <= ttl")
 	}
-	return &Store{db: database, leases: leases, ttl: ttl, lease: lease}, nil
+	return &Store{db: database, leases: leases, ttl: ttl, lease: lease, Log: logger}, nil
 }
 
 func (s *Store) Lease() time.Duration { return s.lease }
@@ -169,7 +171,7 @@ func DeleteExpired(ctx context.Context, database *db.DB, limit int32) (int64, er
 
 func (s *Store) claim(mid uuid.UUID, row gen.BillingIdempotencyKey, start time.Time) *Claim {
 	return &Claim{s: s, merchantID: mid, operation: row.Operation, key: row.IdempotencyKey, token: row.Token,
-		Reclaimed: row.Claims > 1, confirmed: start}
+		Reclaimed: row.Claims > 1, confirmed: start, Log: s.Log}
 }
 
 func record(row gen.BillingIdempotencyKey) *Record {
@@ -195,6 +197,7 @@ type Claim struct {
 	// confirmed is when the last confirmed lease was requested: the lease
 	// runs from at least then, on the database's clock.
 	confirmed time.Time
+	Log       *slog.Logger
 }
 
 // renew returns when the confirmed lease was requested.
@@ -242,8 +245,7 @@ func (c *Claim) Hold(ctx context.Context) (context.Context, func()) {
 					return
 				}
 				if err != nil {
-					log.WithContext(ctx).WithError(err).WithFields(log.Fields{"operation": c.operation, "idempotency_key": c.key}).
-						Warn("idempotency lease renewal failed")
+					c.Log.WarnContext(ctx, "idempotency lease renewal failed", logx.Err(err), "operation", c.operation, "idempotency_key", c.key)
 					continue
 				}
 				confirmed = at

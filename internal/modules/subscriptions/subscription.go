@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	log "github.com/sirupsen/logrus"
 )
 
 type GetSubscriptionsFilters struct {
@@ -48,6 +48,7 @@ type SubscriptionService struct {
 	ProductService           *catalog.ProductService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
+	Log                      *slog.Logger
 }
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
@@ -102,10 +103,7 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 	for _, product := range products {
 		prices, err := s.PriceService.GetActiveByProductID(ctx, product.ID)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"product_id": product.ID,
-				"error":      err.Error(),
-			}).Warn("Failed to load prices for product")
+			s.Log.WarnContext(ctx, "Failed to load prices for product", "product_id", product.ID, "error", err.Error())
 			continue
 		}
 		product.Prices = prices
@@ -133,6 +131,7 @@ func NewSubscriptionService(
 		PriceService:         priceService,
 		ProductService:       productService,
 		PaymentMethodService: paymentMethodService,
+		Log:                  db.Log,
 	}
 }
 

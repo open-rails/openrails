@@ -15,11 +15,11 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
-	log "github.com/sirupsen/logrus"
 )
 
 // publicConfigMaxAge is how long a browser may reuse GET /v1/config. The
@@ -101,13 +101,13 @@ func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) bi
 func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.PaymentConfig, bool) {
 	psps, err := r.State.Merchants.PublicPSPs(r.Request.Context(), mid, pspArmed(r.State.RailConfigs))
 	if err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("payment config: PSPs could not be loaded")
+		r.Log.ErrorContext(r.Request.Context(), "payment config: PSPs could not be loaded", logx.Err(err), "merchant_id", mid.String())
 		r.ErrorCode(billing.CodeInternalError, "failed to load payment configuration")
 		return billing.PaymentConfig{}, false
 	}
 	solana, err := solanaPaymentConfig(r)
 	if err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("payment config: Solana acceptance could not be loaded")
+		r.Log.ErrorContext(r.Request.Context(), "payment config: Solana acceptance could not be loaded", logx.Err(err), "merchant_id", mid.String())
 		r.ErrorCode(billing.CodeInternalError, "failed to load solana payment configuration")
 		return billing.PaymentConfig{}, false
 	}
@@ -119,7 +119,7 @@ func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.
 func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, bool) {
 	name, settings, err := r.State.Merchants.MerchantSettings(r.Request.Context(), mid)
 	if err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("customer config: merchant settings could not be loaded")
+		r.Log.ErrorContext(r.Request.Context(), "customer config: merchant settings could not be loaded", logx.Err(err), "merchant_id", mid.String())
 		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
 		return billing.PublicMerchant{}, false
 	}

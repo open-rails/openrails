@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -16,12 +17,12 @@ import (
 	"github.com/open-rails/helpers/deps"
 	"github.com/open-rails/helpers/vault"
 	"github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
@@ -60,8 +61,8 @@ type Opened struct {
 // Open opens cfg's connections. It waits for the database until ctx ends; a
 // malformed optional section (redis, vault, email_smtp) is left out and
 // reported in Degraded.
-func Open(ctx context.Context, cfg *hostconfig.Config) (*Opened, error) {
-	pool, err := Pool(ctx, cfg, true)
+func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Opened, error) {
+	pool, err := Pool(ctx, logger, cfg, true)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +72,7 @@ func Open(ctx context.Context, cfg *hostconfig.Config) (*Opened, error) {
 		if opts, err := RedisOptions(cfg.Redis); err != nil {
 			o.degrade("redis", fmt.Errorf("%w; abuse state is kept in this process's memory", err))
 		} else {
-			log.WithFields(log.Fields{"addr": opts.Addr, "tls": opts.TLSConfig != nil, "acl_user": opts.Username != ""}).Info("Redis declared")
+			logger.InfoContext(ctx, "Redis declared", "addr", opts.Addr, "tls", opts.TLSConfig != nil, "acl_user", opts.Username != "")
 			client := redis.NewClient(opts)
 			o.Deps.Redis = client
 			o.closes = append(o.closes, func() { _ = client.Close() })
@@ -128,7 +129,7 @@ func (o *Opened) Close() {
 
 // Pool opens the db section's pool. retry waits for the database until ctx
 // ends, as a serving process does; otherwise it tries once.
-func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
+func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
 	url := cfg.DB.ConnectionString()
 	if url == "" {
 		return nil, errors.New("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
@@ -139,7 +140,7 @@ func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Poo
 	}
 	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
 	if cfg.DB.SQLTrace {
-		pc.ConnConfig.Tracer = db.NewSQLTracer()
+		pc.ConnConfig.Tracer = db.NewSQLTracer(logger)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {
@@ -147,7 +148,7 @@ func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Poo
 	}
 	ping := pool.Ping
 	if retry {
-		ping = func(ctx context.Context) error { return pingUntil(ctx, pool.Ping) }
+		ping = func(ctx context.Context) error { return pingUntil(ctx, logger, pool.Ping) }
 	}
 	if err := ping(ctx); err != nil {
 		pool.Close()
@@ -158,7 +159,7 @@ func Pool(ctx context.Context, cfg *hostconfig.Config, retry bool) (*pgxpool.Poo
 
 // pingUntil pings until the database answers or ctx ends: a database that is
 // failing over is waited for, never a boot failure.
-func pingUntil(ctx context.Context, ping func(context.Context) error) error {
+func pingUntil(ctx context.Context, logger *slog.Logger, ping func(context.Context) error) error {
 	started, delay := time.Now(), connectBaseDelay
 	for {
 		pingCtx, cancel := context.WithTimeout(ctx, connectPingTimeout)
@@ -168,7 +169,7 @@ func pingUntil(ctx context.Context, ping func(context.Context) error) error {
 			return nil
 		}
 		waited := time.Since(started).Round(time.Second)
-		log.WithError(err).WithField("waiting_for", waited.String()).Warnf("database ping failed; retrying in %s", delay)
+		logger.WarnContext(ctx, "database ping failed; retrying", logx.Err(err), "waiting_for", waited.String(), "retry_in", delay.String())
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

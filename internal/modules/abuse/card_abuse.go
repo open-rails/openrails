@@ -2,10 +2,10 @@ package abuse
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -75,12 +75,13 @@ type CardAbuseGuard struct {
 	state      *abusestate.Store
 	challenges *captcha.ChallengeStore
 	cfg        CardAbuseConfig
+	Log        *slog.Logger
 }
 
 // NewCardAbuseGuard builds the guard; a nil state or challenges makes it a
 // no-op. cfg is used verbatim, with no zero-value defaulting.
-func NewCardAbuseGuard(state *abusestate.Store, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
-	return &CardAbuseGuard{state: state, challenges: challenges, cfg: cfg}
+func NewCardAbuseGuard(logger *slog.Logger, state *abusestate.Store, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
+	return &CardAbuseGuard{state: state, challenges: challenges, cfg: cfg, Log: logger}
 }
 
 func (g *CardAbuseGuard) enabled() bool {
@@ -110,7 +111,7 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 		// Daily window first, so it keeps counting after the burst window blocks.
 		if daily := g.countFailure(ctx, key, "fail_day", g.cfg.DailyWindow); daily >= g.cfg.DailyBlockAfter {
 			g.challenges.MarkChallenged(ctx, key, g.cfg.DailyBlockTTL)
-			log.WithFields(log.Fields{"subject": key, "failures": daily}).Warn("card-abuse: subject blocked for the day after repeated card failures")
+			g.Log.WarnContext(ctx, "card-abuse: subject blocked for the day after repeated card failures", "subject", key, "failures", daily)
 		}
 
 		// Burst window (15 min): CaptchaAfter -> captcha, BlockAfter -> block for
@@ -119,10 +120,10 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 		switch {
 		case count >= g.cfg.BlockAfter:
 			g.challenges.MarkChallenged(ctx, key, g.cfg.BlockTTL)
-			log.WithFields(log.Fields{"subject": key, "failures": count}).Warn("card-abuse: subject blocked (aggressive captcha) after repeated card failures")
+			g.Log.WarnContext(ctx, "card-abuse: subject blocked (aggressive captcha) after repeated card failures", "subject", key, "failures", count)
 		case count >= g.cfg.CaptchaAfter:
 			g.challenges.MarkChallenged(ctx, key, g.cfg.ChallengeTTL)
-			log.WithFields(log.Fields{"subject": key, "failures": count}).Info("card-abuse: subject captcha-challenged after repeated card failures")
+			g.Log.InfoContext(ctx, "card-abuse: subject captcha-challenged after repeated card failures", "subject", key, "failures", count)
 		}
 	}
 
@@ -130,7 +131,7 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 		return
 	}
 	g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL)
-	log.WithField("merchant_id", merchantID).Warn("card-abuse: attack mode — captcha required on this merchant's card routes")
+	g.Log.WarnContext(ctx, "card-abuse: attack mode — captcha required on this merchant's card routes", "merchant_id", merchantID)
 }
 
 // RecordOrderDecline counts a customer order's refusal once when concurrent

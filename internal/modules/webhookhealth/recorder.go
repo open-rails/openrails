@@ -5,16 +5,17 @@ package webhookhealth
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -25,6 +26,7 @@ import (
 type Recorder struct {
 	DB    *db.DB
 	Clock clockwork.Clock
+	Log   *slog.Logger
 }
 
 func (r *Recorder) now() time.Time {
@@ -70,8 +72,7 @@ func (r *Recorder) record(ctx context.Context, kind string, fn func(ctx context.
 		return fn(ctx, gen.New(tx), mid, psp, custodian)
 	})
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithField("kind", kind).
-			Warn("webhook health: recording failed (webhook processing unaffected)")
+		r.Log.WarnContext(ctx, "webhook health: recording failed (webhook processing unaffected)", logx.Err(err), "kind", kind)
 	}
 }
 

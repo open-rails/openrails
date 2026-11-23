@@ -10,15 +10,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -54,6 +54,7 @@ type Server struct {
 	DB           *db.DB
 	Now          func() time.Time
 	Authenticate func(*http.Request) (billing.MerchantID, error)
+	Log          *slog.Logger
 }
 
 func (s *Server) now() time.Time {
@@ -137,7 +138,7 @@ func (s *Server) serve(h handler) http.Handler {
 		mid, err := s.Authenticate(r)
 		if err != nil {
 			if !errors.Is(err, ErrUnauthorized) {
-				log.WithContext(r.Context()).WithError(err).Warn("scim: authentication failed")
+				s.Log.WarnContext(r.Context(), "scim: authentication failed", logx.Err(err))
 			}
 			writeError(w, errorf(http.StatusUnauthorized, "", "a provisioning token or an application credential is required"))
 			return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -48,7 +49,7 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (bill
 		}
 		return tid, database.RequireMerchantID(ctx, tid)
 	}
-	directory, err := merchants.NewDirectoryService(database.DataPool())
+	directory, err := merchants.NewDirectoryService(slog.Default(), database.DataPool())
 	if err != nil {
 		return billing.MerchantID{}, err
 	}
@@ -67,7 +68,7 @@ func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name 
 	if err != nil {
 		return billing.MerchantID{}, err
 	}
-	database, err := db.NewWithPGXPool(pool, config.SchemaName(cfg))
+	database, err := db.NewWithPGXPool(slog.Default(), pool, config.SchemaName(cfg))
 	if err != nil {
 		return billing.MerchantID{}, err
 	}

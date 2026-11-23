@@ -7,6 +7,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -15,8 +16,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
@@ -24,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
@@ -108,7 +108,7 @@ type RateLimitDeps struct {
 // EvaluateRateLimit decides rate limit and captcha for a request. It may wrap
 // r.Body (http.MaxBytesReader needs w) and read the captcha token header, but
 // never writes the response.
-func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLimitSubject, deps RateLimitDeps) RateLimitDecision {
+func EvaluateRateLimit(logger *slog.Logger, w http.ResponseWriter, r *http.Request, subjects []RateLimitSubject, deps RateLimitDeps) RateLimitDecision {
 	limit, bucket := resolveRateLimitPolicy(deps.Limits, r)
 	if limit == nil {
 		return RateLimitDecision{Outcome: RateLimitAllow, Bucket: bucket}
@@ -124,11 +124,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		}
 		if r.ContentLength > maxBytes {
-			log.WithFields(log.Fields{
-				"bucket":         bucket,
-				"content_length": r.ContentLength,
-				"max":            maxBytes,
-			}).Warn("Request rejected: Content-Length exceeds route threshold")
+			logger.WarnContext(r.Context(), "Request rejected: Content-Length exceeds route threshold", "bucket", bucket, "content_length", r.ContentLength, "max", maxBytes)
 			return RateLimitDecision{
 				Outcome: RateLimitTooLarge,
 				Bucket:  bucket,
@@ -164,7 +160,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			}
 		}
 		if challenged {
-			verdict := evaluateCaptchaVerify(r, deps, bucket, clientIP, keys)
+			verdict := evaluateCaptchaVerify(logger, r, deps, bucket, clientIP, keys)
 			if verdict.Outcome != RateLimitAllow {
 				verdict.Bucket = bucket
 				return verdict
@@ -212,14 +208,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			retryAfter = 60
 		}
 		headers["Retry-After"] = strconv.Itoa(retryAfter)
-		log.WithFields(log.Fields{
-			"limited_subject": combined.subject.Key,
-			"client_ip":       clientIP,
-			"user_id":         userID,
-			"path":            r.URL.Path,
-			"method":          r.Method,
-			"bucket":          bucket,
-		}).Warn("Rate limit exceeded")
+		logger.WarnContext(r.Context(), "Rate limit exceeded", "limited_subject", combined.subject.Key, "client_ip", clientIP, "user_id", userID, "path", r.URL.Path, "method", r.Method, "bucket", bucket)
 		decision.Outcome = RateLimitTooMany
 		return decision
 	}
@@ -230,7 +219,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 
 // evaluateCaptchaVerify verifies the captcha token and, on success, clears the
 // challenge and resets the affected rate-limit buckets.
-func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP string, keys []string) RateLimitDecision {
+func evaluateCaptchaVerify(logger *slog.Logger, r *http.Request, deps RateLimitDeps, bucket, clientIP string, keys []string) RateLimitDecision {
 	token := strings.TrimSpace(r.Header.Get(captcha.TokenHeader))
 	if token == "" {
 		return RateLimitDecision{Outcome: RateLimitCaptchaRequired, Headers: map[string]string{"X-Captcha-Required": "true"}}
@@ -239,7 +228,7 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 	// TestEnabledCaptchaAlwaysHasVerifier asserts it.
 	result, err := deps.Verifier.Verify(r.Context(), captcha.VerifyRequest{Token: token, RemoteIP: clientIP, Bucket: bucket})
 	if err != nil {
-		log.WithError(err).WithField("bucket", bucket).Warn("captcha verification failed")
+		logger.WarnContext(r.Context(), "captcha verification failed", logx.Err(err), "bucket", bucket)
 		return RateLimitDecision{Outcome: RateLimitCaptchaInvalid, Headers: map[string]string{"X-Captcha-Required": "true"}, CaptchaMessage: "captcha verification failed"}
 	}
 	if result == nil || !result.Success {
@@ -250,7 +239,7 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 		deps.ChallengeStore.ClearChallenged(r.Context(), subjectKey)
 	}
 	if err := deps.State.ResetCounts(r.Context(), time.Minute, bucketKeys(keys, config.CaptchaChallengeBuckets())...); err != nil {
-		log.WithError(err).WithField("bucket", bucket).Warn("failed to reset rate limits after captcha")
+		logger.WarnContext(r.Context(), "failed to reset rate limits after captcha", logx.Err(err), "bucket", bucket)
 	}
 	return RateLimitDecision{Outcome: RateLimitAllow}
 }
@@ -264,15 +253,15 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 // client is limited rather than the load balancer; nil or empty uses the
 // socket peer. state is the process's abuse state; nil counts in memory of
 // this middleware's own.
-func RateLimitHTTP(limits config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
+func RateLimitHTTP(logger *slog.Logger, limits config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
 	if len(limits) == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	if state == nil {
-		state = abusestate.New(nil)
+		state = abusestate.New(logger, nil)
 	}
 	if challengeStore == nil {
-		challengeStore = captcha.NewChallengeStore(state)
+		challengeStore = captcha.NewChallengeStore(logger, state)
 	}
 	deps := RateLimitDeps{
 		Limits:         limits,
@@ -284,7 +273,7 @@ func RateLimitHTTP(limits config.RateLimitsConfig, captchaCfg *config.CaptchaCon
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			subjects := rateLimitSubjectsHTTP(r, resolver)
-			decision := EvaluateRateLimit(w, r, subjects, deps)
+			decision := EvaluateRateLimit(logger, w, r, subjects, deps)
 			applyRateLimitDecisionHTTP(w, r, next, decision, captchaCfg)
 		})
 	}
@@ -540,7 +529,7 @@ func cardAttackCaptcha(deps RateLimitDeps) router.Middleware {
 				next(r)
 				return
 			}
-			verdict := evaluateCaptchaVerify(r.Request, deps, bucket, r.ClientIP(), SubjectKeysFromContext(ctx))
+			verdict := evaluateCaptchaVerify(r.Log, r.Request, deps, bucket, r.ClientIP(), SubjectKeysFromContext(ctx))
 			if verdict.Outcome == RateLimitAllow {
 				next(r)
 				return

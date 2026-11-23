@@ -5,8 +5,7 @@ package opsmetric
 
 import (
 	"context"
-
-	log "github.com/sirupsen/logrus"
+	"log/slog"
 )
 
 const (
@@ -25,10 +24,10 @@ const (
 
 // Emit writes one metric line. Info level: these are measurements, not
 // incidents — the tripped/capped cases keep their own Error/Warn lines.
-func Emit(ctx context.Context, name string, fields log.Fields) {
-	entry := log.WithContext(ctx)
+func Emit(ctx context.Context, logger *slog.Logger, name string, fields []any) {
+	entry := logger
 	if len(fields) > 0 {
-		entry = entry.WithFields(fields)
+		entry = entry.With(fields...)
 	}
-	entry.WithField("metric", name).Info(name)
+	entry.InfoContext(ctx, name, "metric", name)
 }

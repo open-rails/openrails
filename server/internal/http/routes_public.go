@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // registerUserRoutesAt mounts the buyer-facing purchase/catalog surface —
@@ -38,13 +37,13 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 // server's process surface, and the public configuration, which is browser
 // tier.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
-	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
+	httproutes.RegisterMetaRoutes(s.Log, router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			httprequest.New(w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
+			httprequest.New(s.Log, w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
 		}),
 		Ready: http.HandlerFunc(s.readyHandler),
 	}})
-	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordBrowserRoute), httproutes.Options{Capabilities: s.capabilities()})
+	httproutes.RegisterMetaRoutes(s.Log, router.NewMuxRecorded(mux, "", s.runtime, s.recordBrowserRoute), httproutes.Options{Capabilities: s.capabilities()})
 }
 
 // capabilities is what the standalone server serves: every bundle.
@@ -58,7 +57,7 @@ func (s *Server) capabilities() *billing.Capabilities {
 // why, goes to the log: the route is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if s != nil && s.draining.Load() {
-		httprequest.New(w, r, nil).ErrorCode(billing.CodeServiceUnavailable, "draining")
+		httprequest.New(s.Log, w, r, nil).ErrorCode(billing.CodeServiceUnavailable, "draining")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -72,9 +71,9 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if err == nil && (s == nil || s.auth == nil) {
 		err = errors.New("readiness: authentication is not available")
 	}
-	req := httprequest.New(w, r, nil)
+	req := httprequest.New(s.Log, w, r, nil)
 	if err != nil {
-		log.WithError(err).Warn("not ready")
+		s.Log.WarnContext(ctx, "not ready", logx.Err(err))
 		req.ErrorCode(billing.CodeServiceUnavailable, "not ready")
 		return
 	}

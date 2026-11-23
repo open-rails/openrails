@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -33,7 +34,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -104,10 +104,11 @@ type PriceMigrationService struct {
 	pushes        MigrationPushes
 	clock         clockwork.Clock
 	admissions    *destructive.Admissions
+	Log           *slog.Logger
 }
 
 func NewPriceMigrationService(d *db.DB, prices *catalog.PriceService, subscriptions *SubscriptionService, config *merchantconfig.Store, stripe *StripeService, nmi *NMIPlanPusher, clock clockwork.Clock) *PriceMigrationService {
-	return &PriceMigrationService{db: d, prices: prices, subscriptions: subscriptions, config: config, stripe: stripe, nmi: nmi, clock: timeutil.FirstClock(clock)}
+	return &PriceMigrationService{db: d, prices: prices, subscriptions: subscriptions, config: config, stripe: stripe, nmi: nmi, clock: timeutil.FirstClock(clock), Log: d.Log}
 }
 
 func (s *PriceMigrationService) now() time.Time { return s.clock.Now() }
@@ -545,7 +546,7 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 			}
 		}
 	}
-	log.WithContext(ctx).WithFields(log.Fields{"price_migration_id": migration, "to_price_id": plan.target.ID, "effective_at": plan.effectiveAt, "matched": len(cohort), "skipped": skipped}).Info("price migration created")
+	s.Log.InfoContext(ctx, "price migration created", "price_migration_id", migration, "to_price_id", plan.target.ID, "effective_at", plan.effectiveAt, "matched", len(cohort), "skipped", skipped)
 	if action != nil {
 		if err := s.finishMigrationAdmission(ctx, *action, destructive.OutcomeUncertain, "migration:"+migration.String()+":prepared"); err != nil {
 			return nil, err

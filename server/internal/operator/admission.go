@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -39,7 +40,7 @@ type MerchantCreationPolicy struct {
 // plane). Every unanswerable question refuses. A name the user already owns is
 // an idempotent repair and skips the allowance and vault checks; the allowance
 // counts live merchants the user owns.
-func MerchantCreationAdmission(controlPlane func() *controlplane.ControlPlane, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
+func MerchantCreationAdmission(logger *slog.Logger, controlPlane func() *controlplane.ControlPlane, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
 	if controlPlane == nil {
 		return nil, errors.New("merchant creation admission: control plane is required")
 	}
@@ -63,7 +64,7 @@ func MerchantCreationAdmission(controlPlane func() *controlplane.ControlPlane, p
 		if err != nil {
 			return fmt.Errorf("list user's merchant memberships: %w", err)
 		}
-		directory, err := merchants.NewDirectoryService(cp.Pool())
+		directory, err := merchants.NewDirectoryService(logger, cp.Pool())
 		if err != nil {
 			return err
 		}

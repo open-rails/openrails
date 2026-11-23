@@ -3,15 +3,16 @@ package paymentpage
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	auth "github.com/open-rails/authkit/auth"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -42,7 +43,7 @@ func FromContext(ctx context.Context) (PayURL, bool) {
 // secret and pins its order's merchant: 404 pay_url_not_found for an
 // unknown or missing one, 410 pay_url_expired past its expiry. Every answer
 // is no-store. Paths outside /v1/ (the page) pass through untouched.
-func ResolveHTTP(store *Store, now func() time.Time) func(http.Handler) http.Handler {
+func ResolveHTTP(logger *slog.Logger, store *Store, now func() time.Time) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(r.URL.Path, "/v1/") {
@@ -59,7 +60,7 @@ func ResolveHTTP(store *Store, now func() time.Time) func(http.Handler) http.Han
 				billingauth.WriteJSONError(w, http.StatusGone, billing.CodePayURLExpired, "")
 				return
 			case err != nil:
-				log.WithContext(r.Context()).WithError(err).Error("payment page: secret lookup failed")
+				logger.ErrorContext(r.Context(), "payment page: secret lookup failed", logx.Err(err))
 				billingauth.WriteJSONError(w, http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "")
 				return
 			}

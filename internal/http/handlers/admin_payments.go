@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -33,7 +34,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	log "github.com/sirupsen/logrus"
 )
 
 type paymentPath struct {
@@ -93,7 +93,7 @@ func RefundPayment(r *httprequest.Request) {
 	}
 	refund, status, err := executeAdminRefund(r.Request.Context(), r, paymentID, req, idempotencyKey)
 	if err != nil {
-		log.WithError(err).WithField("payment_id", paymentID).Warn("admin refund request failed")
+		r.Log.WarnContext(r.Request.Context(), "admin refund request failed", logx.Err(err), "payment_id", paymentID)
 		writeAdminRefundError(r, err)
 		return
 	}
@@ -143,7 +143,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 		if err := gen.New(tx).LockAdminRefund(ctx, adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
-		txDB := db.NewWithPgxTx(tx)
+		txDB := db.NewWithPgxTx(r.Log, tx)
 		paymentService := payments.NewPaymentService(txDB, r.Clock)
 		result, err := prepareAdminRefund(ctx, r, txDB, paymentService, paymentID, req, idempotencyKey)
 		if err != nil {
@@ -195,7 +195,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		}
 		client, ok, err := r.State.CollectionResolver.ResolveNMIClient(ctx, mid.UUID(), payment.PspID)
 		if err != nil || !ok || client == nil {
-			log.WithError(err).WithField("payment_id", paymentID).Warn("nmi refund rail unavailable")
+			r.Log.WarnContext(ctx, "nmi refund rail unavailable", logx.Err(err), "payment_id", paymentID)
 			return api.Coded(billing.CodeRefundRailUnavailable, "nmi refunds are unavailable: the payment's rail account is not armed")
 		}
 		// A credential set already known to fail its environment check refuses
@@ -381,16 +381,12 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepa
 		// (verifier resolving) or retryable: the durable intent finishes the
 		// job and its finalize completes the reservation. Report 202 with the
 		// pending reservation.
-		log.WithFields(log.Fields{
-			"intent_id":     intent.ID,
-			"intent_status": intent.Status,
-			"reason": func() string {
-				if intent.LastFailureReason != nil {
-					return *intent.LastFailureReason
-				}
-				return ""
-			}(),
-		}).Warn("admin refund queued on the provider intent ledger (not completed inline)")
+		r.Log.WarnContext(ctx, "admin refund queued on the provider intent ledger (not completed inline)", "intent_id", intent.ID, "intent_status", intent.Status, "reason", func() string {
+			if intent.LastFailureReason != nil {
+				return *intent.LastFailureReason
+			}
+			return ""
+		}())
 		return refund, http.StatusAccepted, nil
 	}
 }

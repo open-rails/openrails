@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,16 +74,17 @@ type WebhookDispatcher struct {
 	// ObserveEnqueuer schedules the read of a catalog object a Stripe
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
+	Log             *slog.Logger
 }
 
 // webhookRegistry resolves WebhookHandlers by rail: adding a rail means
 // implementing WebhookHandler and registering it here.
 func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
-	reg.Register(StripeWebhookHandler{})
-	reg.Register(NMIWebhookHandler{})
-	reg.Register(CCBillWebhookHandler{})
-	reg.Register(BasisTheoryWebhookHandler{})
+	reg.Register(StripeWebhookHandler{Log: d.Log})
+	reg.Register(NMIWebhookHandler{Log: d.Log})
+	reg.Register(CCBillWebhookHandler{Log: d.Log})
+	reg.Register(BasisTheoryWebhookHandler{Log: d.Log})
 	return reg
 }
 
@@ -135,6 +137,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		DeduplicationService:         d.DeduplicationService,
 		OrderAttemptService:          d.OrderAttemptService,
 		MoneyService:                 d.MoneyService,
+		Log:                          h.Log,
 	}
 	return service.HandleCCBillWebhook(ctx)
 }
@@ -168,6 +171,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 		NMIResolver:                  d.NMIResolver,
 		Clock:                        d.Clock,
+		Log:                          h.Log,
 	}
 	return service.HandleNMIWebhook(ctx)
 }
@@ -213,6 +217,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ConvergeEnqueuer:     d.ConvergeEnqueuer,
 		ObserveEnqueuer:      d.ObserveEnqueuer,
 		StripePaymentState:   paymentState,
+		Log:                  h.Log,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

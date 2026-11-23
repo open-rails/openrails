@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 	if err != nil {
 		return err
 	}
-	return hosttools.DumpMerchantCatalog(cmd.Context(), hosttools.CatalogDumpOptions{
+	return hosttools.DumpMerchantCatalog(cmd.Context(), slog.Default(), hosttools.CatalogDumpOptions{
 		Config:   cfg,
 		PGXPool:  pool,
 		Merchant: slug,

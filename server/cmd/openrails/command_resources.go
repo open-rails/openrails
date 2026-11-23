@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
@@ -52,7 +53,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, func() { _ = c.db.Close() })
-	c.directory, err = merchants.NewDirectoryService(c.db.DataPool())
+	c.directory, err = merchants.NewDirectoryService(slog.Default(), c.db.DataPool())
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, func() { _ = ak.Close(context.WithoutCancel(ctx)) })
-	c.cp, err = controlplane.New(ak, h.Config, akCfg, pool, opts)
+	c.cp, err = controlplane.New(slog.Default(), ak, h.Config, akCfg, pool, opts)
 	if err != nil {
 		return nil, err
 	}

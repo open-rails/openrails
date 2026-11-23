@@ -3,6 +3,7 @@ package money
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -39,10 +40,11 @@ type SubscriptionCollectionHandler struct {
 	Resolver *MerchantCollectionAdapterBuilder
 	Config   *config.Config
 	Clock    clockwork.Clock
+	Log      *slog.Logger
 }
 
 func NewSubscriptionCollectionHandler(d *db.DB, resolver *MerchantCollectionAdapterBuilder, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
-	return &SubscriptionCollectionHandler{DB: d, Resolver: resolver, Config: cfg, Clock: timeutil.FirstClock(clock)}
+	return &SubscriptionCollectionHandler{DB: d, Resolver: resolver, Config: cfg, Clock: timeutil.FirstClock(clock), Log: d.Log}
 }
 func (*SubscriptionCollectionHandler) Type() string { return subscriptions.TypeSubscriptionCollection }
 func (*SubscriptionCollectionHandler) Backoff(n int32) time.Duration {

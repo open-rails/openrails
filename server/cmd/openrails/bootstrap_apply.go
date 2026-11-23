@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/internal/app"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -166,7 +166,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if err := resources.loadMerchants(ctx); err != nil {
 		return err
 	}
-	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config()}
+	runtime := &app.Runtime{DB: resources.db, Config: cfg, Merchants: resources.directory, MerchantConfig: resources.directory.Config(), Log: slog.Default()}
 	if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 	if err != nil {
 		return err
 	}
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, vault, resources.cp, opts.slug)
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, slog.Default(), cfg, vault, resources.cp, opts.slug)
 	if err != nil {
 		return err
 	}
@@ -245,8 +245,8 @@ func applyStartupBootstrap(ctx context.Context, cp *controlplane.ControlPlane) e
 	if err != nil {
 		return err
 	}
-	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
-	return applyAuthKitAuthorityManifest(ctx, cp, manifest, log.StandardLogger().Out, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
+	slog.Default().InfoContext(ctx, "startup bootstrap: first run — applying AuthKit authority manifest", "file", path)
+	return applyAuthKitAuthorityManifest(ctx, cp, manifest, os.Stderr, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
 }
 
 // resolveBootstrapManifestPath returns the conventional bootstrap manifest
@@ -300,7 +300,7 @@ func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp
 		fmt.Fprintf(out, "merchants: %d declared (plan-only; --seed provisions them)\n", len(manifest.Merchants))
 		return nil
 	}
-	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, reconcileOpts); err != nil {
+	if err := bootstrap.ReconcileMerchantManifestData(ctx, slog.Default(), cfg, cp, manifest, reconcileOpts); err != nil {
 		return fmt.Errorf("merchant bootstrap: %w", err)
 	}
 	fmt.Fprintf(out, "merchants: %d provisioned\n", len(manifest.Merchants))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
-	log "github.com/sirupsen/logrus"
 )
 
 type SubscriptionFilters struct {
@@ -39,10 +39,11 @@ type SubscriptionFilters struct {
 }
 
 type SubscriptionRepo struct {
-	db *db.DB
+	db  *db.DB
+	Log *slog.Logger
 }
 
-func NewSubscriptionRepo(d *db.DB) *SubscriptionRepo { return &SubscriptionRepo{db: d} }
+func NewSubscriptionRepo(d *db.DB) *SubscriptionRepo { return &SubscriptionRepo{db: d, Log: d.Log} }
 
 func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionParams, error) {
 	var priceID *uuid.UUID
@@ -556,8 +557,7 @@ func (r *SubscriptionRepo) getByPSPSubscriptionID(ctx context.Context, rail, rai
 		healed, err := q.RespellSubscription(ctx, gen.RespellSubscriptionParams{MerchantID: row.MerchantID, ID: row.ID, RailSubscriptionID: railSubscriptionID})
 		switch {
 		case err == nil:
-			log.WithContext(ctx).WithFields(log.Fields{"subscription_id": row.ID, "rail": rail, "stored": models.DerefStr(row.RailSubscriptionID), "provider": railSubscriptionID}).
-				Info("Respelled the provider subscription id to the provider's spelling")
+			r.Log.InfoContext(ctx, "Respelled the provider subscription id to the provider's spelling", "subscription_id", row.ID, "rail", rail, "stored", models.DerefStr(row.RailSubscriptionID), "provider", railSubscriptionID)
 			row = healed
 		case db.IsNotFound(err):
 			// A concurrent contact respelled it first.

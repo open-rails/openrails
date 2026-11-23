@@ -15,7 +15,7 @@ import (
 // the request selects which catalog they act on.
 
 func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bool) {
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.ErrorCode(billing.CodeInternalError, "billing service unavailable")
 		return nil, false

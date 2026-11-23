@@ -2,11 +2,11 @@ package intents
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/history"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 )
@@ -72,6 +73,7 @@ type Runner struct {
 	Destructive *destructive.Gate
 	Clock       clockwork.Clock
 	Lease       time.Duration
+	Log         *slog.Logger
 }
 
 func (r *Runner) transitionContext(ctx context.Context) context.Context {
@@ -106,13 +108,7 @@ type Stats struct {
 }
 
 func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderIntent, stats *Stats) {
-	logEntry := log.WithContext(ctx).WithFields(log.Fields{
-		"intent_id":   intent.ID,
-		"intent_type": intent.IntentType,
-		"provider":    intent.Rail,
-		"origin":      intent.Origin,
-		"attempts":    intent.Attempts,
-	})
+	logEntry := r.Log.With("intent_id", intent.ID, "intent_type", intent.IntentType, "provider", intent.Rail, "origin", intent.Origin, "attempts", intent.Attempts)
 	now := r.now()
 
 	// Pin the intent's merchant so handler execution and any merchant-scoped
@@ -200,11 +196,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 // ledger transition — on a context detached from the caller's cancellation
 // (LedgerWriteContext): the provider call is already made, so its outcome must
 // land even when the caller has since timed out.
-func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, reason string, verifying bool) {
+func (r *Runner) record(ctx context.Context, logEntry *slog.Logger, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, reason string, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), reason, outcome.Evidence); err != nil {
-		logEntry.WithError(err).Error("intent ledger: external mutation result log failed")
+		logEntry.ErrorContext(ctx, "intent ledger: external mutation result log failed", logx.Err(err))
 	}
 	r.apply(ctx, logEntry, stats, handler, intent, outcome, verifying)
 }
@@ -308,7 +304,7 @@ func (r *Runner) executeByID(ctx context.Context, id uuid.UUID, claim func(conte
 // provider charge of this run is refused (RequireClaim). The handler's outcome
 // is still recorded, guarded by the next executor's verify-before-write.
 // Renewal errors (DB unreachable) are logged and retried on the next beat.
-func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in gen.BillingProviderIntent) (context.Context, func()) {
+func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *slog.Logger, in gen.BillingProviderIntent) (context.Context, func()) {
 	ctx, held := withClaim(ctx, in)
 	lease := r.lease()
 	hbCtx, cancel := context.WithCancel(ctx)
@@ -327,10 +323,10 @@ func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in ge
 			renewed, err := r.Store.RenewClaim(hbCtx, in.ID, in.Status, in.Attempts, now, now.Add(lease))
 			switch {
 			case err != nil && hbCtx.Err() == nil:
-				logEntry.WithError(err).Warn("intent lease renewal failed; retrying next beat")
+				logEntry.WarnContext(ctx, "intent lease renewal failed; retrying next beat", logx.Err(err))
 			case err == nil && !renewed:
 				held.lose()
-				logEntry.Warn("intent claim no longer held by this run; it sends nothing further")
+				logEntry.WarnContext(ctx, "intent claim no longer held by this run; it sends nothing further")
 				_ = failpoint.Hit(hbCtx, failpoint.Site{Point: failpoint.ClaimLost, Kind: in.IntentType, Operation: in.ID, Subscription: subscriptionOf(in)})
 				return
 			}
@@ -363,7 +359,7 @@ type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 // apply writes one classified outcome to the ledger, detached from the
 // caller's cancellation. verifying selects how OutcomeAmbiguous is read: still
 // inconclusive (back off the next verify) or fresh (first verify soon).
-func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
+func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
@@ -376,11 +372,11 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		}
 		current, err := r.Store.Get(ctx, intent.ID)
 		if err != nil {
-			logEntry.WithError(err).Error("intent ledger: cannot verify transactionally completed outcome")
+			logEntry.ErrorContext(ctx, "intent ledger: cannot verify transactionally completed outcome", logx.Err(err))
 			return
 		}
 		if current.Status != expected {
-			logEntry.WithFields(log.Fields{"expected": expected, "actual": current.Status}).Error("intent ledger: handler did not commit its terminal outcome")
+			logEntry.ErrorContext(ctx, "intent ledger: handler did not commit its terminal outcome", "expected", expected, "actual", current.Status)
 			return
 		}
 		terminalOwned = true
@@ -425,7 +421,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		} else {
 			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
 				if err := r.Store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
-					logEntry.WithError(err).Error("cannot persist unsent destructive operation")
+					logEntry.ErrorContext(ctx, "cannot persist unsent destructive operation", logx.Err(err))
 				} else {
 					stats.Parked++
 				}
@@ -439,7 +435,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		applied = OutcomeAmbiguous
 	}
 	if err != nil {
-		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
+		logEntry.ErrorContext(ctx, "intent ledger: outcome transition failed; lease expiry will re-surface the intent", logx.Err(err))
 		return
 	}
 	// Reporting follows a confirmed write/read. A failed transition is never a
@@ -447,26 +443,26 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	switch applied {
 	case OutcomeSucceeded:
 		stats.Succeeded++
-		logEntry.WithField("evidence", outcome.Evidence).Info("intent succeeded")
+		logEntry.InfoContext(ctx, "intent succeeded", "evidence", outcome.Evidence)
 		keepPayload, keepEvidence := prunePolicyFor(handler)
 		if err := r.Store.PruneSucceeded(ctx, intent.ID, outcome.Evidence, keepPayload, keepEvidence); err != nil {
-			logEntry.WithError(err).Warn("intent ledger: prune failed; full durable result retained")
+			logEntry.WarnContext(ctx, "intent ledger: prune failed; full durable result retained", logx.Err(err))
 		}
 	case OutcomeRetryable:
 		stats.Retryable++
-		logEntry.WithField("reason", outcome.Reason).Warn("intent attempt failed; will retry")
+		logEntry.WarnContext(ctx, "intent attempt failed; will retry", "reason", outcome.Reason)
 	case OutcomeAmbiguous:
 		stats.Unknown++
-		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
+		logEntry.WarnContext(ctx, "intent outcome ambiguous; verifier will resolve via provider reads", "reason", outcome.Reason)
 	case OutcomeTerminal:
 		if outcome.Evidence["declined"] == true {
 			r.recordOrderCardDecline(ctx, intent)
 		}
 		stats.Terminal++
-		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
+		logEntry.ErrorContext(ctx, "intent failed terminally", "reason", outcome.Reason)
 		if pruneTerminalPayloadFor(handler) {
 			if err := r.Store.PruneTerminalPayload(ctx, intent.ID); err != nil {
-				logEntry.WithError(err).Warn("intent ledger: terminal payload prune failed")
+				logEntry.WarnContext(ctx, "intent ledger: terminal payload prune failed", logx.Err(err))
 			}
 		}
 	}
@@ -502,7 +498,7 @@ func pruneTerminalPayloadFor(handler Handler) bool {
 }
 
 // park and supersede are ledger transitions like apply and detach the same way.
-func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, outcome Outcome) {
+func (r *Runner) park(ctx context.Context, logEntry *slog.Logger, stats *Stats, id uuid.UUID, now time.Time, outcome Outcome) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
@@ -513,22 +509,22 @@ func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id
 		reason = "" // a deferral waits for its instant: no failure
 	}
 	if err := r.Store.Park(ctx, id, until, reason); err != nil {
-		logEntry.WithError(err).Error("intent ledger: park failed; lease expiry will re-surface the intent")
+		logEntry.ErrorContext(ctx, "intent ledger: park failed; lease expiry will re-surface the intent", logx.Err(err))
 		return
 	}
 	stats.Parked++
-	logEntry.WithFields(log.Fields{"reason": outcome.Reason, "until": until}).Warn("intent parked (stays pending)")
+	logEntry.WarnContext(ctx, "intent parked (stays pending)", "reason", outcome.Reason, "until", until)
 }
 
-func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, reason string) {
+func (r *Runner) supersede(ctx context.Context, logEntry *slog.Logger, stats *Stats, id uuid.UUID, reason string) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	if err := r.Store.MarkSuperseded(ctx, id, reason); err != nil {
-		logEntry.WithError(err).Error("intent ledger: mark superseded failed; lease expiry will re-surface the intent")
+		logEntry.ErrorContext(ctx, "intent ledger: mark superseded failed; lease expiry will re-surface the intent", logx.Err(err))
 		return
 	}
 	stats.Superseded++
-	logEntry.WithField("reason", reason).Info("intent superseded (no longer applicable)")
+	logEntry.InfoContext(ctx, "intent superseded (no longer applicable)", "reason", reason)
 }
 
 func (r *Runner) logExternalMutation(ctx context.Context, intent gen.BillingProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
@@ -627,7 +623,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 	}
 	h := r.Registry.Lookup(in.IntentType)
 	out := Ambiguous("no verifier registered")
-	logger := log.WithContext(ctx).WithField("intent_id", in.ID)
+	logger := r.Log.With("intent_id", in.ID)
 	verifyCtx, stop := r.renewClaimWhile(ctx, logger, in)
 	defer stop()
 	if h != nil {
@@ -642,14 +638,14 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // A held write must not strand a possibly submitted operation in an execute
 // state. Redispatch it through Verify, which can record positive receipts while
 // the write gate remains closed, without issuing another provider mutation.
-func (r *Runner) holdForWritePosture(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
+func (r *Runner) holdForWritePosture(ctx context.Context, logger *slog.Logger, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
 	ctx = withHistoryHold(ctx, "write_posture")
 	submitted, malformed := hasSubmissionEvidence(in)
 	if in.IntentType == "subscription_collection" || in.IntentType == TypeOrderCollection || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {
-			logger.WithError(err).Error("cannot schedule held operation readback")
+			logger.ErrorContext(ctx, "cannot schedule held operation readback", logx.Err(err))
 			return
 		}
 		stats.Parked++

@@ -4,16 +4,17 @@ package captcha
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
@@ -57,6 +58,7 @@ type Verifier struct {
 // "user:abc".
 type ChallengeStore struct {
 	state *abusestate.Store
+	Log   *slog.Logger
 }
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
@@ -138,8 +140,8 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult
 }
 
 // NewChallengeStore creates a captcha challenge store over state.
-func NewChallengeStore(state *abusestate.Store) *ChallengeStore {
-	return &ChallengeStore{state: state}
+func NewChallengeStore(logger *slog.Logger, state *abusestate.Store) *ChallengeStore {
+	return &ChallengeStore{state: state, Log: logger}
 }
 
 // IsChallenged reports whether subject currently requires captcha solving.
@@ -165,7 +167,7 @@ func (s *ChallengeStore) ClearChallenged(ctx context.Context, subject string) {
 		return
 	}
 	if err := s.state.Release(ctx, challengeKey(subject)); err != nil {
-		log.WithError(err).WithField("subject", subject).Warn("captcha: the challenge is cleared in this process only")
+		s.Log.WarnContext(ctx, "captcha: the challenge is cleared in this process only", logx.Err(err), "subject", subject)
 	}
 }
 

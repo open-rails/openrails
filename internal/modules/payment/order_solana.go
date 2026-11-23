@@ -196,7 +196,7 @@ func (s *OrderAttemptService) quoteSolana(ctx context.Context, total int64, curr
 		return nil, time.Time{}, fmt.Errorf("%w: %v", ErrOrderAttemptValidation, err)
 	}
 	quotedAt := s.now().UTC()
-	quote, err := solanamodule.CalculateTokenQuote(ctx, token, cfg.Mint, decimals, moneyutil.Micros(total), currency, s.fxProvider, s.priceProvider, quotedAt)
+	quote, err := solanamodule.CalculateTokenQuote(ctx, s.Log, token, cfg.Mint, decimals, moneyutil.Micros(total), currency, s.fxProvider, s.priceProvider, quotedAt)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrOrderAttemptValidation, err)
 	}

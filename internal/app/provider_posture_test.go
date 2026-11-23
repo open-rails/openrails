@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -60,7 +61,7 @@ func TestPostureStateReadsArmingAtOnce(t *testing.T) {
 		return providerposture.Unknown, errors.New("no answer")
 	}
 	registry.Verify(ctx, key, silent)
-	r := &Runtime{}
+	r := &Runtime{Log: slog.Default()}
 	r.postureWait.Store(&postureWait{first: true})
 	require.ErrorContains(t, r.postureState(), "first verification pending")
 	r.providerPosture.AddPSP(merchant, psp, key, silent)
@@ -99,7 +100,7 @@ func TestNMISandboxProbeVoidOutlivesThePostureDeadline(t *testing.T) {
 		}
 	}))
 	t.Cleanup(gateway.Close)
-	client := &nmi.NMIClient{SecurityKey: "sandbox-fixture", Environment: config.EnvironmentSandbox, V5BaseURL: gateway.URL}
+	client := &nmi.NMIClient{SecurityKey: "sandbox-fixture", Environment: config.EnvironmentSandbox, V5BaseURL: gateway.URL, Log: slog.Default()}
 	registry := providerposture.NewRegistry(nil)
 	registry.Timeout = 100 * time.Millisecond
 
@@ -158,7 +159,7 @@ func TestNMIGatewayTestModeAnswersClassify(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			t.Cleanup(gateway.Close)
-			client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentTest, QueryURL: gateway.URL}
+			client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentTest, QueryURL: gateway.URL, Log: slog.Default()}
 			verdict, err := client.CheckPosture(t.Context())
 			require.Equal(t, tc.want, verdict, err)
 			if tc.want == providerposture.Unsupported {
@@ -180,7 +181,7 @@ func TestNMIMaintenancePageArmsOnceItLifts(t *testing.T) {
 		_, _ = io.WriteString(w, body.Load().(string))
 	}))
 	t.Cleanup(gateway.Close)
-	client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentLive, QueryURL: gateway.URL}
+	client := &nmi.NMIClient{SecurityKey: "test-fixture", Environment: config.EnvironmentLive, QueryURL: gateway.URL, Log: slog.Default()}
 	registry := providerposture.NewRegistry(func(int) time.Duration { return 0 })
 	require.Equal(t, providerposture.Unknown, registry.Verify(t.Context(), client.PostureKey(), client.CheckPosture).Verdict)
 	body.Store("<nm_response><test_mode_enabled>false</test_mode_enabled></nm_response>")

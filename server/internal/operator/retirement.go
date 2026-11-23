@@ -49,7 +49,7 @@ func CompletePendingMerchantRetirements(ctx context.Context, cp *controlplane.Co
 }
 
 func retirementDirectory(cp *controlplane.ControlPlane) (*controlplane.ControlPlane, *merchants.Service, error) {
-	dir, err := merchants.NewDirectoryService(cp.Pool())
+	dir, err := merchants.NewDirectoryService(cp.Log, cp.Pool())
 	if err != nil {
 		return nil, nil, err
 	}

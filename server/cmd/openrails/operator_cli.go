@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -271,7 +272,7 @@ func newAdminLockoutsCmd() *cobra.Command {
 			}
 			client := redis.NewClient(opts)
 			defer client.Close()
-			limiter := middleware.NewAdminOperationLimiter(abusestate.New(client))
+			limiter := middleware.NewAdminOperationLimiter(slog.Default(), abusestate.New(slog.Default(), client))
 			if err := limiter.Unlock(cmd.Context(), args[0], "operator"); err != nil {
 				return err
 			}

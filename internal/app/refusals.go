@@ -7,10 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // refusals are what the engine serves without instead of failing: an
@@ -39,7 +38,7 @@ func (r *Runtime) Refuse(subject string, err error) {
 		return
 	}
 	f.why[subject] = err.Error()
-	log.WithField("subject", subject).WithError(err).Error("openrails: not served; everything else serves")
+	r.Log.Error("openrails: not served; everything else serves", "subject", subject, logx.Err(err))
 }
 
 // Unrefuse clears subject: it serves again.
@@ -52,7 +51,7 @@ func (r *Runtime) Unrefuse(subject string) {
 	defer f.mu.Unlock()
 	if _, ok := f.why[subject]; ok {
 		delete(f.why, subject)
-		log.WithField("subject", subject).Info("openrails: serves again")
+		r.Log.Info("openrails: serves again", "subject", subject)
 	}
 }
 

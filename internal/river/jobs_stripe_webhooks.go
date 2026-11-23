@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -18,7 +19,6 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -100,6 +101,7 @@ type StripeWebhookReconcileWorker struct {
 	Clock     clockwork.Clock
 	// Reload reads a merchant's configuration fresh before its pass.
 	Reload func(context.Context, billing.MerchantID) error
+	Log    *slog.Logger
 }
 
 func (StripeWebhookReconcileWorker) Kind() string { return KindStripeWebhookReconcile }
@@ -114,7 +116,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	if w.Merchants == nil || w.Merchants.Secrets() == nil {
 		// Managed webhook registration resolves only from the armed rail state
 		// (psps + secret store): without it there is nothing to reconcile.
-		log.WithContext(ctx).Info("StripeWebhookReconcile: merchants service not armed; skipping")
+		w.Log.InfoContext(ctx, "StripeWebhookReconcile: merchants service not armed; skipping")
 		return nil
 	}
 	if job.Args.MerchantID == uuid.Nil {
@@ -182,17 +184,17 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 			return fmt.Errorf("list stripe psps: %w", err)
 		}
 		i := slices.IndexFunc(psps, func(p merchants.PSPScope) bool { return p.AccountID == accountID })
-		fields := log.Fields{"merchant_id": mid.String(), "stripe_account_id": accountID}
+		fields := []any{"merchant_id", mid.String(), "stripe_account_id", accountID}
 		if i < 0 {
 			// Archived or no longer declared: its endpoint drains untouched.
-			log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: no active PSP for the account; skipped")
+			w.Log.With(fields...).InfoContext(ctx, "StripeWebhookReconcile: no active PSP for the account; skipped")
 			return nil
 		}
 		psp := psps[i]
 		pass.psp = psp.ID
 		publication := w.Merchants.StripeWebhookPublication(mid, psp.AccountID)
 		verdict := gate.CheckMerchant(ctx, mid.UUID())
-		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
+		res, err := catalog.ReconcileManagedStripeWebhook(ctx, w.Log, catalog.ManagedStripeWebhookParams{
 			Publication:         publication,
 			StripeClients:       w.StripeClients,
 			Config:              w.Config,
@@ -212,20 +214,21 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 			pass.digest = StripeWebhookDigest(w.Config, psp.AccountID, psp.Environment, revision)
 		}
 		if res.Skipped {
-			fields["reason"] = res.SkipReason
-			log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: skipped")
+			fields = append(fields, "reason", res.SkipReason)
+			w.Log.With(fields...).InfoContext(ctx, "StripeWebhookReconcile: skipped")
 			return nil
 		}
-		fields["action"], fields["endpoint_id"] = res.Result.Action, res.Result.EndpointID
+		fields = append(fields, "action", res.Result.Action)
+		fields = append(fields, "endpoint_id", res.Result.EndpointID)
 		if len(res.Retired) > 0 {
-			fields["retired"] = res.Retired
+			fields = append(fields, "retired", res.Retired)
 		}
 		if !verdict.Allowed && len(res.RetirePending) > 0 {
-			fields["gated_reason"] = verdict.Reason
+			fields = append(fields, "gated_reason", verdict.Reason)
 		}
-		log.WithContext(ctx).WithFields(fields).Info("StripeWebhookReconcile: reconciled")
+		w.Log.With(fields...).InfoContext(ctx, "StripeWebhookReconcile: reconciled")
 		if res.OperatorAction != "" {
-			log.WithContext(ctx).WithFields(fields).Warn("StripeWebhookReconcile: " + res.OperatorAction)
+			w.Log.With(fields...).WarnContext(ctx, "StripeWebhookReconcile: "+res.OperatorAction)
 		}
 		w.recordEndpointFinding(ctx, mid, psp.AccountID, res, verdict)
 		pass.settled = res.OperatorAction == ""
@@ -338,9 +341,7 @@ func (w StripeWebhookReconcileWorker) recordEndpointFinding(
 		return uerr
 	})
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"merchant_id": mid.String(), "stripe_account_id": accountID,
-		}).Warn("StripeWebhookReconcile: could not persist the endpoint finding")
+		w.Log.WarnContext(ctx, "StripeWebhookReconcile: could not persist the endpoint finding", logx.Err(err), "merchant_id", mid.String(), "stripe_account_id", accountID)
 	}
 }
 

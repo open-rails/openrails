@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"strings"
 	"text/tabwriter"
@@ -14,7 +15,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -58,11 +59,11 @@ func (s ProposalSet) filtered() bool { return len(s.IDs) == 0 }
 func (o ProposalsOptions) json() bool { return strings.EqualFold(strings.TrimSpace(o.Format), "json") }
 
 // withProposals runs fn on a merchant-scoped connection with the executor.
-func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx context.Context, database *db.DB, x *proposals.Executor) error) error {
+func withProposals(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, fn func(ctx context.Context, database *db.DB, x *proposals.Executor) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	database, err := openEmbeddedDB(opts.Config, opts.PGXPool)
+	database, err := openEmbeddedDB(logger, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx conte
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	runtime := &app.Runtime{DB: database, Config: cfg}
+	runtime := &app.Runtime{DB: database, Config: cfg, Log: logger}
 	x := proposals.New(database, opts.Config, opts.Clock, runtime.NewDestructiveAdmissions(opts.Clock))
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error { return fn(ctx, database, x) })
 }
@@ -89,7 +90,7 @@ func withProposals(ctx context.Context, opts ProposalsOptions, fn func(ctx conte
 // schema, as the runtime does.
 func bindRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB) error {
 	schema := config.RiverSchemaName(cfg)
-	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
+	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true, Logger: database.Log})
 	if err != nil {
 		return fmt.Errorf("River producer: %w", err)
 	}
@@ -105,14 +106,14 @@ func bindRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB)
 // wake on their next provider event.
 func bindParkWakes(ctx context.Context, cfg *config.Config, database *db.DB) {
 	if err := bindRiverProducer(ctx, cfg, database); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("no River producer: parked subscriptions wake on their next provider event")
+		database.Log.WarnContext(ctx, "no River producer: parked subscriptions wake on their next provider event", logx.Err(err))
 	}
 }
 
 // ProposalsList prints the open proposals a set's filter selects (ids are
 // ignored).
-func ProposalsList(ctx context.Context, opts ProposalsOptions, set ProposalSet) error {
-	return withProposals(ctx, opts, func(ctx context.Context, database *db.DB, x *proposals.Executor) error {
+func ProposalsList(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, set ProposalSet) error {
+	return withProposals(ctx, logger, opts, func(ctx context.Context, database *db.DB, x *proposals.Executor) error {
 		items, more, err := selectProposals(ctx, database, x, set, 500)
 		if err != nil {
 			return err
@@ -129,12 +130,12 @@ func ProposalsList(ctx context.Context, opts ProposalsOptions, set ProposalSet) 
 }
 
 // ProposalsShow prints one proposal with its change.
-func ProposalsShow(ctx context.Context, opts ProposalsOptions, id string) error {
+func ProposalsShow(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, id string) error {
 	fid, err := billing.ParseFindingID(strings.TrimSpace(id))
 	if err != nil || fid.IsZero() {
 		return fmt.Errorf("proposals show: %q is not a finding id (fnd_…)", id)
 	}
-	return withProposals(ctx, opts, func(ctx context.Context, _ *db.DB, x *proposals.Executor) error {
+	return withProposals(ctx, logger, opts, func(ctx context.Context, _ *db.DB, x *proposals.Executor) error {
 		page, err := x.List(ctx, billing.ProposalListParams{IDs: []billing.FindingID{fid}})
 		if err != nil {
 			return err
@@ -148,25 +149,25 @@ func ProposalsShow(ctx context.Context, opts ProposalsOptions, id string) error 
 
 // ProposalsApprove approves a set: listed ids, or a filtered set whose size
 // the operator typed back (--expect). Nothing applies on a mismatch.
-func ProposalsApprove(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string) error {
-	return resolveProposals(ctx, opts, set, notes, (*proposals.Executor).Approve)
+func ProposalsApprove(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, set ProposalSet, notes string) error {
+	return resolveProposals(ctx, logger, opts, set, notes, (*proposals.Executor).Approve)
 }
 
 // ProposalsDismiss dismisses a set; notes are required.
-func ProposalsDismiss(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string) error {
-	return resolveProposals(ctx, opts, set, notes, (*proposals.Executor).Dismiss)
+func ProposalsDismiss(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, set ProposalSet, notes string) error {
+	return resolveProposals(ctx, logger, opts, set, notes, (*proposals.Executor).Dismiss)
 }
 
 // ProposalsForeign resolves a set as provider records that are not the
 // merchant's obligation; notes are required, and a record anything local names
 // is refused.
-func ProposalsForeign(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string) error {
-	return resolveProposals(ctx, opts, set, notes, (*proposals.Executor).Foreign)
+func ProposalsForeign(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, set ProposalSet, notes string) error {
+	return resolveProposals(ctx, logger, opts, set, notes, (*proposals.Executor).Foreign)
 }
 
-func resolveProposals(ctx context.Context, opts ProposalsOptions, set ProposalSet, notes string,
+func resolveProposals(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, set ProposalSet, notes string,
 	do func(*proposals.Executor, context.Context, proposals.Request) (billing.ProposalResults, error)) error {
-	return withProposals(ctx, opts, func(ctx context.Context, database *db.DB, x *proposals.Executor) error {
+	return withProposals(ctx, logger, opts, func(ctx context.Context, database *db.DB, x *proposals.Executor) error {
 		listing := opts.Out
 		if opts.json() {
 			listing = io.Discard
@@ -333,7 +334,7 @@ func printResults(w io.Writer, res billing.ProposalResults) {
 }
 
 // ProposalsRuns lists the merchant's approval runs, newest first.
-func ProposalsRuns(ctx context.Context, opts ProposalsOptions, limit int) error {
+func ProposalsRuns(ctx context.Context, logger *slog.Logger, opts ProposalsOptions, limit int) error {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -341,7 +342,7 @@ func ProposalsRuns(ctx context.Context, opts ProposalsOptions, limit int) error 
 		limit = math.MaxInt32
 	}
 	lim := int32(limit)
-	return withProposals(ctx, opts, func(ctx context.Context, database *db.DB, _ *proposals.Executor) error {
+	return withProposals(ctx, logger, opts, func(ctx context.Context, database *db.DB, _ *proposals.Executor) error {
 		kind := reconcile.DestructiveRunKindApproval
 		runs, err := database.Gen(ctx).ListDestructiveRuns(ctx, gen.ListDestructiveRunsParams{
 			MerchantID: opts.MerchantID.UUID(), Kind: &kind, Lim: lim,

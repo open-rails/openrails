@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -57,9 +56,9 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	logger := log.WithContext(ctx).WithFields(log.Fields{"event_type": s.Data.EventType, "vault_id": vault, "methods": len(methods)})
+	logger := s.Log.With("event_type", s.Data.EventType, "vault_id", vault, "methods", len(methods))
 	if len(methods) == 0 {
-		logger.Info("NMI account updater notice for a vault with no stored card here")
+		logger.InfoContext(ctx, "NMI account updater notice for a vault with no stored card here")
 		return nil
 	}
 	advice, isAdvice := acuAdvice[s.Data.EventType]
@@ -70,7 +69,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 			return err
 		}
 		if !found {
-			logger.Warn("NMI account updater notice for a vault NMI no longer has")
+			logger.WarnContext(ctx, "NMI account updater notice for a vault NMI no longer has")
 			return nil
 		}
 	}
@@ -98,7 +97,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("NMI account updater notice applied")
+	logger.InfoContext(ctx, "NMI account updater notice applied")
 	return nil
 }
 

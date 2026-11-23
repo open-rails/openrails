@@ -4,17 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -35,6 +36,7 @@ type UsageOrderWorker struct {
 	Money  *money.MoneyService
 	Config *config.Config
 	Clock  clockwork.Clock
+	Log    *slog.Logger
 }
 
 func (UsageOrderWorker) Kind() string { return money.KindUsageOrders }
@@ -69,7 +71,7 @@ func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) er
 	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
 		return nil
 	}
-	logger := log.WithContext(ctx).WithField("worker", money.KindUsageOrders)
+	logger := w.Log.With("worker", money.KindUsageOrders)
 	now := w.now()
 	var failed error
 	if page.Collect == nil {
@@ -92,7 +94,7 @@ func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) er
 
 // bill checks one page of due usage accounts after after; it returns where
 // the next page starts when this one was full.
-func (w UsageOrderWorker) bill(ctx context.Context, logger *log.Entry, now time.Time, after *money.UsageAccountKey) (*money.UsageAccountKey, error) {
+func (w UsageOrderWorker) bill(ctx context.Context, logger *slog.Logger, now time.Time, after *money.UsageAccountKey) (*money.UsageAccountKey, error) {
 	args := gen.ListDueUsageAccountsParams{Now: now, RowLimit: usagePage}
 	if after != nil {
 		args.AfterAt, args.AfterMerchantID, args.AfterCustomerID, args.AfterCurrency = &after.DueAt, &after.MerchantID, &after.CustomerID, &after.Currency
@@ -112,8 +114,7 @@ func (w UsageOrderWorker) bill(ctx context.Context, logger *log.Entry, now time.
 			return err
 		})
 		if err != nil {
-			logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "customer_id": row.CustomerID, "currency": row.Currency}).
-				Error("usage billing: account failed; continuing")
+			logger.ErrorContext(ctx, "usage billing: account failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "customer_id", row.CustomerID, "currency", row.Currency)
 			failed = errors.Join(failed, fmt.Errorf("usage account %s/%s/%s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
 		}
 		if ctx.Err() != nil {
@@ -121,7 +122,7 @@ func (w UsageOrderWorker) bill(ctx context.Context, logger *log.Entry, now time.
 		}
 	}
 	if billed > 0 {
-		logger.WithField("orders", billed).Info("usage orders billed")
+		logger.InfoContext(ctx, "usage orders billed", "orders", billed)
 	}
 	if len(due) < usagePage {
 		return nil, failed
@@ -132,7 +133,7 @@ func (w UsageOrderWorker) bill(ctx context.Context, logger *log.Entry, now time.
 
 // collect queues one page of due collections after after; it returns where
 // the next page starts when this one was full.
-func (w UsageOrderWorker) collect(ctx context.Context, logger *log.Entry, now time.Time, after *money.UsageOrderKey) (*money.UsageOrderKey, error) {
+func (w UsageOrderWorker) collect(ctx context.Context, logger *slog.Logger, now time.Time, after *money.UsageOrderKey) (*money.UsageOrderKey, error) {
 	args := gen.ListDueUsageCollectionsParams{Now: now, RowLimit: usagePage}
 	if after != nil {
 		args.AfterAt, args.AfterMerchantID, args.AfterID = &after.DueAt, &after.MerchantID, &after.OrderID
@@ -147,8 +148,7 @@ func (w UsageOrderWorker) collect(ctx context.Context, logger *log.Entry, now ti
 			return w.Money.CollectDueUsageOrder(ctx, identity.CustomerID(row.CustomerID), row.ID)
 		})
 		if err != nil {
-			logger.WithError(err).WithFields(log.Fields{"merchant_id": row.MerchantID, "order_id": row.ID}).
-				Error("usage collection: order failed; continuing")
+			logger.ErrorContext(ctx, "usage collection: order failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "order_id", row.ID)
 			failed = errors.Join(failed, fmt.Errorf("usage order %s/%s: %w", row.MerchantID, row.ID, err))
 		}
 		if ctx.Err() != nil {

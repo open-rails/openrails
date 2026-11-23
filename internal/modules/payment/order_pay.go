@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -1227,7 +1226,7 @@ func (h *NMISaleIntentHandler) basisTheoryMethod(ctx context.Context, in gen.Bil
 	}
 	token, err := bt.ConvertTokenIntent(ctx, p.Token, opts)
 	if basistheory.IsNotFound(err) {
-		log.WithContext(ctx).WithField("order_reference", reference).Error("Basis Theory token intent expired before conversion: the order is paid with no card kept")
+		h.Log.ErrorContext(ctx, "Basis Theory token intent expired before conversion: the order is paid with no card kept", "order_reference", reference)
 		return nil, nil
 	}
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"sort"
@@ -14,11 +15,11 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	solrpc "github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/logx"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
@@ -155,12 +156,13 @@ type SolanaFetcher struct {
 	WalletScanCap      int
 	// Now returns the current time; overridable in tests (nil uses time.Now).
 	Now func() time.Time
+	Log *slog.Logger
 }
 
 // NewSolanaFetcher builds a fetcher over the shared RPC client and a local
 // subscription source.
-func NewSolanaFetcher(rpc *solanaint.RPCClient, source SolanaSubscriptionSource) *SolanaFetcher {
-	return &SolanaFetcher{RPC: rpc, Source: source}
+func NewSolanaFetcher(logger *slog.Logger, rpc *solanaint.RPCClient, source SolanaSubscriptionSource) *SolanaFetcher {
+	return &SolanaFetcher{RPC: rpc, Source: source, Log: logger}
 }
 
 func (f *SolanaFetcher) Name() string { return string(ProviderSolana) }
@@ -495,8 +497,7 @@ func (f *SolanaFetcher) enumeratePlanSubscriptions(ctx context.Context, known ma
 		if err != nil {
 			// A corrupt catalog link must not kill the scan; the other plans
 			// still enumerate.
-			log.WithContext(ctx).WithError(err).WithField("plan_pda", planPDA).
-				Warn("solana reconcile: skipping undecodable plan PDA in enumeration")
+			f.Log.WarnContext(ctx, "solana reconcile: skipping undecodable plan PDA in enumeration", logx.Err(err), "plan_pda", planPDA)
 			continue
 		}
 		accounts, err := f.RPC.GetProgramAccounts(ctx, subscriptions.ProgramID, []solanaint.ProgramAccountFilter{
@@ -827,9 +828,7 @@ pageLoop:
 		before = page[len(page)-1].Signature
 	}
 	if capHit {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"wallet": wallet, "cap": f.walletScanCap(),
-		}).Warn("solana reconcile: wallet scan hit the per-window signature cap; older window txs deferred to the next pass")
+		f.Log.WarnContext(ctx, "solana reconcile: wallet scan hit the per-window signature cap; older window txs deferred to the next pass", "wallet", wallet, "cap", f.walletScanCap())
 	}
 
 	skipped := 0
@@ -852,8 +851,7 @@ pageLoop:
 		candidates = append(candidates, c)
 	}
 	if skipped > 0 {
-		log.WithContext(ctx).WithFields(log.Fields{"wallet": wallet, "skipped": skipped}).
-			Warn("solana reconcile: wallet scan skipped unfetchable/unparseable transactions")
+		f.Log.WarnContext(ctx, "solana reconcile: wallet scan skipped unfetchable/unparseable transactions", "wallet", wallet, "skipped", skipped)
 	}
 
 	// Duplicate pass: one local-id on several SUCCESSFUL money-bearing

@@ -52,7 +52,7 @@ func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
 
 // billingService is the request's billing service, or an answered 500.
 func billingService(r *httprequest.Request) (*billingservice.Service, bool) {
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return nil, false

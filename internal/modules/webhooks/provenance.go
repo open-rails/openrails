@@ -3,11 +3,11 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/db"
@@ -20,7 +20,7 @@ import (
 // none) is another, or the PSP moves no money and the object predates the tag.
 // The webhook then answers 200 and is only logged; an object this book
 // created and lost keeps failing, so the provider redelivers it.
-func quietUnknownObject(ctx context.Context, database *db.DB, carried string, subject string) bool {
+func quietUnknownObject(ctx context.Context, logger *slog.Logger, database *db.DB, carried string, subject string) bool {
 	mid, ok := merchant.FromContext(ctx)
 	psp := db.PSPIDFromContext(ctx)
 	if !ok || psp == uuid.Nil || database == nil {
@@ -38,8 +38,7 @@ func quietUnknownObject(ctx context.Context, database *db.DB, carried string, su
 	if !provenance.Quiet(psps.Live) {
 		return false
 	}
-	log.WithContext(ctx).WithFields(log.Fields{"psp_id": psp.String(), "provenance": string(provenance), "object": subject}).
-		Info("webhook names a provider object no record of this merchant names and this book did not create; answered quietly")
+	logger.InfoContext(ctx, "webhook names a provider object no record of this merchant names and this book did not create; answered quietly", "psp_id", psp.String(), "provenance", string(provenance), "object", subject)
 	return true
 }
 

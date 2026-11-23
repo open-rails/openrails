@@ -5,18 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -78,10 +79,11 @@ type OrderCollectionHandler struct {
 	Config   intents.ModeView
 	Clock    clockwork.Clock
 	Policy   intents.BackoffPolicy
+	Log      *slog.Logger
 }
 
 func NewOrderCollectionHandler(database *db.DB, charger *ScopedCharger, verifier *MerchantCollectionAdapterBuilder, cfg intents.ModeView, clock clockwork.Clock) *OrderCollectionHandler {
-	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff}
+	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff, Log: database.Log}
 }
 
 func (h *OrderCollectionHandler) Type() string { return TypeOrderCollection }
@@ -612,14 +614,14 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 	})
 	if errors.Is(err, collection.ErrUnknownCycle) {
 		if ferr := collection.RecordUnknownCycle(ctx, h.DB.Gen(ctx), intent.MerchantID, p.OrderID.String(), "order", err); ferr != nil {
-			log.WithContext(ctx).WithError(ferr).WithField("order_id", p.OrderID).Error("order collection: could not record the unknown-cycle finding")
+			h.Log.ErrorContext(ctx, "order collection: could not record the unknown-cycle finding", logx.Err(ferr), "order_id", p.OrderID)
 		}
 	}
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection refused, but local record failed: "+err.Error(), evidence)
 	}
 	if order != nil {
-		logCollectionDecline(ctx, p.OrderID, rail, &failureCode, action)
+		logCollectionDecline(ctx, h.Log, p.OrderID, rail, &failureCode, action)
 	}
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
@@ -687,21 +689,18 @@ func usageCycleHours(order gen.BillingOrder) int {
 
 // logCollectionDecline names the bucket and its consequence on every
 // refusal. Nothing here cancels anything.
-func logCollectionDecline(ctx context.Context, orderID uuid.UUID, rail string, failureCode *string, action collection.Action) {
-	decline.AlertUnmapped(ctx, action.Decline)
-	entry := log.WithContext(ctx).WithFields(log.Fields{
-		"order_id": orderID, "rail": rail, "failure_code": derefStr(failureCode),
-		"decline_outcome": action.Decline.Action.String(), "decline_coverage": string(action.Decline.Coverage),
-	})
+func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+	decline.AlertUnmapped(ctx, logger, action.Decline)
+	entry := logger.With("order_id", orderID, "rail", rail, "failure_code", derefStr(failureCode), "decline_outcome", action.Decline.Action.String(), "decline_coverage", string(action.Decline.Coverage))
 	switch {
 	case action.AwaitingPaymentMethod():
-		entry.Warn("order collection: the customer's card needs fixing; charging stops, the order stays open")
+		entry.WarnContext(ctx, "order collection: the customer's card needs fixing; charging stops, the order stays open")
 	case action.Terminal && !action.ScheduleExhausted():
-		entry.Error("order collection: non-recoverable decline; the order is uncollectible")
+		entry.ErrorContext(ctx, "order collection: non-recoverable decline; the order is uncollectible")
 	case action.Terminal:
-		entry.Error("order collection: the retry schedule is exhausted; the order is uncollectible")
+		entry.ErrorContext(ctx, "order collection: the retry schedule is exhausted; the order is uncollectible")
 	default:
-		entry.WithField("next_attempt_at", action.NextAttemptAt).Warn("order collection: retryable decline; it retries on the order's own billing cycle")
+		entry.WarnContext(ctx, "order collection: retryable decline; it retries on the order's own billing cycle", "next_attempt_at", action.NextAttemptAt)
 	}
 }
 

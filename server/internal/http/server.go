@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"github.com/open-rails/authkit/auth"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
 
 	"github.com/open-rails/openrails/internal/http/router"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
@@ -100,6 +99,7 @@ type Server struct {
 	checkoutOrigin string
 	paymentHost    paymentpage.Host
 	paymentHandler http.Handler
+	Log            *slog.Logger
 }
 
 // recordRoute appends a registered pattern to the server's route table.
@@ -140,7 +140,7 @@ func (s *Server) handle(mux router.Registrar, pattern string, h http.Handler) {
 
 // New assembles the standalone surface over the engine's initialized runtime
 // and the server's control plane.
-func New(deps Dependencies) (*Server, error) {
+func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	if deps.Config == nil {
 		return nil, fmt.Errorf("server config is required")
 	}
@@ -198,11 +198,12 @@ func New(deps Dependencies) (*Server, error) {
 		controlPlane:            deps.ControlPlane,
 		resource:                deps.Resource,
 		captchaStore:            deps.Runtime.CaptchaStore,
-		adminLimiter:            middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
+		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
 		adminConsole:            deps.AdminConsole,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
+		Log:                     logger,
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -220,7 +221,7 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Single (standalone-friendly) HTTP surface on the framework-neutral
 	// net/http mux (#670): the same stack the embedded surface serves.
-	mux := &router.Table{}
+	mux := &router.Table{Log: logger}
 	// Standalone mode owns service-level health/meta routes.
 	s.registerStandaloneMetaRoutes(mux)
 	// Canonical: /v1/*
@@ -260,12 +261,12 @@ func New(deps Dependencies) (*Server, error) {
 		return nil, err
 	}
 
-	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
+	s.sharedRateLimit = middleware.RateLimitHTTP(logger, s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	if err := s.buildPaymentPage(deps.CheckoutOrigin, deps.CheckoutHandler); err != nil {
 		return nil, err
 	}
 	s.publicHandler = s.dispatchPaymentPage(s.wrapPublicHandler(mux.Handler()))
-	s.nativeRoutes = &router.Table{}
+	s.nativeRoutes = &router.Table{Log: logger}
 	for _, entry := range mux.Entries {
 		switch entry.Path {
 		case "/health/live", "/health/ready":
@@ -278,7 +279,7 @@ func New(deps Dependencies) (*Server, error) {
 		return middleware.WithRoutePath(entry.Path)(s.wrapHandler(entry.Handler, func(*http.Request) bool { return entry.Browser }))
 	})
 
-	log.Info("Billing service initialized successfully")
+	logger.Info("Billing service initialized successfully")
 	return s, nil
 }
 
@@ -308,11 +309,11 @@ func (s *Server) wrapPublicHandler(mux http.Handler) http.Handler {
 func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool) http.Handler {
 	limiter := s.sharedRateLimit
 	if limiter == nil {
-		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
+		limiter = middleware.RateLimitHTTP(s.Log, s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	}
 	return middleware.ChainHTTP(next,
-		middleware.RecoverHTTP(),
-		middleware.RequestLogHTTP(s.trustedProxies(), "/health/live", "/health/ready"),
+		middleware.RecoverHTTP(s.Log),
+		middleware.RequestLogHTTP(s.Log, s.trustedProxies(), "/health/live", "/health/ready"),
 		middleware.SecurityHeadersHTTP(),
 		// CORS is browser transport policy, not API authorization (#765):
 		// every accepted request carries a bearer credential, never an
@@ -352,7 +353,7 @@ func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 
 // HTTPRoutes returns the native hosted surface without process health routes.
 func (s *Server) HTTPRoutes() *router.Table {
-	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...)}
+	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...), Log: s.Log}
 }
 
 // Drain fails /health/ready from now on, so load balancers stop routing here

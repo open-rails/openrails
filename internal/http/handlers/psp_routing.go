@@ -16,7 +16,7 @@ func PreviewPSPRouting(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	svc, err := billingservice.New(r.Log, r.State)
 	if err != nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "billing service unavailable")
 		return
