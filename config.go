@@ -137,8 +137,8 @@ type DatabaseConfig struct {
 	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
 	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is ErrMigrationsRequired. Call
-	// Migrate first. Normal request-time and scheduled partition
+	// or was applied with other content, is billing.ErrMigrationsRequired.
+	// Call Migrate first. Normal request-time and scheduled partition
 	// maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's

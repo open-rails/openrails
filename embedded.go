@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 func init() {
@@ -272,6 +271,6 @@ func (e *Engine) RiverJobs() riverhelpers.Contribution {
 // RiverJobs also adds the provider_refresh queue for operator requests.
 // Hosts may set concurrency in the shared River config.
 const (
-	QueueBilling   = riverjobs.QueueBilling
-	QueuePSPImport = riverjobs.QueuePSPImport
+	QueueBilling   = "billing"
+	QueuePSPImport = "psp_import"
 )

@@ -325,7 +325,7 @@ type DatabaseConfig struct {
 	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
 	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is ErrMigrationsRequired. Call
+	// or was applied with other content, is billing.ErrMigrationsRequired. Call
 	// openrails.Migrate first.
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool

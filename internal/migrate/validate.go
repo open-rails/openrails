@@ -12,11 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
-
-var ErrMigrationsRequired = errors.New("openrails: database migrations are required")
 
 // Validate checks existing OpenRails and River ledgers and writes nothing:
 // every migration of the chain is recorded, by the same file and with the
@@ -87,5 +86,5 @@ func validationError(err error) error {
 		errors.As(err, &postgres) && (strings.HasPrefix(postgres.Code, "08") || strings.HasPrefix(postgres.Code, "53") || strings.HasPrefix(postgres.Code, "57")) {
 		return fmt.Errorf("openrails: validate database migrations: %w", err)
 	}
-	return fmt.Errorf("%w; run openrails.Migrate before application startup: %w", ErrMigrationsRequired, err)
+	return fmt.Errorf("%w; run openrails.Migrate before application startup: %w", billing.ErrMigrationsRequired, err)
 }
