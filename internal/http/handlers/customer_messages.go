@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ListCustomerMessages handles GET /v1/admin/customers/{customer_id}/messages:
@@ -96,6 +100,10 @@ func CreateTestMessage(r *httprequest.Request) {
 	}
 	out, err := svc.Test(r.Request.Context(), in.EventType, in.Language, in.Template)
 	if err != nil {
+		var limited *apperr.Error
+		if errors.As(err, &limited) && limited.Code == billing.CodeRateLimitExceeded {
+			r.SetHeader("Retry-After", fmt.Sprint(limited.Metadata["retry_after_seconds"]))
+		}
 		writeRefusal(r, err, "test message failed")
 		return
 	}

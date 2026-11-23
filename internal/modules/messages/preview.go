@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -35,7 +37,7 @@ func (s *Service) Preview(ctx context.Context, eventType, language string, candi
 }
 
 // Test sends Preview's message to the merchant's alert address, the only
-// address a test goes to.
+// address a test goes to, at most TestCap times a TestWindow.
 func (s *Service) Test(ctx context.Context, eventType, language string, candidate *billing.MessageTemplate) (billing.TestMessage, error) {
 	preview, content, cfg, err := s.preview(ctx, eventType, language, candidate)
 	if err != nil {
@@ -47,6 +49,15 @@ func (s *Service) Test(ctx context.Context, eventType, language string, candidat
 	}
 	if s.Email == nil {
 		return billing.TestMessage{}, errTestNoSender
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return billing.TestMessage{}, err
+	}
+	if sent, left := s.Abuse.Count(ctx, "customer_message_test:"+mid.String(), 1, TestWindow); sent > TestCap {
+		return billing.TestMessage{}, apperr.New(http.StatusTooManyRequests, billing.CodeRateLimitExceeded,
+			fmt.Sprintf("a merchant sends at most %d test messages an hour", TestCap)).
+			WithMetadata(map[string]any{"retry_after_seconds": max(int64(math.Ceil(left.Seconds())), 1)})
 	}
 	err = s.Email.Send(ctx, config.Email{
 		From: config.EmailAddress{Name: cfg.Profile.DisplayName, Address: cfg.Profile.FromEmail}, To: to.Address,

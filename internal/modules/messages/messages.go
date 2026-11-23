@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -27,6 +28,9 @@ const (
 	// more are rate_limited.
 	RateCap    = 10
 	RateWindow = time.Hour
+	// TestCap is how many test messages a merchant sends per TestWindow.
+	TestCap    = 10
+	TestWindow = time.Hour
 )
 
 // Where a message stands (customer_messages.status).
@@ -148,5 +152,7 @@ type Service struct {
 	// Renderer is the host's (Deps.MessageRenderer); nil renders every
 	// message from the templates.
 	Renderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
-	Clock    clockwork.Clock
+	// Abuse counts test messages.
+	Abuse *abusestate.Store
+	Clock clockwork.Clock
 }

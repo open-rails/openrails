@@ -154,7 +154,7 @@ until it serves.
 |---|---|
 | `Client.ListCustomerMessages`, `GET /v1/admin/customers/{customer_id}/messages` | The customer's messages (`billing.CustomerMessage`), newest first: event, status, attempts, last error, recipient, sent time. No body. `merchant:customer:read` |
 | `Client.PreviewMessage`, `POST /v1/merchant/messages/preview` | Renders an event type from the merchant's templates over a sample customer and fact, with the merchant's profile, in `language` or the default language. `template` replaces that language's template for this render only; one that does not render is `400 message_template_invalid`, naming the error. `merchant:config:read` |
-| `Client.CreateTestMessage`, `POST /v1/merchant/messages/test` | Sends that rendering to the merchant's `alert_email`, the only address a test goes to (none: `409 alert_email_required`). It is not logged. `merchant:config:manage` |
+| `Client.CreateTestMessage`, `POST /v1/merchant/messages/test` | Sends that rendering to the merchant's `alert_email`, the only address a test goes to (none: `409 alert_email_required`), at most ten an hour per merchant (`429 rate_limit_exceeded`, with `Retry-After`). It is not logged. `merchant:config:manage` |
 
 A status is `pending`, `queued` or `sending` on the way, then `sent`,
 `disabled`, `test_environment`, `no_contact`, `rate_limited` or `failed`

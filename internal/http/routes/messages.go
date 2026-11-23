@@ -22,7 +22,7 @@ var messagesRoutes = []Route{
 		Errors: codes("invalid_param", "message_template_invalid", "service_unavailable"), Handler: h(handlers.PreviewMessage)},
 	{Method: POST, Path: "/v1/merchant/messages/test", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreateTestMessage", NoConn: true,
 		Doc: "CreateTestMessage sends one sample message, as PreviewMessage renders it, to the merchant's alert email " +
-			"address. It is sent to no other address.",
+			"address. It is sent to no other address, at most ten an hour.",
 		Request: billing.CreateTestMessageParams{}, Responses: []Reply{{200, billing.TestMessage{}}},
-		Errors: codes("alert_email_required", "invalid_param", "message_send_failed", "message_template_invalid", "service_unavailable"), Handler: h(handlers.CreateTestMessage)},
+		Errors: codes("alert_email_required", "invalid_param", "message_send_failed", "message_template_invalid", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.CreateTestMessage)},
 }

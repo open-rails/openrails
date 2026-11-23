@@ -3,6 +3,7 @@ package merchantconfig
 import (
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"strings"
 
@@ -32,6 +33,13 @@ func NormalizeBillingBoundary(boundary string) string {
 	default:
 		return ""
 	}
+}
+
+// oneAddress reports whether s is one bare email address: not a list, not a
+// named mailbox, at most 320 bytes.
+func oneAddress(s string) bool {
+	a, err := mail.ParseAddress(s)
+	return err == nil && a.Name == "" && a.Address == s && len(s) <= 320
 }
 
 // Settings is a merchant's settings, validated: the configuration readers
@@ -66,6 +74,9 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			}
 		}
 		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
+		if cfg.Profile.FromEmail != "" && !oneAddress(cfg.Profile.FromEmail) {
+			return Settings{}, fmt.Errorf("profile.from_email must be one email address")
+		}
 		cfg.Profile.SupportURL, cfg.Profile.SubscribeURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SubscribeURL)
 		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
 		cfg.Profile.TermsURL, cfg.Profile.PrivacyURL = strings.TrimSpace(p.TermsURL), strings.TrimSpace(p.PrivacyURL)
@@ -94,6 +105,9 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	}
 	if in.AlertEmail != nil {
 		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
+		if cfg.AlertEmail != "" && !oneAddress(cfg.AlertEmail) {
+			return Settings{}, fmt.Errorf("alert_email must be one email address")
+		}
 	}
 	if in.UsageGateSafeSpend != nil {
 		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend

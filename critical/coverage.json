@@ -2151,7 +2151,7 @@
     {
       "id": "OR-J39-S18",
       "journey": "J39",
-      "name": "A test message goes to the merchant's alert address only: the request cannot name one, and a merchant without one is refused"
+      "name": "A test message goes to the merchant's alert address only, ten an hour: the request cannot name one, and a merchant without one is refused"
     },
     {
       "id": "OR-J39-S19",

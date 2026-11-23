@@ -535,6 +535,16 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, http.StatusConflict, refusal.Status)
 		require.Equal(t, billing.CodeAlertEmailRequired, refusal.Code)
 		require.Len(t, mail.all(), 1)
+		// A merchant sends at most ten tests an hour.
+		for range 9 {
+			_, err := a.alphaRemote.CreateTestMessage(t.Context(), billing.CreateTestMessageParams{EventType: receiptEvent})
+			require.NoError(t, err)
+		}
+		_, err = a.alphaRemote.CreateTestMessage(t.Context(), billing.CreateTestMessageParams{EventType: receiptEvent})
+		require.True(t, errors.As(err, &refusal), "%v", err)
+		require.Equal(t, http.StatusTooManyRequests, refusal.Status)
+		require.Equal(t, billing.CodeRateLimitExceeded, refusal.Code)
+		require.Len(t, mail.all(), 10, "the eleventh test is not sent")
 	})
 	t.Run("OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding", func(t *testing.T) {
 		t.Run("recipient-refused", func(t *testing.T) {
