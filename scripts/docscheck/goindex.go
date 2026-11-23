@@ -3,10 +3,8 @@ package main
 import (
 	"bufio"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"go/types"
-	"io/fs"
 	"regexp"
 	"strings"
 )
@@ -182,11 +180,11 @@ func (x *goIndex) chain(t *goType, rest []string) (string, bool) {
 func (x *goIndex) addGoSource(dirs ...string) error {
 	fset := token.NewFileSet()
 	for _, dir := range dirs {
-		pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.SkipObjectResolution)
+		pkgs, err := parseGoDir(fset, dir)
 		if err != nil {
 			return err
 		}
-		for pkg, p := range pkgs {
+		for pkg, files := range pkgs {
 			add := func(n string) {
 				if x.names[pkg] == nil {
 					x.names[pkg] = map[string]bool{}
@@ -206,7 +204,7 @@ func (x *goIndex) addGoSource(dirs ...string) error {
 				}
 				return t
 			}
-			for _, f := range p.Files {
+			for _, f := range files {
 				for _, decl := range f.Decls {
 					switch d := decl.(type) {
 					case *ast.FuncDecl:

@@ -54,7 +54,7 @@ func fixture(t *testing.T, edits map[string]string) Tree {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := listFiles(dir)
+	files, err := listFiles(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

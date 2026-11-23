@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,18 +32,18 @@ func main() {
 	inventory := flag.Bool("inventory", false, "list the Go identifiers docs/guide.md references")
 	root := flag.String("root", ".", "repository checkout or export to check")
 	flag.Parse()
-	if err := run(*root, *write, *inventory); err != nil {
+	if err := run(context.Background(), *root, *write, *inventory); err != nil {
 		fmt.Fprintln(os.Stderr, "docscheck:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root string, write, inventory bool) error {
-	files, err := listFiles(root)
+func run(ctx context.Context, root string, write, inventory bool) error {
+	files, err := listFiles(ctx, root)
 	if err != nil {
 		return err
 	}
-	idx, err := realIndex(root)
+	idx, err := realIndex(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -74,13 +75,13 @@ func run(root string, write, inventory bool) error {
 
 // listFiles is the checkout's files git does not ignore when root is its
 // top level, else every file under root.
-func listFiles(root string) ([]string, error) {
+func listFiles(ctx context.Context, root string) ([]string, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	if top, err := exec.Command("git", "-C", abs, "rev-parse", "--show-toplevel").Output(); err == nil && strings.TrimSpace(string(top)) == abs {
-		out, err := exec.Command("git", "-C", abs, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output()
+	if top, err := exec.CommandContext(ctx, "git", "-C", abs, "rev-parse", "--show-toplevel").Output(); err == nil && strings.TrimSpace(string(top)) == abs {
+		out, err := exec.CommandContext(ctx, "git", "-C", abs, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output()
 		if err != nil {
 			return nil, err
 		}
@@ -94,17 +95,21 @@ func listFiles(root string) ([]string, error) {
 		}
 		return files, nil
 	}
+	tree, err := os.OpenRoot(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
 	var files []string
-	err = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(tree.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules") {
-			return filepath.SkipDir
+			return fs.SkipDir
 		}
 		if !d.IsDir() {
-			rel, _ := filepath.Rel(abs, p)
-			files = append(files, filepath.ToSlash(rel))
+			files = append(files, p)
 		}
 		return nil
 	})
@@ -113,7 +118,7 @@ func listFiles(root string) ([]string, error) {
 
 var schemaObject = regexp.MustCompile(`^(?:table|view|function|sequence) billing\.([a-z_][a-z0-9_]*)`)
 
-func realIndex(root string) (*Index, error) {
+func realIndex(ctx context.Context, root string) (*Index, error) {
 	idx := &Index{Routes: map[string]bool{}, Codes: map[string]int{}, Permissions: map[string]bool{}, Events: map[string]bool{}, Schema: map[string]map[string]bool{}}
 	for _, r := range routes.Catalog() {
 		p := wildcard.ReplaceAllString(r.Path, "{}")
@@ -136,7 +141,7 @@ func realIndex(root string) (*Index, error) {
 		idx.JSONFields[m[1]] = true
 	}
 	// AuthKit's Go and React names, and billing-ui's exports, are named too.
-	if out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/open-rails/authkit").Output(); err == nil {
+	if out, err := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", "github.com/open-rails/authkit").Output(); err == nil {
 		ak := strings.TrimSpace(string(out))
 		if err := idx.Go.addGoSource(ak, filepath.Join(ak, "auth"), filepath.Join(ak, "userinfo"), filepath.Join(ak, "internal", "config")); err != nil {
 			return nil, err
@@ -203,10 +208,15 @@ func realIndex(root string) (*Index, error) {
 
 // readAll reads every file named name under dir.
 func readAll(dir, name string) []string {
+	tree, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil
+	}
+	defer tree.Close()
 	var out []string
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(tree.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && d.Name() == name {
-			if b, err := os.ReadFile(p); err == nil {
+			if b, err := tree.ReadFile(p); err == nil {
 				out = append(out, string(b))
 			}
 		}

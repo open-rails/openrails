@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -478,19 +477,21 @@ func configStructPaths(root string) (paths, maps map[string]bool, err error) {
 	types := map[string]map[string]*ast.StructType{"": {}, "billing": {}}
 	for pkg, dir := range map[string]string{"": "server/internal/hostconfig", "billing": "internal/config"} {
 		fset := token.NewFileSet()
-		pkgs, err := parser.ParseDir(fset, filepath.Join(root, dir), func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.SkipObjectResolution)
+		pkgs, err := parseGoDir(fset, filepath.Join(root, dir))
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, p := range pkgs {
-			ast.Inspect(p, func(n ast.Node) bool {
-				if ts, ok := n.(*ast.TypeSpec); ok {
-					if st, ok := ts.Type.(*ast.StructType); ok {
-						types[pkg][ts.Name.Name] = st
+		for _, files := range pkgs {
+			for _, f := range files {
+				ast.Inspect(f, func(n ast.Node) bool {
+					if ts, ok := n.(*ast.TypeSpec); ok {
+						if st, ok := ts.Type.(*ast.StructType); ok {
+							types[pkg][ts.Name.Name] = st
+						}
 					}
-				}
-				return true
-			})
+					return true
+				})
+			}
 		}
 	}
 	paths, maps = map[string]bool{}, map[string]bool{}

@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,13 +37,13 @@ type cliTree struct {
 
 func cliCommands(dir string) ([]string, error) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.SkipObjectResolution)
+	pkgs, err := parseGoDir(fset, dir)
 	if err != nil {
 		return nil, err
 	}
 	t := &cliTree{funcs: map[string]*ast.FuncDecl{}}
-	for _, p := range pkgs {
-		for _, f := range p.Files {
+	for _, files := range pkgs {
+		for _, f := range files {
 			for _, d := range f.Decls {
 				if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv == nil && fd.Body != nil {
 					t.funcs[fd.Name.Name] = fd
