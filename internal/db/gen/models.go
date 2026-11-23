@@ -2065,7 +2065,9 @@ type BillingUsageAccrual struct {
 	DayAt time.Time
 	// The start of the pricing period the usage was priced in.
 	PeriodStartsAt time.Time
-	Amount         int64
+	// The end of that pricing period: what the accrual leaves owed is dated before it.
+	PeriodEndsAt time.Time
+	Amount       int64
 	// What the accrual's postings have moved to the ledger; the rest is held until the next posting.
 	PostedAmount int64
 	// How many postings the accrual has made; the next one posts at source_id postings + 1.

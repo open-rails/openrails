@@ -67,8 +67,9 @@ customer's accrual for that currency, UTC day and pricing period
 pass, or earlier, before any other movement of that balance (a top-up or staff
 grant, a credit lot's expiry, revocation or refund, a usage order): one `spend`
 per credit lot it draws and one `owed_accrual` for the rest, owed as of its day
-(the day's end, or the posting if earlier), so the usage order of that period
-bills it. A sync expires the customer's lapsed credit lots before its usage
+(the end of its day and pricing period, or the posting if earlier), so the usage
+order of that period bills it. Usage of a period an order already billed is
+owed from that order's end and billed by the next order. A sync expires the customer's lapsed credit lots before its usage
 accrues: usage never draws a lot that lapsed before it. Until it posts,
 `balance` holds it, so admissions refuse exactly as if it had posted.
 

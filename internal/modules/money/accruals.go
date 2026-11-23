@@ -45,9 +45,9 @@ func postUsageAccrualsHook(ctx context.Context, q *gen.Queries, merchantID, cust
 // postUsageAccrualsTx posts at now what the customer's usage accrued in the
 // currency and the ledger has not taken, oldest day first, drawing the lots
 // live just before liveAt (now when nil); with dueBefore, only the days
-// before it. What a posting leaves owed is dated when its usage occurred, the
-// end of its day or now if earlier, so the usage order of that period bills
-// it. It takes the customer lock only when there is something to post.
+// before it. What a posting leaves owed is dated when its usage occurred
+// (owedAt), so the usage order of that period bills it. It takes the customer
+// lock only when there is something to post.
 func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, liveAt, dueBefore *time.Time, now time.Time) (bool, error) {
 	args := gen.ListUnpostedUsageAccrualsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
 	due := func(rows []gen.BillingUsageAccrual) []gen.BillingUsageAccrual {
@@ -71,6 +71,10 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 	through := now
 	if liveAt != nil && liveAt.Before(now) {
 		through = *liveAt
+	}
+	billed, err := q.LatestUsageOrderEndInCurrency(ctx, gen.LatestUsageOrderEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	if err != nil {
+		return false, err
 	}
 	payer := identity.CustomerID(customer)
 	for _, row := range rows {
@@ -107,7 +111,7 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 		}
 		posting := *s
 		posting.clock = clockwork.NewFakeClockAt(now)
-		posting.posting = &runningChargePosting{through: through, owed: owed, owedAt: earlier(row.DayAt.Add(24*time.Hour-time.Microsecond), now)}
+		posting.posting = &runningChargePosting{through: through, owed: owed, owedAt: owedAt(row, now, billed)}
 		key := MustIdempotencyKey(OpUsageAccrual, usageAccrualSourcePrefix+row.ID.String(), strconv.Itoa(int(row.Postings)+1))
 		_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
 		if err != nil {
@@ -120,10 +124,19 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 	return true, nil
 }
 
-// PostUsageAccruals posts a customer's unposted accruals in a currency of the
-// days before dueBefore (every day when zero), in its own transaction: the
-// day's one deduction.
-func (s *MoneyService) PostUsageAccruals(ctx context.Context, customer uuid.UUID, currency string, dueBefore time.Time) (bool, error) {
+// owedAt dates what an accrual's posting leaves owed: the last instant of its
+// day and pricing period (which can end within the day), or now if earlier,
+// but never before the end of the customer's last usage order there, so late
+// usage lands in a period no order has billed.
+func owedAt(row gen.BillingUsageAccrual, now, billed time.Time) time.Time {
+	at := earlier(earlier(row.DayAt.Add(24*time.Hour-time.Microsecond), row.PeriodEndsAt.Add(-time.Microsecond)), now)
+	return later(at, billed)
+}
+
+// PostUsageAccruals posts at now a customer's unposted accruals in a currency
+// of the days before dueBefore (every day when zero), in its own
+// transaction: the day's one deduction.
+func (s *MoneyService) PostUsageAccruals(ctx context.Context, customer uuid.UUID, currency string, dueBefore, now time.Time) (bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -135,7 +148,7 @@ func (s *MoneyService) PostUsageAccruals(ctx context.Context, customer uuid.UUID
 		if !dueBefore.IsZero() {
 			before = &dueBefore
 		}
-		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, gen.New(tx), mid.UUID(), customer, currency, nil, before, s.now())
+		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, gen.New(tx), mid.UUID(), customer, currency, nil, before, now)
 		return err
 	})
 	return posted, err

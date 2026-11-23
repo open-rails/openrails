@@ -39,7 +39,8 @@ func (w UsageAccrualWorker) DueBy(ctx context.Context, at time.Time) (bool, erro
 }
 
 func (w UsageAccrualWorker) Pass(ctx context.Context) error {
-	today := w.Money.Clock().Now().UTC().Truncate(24 * time.Hour)
+	now := w.Money.Clock().Now().UTC()
+	today := now.Truncate(24 * time.Hour)
 	logger := log.WithContext(ctx).WithField("worker", KindUsageAccruals)
 	args := gen.ListDueUsageAccrualsParams{DayAt: today, RowLimit: usageAccrualBatch}
 	var failed error
@@ -50,7 +51,7 @@ func (w UsageAccrualWorker) Pass(ctx context.Context) error {
 		}
 		for _, row := range due {
 			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage accruals", func(ctx context.Context) error {
-				_, err := w.Money.PostUsageAccruals(ctx, row.CustomerID, row.Currency, today)
+				_, err := w.Money.PostUsageAccruals(ctx, row.CustomerID, row.Currency, today, now)
 				return err
 			})
 			if err != nil {

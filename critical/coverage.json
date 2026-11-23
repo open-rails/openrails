@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 393,
+  "scenario_count": 396,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1672,6 +1672,21 @@
       "id": "OR-J26-S55",
       "journey": "J26",
       "name": "A direct NMI collection refused before dispatch retains nonexecution proof and recovers without duplicate payment"
+    },
+    {
+      "id": "OR-J26-S56",
+      "journey": "J26",
+      "name": "Usage of a billed day reported after its usage order is owed after that order's period and billed by the next order"
+    },
+    {
+      "id": "OR-J26-S57",
+      "journey": "J26",
+      "name": "Usage before a period that ends within a day is owed in that period, not the next one"
+    },
+    {
+      "id": "OR-J26-S58",
+      "journey": "J26",
+      "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
       "id": "OR-J37-S60",

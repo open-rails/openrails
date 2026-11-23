@@ -1021,6 +1021,15 @@
     "OR-J26-S55": [
       "TestNMICollectionRefusal/OR-J26-S55/a-never-sent-collection-retains-its-proof"
     ],
+    "OR-J26-S56": [
+      "TestUsageBillingContracts/OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order"
+    ],
+    "OR-J26-S57": [
+      "TestUsageBillingContracts/OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it"
+    ],
+    "OR-J26-S58": [
+      "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],

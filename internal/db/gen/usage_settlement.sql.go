@@ -72,7 +72,7 @@ func (q *Queries) GetFirstPostingSince(ctx context.Context, arg GetFirstPostingS
 }
 
 const getUsageAccrual = `-- name: GetUsageAccrual :one
-SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
+SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND day_at = $4::timestamptz
   AND period_starts_at = $5::timestamptz
@@ -102,6 +102,7 @@ func (q *Queries) GetUsageAccrual(ctx context.Context, arg GetUsageAccrualParams
 		&i.Currency,
 		&i.DayAt,
 		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.Amount,
 		&i.PostedAmount,
 		&i.Postings,
@@ -114,10 +115,10 @@ func (q *Queries) GetUsageAccrual(ctx context.Context, arg GetUsageAccrualParams
 }
 
 const insertUsageAccrual = `-- name: InsertUsageAccrual :one
-INSERT INTO billing.usage_accruals (merchant_id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, created_at, updated_at)
+INSERT INTO billing.usage_accruals (merchant_id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, created_at, updated_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
-    $5::timestamptz, $6::bigint, 0, 0, $7::jsonb, $8::timestamptz, $8::timestamptz)
-RETURNING merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at
+    $5::timestamptz, $6::timestamptz, $7::bigint, 0, 0, $8::jsonb, $9::timestamptz, $9::timestamptz)
+RETURNING merchant_id, id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at
 `
 
 type InsertUsageAccrualParams struct {
@@ -126,6 +127,7 @@ type InsertUsageAccrualParams struct {
 	Currency       string
 	DayAt          time.Time
 	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 	Amount         int64
 	Lines          []byte
 	Now            time.Time
@@ -138,6 +140,7 @@ func (q *Queries) InsertUsageAccrual(ctx context.Context, arg InsertUsageAccrual
 		arg.Currency,
 		arg.DayAt,
 		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 		arg.Amount,
 		arg.Lines,
 		arg.Now,
@@ -150,6 +153,7 @@ func (q *Queries) InsertUsageAccrual(ctx context.Context, arg InsertUsageAccrual
 		&i.Currency,
 		&i.DayAt,
 		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.Amount,
 		&i.PostedAmount,
 		&i.Postings,
@@ -222,7 +226,7 @@ func (q *Queries) ListDueUsageAccruals(ctx context.Context, arg ListDueUsageAccr
 }
 
 const listUnpostedUsageAccruals = `-- name: ListUnpostedUsageAccruals :many
-SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
+SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND amount > posted_amount
 ORDER BY day_at, period_starts_at, id
@@ -252,6 +256,7 @@ func (q *Queries) ListUnpostedUsageAccruals(ctx context.Context, arg ListUnposte
 			&i.Currency,
 			&i.DayAt,
 			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
 			&i.Amount,
 			&i.PostedAmount,
 			&i.Postings,
@@ -271,7 +276,7 @@ func (q *Queries) ListUnpostedUsageAccruals(ctx context.Context, arg ListUnposte
 }
 
 const listUsageAccrualsByIDs = `-- name: ListUsageAccrualsByIDs :many
-SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
+SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND id = ANY($3::uuid[])
 `
@@ -298,6 +303,7 @@ func (q *Queries) ListUsageAccrualsByIDs(ctx context.Context, arg ListUsageAccru
 			&i.Currency,
 			&i.DayAt,
 			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
 			&i.Amount,
 			&i.PostedAmount,
 			&i.Postings,
@@ -318,7 +324,7 @@ func (q *Queries) ListUsageAccrualsByIDs(ctx context.Context, arg ListUsageAccru
 
 const lockUsageAccrual = `-- name: LockUsageAccrual :one
 
-SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
+SELECT merchant_id, id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, posted_at, created_at, updated_at FROM billing.usage_accruals
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND day_at = $4::timestamptz
   AND period_starts_at = $5::timestamptz
@@ -351,6 +357,7 @@ func (q *Queries) LockUsageAccrual(ctx context.Context, arg LockUsageAccrualPara
 		&i.Currency,
 		&i.DayAt,
 		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.Amount,
 		&i.PostedAmount,
 		&i.Postings,

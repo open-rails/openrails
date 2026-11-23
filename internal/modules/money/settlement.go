@@ -114,9 +114,10 @@ type UsageBatch struct {
 }
 
 type pricedItem struct {
-	occurred time.Time
-	period   time.Time
-	charges  []itemCharge
+	occurred  time.Time
+	period    time.Time
+	periodEnd time.Time
+	charges   []itemCharge
 	// units are what the item counts toward each named-unit limit whose
 	// rate cards read it.
 	units map[string]int64
@@ -279,11 +280,11 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		if b.Results[i].Err != nil {
 			continue
 		}
-		period, err := anchors[account{it.Customer.UUID(), it.Currency}].start(it.OccurredAt)
+		period, periodEnd, err := anchors[account{it.Customer.UUID(), it.Currency}].period(it.OccurredAt)
 		if err != nil {
 			return nil, err
 		}
-		b.priced[i] = pricedItem{occurred: it.OccurredAt, period: period, units: map[string]int64{}}
+		b.priced[i] = pricedItem{occurred: it.OccurredAt, period: period, periodEnd: periodEnd, units: map[string]int64{}}
 		if it.Failed {
 			continue
 		}
@@ -502,8 +503,9 @@ func (s *MoneyService) accrueTx(ctx context.Context, q *gen.Queries, merchantID 
 		period   time.Time
 	}
 	type sum struct {
-		amount int64
-		lines  map[[2]string]*AccrualLine
+		amount    int64
+		periodEnd time.Time
+		lines     map[[2]string]*AccrualLine
 	}
 	sums := map[key]*sum{}
 	var keys []key
@@ -515,7 +517,7 @@ func (s *MoneyService) accrueTx(ctx context.Context, q *gen.Queries, merchantID 
 		k := key{it.Customer.UUID(), it.Currency, dayOf(p.occurred), p.period}
 		acc := sums[k]
 		if acc == nil {
-			acc = &sum{lines: map[[2]string]*AccrualLine{}}
+			acc = &sum{periodEnd: p.periodEnd, lines: map[[2]string]*AccrualLine{}}
 			sums[k] = acc
 			keys = append(keys, k)
 		}
@@ -563,7 +565,7 @@ func (s *MoneyService) accrueTx(ctx context.Context, q *gen.Queries, merchantID 
 		}
 		if !found {
 			if _, err := q.InsertUsageAccrual(ctx, gen.InsertUsageAccrualParams{MerchantID: merchantID, CustomerID: k.customer, Currency: k.currency,
-				DayAt: k.day, PeriodStartsAt: k.period, Amount: acc.amount, Lines: encoded, Now: b.now}); err != nil {
+				DayAt: k.day, PeriodStartsAt: k.period, PeriodEndsAt: acc.periodEnd, Amount: acc.amount, Lines: encoded, Now: b.now}); err != nil {
 				return err
 			}
 		} else if err := q.AddToUsageAccrual(ctx, gen.AddToUsageAccrualParams{Amount: addSat(row.Amount, acc.amount), Lines: encoded, Now: b.now, MerchantID: merchantID, ID: row.ID}); err != nil {
@@ -905,6 +907,25 @@ type periodAnchor struct {
 
 func (p periodAnchor) start(at time.Time) (time.Time, error) {
 	return CurrentBillingPeriodStart(at, p.anchor, p.boundary)
+}
+
+// period is the period at falls in, as PricingPeriod cuts it.
+func (p periodAnchor) period(at time.Time) (time.Time, time.Time, error) {
+	start, err := p.start(at)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	switch merchantconfig.NormalizeBillingBoundary(p.boundary) {
+	case BillingBoundaryCalendarMonth:
+		return start, start.AddDate(0, 1, 0), nil
+	case BillingBoundaryFixedInterval:
+		return start, start.Add(fixedBillingInterval), nil
+	}
+	anchor := p.anchor
+	if anchor.IsZero() {
+		anchor = time.Unix(0, 0).UTC()
+	}
+	return start, NextUsageBillingDate(start, anchor), nil
 }
 
 // periodAnchorFor is usagePeriodStart's anchor and boundary, read once per

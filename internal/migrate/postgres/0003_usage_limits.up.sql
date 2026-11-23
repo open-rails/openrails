@@ -294,6 +294,7 @@ CREATE TABLE billing.usage_accruals (
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     day_at timestamptz NOT NULL CHECK (day_at = date_trunc('day', day_at, 'UTC')),
     period_starts_at timestamptz NOT NULL,
+    period_ends_at timestamptz NOT NULL,
     amount bigint NOT NULL CHECK (amount >= 0),
     posted_amount bigint NOT NULL CHECK (posted_amount >= 0),
     postings integer NOT NULL CHECK (postings >= 0),
@@ -303,12 +304,14 @@ CREATE TABLE billing.usage_accruals (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT usage_accruals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
+    CONSTRAINT usage_accruals_period_ends_at_check CHECK (period_ends_at > period_starts_at),
     CONSTRAINT usage_accruals_posted_within_amount_check CHECK (posted_amount <= amount),
     CONSTRAINT usage_accruals_posted_at_check CHECK ((posted_at IS NULL) = (postings = 0))
 );
 COMMENT ON TABLE billing.usage_accruals IS 'What one customer''s usage charged in one currency on one UTC day of one pricing period. It posts to the ledger after its day ends, or before any other movement of the customer''s balance in the currency: one credit_spend per lot drawn and one owed_accrual for the rest, at (usage_accrual, usage_accrual:<id>, <posting>). Until posted, the balance holds amount - posted_amount. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.usage_accruals.day_at IS 'The start of the UTC day the usage occurred.';
 COMMENT ON COLUMN billing.usage_accruals.period_starts_at IS 'The start of the pricing period the usage was priced in.';
+COMMENT ON COLUMN billing.usage_accruals.period_ends_at IS 'The end of that pricing period: what the accrual leaves owed is dated before it.';
 COMMENT ON COLUMN billing.usage_accruals.posted_amount IS 'What the accrual''s postings have moved to the ledger; the rest is held until the next posting.';
 COMMENT ON COLUMN billing.usage_accruals.postings IS 'How many postings the accrual has made; the next one posts at source_id postings + 1.';
 COMMENT ON COLUMN billing.usage_accruals.lines IS 'What the accrual is for, per meter and cell: [{meter_key, cell, requests, quantity, amount, posted_amount}].';

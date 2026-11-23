@@ -34,12 +34,12 @@ var (
 	ErrPaymentExceedsDue     = errors.New("payment amount exceeds what the usage order has due")
 )
 
-// FinalizeUsage closes [from, to) for one payer and currency: the window's
-// pending owed charges, usage priced when it was recorded included, are
-// billed as one usage order, due after the payer's net terms. A second close
-// of the same window answers the first order. Nil when the window billed
-// nothing.
-func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*gen.BillingOrder, error) {
+// FinalizeUsage closes [from, to) for one payer and currency at now, the
+// caller's clock: the window's pending owed charges, usage priced when it was
+// recorded included, are billed as one usage order, due after the payer's net
+// terms. A second close of the same window answers the first order. Nil when
+// the window billed nothing.
+func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to, now time.Time) (*gen.BillingOrder, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -65,7 +65,7 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 	var out *gen.BillingOrder
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to, s.now())
+		out, err = s.finalizeUsageTx(ctx, s.db.NewWithPgxTx(tx), payer, cur, from, to, instant(now))
 		return err
 	})
 	return out, err

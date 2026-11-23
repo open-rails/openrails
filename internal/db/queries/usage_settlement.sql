@@ -9,9 +9,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 FOR UPDATE;
 
 -- name: InsertUsageAccrual :one
-INSERT INTO billing.usage_accruals (merchant_id, customer_id, currency, day_at, period_starts_at, amount, posted_amount, postings, lines, created_at, updated_at)
+INSERT INTO billing.usage_accruals (merchant_id, customer_id, currency, day_at, period_starts_at, period_ends_at, amount, posted_amount, postings, lines, created_at, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(day_at)::timestamptz,
-    sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(amount)::bigint, 0, 0, sqlc.arg(lines)::jsonb, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
+    sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(amount)::bigint, 0, 0, sqlc.arg(lines)::jsonb, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
 RETURNING *;
 
 -- name: AddToUsageAccrual :exec

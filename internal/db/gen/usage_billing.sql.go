@@ -200,6 +200,27 @@ func (q *Queries) LatestUsageOrderEnd(ctx context.Context, arg LatestUsageOrderE
 	return period_end, err
 }
 
+const latestUsageOrderEndInCurrency = `-- name: LatestUsageOrderEndInCurrency :one
+SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
+WHERE merchant_id=$1::uuid AND customer_id=$2::uuid
+    AND currency=$3::text AND origin='usage'
+`
+
+type LatestUsageOrderEndInCurrencyParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Where the customer's usage orders in the currency end: owed dated before
+// it would fall in a period an order already billed.
+func (q *Queries) LatestUsageOrderEndInCurrency(ctx context.Context, arg LatestUsageOrderEndInCurrencyParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, latestUsageOrderEndInCurrency, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var period_end time.Time
+	err := row.Scan(&period_end)
+	return period_end, err
+}
+
 const listCustomerUsageBilling = `-- name: ListCustomerUsageBilling :many
 SELECT customer_id, currency, usage_billing_anchor, usage_next_bill_at, usage_minimum_invoice_amount
 FROM billing.money_settings
