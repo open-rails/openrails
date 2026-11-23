@@ -166,7 +166,7 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 			return err
 		}
 		if created && receipt {
-			if err := scoped.queueRefundReceipt(ctx, refund); err != nil {
+			if err := scoped.queueRefundReceipt(ctx, refund, true); err != nil {
 				return err
 			}
 		}
@@ -370,7 +370,7 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 		if result, err = scoped.GetByID(ctx, reservationID); err != nil {
 			return err
 		}
-		return scoped.queueRefundReceipt(ctx, result)
+		return scoped.queueRefundReceipt(ctx, result, false)
 	})
 	return result, err
 }

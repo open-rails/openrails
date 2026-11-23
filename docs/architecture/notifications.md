@@ -106,8 +106,9 @@ for the confirmation: `CancelMembershipTx` (`CancelMembershipParams.EndedReason`
 `admin` for staff, `refund` for a refund), `FailMembership` (`expired` or
 `non_recoverable` when a decline ends the subscription) and `ExpireAwaitingMethod`
 (`expired`); the converge `notifyPass` records `access_ended`. `refund_completed`
-is written by `PaymentService.queueRefundReceipt` where a refund settles, within
-`RefundReceiptWindow` (seven days) of the provider's refund time, with `voided` for
+is written by `PaymentService.queueRefundReceipt` where a refund settles (one
+the provider reported only within `RefundReceiptWindow`, seven days of its
+refund time), with `voided` for
 a reversal `VoidTransactionID` names. `premium_started` carries the first period
 and, when charged, the amount (`membershipCharge`).
 
@@ -331,7 +332,7 @@ Checks:
   S16 (the log route), S17 (preview), S18 (test send and its cap), S19 (SMTP
   refusals through helpers/smtp), S20 (a last attempt cut off mid-send), S21 (a
   declined checkout), S22 (a refund found late), S23 (a void), S24 (the
-  subscription receipt). `internal/modules/messages` has unit tests of
+  subscription receipt), S25 (a staff refund completed late). `internal/modules/messages` has unit tests of
   rendering, defaults, `Check`, template bounds and type checks, and `refusalOf`.
 - Inbox: OR-J31-S40 (adoption export ordering). `TestAccountNotificationChannel`
   and `TestOrderNotificationRecovery` (`critical/account_notifications_test.go`)

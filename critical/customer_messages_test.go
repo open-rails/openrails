@@ -734,6 +734,42 @@ func TestCustomerMessages(t *testing.T) {
 		require.Contains(t, receipt.Text, "Amount paid: 10.00 USD\nBilling period: "+day(sub.CurrentPeriodStartsAt)+" to "+day(sub.CurrentPeriodEndsAt))
 		require.Contains(t, receipt.HTML, "<strong>10.00 USD</strong>")
 	})
+	t.Run("OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-late-by-staff"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		payment := *order.Payment.PaymentID
+		// The provider refunds, but its answer is lost: the refund completes
+		// only when recovery finds it, eight days later.
+		p.mu.Lock()
+		p.lostRefundResponse = true
+		p.mu.Unlock()
+		_, _ = a.alpha.RefundPayment(t.Context(), "refund-completed-late", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Customer asked"})
+		p.mu.Lock()
+		p.lostRefundResponse = false
+		p.mu.Unlock()
+		a.clock.Advance(8 * 24 * time.Hour)
+		fleet := undispatchedFleet(t, a.world)
+		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
+		require.NoError(t, err)
+		for _, job := range jobs.Jobs {
+			if job.State != rivertype.JobStateCompleted && job.State != rivertype.JobStateRunning {
+				_, err = fleet.JobRetry(t.Context(), job.ID)
+				require.NoError(t, err)
+			}
+		}
+		require.Eventually(t, func() bool {
+			read, err := a.alpha.GetPayment(t.Context(), payment)
+			return err == nil && read.AmountRefunded == 10_000_000
+		}, 30*time.Second, 20*time.Millisecond, "recovery completes the staff refund")
+		liveMoney(t, a.world)
+		dispatchMessages(t, fleet)
+		receipt := sentAbout(t, a, mail, "refund_completed", "Your refund from Alpha")
+		require.Contains(t, receipt.Text, "We refunded 10.00 USD")
+	})
 }
 
 // declareMessages gives alpha the messages document s.

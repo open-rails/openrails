@@ -1397,6 +1397,9 @@
     ],
     "OR-J39-S24": [
       "TestCustomerMessages/OR-J39-S24/a-subscriptions-first-payment-sends-its-receipt"
+    ],
+    "OR-J39-S25": [
+      "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ]
   }
 }

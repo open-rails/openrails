@@ -2182,6 +2182,11 @@
       "id": "OR-J39-S24",
       "journey": "J39",
       "name": "A subscription's first payment sends its receipt: the amount paid and the billing period"
+    },
+    {
+      "id": "OR-J39-S25",
+      "journey": "J39",
+      "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
     }
   ]
 }

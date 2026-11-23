@@ -15,9 +15,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// RefundReceiptWindow is how recent a refund must be, by the provider's
-// time, for its receipt: one found later (a backfill, a late refresh) is old
-// news to the customer.
+// RefundReceiptWindow is how recent a refund the provider reported must be,
+// by its time, for its receipt: one found later (a backfill, a late refresh)
+// is old news to the customer.
 const RefundReceiptWindow = 7 * 24 * time.Hour
 
 // voidPrefix marks the reversal a void records: a void is a refund of the
@@ -31,10 +31,11 @@ func VoidTransactionID(transactionID string) string { return voidPrefix + transa
 // queueRefundReceipt records refund's refund_completed fact in the
 // transaction that settles it. Its id is the refund's, so it is written once
 // however often the settlement is replayed. A chargeback or dispute reversal
-// has none, nor a refund older than RefundReceiptWindow.
-func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.Payment) error {
+// has none, nor a refund the provider reported (reported) older than
+// RefundReceiptWindow. A refund OpenRails completes always has one.
+func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.Payment, reported bool) error {
 	if refund.ReversalKind == nil || *refund.ReversalKind != ReversalRefund || refund.RefundedPaymentID == nil ||
-		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) || s.now().Sub(refund.PurchasedAt) > RefundReceiptWindow {
+		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) || reported && s.now().Sub(refund.PurchasedAt) > RefundReceiptWindow {
 		return nil
 	}
 	mid, err := merchant.Require(ctx)
