@@ -50,7 +50,7 @@ pkg openrails, method (*Client) CreatePSPImport(context.Context, billing.CreateP
 pkg openrails, method (*Client) CreatePrice(context.Context, billing.CreatePriceParams) (*billing.Price, error)
 pkg openrails, method (*Client) CreatePriceMigration(context.Context, billing.CreatePriceMigrationParams) (*billing.PriceMigration, error)
 pkg openrails, method (*Client) CreateProduct(context.Context, billing.CreateProductParams) (*billing.Product, error)
-pkg openrails, method (*Client) CreateProductAccess(context.Context, string, billing.CreateProductAccessBatchParams) ([]billing.ProductAccessGrant, error)
+pkg openrails, method (*Client) CreateProductAccess(context.Context, string, []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error)
 pkg openrails, method (*Client) CreateProviderPrice(context.Context, billing.CreateProviderPriceParams) (*billing.Price, error)
 pkg openrails, method (*Client) CreateProvisioningToken(context.Context, billing.CreateProvisioningTokenParams) (*billing.CreatedProvisioningToken, error)
 pkg openrails, method (*Client) CustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
@@ -67,7 +67,7 @@ pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.Exte
 pkg openrails, method (*Client) GetAccessTenure(context.Context, billing.CustomerID, billing.AccessTenureParams) (*billing.AccessTenure, error)
 pkg openrails, method (*Client) GetAdminAccess(context.Context) (*billing.AdminAccess, error)
 pkg openrails, method (*Client) GetAdmission(context.Context, string) (*billing.Admission, error)
-pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, string) (*billing.Balance, error)
+pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, billing.GetBalanceParams) (*billing.Balance, error)
 pkg openrails, method (*Client) GetCreditGrant(context.Context, billing.CreditGrantID) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) GetCustomer(context.Context, billing.CustomerID) (*billing.Customer, error)
 pkg openrails, method (*Client) GetDashboard(context.Context) (*billing.Dashboard, error)
@@ -98,7 +98,7 @@ pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.Alert
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams) (*billing.ListPage[billing.CreditGrant], error)
 pkg openrails, method (*Client) ListCustodians(context.Context) (*billing.ListPage[billing.Custodian], error)
-pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.CustomerID) (*billing.ListPage[billing.CustomerLimit], error)
+pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.CustomerLimitListParams) (*billing.ListPage[billing.CustomerLimit], error)
 pkg openrails, method (*Client) ListCustomers(context.Context, billing.CustomerListParams) (*billing.ListPage[billing.Customer], error)
 pkg openrails, method (*Client) ListDestructiveHolds(context.Context, billing.DestructiveHoldListParams) (*billing.ListPage[billing.DestructiveHold], error)
 pkg openrails, method (*Client) ListEntitlements(context.Context, billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error)
@@ -1162,6 +1162,7 @@ pkg openrails/billing, method (*StatusError) Is(error) bool
 pkg openrails/billing, method (*SubscriptionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (AdmissionResult) Err() error
 pkg openrails/billing, method (AdmissionVerdict) Allowed() bool
+pkg openrails/billing, method (AdmitBatchParams) Validate() error
 pkg openrails/billing, method (AlertWebhookID) IsZero() bool
 pkg openrails/billing, method (AlertWebhookID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (AlertWebhookID) String() string
@@ -1170,6 +1171,7 @@ pkg openrails/billing, method (BalanceTransactionID) IsZero() bool
 pkg openrails/billing, method (BalanceTransactionID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (BalanceTransactionID) String() string
 pkg openrails/billing, method (BalanceTransactionID) UUID() uuid.UUID
+pkg openrails/billing, method (CaptureAdmissionBatchParams) Validate() error
 pkg openrails/billing, method (CaptureResult) Err() error
 pkg openrails/billing, method (Card) Format(fmt.State, rune)
 pkg openrails/billing, method (Card) GoString() string
@@ -1197,6 +1199,7 @@ pkg openrails/billing, method (DestructiveHoldID) IsZero() bool
 pkg openrails/billing, method (DestructiveHoldID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (DestructiveHoldID) String() string
 pkg openrails/billing, method (DestructiveHoldID) UUID() uuid.UUID
+pkg openrails/billing, method (ExtendAdmissionBatchParams) Validate() error
 pkg openrails/billing, method (FindingID) IsZero() bool
 pkg openrails/billing, method (FindingID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (FindingID) String() string
@@ -1291,6 +1294,7 @@ pkg openrails/billing, method (ProvisioningTokenID) IsZero() bool
 pkg openrails/billing, method (ProvisioningTokenID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (ProvisioningTokenID) String() string
 pkg openrails/billing, method (ProvisioningTokenID) UUID() uuid.UUID
+pkg openrails/billing, method (ReleaseAdmissionBatchParams) Validate() error
 pkg openrails/billing, method (RenewalID) IsZero() bool
 pkg openrails/billing, method (RenewalID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (RenewalID) String() string

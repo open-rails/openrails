@@ -5611,7 +5611,7 @@
           "admin"
         ],
         "operationId": "UpdateCustomer",
-        "description": "UpdateCustomer changes one customer's settings, only the fields params names, and returns its ID and saved settings; a customer not billed yet is created.",
+        "description": "UpdateCustomer changes one customer's settings, only the fields params names, and returns its ID and saved settings; a customer not billed yet is created. Its authority is the route's permission; no recent sign-in is asked for.",
         "parameters": [
           {
             "name": "customer_id",

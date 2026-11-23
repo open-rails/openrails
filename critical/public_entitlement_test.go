@@ -33,7 +33,7 @@ func publicGrant(t *testing.T, a *authorityWorld, key string, hours int) billing
 	t.Helper()
 	product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: []string{"library:read"}})
 	require.NoError(t, err)
-	grants, err := a.alphaRemote.CreateProductAccess(t.Context(), key, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), ProductID: product.ID, Hours: ptr(hours), Reason: billing.GrantReasonComp}}})
+	grants, err := a.alphaRemote.CreateProductAccess(t.Context(), key, []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), ProductID: product.ID, Hours: ptr(hours), Reason: billing.GrantReasonComp}})
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
 	require.Equal(t, product.ID, grants[0].ProductID)
@@ -70,7 +70,7 @@ func TestPublicEntitlements(t *testing.T) {
 		}
 		publicAccess(t, a, start.Add(36*time.Hour), false)
 		a.clock.Advance(24 * time.Hour)
-		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: order.CustomerID, Entitlements: []string{"library:read"}})
+		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), order.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}})
 		require.NoError(t, err)
 		require.EqualValues(t, 129600, tenure.Seconds["library:read"], "36 hours, not the sum of two overlapping 24-hour sources")
 	})
@@ -151,12 +151,12 @@ func TestPublicEntitlements(t *testing.T) {
 			at      time.Time
 			seconds int64
 		}{{grant.StartsAt, 0}, {grant.StartsAt.Add(3 * time.Hour), 10800}, {*grant.EndsAt, 21600}} {
-			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
+			tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read", "never:granted"}, At: sample.at})
 			require.NoError(t, err)
 			require.Equal(t, sample.seconds, tenure.Seconds["library:read"])
 			require.Zero(t, tenure.Seconds["never:granted"])
 		}
-		_, err := a.alphaRemote.GetAccessTenure(t.Context(), billing.AccessTenureParams{CustomerID: grant.CustomerID, Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
+		_, err := a.alphaRemote.GetAccessTenure(t.Context(), grant.CustomerID, billing.AccessTenureParams{Entitlements: []string{"library:read"}, At: a.clock.Now().Add(time.Hour)})
 		require.ErrorIs(t, err, billing.ErrInvalid)
 	})
 	t.Run("OR-J27-S04/archive-and-refund-obey-explicit-access-policy", func(t *testing.T) {
@@ -429,7 +429,7 @@ func TestSubscriptionAccessBoundary(t *testing.T) {
 			windows = append(windows, window)
 		}
 		// A manual grant overlaps the same product; it must survive the subscription closure.
-		grants, err := a.alpha.CreateProductAccess(t.Context(), "unrelated-source", billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, EndsAt: &end, Reason: billing.GrantReasonComp}}})
+		grants, err := a.alpha.CreateProductAccess(t.Context(), "unrelated-source", []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, EndsAt: &end, Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		require.Len(t, grants, 1)
 		var before string

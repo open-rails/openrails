@@ -748,3 +748,14 @@ func (g *Gate) releaseRemote(ctx context.Context, t *Ticket) error {
 	}
 	return results[0].Err()
 }
+
+// normalizeCurrency is the server's spelling of a currency or unit code, so
+// the gate's local accounts match its own: a qualified unit keeps its exact
+// spelling.
+func normalizeCurrency(currency string) string {
+	currency = strings.TrimSpace(currency)
+	if strings.ContainsAny(currency, ":/") {
+		return currency // a qualified unit keeps its exact spelling
+	}
+	return strings.ToUpper(currency)
+}

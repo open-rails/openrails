@@ -62,7 +62,7 @@ func limitProduct(t *testing.T, client *openrails.Client, key string) billing.Pr
 
 func grantLimitProduct(t *testing.T, client *openrails.Client, customer billing.CustomerID, key string, hours int) billing.ProductAccessGrant {
 	t.Helper()
-	granted, err := client.CreateProductAccess(t.Context(), uuid.NewString(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: limitProduct(t, client, key), Hours: ptr(hours), Reason: billing.GrantReasonComp}}})
+	granted, err := client.CreateProductAccess(t.Context(), uuid.NewString(), []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: limitProduct(t, client, key), Hours: ptr(hours), Reason: billing.GrantReasonComp}})
 	require.NoError(t, err)
 	require.Len(t, granted, 1)
 	return granted[0]
@@ -70,7 +70,7 @@ func grantLimitProduct(t *testing.T, client *openrails.Client, customer billing.
 
 func customerLimit(t *testing.T, client *openrails.Client, customer billing.CustomerID, key string) billing.CustomerLimit {
 	t.Helper()
-	page, err := client.ListCustomerLimits(t.Context(), customer)
+	page, err := client.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 	require.NoError(t, err)
 	require.Empty(t, page.Next, "one page holds every limit")
 	for _, line := range page.Items {
@@ -86,7 +86,7 @@ func customerLimit(t *testing.T, client *openrails.Client, customer billing.Cust
 
 func mustLimits(t *testing.T, client *openrails.Client, customer billing.CustomerID) []billing.CustomerLimit {
 	t.Helper()
-	page, err := client.ListCustomerLimits(t.Context(), customer)
+	page, err := client.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 	require.NoError(t, err)
 	return page.Items
 }
@@ -210,17 +210,17 @@ func TestUsageLimits(t *testing.T) {
 		w := newWorld(t)
 		applyLimits(t, w.alpha, limitsCatalog)
 		customer := billing.CustomerID(uuid.New())
-		none, err := w.alpha.ListCustomerLimits(t.Context(), customer)
+		none, err := w.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.Empty(t, limitKeys(none.Items), "a customer no product or override gives capacity is subject to no limit")
 		boosted := billing.CustomerID(uuid.New())
 		grantLimitProduct(t, w.alpha, boosted, "boost", 24)
-		only, err := w.alpha.ListCustomerLimits(t.Context(), boosted)
+		only, err := w.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: boosted})
 		require.NoError(t, err)
 		require.Equal(t, []string{"weekly"}, limitKeys(only.Items), "a customer is subject only to the limits it is granted")
 		pro := grantLimitProduct(t, w.alpha, customer, "pro", 24*30)
 		grantLimitProduct(t, w.alpha, customer, "boost", 24)
-		page, err := w.alpha.ListCustomerLimits(t.Context(), customer)
+		page, err := w.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.Equal(t, []string{"five_hour", "weekly"}, limitKeys(page.Items), "every limit the customer is granted, by key")
 		weekly := customerLimit(t, w.alpha, customer, "weekly")
@@ -230,7 +230,7 @@ func TestUsageLimits(t *testing.T) {
 		w.clock.Advance(25 * time.Hour)
 		require.EqualValues(t, 5000, customerLimit(t, w.alpha, customer, "weekly").Capacity, "a lapsed product gives nothing")
 		require.NoError(t, w.alpha.RevokeProductAccess(t.Context(), pro.ID, billing.RevokeProductAccessParams{Reason: "plan ended"}))
-		ended, err := w.alpha.ListCustomerLimits(t.Context(), customer)
+		ended, err := w.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.Empty(t, limitKeys(ended.Items), "a revoked product gives nothing, and leaves the customer subject to no limit")
 		other := billing.CustomerID(uuid.New())
@@ -351,7 +351,7 @@ products:
 		require.NoError(t, err)
 		require.EqualValues(t, 5100, customerLimit(t, a.alphaRemote, alice, "weekly").Capacity)
 
-		foreign, err := a.betaRemote.ListCustomerLimits(t.Context(), alice)
+		foreign, err := a.betaRemote.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: alice})
 		require.NoError(t, err)
 		require.Empty(t, foreign.Items, "another merchant's products and adjustments count nowhere else")
 		grantLimitProduct(t, a.betaRemote, alice, "basic", 24*30)
@@ -392,7 +392,7 @@ products:
 		grantLimitProduct(t, a.alphaRemote, alice, "pro", 24*30)
 		_, err := a.alphaRemote.AdjustCustomerLimit(t.Context(), alice, billing.AdjustLimitParams{Limit: "weekly", Amount: 250, SourceID: "adjust-12"})
 		require.NoError(t, err)
-		staff, err := a.alphaRemote.ListCustomerLimits(t.Context(), alice)
+		staff, err := a.alphaRemote.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: alice})
 		require.NoError(t, err)
 
 		status, raw := a.request(t, http.MethodGet, "/v1/me/limits", a.aliceToken, nil)

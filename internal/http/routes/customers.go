@@ -21,7 +21,8 @@ var customersRoutes = []Route{
 	{Method: PATCH, Path: "/v1/admin/customers/{customer_id}", Group: Admin, Auth: AuthMerchant, Name: "UpdateCustomer", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Args: []any{billing.CustomerID{}},
 		Doc: "UpdateCustomer changes one customer's settings, only the fields params names, and returns its ID and " +
-			"saved settings; a customer not billed yet is created.",
+			"saved settings; a customer not billed yet is created. Its authority is the route's permission; no " +
+			"recent sign-in is asked for.",
 		Request: billing.UpdateCustomerParams{}, Responses: []Reply{{200, billing.CustomerSettingsResult{}}},
 		Errors: withCustomer("billing_policy_not_found", "currency_unsupported", "invalid_param", billing.CodeLimitNotFound, "service_unavailable"), Handler: h(handlers.UpdateCustomer)},
 }

@@ -198,7 +198,7 @@ func TestDueWork(t *testing.T) {
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)
 		grant := func(key string) error {
-			_, err := w.alpha.CreateProductAccess(t.Context(), key, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24), Reason: billing.GrantReasonComp}}})
+			_, err := w.alpha.CreateProductAccess(t.Context(), key, []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24), Reason: billing.GrantReasonComp}})
 			return err
 		}
 		restore := storageFault(t, w, w.schema, "river_job", "NEW.kind = 'openrails.customer_converge'")
@@ -215,7 +215,7 @@ func TestDueWork(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)
-		granted, err := w.alpha.CreateProductAccess(t.Context(), "comp", billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 30), Reason: billing.GrantReasonComp}}})
+		granted, err := w.alpha.CreateProductAccess(t.Context(), "comp", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 30), Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
@@ -230,7 +230,7 @@ func TestDueWork(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pass", DisplayName: "Day pass", Entitlements: []string{"pass:day"}})
 		require.NoError(t, err)
-		_, err = w.alpha.CreateProductAccess(t.Context(), "pass", billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(1), Reason: billing.GrantReasonComp}}})
+		_, err = w.alpha.CreateProductAccess(t.Context(), "pass", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(1), Reason: billing.GrantReasonComp}})
 		require.NoError(t, err)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()

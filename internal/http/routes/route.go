@@ -3,9 +3,10 @@
 //
 // Every route is declared once, as a Route in its resource's file. The
 // declaration mounts the route (its gates are built from it), and generates
-// api/openapi.json, the TypeScript wire types of billing-ui and the admin
-// console, and the route tables under docs/api (go run ./scripts/contracts
-// -write). A route that is not in the catalog cannot be mounted.
+// the Go Client's method (client_gen.go), api/openapi.json, the TypeScript
+// wire types of billing-ui and the admin console, and the route tables under
+// docs/api (go run ./scripts/contracts -write). A route that is not in the
+// catalog cannot be mounted.
 package routes
 
 //go:generate go run ../../../scripts/contracts -write

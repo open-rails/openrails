@@ -5,9 +5,9 @@
       "const (\n\tQueueBilling   = riverjobs.QueueBilling\n\tQueuePSPImport = riverjobs.QueuePSPImport\n)",
       "const DefaultEntitlementCheckMaxAge = 2 * time.Minute",
       "func (c *Client) ActingFor(invoker auth.Invoker) (*Client, error)",
-      "func (c *Client) AdjustCustomerLimit(ctx context.Context, customer billing.CustomerID, params billing.AdjustLimitParams) (*billing.CustomerLimit, error)",
-      "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
-      "func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error)",
+      "func (c *Client) AdjustCustomerLimit(ctx context.Context, customerID billing.CustomerID, params billing.AdjustLimitParams) (*billing.CustomerLimit, error)",
+      "func (c *Client) Admit(ctx context.Context, items []billing.AdmitParams) ([]billing.AdmissionVerdict, error)",
+      "func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error)",
       "func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error)",
       "func (c *Client) ApproveProposals(ctx context.Context, idempotencyKey string, params billing.ApproveProposalsParams) (*billing.ProposalResults, error)",
       "func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error)",
@@ -17,8 +17,8 @@
       "func (c *Client) ChangeSubscription(ctx context.Context, idempotencyKey string, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)",
       "func (c *Client) CheckEntitlementsLive(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)",
-      "func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, req billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
-      "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)",
+      "func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
+      "func (c *Client) CreateAlertWebhook(ctx context.Context, params billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)",
       "func (c *Client) CreateOrder(ctx context.Context, idempotencyKey string, params billing.CreateOrderParams) (*billing.Order, error)",
       "func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams) (*billing.PSP, error)",
@@ -26,14 +26,14 @@
       "func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePriceParams) (*billing.Price, error)",
       "func (c *Client) CreatePriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams) (*billing.PriceMigration, error)",
       "func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProductParams) (*billing.Product, error)",
-      "func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, params billing.CreateProductAccessBatchParams) ([]billing.ProductAccessGrant, error)",
+      "func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, items []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error)",
       "func (c *Client) CreateProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams) (*billing.Price, error)",
-      "func (c *Client) CreateProvisioningToken(ctx context.Context, req billing.CreateProvisioningTokenParams) (*billing.CreatedProvisioningToken, error)",
+      "func (c *Client) CreateProvisioningToken(ctx context.Context, params billing.CreateProvisioningTokenParams) (*billing.CreatedProvisioningToken, error)",
       "func (c *Client) CustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error)",
       "func (c *Client) CustomerToken(ctx context.Context, params billing.CustomerTokenParams) (*billing.CustomerToken, error)",
       "func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhookID) error",
       "func (c *Client) DeletePSPImport(ctx context.Context, id billing.PSPImportID) error",
-      "func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID) error",
+      "func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, id billing.PaymentMethodID) error",
       "func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID) error",
       "func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.ProvisioningTokenID) error",
       "func (c *Client) DismissProposals(ctx context.Context, params billing.DismissProposalsParams) (*billing.ProposalResults, error)",
@@ -43,9 +43,9 @@
       "func (c *Client) GetAccessTenure(ctx context.Context, customerID billing.CustomerID, params billing.AccessTenureParams) (*billing.AccessTenure, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context) (*billing.AdminAccess, error)",
       "func (c *Client) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error)",
-      "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string) (*billing.Balance, error)",
+      "func (c *Client) GetBalance(ctx context.Context, customerID billing.CustomerID, params billing.GetBalanceParams) (*billing.Balance, error)",
       "func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) (*billing.CreditGrant, error)",
-      "func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID) (*billing.Customer, error)",
+      "func (c *Client) GetCustomer(ctx context.Context, customerID billing.CustomerID) (*billing.Customer, error)",
       "func (c *Client) GetDashboard(ctx context.Context) (*billing.Dashboard, error)",
       "func (c *Client) GetFinding(ctx context.Context, id billing.FindingID) (*billing.Finding, error)",
       "func (c *Client) GetLimit(ctx context.Context, key string) (*billing.Limit, error)",
@@ -65,32 +65,32 @@
       "func (c *Client) GetRenewal(ctx context.Context, id billing.RenewalID) (*billing.Renewal, error)",
       "func (c *Client) GetRunningCharge(ctx context.Context, reference string) (*billing.RunningCharge, error)",
       "func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error)",
-      "func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, page billing.PageRequest) (*billing.SubscriptionHistory, error)",
-      "func (c *Client) ImportBilling(ctx context.Context, book billing.DeclaredBilling) (*billing.BillingImportResult, error)",
+      "func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, params billing.PageRequest) (*billing.SubscriptionHistory, error)",
+      "func (c *Client) ImportBilling(ctx context.Context, params billing.DeclaredBilling) (*billing.BillingImportResult, error)",
       "func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader) (*billing.BillingArchiveImport, error)",
       "func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, params billing.LinkPSPImportParams) (*billing.PSPImport, error)",
       "func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error)",
       "func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams) (*billing.ListPage[billing.AlertWebhook], error)",
-      "func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams) (*billing.ListPage[billing.BalanceTransaction], error)",
+      "func (c *Client) ListBalanceTransactions(ctx context.Context, customerID billing.CustomerID, params billing.BalanceTransactionListParams) (*billing.ListPage[billing.BalanceTransaction], error)",
       "func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams) (*billing.ListPage[billing.CreditGrant], error)",
       "func (c *Client) ListCustodians(ctx context.Context) (*billing.ListPage[billing.Custodian], error)",
-      "func (c *Client) ListCustomerLimits(ctx context.Context, customer billing.CustomerID) (*billing.ListPage[billing.CustomerLimit], error)",
+      "func (c *Client) ListCustomerLimits(ctx context.Context, params billing.CustomerLimitListParams) (*billing.ListPage[billing.CustomerLimit], error)",
       "func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListParams) (*billing.ListPage[billing.Customer], error)",
       "func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.DestructiveHoldListParams) (*billing.ListPage[billing.DestructiveHold], error)",
       "func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams) (*billing.ListPage[billing.CustomerEntitlement], error)",
-      "func (c *Client) ListEvents(ctx context.Context, query billing.EventQuery) (*billing.EventPage, error)",
-      "func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams) (*billing.ListPage[billing.Finding], error)",
-      "func (c *Client) ListLimits(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.Limit], error)",
-      "func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.Meter], error)",
+      "func (c *Client) ListEvents(ctx context.Context, params billing.EventQuery) (*billing.EventPage, error)",
+      "func (c *Client) ListFindings(ctx context.Context, params billing.FindingListParams) (*billing.ListPage[billing.Finding], error)",
+      "func (c *Client) ListLimits(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Limit], error)",
+      "func (c *Client) ListMeters(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Meter], error)",
       "func (c *Client) ListOrders(ctx context.Context, params billing.OrderListParams) (*billing.ListPage[billing.Order], error)",
       "func (c *Client) ListPSPImportRecords(ctx context.Context, id billing.PSPImportID, params billing.PSPImportRecordListParams) (*billing.ListPage[billing.PSPImportRecord], error)",
       "func (c *Client) ListPSPImports(ctx context.Context, params billing.PSPImportListParams) (*billing.ListPage[billing.PSPImport], error)",
       "func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams) (*billing.ListPage[billing.PSP], error)",
       "func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams) (*billing.ListPage[billing.ParkedSubscription], error)",
-      "func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.PaymentAttemptListParams) (*billing.ListPage[billing.PaymentAttempt], error)",
+      "func (c *Client) ListPaymentAttempts(ctx context.Context, params billing.PaymentAttemptListParams) (*billing.ListPage[billing.PaymentAttempt], error)",
       "func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, params billing.PaymentMethodListParams) (*billing.ListPage[billing.PaymentMethod], error)",
       "func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListParams) (*billing.ListPage[billing.Payment], error)",
-      "func (c *Client) ListPriceHistory(ctx context.Context, id billing.PriceID, page billing.PageRequest) (*billing.ListPage[billing.PriceKeyMovement], error)",
+      "func (c *Client) ListPriceHistory(ctx context.Context, id billing.PriceID, params billing.PageRequest) (*billing.ListPage[billing.PriceKeyMovement], error)",
       "func (c *Client) ListPriceMigrations(ctx context.Context, params billing.PriceMigrationListParams) (*billing.ListPage[billing.PriceMigration], error)",
       "func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams) (*billing.ListPage[billing.Price], error)",
       "func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAccessListParams) (*billing.ListPage[billing.ProductAccessGrant], error)",
@@ -98,7 +98,7 @@
       "func (c *Client) ListProposals(ctx context.Context, params billing.ProposalListParams) (*billing.ListPage[billing.Finding], error)",
       "func (c *Client) ListProviderCatalog(ctx context.Context, params billing.ProviderCatalogListParams) (*billing.ListPage[billing.ProviderCatalogObject], error)",
       "func (c *Client) ListProvisioningTokens(ctx context.Context, params billing.ProvisioningTokenListParams) (*billing.ListPage[billing.ProvisioningToken], error)",
-      "func (c *Client) ListRenewals(ctx context.Context, filter billing.RenewalListParams) (*billing.ListPage[billing.Renewal], error)",
+      "func (c *Client) ListRenewals(ctx context.Context, params billing.RenewalListParams) (*billing.ListPage[billing.Renewal], error)",
       "func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningChargeListParams) (*billing.ListPage[billing.RunningCharge], error)",
       "func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.SubscriptionID) (*billing.ListPage[billing.SubscriptionChangeOption], error)",
       "func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams) (*billing.ListPage[billing.Subscription], error)",
@@ -109,15 +109,15 @@
       "func (c *Client) PreviewPriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams) (*billing.PriceMigrationPreview, error)",
       "func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChangePreview, error)",
       "func (c *Client) PutCustodian(ctx context.Context, key string, params billing.PutCustodianParams) (*billing.Custodian, error)",
-      "func (c *Client) QueryMetrics(ctx context.Context, query billing.MetricsQuery) (*billing.MetricsResult, error)",
+      "func (c *Client) QueryMetrics(ctx context.Context, params billing.MetricsQuery) (*billing.MetricsResult, error)",
       "func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (*billing.Payment, error)",
       "func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id billing.PaymentID, params billing.RefundPaymentParams) (*billing.Payment, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error)",
-      "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req billing.ResolveFindingParams) (*billing.FindingResolution, error)",
+      "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error)",
       "func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams) error",
-      "func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParams) (*billing.Dashboard, error)",
+      "func (c *Client) SetDashboard(ctx context.Context, params billing.SetDashboardParams) (*billing.Dashboard, error)",
       "func (c *Client) SetLimit(ctx context.Context, key string, params billing.SetLimitParams) (*billing.Limit, error)",
       "func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMeterParams) (*billing.Meter, error)",
       "func (c *Client) SetPSPImportMappings(ctx context.Context, params billing.SetPSPImportMappingsParams) (*billing.PSPImportMappingsResult, error)",
@@ -126,8 +126,8 @@
       "func (c *Client) StopRunningCharge(ctx context.Context, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error)",
       "func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error)",
       "func (c *Client) Uncached() *Client",
-      "func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams) (*billing.AlertWebhook, error)",
-      "func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams) (*billing.CustomerSettingsResult, error)",
+      "func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, params billing.UpdateAlertWebhookParams) (*billing.AlertWebhook, error)",
+      "func (c *Client) UpdateCustomer(ctx context.Context, customerID billing.CustomerID, params billing.UpdateCustomerParams) (*billing.CustomerSettingsResult, error)",
       "func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams) (*billing.MerchantConfigurationState, error)",
       "func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams) (*billing.PSP, error)",
       "func (c *Client) UpdatePSPImport(ctx context.Context, id billing.PSPImportID, params billing.UpdatePSPImportParams) (*billing.PSPImport, error)",
@@ -553,11 +553,15 @@
       "func (m PSPRoutingMatch) IsCatchAll() bool",
       "func (p *CreateProductParams) UnmarshalJSON(raw []byte) error",
       "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error",
+      "func (p AdmitBatchParams) Validate() error",
+      "func (p CaptureAdmissionBatchParams) Validate() error",
+      "func (p ExtendAdmissionBatchParams) Validate() error",
       "func (p ListPage[T]) MarshalJSON() ([]byte, error)",
       "func (p MerchantProfile) NotificationURL(kind string) string",
       "func (p Permission) Action() string",
       "func (p Permission) Persona() string",
       "func (p Permission) Resource() string",
+      "func (p ReleaseAdmissionBatchParams) Validate() error",
       "func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error)",
       "func (r *CatalogApplicationReceipt) String() string",
       "func (r AdmissionResult) Err() error",
@@ -2001,15 +2005,6 @@
     ]
   },
   "declaring_file_imports": {
-    "access_tenure.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "catalog": "github.com/open-rails/openrails/catalog",
-      "context": "context",
-      "fmt": "fmt",
-      "http": "net/http",
-      "time": "time",
-      "url": "net/url"
-    },
     "adapters/authkit/merchant_groups.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
@@ -2056,23 +2051,6 @@
       "openrails": "github.com/open-rails/openrails",
       "strings": "strings"
     },
-    "admin_access.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "admissions.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "alerts.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strconv": "strconv",
-      "url": "net/url"
-    },
     "billing/access_tenure.go": {
       "time": "time"
     },
@@ -2087,6 +2065,10 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "billing/batch.go": {
+      "fmt": "fmt",
+      "http": "net/http"
     },
     "billing/billing_import.go": {
       "json": "encoding/json",
@@ -2304,11 +2286,6 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "time": "time"
     },
-    "billing_import.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
     "catalog/application.go": {
       "bytes": "bytes",
       "currency": "github.com/open-rails/openrails/internal/currency",
@@ -2377,38 +2354,32 @@
       "fmt": "fmt",
       "json": "encoding/json"
     },
-    "catalog_application.go": {
+    "client_gen.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/catalog",
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
-      "http": "net/http",
-      "url": "net/url"
+      "http": "net/http"
     },
-    "client_event_log.go": {
+    "client_handwritten.go": {
+      "archivewire": "github.com/open-rails/openrails/internal/archivewire",
+      "auth": "github.com/open-rails/authkit/auth",
       "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "errors": "errors",
       "eventlog": "github.com/open-rails/helpers/eventlog",
+      "fmt": "fmt",
       "http": "net/http",
-      "strconv": "strconv",
-      "url": "net/url"
+      "io": "io",
+      "json": "encoding/json",
+      "wireform": "github.com/open-rails/openrails/internal/http/wireform"
     },
     "config.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "config": "github.com/open-rails/openrails/internal/config"
-    },
-    "credits.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strconv": "strconv",
-      "url": "net/url"
-    },
-    "custodians.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "url": "net/url"
     },
     "customer_proof.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -2420,39 +2391,6 @@
     },
     "customer_routes.go": {
       "fmt": "fmt"
-    },
-    "customer_tokens.go": {
-      "asn1": "encoding/asn1",
-      "big": "math/big",
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "crypto": "crypto",
-      "ecdsa": "crypto/ecdsa",
-      "ed25519": "crypto/ed25519",
-      "elliptic": "crypto/elliptic",
-      "errors": "errors",
-      "fmt": "fmt",
-      "hex": "encoding/hex",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json",
-      "jwt": "github.com/golang-jwt/jwt/v5",
-      "rand": "crypto/rand",
-      "rsa": "crypto/rsa",
-      "strings": "strings",
-      "time": "time",
-      "url": "net/url"
-    },
-    "customers.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "url": "net/url"
-    },
-    "destructive_holds.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
     },
     "embedded.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -5104,17 +5042,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "leases.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "limits.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "url": "net/url"
-    },
     "local_client.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
@@ -5122,26 +5049,6 @@
       "errors": "errors",
       "fmt": "fmt",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "merchant_archive.go": {
-      "archivewire": "github.com/open-rails/openrails/internal/archivewire",
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "context": "context",
-      "fmt": "fmt",
-      "http": "net/http",
-      "io": "io",
-      "json": "encoding/json"
-    },
-    "merchant_configuration.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "metrics.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
     },
     "migrate.go": {
       "context": "context",
@@ -5181,88 +5088,14 @@
       "sync": "sync",
       "userinfo": "github.com/open-rails/authkit/userinfo"
     },
-    "operational_reads.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings",
-      "time": "time",
-      "url": "net/url"
-    },
-    "operations.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "order_payment_attempt.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "orders.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "payment_attempts.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings",
-      "time": "time",
-      "url": "net/url"
-    },
     "payment_page.go": {
       "http": "net/http"
-    },
-    "payments.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "price_migrations.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings"
-    },
-    "proposals.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "provisioning.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "url": "net/url"
     },
     "psp_declarations.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "time": "time"
-    },
-    "psp_imports.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "psps.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strconv": "strconv",
-      "url": "net/url"
-    },
-    "public_config.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context"
-    },
-    "refunds.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
     },
     "remote.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -5283,39 +5116,8 @@
       "time": "time",
       "unicode": "unicode",
       "url": "net/url",
-      "utf8": "unicode/utf8"
-    },
-    "remote_entitlements.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings",
-      "url": "net/url"
-    },
-    "remote_metering.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "remote_recovery.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
-    },
-    "resources_catalog.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "fmt": "fmt",
-      "http": "net/http",
-      "strconv": "strconv",
-      "url": "net/url"
-    },
-    "running_charges.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings",
-      "url": "net/url"
+      "utf8": "unicode/utf8",
+      "wireform": "github.com/open-rails/openrails/internal/http/wireform"
     },
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",

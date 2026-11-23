@@ -440,7 +440,7 @@ func TestLimitHolds(t *testing.T) {
 		fund(t, w.alpha, payer, "funded", 1000)
 		set, refusal = wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{computeWant(payer, 1)}}))
 		require.Nil(t, refusal)
-		b, err := w.alpha.GetBalance(t.Context(), payer, "USD")
+		b, err := w.alpha.GetBalance(t.Context(), payer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Positive(t, b.HeldAmount)
 		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "money-if-returned", b.AvailableAmount+1)), billing.DenyCapacityHeld)

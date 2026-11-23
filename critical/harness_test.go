@@ -148,7 +148,7 @@ func setCfgMerchant(cfg *openrails.Config, slug string, m openrails.MerchantDecl
 
 func balance(t *testing.T, client *openrails.Client, customer billing.CustomerID, available, held, posted int64) {
 	t.Helper()
-	b, err := client.GetBalance(t.Context(), customer, "USD")
+	b, err := client.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, customer, b.CustomerID)
 	require.Equal(t, "USD", b.Currency)

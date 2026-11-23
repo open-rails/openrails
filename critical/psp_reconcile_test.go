@@ -233,7 +233,7 @@ func TestPSPReconcile(t *testing.T) {
 			require.Equal(t, "held", *recs[ref].LinkedVia)
 		}
 		require.NotContains(t, recs, gone, "a deleted schedule leaves the roster")
-		retired := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &manual.PSP}})["price:retired"]
+		retired := iw.catalog(t, billing.ProviderCatalogListParams{PSP: manual.PSP.String()})["price:retired"]
 		require.NotNil(t, retired.DeletedAt, "a complete list lacking a plan marks it deleted")
 		require.True(t, retired.Retired)
 
@@ -563,7 +563,7 @@ func TestPSPReconcile(t *testing.T) {
 		got := iw.awaitFailed(t, imp.ID)
 		require.Equal(t, billing.PSPImportRosterImplausible, *got.ErrorCode, "%v", got.Error)
 		require.Empty(t, iw.proposals(t, imp.ID), "an implausible roster raises nothing")
-		objects := iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{Key: "nmi"}})
+		objects := iw.catalog(t, billing.ProviderCatalogListParams{PSP: "nmi"})
 		require.Nil(t, objects["price:gold"].DeletedAt, "an implausible roster marks no plan gone")
 		require.NotContains(t, objects, "price:foreign", "nor records the other account's")
 		page, err := iw.alpha.ListProposals(t.Context(), billing.ProposalListParams{PageRequest: billing.PageRequest{Limit: 100}})
@@ -1030,7 +1030,7 @@ func TestDeclaredAdminGrantImport(t *testing.T) {
 		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:read"}})
 		require.NoError(t, err)
 		start := a.clock.Now().UTC().Truncate(time.Microsecond)
-		native, err := a.alpha.CreateProductAccess(t.Context(), "native-staff", billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonStaff}}})
+		native, err := a.alpha.CreateProductAccess(t.Context(), "native-staff", []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Reason: billing.GrantReasonStaff}})
 		require.NoError(t, err)
 		require.Len(t, native, 1)
 		database, err := db.NewWithPGXPool(a.pool, a.schema)

@@ -277,7 +277,9 @@ func productBatch(params billing.ProductListParams) (by string, values []string,
 	}
 	slices.Sort(values)
 	values = slices.Compact(values)
-	if by == "keys" && len(values) > cmp.Or(params.Limit, billing.DefaultPageLimit) {
+	// A read the server would refuse goes to it.
+	if len(params.IDs) > billing.MaxBatchItems || len(params.Keys) > billing.MaxBatchItems || len(params.Entitlements) > billing.MaxBatchItems ||
+		by == "keys" && len(values) > cmp.Or(params.Limit, billing.DefaultPageLimit) {
 		return "", nil, false
 	}
 	return by, values, true

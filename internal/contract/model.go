@@ -1,7 +1,8 @@
 // Package contract renders the HTTP contract from the route catalog
 // (internal/http/routes) and the error-code registry (billing.ErrorCodes):
-// api/openapi.json, the TypeScript wire types of billing-ui and the admin
-// console, and the route and error tables under docs/api. Nothing here is
+// the Go Client (client_gen.go), api/openapi.json, the TypeScript wire types
+// of billing-ui and the admin console, and the route and error tables under
+// docs/api. Nothing here is
 // written by hand twice: `go run ./scripts/contracts -write` regenerates the
 // files and TestGeneratedContractIsFresh fails when one is stale.
 package contract
