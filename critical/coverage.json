@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 412,
+  "scenario_count": 418,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2062,6 +2062,36 @@
       "id": "OR-J22-S09",
       "journey": "J22",
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+    },
+    {
+      "id": "OR-J39-S01",
+      "journey": "J39",
+      "name": "A paid one-off order sends one receipt: a replayed settlement queues no second message and a refused send is retried once"
+    },
+    {
+      "id": "OR-J39-S02",
+      "journey": "J39",
+      "name": "A billing restore queues and sends no customer message"
+    },
+    {
+      "id": "OR-J39-S03",
+      "journey": "J39",
+      "name": "A customer without an address is logged no_contact and the fact is still emitted"
+    },
+    {
+      "id": "OR-J39-S04",
+      "journey": "J39",
+      "name": "A fact on a test PSP is logged test_environment, sends nothing and is still emitted"
+    },
+    {
+      "id": "OR-J39-S05",
+      "journey": "J39",
+      "name": "Past ten messages an hour a customer's message is rate_limited and the merchant has a finding"
+    },
+    {
+      "id": "OR-J39-S06",
+      "journey": "J39",
+      "name": "Erasing a customer over SCIM deletes its message log"
     }
   ]
 }

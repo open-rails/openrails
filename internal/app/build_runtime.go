@@ -45,6 +45,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
@@ -506,6 +507,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
+	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
+		Profiles: merchantconfig.NewStore(database), Renderer: messages.Plain{}, Clock: clock}
 
 	return runtime, nil
 }

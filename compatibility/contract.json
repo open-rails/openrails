@@ -1678,6 +1678,9 @@
       "type receipt struct {\n\tFromN    int64          `json:\"from_n\"`\n\tThroughN int64          `json:\"through_n\"`\n\tDigest   string         `json:\"digest\"`\n\tRefused  []refusedEntry `json:\"refused\"`\n}",
       "type refusedEntry struct {\n\tN    int64             `json:\"n\"`\n\tCode billing.ErrorCode `json:\"code\"`\n}"
     ],
+    "internal/modules/messages": [
+      "type SendArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tMessageID  uuid.UUID `json:\"message_id\"`\n}"
+    ],
     "internal/modules/metrics": [
       "func (c *MoneyCell) UnmarshalJSON(raw []byte) error {\n\tvar text string\n\tif err := json.Unmarshal(raw, \u0026text); err != nil {\n\t\treturn err\n\t}\n\tvalue, err := strconv.ParseInt(text, 10, 64)\n\tif err != nil {\n\t\treturn err\n\t}\n\t*c = MoneyCell(value)\n\treturn nil\n}",
       "func (c MoneyCell) MarshalJSON() ([]byte, error) {\n\treturn json.Marshal(strconv.FormatInt(int64(c), 10))\n}",
@@ -3565,6 +3568,12 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/messages/jobs.go": {
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/metrics/service.go": {
       "big": "math/big",

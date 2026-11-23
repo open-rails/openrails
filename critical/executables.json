@@ -1314,6 +1314,24 @@
     ],
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
+    ],
+    "OR-J39-S01": [
+      "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
+    ],
+    "OR-J39-S02": [
+      "TestCustomerMessages/OR-J39-S02/a-billing-restore-sends-nothing"
+    ],
+    "OR-J39-S03": [
+      "TestCustomerMessages/OR-J39-S03/a-customer-without-an-address-is-no-contact-and-the-fact-is-emitted"
+    ],
+    "OR-J39-S04": [
+      "TestCustomerMessages/OR-J39-S04/a-fact-on-a-test-psp-is-test-environment-and-the-fact-is-emitted"
+    ],
+    "OR-J39-S05": [
+      "TestCustomerMessages/OR-J39-S05/messages-past-the-hourly-cap-are-rate-limited-with-a-finding"
+    ],
+    "OR-J39-S06": [
+      "TestCustomerMessages/OR-J39-S06/erasing-a-customer-erases-its-message-log"
     ]
   }
 }

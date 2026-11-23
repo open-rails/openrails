@@ -195,6 +195,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
+	// Customer messages: each pending one's job, queued by the dispatcher or
+	// its periodic backstop, and the job that sends it.
+	if err := addWorker(workers, &riverjobs.CustomerMessageDispatchWorker{Messages: r.Messages}); err != nil {
+		return fmt.Errorf("add customer message dispatch worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
+		return fmt.Errorf("add customer message worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -410,6 +418,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	}
 	if r.RailPaymentMethodService == nil {
 		return fmt.Errorf("billing worker runtime payment method service is required")
+	}
+	if r.Messages == nil {
+		return fmt.Errorf("billing worker runtime customer messages are required")
 	}
 	return nil
 }

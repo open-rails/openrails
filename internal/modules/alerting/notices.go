@@ -22,6 +22,9 @@ const (
 	// FindingSolanaCrankerLowGas is a Solana cranker wallet low on the SOL its
 	// pulls pay fees with. It resolves itself once a pull pass finds it funded.
 	FindingSolanaCrankerLowGas reconcile.FindingType = "life.solana.cranker_low_gas"
+	// FindingCustomerMessagesRateLimited is a customer whose messages reached
+	// the hourly cap: something sends them far more than billing should.
+	FindingCustomerMessagesRateLimited reconcile.FindingType = "life.customer.messages_rate_limited"
 )
 
 // LedgerRepair is a provider event OpenRails could not book, which the
@@ -131,6 +134,35 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	})
 	if err != nil {
 		return fmt.Errorf("cranker gas: %w", err)
+	}
+	return nil
+}
+
+// MessageRateLimit is a customer message held back by the hourly cap.
+type MessageRateLimit struct {
+	CustomerID uuid.UUID
+	MessageID  uuid.UUID
+	EventType  string
+	Cap        int
+	Window     time.Duration
+}
+
+// RecordMessageRateLimit raises the customer's rate-limited finding; a later
+// message held back observes it again.
+func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time, limit MessageRateLimit) error {
+	if database == nil {
+		return fmt.Errorf("message rate limit: database is required")
+	}
+	customer := billing.CustomerID(limit.CustomerID).String()
+	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingCustomerMessagesRateLimited, SubjectKey: customer, Severity: reconcile.SeverityMedium,
+		RecommendedAction: fmt.Sprintf("Customer %s reached %d messages in %s, so a %s message was not sent. Find what records so many billing facts for them.",
+			customer, limit.Cap, limit.Window, limit.EventType),
+		Evidence: map[string]any{"customer_id": customer, "message_id": limit.MessageID.String(), "event_type": limit.EventType,
+			"cap": limit.Cap, "window_seconds": int64(limit.Window / time.Second), "observed_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("message rate limit: %w", err)
 	}
 	return nil
 }

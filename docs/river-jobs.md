@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 16 core River job kinds. Four have recurring schedules.
+OpenRails registers 18 core River job kinds. Five have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -10,7 +10,7 @@ The [operations inventory](operations-inventory.md) lists the provider calls and
 
 ## Recurring jobs
 
-River attempts startup catch-up for all four declarations. Shared database
+River attempts startup catch-up for all five declarations. Shared database
 leases coordinate them. [Periodic declarations](../internal/river/periodic.go) ·
 [Startup and leases](../internal/app/river_periodic.go)
 
@@ -18,6 +18,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | --- | --- | --- | --- |
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
+| `openrails.customer_messages_dispatch` | `billing` | Every 5 minutes | Queues the send job of each pending customer message a dispatcher's database notification missed. [Worker](../internal/river/jobs_customer_messages.go) · [Dispatch](../internal/modules/messages/dispatch.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
@@ -28,6 +29,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.balance_look` | `billing` | A balance change crosses a watched threshold, or the previous look schedules the next check | Checks one customer balance for expiring credits, running-charge checkpoints, and low or depleted balance notices. [Worker](../internal/river/jobs_balance_watch.go) · [Scheduling](../internal/modules/money/balance_watch.go) |
 | `openrails.charge_attributions` | `billing` | A billing import declares charges that need provider evidence | Reads or waits for provider charge facts, then records each charge against its declared subscription. [Worker](../internal/river/jobs_charge_attributions.go) · [Import trigger](../internal/billingimport/billingimport.go) |
 | `openrails.customer_converge` | `billing` | A customer-affecting mutation commits a job in the same transaction | Reconciles grant effects, references, duplicate charges, findings, and access-ended notices for one customer. [Worker](../internal/river/jobs_customer_converge.go) · [Enqueue](../internal/convergejob/convergejob.go) |
+| `openrails.customer_message` | `billing` | The dispatcher, woken by the commit of a billing fact, or its periodic pass | Sends one customer message, or records why not; a failed send is retried with backoff, ten attempts in all. [Worker](../internal/river/jobs_customer_messages.go) · [Send](../internal/modules/messages/send.go) |
 | `openrails.merchant_secret_cleanup` | `billing` | A merchant purge commits with Vault cleanup pending | Deletes the purged merchant's Vault configuration and records the result on the purge run. [Worker](../internal/river/jobs_merchant_secret_cleanup.go) · [Cleanup](../internal/merchants/secret_cleanup.go) |
 | `openrails.operator_alert` | `billing` | A destructive-action hold or a finding notification queues the initial job, which queues one delivery job per applicable channel | Delivers email or webhook alerts to operators, with independent retries per channel. [Worker](../internal/river/jobs_operator_alert.go) · [Delivery](../internal/modules/alerting/delivery.go) |
 | `openrails.provider_object_observe` | `billing` | Stripe product or price webhooks | Reads the current catalog object from Stripe and records its observed state or retirement. [Worker](../internal/river/jobs_provider_object_observe.go) · [Webhook trigger](../internal/modules/webhooks/stripe_catalog.go) |

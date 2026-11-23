@@ -5,6 +5,8 @@ import (
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+
+	"github.com/open-rails/openrails/internal/modules/messages"
 )
 
 // Gate is when a periodic pass is declared.
@@ -38,6 +40,8 @@ var Periodics = []Periodic{
 	// Queues every Stripe PSP's endpoint pass: Stripe disables or deletes an
 	// endpoint without telling us.
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
+	// Customer messages queued while no dispatcher listened.
+	{Args: messages.DispatchArgs{}, Every: messages.DispatchInterval},
 }
 
 // topOfHour is the cron schedule 0 * * * * in UTC.
