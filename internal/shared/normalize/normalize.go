@@ -32,3 +32,15 @@ func FromPtr(value *string) string {
 	}
 	return Trim(*value)
 }
+
+// Strings converts a slice between string types; nil stays nil.
+func Strings[To, From ~string](in []From) []To {
+	if in == nil {
+		return nil
+	}
+	out := make([]To, len(in))
+	for i, v := range in {
+		out[i] = To(v)
+	}
+	return out
+}

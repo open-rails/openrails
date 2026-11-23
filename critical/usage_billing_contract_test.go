@@ -482,6 +482,6 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.False(t, results[0].Allowed())
 		require.NotNil(t, results[0].Admission)
 		require.NotNil(t, results[0].Admission.DenyCode)
-		require.Equal(t, "delinquent_unpaid_order", *results[0].Admission.DenyCode)
+		require.Equal(t, billing.DenyDelinquentUnpaidOrder, *results[0].Admission.DenyCode)
 	})
 }

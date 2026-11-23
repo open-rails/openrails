@@ -59,7 +59,7 @@ type slot struct {
 // live hold, and the code a want that does not fit it is refused with.
 type moneyRoom struct {
 	room int64
-	code string
+	code billing.DenyCode
 }
 
 func (r *syncRun) want(i int) error {
@@ -477,7 +477,7 @@ func (r *syncRun) refusal(holder limits.Holder, currency string, slots []slot, s
 		case s.balance:
 			return &billing.Refusal{DenyCode: room.code}, nil
 		case strings.HasPrefix(s.key, limits.SpendKeyPrefix):
-			out := &billing.Refusal{DenyCode: admission.DenyBudgetExceeded}
+			out := &billing.Refusal{DenyCode: billing.DenyBudgetExceeded}
 			if s.claim.Window.EndsAt != nil {
 				retry := ceilSeconds(s.claim.Window.EndsAt.Sub(r.now))
 				out.RetryAfterSeconds = &retry

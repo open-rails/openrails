@@ -37,7 +37,7 @@ const (
 type PaymentMethod struct {
 	ID         PaymentMethodID     `json:"id"`
 	CustomerID CustomerID          `json:"customer_id"`
-	Rail       string              `json:"rail"`
+	Rail       Rail                `json:"rail"`
 	PSPID      *PSPID              `json:"psp_id"`
 	Status     PaymentMethodStatus `json:"status"`
 	// NextAction is the bank's authentication of a card being saved, while

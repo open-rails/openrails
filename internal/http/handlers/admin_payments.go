@@ -456,7 +456,7 @@ func ListMyPayments(r *httprequest.Request) {
 		return
 	}
 	params := billing.PaymentListParams{PageRequest: query.PageRequest, CustomerID: billing.CustomerID(customer), SubscriptionID: query.SubscriptionID,
-		OrderID: query.OrderID, Status: query.Status, Rail: query.Rail, Kind: query.Kind, TransactionID: query.TransactionID}
+		OrderID: query.OrderID, Status: query.Status, Rail: billing.Rail(query.Rail), Kind: query.Kind, TransactionID: query.TransactionID}
 	if !checkPaymentList(r, &params) {
 		return
 	}
@@ -465,7 +465,7 @@ func ListMyPayments(r *httprequest.Request) {
 
 // checkPaymentList refuses a filter naming no status or kind there is.
 func checkPaymentList(r *httprequest.Request, params *billing.PaymentListParams) bool {
-	params.Rail, params.TransactionID = strings.TrimSpace(params.Rail), strings.TrimSpace(params.TransactionID)
+	params.Rail, params.TransactionID = billing.Rail(strings.TrimSpace(string(params.Rail))), strings.TrimSpace(params.TransactionID)
 	switch params.Status {
 	case "", billing.PaymentPending, billing.PaymentSucceeded, billing.PaymentFailed, billing.PaymentRefunded, billing.PaymentPartiallyRefunded:
 	default:

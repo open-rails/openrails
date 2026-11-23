@@ -89,7 +89,7 @@ type PSPPaymentConfig struct {
 	// Key is the PSP's key, the purchase payment.psp selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
-	Rail string `json:"rail"`
+	Rail Rail `json:"rail"`
 	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
 	Custodian   string `json:"custodian"`
 	DisplayName string `json:"display_name"`
@@ -107,10 +107,13 @@ type PSPPaymentConfig struct {
 	// Status is PSPTemporarilyUnavailable when the PSP's credentials could not
 	// be checked just now: it is listed without Config, and the document is
 	// not cacheable. Empty is available. RetryAfter is in seconds.
-	Status     string `json:"status,omitempty"`
-	RetryAfter int    `json:"retry_after,omitempty"`
+	Status     PSPPaymentStatus `json:"status,omitempty"`
+	RetryAfter int              `json:"retry_after,omitempty"`
 }
 
-// PSPTemporarilyUnavailable marks a PSP (or option) whose credentials could
-// not be checked just now; retry after RetryAfter seconds.
-const PSPTemporarilyUnavailable = "temporarily_unavailable"
+// PSPPaymentStatus is an armed PSP's state for a browser; empty is available.
+type PSPPaymentStatus string
+
+// PSPTemporarilyUnavailable marks a PSP whose credentials could not be
+// checked just now; retry after RetryAfter seconds.
+const PSPTemporarilyUnavailable PSPPaymentStatus = "temporarily_unavailable"

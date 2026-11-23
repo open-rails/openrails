@@ -48,9 +48,9 @@ func PaymentFailureFrom(err error) (*PaymentFailure, bool) {
 	if !ok {
 		return nil, false
 	}
-	failure := &PaymentFailure{}
-	failure.Reason, _ = raw["reason"].(string)
-	failure.Message, _ = raw["message"].(string)
-	failure.Field, _ = raw["field"].(string)
+	reason, _ := raw["reason"].(string)
+	message, _ := raw["message"].(string)
+	field, _ := raw["field"].(string)
+	failure := &PaymentFailure{Reason: DeclineReason(reason), Message: message, Field: CardField(field)}
 	return failure, failure.Reason != ""
 }

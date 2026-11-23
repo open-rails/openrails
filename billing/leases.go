@@ -12,15 +12,15 @@ import (
 // starts, a batch job once for its whole stream.
 type LeaseID uuid.UUID
 
-const LeaseIDPrefix = "lse_"
+const leaseIDPrefix = "lse_"
 
 func ParseLeaseID(s string) (LeaseID, error) {
-	u, err := parsePrefixedID("lease", LeaseIDPrefix, s)
+	u, err := parsePrefixedID("lease", leaseIDPrefix, s)
 	return LeaseID(u), err
 }
 func (id LeaseID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id LeaseID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id LeaseID) String() string  { return formatPrefixedID(LeaseIDPrefix, uuid.UUID(id)) }
+func (id LeaseID) String() string  { return formatPrefixedID(leaseIDPrefix, uuid.UUID(id)) }
 func (id LeaseID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }

@@ -183,7 +183,7 @@ func TestPSPControls(t *testing.T) {
 		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
 		require.Equal(t, "acct_e2e", psp.AccountID)
-		require.Equal(t, "test", psp.Environment)
+		require.Equal(t, billing.EnvironmentTest, psp.Environment)
 		require.True(t, psp.Credentials["secret_key"].Configured)
 		require.NotNil(t, psp.Credentials["secret_key"].ValidatedAt)
 		input := saleInput(t, a, p.provider)

@@ -252,7 +252,7 @@ func (s *PurchaseService) previewSubscriptionChange(ctx context.Context, req *Su
 		return nil, err
 	}
 	sub := c.sub
-	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: string(sub.Rail), Currency: c.price.Currency}
+	resp := &TierChangePreviewResponse{PriceID: c.price.PublicID, Quantity: subscriptions.CloneQuantity(c.quantity), Rail: billing.Rail(sub.Rail), Currency: c.price.Currency}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
 		case c.clears():

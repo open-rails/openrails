@@ -92,7 +92,7 @@ func planPurchases(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ps
 		if strings.TrimSpace(p.SourceID) == "" {
 			return nil, apperr.Invalidf("declared purchase %d has no source_id", i).WithParam("purchases")
 		}
-		psp, err := psps.resolve(p.PSP, p.Rail, fmt.Sprintf("purchase %s", p.SourceID))
+		psp, err := psps.resolve(p.PSP, string(p.Rail), fmt.Sprintf("purchase %s", p.SourceID))
 		if err != nil {
 			return nil, err
 		}
@@ -133,8 +133,8 @@ func planPurchase(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID
 		return plan, "customer is required", nil
 	case strings.TrimSpace(p.TransactionID) == "":
 		return plan, "transaction_id is required", nil
-	case !providerTransactionID(p.Rail, p.TransactionID):
-		return plan, "transaction_id is not a " + p.Rail + " transaction id", nil
+	case !providerTransactionID(string(p.Rail), p.TransactionID):
+		return plan, string("transaction_id is not a " + p.Rail + " transaction id"), nil
 	case moneyutil.RequireFiatCurrency(plan.currency) != nil || p.Amount <= 0:
 		return plan, "no fiat amount: the sale has no recorded USD (or other fiat) value", nil
 	case p.PaidAt.IsZero() || p.PaidAt.After(asOf):
@@ -282,7 +282,7 @@ func recordPurchase(ctx context.Context, d *db.DB, merchantID uuid.UUID, p plann
 	}
 	result, err := observed.Record(ctx, d, observed.Bill{PSPID: p.psp, CustomerID: p.decl.Customer.UUID(), Owner: observed.OwnerEngine, Kind: "purchase",
 		SourceKind: purchaseSource, SourceKey: p.decl.SourceID, ProviderReference: p.decl.TransactionID, Currency: p.currency, Total: p.decl.Amount, Lines: lines,
-		Payment: &models.Payment{CustomerID: p.decl.Customer.UUID(), Channel: models.ChannelRail, Rail: models.Rail(strings.ToLower(strings.TrimSpace(p.decl.Rail))),
+		Payment: &models.Payment{CustomerID: p.decl.Customer.UUID(), Channel: models.ChannelRail, Rail: models.Rail(strings.ToLower(strings.TrimSpace(string(p.decl.Rail)))),
 			TransactionID: p.decl.TransactionID, Amount: p.decl.Amount, ListAmount: p.listAmount, Currency: p.currency, Status: payments.PaymentStatusSucceededValue,
 			MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.decl.PaidAt.UTC(), CreatedAt: now, Metadata: metadata},
 		Settled: true, SettlementSource: "cash"}, now)

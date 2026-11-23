@@ -33,7 +33,7 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *bi
 		CollectionPolicy: string(sub.CollectionPolicy), Dunning: dunning, DeletionScheduledAt: sub.DeletionScheduledAt,
 		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: priceID,
 		Quantity: CloneQuantity(sub.Quantity),
-		PSPID:    billing.PSPID(sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: normalize.OptionalString(sub.RailSubscriptionID), Status: billing.SubscriptionStatus(sub.Status),
+		PSPID:    billing.PSPID(sub.PspID), Rail: billing.Rail(sub.Rail), RailSubscriptionID: normalize.OptionalString(sub.RailSubscriptionID), Status: billing.SubscriptionStatus(sub.Status),
 		StartedAt: sub.StartedAt, EndedAt: sub.EndedAt, CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,
 		CanceledAt: sub.CanceledAt, CancelFeedback: sub.CancelFeedback, CreatedAt: sub.CreatedAt, UpdatedAt: sub.UpdatedAt,
 		PaymentMethodID: (*billing.PaymentMethodID)(sub.PaymentMethodID),

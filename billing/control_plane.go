@@ -148,10 +148,10 @@ type FleetCurrencyRevenue struct {
 // FleetRailHealth is one rail's approved and declined charge attempts and
 // chargebacks across the window.
 type FleetRailHealth struct {
-	Rail        string `json:"rail"`
-	Succeeded   int64  `json:"succeeded"`
-	Failed      int64  `json:"failed"`
-	Chargebacks int64  `json:"chargebacks"`
+	Rail        Rail  `json:"rail"`
+	Succeeded   int64 `json:"succeeded"`
+	Failed      int64 `json:"failed"`
+	Chargebacks int64 `json:"chargebacks"`
 }
 
 // FleetMRR is one currency's monthly-normalized recurring run rate.

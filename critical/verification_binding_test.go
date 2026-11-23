@@ -76,7 +76,7 @@ func (s *stripeAccounts) read(secret, path string) bool {
 }
 
 func stripePSP(account, secret string, archived bool) billing.PSPConfig {
-	return openrails.StripePSP{AccountID: account, Environment: openrails.EnvironmentTest, SecretKey: secret,
+	return openrails.StripePSP{AccountID: account, Environment: billing.EnvironmentTest, SecretKey: secret,
 		WebhookSigningSecret: "whsec_" + account, PublishableKey: "pk_test_" + account, Archived: archived}.PSPConfig()
 }
 
@@ -361,7 +361,7 @@ type nmiAccounts struct {
 }
 
 func nmiPSP(name string, archived bool) billing.PSPConfig {
-	return openrails.NMIPSP{GatewayID: name + "-gateway", Environment: openrails.EnvironmentTest, SecurityKey: "nmi-" + name + "-key",
+	return openrails.NMIPSP{GatewayID: name + "-gateway", Environment: billing.EnvironmentTest, SecurityKey: "nmi-" + name + "-key",
 		WebhookSigningSecret: "nmi-" + name + "-webhook", TokenizationKey: "nmi-" + name + "-collect", Archived: archived}.PSPConfig()
 }
 

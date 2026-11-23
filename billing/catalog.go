@@ -134,10 +134,9 @@ type Price struct {
 	BillingIntervalMonths *int      `json:"billing_interval_months"`
 	TrialUnitAmount       *int64    `json:"trial_unit_amount,string"`
 	TrialDurationHours    *int      `json:"trial_duration_hours"`
-	// SellVia are the methods one of ours sells through: SellViaCard (the
-	// merchant's card vault and charge PSPs) and SellViaSolana. Null: every
-	// method the merchant has. A provider price sells through its provider.
-	SellVia []string `json:"sell_via"`
+	// SellVia are the methods one of ours sells through. Null: every method
+	// the merchant has. A provider price sells through its provider.
+	SellVia []catalog.SellVia `json:"sell_via"`
 	// Provider is the provider that owns and runs a provider price; null on
 	// ours.
 	Provider *PriceProvider `json:"provider"`
@@ -147,12 +146,6 @@ type Price struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
-
-// Methods a price of ours sells through.
-const (
-	SellViaCard   = "card"
-	SellViaSolana = "solana"
-)
 
 // PriceProvider is the PSP that owns and runs a provider price and its
 // identifiers there: plan_id (NMI), price_id (Stripe), or flex_id and
@@ -166,7 +159,7 @@ type PriceProvider struct {
 	AccessDurationDefault bool              `json:"access_duration_default"`
 	PSP                   string            `json:"psp"`
 	PSPID                 PSPID             `json:"psp_id"`
-	Rail                  string            `json:"rail"`
+	Rail                  Rail              `json:"rail"`
 	IDs                   map[string]string `json:"ids"`
 	Retired               bool              `json:"retired"`
 	SyncStatus            SyncStatus        `json:"sync_status"`
@@ -248,9 +241,9 @@ type CreatePriceParams struct {
 	// terms (0 is a free trial); set both or neither, with a recurring billing interval.
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
-	// SellVia restricts the methods the price sells through (SellViaCard,
-	// SellViaSolana); empty is every method the merchant has.
-	SellVia []string `json:"sell_via,omitempty"`
+	// SellVia restricts the methods the price sells through; empty is every
+	// method the merchant has.
+	SellVia []catalog.SellVia `json:"sell_via,omitempty"`
 	// Archived creates the price retired: subscribers keep paying it, nobody
 	// new can buy it.
 	Archived bool `json:"archived,omitempty"`
@@ -303,7 +296,7 @@ type UpdatePriceParams struct {
 	// SellVia restricts the methods one of ours sells through; null sells
 	// through every method the merchant has. It is not a term: the price
 	// keeps its version.
-	SellVia catalog.Field[[]string] `json:"sell_via,omitzero"`
+	SellVia catalog.Field[[]catalog.SellVia] `json:"sell_via,omitzero"`
 	// ExpectedRevision refuses the edit with revision_mismatch unless the
 	// price key is still at this revision.
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`

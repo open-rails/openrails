@@ -11,7 +11,7 @@
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
 //		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
-//			"stripe": openrails.StripePSP{Environment: openrails.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
+//			"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //	// … openrailshttp.Mount(mux, client, routes); srv := httptest.NewServer(mux)

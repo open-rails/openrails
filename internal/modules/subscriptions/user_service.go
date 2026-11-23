@@ -408,7 +408,7 @@ func applySubscriptionAccess(responses []*UserSubscriptionResponse, active []*mo
 		response.Access = nil
 		if grant := bySource[[2]string{response.CustomerID.String(), response.ID.String()}]; grant != nil {
 			copy := *grant
-			copy.Kind, copy.Rail = "subscription", string(response.Rail)
+			copy.Kind, copy.Rail = "subscription", billing.Rail(response.Rail)
 			response.Access = &copy
 		}
 	}

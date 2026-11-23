@@ -32,7 +32,7 @@ func FleetAnalytics(ctx context.Context, cp *controlplane.ControlPlane, exclude 
 		out.Revenue = append(out.Revenue, billing.FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
 	}
 	for _, r := range snapshot.Rails {
-		out.Rails = append(out.Rails, billing.FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
+		out.Rails = append(out.Rails, billing.FleetRailHealth{Rail: billing.Rail(r.Rail), Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
 	}
 	for _, r := range snapshot.MRR {
 		out.MRR = append(out.MRR, billing.FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})

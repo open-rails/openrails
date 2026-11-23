@@ -13,7 +13,7 @@ func subscriptionFailureNotice(sub *models.Subscription, failure *FailMembership
 	data := billing.NotificationData{
 		SubscriptionID: billing.SubscriptionID(sub.ID), ProductID: billing.ProductID(sub.ProductID),
 		FailureCode: normalize.FromPtr(failure.FailureCode), FailureReason: normalize.FromPtr(failure.FailureReason),
-		DeclineOutcome: failure.Decline.String(), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID,
+		DeclineOutcome: failure.Decline.String(), Rail: billing.Rail(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID,
 		RetryStatus: billing.NotificationRetryUnknown, RecoveryAction: billing.NotificationRecoveryContactSupport,
 	}
 	if data.FailureReason == "" && data.FailureCode != "" {

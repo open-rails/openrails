@@ -50,7 +50,7 @@ type DeclaredHistoricalPayment struct {
 	SourceID      string                     `json:"source_id"`
 	Customer      CustomerID                 `json:"customer"`
 	PSP           PSPRef                     `json:"psp,omitzero"`
-	Rail          string                     `json:"rail"`
+	Rail          Rail                       `json:"rail"`
 	TransactionID string                     `json:"transaction_id"`
 	Amount        int64                      `json:"amount,string"`
 	Currency      string                     `json:"currency"`
@@ -74,7 +74,7 @@ type DeclaredHistoricalRefund struct {
 type DeclaredPurchase struct {
 	SourceID string     `json:"source_id"`
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account that took the payment; falls back to DefaultPSP.
 	PSP           PSPRef              `json:"psp,omitzero"`
 	TransactionID string              `json:"transaction_id"`
@@ -125,7 +125,7 @@ type PSPRef struct {
 // String. A psp_ prefix that is no id is an error.
 func ParsePSPRef(s string) (PSPRef, error) {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, PSPIDPrefix) {
+	if !strings.HasPrefix(s, pspIDPrefix) {
 		return PSPRef{Key: s}, nil
 	}
 	id, err := ParsePSPID(s)
@@ -151,7 +151,7 @@ func (r PSPRef) String() string {
 // (psp, rail_customer_ref, rail_method_ref).
 type DeclaredPaymentMethod struct {
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account holding the vault entry; falls back to DefaultPSP.
 	PSP             PSPRef `json:"psp,omitzero"`
 	RailCustomerRef string `json:"rail_customer_ref"`
@@ -173,7 +173,7 @@ type DeclaredPaymentMethod struct {
 type DeclaredPSPCustomer struct {
 	SourceID string     `json:"source_id,omitempty"`
 	Customer CustomerID `json:"customer"`
-	Rail     string     `json:"rail"`
+	Rail     Rail       `json:"rail"`
 	// PSP is the account holding the customer; falls back to DefaultPSP.
 	PSP               PSPRef `json:"psp,omitzero"`
 	RemoteCustomerRef string `json:"remote_customer_ref"`
@@ -181,7 +181,7 @@ type DeclaredPSPCustomer struct {
 
 // PaymentMethodRef links a DeclaredSubscription to a DeclaredPaymentMethod.
 type PaymentMethodRef struct {
-	Rail            string `json:"rail"`
+	Rail            Rail   `json:"rail"`
 	RailCustomerRef string `json:"rail_customer_ref"`
 	RailMethodRef   string `json:"rail_method_ref"`
 }
@@ -232,7 +232,7 @@ type DeclaredSubscription struct {
 	SourceID           string     `json:"source_id"` // host's stable id: idempotency and audit
 	Customer           CustomerID `json:"customer"`
 	Price              PriceID    `json:"price"`
-	Rail               string     `json:"rail"`
+	Rail               Rail       `json:"rail"`
 	RailSubscriptionID string     `json:"rail_subscription_id"`
 	// PSP is the merchant account owning this subscription at the provider;
 	// falls back to DefaultPSP.

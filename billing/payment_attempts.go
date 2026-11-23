@@ -38,7 +38,7 @@ type PaymentAttempt struct {
 	CardBIN       string       `json:"card_bin"`
 	TokenType     string       `json:"token_type"`
 	TransactionID string       `json:"transaction_id"`
-	Rail          string       `json:"rail"`
+	Rail          Rail         `json:"rail"`
 	PSPID         PSPID        `json:"psp_id"`
 	CustomerID    CustomerID   `json:"customer_id"`
 	Amount        int64        `json:"amount,string"`
@@ -95,7 +95,7 @@ type Renewal struct {
 	SubscriptionID SubscriptionID `json:"subscription_id"`
 	CustomerID     CustomerID     `json:"customer_id"`
 	PSPID          PSPID          `json:"psp_id"`
-	Rail           string         `json:"rail"`
+	Rail           Rail           `json:"rail"`
 	Owner          string         `json:"owner"`
 	DueAt          time.Time      `json:"due_at"`
 	Amount         int64          `json:"amount,string"`

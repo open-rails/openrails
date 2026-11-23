@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 var (
@@ -98,7 +99,7 @@ func RailDefinitions() []billing.RailDefinition {
 			AccountFields:  descriptor.AccountFields,
 			Fields:         pspSettingKeys(string(descriptor.Rail)),
 			CredentialKeys: credentialKeys,
-			Environments:   descriptor.Environments,
+			Environments:   normalize.Strings[billing.Environment](descriptor.Environments),
 		})
 	}
 	return out
@@ -209,7 +210,7 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if !merchantdocs.KeyShape.MatchString(key) {
 		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
 	}
-	environment, err := config.ResolvePSPEnvironment(key, rail, req.Environment)
+	environment, err := config.ResolvePSPEnvironment(key, rail, string(req.Environment))
 	if err != nil {
 		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("environment")
 	}
@@ -717,7 +718,7 @@ func pspView(scope PSPScope, openObligations int64) billing.PSP {
 		ID:              billing.PSPID(scope.ID),
 		Key:             scope.Key,
 		Rail:            billing.Rail(scope.Rail),
-		Environment:     scope.Environment,
+		Environment:     billing.Environment(scope.Environment),
 		Archived:        scope.Archived,
 		OpenObligations: openObligations,
 		PSPFields:       pspFields(scope),

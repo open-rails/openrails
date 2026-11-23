@@ -146,7 +146,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 				var config billing.CustomerConfig
 				require.NoError(t, json.Unmarshal(raw, &config))
 				require.Len(t, config.Payment.PSPs, 1)
-				require.Equal(t, "stripe", config.Payment.PSPs[0].Rail)
+				require.Equal(t, billing.RailStripe, config.Payment.PSPs[0].Rail)
 				require.NotContains(t, string(raw), "sk_test_critical")
 			case "payments":
 				var payments billing.ListPage[billing.Payment]

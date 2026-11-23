@@ -139,7 +139,7 @@ type NotificationData struct {
 	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
 
 	// Rail context on payment_method_failed.
-	Rail               string `json:"rail,omitempty"`
+	Rail               Rail   `json:"rail,omitempty"`
 	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 	TransactionID      string `json:"transaction_id,omitempty"`
 

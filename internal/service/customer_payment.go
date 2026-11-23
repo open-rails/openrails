@@ -131,7 +131,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 				// A valid historical account/refusal remains valid custody after a cutover,
 				// but it is not a failure of the replacement provider binding.
 				if accepted.Renewal.PSPID == sub.PspID && accepted.Rail == string(sub.Rail) && accepted.RailSubscriptionID == sub.RailSubscriptionID {
-					out.LastFailureReason = decline.ReasonFor(accepted.Rail, refusal.Code)
+					out.LastFailureReason = billing.DeclineReason(decline.ReasonFor(accepted.Rail, refusal.Code))
 				}
 			} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 				return nil, err

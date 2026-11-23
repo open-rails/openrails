@@ -106,25 +106,6 @@ const (
 	ProviderWritesReadOnly = "readonly"
 )
 
-// A PSP's environment (billing.PSPConfig.Environment) is its rail's own;
-// omitted, it is the rail's real-money one.
-const (
-	// EnvironmentLive moves real money on nmi, stripe and ccbill.
-	EnvironmentLive = "live"
-	// EnvironmentTest is the provider's own system moving no money: an NMI
-	// account in test mode, Stripe test keys.
-	EnvironmentTest = "test"
-	// EnvironmentSandbox is the provider's separate sandbox system:
-	// sandbox.nmi.com, CCBill's sandbox.
-	EnvironmentSandbox = "sandbox"
-	// EnvironmentMainnet is Solana's real-money network.
-	EnvironmentMainnet = "mainnet"
-	// EnvironmentDevnet is Solana's devnet.
-	EnvironmentDevnet = "devnet"
-	// EnvironmentTestnet is Solana's testnet.
-	EnvironmentTestnet = "testnet"
-)
-
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {

@@ -113,7 +113,7 @@ type Admission struct {
 	// refusal names its Limit and when it ResetsAt (null when nothing refills
 	// it). All are null when allowed.
 	BlockedBy         *AdmissionBlock `json:"blocked_by"`
-	DenyCode          *string         `json:"deny_code"`
+	DenyCode          *DenyCode       `json:"deny_code"`
 	RetryAfterSeconds *int64          `json:"retry_after_seconds"`
 	Limit             *string         `json:"limit"`
 	ResetsAt          *time.Time      `json:"resets_at"`

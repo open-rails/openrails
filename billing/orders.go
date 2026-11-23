@@ -315,7 +315,7 @@ type OrderPaymentOption struct {
 	// this PSP. PSP-held cards remain identified by their own psp_id.
 	SavedPaymentMethodIDs []PaymentMethodID `json:"saved_payment_method_ids,omitempty"`
 	PSPID                 PSPID             `json:"psp_id"`
-	Rail                  string            `json:"rail"`
+	Rail                  Rail              `json:"rail"`
 	Accepts               []string          `json:"accepts"`
 	FailedAttempts        int               `json:"failed_attempts"`
 	// Requires is what the customer must add before this PSP can take the

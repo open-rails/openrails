@@ -789,7 +789,7 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.Pric
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
 		PriceID: priceID,
-		Rail:    string(models.RailStripe), SubscriptionID: &subID,
+		Rail:    billing.RailStripe, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		Effective: effectiveOf(p.Action),
 	}

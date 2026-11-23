@@ -37,7 +37,7 @@ export type Admission = {
   customer_id: string
   allowed: boolean
   blocked_by: "abuse" | "budget" | "limit" | "money" | null
-  deny_code: string | null
+  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "capacity_held" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached" | null
   retry_after_seconds: number | null
   limit: string | null
   resets_at: string | null
@@ -167,7 +167,7 @@ export type ApplyPrice = {
   trial_duration_hours?: number | null
   customer_amount?: CustomerAmount | null
   quantity?: Quantity | null
-  sell_via?: string[] | null
+  sell_via?: ("card" | "solana")[] | null
   amount?: string
   access_duration?: string | null
   billing_interval?: string | null
@@ -568,7 +568,7 @@ export type CreatePSPImportParams = {
 export type CreatePSPParams = {
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
-  environment?: string
+  environment?: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
   custodian?: string
   gateway_id?: string
   account_id?: string
@@ -612,7 +612,7 @@ export type CreatePriceParams = {
   billing_interval_months?: number
   trial_unit_amount?: string
   trial_duration_hours?: number
-  sell_via?: string[]
+  sell_via?: ("card" | "solana")[]
   archived?: boolean
   expected_revision?: number
 }
@@ -727,8 +727,8 @@ export type CurrencyUnits = {
 
 export type Custodian = {
   key: string
-  kind: string
-  environment: string
+  kind: "basis_theory" | "hyperswitch"
+  environment: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
   account_id: string
   settings: Record<string, unknown> | null
   credentials: Record<string, PSPCredential> | null
@@ -878,7 +878,7 @@ export type DeclaredHistoricalPayment = {
   source_id?: string
   customer?: string
   psp?: PSPRef
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   transaction_id?: string
   amount?: string
   currency?: string
@@ -903,14 +903,14 @@ export type DeclaredOrderLine = {
 export type DeclaredPSPCustomer = {
   source_id?: string
   customer?: string
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   psp?: PSPRef
   remote_customer_ref?: string
 }
 
 export type DeclaredPaymentMethod = {
   customer?: string
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   psp?: PSPRef
   rail_customer_ref?: string
   rail_method_ref?: string
@@ -932,7 +932,7 @@ export type DeclaredProviderSchedule = {
 export type DeclaredPurchase = {
   source_id?: string
   customer?: string
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   psp?: PSPRef
   transaction_id?: string
   currency?: string
@@ -990,7 +990,7 @@ export type DeclaredSubscription = {
   source_id?: string
   customer?: string
   price?: string
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id?: string
   psp?: PSPRef
   started_at?: string
@@ -1056,8 +1056,8 @@ export type DunningPolicy = {
   tiers: DunningTier[]
   transient_retry_minutes?: number[]
   customer_retries?: number
-  access_during_dunning?: string
-  access_while_renewal_held?: string
+  access_during_dunning?: "keep" | "suspend"
+  access_while_renewal_held?: "keep" | "suspend"
 }
 
 export type DunningTier = {
@@ -1409,7 +1409,7 @@ export type MerchantConfigurationState = {
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
-  provider_refund_access?: string
+  provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
   arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
@@ -1661,7 +1661,7 @@ export type OrderPaymentAttempt = {
 export type OrderPaymentOption = {
   saved_payment_method_ids?: string[]
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   accepts: string[]
   failed_attempts: number
   requires?: string[]
@@ -1732,7 +1732,7 @@ export type PSP = {
   id: string
   key: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
-  environment: string
+  environment: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
   archived: boolean
   open_obligations: number
   gateway_id?: string
@@ -1760,7 +1760,7 @@ export type PSPCredential = {
 export type PSPImport = {
   id: string
   psp: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   status: "applied" | "applying" | "failed" | "pulled" | "pulling"
   history_since: string | null
   history_through: string | null
@@ -1842,13 +1842,13 @@ export type PSPImportRule = {
 export type PSPPaymentConfig = {
   psp_id: string
   key: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   custodian: string
   display_name: string
   flow: string
   routed: boolean
   config?: Record<string, string>
-  status?: string
+  status?: "temporarily_unavailable"
   retry_after?: number
 }
 
@@ -1894,7 +1894,7 @@ export type PackagePrice = {
 export type ParkedSubscription = {
   id: string
   psp: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   subscription_ref: string
   reason: "customer_unlinked" | "price_unmapped" | "product_held"
   price_ref: string | null
@@ -1927,7 +1927,7 @@ export type Payment = {
   order_id: string | null
   quantity: number | null
   channel: "manual" | "rail"
-  rail: string | null
+  rail: "ccbill" | "nmi" | "solana" | "stripe" | null
   psp_id: string | null
   transaction_id: string
   card: CardDetails | null
@@ -1946,7 +1946,7 @@ export type PaymentAttempt = {
   source: string
   observed_via: string
   category: string
-  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   action: string
   response_code: string
   response_text: string
@@ -1958,7 +1958,7 @@ export type PaymentAttempt = {
   card_bin: string
   token_type: string
   transaction_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   psp_id: string
   customer_id: string
   amount: string
@@ -1979,15 +1979,15 @@ export type PaymentConfig = {
 }
 
 export type PaymentFailure = {
-  reason: string
+  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   message: string
-  field?: string
+  field?: "cvc" | "expiry" | "number" | "postal_code"
 }
 
 export type PaymentMethod = {
   id: string
   customer_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   psp_id: string | null
   status: "active" | "closed" | "removed" | "replaced" | "requires_action"
   next_action: NextAction | null
@@ -2011,7 +2011,7 @@ export type PaymentMethodHealth = {
 }
 
 export type PaymentMethodRef = {
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   rail_customer_ref?: string
   rail_method_ref?: string
 }
@@ -2023,7 +2023,7 @@ export type PaymentMethodSubscription = {
 }
 
 export type PaymentRecovery = {
-  last_failure_reason?: string
+  last_failure_reason?: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   retryable: boolean
   blocked_reason?: string
   order_id?: string
@@ -2078,7 +2078,7 @@ export type Price = {
   billing_interval_months: number | null
   trial_unit_amount: string | null
   trial_duration_hours: number | null
-  sell_via: string[]
+  sell_via: ("card" | "solana")[]
   provider: PriceProvider | null
   solana_plan: string | null
   created_at: string
@@ -2136,7 +2136,7 @@ export type PriceMigrationCancel = {
 
 export type PriceMigrationOutcome = {
   subscription_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   disposition: "blocked" | "scheduled" | "skipped"
   reason: string | null
 }
@@ -2162,7 +2162,7 @@ export type PriceProvider = {
   access_duration_default: boolean
   psp: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   ids: Record<string, string> | null
   retired: boolean
   sync_status: "drifted" | "in_sync" | "missing" | "sync_disabled" | "unknown"
@@ -2288,8 +2288,8 @@ export type PublicMerchant = {
 
 export type PutCustodianParams = {
   expected_revision?: number
-  kind?: string
-  environment?: string
+  kind?: "basis_theory" | "hyperswitch"
+  environment?: "devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet"
   account_id?: string
   settings?: Record<string, unknown>
   credentials?: Record<string, string>
@@ -2306,7 +2306,7 @@ export type RailDefinition = {
   account_fields: string[]
   fields: string[]
   credential_keys: string[]
-  environments: string[]
+  environments: ("devnet" | "live" | "mainnet" | "sandbox" | "test" | "testnet")[]
 }
 
 export type RateCard = {
@@ -2348,7 +2348,7 @@ export type RefundPaymentParams = {
 }
 
 export type Refusal = {
-  deny_code: string
+  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "capacity_held" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null
@@ -2363,7 +2363,7 @@ export type Renewal = {
   subscription_id: string
   customer_id: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   owner: string
   due_at: string
   amount: string
@@ -2530,7 +2530,7 @@ export type Subscription = {
   price_id: string
   quantity: number | null
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_change: ScheduledChange | null
@@ -2562,7 +2562,7 @@ export type SubscriptionAccess = {
   source_type?: string
   source_id?: string
   subscription_id?: string
-  rail?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
   starts_at: string
   ends_at?: string
 }
@@ -2572,7 +2572,7 @@ export type SubscriptionChange = {
   effective?: string
   price_id: string
   quantity: number | null
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   subscription_id?: string
   next_action?: NextAction
   transaction_id: string | null
@@ -2594,7 +2594,7 @@ export type SubscriptionChangePreview = {
   effective: string
   price_id: string
   quantity: number | null
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   currency: string
   amount_due_now: string
   next_charge_amount: string
@@ -2611,7 +2611,7 @@ export type SubscriptionDunning = {
   next_retry_at: string | null
   final_retry_at: string | null
   waiting_for_new_card: boolean
-  last_failure_reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
+  last_failure_reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
 }
 
 export type SubscriptionHistory = {
@@ -2757,7 +2757,7 @@ export type UpdateMerchantConfigurationParams = {
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
-  provider_refund_access?: string
+  provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
   arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
@@ -2796,7 +2796,7 @@ export type UpdatePaymentMethodParams = {
 
 export type UpdatePriceParams = {
   archived?: boolean | null
-  sell_via?: string[] | null
+  sell_via?: ("card" | "solana")[] | null
   expected_revision?: number
 }
 

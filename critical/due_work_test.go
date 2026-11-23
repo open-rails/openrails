@@ -391,7 +391,7 @@ func TestDueWork(t *testing.T) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs = billing.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {
-				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
+				m.PSPs[key] = openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: subacc, Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})

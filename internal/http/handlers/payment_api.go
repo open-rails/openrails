@@ -58,7 +58,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 	if p.Channel == models.ChannelManual {
 		out.Channel = billing.ChannelManual
 	} else {
-		out.Rail = new(string(p.Rail))
+		out.Rail = new(billing.Rail(p.Rail))
 	}
 	if p.PspID != nil {
 		psp := billing.PSPID(*p.PspID)

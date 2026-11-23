@@ -10,7 +10,7 @@ import (
 
 // NormalizeProviderRefundAccess validates a provider_refund_access value; ""
 // means the default.
-func NormalizeProviderRefundAccess(v string) (string, error) {
+func NormalizeProviderRefundAccess(v billing.ProviderRefundAccess) (billing.ProviderRefundAccess, error) {
 	switch v {
 	case "", billing.ProviderRefundRevokeOnFull, billing.ProviderRefundRevokeOnAny, billing.ProviderRefundKeep:
 		return v, nil

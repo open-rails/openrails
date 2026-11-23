@@ -536,7 +536,7 @@ func (s *Service) createPriceLinks(ctx context.Context, req billing.CreatePriceP
 // they are; SetSellVia writes SellVia (nil: every method).
 type UpdatePriceRequest struct {
 	Archived   *bool
-	SellVia    []string
+	SellVia    []catalogwire.SellVia
 	SetSellVia bool
 	// ExpectedRevision refuses the edit unless the price key is at it.
 	ExpectedRevision *int64
@@ -672,7 +672,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 		if req.TrialUnitAmount != nil || req.TrialDurationHours != nil || req.Quantity != nil {
 			return apperr.Invalidf("calendar prices do not yet support trials or per-seat quantities")
 		}
-		if len(req.SellVia) == 1 && req.SellVia[0] == models.SellViaSolana {
+		if len(req.SellVia) == 1 && req.SellVia[0] == catalogwire.SellViaSolana {
 			return apperr.Invalidf("calendar prices require Stripe or NMI engine collection")
 		}
 	}

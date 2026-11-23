@@ -13,18 +13,18 @@ type PSPImportID uuid.UUID
 type PSPImportRecordID uuid.UUID
 
 const (
-	PSPImportIDPrefix       = "pim_"
-	PSPImportRecordIDPrefix = "pir_"
+	pspImportIDPrefix       = "pim_"
+	pspImportRecordIDPrefix = "pir_"
 )
 
 func ParsePSPImportID(s string) (PSPImportID, error) {
-	u, err := parsePrefixedID("PSP import", PSPImportIDPrefix, s)
+	u, err := parsePrefixedID("PSP import", pspImportIDPrefix, s)
 	return PSPImportID(u), err
 }
 
 func (id PSPImportID) UUID() uuid.UUID              { return uuid.UUID(id) }
 func (id PSPImportID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
-func (id PSPImportID) String() string               { return formatPrefixedID(PSPImportIDPrefix, uuid.UUID(id)) }
+func (id PSPImportID) String() string               { return formatPrefixedID(pspImportIDPrefix, uuid.UUID(id)) }
 func (id PSPImportID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *PSPImportID) UnmarshalText(text []byte) error {
 	parsed, err := ParsePSPImportID(string(text))
@@ -33,14 +33,14 @@ func (id *PSPImportID) UnmarshalText(text []byte) error {
 }
 
 func ParsePSPImportRecordID(s string) (PSPImportRecordID, error) {
-	u, err := parsePrefixedID("PSP import record", PSPImportRecordIDPrefix, s)
+	u, err := parsePrefixedID("PSP import record", pspImportRecordIDPrefix, s)
 	return PSPImportRecordID(u), err
 }
 
 func (id PSPImportRecordID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id PSPImportRecordID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id PSPImportRecordID) String() string {
-	return formatPrefixedID(PSPImportRecordIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(pspImportRecordIDPrefix, uuid.UUID(id))
 }
 func (id PSPImportRecordID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *PSPImportRecordID) UnmarshalText(text []byte) error {
@@ -173,7 +173,7 @@ type PSPImportCount struct {
 type PSPImport struct {
 	ID             PSPImportID         `json:"id"`
 	PSP            PSPID               `json:"psp"`
-	Rail           string              `json:"rail"`
+	Rail           Rail                `json:"rail"`
 	Status         PSPImportStatus     `json:"status"`
 	HistorySince   *time.Time          `json:"history_since"`
 	HistoryThrough *time.Time          `json:"history_through"`

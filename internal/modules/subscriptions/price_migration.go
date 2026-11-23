@@ -374,7 +374,7 @@ func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPla
 	out := make([]*classified, 0, len(cohort))
 	for _, sub := range cohort {
 		c := &classified{sub: sub, from: plan.sources[sub.PriceID], capability: s.capability(ctx, sub)}
-		c.outcome = billing.PriceMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: string(sub.Rail)}
+		c.outcome = billing.PriceMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: billing.Rail(sub.Rail)}
 		rail := byRail[string(sub.Rail)]
 		if rail == nil {
 			rail = &billing.PriceMigrationRailCounts{}

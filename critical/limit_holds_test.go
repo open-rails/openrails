@@ -103,7 +103,7 @@ func requireLimitReached(t *testing.T, v billing.AdmissionVerdict, limit string)
 	return refusal
 }
 
-func requireDenied(t *testing.T, v billing.AdmissionVerdict, code string) {
+func requireDenied(t *testing.T, v billing.AdmissionVerdict, code billing.DenyCode) {
 	t.Helper()
 	require.False(t, v.Allowed())
 	require.NotNil(t, v.Admission.DenyCode)

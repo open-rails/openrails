@@ -41,7 +41,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
-		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, Rail: r.Rail,
+		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, Rail: billing.Rail(r.Rail),
 			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {

@@ -316,7 +316,7 @@ func solanaPSP(accounts []merchants.PSPScope) *merchants.PSPScope {
 }
 
 // sellsVia reports whether methods (nil: every method) include method.
-func sellsVia(methods []string, method string) bool {
+func sellsVia(methods []catalogwire.SellVia, method catalogwire.SellVia) bool {
 	return len(methods) == 0 || slices.Contains(methods, method)
 }
 

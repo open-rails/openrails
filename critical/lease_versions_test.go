@@ -710,7 +710,7 @@ func TestLeaseVersions(t *testing.T) {
 		require.NotNil(t, out.Wants[1].LimitSet)
 		require.NotEqual(t, *out.Wants[0].LimitSet, *out.Wants[1].LimitSet, "the same window under another cap is another limit set")
 		require.NotNil(t, out.Wants[0].Refusal, "1,500 is past the free month's 1,000")
-		require.Equal(t, "budget_exceeded", out.Wants[0].Refusal.DenyCode)
+		require.Equal(t, billing.DenyBudgetExceeded, out.Wants[0].Refusal.DenyCode)
 		require.Nil(t, out.Wants[1].Refusal, "and within the gold month's 5,000")
 	})
 

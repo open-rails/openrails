@@ -77,7 +77,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		passlessFleet(t, s.world)
 		product, err := s.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "chain-expiring", DisplayName: "Chain purchase", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"chain:paid"}})
 		require.NoError(t, err)
-		price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", SellVia: []string{billing.SellViaSolana}})
+		price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", SellVia: []catalog.SellVia{catalog.SellViaSolana}})
 		require.NoError(t, err)
 		customer := billing.CustomerID(uuid.MustParse(s.alice.ID))
 		expires := s.clock.Now().Add(time.Hour)

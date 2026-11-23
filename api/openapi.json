@@ -2943,7 +2943,13 @@
             "name": "rail",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "ccbill",
+                "nmi",
+                "solana",
+                "stripe"
+              ]
             }
           },
           {
@@ -7817,7 +7823,13 @@
             "name": "rail",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "ccbill",
+                "nmi",
+                "solana",
+                "stripe"
+              ]
             }
           },
           {
@@ -13016,7 +13028,19 @@
           "deny_code": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "accrual_rate_cap_reached",
+                  "budget_exceeded",
+                  "capacity_held",
+                  "delegated_spend_not_allowed",
+                  "delinquent_unpaid_order",
+                  "failure_rate_limited",
+                  "insufficient_balance",
+                  "insufficient_credit",
+                  "limit_reached",
+                  "outstanding_cap_reached"
+                ]
               },
               {
                 "type": "null"
@@ -13784,7 +13808,11 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "card",
+                    "solana"
+                  ]
                 }
               },
               {
@@ -15601,7 +15629,15 @@
             ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "custodian": {
             "type": "string"
@@ -15740,7 +15776,11 @@
           "sell_via": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "card",
+                "solana"
+              ]
             }
           },
           "archived": {
@@ -16202,10 +16242,22 @@
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "basis_theory",
+              "hyperswitch"
+            ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "account_id": {
             "type": "string"
@@ -16863,7 +16915,13 @@
             "$ref": "#/components/schemas/PSPRef"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "transaction_id": {
             "type": "string"
@@ -16935,7 +16993,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -16952,7 +17016,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -17013,7 +17083,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
@@ -17189,7 +17265,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_subscription_id": {
             "type": "string"
@@ -17403,10 +17485,18 @@
             "type": "integer"
           },
           "access_during_dunning": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "suspend"
+            ]
           },
           "access_while_renewal_held": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "suspend"
+            ]
           }
         },
         "required": [
@@ -19337,7 +19427,12 @@
             "type": "integer"
           },
           "provider_refund_access": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "revoke_on_any",
+              "revoke_on_full"
+            ]
           },
           "arrears_grace_days": {
             "type": "integer"
@@ -20600,7 +20695,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "accepts": {
             "type": "array",
@@ -20960,7 +21061,15 @@
             ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "archived": {
             "type": "boolean"
@@ -21073,7 +21182,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "status": {
             "type": "string",
@@ -21508,7 +21623,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "custodian": {
             "type": "string"
@@ -21529,7 +21650,10 @@
             }
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "temporarily_unavailable"
+            ]
           },
           "retry_after": {
             "type": "integer"
@@ -21718,7 +21842,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "subscription_ref": {
             "type": "string"
@@ -21921,7 +22051,13 @@
           "rail": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "ccbill",
+                  "nmi",
+                  "solana",
+                  "stripe"
+                ]
               },
               {
                 "type": "null"
@@ -22068,6 +22204,7 @@
               "merchant_config",
               "no_such_issuer",
               "over_limit",
+              "payment_page_expired",
               "pickup_card",
               "processing_error",
               "restricted_card",
@@ -22075,6 +22212,7 @@
               "security_violation",
               "stolen_card",
               "stop_recurring",
+              "stored_credential_required",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -22122,7 +22260,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp_id": {
             "type": "string"
@@ -22269,13 +22413,60 @@
         "type": "object",
         "properties": {
           "reason": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "authentication_required",
+              "blocked_by_psp",
+              "call_issuer",
+              "card_not_supported",
+              "communication_error",
+              "currency_not_supported",
+              "do_not_honor",
+              "duplicate_transaction",
+              "expired_card",
+              "fraudulent",
+              "gateway_rejected",
+              "generic_decline",
+              "incorrect_address",
+              "incorrect_cvc",
+              "incorrect_number",
+              "incorrect_zip",
+              "insufficient_funds",
+              "invalid_account",
+              "invalid_expiry",
+              "invalid_pin",
+              "invalid_request",
+              "issuer_unavailable",
+              "lost_card",
+              "merchant_config",
+              "no_such_issuer",
+              "over_limit",
+              "payment_page_expired",
+              "pickup_card",
+              "processing_error",
+              "restricted_card",
+              "retry_later",
+              "security_violation",
+              "stolen_card",
+              "stop_recurring",
+              "stored_credential_required",
+              "transaction_not_allowed",
+              "try_again_later",
+              "unknown",
+              "update_cardholder_data"
+            ]
           },
           "message": {
             "type": "string"
           },
           "field": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cvc",
+              "expiry",
+              "number",
+              "postal_code"
+            ]
           }
         },
         "required": [
@@ -22293,7 +22484,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "psp_id": {
             "oneOf": [
@@ -22472,7 +22669,13 @@
         "type": "object",
         "properties": {
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_customer_ref": {
             "type": "string"
@@ -22506,7 +22709,48 @@
         "type": "object",
         "properties": {
           "last_failure_reason": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "authentication_required",
+              "blocked_by_psp",
+              "call_issuer",
+              "card_not_supported",
+              "communication_error",
+              "currency_not_supported",
+              "do_not_honor",
+              "duplicate_transaction",
+              "expired_card",
+              "fraudulent",
+              "gateway_rejected",
+              "generic_decline",
+              "incorrect_address",
+              "incorrect_cvc",
+              "incorrect_number",
+              "incorrect_zip",
+              "insufficient_funds",
+              "invalid_account",
+              "invalid_expiry",
+              "invalid_pin",
+              "invalid_request",
+              "issuer_unavailable",
+              "lost_card",
+              "merchant_config",
+              "no_such_issuer",
+              "over_limit",
+              "payment_page_expired",
+              "pickup_card",
+              "processing_error",
+              "restricted_card",
+              "retry_later",
+              "security_violation",
+              "stolen_card",
+              "stop_recurring",
+              "stored_credential_required",
+              "transaction_not_allowed",
+              "try_again_later",
+              "unknown",
+              "update_cardholder_data"
+            ]
           },
           "retryable": {
             "type": "boolean"
@@ -22722,7 +22966,11 @@
           "sell_via": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "card",
+                "solana"
+              ]
             }
           },
           "provider": {
@@ -23011,7 +23259,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "disposition": {
             "type": "string",
@@ -23138,7 +23392,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "ids": {
             "oneOf": [
@@ -24104,10 +24364,22 @@
             "type": "integer"
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "basis_theory",
+              "hyperswitch"
+            ]
           },
           "environment": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "devnet",
+              "live",
+              "mainnet",
+              "sandbox",
+              "test",
+              "testnet"
+            ]
           },
           "account_id": {
             "type": "string"
@@ -24175,7 +24447,15 @@
           "environments": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "devnet",
+                "live",
+                "mainnet",
+                "sandbox",
+                "test",
+                "testnet"
+              ]
             }
           }
         },
@@ -24321,7 +24601,19 @@
         "type": "object",
         "properties": {
           "deny_code": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "accrual_rate_cap_reached",
+              "budget_exceeded",
+              "capacity_held",
+              "delegated_spend_not_allowed",
+              "delinquent_unpaid_order",
+              "failure_rate_limited",
+              "insufficient_balance",
+              "insufficient_credit",
+              "limit_reached",
+              "outstanding_cap_reached"
+            ]
           },
           "limit": {
             "oneOf": [
@@ -24389,7 +24681,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "owner": {
             "type": "string"
@@ -25017,7 +25315,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "rail_subscription_id": {
             "oneOf": [
@@ -25230,7 +25534,13 @@
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "starts_at": {
             "type": "string",
@@ -25270,7 +25580,13 @@
             ]
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "subscription_id": {
             "type": "string"
@@ -25360,7 +25676,13 @@
             ]
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "currency": {
             "type": "string"
@@ -25473,6 +25795,7 @@
                   "merchant_config",
                   "no_such_issuer",
                   "over_limit",
+                  "payment_page_expired",
                   "pickup_card",
                   "processing_error",
                   "restricted_card",
@@ -25480,6 +25803,7 @@
                   "security_violation",
                   "stolen_card",
                   "stop_recurring",
+                  "stored_credential_required",
                   "transaction_not_allowed",
                   "try_again_later",
                   "unknown",
@@ -26097,7 +26421,12 @@
             "type": "integer"
           },
           "provider_refund_access": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "keep",
+              "revoke_on_any",
+              "revoke_on_full"
+            ]
           },
           "arrears_grace_days": {
             "type": "integer"
@@ -26245,7 +26574,11 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "card",
+                    "solana"
+                  ]
                 }
               },
               {

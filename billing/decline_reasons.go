@@ -60,10 +60,15 @@ const (
 
 	// DeclineUnknown is a code no table maps.
 	DeclineUnknown DeclineReason = "unknown"
+
+	// No decline, a PaymentFailure's reason all the same: the payment page
+	// expired unpaid, or the card's stored-credential agreement is missing.
+	DeclinePaymentPageExpired       DeclineReason = "payment_page_expired"
+	DeclineStoredCredentialRequired DeclineReason = "stored_credential_required"
 )
 
 // declineCustomer is what each reason tells the buyer (PaymentFailure.Reason).
-var declineCustomer = map[DeclineReason]string{
+var declineCustomer = map[DeclineReason]DeclineReason{
 	DeclineGeneric: "generic_decline", DeclineDoNotHonor: "do_not_honor", DeclineInsufficientFunds: "insufficient_funds",
 	DeclineOverLimit: "over_limit", DeclineCallIssuer: "do_not_honor", DeclineRetryLater: "try_again_later",
 	DeclineTryAgainLater: "try_again_later", DeclineSecurityViolation: "generic_decline", DeclineRestrictedCard: "generic_decline",
@@ -87,7 +92,7 @@ var declineCustomer = map[DeclineReason]string{
 	DeclineUnknown: "generic_decline",
 }
 
-// DeclineReasons lists every reason, sorted.
+// DeclineReasons lists every reason a rail's decline code maps to, sorted.
 func DeclineReasons() []DeclineReason {
 	out := make([]DeclineReason, 0, len(declineCustomer))
 	for r := range declineCustomer {
@@ -107,7 +112,10 @@ func (r DeclineReason) FraudSignal() bool {
 	return false
 }
 
-var failureCopy = map[string]struct{ message, field string }{
+var failureCopy = map[DeclineReason]struct {
+	message string
+	field   CardField
+}{
 	"incorrect_cvc":           {"The card's security code is incorrect.", "cvc"},
 	"incorrect_zip":           {"The postal code doesn't match the card.", "postal_code"},
 	"incorrect_address":       {"The billing address doesn't match the card.", ""},

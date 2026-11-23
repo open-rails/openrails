@@ -201,7 +201,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 			w.deps.FXTransport = option.fx
 		}
 		m := cfgMerchant(w.cfg, "alpha")
-		m.PSPs = billing.PSPs{"solana": openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}
+		m.PSPs = billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		if recurring {
 			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
@@ -222,7 +222,7 @@ func (s *solanaWorld) order(t *testing.T, recurring bool) billing.Order {
 	}
 	p, err := s.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "chain-content", DisplayName: "Chain purchase", Ownership: ownership, Entitlements: []string{"chain:paid"}})
 	require.NoError(t, err)
-	priceInput := billing.CreatePriceParams{ProductID: p.ID, UnitAmount: 10_000_000, Currency: "USD", SellVia: []string{billing.SellViaSolana}}
+	priceInput := billing.CreatePriceParams{ProductID: p.ID, UnitAmount: 10_000_000, Currency: "USD", SellVia: []catalog.SellVia{catalog.SellViaSolana}}
 	if recurring {
 		priceInput.BillingIntervalHours = ptr(168)
 		priceInput.AccessDurationHours = ptr(168)
@@ -328,7 +328,7 @@ func (s *solanaWorld) subscribe(t *testing.T) (billing.Order, *billing.Subscript
 	sub, err := s.alpha.GetSubscription(t.Context(), subs.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
-	require.Equal(t, "solana", sub.Rail)
+	require.Equal(t, billing.RailSolana, sub.Rail)
 	require.Equal(t, s.clock.Now().Add(168*time.Hour), *sub.CurrentPeriodEndsAt)
 	require.EqualValues(t, 10_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	require.EqualValues(t, 90_000_000, s.node.Balance(s.payer.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))

@@ -201,7 +201,7 @@ type ApplyPrice struct {
 	// SellVia restricts the methods the price sells through: card (the
 	// merchant's card vault and charge PSPs) and solana. Null or omitted on a
 	// new price: every method the merchant has. It is not a term.
-	SellVia Field[[]string] `json:"sell_via,omitzero"`
+	SellVia Field[[]SellVia] `json:"sell_via,omitzero"`
 }
 
 // Validate checks the bounded syntax only; row-dependent validation happens
@@ -374,18 +374,21 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 	return sha256.Sum256(raw), nil
 }
 
-// SellVia methods.
+// SellVia is a method a price of ours sells through.
+type SellVia string
+
 const (
-	SellViaCard   = "card"
-	SellViaSolana = "solana"
+	// SellViaCard sells through the merchant's card vault and charge PSPs.
+	SellViaCard   SellVia = "card"
+	SellViaSolana SellVia = "solana"
 )
 
 // ValidateSellVia refuses an unknown or repeated method; nil is every method.
-func ValidateSellVia(methods []string) error {
+func ValidateSellVia(methods []SellVia) error {
 	if methods != nil && len(methods) == 0 {
 		return fmt.Errorf("sell_via names at least one method; null sells through every method")
 	}
-	seen := map[string]bool{}
+	seen := map[SellVia]bool{}
 	for _, m := range methods {
 		if m != SellViaCard && m != SellViaSolana || seen[m] {
 			return fmt.Errorf("sell_via lists methods once each: %s, %s", SellViaCard, SellViaSolana)

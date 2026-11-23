@@ -595,7 +595,7 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 	out := billing.PaymentMethod{
 		ID:                  billing.PaymentMethodID(pm.ID),
 		CustomerID:          billing.CustomerID(pm.CustomerID),
-		Rail:                string(pm.Rail),
+		Rail:                billing.Rail(pm.Rail),
 		Status:              billing.PaymentMethodStatus(pm.Status),
 		Card:                pm.Card.Details(),
 		BillingDetails:      billingDetailsFromMetadata(pm.Metadata),

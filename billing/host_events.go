@@ -9,16 +9,16 @@ import (
 // HostEventID names one host event; on the wire "hev_<uuid>".
 type HostEventID uuid.UUID
 
-const HostEventIDPrefix = "hev_"
+const hostEventIDPrefix = "hev_"
 
 func ParseHostEventID(s string) (HostEventID, error) {
-	u, err := parsePrefixedID("host event", HostEventIDPrefix, s)
+	u, err := parsePrefixedID("host event", hostEventIDPrefix, s)
 	return HostEventID(u), err
 }
 
 func (id HostEventID) UUID() uuid.UUID              { return uuid.UUID(id) }
 func (id HostEventID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
-func (id HostEventID) String() string               { return formatPrefixedID(HostEventIDPrefix, uuid.UUID(id)) }
+func (id HostEventID) String() string               { return formatPrefixedID(hostEventIDPrefix, uuid.UUID(id)) }
 func (id HostEventID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *HostEventID) UnmarshalText(b []byte) error {
 	v, err := ParseHostEventID(string(b))

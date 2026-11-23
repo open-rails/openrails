@@ -16,17 +16,17 @@ import (
 // RunningChargeID names one running charge; on the wire "rch_<uuid>".
 type RunningChargeID uuid.UUID
 
-const RunningChargeIDPrefix = "rch_"
+const runningChargeIDPrefix = "rch_"
 
 func ParseRunningChargeID(s string) (RunningChargeID, error) {
-	u, err := parsePrefixedID("running charge", RunningChargeIDPrefix, s)
+	u, err := parsePrefixedID("running charge", runningChargeIDPrefix, s)
 	return RunningChargeID(u), err
 }
 
 func (id RunningChargeID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id RunningChargeID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id RunningChargeID) String() string {
-	return formatPrefixedID(RunningChargeIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(runningChargeIDPrefix, uuid.UUID(id))
 }
 func (id RunningChargeID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *RunningChargeID) UnmarshalText(text []byte) error {

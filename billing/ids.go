@@ -39,17 +39,17 @@ type (
 )
 
 const (
-	ProductIDPrefix        = "prod_"
-	SubscriptionIDPrefix   = "sub_"
-	PaymentIDPrefix        = "pay_"
-	PaymentMethodIDPrefix  = "pm_"
-	MandateIDPrefix        = "mdt_"
-	OrderAttemptIDPrefix   = "oat_"
-	PaymentAttemptIDPrefix = "att_"
-	RenewalIDPrefix        = "cyc_"
-	PSPIDPrefix            = "psp_"
-	OrderIDPrefix          = "ord_"
-	OrderLineIDPrefix      = "oli_"
+	productIDPrefix        = "prod_"
+	subscriptionIDPrefix   = "sub_"
+	paymentIDPrefix        = "pay_"
+	paymentMethodIDPrefix  = "pm_"
+	mandateIDPrefix        = "mdt_"
+	orderAttemptIDPrefix   = "oat_"
+	paymentAttemptIDPrefix = "att_"
+	renewalIDPrefix        = "cyc_"
+	pspIDPrefix            = "psp_"
+	orderIDPrefix          = "ord_"
+	orderLineIDPrefix      = "oli_"
 )
 
 // MerchantID is the merchant's own UUID (billing.merchants.id, never an
@@ -73,49 +73,49 @@ func (id MerchantID) MarshalText() ([]byte, error)     { return uuid.UUID(id).Ma
 func (id *MerchantID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
 
 func ParseProductID(s string) (ProductID, error) {
-	u, err := parsePrefixedID("product", ProductIDPrefix, s)
+	u, err := parsePrefixedID("product", productIDPrefix, s)
 	return ProductID(u), err
 }
 
 func ParseSubscriptionID(s string) (SubscriptionID, error) {
-	u, err := parsePrefixedID("subscription", SubscriptionIDPrefix, s)
+	u, err := parsePrefixedID("subscription", subscriptionIDPrefix, s)
 	return SubscriptionID(u), err
 }
 func ParsePaymentID(s string) (PaymentID, error) {
-	u, err := parsePrefixedID("payment", PaymentIDPrefix, s)
+	u, err := parsePrefixedID("payment", paymentIDPrefix, s)
 	return PaymentID(u), err
 }
 func ParsePaymentMethodID(s string) (PaymentMethodID, error) {
-	u, err := parsePrefixedID("payment method", PaymentMethodIDPrefix, s)
+	u, err := parsePrefixedID("payment method", paymentMethodIDPrefix, s)
 	return PaymentMethodID(u), err
 }
 func ParseMandateID(s string) (MandateID, error) {
-	u, err := parsePrefixedID("mandate", MandateIDPrefix, s)
+	u, err := parsePrefixedID("mandate", mandateIDPrefix, s)
 	return MandateID(u), err
 }
 func ParseOrderID(s string) (OrderID, error) {
-	u, err := parsePrefixedID("order", OrderIDPrefix, s)
+	u, err := parsePrefixedID("order", orderIDPrefix, s)
 	return OrderID(u), err
 }
 func ParseOrderLineID(s string) (OrderLineID, error) {
-	u, err := parsePrefixedID("order line", OrderLineIDPrefix, s)
+	u, err := parsePrefixedID("order line", orderLineIDPrefix, s)
 	return OrderLineID(u), err
 }
 func ParseOrderAttemptID(s string) (OrderAttemptID, error) {
-	u, err := parsePrefixedID("order attempt", OrderAttemptIDPrefix, s)
+	u, err := parsePrefixedID("order attempt", orderAttemptIDPrefix, s)
 	return OrderAttemptID(u), err
 }
 
 func ParsePaymentAttemptID(s string) (PaymentAttemptID, error) {
-	u, err := parsePrefixedID("payment attempt", PaymentAttemptIDPrefix, s)
+	u, err := parsePrefixedID("payment attempt", paymentAttemptIDPrefix, s)
 	return PaymentAttemptID(u), err
 }
 func ParseRenewalID(s string) (RenewalID, error) {
-	u, err := parsePrefixedID("renewal", RenewalIDPrefix, s)
+	u, err := parsePrefixedID("renewal", renewalIDPrefix, s)
 	return RenewalID(u), err
 }
 func ParsePSPID(s string) (PSPID, error) {
-	u, err := parsePrefixedID("PSP", PSPIDPrefix, s)
+	u, err := parsePrefixedID("PSP", pspIDPrefix, s)
 	return PSPID(u), err
 }
 
@@ -153,25 +153,25 @@ func (id PSPID) IsZero() bool            { return uuid.UUID(id) == uuid.Nil }
 
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
-func (id ProductID) String() string  { return formatPrefixedID(ProductIDPrefix, uuid.UUID(id)) }
+func (id ProductID) String() string  { return formatPrefixedID(productIDPrefix, uuid.UUID(id)) }
 func (id SubscriptionID) String() string {
-	return formatPrefixedID(SubscriptionIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(subscriptionIDPrefix, uuid.UUID(id))
 }
-func (id PaymentID) String() string { return formatPrefixedID(PaymentIDPrefix, uuid.UUID(id)) }
+func (id PaymentID) String() string { return formatPrefixedID(paymentIDPrefix, uuid.UUID(id)) }
 func (id PaymentMethodID) String() string {
-	return formatPrefixedID(PaymentMethodIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(paymentMethodIDPrefix, uuid.UUID(id))
 }
-func (id MandateID) String() string { return formatPrefixedID(MandateIDPrefix, uuid.UUID(id)) }
+func (id MandateID) String() string { return formatPrefixedID(mandateIDPrefix, uuid.UUID(id)) }
 func (id OrderAttemptID) String() string {
-	return formatPrefixedID(OrderAttemptIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(orderAttemptIDPrefix, uuid.UUID(id))
 }
-func (id OrderID) String() string     { return formatPrefixedID(OrderIDPrefix, uuid.UUID(id)) }
-func (id OrderLineID) String() string { return formatPrefixedID(OrderLineIDPrefix, uuid.UUID(id)) }
+func (id OrderID) String() string     { return formatPrefixedID(orderIDPrefix, uuid.UUID(id)) }
+func (id OrderLineID) String() string { return formatPrefixedID(orderLineIDPrefix, uuid.UUID(id)) }
 func (id PaymentAttemptID) String() string {
-	return formatPrefixedID(PaymentAttemptIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(paymentAttemptIDPrefix, uuid.UUID(id))
 }
-func (id RenewalID) String() string { return formatPrefixedID(RenewalIDPrefix, uuid.UUID(id)) }
-func (id PSPID) String() string     { return formatPrefixedID(PSPIDPrefix, uuid.UUID(id)) }
+func (id RenewalID) String() string { return formatPrefixedID(renewalIDPrefix, uuid.UUID(id)) }
+func (id PSPID) String() string     { return formatPrefixedID(pspIDPrefix, uuid.UUID(id)) }
 
 func (id CustomerID) MarshalText() ([]byte, error)       { return []byte(id.String()), nil }
 func (id ProductID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }

@@ -156,7 +156,7 @@ func Page(assets fs.FS) (http.Handler, error) {
 			return
 		}
 		if rest, ok := strings.CutPrefix(r.URL.Path, PagePrefix); ok {
-			if _, err := billing.ParseOrderID(rest); err != nil || !strings.HasPrefix(rest, billing.OrderIDPrefix) {
+			if id, err := billing.ParseOrderID(rest); err != nil || id.IsZero() {
 				http.NotFound(w, r)
 				return
 			}

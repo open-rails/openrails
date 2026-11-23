@@ -14,6 +14,27 @@ const (
 	RailSolana Rail = "solana"
 )
 
+// Environment is a PSP's environment, its rail's own (RailDefinition.Environments);
+// omitted, it is the rail's real-money one.
+type Environment string
+
+const (
+	// EnvironmentLive moves real money on nmi, stripe and ccbill.
+	EnvironmentLive Environment = "live"
+	// EnvironmentTest is the provider's own system moving no money: an NMI
+	// account in test mode, Stripe test keys.
+	EnvironmentTest Environment = "test"
+	// EnvironmentSandbox is the provider's separate sandbox system:
+	// sandbox.nmi.com, CCBill's sandbox.
+	EnvironmentSandbox Environment = "sandbox"
+	// EnvironmentMainnet is Solana's real-money network.
+	EnvironmentMainnet Environment = "mainnet"
+	// EnvironmentDevnet is Solana's devnet.
+	EnvironmentDevnet Environment = "devnet"
+	// EnvironmentTestnet is Solana's testnet.
+	EnvironmentTestnet Environment = "testnet"
+)
+
 // PSP is one merchant account on a rail: mobius and paykings are two PSPs on
 // nmi. Its rail decides its fields (RailDefinition). Credential values are
 // never returned.
@@ -26,7 +47,7 @@ type PSP struct {
 	// Environment is the rail's own (RailDefinition.Environments): nmi live,
 	// test or sandbox; stripe live or test; ccbill live or sandbox; solana
 	// mainnet, devnet or testnet. Live and mainnet move real money.
-	Environment string `json:"environment"`
+	Environment Environment `json:"environment"`
 	// Archived PSPs take no new work and keep serving what they already
 	// carry until it drains.
 	Archived bool `json:"archived"`
@@ -113,9 +134,9 @@ type PSPListParams struct {
 // anything is stored. Repeating a create that took effect returns the PSP it
 // made.
 type CreatePSPParams struct {
-	Key         string `json:"key"`
-	Rail        Rail   `json:"rail"`
-	Environment string `json:"environment,omitempty"`
+	Key         string      `json:"key"`
+	Rail        Rail        `json:"rail"`
+	Environment Environment `json:"environment,omitempty"`
 	// Custodian names a declared merchant-owned vault; empty keeps PSP custody.
 	Custodian string `json:"custodian,omitempty"`
 	PSPAccount
@@ -161,7 +182,7 @@ type RailDefinition struct {
 	CredentialKeys []string `json:"credential_keys"`
 	// Environments are the environments a PSP on the rail may declare, its
 	// real-money one, the default, first.
-	Environments []string `json:"environments"`
+	Environments []Environment `json:"environments"`
 }
 
 // PreviewPSPRoutingParams asks which PSP a purchase for a price would use.

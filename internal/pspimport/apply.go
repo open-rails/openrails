@@ -368,7 +368,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					continue
 				}
 				for _, c := range data.Cards {
-					pm := billing.DeclaredPaymentMethod{Customer: customer, Rail: l.scope.Rail, PSP: billing.PSPRef{ID: &pspID}, RailCustomerRef: r.Ref, RailMethodRef: c.MethodRef, Card: c.details()}
+					pm := billing.DeclaredPaymentMethod{Customer: customer, Rail: billing.Rail(l.scope.Rail), PSP: billing.PSPRef{ID: &pspID}, RailCustomerRef: r.Ref, RailMethodRef: c.MethodRef, Card: c.details()}
 					if r.OccurredAt != nil {
 						pm.CreatedAt = *r.OccurredAt
 					}
@@ -456,7 +456,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				src := "history:" + r.ID.String()
 				d.receipts[src] = append([]uuid.UUID{r.ID}, refundIDs...)
 				d.book.HistoricalPayments = append(d.book.HistoricalPayments, billing.DeclaredHistoricalPayment{
-					SourceID: src, Customer: customer, Rail: l.scope.Rail, TransactionID: data.TransactionID,
+					SourceID: src, Customer: customer, Rail: billing.Rail(l.scope.Rail), TransactionID: data.TransactionID,
 					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt, Refunds: refunds,
 				})
 				continue
@@ -574,7 +574,7 @@ func (l *lander) declarePSPCustomer(d *declaration, customer billing.CustomerID,
 	}
 	pspID := billing.PSPID(l.scope.ID)
 	src := "pspimport:" + l.scope.Rail + ":customer:" + pick.Ref
-	d.book.PSPCustomers = append(d.book.PSPCustomers, billing.DeclaredPSPCustomer{SourceID: src, Customer: customer, Rail: l.scope.Rail,
+	d.book.PSPCustomers = append(d.book.PSPCustomers, billing.DeclaredPSPCustomer{SourceID: src, Customer: customer, Rail: billing.Rail(l.scope.Rail),
 		PSP: billing.PSPRef{ID: &pspID}, RemoteCustomerRef: pick.Ref})
 	d.pspCustomers[src] = pick.ID
 	for _, r := range linked {
@@ -609,7 +609,7 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 		// The provider's record states no terms: the declared price does.
 		data.Amount, data.Currency, data.IntervalHours, data.IntervalMonths = price.amount, price.currency, price.hours, price.months
 	}
-	sub := billing.DeclaredSubscription{Customer: customer, Price: price.id, Rail: l.scope.Rail, RailSubscriptionID: r.Ref, StartedAt: data.StartedAt,
+	sub := billing.DeclaredSubscription{Customer: customer, Price: price.id, Rail: billing.Rail(l.scope.Rail), RailSubscriptionID: r.Ref, StartedAt: data.StartedAt,
 		PaidThrough: data.NextBillingAt, Evidence: data.Evidence}
 	if vault, ok := vaults[deref(r.CustomerRef)]; ok {
 		method := ""
@@ -619,7 +619,7 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 			}
 		}
 		if method != "" {
-			sub.PaymentMethod = &billing.PaymentMethodRef{Rail: l.scope.Rail, RailCustomerRef: deref(r.CustomerRef), RailMethodRef: method}
+			sub.PaymentMethod = &billing.PaymentMethodRef{Rail: billing.Rail(l.scope.Rail), RailCustomerRef: deref(r.CustomerRef), RailMethodRef: method}
 		}
 	}
 	scheduled := l.scope.Rail == "nmi" || l.scope.Rail == "ccbill"

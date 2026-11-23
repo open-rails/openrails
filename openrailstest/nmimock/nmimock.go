@@ -11,7 +11,7 @@
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
-//			"nmi": openrails.NMIPSP{Environment: openrails.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+//			"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //

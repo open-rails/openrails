@@ -673,7 +673,7 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.
 	}
 	resp := &TierChangeResponse{
 		Effective: effectiveOf(action), PriceID: priceID,
-		Rail: in.Rail, SubscriptionID: &subID,
+		Rail: billing.Rail(in.Rail), SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 	}
 	if p.Downgrade() {

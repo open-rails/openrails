@@ -280,7 +280,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		Status:           "requires_action",
 		Effective:        "period_end",
 		PriceID:          resolved.newPrice.PublicID,
-		Rail:             string(models.RailSolana),
+		Rail:             billing.RailSolana,
 		SubscriptionID:   &old,
 		Currency:         resolved.newPrice.Currency,
 		NextChargeAmount: resolved.newPrice.Amount,
@@ -350,7 +350,7 @@ func solanaTierChangeResponse(receipt *models.SolanaTierChangeReceipt, priceID b
 	id := billing.SubscriptionID(receipt.SubscriptionID)
 	out := billing.SubscriptionChange{
 		Status: "succeeded", Effective: "period_end", PriceID: priceID,
-		Rail: string(models.RailSolana), SubscriptionID: &id, Currency: receipt.Currency,
+		Rail: billing.RailSolana, SubscriptionID: &id, Currency: receipt.Currency,
 		AmountDueNow: receipt.AmountDueNow, NextChargeAmount: receipt.NextChargeAmount,
 		NextChargeDate: &receipt.NextChargeDate,
 	}

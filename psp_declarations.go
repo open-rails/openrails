@@ -23,8 +23,8 @@ type NMIPSP struct {
 	GatewayID string `psp:"gateway_id"`
 	// Environment is live (the default), test (a gateway account in test
 	// mode) or sandbox (a sandbox.nmi.com account).
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 	// Custodian is the key of a declared custodian holding this PSP's cards;
 	// "" means NMI's customer vault holds them.
 	Custodian string `psp:"custodian"`
@@ -48,7 +48,7 @@ type NMIPSP struct {
 // PSPConfig returns the declaration.
 func (p NMIPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailNMI, Environment: p.Environment, AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
+		Rail: billing.RailNMI, Environment: string(p.Environment), AccountID: p.GatewayID, Archived: p.Archived, Custodian: p.Custodian,
 		Secrets: secretSlots(map[string]string{
 			"security_key":                    p.SecurityKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -69,8 +69,8 @@ type StripePSP struct {
 	AccountID string `psp:"account_id"`
 	// Environment is live (the default) or test, as the secret key's prefix
 	// says.
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 
 	SecretKey            string `psp:"secrets.secret_key,required"`
 	WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
@@ -89,7 +89,7 @@ type StripePSP struct {
 // PSPConfig returns the declaration.
 func (p StripePSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailStripe, Environment: p.Environment, AccountID: p.AccountID, Archived: p.Archived,
+		Rail: billing.RailStripe, Environment: string(p.Environment), AccountID: p.AccountID, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{
 			"secret_key":                      p.SecretKey,
 			"webhook_signing_secret":          p.WebhookSigningSecret,
@@ -110,8 +110,8 @@ type CCBillPSP struct {
 	ClientAccnum string `psp:"client_accnum"`
 	ClientSubacc string `psp:"client_subacc"`
 	// Environment is live (the default) or sandbox (CCBill's sandbox).
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 
 	// Salt signs FlexForm links and verifies their callbacks.
 	Salt             string `psp:"secrets.salt,required"`
@@ -122,7 +122,7 @@ type CCBillPSP struct {
 // PSPConfig returns the declaration.
 func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailCCBill, Environment: p.Environment, Archived: p.Archived,
+		Rail: billing.RailCCBill, Environment: string(p.Environment), Archived: p.Archived,
 		AccountID: rails.Account(models.RailCCBill, map[string]string{"client_accnum": p.ClientAccnum, "client_subacc": p.ClientSubacc}),
 		Secrets: secretSlots(map[string]string{
 			"salt":              p.Salt,
@@ -138,8 +138,8 @@ func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 // treasury.
 type SolanaPSP struct {
 	// Environment is mainnet (the default), devnet or testnet.
-	Environment string `psp:"environment"`
-	Archived    bool   `psp:"archived"`
+	Environment billing.Environment `psp:"environment"`
+	Archived    bool                `psp:"archived"`
 	// Treasury is the Solana address every payment to the merchant lands in:
 	// the PSP's identity.
 	Treasury string `psp:"treasury"`
@@ -152,7 +152,7 @@ type SolanaPSP struct {
 // PSPConfig returns the declaration.
 func (p SolanaPSP) PSPConfig() billing.PSPConfig {
 	return billing.PSPConfig{
-		Rail: billing.RailSolana, Environment: p.Environment, AccountID: p.Treasury, Archived: p.Archived,
+		Rail: billing.RailSolana, Environment: string(p.Environment), AccountID: p.Treasury, Archived: p.Archived,
 		Secrets: secretSlots(map[string]string{"rpc_url": p.RPCURL}),
 	}
 }

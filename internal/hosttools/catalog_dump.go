@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // CatalogDumpOptions exports current, unarchived prices as an editable catalog
@@ -357,9 +358,9 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 				return fmt.Errorf("decode price %q quantity: %w", row.Key, err)
 			}
 		}
-		price.SellVia = catalog.Null[[]string]()
+		price.SellVia = catalog.Null[[]catalog.SellVia]()
 		if row.SellVia != nil {
-			price.SellVia = catalog.Value(row.SellVia)
+			price.SellVia = catalog.Value(normalize.Strings[catalog.SellVia](row.SellVia))
 		}
 		if p.Prices == nil {
 			p.Prices = map[string]catalog.ApplyPrice{}

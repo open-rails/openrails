@@ -59,7 +59,7 @@ type Payment struct {
 	// that bills no seats.
 	Quantity          *int            `json:"quantity"`
 	Channel           PaymentChannel  `json:"channel"`
-	Rail              *string         `json:"rail"`
+	Rail              *Rail           `json:"rail"`
 	PSPID             *PSPID          `json:"psp_id"`
 	TransactionID     string          `json:"transaction_id"`
 	Card              *CardDetails    `json:"card"`
@@ -84,7 +84,7 @@ type PaymentListParams struct {
 	SubscriptionID SubscriptionID `form:"subscription_id"`
 	OrderID        OrderID        `form:"order_id"`
 	Status         PaymentStatus  `form:"status"`
-	Rail           string         `form:"rail"`
+	Rail           Rail           `form:"rail"`
 	Kind           PaymentKind    `form:"kind"`
 	TransactionID  string         `form:"transaction_id"`
 	PageRequest

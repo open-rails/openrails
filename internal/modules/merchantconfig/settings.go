@@ -99,7 +99,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend
 	}
 	if in.ProviderRefundAccess != nil {
-		policy, err := NormalizeProviderRefundAccess(strings.TrimSpace(*in.ProviderRefundAccess))
+		policy, err := NormalizeProviderRefundAccess(billing.ProviderRefundAccess(strings.TrimSpace(string(*in.ProviderRefundAccess))))
 		if err != nil {
 			return Settings{}, err
 		}

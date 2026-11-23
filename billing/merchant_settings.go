@@ -28,9 +28,12 @@ func (m PSPRoutingMatch) IsCatchAll() bool {
 	return m.Currency == "" && m.Product == "" && m.Price == "" && m.Mode == "" && m.Country == ""
 }
 
-// MerchantSettings.ProviderRefundAccess values.
+// ProviderRefundAccess is what a refund made in the provider's own dashboard
+// does to access.
+type ProviderRefundAccess string
+
 const (
-	ProviderRefundRevokeOnFull = "revoke_on_full"
-	ProviderRefundRevokeOnAny  = "revoke_on_any"
-	ProviderRefundKeep         = "keep"
+	ProviderRefundRevokeOnFull ProviderRefundAccess = "revoke_on_full"
+	ProviderRefundRevokeOnAny  ProviderRefundAccess = "revoke_on_any"
+	ProviderRefundKeep         ProviderRefundAccess = "keep"
 )

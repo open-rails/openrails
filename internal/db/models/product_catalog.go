@@ -101,9 +101,9 @@ type Price struct {
 	// sells the bound object (LoadPricePSPBindings). Not for sale; it still
 	// resolves and bills.
 	ProviderRetired bool `json:"-"`
-	// SellVia are the methods one of ours sells through (SellViaCard,
-	// SellViaSolana); nil is every method the merchant has.
-	SellVia []string `json:"sell_via,omitempty"`
+	// SellVia are the methods one of ours sells through; nil is every method
+	// the merchant has.
+	SellVia []catalog.SellVia `json:"sell_via,omitempty"`
 
 	// PSPLinks is the catalog projection of normalized price_psp_bindings: a
 	// provider price's provider object, or the Solana plans published for one
@@ -135,15 +135,9 @@ func (p *Price) IsPurchasable() bool {
 	return ok && link[RailKeyRail] == string(RailCCBill) && p.IsRecurring()
 }
 
-// Methods one of our prices sells through.
-const (
-	SellViaCard   = "card"
-	SellViaSolana = "solana"
-)
-
 // SellsVia reports whether the price sells through method: a provider price
 // through its own provider only, one of ours through its sell_via.
-func (p *Price) SellsVia(method string) bool {
+func (p *Price) SellsVia(method catalog.SellVia) bool {
 	if p == nil || p.ProviderOwned {
 		return false
 	}
@@ -434,7 +428,7 @@ func (p *Price) View() billing.Price {
 		// immutable snapshot after the current lookup binding moves.
 		provider := &billing.PriceProvider{AccessDurationDefault: p.ProviderAccessDefault, IDs: map[string]string{}, Retired: p.ProviderRetired, SyncStatus: billing.SyncStatusUnknown, Drift: []billing.DriftField{}}
 		if key, link, ok := p.ProviderLink(); ok {
-			provider.PSP, provider.Rail = key, link[RailKeyRail]
+			provider.PSP, provider.Rail = key, billing.Rail(link[RailKeyRail])
 			if id, err := uuid.Parse(link[RailKeyPSPID]); err == nil {
 				provider.PSPID = billing.PSPID(id)
 			}

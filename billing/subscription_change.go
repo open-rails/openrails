@@ -27,7 +27,7 @@ type SubscriptionChange struct {
 	Effective      string          `json:"effective,omitempty"`
 	PriceID        PriceID         `json:"price_id"`
 	Quantity       *int            `json:"quantity"`
-	Rail           string          `json:"rail"`
+	Rail           Rail            `json:"rail"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	// NextAction is the customer's step when Status is requires_action: a
 	// redirect to a provider page, the card issuer's authentication of the
@@ -53,7 +53,7 @@ type SubscriptionChangePreview struct {
 	Effective        string     `json:"effective"` // now | period_end
 	PriceID          PriceID    `json:"price_id"`
 	Quantity         *int       `json:"quantity"`
-	Rail             string     `json:"rail"`
+	Rail             Rail       `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now,string"`
 	NextChargeAmount int64      `json:"next_charge_amount,string"`

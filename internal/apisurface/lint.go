@@ -54,14 +54,10 @@ var stringParams = []string{"key", "reference", "requestID", "requestIDs", "idem
 
 // Enums that fields are named after, beyond the string types with constants
 // the public packages declare.
-var plannedEnums = []string{
-	"Environment", "DenyCode", "DunningAccess", "ProviderRefundAccess", "PSPPaymentStatus",
-	"CardVaultKind", "CardField", "ProviderWriteMode", "SellVia",
-}
+var plannedEnums = []string{"ProviderWriteMode"}
 
 // enumFields are string fields whose name does not spell their enum.
 var enumFields = []string{
-	"billing.PaymentFailure.Reason",     // DeclineReason
 	"billing.AlertWebhookConfig.Format", // AlertWebhookFormat
 }
 
@@ -78,6 +74,7 @@ var exceptions = []exception{
 	{"untyped-const", "billing.*GroupPersona", "AuthKit permission-group personas, which AuthKit takes as strings"},
 	{"untyped-const", "catalog.AccessForever", "a value of the catalog document's access duration string"},
 	{"untyped-const", "catalog.BalanceLimit", "the built-in limit key; limit keys are strings"},
+	{"untyped-const", "billing.CardVaultPlatform", "a value of settings.card_vault, whose other values are PSP keys"},
 	{"untyped-const", "adapters/fiber.RouteNamePrefix", "a prefix of Fiber's string route names"},
 	{"untyped-const", "openrailstest/nmimock.InsufficientFunds", "NMI's response code, a string on NMI's wire"},
 	{"enum-field", "openrails.LLMConfig.Model", "an LLM's model name, not a catalog.Model"},

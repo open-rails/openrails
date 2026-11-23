@@ -219,7 +219,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AVSResult: normalize.FromPtr(a.AvsResult),
 		CVVResult: normalize.FromPtr(a.CvvResult), Card: models.CardFromColumns(a.CardBrand, a.CardLast4, nil, nil).Details(),
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
-		Rail: a.Rail, PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
+		Rail: billing.Rail(a.Rail), PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
 		AttemptedAt: a.AttemptedAt,
 	}
 	if a.OrderID != nil {
@@ -253,7 +253,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.Renewal {
 	out := billing.Renewal{
 		ID: billing.RenewalID(c.ID), SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
-		CustomerID: billing.CustomerID(c.CustomerID), PSPID: billing.PSPID(c.PspID), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
+		CustomerID: billing.CustomerID(c.CustomerID), PSPID: billing.PSPID(c.PspID), Rail: billing.Rail(c.Rail), Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
 		Currency: c.Currency, FirstOutcome: c.FirstOutcome, MissedAt: c.MissedAt, MissReason: normalize.FromPtr(c.MissReason),
 		CollectedAt: c.WonAt, RecoveredBy: c.RecoveredBy, ClosesAt: c.ClosedAt,
 	}

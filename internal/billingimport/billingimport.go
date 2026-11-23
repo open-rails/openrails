@@ -222,14 +222,14 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer.IsZero() {
 				return apperr.Invalidf("declared payment method requires rail, rail_customer_ref and customer")
 			}
-			if pm.RecurringTransactionID != "" && (!strings.EqualFold(pm.Rail, "nmi") || strings.TrimSpace(pm.RecurringTransactionID) != pm.RecurringTransactionID) {
+			if pm.RecurringTransactionID != "" && (!strings.EqualFold(string(pm.Rail), "nmi") || strings.TrimSpace(pm.RecurringTransactionID) != pm.RecurringTransactionID) {
 				return apperr.Invalidf("recurring_transaction_id requires NMI and an unpadded transaction reference")
 			}
-			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
+			pmPSP, err := psps.resolve(pm.PSP, string(pm.Rail), fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
 			if err != nil {
 				return err
 			}
-			if strings.EqualFold(strings.TrimSpace(pm.Rail), "nmi") {
+			if strings.EqualFold(strings.TrimSpace(string(pm.Rail)), "nmi") {
 				if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID.UUID(), ID: pm.Customer.UUID()}); err != nil {
 					return err
 				}
@@ -255,7 +255,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 					ID:              id,
 					MerchantID:      merchantID.UUID(),
 					CustomerID:      pm.Customer.UUID(),
-					Rail:            pm.Rail,
+					Rail:            string(pm.Rail),
 					RailCustomerRef: pm.RailCustomerRef,
 					RailMethodRef:   pm.RailMethodRef,
 					PspID:           &pmPSP,
@@ -276,13 +276,13 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 			} else if owner != pm.Customer.UUID() {
 				return apperr.Conflictf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
-			} else if !strings.EqualFold(existingRail, pm.Rail) {
+			} else if !strings.EqualFold(existingRail, string(pm.Rail)) {
 				return apperr.Conflictf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
 			}
 			if pm.RecurringTransactionID != "" {
 				declaredAgreements[id] = pm.RecurringTransactionID
 			}
-			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
+			pmIDs[pmKey(pmPSP, string(pm.Rail), pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
 
 		// Wake in one lock order.
@@ -303,7 +303,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		// attributed to its subscription and read from the provider later.
 		railOf := map[string]string{}
 		for _, s := range opts.Book.Subscriptions {
-			railOf[s.RailSubscriptionID] = strings.ToLower(strings.TrimSpace(s.Rail))
+			railOf[s.RailSubscriptionID] = strings.ToLower(strings.TrimSpace(string(s.Rail)))
 		}
 		txns := make([]reconcile.RemoteTransaction, 0, len(opts.Book.Transactions))
 		var unverified, attributed []DeclaredTransaction
@@ -369,7 +369,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
 		mandateAnchors := map[string]string{}
 		for _, s := range opts.Book.Subscriptions {
-			subPSP, err := psps.resolve(s.PSP, s.Rail, fmt.Sprintf("subscription %s", s.SourceID))
+			subPSP, err := psps.resolve(s.PSP, string(s.Rail), fmt.Sprintf("subscription %s", s.SourceID))
 			if err != nil {
 				return err
 			}
@@ -382,7 +382,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
 				PriceID:            priceID,
-				Rail:               s.Rail,
+				Rail:               string(s.Rail),
 				RailSubscriptionID: s.RailSubscriptionID,
 				PspID:              subPSP,
 				StartedAt:          s.StartedAt.UTC(),
@@ -398,13 +398,13 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				f.DunningLastRetryAt = s.Dunning.LastRetryAt
 			}
 			if s.PaymentMethod != nil {
-				key := pmKey(subPSP, s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef)
+				key := pmKey(subPSP, string(s.PaymentMethod.Rail), s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef)
 				id, ok := pmIDs[key]
 				if !ok {
 					// Ref to an instrument that already exists locally (e.g. a
 					// prior import created it) — resolve from the DB once.
 					row, err := q.GetPaymentMethodByPSPRailRefs(ctx, gen.GetPaymentMethodByPSPRailRefsParams{
-						MerchantID: merchantID.UUID(), PspID: subPSP, Rail: s.PaymentMethod.Rail,
+						MerchantID: merchantID.UUID(), PspID: subPSP, Rail: string(s.PaymentMethod.Rail),
 						RailCustomerRef: s.PaymentMethod.RailCustomerRef, RailMethodRef: s.PaymentMethod.RailMethodRef,
 					})
 					existing, owner := row.ID, row.CustomerID
@@ -716,10 +716,10 @@ func claimPSPCustomers(ctx context.Context, txdb *db.DB, merchantID uuid.UUID, p
 		if pc.Customer.IsZero() || ref == "" || strings.TrimSpace(ref) != ref {
 			return apperr.Invalidf("declared PSP customer requires customer and an unpadded remote_customer_ref").WithParam("psp_customers")
 		}
-		if !rails.HasRemoteCustomer(models.Rail(strings.ToLower(strings.TrimSpace(pc.Rail)))) {
+		if !rails.HasRemoteCustomer(models.Rail(strings.ToLower(strings.TrimSpace(string(pc.Rail))))) {
 			return apperr.Invalidf("declared PSP customer %s: rail %q has no customer object", ref, pc.Rail).WithParam("psp_customers")
 		}
-		pspID, err := psps.resolve(pc.PSP, pc.Rail, "PSP customer "+ref)
+		pspID, err := psps.resolve(pc.PSP, string(pc.Rail), "PSP customer "+ref)
 		if err != nil {
 			return err
 		}

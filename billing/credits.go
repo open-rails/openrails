@@ -13,17 +13,17 @@ type CreditGrantID uuid.UUID
 type BalanceTransactionID uuid.UUID
 
 const (
-	CreditGrantIDPrefix        = "cgr_"
-	BalanceTransactionIDPrefix = "txn_"
+	creditGrantIDPrefix        = "cgr_"
+	balanceTransactionIDPrefix = "txn_"
 )
 
 func ParseCreditGrantID(s string) (CreditGrantID, error) {
-	u, err := parsePrefixedID("credit grant", CreditGrantIDPrefix, s)
+	u, err := parsePrefixedID("credit grant", creditGrantIDPrefix, s)
 	return CreditGrantID(u), err
 }
 func (id CreditGrantID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id CreditGrantID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id CreditGrantID) String() string  { return formatPrefixedID(CreditGrantIDPrefix, uuid.UUID(id)) }
+func (id CreditGrantID) String() string  { return formatPrefixedID(creditGrantIDPrefix, uuid.UUID(id)) }
 func (id CreditGrantID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }
@@ -34,13 +34,13 @@ func (id *CreditGrantID) UnmarshalText(text []byte) error {
 }
 
 func ParseBalanceTransactionID(s string) (BalanceTransactionID, error) {
-	u, err := parsePrefixedID("balance transaction", BalanceTransactionIDPrefix, s)
+	u, err := parsePrefixedID("balance transaction", balanceTransactionIDPrefix, s)
 	return BalanceTransactionID(u), err
 }
 func (id BalanceTransactionID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id BalanceTransactionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id BalanceTransactionID) String() string {
-	return formatPrefixedID(BalanceTransactionIDPrefix, uuid.UUID(id))
+	return formatPrefixedID(balanceTransactionIDPrefix, uuid.UUID(id))
 }
 func (id BalanceTransactionID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
@@ -304,10 +304,10 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *string           `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int              `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64            `json:"arrears_delinquency_floor,omitempty,string"`
-	PSPRouting              *[]PSPRoutingRule `json:"psp_routing,omitempty"`
+	ProviderRefundAccess    *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays        *int                  `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64                `json:"arrears_delinquency_floor,omitempty,string"`
+	PSPRouting              *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -405,18 +405,20 @@ type DunningPolicy struct {
 	// AccessDuringDunning is DunningAccessKeep (default: members keep access
 	// until a confirmed outcome ends it) or DunningAccessSuspend (access ends
 	// with the paid period while a declined renewal is retried).
-	AccessDuringDunning string `json:"access_during_dunning,omitempty"`
+	AccessDuringDunning DunningAccess `json:"access_during_dunning,omitempty"`
 	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
 	// outcome because collection is stopped keeps access until it is
 	// attempted) or DunningAccessSuspend (access ends at the renewal
 	// allowance, min(24h, max(2h, period/10)) past the paid period).
-	AccessWhileRenewalHeld string `json:"access_while_renewal_held,omitempty"`
+	AccessWhileRenewalHeld DunningAccess `json:"access_while_renewal_held,omitempty"`
 }
 
-// Dunning access policies.
+// DunningAccess is whether access holds while a renewal is unpaid.
+type DunningAccess string
+
 const (
-	DunningAccessKeep    = "keep"
-	DunningAccessSuspend = "suspend"
+	DunningAccessKeep    DunningAccess = "keep"
+	DunningAccessSuspend DunningAccess = "suspend"
 )
 
 // DunningTier is the retry schedule for cycles shorter than MaxCycleHours.

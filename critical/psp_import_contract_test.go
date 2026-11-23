@@ -47,17 +47,17 @@ type importWorld struct {
 }
 
 func importNMIPSP(gateway, securityKey string, archived bool) billing.PSPConfig {
-	return openrails.NMIPSP{GatewayID: gateway, Environment: openrails.EnvironmentTest, SecurityKey: securityKey, WebhookSigningSecret: "critical-import-webhook",
+	return openrails.NMIPSP{GatewayID: gateway, Environment: billing.EnvironmentTest, SecurityKey: securityKey, WebhookSigningSecret: "critical-import-webhook",
 		TokenizationKey: "critical-import-collect", Archived: archived}.PSPConfig()
 }
 
 func importStripePSP(secretKey string) billing.PSPConfig {
-	return openrails.StripePSP{AccountID: "acct_import", Environment: openrails.EnvironmentTest, SecretKey: secretKey, WebhookSigningSecret: "whsec_import",
+	return openrails.StripePSP{AccountID: "acct_import", Environment: billing.EnvironmentTest, SecretKey: secretKey, WebhookSigningSecret: "whsec_import",
 		PublishableKey: "pk_test_import"}.PSPConfig()
 }
 
 func importCCBillPSP(subacc, password string) billing.PSPConfig {
-	return openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: subacc, Environment: openrails.EnvironmentSandbox, Salt: "critical-ccbill-salt",
+	return openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: subacc, Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt",
 		DatalinkUsername: "critical-datalink", DatalinkPassword: password}.PSPConfig()
 }
 
@@ -111,7 +111,7 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 				declared[key] = importCCBillPSP("0001", "critical-datalink-password")
 			case "solana":
 				sandbox.SolanaRPCURL = deadRPC
-				declared[key] = openrails.SolanaPSP{Environment: openrails.EnvironmentDevnet, Treasury: solanago.NewWallet().PublicKey().String(), RPCURL: deadRPC}.PSPConfig()
+				declared[key] = openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: solanago.NewWallet().PublicKey().String(), RPCURL: deadRPC}.PSPConfig()
 				continue
 			}
 		}
@@ -1122,7 +1122,7 @@ func TestPSPImport(t *testing.T) {
 		require.Equal(t, want, book())
 		methods, err := iw.alpha.ListPaymentMethods(t.Context(), customerOf(iw.alice), billing.PaymentMethodListParams{})
 		require.NoError(t, err)
-		require.Equal(t, "nmi", methods.Items[0].Rail, "the NMI vault lands as the customer's card")
+		require.Equal(t, billing.RailNMI, methods.Items[0].Rail, "the NMI vault lands as the customer's card")
 		require.Equal(t, "4242", *methods.Items[0].Card.Last4)
 		for key, entitlement := range map[string]string{"nmi": "member:gold", "stripe": "member:basic", "ccbill": "member:premium"} {
 			require.True(t, iw.entitled(t, members[key], entitlement), key)

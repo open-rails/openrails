@@ -110,7 +110,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		declined := nmimock.Card{Brand: "visa", Last4: "1111", CVV: "M", Decline: "200"}
 		declined.AVS = "Z" // the ZIP matched; no street was sent
 		_, first := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-matched")
-		require.Equal(t, string(billing.DeclineGeneric), first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
+		require.Equal(t, billing.DeclineGeneric, first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
 		tried, err := nmi.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{OrderID: first.ID})
 		require.NoError(t, err)
 		require.Len(t, tried.Items, 1)
@@ -120,7 +120,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		declined.AVS = "N"
 		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
 		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
-		require.Equal(t, string(billing.DeclineIncorrectZip), again.Payment.LastPaymentError.Reason, "an unmatched ZIP is named")
+		require.Equal(t, billing.DeclineIncorrectZip, again.Payment.LastPaymentError.Reason, "an unmatched ZIP is named")
 		// The preview agrees: the customer's unpaid order is no conflict for
 		// another price, but still one for the merchant, who replaces nothing.
 		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: dear.ID}}})
@@ -237,7 +237,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.Equal(t, http.StatusConflict, status, "the unknown sale still holds its order: %s", raw)
 		reopened := settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderOpen })
 		require.NotNil(t, reopened.Payment.LastPaymentError)
-		require.Equal(t, string(billing.DeclineGeneric), reopened.Payment.LastPaymentError.Reason)
+		require.Equal(t, billing.DeclineGeneric, reopened.Payment.LastPaymentError.Reason)
 		require.Empty(t, unresolved(waiting), "NMI's decline settles the sale; nobody has to")
 		journal.core.DropSaleResponses(1)
 		journal.core.HideSales(1)
