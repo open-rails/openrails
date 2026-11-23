@@ -190,7 +190,7 @@ Checks:
 - A new grant state, source type or catalog field adds a value without renaming
   one.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 `grants` and `usage_accruals` are permanent; `balance_watches` and
 `customer_low_balance_lines` are state. `limit_holds` and `limit_hold_parts` are
 partitioned by month, and the held total names a range: `created_at` and

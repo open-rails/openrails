@@ -192,10 +192,8 @@ Checks:
 - `holdPricing` (`gate_cost.go`) builds on `limits.Meter` and `limits.Definition`.
 - `LocalClient`'s only metering methods in `api/go.txt` are the five `…Tx` forms above.
 
-### 6. Migrations and retention
-The baseline holds meters, rate cards, running charges, `meter_period_quantities`
-and `failed_usage_windows`; `0003_usage_limits` added limits, windows, leases,
-holds, adjustments, accruals and rollups. Classes, in each table comment and
+### 6. Data lifecycle
+Classes, in each table comment and
 `internal/retention/tables.go`: permanent `usage_accruals` and `running_charges`;
 monthly partitions for `limit_holds` (`created_at`) and `limit_hold_parts`
 (`hold_created_at`), dropped past the 61-day replay horizon, parts first since

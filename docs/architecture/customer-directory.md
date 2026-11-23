@@ -157,8 +157,8 @@ Checks:
 - `Catalog()` includes `provisioningRoutes`; no second route table exists.
 - `api/openapi.json` has no `/v1/app/scim` path.
 
-### 6. Migrations and retention
-Both tables are in the baseline and are `State` in
+### 6. Data lifecycle
+Both tables are `State` in
 `internal/retention/tables.go`. Erasure keeps an empty row on purpose. Neither table
 moves with the billing archive. Gap: a merchant purge deletes neither, so a purged
 merchant's contacts and token hashes stay.

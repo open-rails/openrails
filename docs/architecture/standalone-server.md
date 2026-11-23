@@ -181,14 +181,9 @@ Checks:
   `embedhttp.ValidateRouteTable`.
 - `hostconfig` names each retired key in its refusal.
 
-### 6. Migrations and retention
-The server adds no OpenRails table. `migrate up` applies the engine's migrations, then
-AuthKit's; `server.New` migrates both unless `SkipMigrations`. AuthKit's tables are
-outside OpenRails' retention classes and the billing archive.
-
-Checks:
-- `applyStandaloneMigrations` calls `engine.Migrate` before `authkit.Migrate`.
-- `controlplane.AuthKit` copies `Database.SkipMigrations` to AuthKit.
+### 6. Data lifecycle
+The server adds no OpenRails table. AuthKit's tables are outside OpenRails'
+retention classes and the billing archive.
 
 ### 7. Work scales with activity
 The server schedules nothing of its own: the boot manifest is reconciled once, and

@@ -111,7 +111,7 @@ Checks:
 - `Schema().Limits` reports `MaxBuckets` and `MaxLimit`, the same constants validation uses.
 - Renaming or removing a `Measures` entry fails no contract check; review such a change as a break.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 The engine owns no table. Every flow statement bounds its time column by the range;
 no family reads a partitioned table (`limit_holds`, `limit_hold_parts`).
 

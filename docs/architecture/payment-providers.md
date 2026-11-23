@@ -235,9 +235,8 @@ Checks:
 - `go run ./scripts/contracts` reports no change under `api/`; `intent_type` is free text, so a new operation type is additive.
 - `stripeapi.guardTransport.RoundTrip` sets `Stripe-Version` on every request lacking it.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-The tables are in `0001_schema.up.sql`; a change is a new numbered migration.
 In `internal/retention/tables.go`, instruction-only operations
 (`OutboxIntentTypes`) and `provider_mutation_logs` go after 25 months;
 `webhook_events` and released parks after 90 days; resolved findings after 12

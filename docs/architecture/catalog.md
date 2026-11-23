@@ -180,10 +180,9 @@ Checks:
 - `go run ./scripts/contracts` passes with no catalog line removed.
 - A replay answers `replayed: true` with the first `application_id` (OR-J05-S03).
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-`0002` changed the cadence check on `prices`; `0003` added `catalog_limits` and
-`catalog_product_limits` and widened `catalog_field_owners`. `products`,
+`products`,
 `product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`
 and `catalog_restore_receipts` are permanent, the rest state; none is
 partitioned. Products and prices soft-delete.

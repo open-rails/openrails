@@ -51,8 +51,11 @@ Every system keeps these. A page says how, or why one does not apply.
    `api/` are regenerated with every change, and the in-process and remote clients
    answer alike. Before v1.0.0 any of them may change; from v1.0.0 they change
    only by adding to them ([compatibility](../compatibility.md)).
-6. **Migrations and retention.** Schema changes are numbered migrations; every
-   table has a retention class, and partitioned reads name a time range.
+6. **Data lifecycle.** Every table has a retention class saying how its rows leave
+   it: permanent (never), partitioned (whole months dropped), rows (deleted past an
+   age) or state (gone when the thing is). The class is stated in the table's
+   comment and `internal/retention`; reads of a partitioned table name a time
+   range. Schema migrations themselves are migratekit's (`internal/migrate`).
 7. **Work scales with activity.** Background work is driven by events, watermarks
    and indexed due work, never a routine sweep over every row.
 8. **Abuse protection.** Public and customer-facing entry points are rate-limited,
