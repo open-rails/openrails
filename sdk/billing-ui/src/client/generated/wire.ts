@@ -250,6 +250,7 @@ export type BalanceTransaction = {
   resource: string | null
   source: string
   source_id: string
+  usage: UsageDeduction | null
   created_at: string
 }
 
@@ -356,7 +357,6 @@ export type CaptureReceipt = {
   estimated_amount: string
   amount: string
   charges: UsageCharge[]
-  usage_event_id: string | null
   balance_transaction_id: string | null
   replayed: boolean
 }
@@ -1206,6 +1206,12 @@ export type Hold = {
   safe: string | null
 }
 
+export type HoldCommitment = {
+  customer_id?: string
+  limit_set?: string
+  limits?: LimitCommitment[]
+}
+
 export type HoldLimit = {
   limit: string
   unit: string
@@ -1307,6 +1313,12 @@ export type Limit = {
   revision: number
   created_at: string
   updated_at: string
+}
+
+export type LimitCommitment = {
+  limit?: string
+  window_starts_at?: string | null
+  committed?: string
 }
 
 export type LimitOverride = {
@@ -2318,14 +2330,6 @@ export type RecordExternalPaymentParams = {
   paid_at?: string
 }
 
-export type RecordUsageBatchParams = {
-  items?: UsageParams[]
-}
-
-export type RecordUsageBatchResult = {
-  items: UsageEventResult[]
-}
-
 export type RefundPaymentParams = {
   amount?: string
   full?: boolean
@@ -2693,6 +2697,7 @@ export type SyncLeasesParams = {
   usage?: LeaseUsage[]
   wants?: LeaseWant[]
   returns?: HoldReturn[]
+  committed?: HoldCommitment[]
 }
 
 export type SyncLeasesResult = {
@@ -2800,7 +2805,7 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "invoker" | "meter" | "resource"
+  group_by: "event_type" | "invoker" | "meter"
   rows: UsageRow[]
   next_cursor: string | null
 }
@@ -2837,54 +2842,25 @@ export type UsageCharge = {
   amount: string
 }
 
+export type UsageDeduction = {
+  day: string
+  amount: string
+  lines: UsageDeductionLine[]
+}
+
+export type UsageDeductionLine = {
+  meter_key: string
+  cell: string | null
+  requests: number
+  quantity: number
+  amount: string
+}
+
 export type UsageEstimate = {
   amount?: string
   event_type?: string
   dimensions?: Record<string, number>
   metadata?: Record<string, unknown>
-}
-
-export type UsageEvent = {
-  id: string
-  customer_id: string
-  invoker: string
-  currency: string
-  event_type: string
-  dimensions: Record<string, number> | null
-  outcome: "failed" | "succeeded"
-  amount: string
-  forgiven_amount: string
-  resource: string | null
-  metadata: Record<string, unknown> | null
-  source: string
-  source_id: string
-  charges: UsageCharge[]
-  balance_transaction_id: string | null
-  occurred_at: string
-  created_at: string
-  replayed: boolean
-}
-
-export type UsageEventResult = {
-  status: number
-  event: UsageEvent | null
-  error: ErrorDetails | null
-}
-
-export type UsageParams = {
-  customer_id?: string
-  invoker?: string
-  invoker_type?: "customer" | "delegated"
-  currency?: string
-  event_type?: string
-  dimensions?: Record<string, number>
-  amount?: string
-  outcome?: "failed" | "succeeded"
-  resource?: string
-  metadata?: Record<string, unknown>
-  source?: string
-  source_id?: string
-  occurred_at?: string
 }
 
 export type UsageRow = {
@@ -2893,7 +2869,6 @@ export type UsageRow = {
   event_count: number
   amount: string
   quantity: number | null
-  dimensions: Record<string, number> | null
 }
 
 export type WebhookReceipt = {

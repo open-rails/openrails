@@ -79,7 +79,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_request_body` | 400 | `invalid_request_error` | The request body could not be read or is not one JSON value. |
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
-| `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id. |
+| `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id, which is older than the replay horizon; start a new lease. |
 | `lease_not_held` | 409 | `invalid_request_error` | The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease. |
 | `limit_not_found` | 404 | `invalid_request_error` | The catalog declares no limit under this key. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
@@ -90,7 +90,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
 | `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
-| `not_implemented` | 501 | `api_error` | The route is declared and this build does not serve it yet. |
 | `order_action_not_allowed` | 409 | `invalid_request_error` | The order's origin or status does not allow this action. |
 | `order_attempt_closed` | 409 | `invalid_request_error` | The order attempt already completed or was canceled. |
 | `order_attempt_expired` | 410 | `invalid_request_error` | The order attempt expired before it was paid. |

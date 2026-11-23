@@ -6420,261 +6420,6 @@
         ]
       }
     },
-    "/v1/app/usage-events/{id}": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageEvent"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:read",
-          "root": "root:usage:read"
-        },
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application"
-        ]
-      }
-    },
-    "/v1/app/usage-events": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "event_type",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "outcome",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "source",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "source_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/UsageEvent"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:read",
-          "root": "root:usage:read"
-        },
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request"
-        ]
-      },
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecordUsageBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordUsageBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request"
-        ]
-      }
-    },
     "/v1/app/admissions/capture": {
       "post": {
         "tags": [
@@ -7618,11 +7363,12 @@
           "root": "root:usage:manage"
         },
         "x-openrails-errors": [
+          "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
           "lease_not_found",
           "lease_not_held",
-          "not_implemented",
+          "usage_not_priced",
           "usage_out_of_order"
         ],
         "x-openrails-error-sets": [
@@ -14023,6 +13769,16 @@
           "source_id": {
             "type": "string"
           },
+          "usage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UsageDeduction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -14039,6 +13795,7 @@
           "resource",
           "source",
           "source_id",
+          "usage",
           "created_at"
         ]
       },
@@ -14484,16 +14241,6 @@
               "$ref": "#/components/schemas/UsageCharge"
             }
           },
-          "usage_event_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "balance_transaction_id": {
             "oneOf": [
               {
@@ -14515,7 +14262,6 @@
           "estimated_amount",
           "amount",
           "charges",
-          "usage_event_id",
           "balance_transaction_id",
           "replayed"
         ]
@@ -17902,6 +17648,23 @@
           "safe"
         ]
       },
+      "HoldCommitment": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "limit_set": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitCommitment"
+            }
+          }
+        }
+      },
       "HoldLimit": {
         "type": "object",
         "properties": {
@@ -18418,6 +18181,29 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "LimitCommitment": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "window_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
       },
       "LimitOverride": {
         "type": "object",
@@ -23573,31 +23359,6 @@
           }
         }
       },
-      "RecordUsageBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UsageParams"
-            }
-          }
-        }
-      },
-      "RecordUsageBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UsageEventResult"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "RefundPaymentParams": {
         "type": "object",
         "properties": {
@@ -25164,6 +24925,12 @@
             "items": {
               "$ref": "#/components/schemas/HoldReturn"
             }
+          },
+          "committed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldCommitment"
+            }
           }
         }
       },
@@ -25656,8 +25423,7 @@
             "enum": [
               "event_type",
               "invoker",
-              "meter",
-              "resource"
+              "meter"
             ]
           },
           "rows": {
@@ -25844,6 +25610,64 @@
           "amount"
         ]
       },
+      "UsageDeduction": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageDeductionLine"
+            }
+          }
+        },
+        "required": [
+          "day",
+          "amount",
+          "lines"
+        ]
+      },
+      "UsageDeductionLine": {
+        "type": "object",
+        "properties": {
+          "meter_key": {
+            "type": "string"
+          },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "meter_key",
+          "cell",
+          "requests",
+          "quantity",
+          "amount"
+        ]
+      },
       "UsageEstimate": {
         "type": "object",
         "properties": {
@@ -25863,219 +25687,6 @@
           "metadata": {
             "type": "object",
             "additionalProperties": {}
-          }
-        }
-      },
-      "UsageEvent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "dimensions": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "failed",
-              "succeeded"
-            ]
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "forgiven_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "resource": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "metadata": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "charges": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UsageCharge"
-            }
-          },
-          "balance_transaction_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "occurred_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "customer_id",
-          "invoker",
-          "currency",
-          "event_type",
-          "dimensions",
-          "outcome",
-          "amount",
-          "forgiven_amount",
-          "resource",
-          "metadata",
-          "source",
-          "source_id",
-          "charges",
-          "balance_transaction_id",
-          "occurred_at",
-          "created_at",
-          "replayed"
-        ]
-      },
-      "UsageEventResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "event": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/UsageEvent"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "event",
-          "error"
-        ]
-      },
-      "UsageParams": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
-            ]
-          },
-          "currency": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "failed",
-              "succeeded"
-            ]
-          },
-          "resource": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "occurred_at": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -26111,19 +25722,6 @@
                 "type": "null"
               }
             ]
-          },
-          "dimensions": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -26131,8 +25729,7 @@
           "cell",
           "event_count",
           "amount",
-          "quantity",
-          "dimensions"
+          "quantity"
         ]
       },
       "WebhookReceipt": {
@@ -26686,7 +26283,7 @@
     "lease_not_found": {
       "status": 404,
       "type": "invalid_request_error",
-      "meaning": "No lease of the merchant has this id."
+      "meaning": "No lease of the merchant has this id, which is older than the replay horizon; start a new lease."
     },
     "lease_not_held": {
       "status": 409,
@@ -26737,11 +26334,6 @@
       "status": 502,
       "type": "api_error",
       "meaning": "The language model did not answer; retry, or ask a narrower question."
-    },
-    "not_implemented": {
-      "status": 501,
-      "type": "api_error",
-      "meaning": "The route is declared and this build does not serve it yet."
     },
     "order_action_not_allowed": {
       "status": 409,
