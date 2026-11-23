@@ -5,9 +5,9 @@ binary and the library hosted products build on. It composes the engine
 (`openrails.New`) with its own AuthKit and a multi-merchant control plane, loads
 configuration, provisions the merchants a manifest declares, serves every route on
 one port, and ships as an image and a Helm chart. It adds no billing logic. Guides:
-[standalone](../standalone.md), [server package](../server-package.md),
-[configuration](../configuration.md), [Kubernetes](../kubernetes.md),
-[operations](../operations.md).
+[standalone](../standalone.md), [server package](../standalone.md),
+[configuration](../standalone.md#configuration-reference), [Kubernetes](../standalone.md#kubernetes-and-helm),
+[operations](../standalone.md).
 
 ## Concepts
 
@@ -128,11 +128,11 @@ credential's permissions reach. The SPA calls `/v1` with the staff token.
 
 - Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`,
   `PrivateHandler`, `Engine`, `AuthKit`, and the control-plane methods
-  ([server package](../server-package.md)), including `ListOpenDestructiveHolds`;
+  ([server package](../standalone.md)), including `ListOpenDestructiveHolds`;
   `admin.FS`.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
   issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` privately.
-- Configuration: `config.yaml` keys ([configuration](../configuration.md)), the
+- Configuration: `config.yaml` keys ([configuration](../standalone.md#configuration-reference)), the
   manifest and `merchant_manifest_overlays`, and the chart's `values.yaml`.
 
 ## Guarantees

@@ -1,32 +1,15 @@
 # OpenRails Helm chart
 
-Runs the standalone OpenRails server (`openrails run-server`). Postgres 18+ and
-Redis are yours: the chart takes their addresses in `config` and their
-credentials from existing Secrets. Walkthrough: [docs/kubernetes.md](../../../docs/kubernetes.md).
+Runs the standalone OpenRails server (`openrails run-server`) as one Deployment.
+PostgreSQL 18+ and Redis are yours: the chart takes their addresses in `config`
+and their credentials from existing Secrets, and creates none.
 
 ```bash
 helm install openrails oci://ghcr.io/open-rails/charts/openrails --version X.Y.Z \
   --namespace openrails --create-namespace -f values.yaml
 ```
 
-Chart version `X.Y.Z` runs image `vX.Y.Z`.
-
-| Value | Meaning |
-|---|---|
-| `config` | `config.yaml`, rendered as is (keys: `config.example.yaml`). No secrets. |
-| `files` | More files in `/etc/openrails`: `merchants.yaml`, `bootstrap.yaml`, `catalog.yaml`. |
-| `secrets.env` | Environment variables from Secret keys, e.g. `DB_URL: {name: db-app, key: uri}`. |
-| `secrets.files` | Secrets whose keys are environment variable names, mounted at `/vault/secrets`. |
-| `secrets.authKeys` | Secret with AuthKit's `keys.json` and `totp.key`, mounted at `/vault/auth`. |
-| `secrets.merchantOverlays` | Secret keys holding merchant manifest overlays (PSP credentials outside Vault). |
-| `metrics` | The private `/metrics` listener (`private_port`), its Service port and an optional ServiceMonitor. |
-| `ingress` | Hosts routed whole to the server; TLS. |
-| `replicaCount` | 1. More need Redis (`config.redis`), which shares OpenRails' rate limits, admin lockouts, captcha challenges and card-testing declines and AuthKit's rate limits and spent proofs (without it each pod keeps its own), and `secrets.authKeys`. |
-| `podDisruptionBudget`, `topologySpreadConstraints`, `affinity` | Scheduling. |
-
-The chart owns `host`, `port` and `private_port` (`ports.http`, `metrics.port`).
-Pods default to UID/GID 10001 and a one-CPU limit, configurable through
-`podSecurityContext` and `resources`. The chart mounts the AuthKit key
-directory with its `fsGroup`; the image's standalone UID remains unchanged.
-Pods use a read-only root filesystem and no ServiceAccount token unless
-Vault's kubernetes auth needs it.
+Chart version `X.Y.Z` runs image `vX.Y.Z`. [`values.yaml`](values.yaml) documents
+each value. Every value, a minimal `values.yaml`, secrets, probes, scaling,
+upgrades and backups: [Kubernetes and Helm](../../../docs/standalone.md#kubernetes-and-helm).
+The server's own configuration keys: [configuration reference](../../../docs/standalone.md#configuration-reference).

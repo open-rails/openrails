@@ -116,8 +116,8 @@ picker to widgets without `fixed_range`, and edits widgets
   update level, `merchant:config:manage`).
 - Errors: `metrics_query_invalid`, `dashboard_invalid`, `service_unavailable`,
   `authentication_required`.
-- Guides: [metrics for LLMs](../metrics-for-llms.md),
-  [billing administration](../billing-admin.md).
+- Guides: [metrics for LLMs](../client.md#metrics),
+  [billing administration](../../sdk/billing-ui/README.md#staff-administration).
 
 ## Guarantees
 

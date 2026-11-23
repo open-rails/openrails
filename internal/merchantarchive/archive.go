@@ -1,7 +1,3 @@
-// Package merchantarchive moves a retained billing book between deployments.
-// It never resolves provider clients or invokes lifecycle services; a restore
-// queues only the wakes of the operations it moves. The source's writers must
-// remain stopped during the final cutover.
 package merchantarchive
 
 import (

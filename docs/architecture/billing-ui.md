@@ -5,8 +5,8 @@ client, React hooks and styled components for a customer's purchase and
 self-service, and the staff administration console. Hosts embed it in their own
 apps; the standalone server's console (`server/web/console`) and the hosted payment
 page (`web/pay`) are built from it. It ships at OpenRails' version, published to
-npm with provenance. Guides: [frontend](../frontend.md),
-[billing administration](../billing-admin.md) and the
+npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
+[billing administration](../../sdk/billing-ui/README.md#staff-administration) and the
 [package README](../../sdk/billing-ui/README.md). Paths starting `src/`,
 `tooling/` or `critical/` below are inside `sdk/billing-ui` unless marked otherwise.
 

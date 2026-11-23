@@ -18,6 +18,7 @@ guards() {
   bash scripts/check-logging.sh
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
+  go run ./scripts/docscheck
   gofmt_clean
 }
 gofmt_clean() {

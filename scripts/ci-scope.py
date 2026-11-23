@@ -55,7 +55,7 @@ def select(changes):
             selected["browser"] = selected["security"] = True
             reasons.append("isolated browser source: " + path)
             continue
-        if path.startswith(("examples/own-auth/", "examples/standalone/", "examples/embedded/")):
+        if path.startswith("examples/"):
             for key in ("core", "browser", "security"):
                 selected[key] = True
             reasons.append("example application: " + path)

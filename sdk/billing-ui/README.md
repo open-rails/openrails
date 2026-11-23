@@ -1,66 +1,28 @@
 # @openrails/billing-ui
 
-Embeddable OpenRails billing UI: purchase, customer account billing, and staff
-administration inside the host's application.
+OpenRails billing in the browser: purchase, the customer's account billing,
+and staff administration, inside your app. Card data is tokenized in the PSP's
+own fields (Collect.js, Stripe Elements) and never enters your app. How it fits
+an integration: the [client guide](https://github.com/open-rails/openrails/blob/master/docs/client.md#orders-and-checkout).
 
-| Import                            | Contents                                                                           |
-| --------------------------------- | ---------------------------------------------------------------------------------- |
-| `@openrails/billing-ui/client`    | Framework-free typed client for `/billing/v1/me/*` and the catalog, `BillingError` |
-| `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
-| `@openrails/billing-ui`           | `BillingProvider`, styled purchase and account components, i18n                    |
-| `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
-| `@openrails/billing-ui/admin`     | `AdminConsole`, `BillingAdmin`, `BillingCustomerSummary`, access and warning helpers |
-| `@openrails/billing-ui/admin.css` | Scoped staff administration styles                                                 |
+| Import | Contents |
+|---|---|
+| `@openrails/billing-ui/client` | the typed client for `/v1/me` and `BillingError`, framework-free |
+| `@openrails/billing-ui/react` | `BillingProvider` and headless hooks, no styles |
+| `@openrails/billing-ui` | the provider, styled purchase and account components, i18n |
+| `@openrails/billing-ui/locales/*` | `en de es ja ko zh` |
+| `@openrails/billing-ui/admin`, `/admin.css` | `AdminConsole`, `BillingAdmin`, `BillingCustomerSummary` and their helpers |
 
-The purchase owns the browser payment flow, behind `<BuyButton>`, `<ProductList>`
-and `<OrderPayment>`: the signed-in customer's order, read and paid with
-their own credential. Card data is tokenized in the PSP's own fields
-(Collect.js, Stripe Elements) and never enters the host application.
+Each OpenRails release `vX.Y.Z` publishes `@openrails/billing-ui@X.Y.Z` with
+provenance; pin the exact version: `pnpm add @openrails/billing-ui@X.Y.Z`.
 
-See [Payment form contract](docs/payment-form-contract.md) for exact money,
-billing fields, browser-autofill behavior and the payment request.
-
-The package lives in the OpenRails repository and shares its version: each
-OpenRails release `vX.Y.Z` publishes `@openrails/billing-ui@X.Y.Z` to npm, with
-provenance.
-
-```sh
-pnpm add @openrails/billing-ui@X.Y.Z
-```
-
-## Account notification wording
-
-AuthKit UI owns the notification bell, inbox and read/archive controls.
-BillingUI supplies the billing-specific wording and action links through
-`BillingNotification` and `isBillingNotification`; it owns no inbox or polling
-client. Pass the component through AuthKit UI's optional `renderItem` callback
-and supply your application's authorized billing destinations:
+## The client
 
 ```tsx
-import { NotificationInbox } from "@openrails/auth-ui"
-import { BillingNotification, isBillingNotification } from "@openrails/billing-ui"
+import { BillingProvider, createBillingClient } from "@openrails/billing-ui"
 
-<NotificationInbox renderItem={(item) =>
-  isBillingNotification(item)
-    ? <BillingNotification item={item} actions={{ manage_billing: "/account/billing" }} />
-    : null
-} />
-```
-
-The formatter supports the six BillingUI locales. It inherits the current
-locale/theme when rendered in a billing context, or accepts explicit `language`,
-`messages` and `appearance` options for a global header. Unknown notification
-kinds fall back to AuthKit UI's generic presentation.
-
-## Buying
-
-A React app imports from one place:
-
-```tsx
-import { BillingProvider, BuyButton, ProductList, createBillingClient, formatAmount } from "@openrails/billing-ui"
-
-// auth-ui's authFetch attaches the bearer and retries once after a refresh;
-// `getToken: () => token` works for any other auth.
+// Embedded: your app's own mount, with your auth's fetch (auth-ui's authFetch
+// attaches the bearer and retries once after a refresh).
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
 <BillingProvider client={billing} appearance={{ theme: "auto" }}>
@@ -68,352 +30,134 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingProvider>
 ```
 
-Where your backend mints the customer's token, `tokenSource` keeps it: in
-memory only, replaced `skew` seconds (60) before it expires with one request
-however many calls wait, and once more when a call answers 401
-`credential_expired`.
+Standalone or hosted, the browser calls the billing API with a short
+`openrails:self` token your backend mints. `tokenSource` keeps it in memory
+only, fetches the next one `skew` seconds (60) before expiry with one request
+however many calls wait, and resends a call answered 401 `credential_expired` once:
 
 ```ts
-import {
-  createBillingClient,
-  redeemAssertion,
-  tokenSource,
-} from "@openrails/billing-ui"
-
 const billing = createBillingClient({
   baseUrl: "https://billing.example/v1",
   getToken: tokenSource({
-    // { access_token, expires_in } from your backend, or its signed assertion redeemed here.
     fetchToken: async () => {
-      const { assertion } = await (
-        await fetch("/api/billing/assertion", { method: "POST" })
-      ).json()
-      return redeemAssertion({
-        tokenEndpoint: "https://billing.example/oauth2/token",
-        assertion,
-      })
+      const { assertion } = await (await fetch("/api/billing/assertion", { method: "POST" })).json()
+      return redeemAssertion({ tokenEndpoint: "https://billing.example/oauth2/token", assertion })
     },
   }),
 })
 ```
 
-The browser never reads the catalog (Stripe's and Paddle's model): your
-server reads the products it sells with the Go `Client.ListProducts` (by key,
-or those granting an entitlement) and puts them in its own page's response,
-their prices as a buyer sees them (`billing.BuyerPrices`). `<BuyButton price>`
-buys one of those prices, `<ProductList products>` sells those products (a
-course, its bundle and the membership that also unlocks it): a `BuyButton` per
-price ("$4.99", "Rent for 3 days, $1.99", "$10.00 every 30 days").
+A `fetch` that adds a DPoP proof (auth-ui's `dpopFetch`) binds the token to the
+browser's key. Requests omit credentials; any origin may call.
 
-The purchase is theirs from start to payment: a button creates the customer's
-order (`POST /me/orders`) and pays it in a dialog. On a page of a site the
-merchant registered to frame its pay URLs (`merchant.embed_origins` in
-`GET /me/config`), it creates the order with its embedded pay URL in the same
-call (`createOrder({ lines, payUrl: { embedded: true } })`) and frames
-`order.pay_url` from the checkout origin (`<EmbeddedPayment>`); anywhere
-else it pays on the page (`<OrderPayment>`). The embedded pay URL returns
-nowhere: the frame says it is paid and tells the page (`onPaid`), and a
-redirect PSP comes back inside it. Nothing is stored: OpenRails answers the
-customer's open order of the same lines, so a second click, a reopened dialog
-or a reload pays the same order (with a fresh URL), and a paid or expired one
-is bought again as a new order. Signing in is the
-host's: with `signedIn={false}`, or when OpenRails answers 401, they call
-`onSignInRequired` instead. `onPaid` receives the completed order; it is a
-hint, so confirm access from your own API (your gate) before granting
-anything.
+## Buying
+
+The browser never reads the catalog: your server reads the products it sells
+(Go `Client.ListProducts`) and puts them, priced as a buyer sees them
+(`billing.BuyerPrices`), in its own page.
 
 ```tsx
-<BuyButton
-  price={course.prices[0]} // from your server's page response
-  signedIn={signedIn}
-  onSignInRequired={() => openSignIn()}
-  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
-/>
-
-<ProductList
-  products={products} // from your server's page response
-  signedIn={signedIn}
-  onSignInRequired={() => openSignIn()}
-  onPaid={() => navigate("/courses/css-101")}
-/>
+<BuyButton price={course.prices[0]} signedIn={signedIn}
+  onSignInRequired={openSignIn} onPaid={() => navigate("/courses/css-101")} />
+<ProductList products={products} signedIn={signedIn}
+  onSignInRequired={openSignIn} onPaid={() => navigate("/courses/css-101")} />
 ```
 
-`returnUrl` returns the buyer from a redirect step (Stripe's hosted page); it
-must be on one of your app's return origins.
+- A button creates the signed-in customer's order and pays it in a dialog. On
+  a site the merchant registered to frame its pay URLs, it frames the order's
+  `pay_url` instead (`<EmbeddedPayment>`). OpenRails answers the customer's open
+  order of the same lines, so a second click, a reopened dialog or a reload pays
+  one order.
+- `onPaid` is a hint. Grant access from your server's own check, or from the
+  `order.completed` event, never from the browser.
+- `<OrderPayment orderId>` pays an order your server created (`CreateOrder`):
+  saved cards, a new card, a hosted page, a Solana wallet, Apple and Google Pay
+  through Stripe. `onSettled` follows completion. `returnUrl` must be on one of
+  your app's return origins.
+- A rail's own step is the order's `payment.next_action`: `redirect_to_url`
+  (top window), `solana_pay` (a QR code or wallet link) or `authenticate` (the
+  bank's challenge, in the page). In the EEA and UK a new card is kept only with
+  `reusable: true`, the customer's own opt-in.
+- `fallbacks` keeps a PSP back until the PSPs it stands in for fail
+  (`{ ccbill: { for: ["mobius"], afterFailures: 2 } }`), then offers it under
+  "Card payment isn't working?". `BuyButton`, `ProductList`, `Cart`,
+  `OrderPayment` and `EmbeddedPayment` take it.
+- A `customer_amount` price takes the buyer's `amount`: parse it with
+  `decimalToAmount(text, currency.decimals)` and check the price's bounds with
+  `BigInt`. `<Cart>` sells the customer's cart.
 
-`fallbacks` keeps a PSP back until the PSPs it stands in for are not offered,
-or have failed `afterFailures` times on the order combined (each payment
-option reports its `failed_attempts`); it then shows under "Card payment isn't
-working?". CCBill after Mobius declines twice:
-
-```tsx
-<ProductList
-  products={products}
-  fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }}
-  {...handlers}
-/>
-```
-
-`BuyButton`, `Cart`, `OrderPayment` and `EmbeddedPayment` take it too.
-`EmbeddedPayment` passes it to the framed pay page in the URL fragment
-(`withPaymentFallbacks(payUrl, fallbacks)` does the same for a hosted pay URL).
-
-For prepaid credits, a fixed pack is another product/price. A
-`customer_amount` price takes the buyer's `amount`: collect it on your product
-page, and the purchase charges exactly that:
-
-```tsx
-import { decimalToAmount } from "@openrails/billing-ui/client"
-
-// `depositPrice` is in a product your server sent; `currency` from getConfig().currencies.
-// `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
-const amount = decimalToAmount(enteredAmount, currency.decimals)
-const bounds = depositPrice.customer_amount
-const valid = amount && bounds && BigInt(amount) >= BigInt(bounds.min_amount) && BigInt(amount) <= BigInt(bounds.max_amount)
-
-<BuyButton price={depositPrice} amount={valid ? amount : undefined} label="Add credits" {...handlers} />
-```
-
-OpenRails validates the bounds and whole currency minor units before accepting
-payment. Fixed prices reject `amount`; their pack benefit can be greater than
-the purchase price for a bulk discount. Customer-selected deposits currently
-use NMI or Stripe.
-
-A rail's own step is the order's `payment.next_action`: `redirect_to_url` (an
-https page, opened in the top window), `solana_pay` (a `solana:` link shown
-as a QR code) or `authenticate` (the bank's challenge, run in the page).
-
-### An order your server creates
-
-A server that decides what its customer buys creates the order with the Go
-`Client.CreateOrder` (`POST /v1/app/orders`) and hands its id to the
-customer's browser, which pays it signed in:
-
-```tsx
-<OrderPayment
-  orderId={orderId}
-  returnUrl={returnUrl}
-  onSettled={(order) => refetchAccess(order)}
-/>
-```
-
-`onSettled` follows a complete order, or one processing on an asynchronous
-rail. A subscription line names its subscription once paid. A customer back
-from a PSP's page before it reported is offered to continue there.
+The form's fields, autofill and exact money rules: [payment form
+contract](docs/payment-form-contract.md).
 
 ## Account billing
 
-One `BillingProvider`, usually at the app's root, gives every component the
-client, the appearance and the words. `@openrails/billing-ui/react` exports the
-same provider for an app that uses only the hooks; it loads no stylesheet.
-
 ```tsx
-import { AccountBilling, BillingProvider, createBillingClient } from "@openrails/billing-ui"
-import { de } from "@openrails/billing-ui/locales/de"
-
-const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
-
-<BillingProvider
-  client={billing}
-  appearance={{ theme: "auto" }}
-  messages={de}
-  locale="de"
-  navigate={navigate}
-  onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}
->
-  <AccountBilling
-    plansHref="/plans"
-    defaultCurrency="USD" // offers "Make default"
-    sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // optional on-chain cancellation
-  />
-</BillingProvider>
+<AccountBilling plansHref="/plans" defaultCurrency="USD"
+  sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} />
 ```
 
-The panels read OpenRails' configuration themselves, once per
-`BillingProvider`: the customer's merchant's (`GET /me/config`), where "Add
-card" offers each PSP of its `payment` that saves a card in the page, and says
-so while the read fails or its card PSPs are temporarily unavailable; and the
-deployment's (`GET /config`), whose currency registry amounts use over the
-pinned copy. `useCustomerConfig()`, `useConfig()` and `useCurrencyScales()`
-read the same copies for host components.
+`AccountBilling` stacks `SubscriptionsPanel` (cancel, resume, change card,
+change plan), `PaymentMethodsPanel` and `PaymentHistory`; `RenewalPrompt` invites
+a customer whose subscriptions all ended back to `plansHref`. The hooks
+(`useSubscriptions`, `useChangeOptions`, `usePaymentMethods`, `usePayments`)
+resolve to `null` or a `BillingError`, never throwing.
 
-A page your server renders can carry both documents in its own response, so
-the page loads from that one response: `config` in `GET /config`'s shape (Go:
-`engine.PublicConfig(routes)` with the `Routes` you mount, or a remote client's
-`GetPublicConfig`) and `customerConfig` in `GET /me/config`'s (Go:
-`engine.CustomerConfig(routes, r)`, `r` your own signed-in request). billing-ui
-then does not request them to load; a retry still reads the server's copy:
-
-```tsx
-<BillingProvider
-  client={billing}
-  config={page.billingConfig}
-  customerConfig={page.customerBillingConfig}
->
-```
+- **Configuration.** The panels read `GET /v1/config` and `GET /v1/me/config`
+  once per provider (`useConfig()`, `useCustomerConfig()`). A page your server
+  renders can pass both as `config` and `customerConfig` (Go:
+  `Engine.PublicConfig`, `Engine.CustomerConfig`), so nothing is fetched to load.
+- **Plan changes.** `changeSubscription(id, { priceId?, quantity?, idempotencyKey })`
+  is a money write: mint one key per attempt and reuse it until the change
+  resolves. More seats and upgrades charge now; fewer and downgrades apply at
+  the next renewal. `authenticateChange` runs a card challenge in the page;
+  Solana changes sign in the wallet (`signWalletAction`).
+- **Money and periods** are exact: amounts are int64 native-unit strings scaled
+  by OpenRails' currency registry (`formatAmount`), and 720 hours reads "every
+  30 days", never "monthly".
+- **Words and styles.** English is complete and the fallback; `messages` layers
+  bundles and `t` lets your i18n win. Styles are scoped under `.orck`;
+  `appearance.theme` is `light`, `dark`, `auto` or `inherit` (your shadcn tokens).
+- **Notifications.** AuthKit UI owns the inbox; `BillingNotification` and
+  `isBillingNotification` render billing items through its `renderItem`.
 
 ## Staff administration
 
-`AdminConsole` is the whole staff console, AuthKit's account administration and
-billing together, configured rather than composed (needs `@openrails/auth-ui`):
+Needs `@tanstack/react-query`. `AdminConsole` is the whole staff console, AuthKit's
+account administration and billing together (needs `@openrails/auth-ui`):
 
 ```tsx
 <AdminConsole authBaseUrl="/api/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
 ```
 
-To compose your own pages instead:
-
-Install the admin entry's optional peer with `pnpm add @tanstack/react-query`.
-The host owns sign-in and passes its authenticated transport and router:
+`BillingAdmin` is the billing pages alone, inside your own admin app:
 
 ```tsx
 import { BillingAdmin } from "@openrails/billing-ui/admin"
 import "@openrails/billing-ui/admin.css"
 
-;<BillingAdmin
-  baseUrl="/billing/v1"
-  auth={auth}
-  basePath="/admin/billing"
-  navigation={{ pathname, search, navigate }}
-  appearance={{ theme: "inherit" }}
-/>
+<BillingAdmin baseUrl="/billing/v1" auth={auth} basePath="/admin/billing"
+  navigation={{ pathname, search, navigate }} appearance={{ theme: "inherit" }} />
 ```
 
-`auth` implements `authFetch`; it can be an AuthKit client or a host transport.
-Mount the component for the signed-in person and remount when that identity
-changes. Omitting `navigation` uses browser history. Each instance owns its
-transport, selected merchant, and query namespace, including when the host
-supplies a shared `queryClient`.
+- `auth` supplies `authFetch`; the component stores no tokens. Mount it for the
+  signed-in person and remount when that changes. Each tab shows only to whoever
+  holds its permission (`GET /v1/admin/access`); the API checks every request.
+- `merchant` fixes the merchant (`merchants` and `onMerchantChange` add a
+  switcher); `settingsTabs`, `customerPanels` and `userHref` add your content.
+- `useBillingAdminAccess` reads the staff member's access for your navigation;
+  `BillingCustomerSummary` previews a customer's billing on your page;
+  `billingConfirmWarnings` words a ban or deletion warning (neither cancels
+  subscriptions).
+- The customer imports load no admin code or styles.
 
-`useBillingAdminAccess` reads the staff member's capabilities for the host's
-navigation. `BillingCustomerSummary` supplies a bounded billing preview for a
-host customer page. `settingsTabs`, `customerPanels`, and `userHref` compose
-host content and links. The customer imports above do not load admin code or
-styles. See the [BillingAdmin integration guide](https://github.com/open-rails/openrails/blob/master/docs/billing-admin.md)
-for merchant selection, permissions, localization, and standalone console setup.
+## Developing
 
-## Configuration and plan changes
-
-The client also reads the configuration and changes a subscription's plan.
-`GET /config` is a public route: the client sends it no bearer.
-
-| Call                                                                                                                        | Route                                        |
-| --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry)                           | `GET /config`                                |
-| `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config`                             |
-| `listSubscriptionChangeOptions(id)` (the other tiers it can move to now, ranked, each with its preview)                     | `GET /me/subscriptions/{id}/change/options`  |
-| `previewSubscriptionChange(id, { priceId?, quantity? })`                                                                    | `POST /me/subscriptions/{id}/change/preview` |
-| `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                                               | `POST /me/subscriptions/{id}/change`         |
-
-```ts
-const preview = await billing.previewSubscriptionChange(sub.id, { quantity: 5 }) // amount_due_now, effective
-const change = await billing.changeSubscription(sub.id, {
-  quantity: 5,
-  idempotencyKey,
-})
-```
-
-- A change moves to another price of the tier group (`priceId`), to other
-  seats of a per-seat price (`quantity`), or both. More seats and an upgrade
-  charge now; fewer seats and a downgrade apply at the next renewal.
-- `changeSubscription` is a money write. Mint one `idempotencyKey` per attempt and
-  reuse it until the change resolves (`status: "processing"`, a
-  `subscription_change_in_flight` refusal, a 5xx or a lost response), so
-  OpenRails replays the stored result instead of charging twice. A change the
-  card issuer challenges answers `requires_action` with an `authenticate`
-  `next_action`: `authenticateChange(client, id, change, psp)` runs it in the
-  page and confirms the change (`confirmSubscriptionChange`).
-- A rail that needs the customer's own step answers `requires_action` with a
-  `next_action`. Solana's is `solana_sign_transactions`:
-  `signWalletAction(change.next_action, send)` signs and sends its
-  transactions and returns the signature; repeat `changeSubscription` with the same
-  key and `signature`. `cancelSubscription(id, { reason })` cancels at
-  period end without a wallet. Set `revokeOnChain: true` to also request an
-  optional wallet step; local cancellation has already taken effect. The
-  cancel hook signs this additional step when passed `sendTransaction` and
-  `revokeOnChain: true`.
-
-## Provider-neutral flows
-
-OpenRails's browser PSP configs (`GET /me/config`'s `payment.psps`) pick the
-browser flow from each PSP's `flow` and public `config`
-(Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
-provider:
-
-- An order's `payment_options` are exactly the armed PSPs whose rail can make
-  this sale (Solana for one-time lines when it is configured, never CCBill),
-  each with what it `accepts`. `OrderPayment` renders one panel: the
-  customer's saved cards on them, newest first, an inline new card and one Pay
-  button. No provider chooser with one rail.
-- A new card is charged and saved in one pay; an `authenticate` next action
-  runs 3-D Secure in the page, then `confirm`. A decline stays on the panel
-  with its message, so the buyer can pick another card under a new
-  idempotency key.
-- Only PSPs with `routed !== false` (`routedPsps`) take new cards; others
-  stay listed so existing cards and subscriptions keep working.
-- `<SavePaymentMethod psp={psp} onSaved={(id) => ...} />` saves a card in the
-  page (needs `BillingProvider`); `canSavePaymentMethod(psp)` filters PSPs
-  that support it. After an off-page verification the provider returns to
-  `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
-- `defaultCountry` (SavePaymentMethod, AccountBilling)
-  preselects the billing country, else the browser locale's region.
-
-- Panels: `SubscriptionsPanel` (cancel, resume, change card, change plan),
-  `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,
-  `CancelSubscriptionDialog`; `AccountBilling` stacks them. A row offers
-  Change plan when OpenRails lists another tier for it; the dialog shows each
-  tier's charge and date and runs the change (wallet and issuer steps
-  included, one idempotency key until it resolves).
-- `<RenewalPrompt plansHref="/plans" />` invites a customer whose
-  subscriptions all ended back to the plans page. A host that grants access
-  some other way leaves it out for customers who have that access.
-- `renderSubscriptionFooter={(s) => ...}` adds host content under a
-  subscription row; `useBillingRefresh()` refetches after host-side changes.
-- Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
-  `changeSubscription`, per-row `pending`, `nextCursor`), `useChangeOptions`, `usePaymentMethods` (`add`,
-  `remove`, `setDefault`), `usePayments` (cursor pages).
-  Actions resolve to `null` or a `BillingError`; they never throw.
-  `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume
-  and the card change answer the subscription, which replaces the row.
-- Money is exact: `/me` amounts are int64 native-unit strings, scaled by the
-  OpenRails currency registry (`currencies` option to extend it).
-- Messages: English is complete and the fallback; `messages` layers bundles,
-  `t` lets the host's i18n win. `useMessages().error(err)` maps error codes.
-  Count-dependent messages are CLDR plural nodes (`{ one, other }`, plus an
-  exact `"1"` like ICU `=1`), selected with `locale`.
-- Periods are exact: OpenRails windows are hours, so 720h reads "every 30
-  days", never "monthly"; only exact weeks, days or hours are named.
-- Styles are scoped under `.orck`; `appearance.theme` is `light`, `dark`,
-  `auto` or `inherit`. `inherit` bundles no palette: the host page's shadcn
-  tokens (`--background`, `--primary`, ...) and its `.dark` class apply.
-
-## UI primitives
-
-`src/components/ui/*` is shadcn (`base-vega`, zinc; see `components.json`),
-managed with `pnpm dlx shadcn@4.21.0 add <name> --overwrite`, importing `cn`
-from the [`cn`](https://github.com/shadcn-ui/cn) package.
-
-## Critical client contracts
-
-`critical/` exercises the built client in Chromium against real AuthKit,
-OpenRails, PostgreSQL, and the actual Stripe adapter. The Go critical suite
-owns isolated schemas, credentials, external provider fixtures, and network
-faults. Set `OPENRAILS_CRITICAL_DSN` to an owned disposable PostgreSQL database;
-no missing service is accepted as a skipped critical case.
-
-```sh
-pnpm critical:build # build the SDK, browser bundle, and check driver types
-pnpm critical:static # reuse dist: type/lint and packed-artifact checks
-pnpm test:e2e        # local SDK subset, hosted by the real Go fixtures
-pnpm contract        # regenerate OpenRails' contract files, src/client/generated among them
-pnpm contract:check  # fail if a generated contract file is stale
-```
-
-Install Chromium with `pnpm exec playwright install chromium`. Required CI
-builds once, then runs the root critical suite, including these browser cases.
-The local SDK command does not establish coverage of the full Go suite.
-The selected methods and executable browser cases have explicit result gates;
-method invocation alone does not establish complete method functionality.
+`pnpm critical:build` builds the package and checks the browser driver types;
+`pnpm critical:static` runs type, lint and packed-artifact checks;
+`pnpm contract:check` fails when the generated wire types under
+`src/client/generated` are stale (`pnpm contract` regenerates them with
+OpenRails' contracts). Browser behaviour runs in OpenRails' critical suite.
+`src/components/ui` is shadcn (`base-vega`, zinc; see `components.json`).
 
 ## License
 

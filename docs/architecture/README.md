@@ -49,7 +49,7 @@ Every system keeps these. A page says how, or why one does not apply.
 5. **Contracts match the code.** The Go API, HTTP routes and schema snapshots in
    `api/` are regenerated with every change, and the in-process and remote clients
    answer alike. Before v1.0.0 any of them may change; from v1.0.0 they change
-   only by adding to them ([compatibility](../compatibility.md)).
+   only by adding to them ([compatibility](../../compatibility/README.md)).
 6. **Data lifecycle.** Every table has a retention class saying how its rows leave
    it: permanent (never), partitioned (whole months dropped), rows (deleted past an
    age) or state (gone when the thing is). The class is stated in the table's

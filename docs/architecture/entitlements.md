@@ -135,10 +135,10 @@ deduplicated by write key for 15 minutes.
   (`POST /v1/app/entitlements/check`, `merchant:entitlements:read`): up to 100
   keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant. Cache:
   `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on `RemoteOptions`,
-  `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../standalone.md#backend).
+  `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../client.md#caching).
 - **Gate**: `openrails.NewGate(client, GateDeps{Redis, Outbox})`; `Gate.Admit`,
   `Consume`, `Record`, `Limits`, `Flush`, `Close`; `Ticket.Capture`, `Release`,
-  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../usage-billing.md#the-gate)).
+  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-admissions-and-the-gate)).
 - **Limits and admissions** (`merchant:usage:manage`, reads `merchant:usage:read`):
   `SyncLeases` (`POST /v1/app/leases/sync`); `Admit` (`POST /v1/app/admissions`),
   `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, `GetAdmission`,
@@ -157,9 +157,9 @@ deduplicated by write key for 15 minutes.
   (`PUT /v1/catalog/limits/{key}`); `limits_reached` (`POST /v1/metrics/query`);
   `product.entitlements_changed` (`billing.ProductEntitlementsChangedEvent`),
   `balance.low`, `balance.depleted`. Guide:
-  [entitlements follow the product](../entitlements_timeline.md).
+  [entitlements follow the product](../client.md#entitlements-and-access).
 - **Configuration**: merchant `billing_policies`, `usage_gate_safe_spend`
-  ([spend limits](../spend-limits.md)).
+  ([spend limits](../client.md#limits-admissions-and-the-gate)).
 
 ## Guarantees
 
@@ -294,7 +294,7 @@ meters each invoker by item: 10 a minute, shared by `UpdateCustomer`,
 100 grants a call, `billing.MaxBatchItems`); going over locks the invoker out for
 an hour. An application acting as itself is not metered. `/v1/me/entitlements`
 and `/v1/me/limits` take no OpenRails rate limit; the proxy owns a generic
-ceiling ([limits](../limits.md)). SDK Redis calls wait at most 25 ms (lookups and
+ceiling ([limits](../standalone.md#abuse-limits)). SDK Redis calls wait at most 25 ms (lookups and
 fills) or 250 ms (a live denial's eviction), at most 64 outstanding each, so a
 slow Redis falls back to OpenRails.
 Checks:

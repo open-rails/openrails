@@ -58,7 +58,7 @@ movements (`postRunningChargesThrough`).
 - **Running charges** (`merchant:usage:manage`, reads `merchant:usage:read`):
   `StartRunningCharge` (`POST /v1/app/running-charges`), `StopRunningCharge`,
   `GetRunningCharge`, `ListRunningCharges`; `GetBalance`
-  ([running charges](../running-charges.md)); in a host transaction
+  ([running charges](../client.md#usage-and-running-charges)); in a host transaction
   (`LocalClient`) `StartRunningChargeTx`, `StopRunningChargeTx`.
 - **Catalog**: `ListMeters`, `GetMeter`, `SetMeter`, or a catalog document.
 - **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveOrderBalance`,
@@ -69,7 +69,7 @@ movements (`postRunningChargesThrough`).
   `order_overdue`, `order_collection_stopped`.
 - **Configuration**: `usage_billing_enabled` (`Config.UsageBillingEnabled`);
   merchant `usage_billing`, `billing_period_boundary`
-  ([usage billing](../usage-billing.md)).
+  ([usage billing](../client.md#usage-and-running-charges)).
 
 ## Guarantees
 
@@ -146,7 +146,7 @@ Checks:
 - OR-J26-S40 and OR-J26-S52 bound the usage pass.
 
 ### 8. Abuse protection
-Does not apply: usage enters through syncs and admissions, bounded in [entitlements and limits](entitlements.md); `/v1/me/usage` takes no OpenRails rate limit, and the proxy owns a generic ceiling ([limits](../limits.md)).
+Does not apply: usage enters through syncs and admissions, bounded in [entitlements and limits](entitlements.md); `/v1/me/usage` takes no OpenRails rate limit, and the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)).
 
 ### 9. Destructive-action safeguards
 Waiving or writing off a usage order is a `waive_order` or `mark_uncollectible`

@@ -117,7 +117,7 @@ func errorCodesMD() []byte {
 	b.WriteString(docsHeader)
 	b.WriteString("\n# Error codes\n\n")
 	b.WriteString("Every `error.code` the API answers, with the HTTP status and `error.type` that always accompany it. Codes are stable; messages are not. ")
-	b.WriteString("The registry is `billing.ErrorCodes()`; see [errors.md](errors.md) for the envelope and how clients classify.\n\n")
+	b.WriteString("The registry is `billing.ErrorCodes()`; see [the client guide](../client.md#errors) for the envelope and how clients classify.\n\n")
 	b.WriteString("| Code | Status | Type | Meaning |\n|---|---|---|---|\n")
 	for _, c := range errorCodes() {
 		fmt.Fprintf(&b, "| `%s` | %d | `%s` | %s |\n", c.Code, c.Status, c.Type, c.Meaning)

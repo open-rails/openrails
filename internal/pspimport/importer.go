@@ -1,10 +1,3 @@
-// Package pspimport imports a merchant's subscribers straight from its PSPs:
-// it observes the PSP's catalog, pulls each provider object read-only, stages
-// it with the identity facts the provider holds, links it to a customer by
-// the merchant's rules and mappings, and lands the linked ones through
-// billingimport on the provider prices mapping their plans. Objects no rule
-// links, and subscriptions whose plan no one mapped, stay staged and listed;
-// nothing is guessed.
 package pspimport
 
 import (

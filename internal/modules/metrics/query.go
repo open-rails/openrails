@@ -1,6 +1,3 @@
-// Package metrics is the merchant analytics engine: an in-code registry of
-// measures and dimensions compiles a JSON query to parameterized SQL per source
-// family, so no client string ever becomes SQL text.
 package metrics
 
 import (

@@ -102,7 +102,7 @@ Tables owned: `psp_imports`, `psp_import_records`, `psp_import_basis`,
   `POST /v1/merchant/psp-import-mappings`, `GET /v1/merchant/provider-catalog`,
   `POST /v1/merchant/billing-import`; proposals by `GET /v1/merchant/proposals`.
 - **CLI**: `openrails proposals list --pull`, `openrails undo-run`; no import
-  command. **Docs**: [PSP import](../psp-import.md), [batch import](../batch-import.md).
+  command. **Docs**: [PSP import](../client.md#imports-and-archives), [batch import](../client.md#imports-and-archives).
 
 ## Guarantees
 

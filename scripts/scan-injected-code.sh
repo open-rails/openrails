@@ -6,7 +6,10 @@
 # PolinRider class) that appended an obfuscated dropper to build-config files on
 # infected contributor machines and rode into this repo inside otherwise normal
 # commits (2025-11 .. 2026-05: vite/webpack/tailwind/postcss configs, and
-# frontend/scripts/setup-husky.mjs).
+# frontend/scripts/setup-husky.mjs). The dropper resolves its C2 from a
+# blockchain dead-drop, decodes and evals a next stage and re-spawns detached;
+# it has also appeared in ordinary application source, sometimes
+# base64-encapsulated, and the same actor ships browser-extension stealers.
 #
 # The payload hides after a ~2800-space run on the last line of a config file,
 # so it is invisible in an editor and in `git diff` without scrolling right. The
@@ -22,8 +25,31 @@
 #   scan-injected-code.sh --range <rev-range>  scan blobs changed in a range (CI)
 #   scan-injected-code.sh --files <path>...    scan the named paths verbatim
 #   scan-injected-code.sh --self-test          run the detector against its fixtures
+# scripts/install-git-hooks.sh installs the pre-commit scan once per clone. CI
+# runs the tree scan and the self-test. --staged and --range read blobs, not
+# the working tree.
 #
-# Exits non-zero if anything is found. See docs/dev/injection-scan.md.
+# Rules: R1 100+ spaces or 20+ tabs in a row, outside Markdown; R2 eval( on a
+# line with a base64 decode; R3 detached: true in a file using child_process;
+# R4 a dead-drop host within 1000 chars of an execution primitive (alone, a
+# non-blocking NOTE); R5 known obfuscator markers; R6-R10 build configs: a line
+# over 250 chars, 40+ interior whitespace, any Unicode space, over 8192 bytes,
+# a string over 200 chars; R8 run: 20+ Unicode spaces or \r in a row, outside
+# Markdown; R11 a NUL byte in a source file; R12 a base64 literal decoding to a
+# dead-drop host, chain address, URL or marker; R13 a manifest.json whose
+# __meta holds client_id; R14 a 40+ whitespace gap between code on a file's
+# last non-blank line. Build configs are *.config.*, gulpfile.*, Gruntfile.*,
+# setup-*.{js,mjs,cjs,ts} and .husky/*. Thresholds were measured to give zero
+# false positives across the repositories carrying the scanner. Markdown is
+# exempt from R1 and the R8 run; scripts/testdata/injection-scan/ from every
+# rule; this script from the content rules, since it quotes signatures.
+#
+# Exits non-zero if anything is found. If it fires, do not run, build or import
+# the file; read it with `cat -A` or a diff scrolled right. A real hit means the
+# machine that made the commit is compromised: rebuild it, rotate its
+# credentials and check every repository it could write to. Hooks under
+# .git/hooks/ and sideloaded browser extensions are out of scope: check them by
+# hand.
 
 set -euo pipefail
 export LC_ALL=C # byte-wise matching; grep -P must not choke on invalid UTF-8
@@ -83,9 +109,9 @@ CONFIG_RE='(^|/)([^/]+\.config\.[A-Za-z]+|(vite|webpack|tailwind|postcss|next|ro
 
 # Excluded from every rule: the fixtures deliberately carry live signatures.
 SKIP_ALL_RE='(^|/)scripts/testdata/injection-scan/'
-# Excluded from the content rules (2-5) only: these two quote the signatures they
-# describe. Both are still subject to the structural whitespace rule.
-SKIP_CONTENT_RE='(^|/)(scripts/scan-injected-code\.sh|docs/dev/injection-scan\.md)$'
+# Excluded from the content rules (2-5) only: this script quotes the signatures
+# it describes. It is still subject to the structural whitespace rule.
+SKIP_CONTENT_RE='(^|/)scripts/scan-injected-code\.sh$'
 
 self="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 findings=0
@@ -93,7 +119,7 @@ findings=0
 # --- argument parsing --------------------------------------------------------
 
 usage() {
-	sed -n '3,26p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
+	sed -n '3,52p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
 	exit 2
 }
 

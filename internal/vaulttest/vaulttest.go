@@ -44,7 +44,7 @@ func New(t testing.TB) *Vault {
 	t.Helper()
 	addr := strings.TrimSpace(os.Getenv(AddrEnv))
 	if addr == "" {
-		t.Skip(AddrEnv + " is unset: this test needs a dev Vault (docs/dev/testing.md)")
+		t.Skip(AddrEnv + " is unset: this test needs a dev Vault at that address, with its token in " + TokenEnv)
 	}
 	token := strings.TrimSpace(os.Getenv(TokenEnv))
 	if token == "" {

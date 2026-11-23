@@ -11,7 +11,7 @@ int64 decimal string of its `currency`'s native unit: `total`, each line's
 `unit_amount` and `amount`, and a usage order's `amount_paid` and
 `amount_due`. A JSON number, a decimal point or a value outside int64 fails
 schema validation; the package never assumes a scale. It takes the scale from
-OpenRails' currency registry (`billing.LookupCurrency`, the `currencies` of
+OpenRails' currency registry (`catalog.ParseCurrency` and `Currency.Units()`, the `currencies` of
 `GET /v1/config`).
 
 Rendering scales with `BigInt` and hands Intl the exact major-unit decimal;

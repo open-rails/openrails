@@ -49,7 +49,7 @@ every movement of its value is a [ledger](ledger.md) transfer carrying its
   part repays owed. An order buys at most one credit product.
 - **Recurring**: each paid renewal of an engine-owned recurring credit price funds
   the order line's frozen promise (`internal/modules/orders/renewal.go`), with its
-  own expiry from delivery ([recurring credits](../recurring-credits.md)).
+  own expiry from delivery ([recurring credits](../client.md#credits)).
 
 ### Spending
 
@@ -128,8 +128,8 @@ re-arms them) and sets the next look.
 - Error codes: `credit_grant_held`, `credit_grant_not_found`,
   `credit_grant_unavailable`, `currency_unsupported`, `idempotency_key_reused`,
   `invalid_param`.
-- Docs: [prepaid credits](../prepaid-credits.md), [recurring credits](../recurring-credits.md),
-  [merchant operations](../merchant-operations.md#credit-grants).
+- Docs: [prepaid credits](../client.md#credits), [recurring credits](../client.md#credits),
+  [merchant operations](../client.md#credits).
 
 ## Guarantees
 

@@ -5,8 +5,8 @@ per merchant. Hosts read the log and own delivery to customers: receipts, email,
 preferences. OpenRails itself delivers three things: selected customer notices
 to an AuthKit account inbox (optional), merchant alerts by email and alert
 webhook, and the findings queue staff work in the console. It sends customers no
-email and no SMS. Integration guides: [events](../events.md) and
-[balance notices](../running-charges.md#balance-notices).
+email and no SMS. Integration guides: [events](../client.md#events) and
+[balance notices](../client.md#usage-and-running-charges).
 
 ## Concepts
 

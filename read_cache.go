@@ -52,7 +52,14 @@ type ReadPolicy struct {
 }
 
 // ReadCache is Config.ReadCache and RemoteOptions.ReadCache: the policy of
-// each Read it names, replacing its default.
+// each Read it names, replacing its default. Defaults in process: ReadCatalog
+// and ReadMeters refresh after 1 minute, stale up to 10; the configuration
+// reads are live. Over HTTP: ReadCatalog, ReadMeters and ReadPublicConfig
+// refresh after 10 minutes, stale up to an hour; ReadMerchantConfiguration
+// after 30 seconds, stale up to 10 minutes. A handle's own catalog,
+// configuration or archive write, and any change the embedded engine commits,
+// drops the merchant's cached answers at once; another replica's change shows
+// within RefreshAfter.
 type ReadCache map[Read]ReadPolicy
 
 // transport is how a handle reaches OpenRails, which sets what a read costs.

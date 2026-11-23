@@ -18,7 +18,21 @@ func newCatalogCmd() *cobra.Command {
 func newCatalogExportCmd() *cobra.Command {
 	var merchant, out string
 	var overwrite bool
-	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export all persisted catalog history as a sealed YAML snapshot", Long: "Preserves archived products and prices, UUIDs, revisions, key movements, provider bindings, meters, rate cards and catalog receipts. Does not export purchases, balances, credentials or provider jobs. Use dump-merchant-catalog for editable active-price YAML.", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export all persisted catalog history as a sealed YAML snapshot", Long: `Writes a backup of the merchant's catalog from a consistent snapshot of the
+configured database: a versioned kind: catalog_snapshot YAML with named rows
+and a SHA-256 digest, published atomically to a private file (an existing
+file needs --overwrite).
+
+It keeps every row of the catalog tables (products, product_entitlements,
+prices, price_key_movements, price_psp_bindings, catalog_meters,
+catalog_limits, catalog_product_limits, catalog_rate_cards,
+catalog_field_owners, catalog_applications) and the catalog revision:
+archived products and prices, UUIDs and revisions, so every purchase keeps its
+original price. Overwritten meter and rate-card definitions were never stored
+and cannot be recovered. It exports no purchases, balances, credentials or
+provider jobs: use billing export for the whole book, and
+dump-merchant-catalog for an editable document. Artifacts are bounded at
+64 MiB.`, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		mid, err := parseBillingArchiveMerchant(merchant)
 		if err != nil {
@@ -48,7 +62,18 @@ func newCatalogExportCmd() *cobra.Command {
 }
 func newCatalogImportCmd() *cobra.Command {
 	var merchant, in string
-	cmd := &cobra.Command{Use: "import --merchant UUID --in catalog.snapshot.yaml", Short: "Restore a catalog snapshot into an empty catalog for the same merchant", Long: "Restores all catalog IDs and persisted history atomically. Provision the exact merchant, referenced PSP accounts and customer IDs first. Existing catalog state is never replaced. An identical successful import remains a no-op after later changes; this is not a rollback command.", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "import --merchant UUID --in catalog.snapshot.yaml", Short: "Restore a catalog snapshot into an empty catalog for the same merchant", Long: `Restores a catalog snapshot's IDs and history in one transaction, into an
+empty catalog (revision zero) of the merchant whose UUID the artifact names;
+it never merges, replaces or deletes. Provision that merchant first (for a new
+local destination, billing prepare-target), and the PSPs its bindings
+reference with their original UUID, rail, environment and account id: an
+ordinary PSP's UUID derives from those, so declaring the same PSP recreates
+it. IDs are never remapped. Aliases, tags, duplicate keys and unknown fields
+are refused.
+
+An identical artifact already imported is a no-op even after later edits; a
+different one is refused. This is not a rollback. Nothing contacts a provider,
+charges, grants access or schedules jobs.`, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		mid, err := parseBillingArchiveMerchant(merchant)
 		if err != nil {

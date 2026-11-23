@@ -2,7 +2,7 @@
 
 # Error codes
 
-Every `error.code` the API answers, with the HTTP status and `error.type` that always accompany it. Codes are stable; messages are not. The registry is `billing.ErrorCodes()`; see [errors.md](errors.md) for the envelope and how clients classify.
+Every `error.code` the API answers, with the HTTP status and `error.type` that always accompany it. Codes are stable; messages are not. The registry is `billing.ErrorCodes()`; see [the client guide](../client.md#errors) for the envelope and how clients classify.
 
 | Code | Status | Type | Meaning |
 |---|---|---|---|

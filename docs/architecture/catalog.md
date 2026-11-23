@@ -4,7 +4,7 @@ What a merchant sells: products, prices, meters, rate cards and usage limits. It
 changes by documents (`catalog.Application`) an operator applies and by edits
 from the console, the catalog routes and `Client` methods; starting OpenRails
 never applies one (`internal/engine/engine.go`). Guides:
-[catalog](../catalog.md), [catalog export](../catalog-export.md).
+[catalog](../client.md#catalog), [catalog export](../client.md#catalog).
 
 ## Concepts
 
@@ -209,7 +209,7 @@ Checks:
 ### 8. Abuse protection
 
 Catalog routes are staff routes, outside the customer limits
-([limits](../limits.md)). Bodies are capped at 1 MiB
+([limits](../standalone.md#abuse-limits)). Bodies are capped at 1 MiB
 (`middleware.DefaultMaxBodyBytes`), documents at 2000 items. The assistant
 spends model tokens: the `catalog-ask` bucket (10 a minute) and a capped loop.
 

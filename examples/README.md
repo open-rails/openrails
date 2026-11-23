@@ -1,15 +1,16 @@
-# Integration examples
+# Examples
 
-These samples sell access to courses with the Go client and the browser SDK.
-Start with the guide for the deployment you plan to use. The README for each sample explains its prerequisites and release context.
+A course store sold three ways, plus two backends. Each folder is complete on
+its own and its README says how to run it.
 
-| Integration | Sample | Guide |
-| --- | --- | --- |
-| OpenRails runs inside your Go app | [Embedded](embedded) | [Embedded guide](../docs/embedded.md) |
-| You run OpenRails as an HTTP service | [Standalone Compose](standalone) | [Standalone guide](../docs/standalone.md) |
-| You connect to the hosted platform | [Hosted sample with older provisioning](hosted) | [OpenRails SaaS guide](../docs/saas.md) |
+| Example | Shows | Guide |
+|---|---|---|
+| [`embedded`](embedded) | OpenRails in the app's Go process, behind its AuthKit | [Embedded](../docs/embedded.md) |
+| [`standalone`](standalone) | the same store calling the `openrails` server it runs (Compose) | [Standalone](../docs/standalone.md) |
+| [`hosted`](hosted) | the same store calling the hosted platform | [Client: credentials](../docs/client.md#credentials) |
+| [`own-auth`](own-auth) | two merchants on one engine behind the host's own users, sessions and roles | [Embedded: auth](../docs/embedded.md#auth) |
+| [`gate`](gate) | an API whose requests count toward usage limits, admitted in process by `openrails.Gate` | [Client: the Gate](../docs/client.md#limits-admissions-and-the-gate) |
+| [`guide`](guide) | the fragments the guides show that no app runs; they compile | [Integration guide](../docs/guide.md) |
 
-The [own-auth sample](own-auth) shows two merchants on an embedded engine with
-the host application's own users, sessions, and roles.
-The [gate sample](gate) is a backend whose requests count toward usage limits:
-`openrails.Gate` admits each one in process and reports what it used.
+The three stores share `content.go`, `web/src/pages.tsx` and the catalog; only
+`main.go`, `web/src/clients.ts` and the run files differ.

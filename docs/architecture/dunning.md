@@ -7,7 +7,7 @@ arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the
 renewal schedule and the arrears grace periods; usage orders retry on the
 built-in schedule. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
-Guides: [dunning](../dunning.md), [spend limits](../spend-limits.md).
+Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-admissions-and-the-gate).
 
 ## Concepts
 

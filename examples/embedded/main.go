@@ -65,6 +65,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authk
 // newBilling builds the billing engine and the handle of your merchant: the
 // engine runs and mounts, the handle has every billing operation.
 func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Engine, *openrails.Client, error) {
+	// guide:embedded-new
 	// You, the seller, and your payment processor accounts (PSPs), declared in
 	// merchant.yaml. It carries PSP credentials: keep it out of version control.
 	raw, err := os.ReadFile("merchant.yaml")
@@ -105,6 +106,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 		_ = bill.Close(context.WithoutCancel(ctx))
 		return nil, nil, err
 	}
+	// guide:end
 	return bill, shop, nil
 }
 
@@ -125,6 +127,7 @@ func run(ctx context.Context) error {
 
 	rbac := authkit.NewRoles()
 
+	// guide:embedded-roles
 	// OpenRails' permissions, by its own names. Held on root, they reach every
 	// merchant you serve.
 	perm := func(p billing.Permission) iam.Perm { return rbac.Root.Permission(p.Resource(), p.Action()) }
@@ -133,6 +136,7 @@ func run(ctx context.Context) error {
 
 	rbac.Root.Role("support", billingRead, billingManage)
 	rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
+	// guide:end
 
 	ak, err := newAuth(ctx, db, rbac) // see AuthKit's README
 	if err != nil {
@@ -148,6 +152,7 @@ func run(ctx context.Context) error {
 		return applyCatalog(ctx, shop, os.Args[3], os.Stdout)
 	}
 
+	// guide:embedded-start
 	// Background work. OpenRails runs its own River workers: rebills, retries of
 	// failed payments, invoices.
 	if err := ak.Start(ctx); err != nil {
@@ -156,11 +161,13 @@ func run(ctx context.Context) error {
 	if err := bill.Start(ctx); err != nil {
 		return err
 	}
+	// guide:end
 
 	r := gin.Default()
 	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1
 		return err
 	}
+	// guide:embedded-mount
 	// Billing. Public, customer (/me) and webhook routes are always mounted.
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
 		Auth:        ak.Authenticator(), // says who a request is; OpenRails decides what to admit
@@ -170,6 +177,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// guide:end
 
 	// The key media URLs are signed with: MEDIA_KEY in production, else one per run.
 	media := mediaKey(os.Getenv("MEDIA_KEY"))

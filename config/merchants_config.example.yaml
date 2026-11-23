@@ -13,8 +13,8 @@ version: 1
 # Each PSP picks its own environment and a merchant mixes them freely; an
 # omitted environment is the rail's real-money one.
 #
-# Solana rebilling also needs the deployment's solana.crankers (config.yaml);
-# docs/rails/solana.md.
+# Solana rebilling also needs the deployment's solana.crankers (config.yaml):
+# docs/standalone.md#configuration-reference.
 
 merchants:
   local-stack:
@@ -26,7 +26,7 @@ merchants:
 
     # The merchant's settings sit flat on the merchant: the same fields GET
     # /v1/merchant/configuration reads and PATCH changes
-    # (docs/merchant-configuration.md), with the same names and units.
+    # (docs/client.md#merchant-configuration-and-psps), with the same names and units.
     profile:
       logo_url: https://local-stack.example/assets/logo.png
       from_email: billing@local-stack.example
@@ -37,17 +37,17 @@ merchants:
       billing_day: 13
       currencies:
         - {currency: USD, credit_limit: 100000000, minimum_invoice_amount: 1000000}
-    # or#878 arrears delinquency: days past due_at before new spend is refused
+    # Arrears delinquency: days past due_at before new spend is refused
     # and the host is signalled to shut off. Default 14; the amount floor
     # (arrears_delinquency_floor) defaults to monthly_floor. See
-    # docs/spend-limits.md.
+    # docs/client.md.
     arrears_grace_days: 7
 
     delegated_invoker_wasted_spend_limits:
       - { key: burst, window_seconds: 900, limit: 5000000 }
       - { key: sustained, window_seconds: 18000, limit: 20000000 }
 
-    # or#288 processor routing: ordered rules, FIRST MATCH WINS. `prefer` is
+    # Processor routing: ordered rules, FIRST MATCH WINS. `prefer` is
     # both the ranked candidate list and the whitelist: a PSP the winning rule
     # does not name cannot be routed to, which is how you pin a product to one
     # rail. Candidates that cannot serve the price right now (unarmed,
@@ -103,7 +103,7 @@ merchants:
           security_key: replace-with-paykings-nmi-security-key
           webhook_signing_secret: replace-with-paykings-nmi-webhook-secret
 
-      # or#879/or#880 CUSTODY: ordinary NMI PSPs whose cards are held by a
+      # CUSTODY: ordinary NMI PSPs whose cards are held by a
       # third-party custodian (Basis Theory) instead of in NMI's own vault.
       # Custody is a MODIFIER on the rail, never a rail of its own: NMI still
       # charges, the custodian just detokenizes the PAN into this gateway.
@@ -140,7 +140,7 @@ merchants:
         client_accnum: "999999"
         client_subacc: "0000"
         # Webhook source IPs are CCBill's documented provider-wide ranges,
-        # built in (#710) — there is no per-merchant allowlist.
+        # built in; there is no per-merchant allowlist.
         secrets:
           salt: replace-with-ccbill-flexform-salt
           datalink_username: replace-with-ccbill-datalink-username
@@ -172,7 +172,7 @@ merchants:
         secrets:
           rpc_url: https://devnet.helius-rpc.com/?api-key=replace-with-helius-api-key
 
-    # Operator-declared CUSTODIAN catalog (or#880): the same shape as `psps:`
+    # Operator-declared CUSTODIAN catalog: the same shape as `psps:`
     # one axis over. A PSP says who CHARGES the card; a custodian says who
     # HOLDS it. Most merchants declare none at all — a card stored inside
     # Stripe or in NMI's own vault needs no configuration, because the PSP IS
@@ -187,7 +187,7 @@ merchants:
         # Its money class, matching the PSPs it serves: live (default) or test.
         environment: test
         # The custodian-native tenant identity. Operator-declared: there is
-        # no runtime whoami (#592).
+        # no runtime whoami.
         account_id: replace-with-bt-tenant-id
         # The PUBLIC application key the payment page tokenizes with. It
         # replaces the rail's own tokenization_key: with custody, the browser

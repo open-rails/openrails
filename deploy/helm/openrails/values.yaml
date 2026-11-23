@@ -1,5 +1,5 @@
 # OpenRails standalone server. Postgres 18+ and Redis (or Garnet) are not part
-# of this chart: name them in config and secrets. docs/kubernetes.md has a
+# of this chart: name them in config and secrets. docs/standalone.md has the
 # walkthrough.
 
 # Every pod serves the API and runs the workers. More than one needs Redis

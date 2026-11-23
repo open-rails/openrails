@@ -14,6 +14,9 @@ identity = {"GIT_AUTHOR_NAME": "Paul Fidika", "GIT_AUTHOR_EMAIL": "paul@fidika.c
 env = os.environ | identity
 cases = [
     ("docs", [("M", "README.md")], set()),
+    ("guide", [("M", "docs/guide.md")], set()),
+    ("example-gate", [("M", "examples/gate/main.go")], {"core", "browser", "security"}),
+    ("example-guide", [("A", "examples/guide/checkout.go")], {"core", "browser", "security"}),
     ("license", [("M", "LICENSE")], set()),
     ("isolated-ui", [("M", "server/web/console/src/components/button.tsx")], {"browser", "security"}),
     ("client", [("M", "sdk/billing-ui/src/client/client.ts")], source),

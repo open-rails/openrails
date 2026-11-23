@@ -52,7 +52,6 @@ type settings struct {
 	OpenRailsURL string             // the server, and its resource identifier (auth.resource.id)
 	Merchant     billing.MerchantID // the merchant the server trusts this app's issuer for
 	ClientSecret string             // the backend client's secret
-	SCIMInterval time.Duration      // how often AuthKit pushes user changes to the server
 	SMTP         smtp.Server        // AuthKit's mail: the codes that prove each user's email
 }
 
@@ -94,6 +93,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
 		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 
+		// guide:standalone-issuer
 		// OpenRails is a resource server this AuthKit mints tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{
 			Resources: []authkit.ResourceServerConfig{{
@@ -118,12 +118,12 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 			}},
 		},
+		// guide:end
 
 		// Customer contacts: every user, pushed to the merchant's directory in
 		// the server's AuthKit with the backend client's tokens, so receipts
 		// and the admin customer read have each email.
 		Provisioning: authkit.ProvisioningConfig{
-			Interval: s.SCIMInterval,
 			Targets: []authkit.ProvisioningTarget{{
 				Name:              "openrails",
 				URL:               s.OpenRailsURL + "/directory/scim/v2",
@@ -149,6 +149,7 @@ func backendCredentials(s settings) *authkit.ProvisioningClientCredentials {
 // over HTTP, with a client-credentials token from this app's AuthKit. The
 // server trusts that issuer for one merchant, the one every call acts on.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
+	// guide:standalone-client
 	cc := backendCredentials(s)
 	tokens := (&clientcredentials.Config{
 		ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
@@ -167,6 +168,7 @@ func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
 		return nil, err
 	}
 	return remote.Merchant(s.Merchant)
+	// guide:end
 }
 
 // newApp builds the app: its AuthKit (started: its River workers push the
@@ -210,7 +212,6 @@ func run(ctx context.Context) error {
 		PublicURL:    cmp.Or(os.Getenv("PUBLIC_URL"), "http://localhost:8080"),
 		OpenRailsURL: cmp.Or(os.Getenv("OPENRAILS_URL"), "http://localhost:3053"),
 		ClientSecret: os.Getenv("OPENRAILS_CLIENT_SECRET"),
-		SCIMInterval: 30 * time.Second,
 		SMTP: smtp.Server{
 			Host: cmp.Or(os.Getenv("EMAIL_SMTP_HOST"), "localhost"),
 			Port: cmp.Or(atoi(os.Getenv("EMAIL_SMTP_PORT")), 1025),

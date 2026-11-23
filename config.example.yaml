@@ -126,7 +126,7 @@ naming:
 # Solana rebilling's crankers, in order: the first publishes new plans, and
 # each pulls the plans it owns. None turns Solana rebilling off; one-time
 # Solana payments still work. SOLANA_CRANKERS takes them as a JSON list, from
-# the environment or a mounted secret file. docs/rails/solana.md.
+# the environment or a mounted secret file. docs/standalone.md#configuration-reference.
 # solana:
 #   crankers:
 #     - {mode: vault_transit, key: openrails-solana-cranker}
@@ -163,7 +163,7 @@ user_action_rate_limit:
   paid_customers_per_daily_customer: 100
 
 # Staff refunds, revokes, cancels and other held destructive actions per
-# rolling hour/day (docs/destructive-actions.md). Shown are the defaults.
+# rolling hour/day (docs/standalone.md#destructive-holds). Shown are the defaults.
 # destructive_action_limits:
 #   actor_per_hour: 5
 #   actor_per_day: 15
@@ -180,7 +180,7 @@ user_action_rate_limit:
 # How long a rotated-out webhook signing secret keeps verifying (max 168h).
 # webhook_secret_overlap: 24h
 
-# CIDRs whose X-Forwarded-For is trusted (#746). Empty (default) trusts
+# CIDRs whose X-Forwarded-For is trusted. Empty (default) trusts
 # NOTHING — rate limiting, abuse tracking, webhook IPAddress recording, and the
 # CCBill IP allowlist all use the raw socket peer. Set this to your load
 # balancer's/reverse proxy's address range when deploying behind one.
@@ -266,11 +266,11 @@ admin_console:
 #   base_url: ""             # optional endpoint override (env LLM_BASE_URL) — with provider=openai
 #                            # this serves any OpenAI-compatible backend, base INCLUDES /v1
 #                            # (e.g. https://api.groq.com/openai/v1, https://models.example/v1)
-#   catalog_copilot_enabled: false   # #779 Phase 1 consent: /console/catalog/ask sends aggregate
+#   catalog_copilot_enabled: false   # consent: /console/catalog/ask sends aggregate
 #                            # catalog/subscriber-count data to the LLM provider; env
 #                            # LLM_CATALOG_COPILOT_ENABLED
-#   catalog_drafting_enabled: false  # #779 Phase 2: arms the draft_price_change/draft_catalog_diff
-#                            # proposal tools; #781 notice-window enforcement remains server-side
+#   catalog_drafting_enabled: false  # arms the draft_price_change/draft_catalog_diff
+#                            # proposal tools; notice-window enforcement remains server-side
 #                            # and this gate requires separate deployment consent; env
 #                            # LLM_CATALOG_DRAFTING_ENABLED
 

@@ -6,7 +6,7 @@ only to show customers to staff, to match them in reconciliation and imports, an
 to name the buyer to a provider's own page. Contacts come from the host's
 directory, read in process on every use, or from a copy the merchant's directory
 pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
-[customer contacts](../customer-contacts.md).
+[customer contacts](../client.md#customers).
 
 ## Concepts
 
@@ -106,7 +106,7 @@ minute.
   `/v1/merchant/provisioning-tokens` (`merchant:config:read`,
   `merchant:config:manage`). [Routes](../api/routes.md).
 - Configuration: `secrets.scim_token` in a merchant declaration or Vault document
-  ([merchant configuration](../merchant-configuration.md)).
+  ([merchant configuration](../client.md#merchant-configuration-and-psps)).
 
 ## Guarantees
 
@@ -181,7 +181,7 @@ Checks:
   and order.
 
 ### 8. Abuse protection
-SCIM routes are in no rate-limit bucket ([limits](../limits.md): a per-address
+SCIM routes are in no rate-limit bucket ([limits](../standalone.md#abuse-limits): a per-address
 ceiling belongs to the proxy). They are bounded by size instead, and a minted
 token carries 256 random bits.
 

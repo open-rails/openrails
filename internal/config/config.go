@@ -682,6 +682,14 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 
 // UserActionRateLimitConfig bounds distinct customers affected by manual card
 // removals and cancellations in rolling hour/day windows. Zero fields select defaults.
+//
+// The budget is merchant-wide across replicas and always enforced: per
+// rolling day the larger of MinimumCustomersPerDay (10) or one per
+// PaidCustomersPerDailyCustomer (100) customers who paid in the last 30 days,
+// per rolling hour the larger of 5 or one per 400. A customer counts once a
+// day. Admission is atomic in user_destructive_reservations before any
+// change; a refusal answers 429, records a finding and opens no hold.
+// Renewals, expiry and provider-side cancellation spend nothing.
 type UserActionRateLimitConfig struct {
 	MinimumCustomersPerHour        int64
 	PaidCustomersPerHourlyCustomer int64
@@ -713,6 +721,24 @@ func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLi
 // merchant's and the deployment's. The merchant and deployment limits are
 // floors that rise with active customers. Zero fields select the defaults
 // (actor 5/15, merchant 15/25, deployment 50/100).
+//
+// Counted actions are refunds, cancellations, payment-method removal, access
+// and credit revocation, write-offs, and changes that archive or remove an
+// existing catalog object's billable, access or routing terms; creating an
+// object spends nothing, nor do replays and proven no-ops. A batch counts its
+// targets. The actor is the verified issuer and invoker, so a rotated
+// credential gets no new allowance. The merchant and deployment floors rise
+// by one per 400 (hour) and 100 (day) customers active in the last 30 days. An
+// in-process call that names no invoker is the host's own work: audited with
+// origin host, it spends nothing and no hold stops it. A catalog file applied
+// by the operator spends the merchant's autonomous budget. Customer
+// self-service is UserActionRateLimit's.
+//
+// A breach answers 429 and opens a hold that persists until a person clears it
+// (see `openrails destructive-holds`); its host events are
+// destructive.hold_opened and destructive.hold_cleared, and operator alerts
+// are delivered at least once. Holds and the action audit belong to the
+// deployment: keep them in full backups; a merchant archive cannot reset them.
 type DestructiveActionLimitsConfig struct {
 	ActorPerHour      int64
 	ActorPerDay       int64
@@ -751,6 +777,30 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 // RateLimitsConfig maps a feature bucket to its request limit.
 // A bucket left out is not limited; other routes never are (a
 // per-address ceiling belongs to the proxy in front of OpenRails).
+//
+// Buckets and built-in limits per minute: purchase 10 (creating, paying and
+// confirming orders, Solana Pay), subscribe 20 (/v1/me/subscriptions
+// writes), payment 40 (/v1/me/payment-methods), webhook 1200 (a rail's
+// webhooks share its source addresses) and catalog-ask 10. Counting is per
+// one-minute window, bucket and subject (the client address, plus the user
+// when authenticated); any subject tripping refuses the request with 429,
+// and the X-RateLimit-* headers report the strictest. An unknown key is
+// reported and ignored; a limit of 0 or less means 60. A pay URL is also
+// limited per order (120 reads and 10 pays a minute). In-process Client
+// calls count nothing. The client address is the socket peer unless
+// TrustedProxies lists the proxy, so set it behind a load balancer. A
+// declared Content-Length over the bucket's ceiling is 413 before counting
+// (64 KiB for purchase, subscribe and payment, 1 MiB elsewhere; webhooks use
+// per-rail caps). Counters, captcha challenges, card-testing declines and
+// admin lockouts live in Redis when configured, else in process memory (one
+// instance); never in PostgreSQL.
+//
+// Card saves and purchase payments are also refused before any provider call
+// with 429 card_attempts_blocked after 6 declines in 15 minutes or 10 in 24
+// hours per customer or client address (IPv6 /64). 100 declines in 24 hours
+// from at least 25 customers and 25 addresses puts the merchant in attack
+// mode: subjects with a recent decline are blocked and captcha buckets
+// challenge everyone.
 type RateLimitsConfig map[string]*RateLimit
 
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
@@ -786,6 +836,12 @@ const (
 // CaptchaConfig is the captcha account. Setting both keys enables the
 // challenge, which is asked only of a client that keeps hitting a rate limit
 // on purchase, payment methods or subscriptions.
+//
+// A subject reaching three times a bucket's limit in a window is challenged
+// for 15 minutes: 403 captcha_required with X-Captcha-Required until it sends
+// a valid X-Captcha-Token, which clears the challenge and its counters.
+// Staff, console and server-to-server routes never see one. Clients render it
+// from GET /v1/config's captcha block or the error's metadata.
 type CaptchaConfig struct {
 	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
 	Provider  string
