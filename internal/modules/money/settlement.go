@@ -242,8 +242,9 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 	}
 	b.defs, b.meters = defs, meters
-	// A customer counts usage only toward the limits a product or override
-	// gives it capacity in.
+	// Usage counts toward every limit that reads it; only a limit a product
+	// or override gives the customer capacity in refuses what it cannot
+	// price.
 	granted := map[uuid.UUID]map[string]bool{}
 	if len(defs) > 0 {
 		for _, a := range accounts {
@@ -290,11 +291,14 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 		usage := limits.Usage{EventType: it.EventType, Dimensions: it.Dimensions, Metadata: it.Metadata}
 		for _, def := range defs {
-			if catalog.LimitUnitCurrency(def.Unit) || !granted[it.Customer.UUID()][def.Key] || !limits.Counts(def, meters, it.EventType) {
+			if catalog.LimitUnitCurrency(def.Unit) || !limits.Counts(def, meters, it.EventType) {
 				continue
 			}
 			units, err := limits.Units(def, meters, usage)
 			if err != nil {
+				if !granted[it.Customer.UUID()][def.Key] {
+					continue
+				}
 				b.Results[i].Err = settleRefusal(err)
 				break
 			}
@@ -759,7 +763,8 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 						if def.Unit != it.Currency {
 							units = priced.units[def.Key]
 						}
-						settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: w, Capacity: current[def.Key].Capacity, Units: units})
+						c := current[def.Key]
+						settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: w, Capacity: c.Capacity, KeepCapacity: c.Ungranted, Units: units, Ungranted: c.Ungranted})
 					default:
 						continue
 					}
@@ -769,11 +774,11 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 					}
 				}
 			}
-			// A limit the customer is subject to and the hold does not name
-			// takes the usage in its current window.
+			// A limit the hold does not name takes the usage in its current
+			// window, granted or not.
 			for _, def := range defs {
-				c, subject := current[def.Key]
-				if held[def.Key] || !subject {
+				c, ok := current[def.Key]
+				if held[def.Key] || !ok {
 					continue
 				}
 				units, counts := priced.units[def.Key]
@@ -783,7 +788,7 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 				if !counts {
 					continue
 				}
-				settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: c.Window, Capacity: c.Capacity, Units: units})
+				settle(limits.Settlement{Key: def.Key, Reset: def.Reset, Window: c.Window, Capacity: c.Capacity, KeepCapacity: c.Ungranted, Units: units, Ungranted: c.Ungranted})
 				res.Units[def.Key] = units
 			}
 		}

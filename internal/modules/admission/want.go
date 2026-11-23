@@ -118,10 +118,11 @@ func (w Want) SpendAt(merchantID, customer uuid.UUID, currency string, at time.T
 	return spendgate.SpendClaims(merchantID, customer, strings.TrimSpace(currency), w.gated.policy, w.gated.request, 0, at)
 }
 
-// MoneyTerms names what the resolved policy makes of the balance: invokers
-// whose policies differ there (a trust level's outstanding_cap) hold apart.
+// MoneyTerms names the resolved policy and what it makes of the balance:
+// invokers whose policies differ (a trust level's outstanding_cap, or its
+// spend window of the same key with another cap) hold apart.
 func (w Want) MoneyTerms() string {
-	return fmt.Sprintf("%s:%d", w.resolved.Kind, w.resolved.OutstandingCapAmount)
+	return fmt.Sprintf("%q:%s:%d", w.resolved.Name, w.resolved.Kind, w.resolved.OutstandingCapAmount)
 }
 
 // BalanceRefusal is the deny code a want that does not fit the balance gets,

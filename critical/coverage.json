@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 399,
+  "scenario_count": 401,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -722,6 +722,16 @@
       "id": "OR-J24-S31",
       "journey": "J24",
       "name": "A sync that reaches its commit past its timeout less a margin commits nothing and answers service_unavailable; its retry settles once"
+    },
+    {
+      "id": "OR-J24-S32",
+      "journey": "J24",
+      "name": "Trust levels whose spend windows share a key but not a cap resolve to different limit sets, each refused by its own cap"
+    },
+    {
+      "id": "OR-J24-S33",
+      "journey": "J24",
+      "name": "Usage while a limit's grant has lapsed is not enforced but counts in the limit's window, which the returning grant reads"
     },
     {
       "id": "OR-J25-S01",

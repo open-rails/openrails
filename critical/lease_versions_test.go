@@ -77,6 +77,17 @@ products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
 
+// sameWindowTrust caps one spend window apart by trust level.
+func sameWindowTrust(w *world) {
+	m := w.cfg.Merchants["alpha"]
+	m.BillingPolicies = []billing.BillingPolicy{
+		{Name: "free", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1000, Currency: "USD"}}},
+		{Name: "gold", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 5000, Currency: "USD"}}},
+	}
+	m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "free"}, {PolicyName: "gold", Tier: "gold"}}
+	w.cfg.Merchants["alpha"] = m
+}
+
 // goldTrust hold a gold trust level against its own spend window.
 func goldTrust(w *world) {
 	m := w.cfg.Merchants["alpha"]
@@ -632,6 +643,46 @@ func TestLeaseVersions(t *testing.T) {
 		balance(t, w.alpha, customer, 900, 100, 1000)
 	})
 
+	t.Run("OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-hold-apart", func(t *testing.T) {
+		w := newWorld(t, sameWindowTrust)
+		usageMeter(t, w.alpha, 100)
+		customer := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, customer, "funded", 10_000)
+		plain := computeWant(customer, 15)
+		plain.Invoker = "apiKey:plain"
+		gold := computeWant(customer, 15)
+		gold.Invoker, gold.TrustLevel = "apiKey:gold", ptr("gold")
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{plain, gold}})
+		require.Len(t, out.Wants, 2)
+		require.NotNil(t, out.Wants[0].LimitSet)
+		require.NotNil(t, out.Wants[1].LimitSet)
+		require.NotEqual(t, *out.Wants[0].LimitSet, *out.Wants[1].LimitSet, "the same window under another cap is another limit set")
+		require.NotNil(t, out.Wants[0].Refusal, "1,500 is past the free month's 1,000")
+		require.Equal(t, "budget_exceeded", out.Wants[0].Refusal.DenyCode)
+		require.Nil(t, out.Wants[1].Refusal, "and within the gold month's 5,000")
+	})
+
+	t.Run("OR-J24-S33/usage-while-a-grant-lapsed-counts-once-it-returns", func(t *testing.T) {
+		w := newWorld(t)
+		applyLimits(t, w.alpha, unitPlan)
+		customer := billing.CustomerID(uuid.New())
+		grantLimitProduct(t, w.alpha, customer, "plan", 1)
+		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "granted", 10))...)
+		require.EqualValues(t, 10, customerLimit(t, w.alpha, customer, "quota").Used)
+		w.clock.Advance(2 * time.Hour)
+		page, err := w.alpha.ListCustomerLimits(t.Context(), customer)
+		require.NoError(t, err)
+		require.NotContains(t, limitKeys(page.Items), "quota", "a customer reads only the limits it is granted")
+		// While the grant has lapsed nothing enforces the limit, and its
+		// window still counts the usage.
+		_, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Wants: []billing.LeaseWant{workWant(customer, 500)}}))
+		require.Nil(t, refusal)
+		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "lapsed", 30))...)
+		grantLimitProduct(t, w.alpha, customer, "plan", 24)
+		quota := customerLimit(t, w.alpha, customer, "quota")
+		require.EqualValues(t, 100, quota.Capacity)
+		require.EqualValues(t, 40, quota.Used, "the window kept counting while the grant lapsed")
+	})
 }
 
 func TestLimitArchive(t *testing.T) {

@@ -45,15 +45,18 @@ const SpendKeyPrefix = "spend:"
 // Claim is what one hold asks of one limit: Cost units in Window, against
 // Capacity (the products' sum, an override, or a spend window's limit,
 // before adjustments). Opens is a session or first-use window the hold opens.
+// Ungranted is a limit no product or override gives the customer: usage
+// still counts in its windows, and nothing enforces it.
 type Claim struct {
-	Key      string
-	Unit     string
-	Reset    catalog.LimitReset
-	Window   Window
-	Opens    bool
-	Capacity int64
-	Cost     int64
-	Overrun  catalog.Overrun
+	Key       string
+	Unit      string
+	Reset     catalog.LimitReset
+	Window    Window
+	Opens     bool
+	Capacity  int64
+	Cost      int64
+	Overrun   catalog.Overrun
+	Ungranted bool
 }
 
 // Standing is where a limit stands in a claim's window: its capacity with
@@ -271,7 +274,8 @@ func (h Holder) TakeBack(ctx context.Context, r Returnable) error {
 
 // Settlement is units a capture or report settles into one limit's window:
 // the window its hold was issued in, or the current one. KeepCapacity keeps
-// the capacity the window last stored (a spend window's).
+// the capacity the window last stored (a spend window's). An ungranted
+// limit's window counts the units and is never reached.
 type Settlement struct {
 	Key          string
 	Reset        catalog.LimitReset
@@ -279,6 +283,7 @@ type Settlement struct {
 	Capacity     int64
 	KeepCapacity bool
 	Units        int64
+	Ungranted    bool
 }
 
 // Settle adds each settlement's units to its window in full, never clamped,
@@ -323,7 +328,7 @@ func (h Holder) Settle(ctx context.Context, settlements []Settlement) error {
 		}
 		standing.Settled = addSat(standing.Settled, s.Units)
 		var reached *time.Time
-		if row.ReachedAt == nil && addSat(standing.Settled, standing.Held) >= standing.Capacity {
+		if row.ReachedAt == nil && !s.Ungranted && addSat(standing.Settled, standing.Held) >= standing.Capacity {
 			reached = &h.Now
 		}
 		if err := h.write(ctx, s.Key, s.Window.StartsAt, settled, capacity, reached); err != nil {
