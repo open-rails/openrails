@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 345,
+  "scenario_count": 346,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1591,7 +1591,12 @@
     {
       "id": "OR-J27-S13",
       "journey": "J27",
-      "name": "The merchant SDK reuses scoped current entitlement checks through their scheduled cutoff"
+      "name": "The merchant SDK reuses scoped allowed entitlement keys, never denials, through their scheduled cutoff"
+    },
+    {
+      "id": "OR-J27-S14",
+      "journey": "J27",
+      "name": "A purchase after a cached entitlement check is visible on the next check"
     },
     {
       "id": "OR-J04-S42",

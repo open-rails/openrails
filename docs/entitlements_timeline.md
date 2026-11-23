@@ -39,8 +39,12 @@ the `Client`):
   receive `evaluated_at` and `valid_until`. The latter is the next scheduled
   change that could affect a requested verdict or quantity, and is null when
   no change is scheduled. Both are null for a check that did not ask.
-  The [remote Go SDK cache](standalone.md#backend) requests this metadata
-  when enabled.
+  The remote Go SDK's [entitlement cache](standalone.md#backend), on by
+  default for API keys, requests this metadata. It keeps allowed keys only, so
+  a purchase is seen on the next check; an allowed key is reused until its
+  `valid_until` or for at most `MaxAge` (10 s by default), which bounds how
+  late a revocation can appear. `CheckEntitlementsLive` always asks and drops
+  the entries of the keys it finds denied; `Disabled` turns the cache off.
 
 Staff read with the admin API (`billing.MerchantCustomerRead` or `billing.RootCustomerRead`):
 

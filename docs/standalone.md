@@ -174,37 +174,42 @@ status and code ([errors](api/errors.md)). For admission, honor every clean deny
 decide per endpoint whether `ErrUnreachable` fails open or closed; keep the
 deadline short.
 
-**Cache entitlement checks.** For a backend using a merchant API key, set
-`RemoteMerchantOptions.EntitlementCheckCache` (or the same field on
-`RemoteOptions`) to opt in:
+**Cache entitlement checks.** A client using a merchant API key caches
+`CheckEntitlements` by default. It keeps each allowed key's answer, never a
+denial: a check is answered from the cache only when every requested key is
+allowed there, and otherwise asks OpenRails for the whole set, so a purchase is
+visible on the next check. An allowed answer is reused for up to `MaxAge`
+(10 s by default, `DefaultEntitlementCheckMaxAge`) and expires sooner at the
+next scheduled access change, such as a rental's end. A revocation, refund or
+API key permission change can therefore take up to `MaxAge` to appear.
+`CheckEntitlementsLive` always asks OpenRails; its answer replaces each allowed
+key's entry and drops each denied one, so later checks see a revocation too.
+Configure it on `RemoteMerchantOptions.EntitlementCheckCache` (or the same
+field on `RemoteOptions`); `Disabled: true` makes every check ask OpenRails:
 
 ```go
 client, err := openrails.NewRemoteMerchant(billingURL,
     openrails.RemoteCredential{APIKey: apiKey},
     openrails.RemoteMerchantOptions{
         EntitlementCheckCache: openrails.EntitlementCheckCacheOptions{
-            MaxAge: 30 * time.Second,
+            MaxAge: 30 * time.Second, // or Disabled: true
+            Redis:  redisClient,      // optional, shared by replicas
         },
     })
 ```
 
-`CheckEntitlements` caches exact-key checks for the present in bounded process
-memory. If you supply your own go-redis client as `EntitlementCheckCache.Redis`,
-replicas using the same OpenRails endpoint, merchant, API key and cache age
-can share answers. Your backend owns that Redis client and its connection
+Entries live in bounded process memory. If you supply your own go-redis client
+as `Redis`, replicas using the same OpenRails endpoint, merchant, API key and
+`MaxAge` share them. Your backend owns that Redis client and its connection
 lifecycle. Use a trusted Redis 6.2+ instance with synchronized clocks across
 its failover nodes. Set short socket timeouts and `ContextTimeoutEnabled` on
 the Redis client so timed-out lookups release connections promptly. A client
 created with `NewRemoteMerchant` learns its merchant in an authenticated
-response before it can reuse shared entries.
-
-An answer can be reused for up to `MaxAge` and expires by the next scheduled
-access change. A new purchase, early revocation or API key permission change
-can take up to `MaxAge` to appear. Call `CheckEntitlementsLive` when you require a
-fresh decision; its answer also replaces the cached one, so the next
-`CheckEntitlements` sees it too. Prefix or historical requests and token-backed
-credentials use live checks. Redis failures also fall back to OpenRails. The
-cache needs a server of the same release. See [entitlement windows](entitlements_timeline.md#reading-access).
+response before it can reuse shared entries. Prefix or historical requests,
+calls with request options and token-backed credentials always ask OpenRails,
+as does any check when Redis fails. The cache needs a server of this release
+or later; against an older one, set `Disabled`. See
+[entitlement windows](entitlements_timeline.md#reading-access).
 
 **Customer tokens.** A backend whose signing key is registered as the merchant's
 application sets `RemoteCredential.Assertion` (issuer, `kid`, a `crypto.Signer`,
