@@ -348,7 +348,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []int{1}, attempts, "the continuation makes one attempt; the next period's pass retries what it left")
 	})
-	t.Run("OR-J29-S41/a-retained-month-of-holds-drops-its-parts-before-its-holds", func(t *testing.T) {
+	t.Run("OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts", func(t *testing.T) {
 		w := newWorld(t)
 		fleet := quietFleet(t, w)
 		meterForCapture(t, w)
@@ -375,10 +375,11 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Contains(t, partitions("limit_holds"), "limit_holds"+suffix)
 		require.Contains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)
 		require.Equal(t, 1, rowsIn("limit_holds"+suffix))
-		require.Positive(t, rowsIn("limit_hold_parts"+suffix), "the hold's parts reference it from their own month")
+		require.Positive(t, rowsIn("limit_hold_parts"+suffix), "the hold's parts are in its month")
 
-		// Once the whole month is past the replay horizon, the cleanup drops
-		// it: the parts' month first, since its rows reference the holds'.
+		// Once the whole month is past the replay horizon, one cleanup pass
+		// drops both months: no foreign key ties a partition of parts to one
+		// of holds, so neither drop is refused.
 		w.clock.Advance(month.AddDate(0, 1, 0).Add(retention.Admissions + time.Hour).Sub(w.clock.Now()))
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.NotContains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)

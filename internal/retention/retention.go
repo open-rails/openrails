@@ -111,8 +111,9 @@ type MonthlyPartitions struct {
 	DropBefore func(now time.Time) time.Time
 }
 
-// Partitioned lists the partitioned tables. A month of hold parts drops
-// before the month of holds its foreign key references.
+// Partitioned lists the partitioned tables. Hold parts have no foreign key
+// to their hold (a referenced partition cannot be dropped); readers join the
+// hold, and a month of parts drops before its month of holds.
 var Partitioned = []MonthlyPartitions{
 	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
 	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},

@@ -231,11 +231,10 @@ CREATE TABLE billing.limit_hold_parts (
     contended_at timestamptz,
     answered_units bigint CHECK (answered_units >= 0),
     PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at),
-    CONSTRAINT limit_hold_parts_hold_id_fkey FOREIGN KEY (merchant_id, hold_id, hold_created_at) REFERENCES billing.limit_holds (merchant_id, id, created_at) ON DELETE CASCADE,
     CONSTRAINT limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CONSTRAINT limit_hold_parts_window_check CHECK (window_ends_at IS NULL OR window_ends_at > window_starts_at)
 ) PARTITION BY RANGE (hold_created_at);
-COMMENT ON TABLE billing.limit_hold_parts IS 'What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window''s held units are its live holds'' parts. Its foreign key to limit_holds cascades. Retention: monthly partitions on hold_created_at, dropped with their hold''s, each month before the holds it references.';
+COMMENT ON TABLE billing.limit_hold_parts IS 'What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window''s held units are its live holds'' parts. It has no foreign key to limit_holds, because PostgreSQL cannot drop a partition a foreign key references: every reader joins the part to its hold, so a part whose hold is gone counts nowhere. Retention: monthly partitions on hold_created_at, dropped with their hold''s, each month before its month of holds.';
 COMMENT ON COLUMN billing.limit_hold_parts.hold_created_at IS 'The hold''s created_at: the partition key, shared with the hold so both drop together.';
 COMMENT ON COLUMN billing.limit_hold_parts.request_units IS 'A lease''s hold: what one request of its customer last cost in the limit; null for a request''s hold.';
 COMMENT ON COLUMN billing.limit_hold_parts.used_units IS 'A lease''s hold: the units its usage took from the part since the hold was last sized; null for a request''s hold.';

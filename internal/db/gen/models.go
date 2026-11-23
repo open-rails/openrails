@@ -652,7 +652,7 @@ type BillingLimitHold struct {
 	AppliedVersion *int64
 }
 
-// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. Its foreign key to limit_holds cascades. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before the holds it references.
+// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. It has no foreign key to limit_holds, because PostgreSQL cannot drop a partition a foreign key references: every reader joins the part to its hold, so a part whose hold is gone counts nowhere. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds.
 type BillingLimitHoldPart struct {
 	MerchantID uuid.UUID
 	HoldID     uuid.UUID

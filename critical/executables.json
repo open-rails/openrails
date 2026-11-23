@@ -1013,7 +1013,7 @@
       "TestBackgroundJobs/OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants"
     ],
     "OR-J29-S41": [
-      "TestBackgroundJobs/OR-J29-S41/a-retained-month-of-holds-drops-its-parts-before-its-holds"
+      "TestBackgroundJobs/OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts"
     ],
     "OR-J26-S50": [
       "TestUsageBillingContracts/OR-J26-S50/paid",

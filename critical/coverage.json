@@ -1666,7 +1666,7 @@
     {
       "id": "OR-J29-S41",
       "journey": "J29",
-      "name": "Partition retention drops a month of hold parts before the month of holds they reference, and keeps the current month"
+      "name": "Partition retention drops a month of holds and the month of their parts in one pass once it is past the replay horizon, and keeps the current month"
     },
     {
       "id": "OR-J26-S50",
