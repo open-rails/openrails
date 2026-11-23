@@ -135,7 +135,7 @@ Checks:
 - OR-J04-S01: the built client and real HTTP return the same outcomes.
 - `src/admin/lib/api/metrics.ts` duplicates generated types; compare it to `wire.ts`.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 Does not apply: the library owns no tables.
 
 ### 7. Work scales with activity

@@ -169,9 +169,9 @@ in `api/schema.txt`.
 Checks:
 - `go run ./scripts/contracts` reports no change under `api/`; OR-J12-S06 and S07 run removal over HTTP and both clients alike.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-All tables are in `0001_schema.up.sql`. `payment_method_versions` and
+`payment_method_versions` and
 `mandates` are `Permanent`; `payment_methods`, `custodians`, `psp_customers` and
 `stored_card_checks` are `State`; `user_destructive_reservations` rows go after
 24 hours. A removed card is a `removed` row, not a deletion. None is partitioned.

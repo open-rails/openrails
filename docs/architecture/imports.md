@@ -161,9 +161,9 @@ Checks:
 - `go run ./scripts/contracts` reports no change under `api/`.
 - `psp_imports_status_check` and `psp_import_records_state_check` fix the statuses and states.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
-All tables are in `0001_schema.up.sql`. `psp_imports`, `psp_import_records` and
+`psp_imports`, `psp_import_records` and
 `psp_import_basis` are `State` and go when a person deletes the import;
 `psp_import_mappings` (until replaced) and `provider_catalog_objects` (the latest
 observation) are `State` and outlive it; `provider_charge_attributions` is

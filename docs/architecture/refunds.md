@@ -198,7 +198,7 @@ Checks:
 - `go run ./scripts/contracts` shows no removed line here.
 - A new reversal kind adds to the `reversal_kind` CHECK and `billing.PaymentKind`.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 `payments` is permanent, soft-deleted only by `openrails prune`. Refund intents
 are permanent (they moved or refused money); `provider_mutation_logs` rows go after
 25 months, `webhook_events` 90 days after completion. Nothing here is partitioned.

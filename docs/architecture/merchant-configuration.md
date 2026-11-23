@@ -196,7 +196,7 @@ Checks:
 - `archivewire` refuses a header whose `Version` is not `Version`.
 - OR-J31-S08 and OR-J31-S11: archives written before a schema cleanup still restore.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 The directory, alias, posture, book, PSP and custodian tables are `State`;
 `maintenance_runs` (inventories, purges, restore receipts) is `Permanent`. Restore
 creates partitions before its transaction (`retention.EnsureRetainedPartitions`). The
@@ -206,7 +206,6 @@ Checks:
 - `internal/retention/tables.go` classifies `merchants`, `merchant_slug_aliases`,
   `merchant_write_posture`, `book_identity`, `psps`, `custodians`.
 - `ownedTables` and the exclusion lists in `checks.go` cover every owned table.
-- OR-J31-S12 and OR-J31-S13: an older baseline is re-stamped or refused.
 
 ### 7. Work scales with activity
 Nothing sweeps every merchant: configuration loads on use and reloads on access or

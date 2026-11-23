@@ -185,8 +185,7 @@ Checks:
 - Each `Name` in `internal/http/routes/orders.go` is a `Client` method that calls
   that route.
 
-### 6. Migrations and retention
-The tables are in `0001_schema.up.sql`; `0002` added `order_lines.billing_interval_months`.
+### 6. Data lifecycle
 Retention classes (`retention.Tables`): `orders` rows (unpaid closed orders that
 never started an attempt go 90 days after closing, `DeleteClosedUnpaidOrders`),
 `order_attempts` rows (expired never-sent attempts after 90 days), `order_lines`

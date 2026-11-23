@@ -92,8 +92,8 @@ Checks:
 - `DecodePut` decodes into `billing.DashboardWidget` with unknown fields refused, like the metrics API.
 - Compare the console's hand-written `Dashboard` and `Widget` (`sdk/billing-ui/src/admin/lib/api/metrics.ts`) with `wire.ts`: `updated_at` and `updated_by` are optional there but `string | null` on the wire.
 
-### 6. Migrations and retention
-`dashboard_configs` is in the baseline with retention class state; a row lives as
+### 6. Data lifecycle
+`dashboard_configs` has retention class state; a row lives as
 long as its merchant. Merchant archives exclude it as presentation, so a restored
 merchant starts from the default template.
 

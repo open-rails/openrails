@@ -183,8 +183,8 @@ Checks:
   `RecordedPolicyOf` reads a missing transient list as none.
 - `internal/merchantarchive/contract/dunning_policy.go` validates them on restore.
 
-### 6. Migrations and retention
-The tables are in the baseline migration. In `internal/retention/tables.go`,
+### 6. Data lifecycle
+In `internal/retention/tables.go`,
 `payment_attempts` and `rebill_cycles` are `rows` (25 months), `subscriptions`
 and `customer_delinquency` are `state`. No partitioned table is read. A
 `customer_delinquency` row is never deleted, so its dedupe key never repeats.

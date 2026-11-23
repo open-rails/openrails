@@ -150,8 +150,8 @@ Checks:
 - `cacheableEntitlementKeys` sends checks with `at`, prefixes or invalid keys to
   the server, so validation answers alike.
 
-### 6. Migrations and retention
-All tables are in the baseline. `product_entitlements` and `grants` are permanent;
+### 6. Data lifecycle
+`product_entitlements` and `grants` are permanent;
 `product_access` is state and keeps revoked and removed windows; the two cache
 tables are derived state, left out of merchant archives. None is partitioned.
 Checks:

@@ -186,13 +186,12 @@ Checks:
 - Each staff and migration route has one `Client` method (`remote_recovery.go`,
   `price_migrations.go`); `/v1/me` routes have none.
 
-### 6. Migrations and retention
+### 6. Data lifecycle
 
 State: `subscriptions`, `subscription_verifications`. Permanent:
 `scheduled_changes`, `price_migrations`, `mandates`, `provider_schedules`. Rows
 (25 months): `subscription_status_transitions`, `subscription_billing_changes`,
-`rebill_cycles`. `0002_calendar_billing_intervals` changes the calendar cadence
-check on `prices` and adds it to `order_lines`; subscriptions soft-delete
+`rebill_cycles`. Subscriptions soft-delete
 (`deleted_at`); no partitioned table is read.
 
 Checks:
