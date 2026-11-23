@@ -4,35 +4,59 @@
 
 Feature branch → release candidate → `master` → tag.
 
-- `master` is the release mainline. It takes pull requests only from the open release candidate (`rc/X.Y.Z`) and from `scripts/release` (`chore/release-vX.Y.Z`); the required `Source branch` check refuses any other head, documentation included.
-- One release candidate is open at a time, named for the version it becomes (`rc/0.280.0`), cut from master and deleted once it merges. [OPEN.md](../OPEN.md) names it, or says none is open. Feature branches are cut from it and their pull requests target it.
-- A release is a tag on master (`scripts/release`); not every master commit is one.
+- Feature pull requests target the open release candidate (`rc/X.Y.Z`). See [OPEN.md](../OPEN.md).
+- `master` accepts the release candidate or a release-script branch
+  (`chore/release-vX.Y.Z)) from the same repository. This rule also applies to
+  documentation. [Source branch check](../scripts/ci-source-branch.sh)
+- `scripts/release` tags the version on `master`. [Release script](../scripts/release)
 
 ## Qualification
 
-Ready PRs qualify the synthetic merge with the current target branch, in one of two tiers:
+The [Validate workflow](../.github/workflows/ci.yaml) qualifies the synthetic
+merge with the current target branch when a pull request is ready.
 
-- **Light**, into `rc/**`: the selected static suites (guards, build and lint of every module, SQL bindings and contracts, browser build, chart, security, artifact snapshots). The `critical/` journeys do not run.
-- **Full**, into `master`: every suite including `critical/`, with no selection, once for the whole candidate.
+- **Light** applies to pull requests into the release candidate. Changed
+  paths select source guards, build and lint, SQL and contract checks, browser
+  build, chart, security, and artifact snapshots. Shared or unknown inputs
+  select the broad source suite. Known isolated docs, UI or chart changes
+  select only affected checks. [Suite selection](../scripts/ci-scope.py)
+- **Full** runs every suite, including critical journeys, for pull requests
+  into `master` and manual workflow runs.
 
-Explicit manual runs are full. Draft/closed PRs and ordinary branch/master/tag pushes do not run source CI. The final `CI Gate` requires every job its tier selected to pass, refuses a master run that skipped anything, and rechecks that the target branch has not moved.
+Draft or closed pull requests and ordinary branch or tag pushes skip source
+CI. The `CI Gate` requires every suite selected for the tier to pass and
+rechecks the base commit. Published releases build and verify the release
+artifacts from qualified source. Deployment has its own checks.
 
-For the light tier, `scripts/ci-scope.py` classifies changed paths automatically and reports each suite's selection and reasons. Unknown/shared source selects the broad source suite. Deleted/renamed inputs, dependency changes and artifact-build inputs select broader qualification. Only known isolated documentation, UI or chart inputs skip unrelated suites. `scripts/check-ci-policy.py` verifies this through actual Git diffs and the CLI.
+The [critical coverage manifest](../critical/coverage.json) lists the required
+scenarios. Its [executable map](../critical/executables.json) names the Go tests
+that must each run and pass once. The results checker requires a package pass
+and rejects skips, failures, missing paths and duplicate mappings.
+[Results checker](../scripts/critical-results.py)
 
-The required behavioral suite is `critical/`: the logical scenarios of `critical/coverage.json`, with exact executable paths in `critical/executables.json`. Source-only fixtures and helper tests are not scenario passes. Missing required owners, successful nested tests without their parent, duplicate mappings, skips, failures and empty runs fail qualification. Focused `--case` runs are local development only.
+Run `bash scripts/critical-tests.sh` with `OPENRAILS_CRITICAL_DSN` set to an
+owned disposable PostgreSQL database. Add `--case OR-JNN-SNN` to run one
+scenario locally. The full job runs OpenRails embedded and standalone with
+AuthKit, PostgreSQL, Redis, Vault and independent provider fixtures. It
+builds the standalone fixture, CLI and browser assets once. Go-hosted SDK
+cases drive the browser. [Test runner](../scripts/critical-tests.sh) ·
+[CI fixture setup](../.github/workflows/ci.yaml#L283) ·
+[Service image pins](../scripts/ci-services.sh)
 
-One critical job supplies actual PostgreSQL18, Redis7, Vault2.1.1, real AuthKit, the current embedded/standalone OpenRails and independent external provider fixtures. It builds the SDK, console and payment assets once (the light tier builds them in `Browser build`); the Go-hosted SDK cases own the browser execution. The standalone fixture binary is built once and reused with isolated per-scenario resources. Pure money/parser/cryptographic boundary vectors use literal independent oracles and do not need browser fixtures.
-
-Static checks retain source clock/migration/injection guards, compilation and lint for the published modules/examples, independent-host dependency proof, SQLC generation/query preparation, the reviewed contracts (`scripts/contracts`, schema read from PostgreSQL), the proof that a pull request rewriting its base's migrations builds the same schema (`scripts/schemaproof`: a deliberate re-squash of the baseline; a schema change adds a numbered migration and rewrites nothing), browser artifact/contract checks, chart checks and security scans. The retired wildcard test launches, twelve runtime shards, test-name gates, old browser fixtures and test-only EXPLAIN auditor are removed. The separate SDK workflow is a static/manual artifact check; it does not repeat the Go-hosted browser cases. When the SQL bindings or contract snapshots drift, the SQL job uploads the regenerated files as patches, `regenerated-sqlc` and `regenerated-contracts`, to review and commit.
-
-Artifact snapshots run when their build inputs require them. Published releases build/package the tested source and verify the artifacts; they do not repeat the source suite. Deployment uses immutable artifacts and remains distinct from a passing source gate.
-
-The new candidate must complete its entire selected manifest before entering ready CI. A partial implementation is not a passing reduced suite. Full-run timeout is a ceiling; calibrate it from the combined qualified run, not an estimate from test counts.
+The SQL job checks SQLC, generated API and schema contracts, and schema
+equivalence when an existing migration is rewritten. When the SQL bindings or
+contract snapshots drift, it uploads the regenerated files as the
+`regenerated-sqlc` and `regenerated-contracts` patches. [Contract snapshots](compatibility.md) ·
+[Schema proof](../scripts/schemaproof/main.go)
 
 ## Dependencies
 
-No bot opens dependency pull requests. GitHub's advisory feed lists what is vulnerable; `scripts/deps` prints its open alerts by manifest and package, each with the version that fixes it, and exits 1 while a fix is published.
+Run `scripts/deps` when a release candidate is cut. It lists open GitHub
+advisories by manifest and package and exits 1 when a fix is available.
+Submit the updates as one pull request into the release candidate.
+`Required Security` blocks fixable vulnerabilities in shipped dependencies.
+The advisory feed also covers development dependencies. [Dependency report](../scripts/deps)
 
-- `Required Security` refuses a pull request while a shipped dependency has a fixable vulnerability. Development-only dependencies are outside that scan; the feed covers them.
-- Updates are one batch per release candidate: run `scripts/deps` when the candidate is cut and bump what it lists in one pull request into it.
-- A Go bump moves every module in step (root, `server`, `examples`, `adapters/authkit`, `critical/server-fixture`); a JavaScript bump moves every lockfile that carries the package.
+A Go version bump moves the root, server, examples, AuthKit adapter and
+critical server fixture in step. Update every lockfile that carries a bumped
+JavaScript dependency.

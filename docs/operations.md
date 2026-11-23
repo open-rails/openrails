@@ -29,6 +29,8 @@ PostgreSQL, Redis and the server on `:3053` (`task docker-down`,
 
 ## Who owns what
 
+See the [operations inventory](operations-inventory.md) for provider reads, provider writes, local state changes, and the logs available for a rehearsal.
+
 OpenRails owns the catalog; the provider owns money state (is a subscription
 alive, what was charged); access is derived from both. So there are four ways to
 diverge:
@@ -108,25 +110,19 @@ processes. There is no instance count, primary or sticky session.
   `max_connections` for every pool, plus one connection per instance with Vault
   configuration (it listens for edits).
 - **Upgrades:** `New` and `run-server` migrate under an advisory lock before
-  serving: one instance migrates, the rest wait. Migrations are additive, so the
-  previous build runs on the migrated schema. `openrails migrate up` can run
-  first as a deploy step; `openrails migrate status` compares the applied ledger
-  with the binary's. A host that skips migrations at start
-  (`Config.Database.SkipMigrations`) only checks the ledger: it is refused with
-  `ErrMigrationsRequired` until the migration step (`openrails.Migrate`) has run
-  for its build. From v1 every release upgrades any earlier v1 database in
-  place ([compatibility](compatibility.md)).
-- **Older databases:** the schema is one baseline migration and the numbered
-  migrations after it. Where a database recorded the baseline with other
-  content (an earlier release's chain, or a baseline rewritten since), the
-  migration step compares its schema with a fresh build of the migrations it
-  records, whichever monthly partitions exist. Equal: the database is accepted
-  and its record re-stamped. Different: it is refused with the difference and
-  nothing changes; bring it level with the build that carried its migrations,
-  or recreate it. The records of the numbered migrations a baseline replaced
-  stay in `public.migrations` (`app = 'openrails'`): delete every `sequence`
-  but 1 for the schema before the next upgrade, or its first numbered migration
-  is refused as applied by another file.
+  serving. You can run `openrails migrate up` first as a deploy step. With
+  `Config.Database.SkipMigrations`, startup returns `ErrMigrationsRequired`
+  until the database passes the migration check for the running build.
+  `openrails migrate status` compares the applied ledger with the binary's
+  migration chain. Check [schema compatibility](compatibility.md#database-schema)
+  for rolling upgrades.
+- **Older databases:** when a recorded migration's content differs, the
+  migrator compares the schema with a fresh build of its recorded migrations,
+  ignoring rolling monthly partitions. A match updates the recorded digest
+  and audits the change. A mismatch stops the migration and reports the
+  difference. Use the release's upgrade instructions for any pre-v1 schema
+  change. [Migration logic](../internal/migrate/migrator.go) ·
+  [Baseline adoption test](../critical/baseline_adoption_test.go)
 
 ## Safety levers
 
@@ -170,7 +166,7 @@ subscription to another collector.
 ### Booting against production credentials
 
 Set the mode before the first start: imported `past_due` subscriptions are due
-at once. For a cutover that needs review first:
+at once. Use the following sequence to review a cutover before enabling full writes.
 
 1. Boot `limited` (the site works; system writes park) or `readonly`.
 2. Let provider reads catch up. Dunning materializes in-window charges as parked
@@ -525,39 +521,25 @@ refresh stays advisory until the merchant is armed again.
 
 ## Background jobs
 
-Everything runs under River once a server or worker is up. A periodic pass
-catches up at start when its last retained run is older than its interval.
+See [River jobs](river-jobs.md) for schedules, queue routing, enqueue triggers,
+and commands for inspecting a running deployment. Interval jobs attempt startup
+catch-up when the retained run is older than their interval. The hourly billing
+pass coalesces by UTC hour. [Startup scheduling](../internal/app/river_periodic.go)
 
-| Job | When |
-|---|---|
-| `openrails.billing_pass` runs the [billing scans](river-jobs.md#hourly-billing-scans), including the posting of each customer's finished days of usage and targeted subscription verification retries. | Top of each UTC hour and on startup. |
-| retention cleanup; merchant health | hourly |
-| provider refresh (`openrails.provider_refresh_requested`) | An operator requests a refresh for one merchant. |
-| Stripe webhook endpoint backstop | 24 h |
-| a provider operation (`openrails.provider_operation`) | queued with its intent, sleeping to each attempt |
-| a customer's convergence (`openrails.customer_converge`) | committed with the change |
-| a balance's look | committed with a change crossing one of its lines, and at the instant its last look named |
-| an operator alert (`openrails.operator_alert`), one delivery job per alert channel | committed with a destructive-action hold or a finding's notice |
-| a PSP import, its charge attribution, a purge's Vault cleanup, a Stripe PSP's webhook setup | queued by that action |
+The hourly billing pass skips an overlapping run and continues through
+individual scan failures, reporting the failed scans. Unfinished work stays due
+for the next pass. Order reads reflect expiration immediately. The expiry scan
+persists it and emits `order.expired` when it reaches the order's merchant.
+[Pass execution](../internal/river/jobs_billing_pass.go) ·
+[Order expiry](../internal/river/jobs_order_expiry.go)
 
-A scan is a function the billing pass runs, not a job kind; usage billing alone
-is also a job, for its page continuations and threshold wake-ups. The pass takes
-everything due by its start, and one that starts while another still runs exits;
-one scan's failure never stops another, and renewals wait at most an hour (an
-engine renewal's allowance is at least two). It queues a wake again for a live
-provider operation more than an hour past its due time, whose wake may be lost
-(its River job deleted, its River schema reset, its fleet stopped); such an
-operation gains at most one extra wake. An expired order is expired for every
-read at once; the pass writes it, paging through each merchant's backlog, so
-`order.expired` may follow up to an hour later. Jobs time out after 10 minutes,
-an hour for `cleanup_expired_data`, `provider_refresh_requested`,
-`merchant_health` and an import's charge attribution, two for `psp_import`. The
-billing pass runs each scan under its own budget, 10 minutes or an hour for the
-rebill watch, the NMI history read and stored-card refresh (which stops opening
-pages after 10 minutes), and takes their sum. River's rescuer returns a job whose
-process died once it passes its timeout and `RescueStuckJobsAfter` (10 minutes).
-Passes bounded per job (cleanup's 200 merchants, 200 usage accounts) continue in a
-new job.
+The [worker timeout map](../internal/river/timeouts.go) defines each job's
+budget. The billing pass gets the sum of its scan budgets. The stored-card scan stops
+opening new pages after ten minutes. River rescues a crashed job once it
+passes its timeout and `RescueStuckJobsAfter`. OpenRails defaults the rescue
+window to the greater of ten minutes and the fleet's `JobTimeout`.
+[Fleet configuration](../internal/app/river_composition.go) ·
+[Stored-card scan](../internal/river/jobs_stored_card_refresh.go)
 
 ## Health and observability
 

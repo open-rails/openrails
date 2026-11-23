@@ -1,12 +1,17 @@
 # Authentication and authority
 
-OpenRails authenticates nobody and the host writes no middleware for it. Every
-gated route asks an `openrails.Authenticator` (`authkit/auth`), given at `Mount`
-as `Routes.Auth`, who the request is, once per request, and builds its gate from
-the answer. AuthKit provides one as `ak.Authenticator()`; a host without AuthKit
-writes [its own](#your-own-auth). The standalone server mounts its routes with
-its own AuthKit's, like any host. Billing identity is merchant-scoped: a customer
-belongs to one merchant.
+Billing identity is merchant-scoped. Each integration establishes who is
+calling and which merchant the credential belongs to.
+
+- [Embedded](embedded.md) uses the `Authenticator` passed as `Routes.Auth`.
+  Use AuthKit's `ak.Authenticator()` or [implement the adapter](#your-own-auth)
+  for your application's identity system.
+- [Self-hosted standalone](standalone.md) uses the server's AuthKit and its
+  configured trusted issuers.
+- [OpenRails SaaS](saas.md) provides platform credentials for your merchant and
+  customer billing flows.
+
+Gated routes resolve identity once per request and check the route's authority.
 
 | Route tier | OpenRails asks | Admits |
 |---|---|---|

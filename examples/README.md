@@ -1,35 +1,15 @@
-# Examples
+# Integration examples
 
-One app three ways: a course site where users sign in with AuthKit, buy a
-course, rent one for 3 days, buy the bundle, or join the channel membership,
-which unlocks every video. Each folder is complete on its own; copy the one
-you need. They share no code by import; what they have in common is the
-same in each: the catalog, the content routes and media signing
-(`content.go`), and the React pages (`web/src/pages.tsx`, `main.tsx`).
+These samples sell access to courses with the Go client and the browser SDK.
+Start with the guide for the deployment you plan to use. The README for each sample explains its prerequisites and release context.
 
-| | [`embedded`](embedded) | [`standalone`](standalone) | [`hosted`](hosted) |
-|---|---|---|---|
-| **OpenRails runs** | in the app's process | as the `openrails` server you run | on the hosted platform |
-| **You operate** | the app and PostgreSQL | the app, the server, PostgreSQL 18, Redis and SMTP | the app |
-| **Billing client** | `openrails.New(ctx, cfg, deps)`, then the merchant's handle (`MerchantBySlug`) | `openrails.NewRemoteMerchant(url, RemoteCredential{Token: …})` | `openrails.NewRemoteMerchant(url, RemoteCredential{APIKey: …})` |
-| **Backend credential** | none: in process | client credentials from the app's AuthKit (`courses-backend`) | the console's service token |
-| **Browser's billing calls** | same origin, `/billing/v1`, with the AuthKit session token | the server, with a DPoP-bound `openrails:self` token from AuthKit token exchange (`courses-web`) | the platform, the same way |
-| **Who trusts the app's AuthKit** | nothing to trust: `Mount` takes `ak.Authenticator()` | the merchant's `remote_application` in `merchant.yaml`, a trusted issuer of the server's AuthKit | the merchant's registered signing application |
-| **Catalog** | the app's `catalog apply` command: `Client.ApplyCatalog` | `openrails catalog apply` | the app's `catalog apply` command: `Client.ApplyCatalog` with the service token |
-| **PSP** | `merchant.yaml`, read by `New` | `openrails/merchant.yaml`, read by the server at boot | added in the console |
-| **Customer contacts** | `Deps.UserInfo`: AuthKit asked on each read | AuthKit pushes users over SCIM to the server's AuthKit (`/directory/scim/v2`) with its client credentials | the same push to the platform's directory, with the service token |
-| **Receipts** | `Config.SMTP` (unset here) | the server's `email_smtp` | the platform sends them |
-| **PSP webhooks** | `/billing/v1/webhooks/{rail}/{account_id}` on the app | `/v1/webhooks/{rail}/{account_id}` on the server | the URL the console shows for each PSP |
-| **Route groups** | `Routes.RouteGroups`; staff roles hold `billing.Permissions()` | the server's `route_groups` | on |
+| Integration | Sample | Guide |
+| --- | --- | --- |
+| OpenRails runs inside your Go app | [Embedded](embedded) | [Embedded guide](../docs/embedded.md) |
+| You run OpenRails as an HTTP service | [Standalone Compose](standalone) | [Standalone guide](../docs/standalone.md) |
+| You connect to the hosted platform | [Hosted sample with older provisioning](hosted) | [OpenRails SaaS guide](../docs/saas.md) |
 
-Only `main.go`, `web/src/clients.ts` and each folder's run files differ.
-OpenRails emails a customer only at an address they proved, so the
-standalone and hosted apps make AuthKit verify each sign-up's email. Each
-folder's README says how to run it.
-
-[`gate`](gate) is a backend whose requests count toward usage limits:
+The [own-auth sample](own-auth) shows two merchants on an embedded engine with
+the host application's own users, sessions, and roles.
+The [gate sample](gate) is a backend whose requests count toward usage limits:
 `openrails.Gate` admits each one in process and reports what it used.
-
-[`own-auth`](own-auth) stands apart: a backend with custom authentication and no web
-app, two merchants on one engine, whose own users, sessions and roles tables
-answer OpenRails through authkit/auth's `Authenticator`.
