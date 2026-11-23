@@ -1031,7 +1031,11 @@ func TestGateRollsOverWhenAnAnswerReportsTheLeaseDead(t *testing.T) {
 			t.Fatal("an answer that renewed nothing kept the lease")
 		}
 		var wants int
-		f.set(func(f *fakeSync) { wants = f.wants })
+		var closed []billing.LeaseID
+		f.set(func(f *fakeSync) { wants, closed = f.wants, slices.Clone(f.closed) })
+		if !slices.Contains(closed, first) {
+			t.Fatalf("closed %v: the lease answered dead is closed, so its holds free at once", closed)
+		}
 		mustAdmit(t, g, work(customer, "after", 1))
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -1138,6 +1142,81 @@ func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
 		outbox.mu.Unlock()
 		if left != 0 {
 			t.Fatalf("%d outbox items left: the moved item's old ref is acked and its new one settled", left)
+		}
+	})
+}
+
+// leakyOutbox stores every item, but fails the first Put of number failN
+// and every Ack of it: a failed Put that stored the item anyway.
+type leakyOutbox struct {
+	memOutbox
+	failN int64
+	kept  *billing.LeaseUsageRef
+	puts  map[billing.LeaseUsageRef]int
+}
+
+func (o *leakyOutbox) Put(ctx context.Context, items []billing.OutboxItem) error {
+	_ = o.memOutbox.Put(ctx, items)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var err error
+	for _, it := range items {
+		ref := billing.LeaseUsageRef{LeaseID: it.LeaseID, N: it.Usage.N}
+		o.puts[ref]++
+		if it.Usage.N == o.failN && o.kept == nil {
+			o.kept, err = &ref, errors.New("outbox: stored, then the write timed out")
+		}
+	}
+	return err
+}
+
+func (o *leakyOutbox) Ack(ctx context.Context, refs []billing.LeaseUsageRef) error {
+	o.mu.Lock()
+	kept := o.kept
+	o.mu.Unlock()
+	rest := slices.DeleteFunc(slices.Clone(refs), func(r billing.LeaseUsageRef) bool { return kept != nil && r == *kept })
+	_ = o.memOutbox.Ack(ctx, rest)
+	if len(rest) < len(refs) {
+		return errors.New("outbox: ack timed out")
+	}
+	return nil
+}
+
+func TestGateNeverReusesTheNumberOfAFailedPut(t *testing.T) {
+	f := newFakeSync(map[string]int64{"quota": 100})
+	f.pool(t, 3)
+	synctest.Test(t, func(t *testing.T) {
+		f.size = func(int64) int64 { return 50 }
+		outbox := &leakyOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, puts: map[billing.LeaseUsageRef]int{}}
+		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
+			t.Fatal(err)
+		}
+		first := leaseOf(g)
+		if _, err := g.Consume(t.Context(), work(customer, "two", 2)); err == nil {
+			t.Fatal("a capture whose Put failed succeeded")
+		}
+		if _, err := g.Consume(t.Context(), work(customer, "three", 3)); err != nil {
+			t.Fatal(err)
+		}
+		flush(t, g)
+		if got := f.settledOf(customer, "quota"); got != 4 {
+			t.Fatalf("settled %d, want 1 + 3: the unstored capture never bills here", got)
+		}
+		if leaseOf(g) == first {
+			t.Fatal("the gapped lease stayed current: the item past the gap moves to a new lease")
+		}
+		outbox.mu.Lock()
+		defer outbox.mu.Unlock()
+		for ref, n := range outbox.puts {
+			if n > 1 {
+				t.Fatalf("%v was put %d times: a failed Put's number is never issued again", ref, n)
+			}
+		}
+		if _, ok := outbox.items[billing.LeaseUsageRef{LeaseID: first, N: 2}]; !ok {
+			t.Fatal("the leaked item is still the outbox's only item under its number")
 		}
 	})
 }

@@ -86,6 +86,9 @@ const (
 	// maxColdRounds bounds the syncs one request waits through for a hold
 	// that fits it.
 	maxColdRounds = 20
+	// maxGateCloses bounds the abandoned leases a gate still has to close;
+	// past it one is left to expire.
+	maxGateCloses = 64
 )
 
 // newLeaseID is a gate's lease id: a UUIDv7, as the server requires.

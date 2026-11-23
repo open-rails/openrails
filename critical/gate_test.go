@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -772,30 +773,155 @@ func TestGate(t *testing.T) {
 		require.EqualValues(t, 40, heldAfterLoss, "a shrink the gate never applied releases nothing")
 	})
 
-	t.Run("OR-J23-S30/an-answer-that-reports-the-lease-dead-starts-a-new-lease", func(t *testing.T) {
+	t.Run("OR-J23-S30/a-lease-answered-dead-is-closed-and-its-holds-free-at-once", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		applyLimits(t, a.alpha, gatePlan)
+		for _, mode := range []string{"in process", "redis"} {
+			customer := gateCustomer(t, a)
+			client, wire := gateRemote(t, a)
+			var mu sync.Mutex
+			var first billing.LeaseID
+			dead, closed := false, false
+			wire.watch = func(p billing.SyncLeasesParams, out *billing.SyncLeasesResult) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				if first.IsZero() {
+					first = p.LeaseID
+				}
+				if p.LeaseID == first && !p.Close && !out.Lease.Live {
+					dead = true
+				}
+				if p.LeaseID == first && p.Close && dead {
+					closed = true
+				}
+				return false
+			}
+			cfg := openrails.GateConfig{}
+			if mode == "redis" {
+				cfg.Redis = criticalRedis(t)
+			}
+			g := newGate(t, client, cfg)
+			require.NoError(t, gateAdmit(t, g, gateWork(customer, "warm", 50)).Release(t.Context()))
+			require.Positive(t, customerLimit(t, a.alpha, customer, "daily").Held, mode)
+			// The server's clock passes the lease's life between two syncs: its
+			// next answer reports the lease dead and renews nothing, and the
+			// gate closes it.
+			a.clock.Advance(limits.LeaseLifetime + time.Second)
+			require.Eventually(t, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return closed
+			}, 10*time.Second, 20*time.Millisecond, "%s: the lease answered dead is closed", mode)
+			// Readers count a dead lease's holds for a grace past its life; a
+			// closed one's hold nothing, with the clock still inside it.
+			require.Zero(t, customerLimit(t, a.alpha, customer, "daily").Held, "%s: the closed lease holds nothing", mode)
+			// The dead lease's capacity goes to another gate at once.
+			other := newGate(t, a.alpha, openrails.GateConfig{})
+			taken := gateAdmit(t, other, gateWork(customer, "other", 55))
+			// The first gate decides from no hold of the dead lease: it wants
+			// again, on a new lease, and is refused.
+			short, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			stale, err := g.Admit(short, gateWork(customer, "stale", 10))
+			cancel()
+			require.NoError(t, err, mode)
+			require.False(t, stale.Allowed(), "%s: a dead lease's hold never decides again", mode)
+			require.NoError(t, taken.Capture(t.Context(), workUsage(55)))
+			gateFlush(t, other)
+			require.EqualValues(t, 55, customerLimit(t, a.alpha, customer, "daily").Used, mode)
+		}
+	})
+
+	t.Run("OR-J23-S31/a-redis-usage-write-whose-reply-was-lost-posts-once-when-retried", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		applyLimits(t, a.alpha, gatePlan)
 		customer := gateCustomer(t, a)
-		client, wire := gateRemote(t, a)
-		g := newGate(t, client, openrails.GateConfig{})
-		require.NoError(t, gateAdmit(t, g, gateWork(customer, "warm", 50)).Release(t.Context()))
-		// The server's clock passes the lease's life between two syncs: its
-		// next answer reports the lease dead and renews nothing.
-		syncs := wire.syncs.Load()
-		a.clock.Advance(11 * time.Second)
-		require.Eventually(t, func() bool { return wire.syncs.Load() >= syncs+2 }, 10*time.Second, 20*time.Millisecond)
-		// The dead lease's capacity went to another gate.
-		other := newGate(t, a.alpha, openrails.GateConfig{})
-		taken := gateAdmit(t, other, gateWork(customer, "other", 55))
-		// The first gate decides from no hold of the dead lease: it wants
-		// again, on a new lease, and is refused.
-		short, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-		defer cancel()
-		stale, err := g.Admit(short, gateWork(customer, "stale", 10))
+		client, _ := gateRemote(t, a)
+		rdb := criticalRedis(t)
+		lost := &loseUsageReplies{}
+		rdb.AddHook(lost)
+		g := newGate(t, client, openrails.GateConfig{Redis: rdb})
+		_, err := g.Consume(t.Context(), gateWork(customer, "warm", 1))
 		require.NoError(t, err)
-		require.False(t, stale.Allowed(), "a dead lease's hold never decides again")
-		require.NoError(t, taken.Capture(t.Context(), workUsage(55)))
-		gateFlush(t, other)
-		require.EqualValues(t, 55, customerLimit(t, a.alpha, customer, "daily").Used)
+		gateFlush(t, g)
+		retried := gateAdmit(t, g, gateWork(customer, "retried", 2))
+		settled := gateAdmit(t, g, gateWork(customer, "settled", 4))
+		// A failed write marks Redis down for a sync interval; Flush then
+		// returns at once.
+		redisUp := func() { time.Sleep(limits.SyncInterval + 200*time.Millisecond) }
+
+		// Every try of the write lands and loses its reply: the capture fails
+		// and its ticket stays open. Retried while Redis counts as down, it
+		// goes to Redis anyway, finds its write and adds nothing.
+		lost.lose.Store(3)
+		require.Error(t, retried.Capture(t.Context(), workUsage(2)))
+		require.NoError(t, retried.Capture(t.Context(), workUsage(2)))
+		redisUp()
+		gateFlush(t, g)
+		require.EqualValues(t, 3, customerLimit(t, a.alpha, customer, "daily").Used, "the retried capture posts once")
+
+		// The write's key outlives its settlement: a retry after the lost
+		// write settled adds nothing.
+		lost.lose.Store(3)
+		require.Error(t, settled.Capture(t.Context(), workUsage(4)))
+		redisUp()
+		gateFlush(t, g)
+		require.EqualValues(t, 7, customerLimit(t, a.alpha, customer, "daily").Used, "the lost write was in Redis and settled")
+		require.NoError(t, settled.Capture(t.Context(), workUsage(4)))
+		gateFlush(t, g)
+		require.EqualValues(t, 7, customerLimit(t, a.alpha, customer, "daily").Used, "a retry after settlement posts nothing again")
+
+		// A Record is keyed by its source and source_id.
+		record := billing.UsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "work",
+			Source: "batch", SourceID: "job-1", Dimensions: map[string]int64{"units": 5}, Amount: ptr(int64(0))}
+		require.NoError(t, g.Record(t.Context(), record))
+		require.NoError(t, g.Record(t.Context(), record))
+		gateFlush(t, g)
+		require.EqualValues(t, 12, customerLimit(t, a.alpha, customer, "daily").Used, "a repeated Record posts once")
 	})
+}
+
+// loseUsageReplies lets a gate's usage writes run in Redis, then loses the
+// replies of the next lose of them, as a connection that drops after the
+// write.
+type loseUsageReplies struct{ lose atomic.Int64 }
+
+func (h *loseUsageReplies) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (h *loseUsageReplies) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+func (h *loseUsageReplies) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if err != nil || !usageWrite(cmd) {
+			return err
+		}
+		for {
+			n := h.lose.Load()
+			if n <= 0 {
+				return nil
+			}
+			if h.lose.CompareAndSwap(n, n-1) {
+				break
+			}
+		}
+		lostErr := errors.New("critical fixture lost Redis's reply to a usage write")
+		cmd.SetErr(lostErr)
+		return lostErr
+	}
+}
+
+// usageWrite reports the gate's usage script, the one script with a write
+// key (a "}:k:" key).
+func usageWrite(cmd redis.Cmder) bool {
+	if name := cmd.Name(); name != "evalsha" && name != "eval" {
+		return false
+	}
+	for _, arg := range cmd.Args() {
+		if s, ok := arg.(string); ok && strings.Contains(s, "}:k:") {
+			return true
+		}
+	}
+	return false
 }

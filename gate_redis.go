@@ -31,9 +31,11 @@ import (
 //	                 syncer's clock less a skew margin; 0 not yet answered,
 //	                 1 dead), n:<lease> highest number issued
 //	G:u:<id>   stream of a lease's unsettled usage: n, item, hold, ticket,
-//	           key, unsent, costs
+//	           unsent, costs
 //	G:leases   set   leases with a usage stream
-//	G:keys     hash  write key (a ticket, or a Record's) -> lease|n
+//	G:close    set   earlier leases to close
+//	G:k:<key>  a usage write (a ticket's, or a Record's source and source_id)
+//	           -> lease|n, kept for gateWriteKeyTTL
 //	G:lock     the syncing process, renewed while it syncs
 //	G:kick     list  wakes the syncing process for an early sync
 //	G:wants    hash  want key -> want for the next sync
@@ -86,7 +88,13 @@ const (
 	// gateWriteAttempts bounds the retries of a usage write whose outcome
 	// is unknown.
 	gateWriteAttempts = 3
-	maxGateOrphans    = 10_000
+	// gateWriteKeyTTL is how long a usage write's key is kept: a capture or
+	// Record retried within it posts once.
+	gateWriteKeyTTL = 24 * time.Hour
+	maxGateOrphans  = 10_000
+	// maxGateMaybe bounds the write keys a process remembers as maybe
+	// written; past it the oldest is forgotten.
+	maxGateMaybe = 100_000
 )
 
 type sharedGate struct {
@@ -114,6 +122,9 @@ type sharedGate struct {
 	genCh   chan struct{}
 	syncs   int
 	orphans []orphan
+	// maybe are write keys whose write may have reached Redis: they are
+	// retried there, never reported on the process's own lease.
+	maybe map[string]time.Time
 
 	waiting atomic.Int32
 
@@ -136,7 +147,7 @@ type orphan struct{ ns, hold, ticket string }
 func newSharedGate(c *Client, rdb redis.UniversalClient) *sharedGate {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &sharedGate{c: c, rdb: rdb, proc: uuid.NewString(),
-		sets: map[string]string{}, prices: map[string]*sharedPricing{}, genCh: make(chan struct{}),
+		sets: map[string]string{}, prices: map[string]*sharedPricing{}, maybe: map[string]time.Time{}, genCh: make(chan struct{}),
 		ctx: ctx, cancel: cancel, stop: make(chan struct{})}
 	s.fb = s.newFallback()
 	return s
@@ -510,9 +521,11 @@ func unsentArg(currency string, takes []take) string {
 
 // capture numbers the usage in the group's lease stream once per ticket,
 // then turns the ticket's take into its cost. A write whose outcome is
-// unknown is retried, never also reported elsewhere; one known not to have
-// happened (Redis unreachable before it) is reported on the process's own
-// lease with no hold, and the ticket's take is released once Redis answers.
+// unknown fails the capture and marks the ticket maybe written: capturing
+// again retries it in Redis, never elsewhere. Only a write known not to have
+// happened (Redis unreachable before the ticket's first write) is reported
+// on the process's own lease with no hold, and the ticket's take is released
+// once Redis answers.
 func (st *sharedTicket) capture(ctx context.Context, t *Ticket, u billing.CaptureUsage) error {
 	s := st.s
 	item := captureItem(t.params, &t.limitSet, u, time.Now())
@@ -606,10 +619,12 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 }
 
 // number writes an item to the group's current lease stream once per write
-// key: a retry of a write whose outcome is unknown finds it. errNotWritten
-// is a write known not to have happened.
+// key, which Redis keeps for gateWriteKeyTTL: a retry of a write whose
+// outcome is unknown finds it. errNotWritten is a write known not to have
+// happened, never answered for a key an earlier write may have reached.
 func (s *sharedGate) number(ctx context.Context, ns string, item billing.LeaseUsage, hold, ticket, key string, costs []take) (int64, error) {
-	if s.down() {
+	maybe := s.mayBeWritten(key)
+	if s.down() && !maybe {
 		return 0, errNotWritten
 	}
 	body, err := json.Marshal(item)
@@ -625,27 +640,28 @@ func (s *sharedGate) number(ctx context.Context, ns string, item billing.LeaseUs
 	unknown := 0
 	for hops := 0; hops < 5; hops++ {
 		if lease == "" {
+			// Only the script can tell whether a write that may have
+			// happened did.
 			cur, err := s.rdb.HGet(ctx, s.g(ns, "lease"), "id").Result()
-			if s.redisFailed(err) && unknown == 0 {
-				return 0, errNotWritten
-			}
-			if cur == "" && unknown == 0 {
+			if (s.redisFailed(err) || cur == "") && unknown == 0 && !maybe {
 				return 0, errNotWritten
 			}
 			lease = cur
 		}
-		keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+lease), s.g(ns, "leases"), s.g(ns, "keys"), s.g(ns, "unsent:"+item.CustomerID.String())}
-		res, err := usageScript.Run(ctx, s.rdb, keys, lease, body, hold, ticket, key, unsentArg(item.Currency, costs), encodeTakes(costs)).Slice()
+		keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+lease), s.g(ns, "leases"), s.g(ns, "k:"+key), s.g(ns, "unsent:"+item.CustomerID.String())}
+		res, err := usageScript.Run(ctx, s.rdb, keys, lease, body, hold, ticket, unsentArg(item.Currency, costs), encodeTakes(costs), gateWriteKeyTTL.Milliseconds()).Slice()
 		if err == nil && len(res) == 2 {
 			code, _ := res[0].(int64)
 			ref := fmt.Sprint(res[1])
 			if code == 1 {
+				s.written(key)
 				_, n, _ := strings.Cut(ref, "|")
 				return strconv.ParseInt(n, 10, 64)
 			}
 			// The group's lease is another (or none); the key was not
 			// found, so nothing was written.
 			if ref == "" {
+				s.written(key)
 				return 0, errNotWritten
 			}
 			lease = ref
@@ -656,22 +672,77 @@ func (s *sharedGate) number(ctx context.Context, ns string, item billing.LeaseUs
 		}
 		s.redisFailed(err)
 		if unknown++; unknown >= gateWriteAttempts || !sleepCtx(ctx, time.Duration(unknown)*10*time.Millisecond) {
-			return 0, fmt.Errorf("openrails: gate: usage may not have reached Redis; capture again to retry it: %w", err)
+			return 0, s.mayBe(key, err)
 		}
 	}
-	return 0, fmt.Errorf("openrails: gate: the group's lease kept changing under a usage write")
+	err = errors.New("openrails: gate: the group's lease kept changing under a usage write")
+	if unknown == 0 {
+		s.written(key)
+		return 0, err
+	}
+	return 0, s.mayBe(key, err)
 }
 
+// mayBe marks a write key maybe written and answers the write's failure: a
+// retry goes to Redis only.
+func (s *sharedGate) mayBe(key string, cause error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.maybe) >= maxGateMaybe {
+		now := time.Now()
+		var oldest string
+		for k, at := range s.maybe {
+			if now.Sub(at) >= gateWriteKeyTTL {
+				delete(s.maybe, k)
+			} else if oldest == "" || at.Before(s.maybe[oldest]) {
+				oldest = k
+			}
+		}
+		if len(s.maybe) >= maxGateMaybe {
+			delete(s.maybe, oldest)
+		}
+	}
+	s.maybe[key] = time.Now()
+	return fmt.Errorf("openrails: gate: usage may have reached Redis; retry to settle it once: %w", cause)
+}
+
+// mayBeWritten reports a write key an earlier write may have reached.
+func (s *sharedGate) mayBeWritten(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.maybe[key]
+	if ok && time.Since(at) >= gateWriteKeyTTL {
+		delete(s.maybe, key)
+		ok = false
+	}
+	return ok
+}
+
+// written forgets a write key once Redis has answered whether it was
+// written.
+func (s *sharedGate) written(key string) {
+	s.mu.Lock()
+	delete(s.maybe, key)
+	s.mu.Unlock()
+}
+
+// record writes usage with no admission once per source and source_id: a
+// Record repeated within gateWriteKeyTTL finds the first write.
 func (s *sharedGate) record(ctx context.Context, item billing.LeaseUsage) error {
 	ns, ok := s.namespace()
-	if !ok || s.down() {
+	if !ok {
 		return s.fallback().record(ctx, item)
 	}
-	_, err := s.number(ctx, ns, item, "", "", "r:"+uuid.NewString(), nil)
+	_, err := s.number(ctx, ns, item, "", "", recordKey(item), nil)
 	if errors.Is(err, errNotWritten) {
 		return s.fallback().record(ctx, item)
 	}
 	return err
+}
+
+func recordKey(item billing.LeaseUsage) string {
+	sum := sha256.Sum256([]byte(item.Source + "\x00" + item.SourceID))
+	return "r:" + hex.EncodeToString(sum[:16])
 }
 
 // storedWant is a want in Redis; storedAnswer a sync's answer to it.
@@ -1032,7 +1103,6 @@ type usageEntry struct {
 	item   billing.LeaseUsage
 	hold   string
 	ticket string
-	key    string
 	unsent string
 	costs  []take
 }
@@ -1066,7 +1136,6 @@ func (s *sharedGate) readUsage(ctx context.Context, ns, lease string) ([]usageEn
 		}
 		e.hold, _ = m.Values["hold"].(string)
 		e.ticket, _ = m.Values["ticket"].(string)
-		e.key, _ = m.Values["key"].(string)
 		e.unsent, _ = m.Values["unsent"].(string)
 		costs, _ := m.Values["costs"].(string)
 		e.costs = decodeTakes(costs)
@@ -1104,10 +1173,15 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 	lease, _ := info[0].(string)
 	valid, _ := strconv.ParseInt(fmt.Sprint(info[1]), 10, 64)
 	if lease == "" || (valid != 0 && now.UnixMilli() >= valid) {
+		old := lease
 		lease = newLeaseID().String()
 		if _, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 			p.HSet(ctx, s.g(ns, "lease"), "id", lease, "valid", 0)
 			p.Del(ctx, s.g(ns, "applied"))
+			if old != "" {
+				// Closed, so its holds free at once.
+				p.SAdd(ctx, s.g(ns, "close"), old)
+			}
 			return nil
 		}); err != nil {
 			return err
@@ -1299,7 +1373,44 @@ func (s *sharedGate) syncGroup(ctx context.Context, ns string) error {
 			_ = s.rdb.Del(ctx, s.g(ns, "sets")).Err()
 		}
 	}
-	return s.resendEarlier(ctx, ns, lease)
+	if err := s.resendEarlier(ctx, ns, lease); err != nil {
+		return err
+	}
+	return s.closeEarlier(ctx, ns, lease)
+}
+
+// closeEarlier closes the group's abandoned leases that have no usage left
+// to send (a usage sync closes the others), one empty closing sync each, so
+// their holds free before the leases would expire.
+func (s *sharedGate) closeEarlier(ctx context.Context, ns, current string) error {
+	leases, err := s.rdb.SRandMemberN(ctx, s.g(ns, "close"), maxGateCloses).Result()
+	if err != nil {
+		return err
+	}
+	for _, lease := range leases {
+		id, perr := billing.ParseLeaseID(lease)
+		if perr == nil && lease != current {
+			pending, err := s.rdb.XLen(ctx, s.g(ns, "u:"+lease)).Result()
+			if err != nil {
+				return err
+			}
+			if pending > 0 {
+				continue
+			}
+			call, cancel := context.WithTimeout(ctx, syncTimeout)
+			_, syncErr := s.c.SyncLeases(call, billing.SyncLeasesParams{LeaseID: id, Usage: []billing.LeaseUsage{}, Wants: []billing.LeaseWant{},
+				Returns: []billing.HoldReturn{}, Committed: []billing.HoldCommitment{}, Applied: []billing.HoldApplied{}, Close: true})
+			cancel()
+			if syncErr != nil && classify(syncErr) == faultUnreachable {
+				return nil
+			}
+		}
+		// Closed, or refused for good: either way not tried again.
+		if err := s.rdb.SRem(ctx, s.g(ns, "close"), lease).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // collided reports a refusal that shows the lease's numbers were issued
@@ -1340,7 +1451,7 @@ func (s *sharedGate) applyAnswer(ctx context.Context, pipe redis.Pipeliner, ns, 
 	}
 	consumed := map[string]*settled{}
 	dropped := map[string][]string{}
-	var ids, keys []string
+	var ids []string
 	gap := ""
 	for _, e := range entries {
 		if e.item.N > through {
@@ -1350,9 +1461,6 @@ func (s *sharedGate) applyAnswer(ctx context.Context, pipe redis.Pipeliner, ns, 
 			continue
 		}
 		ids = append(ids, e.id)
-		if e.key != "" {
-			keys = append(keys, e.key)
-		}
 		f, isRefused := refused[e.item.N]
 		if isRefused {
 			pipe.HSet(ctx, s.g(ns, "state"), "refused", fmt.Sprintf("usage %d (%s %s) refused with status %d", f.N, e.item.Source, e.item.SourceID, f.Status))
@@ -1374,9 +1482,6 @@ func (s *sharedGate) applyAnswer(ctx context.Context, pipe redis.Pipeliner, ns, 
 	}
 	if len(ids) > 0 {
 		pipe.XDel(ctx, s.g(ns, "u:"+lease), ids...)
-	}
-	if len(keys) > 0 {
-		pipe.HDel(ctx, s.g(ns, "keys"), keys...)
 	}
 	for hold := range returned {
 		pipe.Del(ctx, s.holdKeys(ns, hold)...)
@@ -1522,17 +1627,21 @@ func (s *sharedGate) moveGap(ctx context.Context, ns, from, startID string) erro
 		return err
 	}
 	if cur == "" || cur == from {
+		replaced := cur
 		cur = newLeaseID().String()
 		if _, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 			p.HSet(ctx, s.g(ns, "lease"), "id", cur, "valid", 0)
 			p.Del(ctx, s.g(ns, "applied"))
+			if replaced != "" {
+				p.SAdd(ctx, s.g(ns, "close"), replaced)
+			}
 			return nil
 		}); err != nil {
 			return err
 		}
 		s.setLease(cur, 0)
 	}
-	keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+from), s.g(ns, "u:"+cur), s.g(ns, "leases"), s.g(ns, "keys")}
+	keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+from), s.g(ns, "u:"+cur), s.g(ns, "leases")}
 	for {
 		moved, err := moveScript.Run(ctx, s.rdb, keys, cur, startID).Int64()
 		if err != nil || moved <= 0 {
@@ -1597,6 +1706,7 @@ func (s *sharedGate) resendEarlier(ctx context.Context, ns, current string) erro
 		}
 		pipe := s.rdb.Pipeline()
 		gap := s.applyAnswer(ctx, pipe, ns, lease, entries, &billing.SyncLeasesResult{Usage: res.Usage}, nil, false, &groupHolds{fields: map[string]map[string]string{}})
+		pipe.SRem(ctx, s.g(ns, "close"), lease)
 		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
@@ -2170,51 +2280,53 @@ if bump then redis.call('HINCRBY', h, 'ver', 1) end
 return 1
 `)
 
-// usageScript: KEYS lease, stream, leases, keys, unsent; ARGV lease, item,
-// hold, ticket, write key, unsent costs, part costs. Numbers the item in the
-// group's current lease once per write key: {1, lease|n} written (now or by
-// an earlier try), {0, current lease} not written, the lease being another.
+// usageScript: KEYS lease, stream, leases, write key, unsent; ARGV lease,
+// item, hold, ticket, unsent costs, part costs, write key TTL (ms). Numbers
+// the item in the group's current lease once per write key: {1, lease|n}
+// written (now or by an earlier try), {0, current lease} not written, the
+// lease being another. The write key outlives the item's settlement.
 var usageScript = redis.NewScript(`
-local done = redis.call('HGET', KEYS[4], ARGV[5])
+local done = redis.call('GET', KEYS[4])
 if done then return {1, done} end
 local cur = redis.call('HGET', KEYS[1], 'id')
 if cur ~= ARGV[1] then return {0, cur or ''} end
+local ttl = tonumber(ARGV[7])
+if not ttl or ttl < 1 then return redis.error_reply('usage: bad key ttl') end
 local unsent = {}
-for k, c in string.gmatch(ARGV[6], '([^=;]+)=([^;]*)') do
+for k, c in string.gmatch(ARGV[5], '([^=;]+)=([^;]*)') do
   local v = tonumber(c)
   if not v or v ~= math.floor(v) then return redis.error_reply('usage: bad unsent cost') end
   if v ~= 0 then unsent[#unsent + 1] = {k, string.format('%d', v)} end
 end
 local n = redis.call('HINCRBY', KEYS[1], 'n:' .. ARGV[1], 1)
 local ref = ARGV[1] .. '|' .. string.format('%d', n)
-redis.call('XADD', KEYS[2], '*', 'n', string.format('%d', n), 'item', ARGV[2], 'hold', ARGV[3], 'ticket', ARGV[4], 'key', ARGV[5], 'unsent', ARGV[6], 'costs', ARGV[7])
+redis.call('XADD', KEYS[2], '*', 'n', string.format('%d', n), 'item', ARGV[2], 'hold', ARGV[3], 'ticket', ARGV[4], 'unsent', ARGV[5], 'costs', ARGV[6])
 redis.call('SADD', KEYS[3], ARGV[1])
-redis.call('HSET', KEYS[4], ARGV[5], ref)
+redis.call('SET', KEYS[4], ref, 'PX', string.format('%d', ttl))
 for _, kc in ipairs(unsent) do redis.call('HINCRBY', KEYS[5], kc[1], kc[2]) end
 if #unsent > 0 then redis.call('PEXPIRE', KEYS[5], 86400000) end
 return {1, ref}
 `)
 
-// moveScript: KEYS lease, from stream, to stream, leases, keys; ARGV to
-// lease (the group's current), first entry id. Numbers up to 1000 entries
-// from that id on again on the current lease; answers how many moved, -1
-// when the lease is not the group's.
+// moveScript: KEYS lease, from stream, to stream, leases; ARGV to lease
+// (the group's current), first entry id. Numbers up to 1000 entries from
+// that id on again on the current lease; answers how many moved, -1 when
+// the lease is not the group's. A moved item's write key still says it was
+// written.
 var moveScript = redis.NewScript(`
 if redis.call('HGET', KEYS[1], 'id') ~= ARGV[1] then return -1 end
 local entries = redis.call('XRANGE', KEYS[2], ARGV[2], '+', 'COUNT', 1000)
 for _, e in ipairs(entries) do
   local n = string.format('%d', redis.call('HINCRBY', KEYS[1], 'n:' .. ARGV[1], 1))
-  local fields, key = {}, nil
+  local fields = {}
   for j = 1, #e[2], 2 do
     local f, v = e[2][j], e[2][j + 1]
     if f == 'n' then v = n end
-    if f == 'key' then key = v end
     fields[#fields + 1] = f
     fields[#fields + 1] = v
   end
   redis.call('XADD', KEYS[3], '*', unpack(fields))
   redis.call('XDEL', KEYS[2], e[1])
-  if key and key ~= '' then redis.call('HSET', KEYS[5], key, ARGV[1] .. '|' .. n) end
 end
 if #entries > 0 then redis.call('SADD', KEYS[4], ARGV[1]) end
 return #entries

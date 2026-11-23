@@ -461,7 +461,10 @@
       "TestGate/OR-J23-S29/a-lost-reply-after-a-shrink-keeps-the-capacity-until-the-gate-applies-it"
     ],
     "OR-J23-S30": [
-      "TestGate/OR-J23-S30/an-answer-that-reports-the-lease-dead-starts-a-new-lease"
+      "TestGate/OR-J23-S30/a-lease-answered-dead-is-closed-and-its-holds-free-at-once"
+    ],
+    "OR-J23-S31": [
+      "TestGate/OR-J23-S31/a-redis-usage-write-whose-reply-was-lost-posts-once-when-retried"
     ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"

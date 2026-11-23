@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 401,
+  "scenario_count": 402,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1216,7 +1216,12 @@
     {
       "id": "OR-J23-S30",
       "journey": "J23",
-      "name": "A sync answer that reports the lease dead starts a new lease; the dead lease's hold never decides again"
+      "name": "A lease a sync answers dead is closed and its holds free at once, in process and through Redis; its hold never decides again"
+    },
+    {
+      "id": "OR-J23-S31",
+      "journey": "J23",
+      "name": "A Redis usage write whose reply was lost posts once when retried, before or after it settled; a Record repeated with its source and source_id posts once"
     },
     {
       "id": "OR-J29-S07",
