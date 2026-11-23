@@ -433,7 +433,7 @@ func TestPSPImport(t *testing.T) {
 
 		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
 		recs = iw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportImported, recs[gold].State, "%v", recs[gold].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[gold].State, "%v", deref(recs[gold].Reason))
 		require.Equal(t, billing.PSPImportBlocked, recs[silver].State)
 		subs := iw.subscriptions(t, customerOf(iw.alice))
 		require.Len(t, subs, 1)
@@ -583,14 +583,14 @@ func TestPSPImport(t *testing.T) {
 		require.Empty(t, iw.catalog(t, billing.ProviderCatalogListParams{PSP: billing.PSPRef{ID: &imp.PSP}}), "CCBill has no catalog to observe")
 
 		recs := iw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportImported, recs[m23].State, "%v", recs[m23].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[m23].State, "%v", deref(recs[m23].Reason))
 		require.Equal(t, premium.ID, iw.subscriptions(t, customerOf(iw.alice))[0].PriceID, "the weekly 23.00 price does not rebill every 30 days")
-		require.Equal(t, billing.PSPImportImported, recs[m19].State, "%v", recs[m19].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[m19].State, "%v", deref(recs[m19].Reason))
 		require.Equal(t, legacy.ID, iw.subscriptions(t, customerOf(iw.bob))[0].PriceID, "an archived price of another product still matches")
 		require.True(t, iw.entitled(t, customerOf(iw.bob), "member:premium-legacy"))
-		require.Equal(t, billing.PSPImportImported, recs[m5].State, "%v", recs[m5].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[m5].State, "%v", deref(recs[m5].Reason))
 		require.Equal(t, lite.ID, iw.subscriptions(t, customerOf(erin))[0].PriceID, "a one-off price at the same amount never matches a rebill")
-		require.Equal(t, billing.PSPImportImported, recs[undated].State, "%v", recs[undated].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[undated].State, "%v", deref(recs[undated].Reason))
 		require.Equal(t, lite.ID, iw.subscriptions(t, customerOf(gina))[0].PriceID, "only recurring prices match, whatever the cadence")
 		require.Equal(t, billing.PSPImportBlocked, recs[m999].State)
 		require.Contains(t, *recs[m999].Reason, "2 match")
@@ -629,7 +629,7 @@ func TestPSPImport(t *testing.T) {
 		require.Nil(t, iw.records(t, imp.ID)[m14].ManualPrice, "a null price clears the pick")
 		require.NoError(t, pick(imp.ID, recs[none].ID, &legacy.ID))
 		recs = iw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportImported, recs[none].State, "%v", recs[none].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[none].State, "%v", deref(recs[none].Reason))
 		require.Equal(t, legacy.ID, *recs[none].ManualPrice)
 		subs := iw.subscriptions(t, customerOf(dave))
 		require.Len(t, subs, 1)
@@ -664,7 +664,7 @@ func TestPSPImport(t *testing.T) {
 		require.True(t, price.Provider.Retired)
 		require.EqualValues(t, 15_000_000, price.UnitAmount)
 		recs := iw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportImported, recs[legacySub].State, "%v", recs[legacySub].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[legacySub].State, "%v", deref(recs[legacySub].Reason))
 		subs := iw.subscriptions(t, customerOf(iw.alice))
 		require.Len(t, subs, 1)
 		require.Equal(t, billing.SubscriptionActive, subs[0].Status)
@@ -912,7 +912,7 @@ func TestPSPImport(t *testing.T) {
 			t.Helper()
 			r, ok := recs[ref]
 			require.True(t, ok, "%s is staged", ref)
-			require.Equal(t, billing.PSPImportLinked, r.State, "%s: %v", ref, r.Reason)
+			require.Equal(t, billing.PSPImportLinked, r.State, "%s: %v", ref, deref(r.Reason))
 			require.Equal(t, who, *r.Customer)
 		}
 		nmiRecs := iw.records(t, imports["nmi"].ID)
@@ -1113,7 +1113,7 @@ func TestPSPImport(t *testing.T) {
 			for key, id := range ids {
 				require.NoError(t, iw.link(t, id, billing.LinkPSPImportParams{}))
 				for ref, r := range iw.apply(t, id) {
-					require.Equal(t, state, r.State, "%s %s %s: %v", key, r.Kind, ref, r.Reason)
+					require.Equal(t, state, r.State, "%s %s %s: %v", key, r.Kind, ref, deref(r.Reason))
 				}
 			}
 		}
@@ -1330,7 +1330,7 @@ func TestPSPImport(t *testing.T) {
 			yen:  {customerOf(iw.alice), "yen", "JPY", 10_000_000},
 			euro: {customerOf(iw.bob), "euro", "EUR", 12_500_000},
 		} {
-			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%s: %v", want.plan, recs[ref].Reason)
+			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%s: %v", want.plan, deref(recs[ref].Reason))
 			subs := iw.subscriptions(t, want.customer)
 			require.Len(t, subs, 1)
 			require.Equal(t, prices[want.plan].ID, subs[0].PriceID)

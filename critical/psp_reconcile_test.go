@@ -197,7 +197,7 @@ func TestPSPReconcile(t *testing.T) {
 		require.NoError(t, iw.link(t, first.ID, billing.LinkPSPImportParams{}))
 		recs := iw.apply(t, first.ID)
 		for _, ref := range []string{renewed, gone, recarded} {
-			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%v", recs[ref].Reason)
+			require.Equal(t, billing.PSPImportImported, recs[ref].State, "%v", deref(recs[ref].Reason))
 			require.Equal(t, "provider", iw.held(t, ref).Authority, "a PSP import lands provider facts")
 		}
 
@@ -227,9 +227,9 @@ func TestPSPReconcile(t *testing.T) {
 			t.Fatalf("a pull lands nothing, but %v; jobs %v", diff, ran)
 		}
 		recs = iw.records(t, manual.ID)
-		require.Equal(t, billing.PSPImportLinked, recs[added].State, "%v", recs[added].Reason)
+		require.Equal(t, billing.PSPImportLinked, recs[added].State, "%v", deref(recs[added].Reason))
 		for _, ref := range []string{renewed, recarded, vault} {
-			require.Equal(t, billing.PSPImportHeld, recs[ref].State, "%s: %v", ref, recs[ref].Reason)
+			require.Equal(t, billing.PSPImportHeld, recs[ref].State, "%s: %v", ref, deref(recs[ref].Reason))
 			require.Equal(t, "held", *recs[ref].LinkedVia)
 		}
 		require.NotContains(t, recs, gone, "a deleted schedule leaves the roster")
@@ -254,7 +254,7 @@ func TestPSPReconcile(t *testing.T) {
 		require.Equal(t, billing.PSPImportProposals{Open: 6, Corrections: 5}, view.Proposals)
 
 		recs = iw.apply(t, manual.ID)
-		require.Equal(t, billing.PSPImportImported, recs[added].State, "%v", recs[added].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[added].State, "%v", deref(recs[added].Reason))
 		require.Len(t, iw.subscriptions(t, customerOf(carol)), 2, "the new schedule landed")
 		var run *billing.RunID
 		outcomes := map[billing.ChangeKind][]string{}
@@ -431,7 +431,7 @@ func TestPSPReconcile(t *testing.T) {
 		require.Equal(t, []string{"legacy-alice"}, res.Imported, "%v", res.Reasons)
 
 		recs := iw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportHeld, recs[schedule].State, "Apply finds it held, not landed twice: %v", recs[schedule].Reason)
+		require.Equal(t, billing.PSPImportHeld, recs[schedule].State, "Apply finds it held, not landed twice: %v", deref(recs[schedule].Reason))
 		require.Len(t, iw.subscriptions(t, customerOf(iw.alice)), 1)
 		row := iw.held(t, schedule)
 		require.Equal(t, prices["current19"].ID.String(), row.Price, "diffed and corrected at Apply")

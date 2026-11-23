@@ -646,7 +646,7 @@ func TestProviderTrailing(t *testing.T) {
 		require.Equal(t, billing.PSPImportUnmatched, recs[sub].State)
 		require.NoError(t, tw.link(t, imp.ID, billing.LinkPSPImportParams{Links: []billing.PSPImportLink{{Record: recs[vault].ID, Customer: new(customerOf(tw.alice))}}}))
 		recs = tw.apply(t, imp.ID)
-		require.Equal(t, billing.PSPImportImported, recs[sub].State, "%v", recs[sub].Reason)
+		require.Equal(t, billing.PSPImportImported, recs[sub].State, "%v", deref(recs[sub].Reason))
 		subs := tw.subscriptions(t, customerOf(tw.alice))
 		require.Len(t, subs, 1)
 		require.Empty(t, tw.parks(t, billing.ParkedSubscriptionListParams{}))
