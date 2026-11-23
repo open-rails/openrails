@@ -81,8 +81,8 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 
-// ErrUsageOutsideIngestWindow is returned by RecordUsage when occurred_at is
-// older than the ingest window or ahead of the clock.
+// ErrUsageOutsideIngestWindow refuses usage whose occurred_at is older than
+// the ingest window or ahead of the clock.
 var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
 
 // CaptureAdmission settles an admitted request. The first capture fixes its

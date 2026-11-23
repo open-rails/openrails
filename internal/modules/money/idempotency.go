@@ -44,12 +44,13 @@ const (
 
 	OpArrearsAccrual     = ledger.OpArrearsAccrual
 	OpMeteredRating      = ledger.OpMeteredRating
+	OpUsageAccrual       = ledger.OpUsageAccrual
 	OpOrderPayment       = ledger.OpOrderPayment
 	OpManualOrderPayment = ledger.OpManualOrderPayment
 	OpOrderVoid          = ledger.OpOrderVoid
 )
 
-// UsageOperation is the operation kind of a metered usage charge (usage:<event_type>).
+// UsageOperation is the operation kind of a charged failure (usage:<event_type>).
 func UsageOperation(eventType string) Operation { return ledger.UsageOperation(eventType) }
 
 // IdempotencyKey is the coordinate a durable money write is idempotent on. The

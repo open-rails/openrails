@@ -207,15 +207,9 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	// Spend windows are currency limits on their hashed anchors; they and the
 	// declared limits are taken together, all or none.
 	windows := in.Policy.EffectiveWindows(in.Request)
-	claims := make([]limits.Claim, 0, len(windows)+len(in.Limits))
-	for _, w := range windows {
-		key, start, end, err := windowPeriod(mid.UUID(), in.Customer, in.Currency, w, now)
-		if err != nil {
-			return Decision{}, err
-		}
-		claims = append(claims, limits.Claim{Key: limits.SpendKeyPrefix + key, Unit: in.Currency,
-			Reset:  catalog.LimitReset{Kind: catalog.ResetFixed, WindowSeconds: int(w.Duration / time.Second)},
-			Window: limits.Window{StartsAt: start, EndsAt: &end, Open: true}, Capacity: w.Limit, Cost: in.Cost, Overrun: catalog.OverrunRequireEstimate})
+	claims, err := SpendClaims(mid.UUID(), in.Customer, in.Currency, in.Policy, in.Request, in.Cost, now)
+	if err != nil {
+		return Decision{}, err
 	}
 	claims = append(claims, in.Limits...)
 	taken, err := limits.Holder{Q: q, MerchantID: mid.UUID(), CustomerID: in.Customer, Now: now}.Take(ctx, claims)
@@ -432,6 +426,23 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 		_, err := d.Gen(ctx).ExtendRequestHold(ctx, gen.ExtendRequestHoldParams{MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, AsOf: g.Now(), ExpiresAt: until.UTC()})
 		return err
 	})
+}
+
+// SpendClaims are a request's spend windows as currency limits on their
+// hashed anchors, each claiming cost, in policy order.
+func SpendClaims(merchantID, customer uuid.UUID, currency string, policy Policy, req Request, cost int64, now time.Time) ([]limits.Claim, error) {
+	windows := policy.EffectiveWindows(req)
+	claims := make([]limits.Claim, 0, len(windows))
+	for _, w := range windows {
+		key, start, end, err := windowPeriod(merchantID, customer, currency, w, now)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, limits.Claim{Key: limits.SpendKeyPrefix + key, Unit: currency,
+			Reset:  catalog.LimitReset{Kind: catalog.ResetFixed, WindowSeconds: int(w.Duration / time.Second)},
+			Window: limits.Window{StartsAt: start, EndsAt: &end, Open: true}, Capacity: w.Limit, Cost: cost, Overrun: catalog.OverrunRequireEstimate})
+	}
+	return claims, nil
 }
 
 func fixedOffsetMs(prefix string, durMs int64) int64 {

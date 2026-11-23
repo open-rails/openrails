@@ -187,10 +187,10 @@ type CaptureAdmissionBatchParams struct {
 }
 
 // CaptureReceipt is the result of settling one admitted request: Amount is
-// what it charged, the sum of Charges when its usage was priced by rate
-// cards. UsageEventID is the usage event it recorded; BalanceTransactionID
-// the ledger posting it made (its first charge's), null when it charged
-// nothing.
+// what it charged, the sum of Charges. The charge accrues to the customer's
+// day of usage, which posts to the ledger once the day ends or before the
+// balance next moves: BalanceTransactionID is that posting's first leg, null
+// until it posts and when the capture charged nothing.
 type CaptureReceipt struct {
 	RequestID            string                `json:"request_id"`
 	CustomerID           CustomerID            `json:"customer_id"`
@@ -198,7 +198,6 @@ type CaptureReceipt struct {
 	EstimatedAmount      int64                 `json:"estimated_amount,string"`
 	Amount               int64                 `json:"amount,string"`
 	Charges              []UsageCharge         `json:"charges"`
-	UsageEventID         *UsageEventID         `json:"usage_event_id"`
 	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 	Replayed             bool                  `json:"replayed"`
 }

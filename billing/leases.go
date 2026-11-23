@@ -35,6 +35,7 @@ const (
 	MaxSyncUsageItems = 1000
 	MaxSyncWants      = 1000
 	MaxSyncReturns    = 1000
+	MaxSyncCommitted  = 10_000
 )
 
 // SyncLeasesParams is one gate's sync: the usage it settles, the holds it
@@ -45,6 +46,29 @@ type SyncLeasesParams struct {
 	Usage   []LeaseUsage `json:"usage"`
 	Wants   []LeaseWant  `json:"wants"`
 	Returns []HoldReturn `json:"returns"`
+	// Committed is what the gate's open tickets have taken of its holds, as
+	// the sync was built: every hold with open tickets, none for the rest.
+	// A want asks for its estimate beyond its hold's commitment. A hold
+	// shrinks in two steps: an answer gives the gate the smaller size, and
+	// the next sync releases only what that sync's commitment leaves above
+	// it, so capacity a ticket took is never given to another gate.
+	Committed []HoldCommitment `json:"committed"`
+}
+
+// HoldCommitment is what open tickets have taken of one hold.
+type HoldCommitment struct {
+	CustomerID CustomerID        `json:"customer_id"`
+	LimitSet   string            `json:"limit_set"`
+	Limits     []LimitCommitment `json:"limits"`
+}
+
+// LimitCommitment is what open tickets have taken of one limit of a hold,
+// in the window the hold set it aside in (null for balance and lifetime
+// limits).
+type LimitCommitment struct {
+	Limit          string     `json:"limit"`
+	WindowStartsAt *time.Time `json:"window_starts_at"`
+	Committed      int64      `json:"committed,string"`
 }
 
 // LeaseUsage is one usage item of a lease, numbered once per lease and sent

@@ -12,57 +12,9 @@ import (
 	"github.com/google/uuid"
 )
 
-const getUsageEventByID = `-- name: GetUsageEventByID :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at, outcome, forgiven_amount, charges, stated_amount FROM billing.usage_events
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-  AND occurred_at >= $3::timestamptz
-  AND occurred_at <= $4::timestamptz
-ORDER BY occurred_at DESC
-LIMIT 1
-`
-
-type GetUsageEventByIDParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	FromAt     time.Time
-	ToAt       time.Time
-}
-
-func (q *Queries) GetUsageEventByID(ctx context.Context, arg GetUsageEventByIDParams) (BillingUsageEvent, error) {
-	row := q.db.QueryRow(ctx, getUsageEventByID,
-		arg.MerchantID,
-		arg.ID,
-		arg.FromAt,
-		arg.ToAt,
-	)
-	var i BillingUsageEvent
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.InvokerID,
-		&i.Currency,
-		&i.Resource,
-		&i.EventType,
-		&i.Dimensions,
-		&i.Amount,
-		&i.Source,
-		&i.SourceID,
-		&i.LedgerTransferID,
-		&i.Metadata,
-		&i.OccurredAt,
-		&i.CreatedAt,
-		&i.Outcome,
-		&i.ForgivenAmount,
-		&i.Charges,
-		&i.StatedAmount,
-	)
-	return i, err
-}
-
 const listRequestHolds = `-- name: ListRequestHolds :many
 
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND request_id IS NOT NULL
   AND created_at >= $2::timestamptz
   AND created_at < $3::timestamptz
@@ -134,91 +86,7 @@ func (q *Queries) ListRequestHolds(ctx context.Context, arg ListRequestHoldsPara
 			&i.CapturedAt,
 			&i.ReleasedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUsageEvents = `-- name: ListUsageEvents :many
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, metadata, occurred_at, created_at, outcome, forgiven_amount, charges, stated_amount FROM billing.usage_events
-WHERE merchant_id = $1::uuid
-  AND occurred_at >= $2::timestamptz
-  AND occurred_at < $3::timestamptz
-  AND ($4::uuid IS NULL OR customer_id = $4::uuid)
-  AND ($5::text IS NULL OR currency = $5::text)
-  AND ($6::text IS NULL OR event_type = $6::text)
-  AND ($7::text IS NULL OR source = $7::text)
-  AND ($8::text IS NULL OR source_id = $8::text)
-  AND ($9::text IS NULL OR outcome = $9::text)
-  AND ($10::timestamptz IS NULL OR
-       (occurred_at, id) < ($10::timestamptz, $11::uuid))
-ORDER BY occurred_at DESC, id DESC
-LIMIT $12::int
-`
-
-type ListUsageEventsParams struct {
-	MerchantID uuid.UUID
-	FromAt     time.Time
-	ToAt       time.Time
-	CustomerID *uuid.UUID
-	Currency   *string
-	EventType  *string
-	Source     *string
-	SourceID   *string
-	Outcome    *string
-	AfterAt    *time.Time
-	AfterID    *uuid.UUID
-	RowLimit   int32
-}
-
-func (q *Queries) ListUsageEvents(ctx context.Context, arg ListUsageEventsParams) ([]BillingUsageEvent, error) {
-	rows, err := q.db.Query(ctx, listUsageEvents,
-		arg.MerchantID,
-		arg.FromAt,
-		arg.ToAt,
-		arg.CustomerID,
-		arg.Currency,
-		arg.EventType,
-		arg.Source,
-		arg.SourceID,
-		arg.Outcome,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingUsageEvent
-	for rows.Next() {
-		var i BillingUsageEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.InvokerID,
-			&i.Currency,
-			&i.Resource,
-			&i.EventType,
-			&i.Dimensions,
-			&i.Amount,
-			&i.Source,
-			&i.SourceID,
-			&i.LedgerTransferID,
-			&i.Metadata,
-			&i.OccurredAt,
-			&i.CreatedAt,
-			&i.Outcome,
-			&i.ForgivenAmount,
-			&i.Charges,
-			&i.StatedAmount,
+			&i.CapturedCharges,
 		); err != nil {
 			return nil, err
 		}

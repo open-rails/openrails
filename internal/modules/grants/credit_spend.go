@@ -97,14 +97,34 @@ func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {
 // clock. The money package, which owns running charges, installs it.
 var PostRunningCharges func(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, through, now time.Time) (posted bool, err error)
 
+// PostUsageAccruals posts what a customer's usage accrued in a currency and
+// the ledger has not taken, drawing the lots live just before liveAt (now
+// when nil), and reports whether anything was posted. now is the caller's
+// clock. The money package, which owns accruals, installs it.
+var PostUsageAccruals func(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, liveAt *time.Time, now time.Time) (posted bool, err error)
+
 // SettleRunningCharges posts what the customer's running charges accrued
-// through an instant, before a credit lot is expired, revoked or refunded at
-// it: the lot funds what accrued while it lived.
+// through an instant, and its unposted usage, before a credit lot is expired,
+// revoked or refunded at it: the lot funds what accrued while it lived.
 func (l *Ledger) SettleRunningCharges(ctx context.Context, customer uuid.UUID, currency string, through time.Time) (bool, error) {
-	if PostRunningCharges == nil {
+	posted := false
+	if PostRunningCharges != nil {
+		var err error
+		if posted, err = PostRunningCharges(ctx, l.q, l.merchant, customer, currency, through, l.now()); err != nil {
+			return posted, err
+		}
+	}
+	accrued, err := l.settleUsage(ctx, customer, currency, &through)
+	return posted || accrued, err
+}
+
+// settleUsage posts the customer's unposted usage before another movement of
+// its balance.
+func (l *Ledger) settleUsage(ctx context.Context, customer uuid.UUID, currency string, liveAt *time.Time) (bool, error) {
+	if PostUsageAccruals == nil {
 		return false, nil
 	}
-	return PostRunningCharges(ctx, l.q, l.merchant, customer, currency, through, l.now())
+	return PostUsageAccruals(ctx, l.q, l.merchant, customer, currency, liveAt, l.now())
 }
 
 // DrawLotsLiveAt makes CreditSpend draw the lots that had not lapsed by t in

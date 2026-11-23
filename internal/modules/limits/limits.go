@@ -342,6 +342,38 @@ func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[stri
 	return out, nil
 }
 
+// Windows are each declared limit's current window and the customer's base
+// capacity there, by key: a session or first-use window not yet open opens
+// now.
+func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Claim, error) {
+	c.Now = c.Now.UTC()
+	capacities, err := c.capacities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latest, err := c.latest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Claim, len(defs))
+	for _, def := range defs {
+		var newest *Stored
+		if s, ok := latest[def.Key]; ok {
+			newest = &s
+		}
+		w, err := c.window(ctx, def, newest)
+		if err != nil {
+			return nil, err
+		}
+		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacities[def.Key], Overrun: def.Overrun}
+		if !w.Open {
+			claim.Window, claim.Opens = Opening(def.Reset, c.Now), true
+		}
+		out[def.Key] = claim
+	}
+	return out, nil
+}
+
 // Settlements are where usage the customer's declared limits count settles
 // when no hold of theirs names the window: their current windows, opening a
 // session or first-use window. skip names the limits a hold already settles.

@@ -208,46 +208,54 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		return err
 	}
 	tenantID := tid.UUID()
-	payerID := payer.UUID()
 	s.db.EnsurePartitions(ctx, s.now())
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.ReadMerchantSettingsLock(ctx, tenantID); err != nil {
 			return err
 		}
-		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
-			return err
-		}
-		txSvc := s.WithDatabase(s.db.NewWithPgxTx(tx))
-		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
-			return err
-		}
-		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
-			return err
-		}
-		now := s.now()
-		// Credit that lapsed is expired before the balance is read: admission
-		// never spends it, however long its watch takes to come round.
-		if _, err := txSvc.grantLedger(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
-			return err
-		}
-		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
-			MerchantID:     tenantID,
-			CustomerID:     payerID,
-			Currency:       cur,
-			AsOf:           now,
-			HeldSince:      now.Add(-retention.AdmissionMaxHold),
-			LeaseLiveSince: now.Add(-limits.LeaseLifetime),
-		})
-		if err != nil {
-			return err
-		}
-		capacity, err := txSvc.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+		capacity, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).AdmissionCapacityTx(ctx, q, payer, cur)
 		if err != nil {
 			return err
 		}
 		return fn(ctx, s.db.NewWithPgxTx(tx), capacity)
 	})
+}
+
+// AdmissionCapacityTx takes the payer's money lock in the caller's
+// transaction and reads its admission capacity: lapsed credit is expired
+// first, so admission never spends it.
+func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	tenantID, payerID, cur := tid.UUID(), payer.UUID(), normalizeCurrency(currency)
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	if _, err := s.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	now := s.now()
+	if _, err := s.grantLedger(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
+		MerchantID:     tenantID,
+		CustomerID:     payerID,
+		Currency:       cur,
+		AsOf:           now,
+		HeldSince:      now.Add(-retention.AdmissionMaxHold),
+		LeaseLiveSince: now.Add(-limits.LeaseLifetime),
+	})
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
 }
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
@@ -316,8 +324,14 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		if err != nil {
 			return page, err
 		}
+		deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), rows)
+		if err != nil {
+			return page, err
+		}
 		for _, r := range rows {
-			page.Items = append(page.Items, balanceTransactionFromTransfer(r))
+			item := balanceTransactionFromTransfer(r)
+			item.Usage = deductions[r.ID]
+			page.Items = append(page.Items, item)
 		}
 		return page, nil
 	}
@@ -344,9 +358,15 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 	if err != nil {
 		return page, err
 	}
+	deductions, err := usageDeductions(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), rows)
+	if err != nil {
+		return page, err
+	}
 	items := make([]billing.BalanceTransaction, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, balanceTransactionFromTransfer(r))
+		item := balanceTransactionFromTransfer(r)
+		item.Usage = deductions[r.ID]
+		items = append(items, item)
 	}
 	return pagination.Cut(items, limit, func(t billing.BalanceTransaction) any {
 		return pagination.TimeID{At: t.CreatedAt, ID: t.ID.UUID()}

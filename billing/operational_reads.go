@@ -14,19 +14,3 @@ type AdmissionListParams struct {
 	To         time.Time      `form:"to"`
 	PageRequest
 }
-
-// UsageEventListParams selects recorded events, newest occurrence first.
-// From/To bound occurrence time as [From, To), at most 31 days per query;
-// omitted bounds select the last 31 days. Read earlier history in successive
-// windows. SourceID requires Source. Continue paging with the same filters.
-type UsageEventListParams struct {
-	CustomerID CustomerID   `form:"customer_id"`
-	Currency   string       `form:"currency"`
-	EventType  string       `form:"event_type"`
-	Source     string       `form:"source"`
-	SourceID   string       `form:"source_id"`
-	Outcome    UsageOutcome `form:"outcome"`
-	From       time.Time    `form:"from"`
-	To         time.Time    `form:"to"`
-	PageRequest
-}

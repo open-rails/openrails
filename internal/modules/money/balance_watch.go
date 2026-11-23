@@ -302,8 +302,9 @@ func (v balanceView) watched() bool {
 }
 
 // sampleUsageRate adds the usage dated since the last sample to the decayed
-// rate. Each event is read by one look; events dated before the last sample,
-// or more than one time constant ago, are left out: the rate is an estimate.
+// rate, by whole minutes: each minute is read by one look once it has ended;
+// minutes before the last sample, or more than one time constant ago, are left
+// out: the rate is an estimate.
 func sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalanceWatch, now time.Time) (rate int64, sampledAt time.Time, err error) {
 	since := now.Add(-usageRateTimeConstant)
 	if prev := watch.RateSampledAt; prev != nil {
@@ -313,7 +314,7 @@ func sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalan
 		since = later(since, *prev)
 		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
 	}
-	spent, err := q.SumUsageAmountBetween(ctx, gen.SumUsageAmountBetweenParams{
+	spent, err := q.SumUsageMinutesBetween(ctx, gen.SumUsageMinutesBetweenParams{
 		MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency, Since: since, Until: now,
 	})
 	if err != nil {

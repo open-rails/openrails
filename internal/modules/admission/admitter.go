@@ -227,95 +227,14 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		}
 	}
 
-	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
-	trustLevel := req.TrustLevel
-	if trustLevel == "" {
-		if t, terr := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
-			trustLevel = t
+	g, refused, err := a.gates(ctx, q, req)
+	if err != nil || refused != nil {
+		if refused != nil {
+			return *refused, nil
 		}
-		if trustLevel == "" {
-			trustLevel = DefaultTrustLevel
-		}
-	}
-
-	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
-	// not cut off here (their failures past grace are charged when recorded).
-	if a.failedCutoff != nil && !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" {
-		over, werr := a.failedCutoff.CutoffReached(ctx, req.CustomerID, req.Invoker, money.NormalizeCurrency(req.Currency))
-		if werr != nil {
-			return AdmitDecision{}, werr
-		}
-		if over {
-			return AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
-		}
-	}
-
-	// or#878, the TIME axis. The amount cap below asks "can this payer afford
-	// one more request"; this asks "has this payer's existing debt outlived the
-	// merchant's grace window". A payer can pass either and fail the other, so
-	// both gates run and each has its own deny code.
-	//
-	// This is the ONE enforcement lever OpenRails is authoritative over, and for
-	// usage billing it is the meaningful cutoff: refusing new spend is what stops
-	// the bill growing. It revokes nothing and cancels nothing — whatever the
-	// host is already running is the host's to shut off, told by the durable
-	// delinquency signal.
-	//
-	// Fails OPEN by construction: the gate below only refuses on a recorded
-	// transition that a live re-read of the invoices still agrees with.
-	if a.delinquency != nil {
-		delinquent, derr := a.delinquency.IsDelinquent(ctx, req.CustomerID, req.Currency)
-		if derr != nil {
-			return AdmitDecision{}, derr
-		}
-		if delinquent {
-			return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
-		}
-	}
-
-	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
-
-	// or#897: the merchant's bound billing policy is resolved FIRST, because its
-	// KIND decides whether prior debt reduces this payer's headroom at all. The
-	// merchant chose which policy binds to this payer; OpenRails measures and
-	// enforces it from the transaction's locked merchant settings snapshot.
-	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
-	if err != nil {
 		return AdmitDecision{}, err
 	}
-
-	// Cap windows (FX-normalized to the request currency).
-	policy, err := a.loader.Load(ctx, req.Currency, resolved)
-	if err != nil {
-		return AdmitDecision{}, err
-	}
-
-	// Only the customer's own credential spends its balance: nothing grants a
-	// delegated invoker spend.
-	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
-	}
-
-	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
-	// because it is a different question: not "can this payer pay for one more
-	// request" but "would what it is about to deploy push it past the rate it is
-	// allowed to burn at". Measured from reported usage over the policy's
-	// lookback; the host supplies what it is about to add.
-	if resolved.Kind == models.BillingPolicyAccrualRateCap {
-		if a.rates == nil {
-			// Fail CLOSED, loudly. A quota with no meter behind it is not a
-			// relaxed quota, it is a lie: the merchant declared a ceiling and
-			// would never learn it was not enforced.
-			return AdmitDecision{}, fmt.Errorf("admission: policy %q is accrual_rate_cap but no accrual-rate meter is wired", resolved.Name)
-		}
-		measured, rerr := a.rates.MeasuredRatePerHour(ctx, req.CustomerID, req.Currency, resolved.RateWindow())
-		if rerr != nil {
-			return AdmitDecision{}, rerr
-		}
-		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
-			return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
-		}
-	}
+	resolved, policy, sgReq := g.resolved, g.policy, g.request
 
 	// Usage limits the request counts toward: those in its currency claim its
 	// money estimate, named units what their rate cards count of its usage.
@@ -376,6 +295,113 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 	return AdmitDecision{BlockedBy: blocked, DenyCode: code, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
 		RetryAfterSeconds: ceilSeconds(dec.RetryAfter)}, nil
+}
+
+// gated is a request past the checks admission makes before it weighs any
+// limit: its trust level, its resolved policy and the spend windows it loads.
+type gated struct {
+	trustLevel string
+	request    spendgate.Request
+	resolved   ResolvedPolicy
+	policy     spendgate.Policy
+}
+
+// gates resolves the request's trust level and policy and makes the checks
+// that refuse it whatever it costs: the delegated failed-usage cutoff,
+// delinquency, the delegated-invoker refusal and the accrual-rate cap. A
+// lease makes them when it issues a hold.
+func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) (gated, *AdmitDecision, error) {
+	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
+	trustLevel := req.TrustLevel
+	if trustLevel == "" {
+		if t, terr := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
+			trustLevel = t
+		}
+		if trustLevel == "" {
+			trustLevel = DefaultTrustLevel
+		}
+	}
+
+	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
+	// not cut off here (their failures past grace are charged when recorded).
+	if a.failedCutoff != nil && !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" {
+		over, werr := a.failedCutoff.CutoffReached(ctx, req.CustomerID, req.Invoker, money.NormalizeCurrency(req.Currency))
+		if werr != nil {
+			return gated{}, nil, werr
+		}
+		if over {
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: DenyFailureRateLimited}, nil
+		}
+	}
+
+	// or#878, the TIME axis. The amount cap below asks "can this payer afford
+	// one more request"; this asks "has this payer's existing debt outlived the
+	// merchant's grace window". A payer can pass either and fail the other, so
+	// both gates run and each has its own deny code.
+	//
+	// This is the ONE enforcement lever OpenRails is authoritative over, and for
+	// usage billing it is the meaningful cutoff: refusing new spend is what stops
+	// the bill growing. It revokes nothing and cancels nothing — whatever the
+	// host is already running is the host's to shut off, told by the durable
+	// delinquency signal.
+	//
+	// Fails OPEN by construction: the gate below only refuses on a recorded
+	// transition that a live re-read of the invoices still agrees with.
+	if a.delinquency != nil {
+		delinquent, derr := a.delinquency.IsDelinquent(ctx, req.CustomerID, req.Currency)
+		if derr != nil {
+			return gated{}, nil, derr
+		}
+		if delinquent {
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyDelinquent}, nil
+		}
+	}
+
+	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
+
+	// or#897: the merchant's bound billing policy is resolved FIRST, because its
+	// KIND decides whether prior debt reduces this payer's headroom at all. The
+	// merchant chose which policy binds to this payer; OpenRails measures and
+	// enforces it from the transaction's locked merchant settings snapshot.
+	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	if err != nil {
+		return gated{}, nil, err
+	}
+
+	// Cap windows (FX-normalized to the request currency).
+	policy, err := a.loader.Load(ctx, req.Currency, resolved)
+	if err != nil {
+		return gated{}, nil, err
+	}
+
+	// Only the customer's own credential spends its balance: nothing grants a
+	// delegated invoker spend.
+	if !identity.IsDirectPayerInvoker(req.InvokerType) {
+		return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
+	}
+
+	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
+	// because it is a different question: not "can this payer pay for one more
+	// request" but "would what it is about to deploy push it past the rate it is
+	// allowed to burn at". Measured from reported usage over the policy's
+	// lookback; the host supplies what it is about to add.
+	if resolved.Kind == models.BillingPolicyAccrualRateCap {
+		if a.rates == nil {
+			// Fail CLOSED, loudly. A quota with no meter behind it is not a
+			// relaxed quota, it is a lie: the merchant declared a ceiling and
+			// would never learn it was not enforced.
+			return gated{}, nil, fmt.Errorf("admission: policy %q is accrual_rate_cap but no accrual-rate meter is wired", resolved.Name)
+		}
+		measured, rerr := a.rates.MeasuredRatePerHour(ctx, req.CustomerID, req.Currency, resolved.RateWindow())
+		if rerr != nil {
+			return gated{}, nil, rerr
+		}
+		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
+			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
+		}
+	}
+
+	return gated{trustLevel: trustLevel, request: sgReq, resolved: resolved, policy: policy}, nil, nil
 }
 
 func ceilSeconds(d time.Duration) int64 {

@@ -21,10 +21,9 @@ const (
 	// UsageBillingLagMonths is how long after a month ends its usage is
 	// billed at the latest: the longest billing period is one month.
 	UsageBillingLagMonths = 1
-	// UsageIngestWindow is how far back a usage event may be dated when it is
-	// recorded, and how long its idempotency key is honoured after it occurred.
+	// UsageIngestWindow is how far back usage may be dated when it settles.
 	UsageIngestWindow = 35 * Day
-	// UsageClockSkew is how far ahead of the server clock an event may be dated.
+	// UsageClockSkew is how far ahead of the server clock usage may be dated.
 	UsageClockSkew = 5 * time.Minute
 
 	// AdmissionMaxWindow is the longest spend window a policy may declare.
@@ -73,6 +72,9 @@ const (
 	Leases = Admissions
 	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
 	LimitAdjustments = Admissions
+	// UsageMinutes keeps a minute of a customer's usage spend past the
+	// longest accrual-rate window, a day.
+	UsageMinutes = 25 * time.Hour
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day
@@ -111,7 +113,6 @@ type MonthlyPartitions struct {
 
 // Partitioned lists the partitioned tables.
 var Partitioned = []MonthlyPartitions{
-	{Table: "usage_events", Key: "occurred_at", WriteBack: UsageIngestWindow, DropBefore: UsageDropBefore},
 	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
 	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
 }

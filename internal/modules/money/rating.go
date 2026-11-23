@@ -15,22 +15,20 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Usage is priced when it is recorded. Each meter of the event's type that
-// has a rate card takes its quantity from the event; the customer's quantity
-// of that meter (and matrix cell) in the event's billing period is Q, and the
-// event is charged R(Q+q) - R(Q), where R is the card's price for a whole
-// period. R never falls as Q grows, so no charge is negative, and a period's
-// charges sum to R of its total: per-event rounding never drifts. A dynamic
-// card instead charges the event's stated amount for a positive quantity.
+// Usage is priced when it settles. Each meter of the usage's event type that
+// has a rate card takes its quantity from each item; the customer's quantity
+// of that meter (and matrix cell) in the billing period is Q, and a group of
+// items with quantities q is charged R(Q+Σq) - R(Q), where R is the card's
+// price for a whole period. R never falls as Q grows, so no charge is
+// negative, and a period's charges sum to R of its total: rounding never
+// drifts. A dynamic card instead charges each item's stated amount for a
+// positive quantity.
 
 func usageNotPriced(param, format string, args ...any) error {
 	return &apperr.Error{Status: http.StatusUnprocessableEntity, Code: billing.CodeUsageNotPriced, Message: fmt.Sprintf(format, args...), Param: param}
@@ -40,6 +38,7 @@ func usageNotPriced(param, format string, args ...any) error {
 // pins it.
 type ratingCard struct {
 	MeterKey    string              `json:"meter_key"`
+	EventType   string              `json:"event_type,omitempty"`
 	ValueKey    string              `json:"value_property"`
 	Aggregation catalog.Aggregation `json:"aggregation"`
 	GroupBy     map[string]string   `json:"group_by,omitempty"`
@@ -73,7 +72,7 @@ func usageCards(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, event
 	}
 	cards := make([]ratingCard, 0, len(rows))
 	for _, r := range rows {
-		card := ratingCard{MeterKey: r.MeterKey, ValueKey: propertyKey(r.ValueProperty), Aggregation: catalog.Aggregation(r.Aggregation)}
+		card := ratingCard{MeterKey: r.MeterKey, EventType: eventType, ValueKey: propertyKey(r.ValueProperty), Aggregation: catalog.Aggregation(r.Aggregation)}
 		if err := json.Unmarshal(r.GroupBy, &card.GroupBy); err != nil {
 			return nil, fmt.Errorf("decode meter %q group_by: %w", r.MeterKey, err)
 		}
@@ -327,88 +326,6 @@ func (s *MoneyService) usagePeriodStart(ctx context.Context, q *gen.Queries, mer
 		}
 	}
 	return CurrentBillingPeriodStart(occurred, anchor, boundary)
-}
-
-// rateUsageTx prices an event's quantities and posts each charge
-// (priceUsageTx, then postChargesTx).
-func (s *MoneyService) rateUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invoker, currency string, eventID uuid.UUID, occurred time.Time, quantities []usageQuantity) ([]models.UsageCharge, *uuid.UUID, error) {
-	charges, err := s.priceUsageTx(ctx, q, payer, currency, occurred, quantities)
-	if err != nil {
-		return nil, nil, err
-	}
-	first, err := s.postChargesTx(ctx, q, payer, invoker, currency, eventID, charges)
-	return charges, first, err
-}
-
-// priceUsageTx advances the customer's period quantities by an event's and
-// answers what each meter charges it. The caller holds the customer's spend
-// lock and has opened its balance account.
-func (s *MoneyService) priceUsageTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, occurred time.Time, quantities []usageQuantity) ([]models.UsageCharge, error) {
-	charges := make([]models.UsageCharge, 0, len(quantities))
-	if len(quantities) == 0 {
-		return charges, nil
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	merchantID := mid.UUID()
-	period, err := s.usagePeriodStart(ctx, q, merchantID, payer.UUID(), currency, occurred)
-	if err != nil {
-		return nil, err
-	}
-	now := s.now()
-	var totalAmount int64
-	for _, u := range quantities {
-		total, err := q.AddMeterPeriodQuantity(ctx, gen.AddMeterPeriodQuantityParams{
-			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency, MeterKey: u.card.MeterKey,
-			Cell: u.cell, PeriodStartsAt: period, Quantity: u.quantity, Now: now,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("meter %q period quantity: %w", u.card.MeterKey, err)
-		}
-		amount, err := u.price(total - u.quantity)
-		if err != nil {
-			return nil, err
-		}
-		if amount < 0 || totalAmount > maxQuantity-amount {
-			return nil, fmt.Errorf("usage amount overflows int64")
-		}
-		totalAmount += amount
-		charges = append(charges, models.UsageCharge{MeterKey: u.card.MeterKey, Model: u.card.Price.Model, Cell: u.cell, Quantity: u.quantity, Amount: amount})
-	}
-	return charges, nil
-}
-
-// postChargesTx posts each charge of an event at metered:<meter>, balance
-// first and the rest owed: usage is never refused for money. It answers the
-// transfer of the first charge posted.
-func (s *MoneyService) postChargesTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invoker, currency string, eventID uuid.UUID, charges []models.UsageCharge) (*uuid.UUID, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var first *uuid.UUID
-	for _, c := range charges {
-		if c.Amount == 0 {
-			continue
-		}
-		key := MustIdempotencyKey(OpMeteredRating, "metered:"+c.MeterKey, eventID.String())
-		if _, _, _, err := s.spendBalanceThenOwedTx(ctx, q, payer, invoker, currency, key, c.Amount, true); err != nil {
-			return nil, err
-		}
-		if first == nil {
-			tr, err := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
-				MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency,
-				Operation: string(key.Operation()), Source: key.Source(), SourceID: key.SourceID(),
-			})
-			if err != nil {
-				return nil, fmt.Errorf("meter %q posting: %w", c.MeterKey, err)
-			}
-			first = &tr.ID
-		}
-	}
-	return first, nil
 }
 
 func propertyKey(property string) string {

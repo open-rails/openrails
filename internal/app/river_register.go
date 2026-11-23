@@ -206,7 +206,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture()}
+	accruals := &riverjobs.UsageAccrualWorker{DB: r.DB, Money: r.MoneyService}
 	scans := []riverjobs.Scan{
+		// A day's usage posts once its day ends, before anything bills it.
+		{Kind: riverjobs.KindUsageAccruals, Run: accruals.Pass, DueBy: accruals.DueBy},
 		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},

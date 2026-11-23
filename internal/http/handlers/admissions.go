@@ -13,7 +13,6 @@ import (
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
-	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -335,86 +334,4 @@ func admissionFailure(ctx context.Context, err error, requestID, message string)
 	}
 	log.WithContext(ctx).WithError(err).WithField("request_id", requestID).Error(message)
 	return api.Coded(billing.CodeInternalError, message)
-}
-
-// RecordUsage records a batch of usage events, one result per item in
-// order. The batch answers 200; each item is recorded or refused on its own,
-// exactly as recording it alone would be.
-func RecordUsage(r *httprequest.Request) {
-	var params billing.RecordUsageBatchParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	if !batchItems(r, len(params.Items), billing.MaxUsageBatchItems) {
-		return
-	}
-	if !requireMerchantRoutePrincipal(r) {
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out := make([]billing.UsageEventResult, len(params.Items))
-	for i, item := range params.Items {
-		out[i] = recordUsageItem(r, svc, item)
-		if out[i].Error != nil {
-			out[i].Error.RequestID = r.RequestID()
-		}
-	}
-	r.JSON(http.StatusOK, billing.RecordUsageBatchResult{Items: out})
-}
-
-func usageRefusal(err *api.APIError) billing.UsageEventResult {
-	details := err.ToResponse().Error
-	return billing.UsageEventResult{Status: err.HTTPStatus, Error: &details}
-}
-
-func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params billing.RecordUsageParams) billing.UsageEventResult {
-	switch {
-	case params.Amount != nil && *params.Amount < 0:
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
-	case params.Outcome == billing.UsageFailed && params.Amount == nil:
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, "failed usage must state amount").WithParam("amount"))
-	case params.CustomerID.IsZero():
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
-	case len(params.SourceID) > maxSourceIDBytes:
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, "source_id must be at most 255 bytes").WithParam("source_id"))
-	case params.Outcome != "" && params.Outcome != billing.UsageSucceeded && params.Outcome != billing.UsageFailed:
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, `outcome must be "succeeded" or "failed"`).WithParam("outcome"))
-	case params.InvokerType != "" && params.InvokerType != billing.InvokerTypeCustomer && params.InvokerType != billing.InvokerTypeDelegated:
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, `invoker_type must be "customer" or "delegated"`).WithParam("invoker_type"))
-	case params.InvokerType == billing.InvokerTypeDelegated && (params.Outcome != billing.UsageFailed || strings.TrimSpace(params.Invoker) == ""):
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, "a delegated invoker records only failed usage, and names its invoker").WithParam("invoker_type"))
-	case !serviceCustomerScopeAllows(r, params.CustomerID):
-		return usageRefusal(api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, ""))
-	}
-	key, err := money.NewIdempotencyKey(money.UsageOperation(params.EventType), params.Source, params.SourceID)
-	if err != nil {
-		return usageRefusal(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("source_id"))
-	}
-	in := billingservice.RecordUsageInput{
-		CustomerID: params.CustomerID, Invoker: params.Invoker, InvokerType: params.InvokerType, Currency: params.Currency, EventType: params.EventType,
-		Dimensions: params.Dimensions, Amount: params.Amount, Resource: params.Resource, Metadata: params.Metadata, Key: key,
-		Failed: params.Outcome == billing.UsageFailed,
-	}
-	if params.OccurredAt != nil {
-		in.OccurredAt = params.OccurredAt.UTC()
-	}
-	event, err := svc.RecordUsage(r.Request.Context(), in)
-	if err != nil {
-		refusal := moneyRefusal(err)
-		if refusal == nil {
-			// The wire stays non-leaky; the cause reaches the operator log.
-			log.WithContext(r.Request.Context()).WithError(err).WithFields(log.Fields{"customer_id": params.CustomerID, "source_id": params.SourceID}).
-				Error("usage record failed")
-			refusal = api.Coded(billing.CodeInternalError, "usage record failed")
-		}
-		return usageRefusal(refusal)
-	}
-	status := http.StatusCreated
-	if event.Replayed {
-		status = http.StatusOK
-	}
-	return billing.UsageEventResult{Status: status, Event: event}
 }

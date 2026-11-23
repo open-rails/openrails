@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -228,10 +230,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return 0, 0, false, aerr
 		}
 		applied = applied || owedApplied
-		if err := insertPendingOwedItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, key.owedItemSourceID(), fromOwed, now, map[string]any{
-			"operation": string(key.Operation()),
-			"source":    key.Source(),
-		}); err != nil {
+		if err := s.insertOwedItemsTx(ctx, q, tenantID, payerID, cur, key, fromOwed, now); err != nil {
 			return 0, 0, false, err
 		}
 		if err := s.queueUsageBilling(ctx, q, payerID, cur); err != nil {
@@ -241,4 +240,30 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	return balanceSpent, owedAccrued, applied, nil
+}
+
+// insertOwedItemsTx queues what a spend left owed for its usage order: one
+// item, or one per meter an accrual's posting is for, so the order bills each
+// meter on its own line.
+func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, key IdempotencyKey, owed int64, now time.Time) error {
+	if s.posting == nil || len(s.posting.owed) == 0 {
+		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, map[string]any{
+			"operation": string(key.Operation()),
+			"source":    key.Source(),
+		})
+	}
+	weights := make([]int64, len(s.posting.owed))
+	for i, o := range s.posting.owed {
+		weights[i] = o.weight
+	}
+	for i, amount := range share(owed, weights) {
+		meter := s.posting.owed[i].meter
+		if err := insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID()+"/"+meter, amount, now, map[string]any{
+			"operation": string(key.Operation()),
+			"source":    "metered:" + meter,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

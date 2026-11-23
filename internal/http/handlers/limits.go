@@ -118,12 +118,36 @@ func AdjustCustomerLimit(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// SyncLeases is a gate's lease sync. The route is declared for gates; this
-// build answers not_implemented.
+// SyncLeases is a gate's lease sync: its usage settles in order, each want
+// is answered with a hold or a refusal, and returned holds are taken back.
+// The sync answers 200; each refused item and undecided want carries its own
+// error.
 func SyncLeases(r *httprequest.Request) {
 	var params billing.SyncLeasesParams
 	if !r.BindJSON(&params) {
 		return
 	}
-	r.ErrorCode(billing.CodeNotImplemented, "lease syncs are not served by this build")
+	if !requireMerchantRoutePrincipal(r) {
+		return
+	}
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.SyncLeases(r.Request.Context(), params, func(c billing.CustomerID) bool { return serviceCustomerScopeAllows(r, c) })
+	if err != nil {
+		writeRefusal(r, err, "lease sync failed")
+		return
+	}
+	for i := range out.Usage.Refused {
+		if out.Usage.Refused[i].Error != nil {
+			out.Usage.Refused[i].Error.RequestID = r.RequestID()
+		}
+	}
+	for i := range out.Wants {
+		if out.Wants[i].Error != nil {
+			out.Wants[i].Error.RequestID = r.RequestID()
+		}
+	}
+	r.JSON(http.StatusOK, out)
 }

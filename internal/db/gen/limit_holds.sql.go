@@ -15,26 +15,28 @@ import (
 const captureRequestHold = `-- name: CaptureRequestHold :one
 UPDATE billing.limit_holds
 SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint,
-    captured_at = $3::timestamptz, updated_at = $3::timestamptz
-WHERE merchant_id = $4::uuid AND id = $5::uuid
-  AND created_at = $6::timestamptz AND request_id IS NOT NULL
+    captured_charges = $3::jsonb, captured_at = $4::timestamptz, updated_at = $4::timestamptz
+WHERE merchant_id = $5::uuid AND id = $6::uuid
+  AND created_at = $7::timestamptz AND request_id IS NOT NULL
   AND state <> 'captured'
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at
+RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges
 `
 
 type CaptureRequestHoldParams struct {
-	CaptureTerms []byte
-	Amount       int64
-	AsOf         time.Time
-	MerchantID   uuid.UUID
-	ID           uuid.UUID
-	CreatedAt    time.Time
+	CaptureTerms    []byte
+	Amount          int64
+	CapturedCharges []byte
+	AsOf            time.Time
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	CreatedAt       time.Time
 }
 
 func (q *Queries) CaptureRequestHold(ctx context.Context, arg CaptureRequestHoldParams) (BillingLimitHold, error) {
 	row := q.db.QueryRow(ctx, captureRequestHold,
 		arg.CaptureTerms,
 		arg.Amount,
+		arg.CapturedCharges,
 		arg.AsOf,
 		arg.MerchantID,
 		arg.ID,
@@ -63,6 +65,7 @@ func (q *Queries) CaptureRequestHold(ctx context.Context, arg CaptureRequestHold
 		&i.CapturedAt,
 		&i.ReleasedAt,
 		&i.UpdatedAt,
+		&i.CapturedCharges,
 	)
 	return i, err
 }
@@ -126,7 +129,12 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
-           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)) AS claims,
+           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What the customer's usage accrued and the ledger has not taken.
+     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
+              FROM billing.usage_accruals ua
+             WHERE ua.merchant_id = $1::uuid AND ua.customer_id = $2::uuid
+               AND ua.currency = $3::text AND ua.amount > ua.posted_amount), 0)) AS claims,
      COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE($7::timestamptz, $5::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = $1::uuid AND rc.customer_id = $2::uuid AND rc.currency = $3::text AND rc.stopped_at IS NULL), 0) AS accrued) h
@@ -148,7 +156,8 @@ type GetFinancialHeldAmountRow struct {
 }
 
 // The one financial hold total: live holds' balance parts, pending refunds,
-// and what the customer's running charges have accrued and not posted
+// unposted usage accruals, and what the customer's running charges have
+// accrued and not posted
 // (accrued, also answered apart). GetAdmissionCapacity computes the same sum.
 // A live hold was created within the hold lifetime, which is held_since. A
 // posting through an instant holds the accrual as of it (accrued_as_of);
@@ -169,7 +178,7 @@ func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHe
 }
 
 const getRequestHold = `-- name: GetRequestHold :one
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND request_id = $2::text
   AND created_at >= $3::timestamptz
 ORDER BY created_at DESC
@@ -207,6 +216,7 @@ func (q *Queries) GetRequestHold(ctx context.Context, arg GetRequestHoldParams) 
 		&i.CapturedAt,
 		&i.ReleasedAt,
 		&i.UpdatedAt,
+		&i.CapturedCharges,
 	)
 	return i, err
 }
@@ -257,7 +267,7 @@ INSERT INTO billing.limit_holds (
     $8::jsonb, $9::jsonb, $10::jsonb,
     $11::timestamptz, $11::timestamptz, 'open', $2::timestamptz
 )
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at
+RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges
 `
 
 type InsertRequestHoldParams struct {
@@ -311,6 +321,7 @@ func (q *Queries) InsertRequestHold(ctx context.Context, arg InsertRequestHoldPa
 		&i.CapturedAt,
 		&i.ReleasedAt,
 		&i.UpdatedAt,
+		&i.CapturedCharges,
 	)
 	return i, err
 }
@@ -365,7 +376,7 @@ func (q *Queries) ListHoldParts(ctx context.Context, arg ListHoldPartsParams) ([
 }
 
 const lockHold = `-- name: LockHold :one
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND created_at = $3::timestamptz
 FOR UPDATE
@@ -402,6 +413,7 @@ func (q *Queries) LockHold(ctx context.Context, arg LockHoldParams) (BillingLimi
 		&i.CapturedAt,
 		&i.ReleasedAt,
 		&i.UpdatedAt,
+		&i.CapturedCharges,
 	)
 	return i, err
 }

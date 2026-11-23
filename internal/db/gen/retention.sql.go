@@ -418,6 +418,58 @@ func (q *Queries) DeleteSubscriptionTransitionsPastRetention(ctx context.Context
 	return result.RowsAffected(), nil
 }
 
+const deleteUsageDailyBefore = `-- name: DeleteUsageDailyBefore :execrows
+DELETE FROM billing.usage_daily d
+WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter_key, d.cell, d.invoker, d.outcome) IN (
+    SELECT e.merchant_id, e.customer_id, e.day_at, e.currency, e.event_type, e.meter_key, e.cell, e.invoker, e.outcome
+    FROM billing.usage_daily e
+    WHERE e.merchant_id = $1::uuid AND e.day_at < $2::timestamptz
+    ORDER BY e.day_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteUsageDailyBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteUsageDailyBefore(ctx context.Context, arg DeleteUsageDailyBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUsageDailyBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteUsageMinutesBefore = `-- name: DeleteUsageMinutesBefore :execrows
+DELETE FROM billing.usage_minutes m
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute
+    FROM billing.usage_minutes e
+    WHERE e.merchant_id = $1::uuid AND e.minute < $2::timestamptz
+    ORDER BY e.minute
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteUsageMinutesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteUsageMinutesBefore(ctx context.Context, arg DeleteUsageMinutesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUsageMinutesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteWebhookHealthDaysBefore = `-- name: DeleteWebhookHealthDaysBefore :execrows
 DELETE FROM billing.webhook_health_daily
 WHERE ctid IN (
@@ -602,6 +654,18 @@ FROM (
       WHERE ($1::uuid IS NULL OR la.merchant_id > $1::uuid)
         AND la.created_at < $16::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT ud.merchant_id AS mid
+       FROM billing.usage_daily ud
+      WHERE ($1::uuid IS NULL OR ud.merchant_id > $1::uuid)
+        AND ud.day_at < $17::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT um.merchant_id AS mid
+       FROM billing.usage_minutes um
+      WHERE ($1::uuid IS NULL OR um.merchant_id > $1::uuid)
+        AND um.minute < $18::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -624,6 +688,8 @@ type ListRetentionWorkMerchantsParams struct {
 	ParkCutoff          time.Time
 	LimitWindowCutoff   time.Time
 	ReplayCutoff        time.Time
+	UsageCutoff         time.Time
+	UsageMinuteCutoff   time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -648,6 +714,8 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.ParkCutoff,
 		arg.LimitWindowCutoff,
 		arg.ReplayCutoff,
+		arg.UsageCutoff,
+		arg.UsageMinuteCutoff,
 	)
 	if err != nil {
 		return nil, err

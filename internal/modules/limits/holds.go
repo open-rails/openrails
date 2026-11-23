@@ -137,6 +137,78 @@ func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 	return out, nil
 }
 
+// Locked is the claims' windows locked in order, with where each stands.
+type Locked struct {
+	Claims    []Claim
+	Standings []Standing
+	rows      []*gen.GetLimitWindowForUpdateRow
+}
+
+// Lock locks every claim's window in key order and reads where each stands,
+// for a caller that sizes what it sets aside itself. A session or first-use
+// window a claim opens is not written until Commit.
+func (h Holder) Lock(ctx context.Context, claims []Claim) (Locked, error) {
+	h.Now = h.Now.UTC()
+	l := Locked{Claims: claims, Standings: make([]Standing, len(claims)), rows: make([]*gen.GetLimitWindowForUpdateRow, len(claims))}
+	for _, i := range lockOrder(claims) {
+		c := claims[i]
+		if !c.Opens {
+			if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
+				return l, err
+			}
+		}
+		row, err := h.lock(ctx, c.Key, c.Window.StartsAt)
+		if err != nil {
+			return l, err
+		}
+		l.rows[i] = row
+		if l.Standings[i], err = h.standing(ctx, c.Key, c.Reset, c.Window, c.Capacity, row); err != nil {
+			return l, err
+		}
+	}
+	return l, nil
+}
+
+// Commit records what a caller changed of each locked claim's holds: added
+// (negative gives back) on top of the standing it read. It opens the windows
+// that held something, records reached_at and writes a rate limit's level as
+// of now, as Take does.
+func (h Holder) Commit(ctx context.Context, l Locked, added []int64) error {
+	h.Now = h.Now.UTC()
+	for _, i := range lockOrder(l.Claims) {
+		c, s, row := l.Claims[i], l.Standings[i], l.rows[i]
+		if c.Opens && row == nil {
+			if added[i] <= 0 {
+				continue
+			}
+			if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
+				return err
+			}
+		}
+		var reached *time.Time
+		if total := addSat(addSat(s.Settled, s.Held), added[i]); added[i] > 0 && total > 0 && total >= s.Capacity && (row == nil || row.ReachedAt == nil) {
+			reached = &h.Now
+		}
+		if reached == nil && c.Reset.Kind != catalog.ResetRate {
+			continue
+		}
+		settled := s.Settled
+		if c.Reset.Kind != catalog.ResetRate && row != nil {
+			settled = row.Settled
+		}
+		if err := h.write(ctx, c.Key, c.Window.StartsAt, settled, c.Capacity, reached); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetsAt is when a refused claim's limit resets.
+func (h Holder) ResetsAt(ctx context.Context, c Claim, s Standing) *time.Time {
+	h.Now = h.Now.UTC()
+	return h.resetsAt(ctx, c, s)
+}
+
 // Settlement is units a capture or report settles into one limit's window:
 // the window its hold was issued in, or the current one. KeepCapacity keeps
 // the capacity the window last stored (a spend window's).

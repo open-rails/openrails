@@ -128,6 +128,18 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR la.merchant_id > sqlc.narg(after)::uuid)
         AND la.created_at < sqlc.arg(replay_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ud.merchant_id AS mid
+       FROM billing.usage_daily ud
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ud.merchant_id > sqlc.narg(after)::uuid)
+        AND ud.day_at < sqlc.arg(usage_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT um.merchant_id AS mid
+       FROM billing.usage_minutes um
+      WHERE (sqlc.narg(after)::uuid IS NULL OR um.merchant_id > sqlc.narg(after)::uuid)
+        AND um.minute < sqlc.arg(usage_minute_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -305,6 +317,28 @@ WHERE (l.merchant_id, l.id) IN (
     FROM billing.leases e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.last_sync_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.last_sync_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteUsageDailyBefore :execrows
+DELETE FROM billing.usage_daily d
+WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter_key, d.cell, d.invoker, d.outcome) IN (
+    SELECT e.merchant_id, e.customer_id, e.day_at, e.currency, e.event_type, e.meter_key, e.cell, e.invoker, e.outcome
+    FROM billing.usage_daily e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.day_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.day_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteUsageMinutesBefore :execrows
+DELETE FROM billing.usage_minutes m
+WHERE (m.merchant_id, m.customer_id, m.currency, m.minute) IN (
+    SELECT e.merchant_id, e.customer_id, e.currency, e.minute
+    FROM billing.usage_minutes e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.minute < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.minute
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
 );

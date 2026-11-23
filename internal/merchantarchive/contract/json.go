@@ -180,7 +180,7 @@ var rateJSON = object(map[string]jsonRule{
 })
 
 // pinnedRateCardJSON is a rate card as an admission pins it.
-var pinnedRateCardJSON = object(map[string]jsonRule{"meter_key": textValue, "value_property": textValue, "aggregation": textValue,
+var pinnedRateCardJSON = object(map[string]jsonRule{"meter_key": textValue, "event_type": textValue, "value_property": textValue, "aggregation": textValue,
 	"group_by": dictionary(textValue), "filter": dictionary(array(textValue)), "allowance": object(map[string]jsonRule{"included": integerValue}), "price": rateJSON})
 
 var collectedReceiptJSON = object(map[string]jsonRule{
@@ -302,7 +302,6 @@ var jsonRules = map[string]jsonRule{
 	"payments.discount_metadata": metadataJSON,
 	"payment_methods.capture":    nullable(captureJSON),
 	"payment_methods.metadata":   metadataJSON,
-	"usage_events.metadata":      metadataJSON,
 	"owed_items.metadata":        metadataJSON,
 	// Successful purchase intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
@@ -362,8 +361,7 @@ var jsonRules = map[string]jsonRule{
 	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
-	"usage_events.dimensions":    dictionary(integerValue),
-	"usage_events.charges":       array(object(map[string]jsonRule{"model": textValue, "meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
+	"usage_accruals.lines":       array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "requests": integerValue, "quantity": integerValue, "amount": integerValue, "posted_amount": integerValue})),
 	"order_attempts.metadata":    metadataJSON,
 	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"order_attempts.rail_state": nullable(object(map[string]jsonRule{
@@ -386,6 +384,7 @@ var jsonRules = map[string]jsonRule{
 	"limit_holds.capture_terms":            nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
 	"limit_holds.estimate_usage":           nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
 	"limit_holds.rate_cards":               nullable(array(pinnedRateCardJSON)),
+	"limit_holds.captured_charges":         nullable(array(object(map[string]jsonRule{"meter_key": textValue, "model": textValue, "cell": nullable(textValue), "quantity": integerValue, "amount": moneyStringValue}))),
 	// A Solana plan change's frozen agreement, and how its chain outcome ended.
 	"provider_intents.solana_tier_change.payload": object(map[string]jsonRule{
 		"reference": textValue, "last_valid_block_height": unsignedValue, "old_subscription_id": uuidValue, "customer_id": uuidValue, "old_period_ends_at": nullable(textValue),

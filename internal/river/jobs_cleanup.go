@@ -145,6 +145,8 @@ type CleanupResult struct {
 	LimitWindows               int64
 	Leases                     int64
 	LimitAdjustments           int64
+	UsageDaily                 int64
+	UsageMinutes               int64
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
 	ProviderIntents            int64
@@ -221,6 +223,8 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 			ParkCutoff:          now.Add(-retention.ReleasedParks),
 			LimitWindowCutoff:   now.Add(-retention.LimitWindows),
 			ReplayCutoff:        now.Add(-retention.Leases),
+			UsageCutoff:         retention.UsageDropBefore(now),
+			UsageMinuteCutoff:   now.Add(-retention.UsageMinutes),
 			After:               after,
 			MerchantLimit:       limit,
 		})
@@ -274,6 +278,8 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"limit_windows":                result.LimitWindows,
 		"leases":                       result.Leases,
 		"limit_adjustments":            result.LimitAdjustments,
+		"usage_daily":                  result.UsageDaily,
+		"usage_minutes":                result.UsageMinutes,
 		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
 		"provider_intents":             result.ProviderIntents,
@@ -520,6 +526,15 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		return q.DeleteLimitAdjustmentsBefore(ctx, gen.DeleteLimitAdjustmentsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.LimitAdjustments), RowLimit: limit,
 		})
+	})
+
+	// Usage rollups past the months that bill them, and per-minute spend past
+	// the rate windows that read it.
+	sweep("delete usage rollups", &result.UsageDaily, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteUsageDailyBefore(ctx, gen.DeleteUsageDailyBeforeParams{MerchantID: mid, Cutoff: retention.UsageDropBefore(now), RowLimit: limit})
+	})
+	sweep("delete usage minutes", &result.UsageMinutes, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteUsageMinutesBefore(ctx, gen.DeleteUsageMinutesBeforeParams{MerchantID: mid, Cutoff: now.Add(-retention.UsageMinutes), RowLimit: limit})
 	})
 
 	// Metric counters.

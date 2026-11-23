@@ -44,6 +44,11 @@ SELECT
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
            AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What the customer's usage accrued and the ledger has not taken.
+     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
+              FROM billing.usage_accruals ua
+             WHERE ua.merchant_id = a.merchant_id AND ua.customer_id = a.customer_id AND ua.currency = a.currency
+               AND ua.amount > ua.posted_amount), 0)
      -- What the customer's running charges have accrued and not posted.
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $2::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc

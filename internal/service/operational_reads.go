@@ -2,18 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -149,96 +144,5 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 		return page.position("admissions", row.CreatedAt, *row.RequestID)
 	})
 	out := pagination.Map(cut, func(row gen.BillingLimitHold) billing.Admission { return *admissionFromHold(row, now) })
-	return &out, nil
-}
-
-// GetUsageEvent reads an existing event within retained partitions. The read
-// never rates usage or posts to the ledger.
-func (s *Service) GetUsageEvent(ctx context.Context, id billing.UsageEventID) (*billing.UsageEvent, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now := s.now().UTC()
-	row, err := s.rt.DB.Gen(ctx).GetUsageEventByID(ctx, gen.GetUsageEventByIDParams{MerchantID: mid.UUID(), ID: id.UUID(), FromAt: retention.UsageDropBefore(now), ToAt: now.Add(retention.UsageClockSkew)})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "usage event not found")
-	}
-	if err != nil {
-		return nil, err
-	}
-	event, err := money.UsageEventFromRow(row)
-	if err != nil {
-		return nil, err
-	}
-	return usageEventReceipt(event), nil
-}
-
-// ListUsageEvents is a bounded read of individual usage facts, not aggregates.
-func (s *Service) ListUsageEvents(ctx context.Context, params billing.UsageEventListParams) (*billing.ListPage[billing.UsageEvent], error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	now := s.now().UTC()
-	const maxSpan = 31 * retention.Day
-	page, err := readInspectionPage("usage-events", params.PageRequest, params.From, params.To, now.Add(time.Microsecond).Add(-maxSpan), now, maxSpan)
-	if err != nil {
-		return nil, err
-	}
-	switch params.Outcome {
-	case "", billing.UsageSucceeded, billing.UsageFailed:
-	default:
-		return nil, invalidInspectionQuery("outcome", "outcome must be succeeded or failed")
-	}
-	params.Source, params.SourceID, params.EventType = strings.TrimSpace(params.Source), strings.TrimSpace(params.SourceID), strings.TrimSpace(params.EventType)
-	if params.SourceID != "" && params.Source == "" {
-		return nil, invalidInspectionQuery("source_id", "source_id requires source")
-	}
-	if len(params.SourceID) > 255 {
-		return nil, invalidInspectionQuery("source_id", "source_id must be at most 255 bytes")
-	}
-	currency, err := inspectionCurrency(params.Currency)
-	if err != nil {
-		return nil, err
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	args := gen.ListUsageEventsParams{MerchantID: mid.UUID(), FromAt: retainedFrom(page.from, retention.UsageDropBefore(now)), ToAt: page.to,
-		Currency: currency, EventType: optionalInspectionText(params.EventType), Source: optionalInspectionText(params.Source), SourceID: optionalInspectionText(params.SourceID), Outcome: optionalInspectionText(string(params.Outcome)), RowLimit: pagination.Fetch(page.limit)}
-	if !params.CustomerID.IsZero() {
-		customer := params.CustomerID.UUID()
-		args.CustomerID = &customer
-	}
-	if page.after != nil {
-		id, err := uuid.Parse(page.after.Key)
-		if err != nil || id == uuid.Nil {
-			return nil, pagination.ErrInvalidCursor
-		}
-		args.AfterAt, args.AfterID = &page.after.At, &id
-	}
-	rows, err := s.rt.DB.Gen(ctx).ListUsageEvents(ctx, args)
-	if err != nil {
-		return nil, err
-	}
-	cut := pagination.Cut(rows, page.limit, func(row gen.BillingUsageEvent) any {
-		return page.position("usage-events", row.OccurredAt, row.ID.String())
-	})
-	out := billing.ListPage[billing.UsageEvent]{Items: make([]billing.UsageEvent, 0, len(cut.Items)), Next: cut.Next}
-	for _, row := range cut.Items {
-		event, err := money.UsageEventFromRow(row)
-		if err != nil {
-			return nil, err
-		}
-		out.Items = append(out.Items, *usageEventReceipt(event))
-	}
 	return &out, nil
 }

@@ -69,7 +69,8 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(c
 
 -- name: GetFinancialHeldAmount :one
 -- The one financial hold total: live holds' balance parts, pending refunds,
--- and what the customer's running charges have accrued and not posted
+-- unposted usage accruals, and what the customer's running charges have
+-- accrued and not posted
 -- (accrued, also answered apart). GetAdmissionCapacity computes the same sum.
 -- A live hold was created within the hold lifetime, which is held_since. A
 -- posting through an instant holds the accrual as of it (accrued_as_of);
@@ -102,7 +103,12 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
-           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)) AS claims,
+           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What the customer's usage accrued and the ledger has not taken.
+     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
+              FROM billing.usage_accruals ua
+             WHERE ua.merchant_id = sqlc.arg(merchant_id)::uuid AND ua.customer_id = sqlc.arg(customer_id)::uuid
+               AND ua.currency = sqlc.arg(currency)::text AND ua.amount > ua.posted_amount), 0)) AS claims,
      COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0) AS accrued) h;
@@ -116,7 +122,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 -- name: CaptureRequestHold :one
 UPDATE billing.limit_holds
 SET state = 'captured', capture_terms = sqlc.arg(capture_terms)::jsonb, captured_amount = sqlc.arg(amount)::bigint,
-    captured_at = sqlc.arg(as_of)::timestamptz, updated_at = sqlc.arg(as_of)::timestamptz
+    captured_charges = sqlc.arg(captured_charges)::jsonb, captured_at = sqlc.arg(as_of)::timestamptz, updated_at = sqlc.arg(as_of)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND created_at = sqlc.arg(created_at)::timestamptz AND request_id IS NOT NULL
   AND state <> 'captured'

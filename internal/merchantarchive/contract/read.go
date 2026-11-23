@@ -26,6 +26,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	watermarks, custody, cadence := false, false, false
 	// An archive from before holds carries admissions, each a request hold.
 	admissions := false
+	// An archive from before usage settled in batches carries raw usage
+	// events: their money is in the ledger it carries, and they are not read.
+	events := false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			invoices = r.Table == "invoices"
@@ -35,6 +38,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return nil
 			}
 			if custody = r.Table == "custody_migrations"; custody {
+				return nil
+			}
+			if events = r.Table == "usage_events"; events {
 				return nil
 			}
 			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
@@ -61,7 +67,7 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
-		if watermarks || custody || cadence {
+		if watermarks || custody || cadence || events {
 			return nil
 		}
 		p := Profiles[table]
@@ -88,13 +94,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return err
 			}
 		}
-		// Usage events before failed usage all succeeded and forgave nothing;
-		// before rating at ingest none recorded charges.
-		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-3 {
-			r.Values = append(r.Values, new("succeeded"), new("0"))
-		}
-		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, new("[]"))
+		// Holds before batch settlement kept no captured charges.
+		if p.Name == "limit_holds" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
 		}
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
@@ -228,12 +230,12 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 			updated = t
 		}
 	}
-	return []*string{v[0], &id, v[9], v[2], v[3], nil, nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated}, nil
+	return []*string{v[0], &id, v[9], v[2], v[3], nil, nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
 }
 
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
-var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true}
+var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "usage_daily": true, "usage_accruals": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}

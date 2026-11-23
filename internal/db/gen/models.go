@@ -551,6 +551,8 @@ type BillingLease struct {
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
 	ClosedAt        *time.Time
+	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the items it refused.
+	Receipts []byte
 }
 
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
@@ -638,6 +640,8 @@ type BillingLimitHold struct {
 	CapturedAt     *time.Time
 	ReleasedAt     *time.Time
 	UpdatedAt      time.Time
+	// What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].
+	CapturedCharges []byte
 }
 
 // What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. Retention: monthly partitions on hold_created_at, dropped with their hold's.
@@ -652,6 +656,14 @@ type BillingLimitHoldPart struct {
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
 	Held           int64
+	// A lease's hold: what one request of its customer last cost in the limit; null for a request's hold.
+	RequestUnits *int64
+	// A lease's hold: the units its usage took from the part since the lease's previous sync; null for a request's hold.
+	UsedUnits *int64
+	// When another lease was refused capacity_held for capacity this part holds; it shrinks on its lease's next sync.
+	ContendedAt *time.Time
+	// A lease's hold: the size its last sync answered, less what usage took since. A shrink is answered first and released at the next sync, down to this or what the gate's open tickets took, whichever is more; null for a request's hold.
+	AnsweredUnits *int64
 }
 
 // One customer's use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit's bucket, the one row of a lifetime or rate limit, or a billing policy's spend window (spend:<identity>). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
@@ -2035,35 +2047,57 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// Append-only multi-dimensional metered usage. Source of truth for usage reporting and usage order lines. Priced when recorded, by the host (amount) or the rate cards (charges); event and ledger postings commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was billed.
-type BillingUsageEvent struct {
+// What one customer's usage charged in one currency on one UTC day of one pricing period. It posts to the ledger after its day ends, or before any other movement of the customer's balance in the currency: one credit_spend per lot drawn and one owed_accrual for the rest, at (usage_accrual, usage_accrual:<id>, <posting>). Until posted, the balance holds amount - posted_amount. Retention: permanent, never pruned.
+type BillingUsageAccrual struct {
+	MerchantID uuid.UUID
 	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// The start of the UTC day the usage occurred.
+	DayAt time.Time
+	// The start of the pricing period the usage was priced in.
+	PeriodStartsAt time.Time
+	Amount         int64
+	// What the accrual's postings have moved to the ledger; the rest is held until the next posting.
+	PostedAmount int64
+	// How many postings the accrual has made; the next one posts at source_id postings + 1.
+	Postings int32
+	// What the accrual is for, per meter and cell: [{meter_key, cell, requests, quantity, amount, posted_amount}].
+	Lines     []byte
+	PostedAt  *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// One UTC day of a customer's usage, per invoker, currency, event type, meter, matrix cell and outcome. The row with an empty meter_key counts the events themselves: requests, and what failed usage charged or forgave; a meter's row counts the events it priced, their quantity and what it charged. Retention: rows are deleted 24 months after the month's usage was billed.
+type BillingUsageDaily struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// Caller-supplied principal string that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.
-	InvokerID string
-	// Native OpenRails currency code; amount uses this currency internal precision.
-	Currency string
-	// Caller-supplied free-form string for what was metered (for example, an endpoint or plan slug). Opaque to OpenRails; nullable, not a FK.
-	Resource         *string
-	EventType        string
-	Dimensions       []byte
-	Amount           int64
-	Source           string
-	SourceID         string
-	LedgerTransferID *uuid.UUID
-	Metadata         []byte
-	// When the usage happened; the partition key. Accepted only within the ingest window, so every read and the idempotency lookup name a time range.
-	OccurredAt time.Time
-	CreatedAt  time.Time
-	// succeeded, or failed: work that cost the platform and did not deliver. A failed event charges only what the customer's grace leaves.
-	Outcome string
-	// The part of a failed event's reported cost its grace absorbed; amount + forgiven_amount is what the host reported. Zero for a succeeded event.
+	DayAt      time.Time
+	Currency   string
+	EventType  string
+	// The meter that priced the events; empty for the events themselves.
+	MeterKey string
+	// The matrix cell the meter priced the events in; empty without a matrix.
+	Cell string
+	// Caller-supplied principal string that fired the usage; empty when none was named.
+	Invoker        string
+	Outcome        string
+	Requests       int64
+	Quantity       int64
+	Amount         int64
 	ForgivenAmount int64
-	// What each meter charged the event: [{meter_key, model, cell, quantity, amount}]. Empty when no meter consumes it or the usage failed.
-	Charges []byte
-	// Optional host cost in native currency units. Dynamic meter cards charge it; other cards ignore it. Failed events must state their cost.
-	StatedAmount *int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// What a customer's usage charged in one currency in one UTC minute it occurred in: the accrual-rate meter and the balance watch read it. Retention: rows are deleted 25 hours after their minute, past the longest accrual-rate window.
+type BillingUsageMinute struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Minute     time.Time
+	Amount     int64
 }
 
 // Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.
