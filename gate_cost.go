@@ -278,10 +278,9 @@ func (p *holdPricing) moneyCost(r request) (int64, error) {
 		}
 		var c int64
 		if mc.card.Price.Model == catalog.ModelDynamic {
-			if r.stated == nil {
-				return 0, invalidParam("usage.amount", fmt.Sprintf("meter %q is priced by a stated amount: usage.amount is required", mc.card.Meter))
+			if r.stated != nil {
+				c = *r.stated
 			}
-			c = *r.stated
 		} else {
 			b, ok := p.bounds[boundKey{mc.card.Meter, cell}]
 			if !ok || b.DivideBy <= 0 {

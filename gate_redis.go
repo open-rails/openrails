@@ -1310,7 +1310,8 @@ func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([
 }
 
 // flush waits until the group has settled the usage numbered before the
-// call.
+// call. Usage in a Redis this process cannot reach is not waited for: it is
+// lost with Redis, never billed.
 func (s *sharedGate) flush(ctx context.Context) error {
 	ns, ok := s.namespace()
 	if !ok || s.down() {
@@ -1318,7 +1319,7 @@ func (s *sharedGate) flush(ctx context.Context) error {
 	}
 	leases, err := s.rdb.SMembers(ctx, s.g(ns, "leases")).Result()
 	if s.redisFailed(err) {
-		return fmt.Errorf("%w: %w", errRedis, err)
+		return nil
 	}
 	targets := map[string]int64{}
 	for _, lease := range leases {
@@ -1336,7 +1337,7 @@ func (s *sharedGate) flush(ctx context.Context) error {
 		for lease, last := range targets {
 			msgs, err := s.rdb.XRangeN(ctx, s.g(ns, "u:"+lease), "-", "+", 1).Result()
 			if s.redisFailed(err) {
-				return fmt.Errorf("%w: %w", errRedis, err)
+				return nil
 			}
 			if len(msgs) > 0 {
 				if n, _ := strconv.ParseInt(fmt.Sprint(msgs[0].Values["n"]), 10, 64); n <= last {
