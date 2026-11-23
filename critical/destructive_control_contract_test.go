@@ -59,6 +59,7 @@ func holdEvidence(t *testing.T, a *authorityWorld, hold billing.DestructiveHold)
 
 // holdReviewer is the person a host verified to review holds.
 var holdReviewer = auth.Invoker{Issuer: "https://operator.critical.invalid", ID: "verified-human"}
+
 func TestDestructiveControls(t *testing.T) {
 	t.Run("OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
@@ -223,6 +224,8 @@ func TestDestructiveControls(t *testing.T) {
 		require.Error(t, err, "a remote handle's credential names its caller")
 		reviewer, err := a.alpha.ActingFor(holdReviewer)
 		require.NoError(t, err)
+		_, err = openrails.NewGate(reviewer, openrails.GateDeps{})
+		require.Error(t, err, "a gate serves every request, so it takes the merchant's own handle")
 		product, err := reviewer.CreateProduct(t.Context(), billing.CreateProductParams{Key: "acted-for", DisplayName: "Acted for"})
 		require.NoError(t, err)
 		require.Equal(t, "acted-for", product.Key)

@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	var cfg openrails.GateConfig
+	var deps openrails.GateDeps
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		opts, err := redis.ParseURL(url)
 		if err != nil {
@@ -58,9 +58,9 @@ func main() {
 		}
 		rdb := redis.NewClient(opts)
 		defer rdb.Close()
-		cfg.Redis = rdb
+		deps.Redis = rdb
 	}
-	gate, err := openrails.NewGate(client, cfg)
+	gate, err := openrails.NewGate(client, deps)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func main() {
 		if !ok {
 			return
 		}
-		lines, err := gate.Limits(r.Context(), customer)
+		lines, err := gate.ListCustomerLimits(r.Context(), customer)
 		if err != nil {
 			http.Error(w, err.Error(), status(err))
 			return

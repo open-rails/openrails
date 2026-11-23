@@ -2,15 +2,11 @@ package openrails
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/service"
 )
 
 // ApplyCatalog applies a catalog document as the apply manager. Each product,
@@ -39,34 +35,4 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 		return nil, err
 	}
 	return &out, nil
-}
-
-// WriteCatalogReceipt writes what an ApplyCatalog changed and what it skipped,
-// for a person: a host's own catalog command prints it as openrails catalog
-// apply does.
-func WriteCatalogReceipt(w io.Writer, r *billing.CatalogApplicationReceipt) error {
-	if r == nil {
-		return invalidErr("catalog receipt is required")
-	}
-	var b strings.Builder
-	if r.Replayed {
-		fmt.Fprintf(&b, "%s was already applied; nothing changed\n", r.ApplicationID)
-	} else {
-		fmt.Fprintf(&b, "%s: catalog revision %d -> %d\n", r.ApplicationID, r.BaseRevision, r.AppliedRevision)
-	}
-	for _, c := range r.Changes {
-		name := fmt.Sprintf("%s %s", c.Object, c.Key)
-		if c.ProductKey != nil {
-			name = fmt.Sprintf("price %s of product %s", c.Key, *c.ProductKey)
-		}
-		fmt.Fprintf(&b, "  changed %s (%s), now revision %d\n", name, strings.Join(c.Fields, ", "), c.Revision)
-	}
-	for _, line := range service.ReadableCatalogConflicts(r.Conflicts) {
-		fmt.Fprintf(&b, "  %s\n", line)
-	}
-	if len(r.Conflicts) > 0 {
-		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.\n", len(r.Conflicts))
-	}
-	_, err := io.WriteString(w, b.String())
-	return err
 }
