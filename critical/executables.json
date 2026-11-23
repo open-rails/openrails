@@ -454,6 +454,15 @@
     "OR-J23-S27": [
       "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-a-shared-lease-ends-with-its-last-process"
     ],
+    "OR-J23-S28": [
+      "TestGate/OR-J23-S28/a-units-only-plan-takes-zero-money-through-redis-and-gives-every-unit-back"
+    ],
+    "OR-J23-S29": [
+      "TestGate/OR-J23-S29/a-lost-reply-after-a-shrink-keeps-the-capacity-until-the-gate-applies-it"
+    ],
+    "OR-J23-S30": [
+      "TestGate/OR-J23-S30/an-answer-that-reports-the-lease-dead-starts-a-new-lease"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],

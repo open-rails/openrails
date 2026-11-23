@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 376,
+  "scenario_count": 379,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1112,6 +1112,21 @@
       "id": "OR-J23-S27",
       "journey": "J23",
       "name": "Closing a gate ends its lease and returns its holds at once; with Redis the group lease lives while a process remains and ends with the last"
+    },
+    {
+      "id": "OR-J23-S28",
+      "journey": "J23",
+      "name": "With Redis, a units-only plan's zero-cost money parts are taken, released, captured and settled, and every released unit comes back"
+    },
+    {
+      "id": "OR-J23-S29",
+      "journey": "J23",
+      "name": "A sync reply lost after a shrink releases nothing until the gate has applied the shrink, and the capacity then reaches the gate that waited"
+    },
+    {
+      "id": "OR-J23-S30",
+      "journey": "J23",
+      "name": "A sync answer that reports the lease dead starts a new lease; the dead lease's hold never decides again"
     },
     {
       "id": "OR-J29-S07",
