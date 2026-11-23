@@ -14,6 +14,7 @@ guards() {
   bash scripts/check_business_time.sh
   bash scripts/check-one-pull-entry.sh
   bash scripts/scan-injected-code.sh --all
+  go run ./scripts/docscheck
   local files=() unformatted
   while IFS= read -r -d '' file; do
     [[ -e "$file" ]] && files+=("$file")

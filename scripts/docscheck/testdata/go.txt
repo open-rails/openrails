@@ -1,0 +1,5 @@
+pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
+pkg openrails, method (*Client) CreateOrder(context.Context, billing.CreateOrderParams) (*billing.Order, error)
+pkg openrails, method (*Client) ListProducts(context.Context, billing.ProductListParams) (*billing.ListPage[billing.Product], error)
+pkg openrails, type Client struct
+pkg openrails/billing, const HostEventOrderCompleted HostEventType = "order.completed"
