@@ -135,8 +135,8 @@ type sharedGate struct {
 	fbMu sync.Mutex
 	fb   *localGate
 
-	nsMu sync.Mutex
-	ns   string
+	// ns is the group's key namespace: the server and merchant.
+	ns string
 
 	downUntil atomic.Int64
 	upSince   atomic.Int64
@@ -176,7 +176,8 @@ type orphan struct{ ns, hold, ticket string }
 
 func newSharedGate(c *Client, rdb redis.UniversalClient) *sharedGate {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &sharedGate{c: c, rdb: rdb, proc: uuid.NewString(),
+	sum := sha256.Sum256([]byte(c.baseURL + "\x00" + c.merchantID.String()))
+	s := &sharedGate{c: c, rdb: rdb, proc: uuid.NewString(), ns: hex.EncodeToString(sum[:10]),
 		sets: map[string]string{}, prices: map[string]*sharedPricing{}, maybe: map[string]time.Time{}, genCh: make(chan struct{}),
 		ctx: ctx, cancel: cancel, stop: make(chan struct{})}
 	s.fb = s.newFallback()
@@ -195,24 +196,6 @@ func (s *sharedGate) fallback() *localGate {
 	s.fbMu.Lock()
 	defer s.fbMu.Unlock()
 	return s.fb
-}
-
-// namespace is the group's key namespace: the server and merchant. A handle
-// that has not yet learned its merchant has none, and decides from its own
-// lease meanwhile.
-func (s *sharedGate) namespace() (string, bool) {
-	s.nsMu.Lock()
-	defer s.nsMu.Unlock()
-	if s.ns != "" {
-		return s.ns, true
-	}
-	mid := s.c.MerchantID()
-	if mid.IsZero() {
-		return "", false
-	}
-	sum := sha256.Sum256([]byte(s.c.baseURL + "\x00" + mid.String()))
-	s.ns = hex.EncodeToString(sum[:10])
-	return s.ns, true
 }
 
 func (s *sharedGate) g(ns, suffix string) string { return gateKeyPrefix + "{" + ns + "}:" + suffix }
@@ -263,11 +246,10 @@ func (s *sharedGate) start() {
 }
 
 func (s *sharedGate) admit(ctx context.Context, gate *Gate, p billing.AdmitParams) (*Ticket, error) {
-	ns, ok := s.namespace()
-	if !ok || s.down() {
+	if s.down() {
 		return s.fallback().admit(ctx, gate, p)
 	}
-	t, err := s.admitShared(ctx, gate, ns, p)
+	t, err := s.admitShared(ctx, gate, s.ns, p)
 	if errors.Is(err, errRedis) {
 		return s.fallback().admit(ctx, gate, p)
 	}
@@ -760,11 +742,7 @@ func (s *sharedGate) written(key string) {
 // source and source_id: a Record repeated before gateWriteKeyTTL past the
 // first's settlement finds it.
 func (s *sharedGate) record(ctx context.Context, item billing.LeaseUsage) error {
-	ns, ok := s.namespace()
-	if !ok {
-		return s.fallback().record(ctx, item)
-	}
-	_, err := s.number(ctx, ns, item, "", "", recordKey(item), nil)
+	_, err := s.number(ctx, s.ns, item, "", "", recordKey(item), nil)
 	if errors.Is(err, errNotWritten) {
 		return s.fallback().record(ctx, item)
 	}
@@ -936,22 +914,14 @@ func (s *sharedGate) run() {
 		select {
 		case <-s.stop:
 			if holder {
-				if ns, ok := s.namespace(); ok {
-					c, done := context.WithTimeout(context.WithoutCancel(ctx), syncTimeout)
-					_ = unlockScript.Run(c, s.rdb, []string{s.g(ns, "lock")}, s.proc).Err()
-					done()
-				}
+				c, done := context.WithTimeout(context.WithoutCancel(ctx), syncTimeout)
+				_ = unlockScript.Run(c, s.rdb, []string{s.g(s.ns, "lock")}, s.proc).Err()
+				done()
 			}
 			return
 		default:
 		}
-		ns, ok := s.namespace()
-		if !ok {
-			if !s.sleep(limits.SyncInterval) {
-				return
-			}
-			continue
-		}
+		ns := s.ns
 		c, done := context.WithTimeout(ctx, syncTimeout)
 		var err error
 		holder, err = s.takeLock(c, ns, holder)
@@ -1037,11 +1007,10 @@ func (s *sharedGate) pollGen() {
 			return
 		case <-t.C:
 		}
-		ns, ok := s.namespace()
-		if !ok || s.down() || s.waiting.Load() == 0 {
+		if s.down() || s.waiting.Load() == 0 {
 			continue
 		}
-		gen, err := s.rdb.Get(ctx, s.g(ns, "gen")).Int64()
+		gen, err := s.rdb.Get(ctx, s.g(s.ns, "gen")).Int64()
 		if err == nil {
 			s.observe(gen)
 		}
@@ -1066,10 +1035,7 @@ func (s *sharedGate) beat() {
 }
 
 func (s *sharedGate) beatOnce() {
-	ns, ok := s.namespace()
-	if !ok {
-		return
-	}
+	ns := s.ns
 	ctx, cancel := context.WithTimeout(s.ctx, syncTimeout)
 	defer cancel()
 	now := time.Now().UnixMilli()
@@ -2041,11 +2007,10 @@ func reclaimable(v string, dead map[string]bool, now int64) bool {
 }
 
 func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([]billing.CustomerLimit, error) {
-	ns, ok := s.namespace()
-	if !ok || s.down() {
+	if s.down() {
 		return s.fallback().limits(ctx, customer)
 	}
-	raw, err := s.rdb.Get(ctx, s.g(ns, "limits:"+customer.String())).Result()
+	raw, err := s.rdb.Get(ctx, s.g(s.ns, "limits:"+customer.String())).Result()
 	if s.redisFailed(err) {
 		return s.fallback().limits(ctx, customer)
 	}
@@ -2060,7 +2025,7 @@ func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([
 		}
 		lines = page.Items
 	}
-	unsentRaw, err := s.rdb.HGetAll(ctx, s.g(ns, "unsent:"+customer.String())).Result()
+	unsentRaw, err := s.rdb.HGetAll(ctx, s.g(s.ns, "unsent:"+customer.String())).Result()
 	if s.redisFailed(err) {
 		return lines, nil
 	}
@@ -2077,10 +2042,10 @@ func (s *sharedGate) limits(ctx context.Context, customer billing.CustomerID) ([
 // process cannot reach is not waited for: it is lost with Redis, never
 // billed.
 func (s *sharedGate) flush(ctx context.Context) error {
-	ns, ok := s.namespace()
-	if !ok || s.down() {
+	if s.down() {
 		return nil
 	}
+	ns := s.ns
 	ctx, cancel := boundContext(ctx)
 	defer cancel()
 	leases, err := s.rdb.SMembers(ctx, s.g(ns, "leases")).Result()
@@ -2154,11 +2119,9 @@ func (s *sharedGate) close(ctx context.Context) error {
 	case <-ctx.Done():
 		return errors.Join(err, waitErr(ctx))
 	}
-	if ns, ok := s.namespace(); ok {
-		others, lerr := leaveScript.Run(ctx, s.rdb, []string{s.g(ns, "procs")}, s.proc, time.Now().Add(-gateProcTTL).UnixMilli()).Int64()
-		if lerr == nil && others == 0 {
-			err = errors.Join(err, s.closeGroup(ctx, ns))
-		}
+	others, lerr := leaveScript.Run(ctx, s.rdb, []string{s.g(s.ns, "procs")}, s.proc, time.Now().Add(-gateProcTTL).UnixMilli()).Int64()
+	if lerr == nil && others == 0 {
+		err = errors.Join(err, s.closeGroup(ctx, s.ns))
 	}
 	return errors.Join(err, s.fallback().close(ctx))
 }

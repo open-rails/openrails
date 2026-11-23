@@ -7,15 +7,13 @@ import "time"
 // price. Quantity is the seats wanted, within the price's bounds; nil keeps
 // them. Only a per-seat price has seats: a quantity for any other is refused
 // with quantity_not_allowed. Reason is why staff make the change, required
-// on a change (not a preview) and kept with it and any charge. IdempotencyKey
-// identifies the change; reuse it until the change resolves. Staff changes on
+// on a change (not a preview) and kept with it and any charge. Staff changes on
 // engine-billed subscriptions take effect at renewal, with no immediate charge.
 // The customer endpoints use their own immediate upgrade/seat-increase flow.
 type ChangeSubscriptionParams struct {
-	PriceID        *PriceID `json:"price_id,omitempty"`
-	Quantity       *int     `json:"quantity,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
-	IdempotencyKey string   `json:"-"`
+	PriceID  *PriceID `json:"price_id,omitempty"`
+	Quantity *int     `json:"quantity,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
 }
 
 // SubscriptionChange is the result of a subscription change. Status is

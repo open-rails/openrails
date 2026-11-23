@@ -245,9 +245,13 @@ func TestPSPControls(t *testing.T) {
 				require.Empty(t, p.provider.effects(t))
 			})
 		}
-		declared, err := a.local.DeclarePSP(t.Context(), billing.PSPDeclaration{Key: "stripe", Rail: billing.RailStripe, Environment: "test", PSPAccount: billing.PSPAccount{AccountID: "acct_e2e"}})
+		unarmed := pspInput()
+		unarmed.Credentials = map[string]string{}
+		_, err := a.alphaRemote.CreatePSP(t.Context(), unarmed)
+		pspRefusal(t, err, 403, "psp_claim_requires_proof")
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
-		require.False(t, declared.Credentials["secret_key"].Configured)
+		require.Empty(t, psps.Items, "an account claimed without credentials is not declared")
 		input := saleInput(t, a, p.provider)
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "unarmed-processor"})
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
@@ -669,7 +673,7 @@ func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
 	var err error
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
-	w.alpha, err = w.engine.MerchantBySlug("alpha")
+	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)
 	return w
 }

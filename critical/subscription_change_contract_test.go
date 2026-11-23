@@ -101,7 +101,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 	t.Run("OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		price := upgradePrice(t, a, sub)
-		params := billing.ChangeSubscriptionParams{PriceID: &price.ID, Reason: "Customer requested larger plan", IdempotencyKey: "scheduled-upgrade"}
+		params := billing.ChangeSubscriptionParams{PriceID: &price.ID, Reason: "Customer requested larger plan"}
 		preview, err := a.alpha.PreviewSubscriptionChange(t.Context(), sub.ID, params)
 		require.NoError(t, err)
 		require.Equal(t, "period_end", preview.Effective)
@@ -114,12 +114,12 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.Len(t, options.Items, 1)
 		require.Equal(t, price.ID, options.Items[0].Price.ID)
 		require.Equal(t, *preview, options.Items[0].Preview)
-		changed, err := a.alpha.ChangeSubscription(t.Context(), sub.ID, params)
+		changed, err := a.alpha.ChangeSubscription(t.Context(), "scheduled-upgrade", sub.ID, params)
 		require.NoError(t, err)
 		require.Equal(t, preview.Effective, changed.Effective)
 		require.Equal(t, preview.AmountDueNow, changed.AmountDueNow)
 		require.Equal(t, preview.NextChargeAmount, changed.NextChargeAmount)
-		repeat, err := a.alpha.ChangeSubscription(t.Context(), sub.ID, params)
+		repeat, err := a.alpha.ChangeSubscription(t.Context(), "scheduled-upgrade", sub.ID, params)
 		require.NoError(t, err)
 		require.Equal(t, changed, repeat)
 		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
@@ -155,12 +155,12 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodeQuantityNotAllowed, refusal.Code)
 		price := upgradePrice(t, a, sub)
-		params := billing.ChangeSubscriptionParams{PriceID: &price.ID, Reason: "Attempt stale target", IdempotencyKey: "stale-preview"}
+		params := billing.ChangeSubscriptionParams{PriceID: &price.ID, Reason: "Attempt stale target"}
 		_, err = a.alpha.PreviewSubscriptionChange(t.Context(), sub.ID, params)
 		require.NoError(t, err)
 		_, err = a.alpha.UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 		require.NoError(t, err)
-		_, err = a.alpha.ChangeSubscription(t.Context(), sub.ID, params)
+		_, err = a.alpha.ChangeSubscription(t.Context(), "stale-preview", sub.ID, params)
 		require.Error(t, err)
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodeSubscriptionChangeTargetInactive, refusal.Code)
@@ -339,7 +339,7 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 	})
 	t.Run("OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats", func(t *testing.T) {
 		s := stripeSeatMembership(t)
-		changed, err := s.alpha.ChangeSubscription(t.Context(), s.sub.ID, billing.ChangeSubscriptionParams{PriceID: &s.silver.ID, Reason: "Customer asked for the smaller plan", IdempotencyKey: "three-seat-downgrade"})
+		changed, err := s.alpha.ChangeSubscription(t.Context(), "three-seat-downgrade", s.sub.ID, billing.ChangeSubscriptionParams{PriceID: &s.silver.ID, Reason: "Customer asked for the smaller plan"})
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", changed.Status, changed.Message)
 		require.Equal(t, "period_end", changed.Effective)

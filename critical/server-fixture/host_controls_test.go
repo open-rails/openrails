@@ -27,16 +27,6 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 	var err error
 	mid, _ := billing.ParseMerchantID(cmd.Merchant)
 	switch cmd.Op {
-	case "declare-psp":
-		var declaration billing.PSPDeclaration
-		if err = json.Unmarshal(cmd.Body, &declaration); err == nil {
-			local, localErr := srv.Engine().LocalMerchant(mid)
-			if localErr != nil {
-				err = localErr
-			} else {
-				result, err = local.DeclarePSP(t.Context(), declaration)
-			}
-		}
 	case "new-directory":
 		apps, listErr := srv.AuthKit().ListRemoteApplications(t.Context(), iam.GroupByID(mid.String()), iam.PageRequest{})
 		if listErr != nil {

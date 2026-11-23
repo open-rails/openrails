@@ -81,7 +81,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		require.NoError(t, err)
 		customer := billing.CustomerID(uuid.MustParse(s.alice.ID))
 		expires := s.clock.Now().Add(time.Hour)
-		created, err := s.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires, IdempotencyKey: "solana-expiring"})
+		created, err := s.alpha.CreateOrder(t.Context(), "solana-expiring", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
 		require.NoError(t, err)
 		// Quoted ten minutes before the order expires: the quote and its late
 		// window outlive the order.
@@ -206,7 +206,7 @@ func TestOrderExpiryClock(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &order))
 			lapsed = append(lapsed, order.ID)
 		}
-		_, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}}, IdempotencyKey: "while-held"})
+		_, err := a.alphaRemote.CreateOrder(t.Context(), "while-held", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}}})
 		var refused *billing.StatusError
 		require.ErrorAs(t, err, &refused)
 		require.Equal(t, "already_owned", refused.Code, "before its expiry the open order holds the line")
@@ -217,7 +217,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		for _, line := range preview.Lines {
 			require.Nil(t, line.Refusal)
 		}
-		merchantOrder, err := a.alpha.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}}, IdempotencyKey: "after-expiry"})
+		merchantOrder, err := a.alpha.CreateOrder(t.Context(), "after-expiry", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: forMerchant}}})
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderOpen, merchantOrder.Status)
 		status, raw := a.request(t, http.MethodPut, "/v1/me/cart/lines/"+forCart.String(), a.aliceToken, billing.SetCartLineParams{})

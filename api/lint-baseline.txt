@@ -143,7 +143,6 @@ enum-field billing.MerchantSettings.ProviderRefundAccess
 enum-field billing.NotificationData.Rail
 enum-field billing.OrderPaymentOption.Rail
 enum-field billing.PSP.Environment
-enum-field billing.PSPDeclaration.Environment
 enum-field billing.PSPImport.Rail
 enum-field billing.PSPPaymentConfig.Rail
 enum-field billing.ParkedSubscription.Rail
@@ -420,13 +419,7 @@ internal server.FormerNamesFinite
 internal server.FormerNamesForever
 internal server.FormerNamesImmediate
 internal server.NamingConfig.FormerNames
-json-dash billing.ChangeSubscriptionParams.IdempotencyKey
-json-dash billing.CreateOrderParams.IdempotencyKey
-json-dash billing.CreateProductAccessBatchParams.IdempotencyKey
-json-dash billing.RefundPaymentParams.IdempotencyKey
 json-dash billing.RenameMerchantParams.ActorUserID
-json-dash billing.RetrySubscriptionNowParams.IdempotencyKey
-json-dash billing.RetrySubscriptionNowParams.SubscriptionID
 json-dash openrails.MerchantDeclaration.Binding
 reexport openrails.CredentialAPIKey
 reexport openrails.CredentialAccessToken

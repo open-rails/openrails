@@ -811,11 +811,8 @@ func (w *scimRefusals) flush() {
 }
 
 // scimMerchant is the merchant the SCIM gate admitted: a provisioning
-// token's, an application's, or the in-process directory's.
+// token's or an application's.
 func (e *Env) scimMerchant(r *http.Request) (billing.MerchantID, error) {
-	if !e.SCIMMerchant.IsZero() {
-		return e.SCIMMerchant, nil
-	}
 	if mid, ok := r.Context().Value(provisionerKey{}).(billing.MerchantID); ok && !mid.IsZero() {
 		return mid, nil
 	}

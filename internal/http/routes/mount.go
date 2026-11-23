@@ -51,10 +51,6 @@ type Options struct {
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
 
-	// SCIMMerchant serves the SCIM routes for this merchant without a
-	// credential: a directory in the same process holding the engine.
-	SCIMMerchant billing.MerchantID
-
 	// External are the handlers the assembly owns.
 	External External
 
@@ -160,7 +156,7 @@ func (e *Env) enabled(f Feature) bool {
 	case FeatureCatalogCopilot:
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureCustomerProvisioning:
-		return rt != nil && !rt.HostUserInfo && (e.Groups.Programmatic || !e.SCIMMerchant.IsZero())
+		return rt != nil && !rt.HostUserInfo && e.Groups.Programmatic
 	}
 	panic("routes: unknown feature " + string(f))
 }
@@ -203,9 +199,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthProvider:
 		mw = conn
 	case AuthProvisioning:
-		if e.SCIMMerchant.IsZero() {
-			mw = []router.Middleware{e.provisioningGate(route)}
-		}
+		mw = []router.Middleware{e.provisioningGate(route)}
 	case AuthApplication:
 		mw = append(e.appGates(route), conn...)
 	case AuthCustomer:
@@ -410,13 +404,6 @@ func RegisterAppRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	env.mount(rr, "/v1", in(App, func(r Route) bool {
 		return env.on(r) && (r.Auth == AuthApplication || r.Auth == AuthProvisioning)
 	}))
-}
-
-// RegisterSCIMRoutes mounts the SCIM routes for merchant, without a
-// credential, on a router rooted at the SCIM root: a directory in the same
-// process pushes to them.
-func RegisterSCIMRoutes(rr *router.Router, rt *app.Runtime, merchant billing.MerchantID) {
-	newEnv(rt, Options{SCIMMerchant: merchant}).mount(rr, SCIMRoot, in(App, func(r Route) bool { return r.Auth == AuthProvisioning }))
 }
 
 // SCIMRoot is where the SCIM routes are, beneath the API root.

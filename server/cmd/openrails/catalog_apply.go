@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
 )
@@ -64,7 +64,7 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if err != nil {
 		return err
 	}
-	if err := openrails.WriteCatalogReceipt(cmd.OutOrStdout(), receipt); err != nil {
+	if _, err := io.WriteString(cmd.OutOrStdout(), receipt.String()); err != nil {
 		return fmt.Errorf("write catalog receipt (application committed): %w", err)
 	}
 	if n := len(receipt.Conflicts); n > 0 {

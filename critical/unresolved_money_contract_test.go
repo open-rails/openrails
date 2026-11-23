@@ -104,7 +104,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		a.cfg.Merchants["alpha"] = m
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		queue := hostFleet(t, a.world)
 		settled := recoverSale(t, a, p, queue, order.ID)

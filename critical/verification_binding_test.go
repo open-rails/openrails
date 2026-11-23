@@ -141,7 +141,7 @@ func drainingStripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
 	return a, accounts, sub
 }
@@ -247,7 +247,7 @@ func TestVerificationBinding(t *testing.T) {
 		a.cfg.Merchants["alpha"] = m
 		a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 		require.NoError(t, err)
-		a.alpha, err = a.engine.MerchantBySlug("alpha")
+		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		quietFleet(t, a.world)
 		old.TruncateRoster(1)
@@ -340,8 +340,7 @@ func unretractedGrant(t *testing.T, a *authorityWorld) (billing.CustomerID, stri
 	customer := billing.CustomerID(uuid.New())
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp-reader", DisplayName: "Comp reader", Entitlements: []string{key}})
 	require.NoError(t, err)
-	granted, err := a.alpha.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: "comp-reader",
-		Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 365), Reason: billing.GrantReasonComp}}})
+	granted, err := a.alpha.CreateProductAccess(t.Context(), "comp-reader", billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24 * 365), Reason: billing.GrantReasonComp}}})
 	require.NoError(t, err)
 	require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), granted[0].ID, billing.RevokeProductAccessParams{Reason: "critical drift"}))
 	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET revoked_at=NULL, revoke_reason=NULL WHERE id=$1", uuid.UUID(granted[0].ID))

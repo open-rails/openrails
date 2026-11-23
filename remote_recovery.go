@@ -9,7 +9,7 @@ import (
 
 // ListSubscriptions returns one page of the merchant's subscriptions matching
 // params, newest first.
-func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error) {
+func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams) (*billing.ListPage[billing.Subscription], error) {
 	q := pageValues(nil, params.PageRequest)
 	if !params.CustomerID.IsZero() {
 		q.Set("customer_id", params.CustomerID.String())
@@ -33,7 +33,7 @@ func (c *Client) ListSubscriptions(ctx context.Context, params billing.Subscript
 		return nil, err
 	}
 	var out billing.ListPage[billing.Subscription]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/subscriptions?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -48,13 +48,13 @@ func subscriptionPath(id billing.SubscriptionID) (string, error) {
 }
 
 // GetSubscription reads one subscription.
-func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
+func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Subscription
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -62,13 +62,13 @@ func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID,
 
 // GetSubscriptionHistory reads retained subscription evidence, newest first.
 // It uses the merchant's subscription read permission, including when embedded.
-func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.SubscriptionHistory, error) {
+func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.SubscriptionID, page billing.PageRequest) (*billing.SubscriptionHistory, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.SubscriptionHistory
-	if err := c.do(ctx, http.MethodGet, path+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/history?"+pageValues(nil, page).Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -77,14 +77,14 @@ func (c *Client) GetSubscriptionHistory(ctx context.Context, id billing.Subscrip
 // CancelSubscription cancels at the end of the paid period or, with
 // RevokeAccess, immediately, and returns the subscription. Both stop provider
 // billing.
-func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
-	return c.subscriptionAction(ctx, http.MethodPost, id, "/cancel", params, requestOptions...)
+func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams) (*billing.Subscription, error) {
+	return c.subscriptionAction(ctx, http.MethodPost, id, "/cancel", params)
 }
 
 // ResumeSubscription undoes a scheduled cancel before the paid period ends
 // and returns the subscription.
-func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
-	return c.subscriptionAction(ctx, http.MethodPost, id, "/resume", nil, requestOptions...)
+func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error) {
+	return c.subscriptionAction(ctx, http.MethodPost, id, "/resume", nil)
 }
 
 // SetSubscriptionPaymentMethod gives a subscription its own card, another of
@@ -92,20 +92,20 @@ func (c *Client) ResumeSubscription(ctx context.Context, id billing.Subscription
 // the customer's default card for its currency, and returns the
 // subscription. Staff selection preserves the retry schedule and does not
 // resume stopped dunning; it is not an immediate collection request.
-func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
+func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams) (*billing.Subscription, error) {
 	if params.PaymentMethodID != nil && params.PaymentMethodID.IsZero() {
 		return nil, invalidErr("payment_method_id is invalid")
 	}
-	return c.subscriptionAction(ctx, http.MethodPut, id, "/payment-method", params, requestOptions...)
+	return c.subscriptionAction(ctx, http.MethodPut, id, "/payment-method", params)
 }
 
-func (c *Client) subscriptionAction(ctx context.Context, method string, id billing.SubscriptionID, suffix string, body any, requestOptions ...RequestOption) (*billing.Subscription, error) {
+func (c *Client) subscriptionAction(ctx context.Context, method string, id billing.SubscriptionID, suffix string, body any) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Subscription
-	if err := c.do(ctx, method, path+suffix, body, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, method, path+suffix, body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -114,13 +114,13 @@ func (c *Client) subscriptionAction(ctx context.Context, method string, id billi
 // ListSubscriptionChangeOptions lists the prices staff can change a
 // subscription to, each with what the customer would pay from the next
 // renewal. A target the change would refuse is left out.
-func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.ListPage[billing.SubscriptionChangeOption], error) {
+func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.SubscriptionID) (*billing.ListPage[billing.SubscriptionChangeOption], error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.ListPage[billing.SubscriptionChangeOption]
-	if err := c.do(ctx, http.MethodGet, path+"/change/options", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/change/options", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -129,13 +129,13 @@ func (c *Client) ListSubscriptionChangeOptions(ctx context.Context, id billing.S
 // PreviewSubscriptionChange reports what changing a subscription's price or
 // seats would charge and when it would take effect, without changing
 // anything. A staff change charges nothing and waits for the next renewal.
-func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChangePreview, error) {
+func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChangePreview, error) {
 	path, err := changePath(id, params)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.SubscriptionChangePreview
-	if err := c.do(ctx, http.MethodPost, path+"/change/preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/change/preview", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -143,14 +143,15 @@ func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.Subsc
 
 // ChangeSubscription moves a subscription to another price of its tier group,
 // to other seats of a per-seat price, or both. As staff it charges nothing:
-// the change applies at the next renewal. The same IdempotencyKey replays it.
-func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error) {
+// the change applies at the next renewal. idempotencyKey is required: reuse
+// it until the change resolves; the same key replays it.
+func (c *Client) ChangeSubscription(ctx context.Context, idempotencyKey string, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error) {
 	path, err := changePath(id, params)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.SubscriptionChange
-	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change", params, &out, idempotent(idempotencyKey)); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -174,7 +175,7 @@ func changePath(id billing.SubscriptionID, params billing.ChangeSubscriptionPara
 }
 
 // ListPaymentMethods is one page of a customer's saved cards, newest first.
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, params billing.PaymentMethodListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error) {
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, params billing.PaymentMethodListParams) (*billing.ListPage[billing.PaymentMethod], error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
@@ -184,7 +185,7 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.Cust
 		return nil, err
 	}
 	var out billing.ListPage[billing.PaymentMethod]
-	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -193,7 +194,7 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.Cust
 // DeletePaymentMethod removes an owned unused card only after its holder
 // confirms deletion. Existing subscriptions and accepted payments block removal;
 // retries recover the same operation and financial records remain available.
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID, requestOptions ...RequestOption) error {
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID) error {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return err
@@ -202,5 +203,5 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.Cus
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodDelete, path+"/payment-methods/"+id, nil, nil, requestOptions...)
+	return c.do(ctx, http.MethodDelete, path+"/payment-methods/"+id, nil, nil)
 }

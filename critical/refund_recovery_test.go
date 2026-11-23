@@ -40,7 +40,7 @@ func TestRefundRecovery(t *testing.T) {
 		for _, key := range []string{"overlap-first", "overlap-second"} {
 			go func() {
 				<-start
-				refund, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Amount: 20_000_000, Reason: "Overlapping request", IdempotencyKey: key})
+				refund, err := a.alpha.RefundPayment(t.Context(), key, payment, billing.RefundPaymentParams{Amount: 20_000_000, Reason: "Overlapping request"})
 				answers <- answer{refund, err}
 			}()
 		}
@@ -60,7 +60,7 @@ func TestRefundRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 20_000_000, read.AmountRefunded)
 		require.Len(t, read.Refunds, 1)
-		final, err := a.alpha.RefundPayment(t.Context(), payment, billing.RefundPaymentParams{Full: true, Reason: "Return remainder", IdempotencyKey: "overlap-remainder"})
+		final, err := a.alpha.RefundPayment(t.Context(), "overlap-remainder", payment, billing.RefundPaymentParams{Full: true, Reason: "Return remainder"})
 		require.NoError(t, err)
 		require.EqualValues(t, -10_000_000, final.Amount)
 		var debited, refunded int64
@@ -86,8 +86,8 @@ func TestRefundRecovery(t *testing.T) {
 		p.mu.Lock()
 		p.lostRefundResponse = true
 		p.mu.Unlock()
-		params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Refund with response lost", IdempotencyKey: "refund-response-lost"}
-		_, _ = a.alpha.RefundPayment(t.Context(), payment, params)
+		params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Refund with response lost"}
+		_, _ = a.alpha.RefundPayment(t.Context(), "refund-response-lost", payment, params)
 		effects := p.effects(t)
 		require.Len(t, effects, 2, "provider must actually have returned money before the loss")
 		var refundID string
@@ -118,7 +118,7 @@ func TestRefundRecovery(t *testing.T) {
 			read, err := a.alpha.GetPayment(t.Context(), payment)
 			return err == nil && read.AmountRefunded == 10_000_000
 		}, 20*time.Second, 20*time.Millisecond)
-		replay, err := a.alpha.RefundPayment(t.Context(), payment, params)
+		replay, err := a.alpha.RefundPayment(t.Context(), "refund-response-lost", payment, params)
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, replay.Status)
 		require.EqualValues(t, -10_000_000, replay.Amount)

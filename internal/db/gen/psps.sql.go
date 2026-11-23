@@ -90,57 +90,6 @@ func (q *Queries) CountPSPOpenObligations(ctx context.Context, arg CountPSPOpenO
 	return items, nil
 }
 
-const declarePSPIdentity = `-- name: DeclarePSPIdentity :one
-INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
-VALUES ($1::uuid, $2::uuid, $3::text,
-        $4::text, $5::text, $6::text)
-ON CONFLICT (rail, live, account_id) DO UPDATE SET id=billing.psps.id
-WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
-  AND billing.psps.key = EXCLUDED.key
-RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest
-`
-
-type DeclarePSPIdentityParams struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-	AccountID   string
-	Key         string
-}
-
-// Declaration supplies attribution only. A matching existing account keeps
-// its original id, key and discovered state.
-func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentityParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, declarePSPIdentity,
-		arg.ID,
-		arg.MerchantID,
-		arg.Rail,
-		arg.Environment,
-		arg.AccountID,
-		arg.Key,
-	)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-		&i.SupersededAt,
-		&i.Live,
-		&i.WebhookDigest,
-	)
-	return i, err
-}
-
 const getPSP = `-- name: GetPSP :one
 SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at, live, webhook_digest FROM billing.psps
 WHERE psps.merchant_id = $2::uuid AND id = $1

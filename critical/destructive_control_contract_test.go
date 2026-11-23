@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
@@ -42,6 +43,23 @@ func hostHeldCredits(t *testing.T) (*authorityWorld, []billing.CreditGrant, bill
 	balance(t, a.alpha, customer, 200, 0, 200)
 	return a, grants, holds.Items[0]
 }
+
+// holdEvidence is the actor whose action opened hold, its target, and who
+// cleared it: the private review the standalone server's operator lists.
+func holdEvidence(t *testing.T, a *authorityWorld, hold billing.DestructiveHold) (trigger auth.Invoker, target string, clearedBy *auth.Invoker) {
+	t.Helper()
+	var issuer, id *string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor_issuer, actor_id, target, cleared_by_issuer, cleared_by_id FROM "+pgx.Identifier{a.schema, "destructive_holds"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
+		hold.MerchantID.UUID(), hold.ID.UUID()).Scan(&trigger.Issuer, &trigger.ID, &target, &issuer, &id))
+	if issuer != nil && id != nil {
+		clearedBy = &auth.Invoker{Issuer: *issuer, ID: *id}
+	}
+	return trigger, target, clearedBy
+}
+
+// holdReviewer is the person a host verified to review holds.
+var holdReviewer = auth.Invoker{Issuer: "https://operator.critical.invalid", ID: "verified-human"}
+
 func TestDestructiveControls(t *testing.T) {
 	t.Run("OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
@@ -52,20 +70,18 @@ func TestDestructiveControls(t *testing.T) {
 		require.EqualValues(t, 1, hold.Requested)
 		require.EqualValues(t, 5, hold.Ceiling)
 		require.Nil(t, hold.ClearedAt)
-		reviews, err := a.engine.ListOpenDestructiveHolds(t.Context(), 100, billing.DestructiveHoldID{})
-		require.NoError(t, err)
-		require.Len(t, reviews, 1)
-		require.Equal(t, hold.ID, reviews[0].Hold.ID)
-		require.NotEmpty(t, reviews[0].TriggerActor.ID)
-		require.NotEmpty(t, reviews[0].TriggerActor.Issuer)
-		require.Equal(t, grants[5].ID.UUID().String(), reviews[0].Target)
+		trigger, target, clearedBy := holdEvidence(t, a, hold)
+		require.NotEmpty(t, trigger.ID)
+		require.NotEmpty(t, trigger.Issuer)
+		require.Equal(t, grants[5].ID.UUID().String(), target)
+		require.Nil(t, clearedBy)
 		var revoker *string
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE merchant_id = $1 AND supersedes_id = $2 AND event = 'revoke'",
 			a.alpha.MerchantID().UUID(), grants[0].ID.UUID()).Scan(&revoker))
 		require.NotNil(t, revoker, "a credit grant's revoke names the staff member who made it")
 		require.NotEmpty(t, *revoker)
 		for range 2 {
-			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err := a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.Error(t, err)
 		}
 		current, err := a.alpha.GetCreditGrant(t.Context(), grants[5].ID)
@@ -107,7 +123,12 @@ func TestDestructiveControls(t *testing.T) {
 	})
 	t.Run("OR-J34-S02/noninteractive-and-foreign-authority-cannot-clear-or-forge-actor", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
-		for _, client := range []*openrails.Client{a.alphaRemote, a.betaRemote, a.alpha} {
+		// The host's own handle names no person, and the person whose action
+		// opened the hold cannot clear it, however the host names them.
+		trigger, _, _ := holdEvidence(t, a, hold)
+		self, err := a.alpha.ActingFor(trigger)
+		require.NoError(t, err)
+		for _, client := range []*openrails.Client{a.alphaRemote, a.betaRemote, a.alpha, self} {
 			_, err := client.ClearDestructiveHold(t.Context(), hold.ID, billing.ClearDestructiveHoldParams{Reason: "untrusted clear"})
 			require.Error(t, err)
 		}
@@ -150,10 +171,14 @@ func TestDestructiveControls(t *testing.T) {
 	})
 	t.Run("OR-J34-S03/reviewed-clear-resumes-action-without-replaying-prior-effects", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
-		cleared, err := a.engine.ClearDestructiveHold(t.Context(), a.alpha.MerchantID(), hold.ID, billing.DestructiveOperator{Issuer: "https://operator.critical.invalid", ID: "verified-human"}, "reviewed seven independent corrections")
+		reviewer, err := a.alpha.ActingFor(holdReviewer)
+		require.NoError(t, err)
+		cleared, err := reviewer.ClearDestructiveHold(t.Context(), hold.ID, billing.ClearDestructiveHoldParams{Reason: "reviewed seven independent corrections"})
 		require.NoError(t, err)
 		require.NotNil(t, cleared.ClearedAt)
 		require.Equal(t, hold.ID, cleared.ID)
+		_, _, clearedBy := holdEvidence(t, a, hold)
+		require.Equal(t, &holdReviewer, clearedBy, "the clear records the person the host named")
 		for range 2 {
 			result, err := a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.NoError(t, err)
@@ -166,9 +191,10 @@ func TestDestructiveControls(t *testing.T) {
 		events, err := a.alpha.ListEvents(t.Context(), billing.EventQuery{Types: []string{string(billing.HostEventDestructiveHoldCleared)}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 1)
-		open, err := a.engine.ListOpenDestructiveHolds(t.Context(), 100, billing.DestructiveHoldID{})
+		stored, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{IDs: []billing.DestructiveHoldID{hold.ID}})
 		require.NoError(t, err)
-		require.Empty(t, open)
+		require.Len(t, stored.Items, 1)
+		require.NotNil(t, stored.Items[0].ClearedAt)
 	})
 	t.Run("OR-J34-S04/finding-resolution-cannot-bypass-destructive-hold", func(t *testing.T) {
 		a, grants, hold := hostHeldCredits(t)
@@ -185,10 +211,23 @@ func TestDestructiveControls(t *testing.T) {
 		// Finding presentation operations cannot clear financial authority.
 		_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[6].ID, billing.RevokeCreditGrantParams{Reason: "another correction"})
 		require.Error(t, err)
-		reviews, err := a.engine.ListOpenDestructiveHolds(t.Context(), 100, billing.DestructiveHoldID{})
+		stored, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 		require.NoError(t, err)
-		require.Len(t, reviews, 1)
-		require.Equal(t, hold.ID, reviews[0].Hold.ID)
+		require.Len(t, stored.Items, 1)
+		require.Equal(t, hold.ID, stored.Items[0].ID)
+		require.Nil(t, stored.Items[0].ClearedAt)
 		balance(t, a.alpha, grants[5].CustomerID, 200, 0, 200)
+	})
+	t.Run("OR-J34-S31/a-remote-handle-refuses-acting-for", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		_, err := a.alphaRemote.ActingFor(holdReviewer)
+		require.Error(t, err, "a remote handle's credential names its caller")
+		reviewer, err := a.alpha.ActingFor(holdReviewer)
+		require.NoError(t, err)
+		_, err = openrails.NewGate(reviewer, openrails.GateDeps{})
+		require.Error(t, err, "a gate serves every request, so it takes the merchant's own handle")
+		product, err := reviewer.CreateProduct(t.Context(), billing.CreateProductParams{Key: "acted-for", DisplayName: "Acted for"})
+		require.NoError(t, err)
+		require.Equal(t, "acted-for", product.Key)
 	})
 }

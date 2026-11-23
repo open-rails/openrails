@@ -101,12 +101,17 @@ func grants(held map[string]*int) func(billing.CheckEntitlementsParams) billing.
 // cachedClient's handle knows its merchant, so its first check can fill.
 func cachedClient(t *testing.T, server *entitlementServer, cache EntitlementCheckCacheOptions) *Client {
 	t.Helper()
-	remote, err := NewRemote(server.URL, RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{server.merchant: {APIKey: "test-key"}}, EntitlementCheckCache: cache})
+	return remoteHandle(t, server.URL, server.merchant, RemoteCredential{APIKey: "test-key"}, cache)
+}
+
+func remoteHandle(t *testing.T, url string, mid billing.MerchantID, credential RemoteCredential, cache EntitlementCheckCacheOptions) *Client {
+	t.Helper()
+	remote, err := NewRemote(url, RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{mid: credential}, EntitlementCheckCache: cache})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = remote.Close(context.Background()) })
-	client, err := remote.Merchant(server.merchant)
+	client, err := remote.Merchant(mid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +223,7 @@ func TestEntitlementCheckCachesAllowedKeysOnly(t *testing.T) {
 	if _, err := client.CheckEntitlements(t.Context(), prefix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CheckEntitlements(t.Context(), params, WithIdempotencyKey("test-idempotency")); err != nil {
+	if _, err := client.Uncached().CheckEntitlements(t.Context(), params); err != nil {
 		t.Fatal(err)
 	}
 	invalid := params
@@ -352,7 +357,7 @@ func TestEntitlementCheckCacheRequiresMetadataAndScope(t *testing.T) {
 		metadata bool
 	}{
 		{name: "answer without metadata", bound: true},
-		{name: "merchant unresolved", metadata: true},
+		{name: "answer naming no merchant", metadata: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mid := billing.MerchantID(uuid.New())
@@ -379,13 +384,14 @@ func TestEntitlementCheckCacheRequiresMetadataAndScope(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "test-key"})
-			if err != nil {
-				t.Fatal(err)
-			}
+			client := remoteHandle(t, server.URL, mid, RemoteCredential{APIKey: "test-key"}, EntitlementCheckCacheOptions{})
 			params := billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}}
 			for range 2 {
-				if out, err := client.CheckEntitlements(t.Context(), params); err != nil || !out.Entitlements["premium"] {
+				out, err := client.CheckEntitlements(t.Context(), params)
+				switch {
+				case !test.bound && !errors.Is(err, billing.ErrUnreachable):
+					t.Fatalf("unbound check = %+v, %v; want ErrUnreachable", out, err)
+				case test.bound && (err != nil || !out.Entitlements["premium"]):
 					t.Fatalf("check = %+v, %v", out, err)
 				}
 			}
@@ -412,13 +418,10 @@ func TestEntitlementCheckCacheDoesNotSkipTokenProvider(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewRemoteMerchant(server.URL, RemoteCredential{Token: func(context.Context) (string, error) {
+	client := remoteHandle(t, server.URL, mid, RemoteCredential{Token: func(context.Context) (string, error) {
 		tokens.Add(1)
 		return "test-token", nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	}}, EntitlementCheckCacheOptions{})
 	params := billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.New()), Entitlements: []string{"premium"}}
 	for range 2 {
 		if _, err := client.CheckEntitlements(t.Context(), params); err != nil {
@@ -547,24 +550,6 @@ func TestEntitlementRedisBudgetLimitsOutstandingWork(t *testing.T) {
 		}
 		close(release)
 	})
-}
-
-func TestEntitlementCheckCacheFillsOnlyKnownScope(t *testing.T) {
-	server := newEntitlementServer(t, grants(map[string]*int{"premium": nil}))
-	client, err := NewRemoteMerchant(server.URL, RemoteCredential{APIKey: "test-key"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	customer := billing.CustomerID(uuid.New())
-	// The first answer resolves the handle, too late to have read the scope's
-	// generation, so the second check fills and the third is a hit.
-	for range 3 {
-		check(t, client, customer, "premium")
-	}
-	if client.MerchantID() != server.merchant {
-		t.Fatal("handle did not adopt the merchant from the first response")
-	}
-	wantRequests(t, server, 2)
 }
 
 func TestEntitlementCheckLiveDenialRefusesInFlightFill(t *testing.T) {

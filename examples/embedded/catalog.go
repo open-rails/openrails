@@ -23,7 +23,7 @@ func applyCatalog(ctx context.Context, shop *openrails.Client, path string, out 
 	if err != nil {
 		return err
 	}
-	if err := openrails.WriteCatalogReceipt(out, receipt); err != nil {
+	if _, err := io.WriteString(out, receipt.String()); err != nil {
 		return err
 	}
 	if n := len(receipt.Conflicts); n > 0 {

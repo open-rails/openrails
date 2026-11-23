@@ -16,22 +16,22 @@ func meterPath(key string) (string, error) {
 }
 
 // ListMeters returns one page of the merchant's meters, by key.
-func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.Meter], error) {
+func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.Meter], error) {
 	var out billing.ListPage[billing.Meter]
-	if err := c.read(ctx, ReadMeters, "/v1/catalog/meters?"+pageValues(nil, page).Encode(), &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadMeters, "/v1/catalog/meters?"+pageValues(nil, page).Encode(), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // GetMeter reads one meter with its rate card.
-func (c *Client) GetMeter(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Meter, error) {
+func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
 	path, err := meterPath(key)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Meter
-	if err := c.read(ctx, ReadMeters, path, &out, requestOptions...); err != nil {
+	if err := c.read(ctx, ReadMeters, path, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -41,13 +41,13 @@ func (c *Client) GetMeter(ctx context.Context, key string, requestOptions ...Req
 // definition, and with params.RateCard sets or (null) removes the rate card
 // that prices its usage. A meter with recorded usage keeps its definition
 // (billing.ErrConflict, code meter_in_use).
-func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMeterParams, requestOptions ...RequestOption) (*billing.Meter, error) {
+func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMeterParams) (*billing.Meter, error) {
 	path, err := meterPath(key)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Meter
-	if err := c.do(ctx, http.MethodPut, path, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, path, params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

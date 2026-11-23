@@ -1,9 +1,6 @@
 package openrails
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 )
@@ -200,19 +197,4 @@ var ErrUnauthenticated = billingauth.ErrUnauthenticated
 // refusing unknown fields. Issuer is set in code.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
-}
-
-// ReadMerchantFile reads an entry of Config.Merchants from a YAML file in
-// ParseMerchantDeclaration's shape. The file carries PSP credentials, so keep
-// it out of version control.
-func ReadMerchantFile(path string) (MerchantDeclaration, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return MerchantDeclaration{}, err
-	}
-	m, err := config.ParseMerchantDeclaration(raw)
-	if err != nil {
-		return MerchantDeclaration{}, fmt.Errorf("%s: %w", path, err)
-	}
-	return m, nil
 }

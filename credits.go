@@ -43,7 +43,7 @@ func withQuery(path string, q url.Values) string {
 // SourceID makes it idempotent per customer: an identical retry answers the
 // existing grant with Replayed set, one with a different amount, currency or
 // expiry refuses the batch with billing.ErrIdempotencyKeyReused.
-func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams, requestOptions ...RequestOption) ([]billing.CreditGrant, error) {
+func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error) {
 	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateC
 		body.Items[i] = item
 	}
 	var out billing.CreateCreditGrantBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/credit-grants", body, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/credit-grants", body, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -64,7 +64,7 @@ func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateC
 
 // ListCreditGrants lists params.CustomerID's credit grants, newest first, or
 // the grants params.IDs names.
-func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditGrant], error) {
+func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams) (*billing.ListPage[billing.CreditGrant], error) {
 	q := url.Values{}
 	if params.IDs == nil {
 		if params.CustomerID.IsZero() {
@@ -82,7 +82,7 @@ func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGran
 		return nil, err
 	}
 	var out billing.ListPage[billing.CreditGrant]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/credit-grants", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/credit-grants", pageValues(q, params.PageRequest)), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -96,13 +96,13 @@ func creditGrantPath(id billing.CreditGrantID) (string, error) {
 }
 
 // GetCreditGrant reads one credit grant.
-func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID, requestOptions ...RequestOption) (*billing.CreditGrant, error) {
+func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) (*billing.CreditGrant, error) {
 	path, err := creditGrantPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.CreditGrant
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -110,13 +110,13 @@ func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID, r
 
 // RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked
 // grant returns it with Replayed set.
-func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error) {
+func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error) {
 	path, err := creditGrantPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.CreditGrant
-	if err := c.do(ctx, http.MethodPost, path+"/revoke", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/revoke", params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -124,7 +124,7 @@ func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID
 
 // ListBalanceTransactions lists a customer's balance transactions in one currency,
 // newest first, or the transactions params.IDs names.
-func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error) {
+func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams) (*billing.ListPage[billing.BalanceTransaction], error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.C
 		return nil, err
 	}
 	var out billing.ListPage[billing.BalanceTransaction]
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/balance/transactions", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path+"/balance/transactions", pageValues(q, params.PageRequest)), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -145,13 +145,13 @@ func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.C
 
 // GetBalance reads a customer's balance, holds and owed amount in one
 // currency.
-func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error) {
+func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string) (*billing.Balance, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Balance
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/balance", url.Values{"currency": {normalizeCurrency(currency)}}), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path+"/balance", url.Values{"currency": {normalizeCurrency(currency)}}), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

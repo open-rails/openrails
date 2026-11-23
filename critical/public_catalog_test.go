@@ -140,7 +140,7 @@ func TestPublicCatalog(t *testing.T) {
 			require.ErrorIs(t, err, billing.ErrInvalid)
 		}
 		for _, quantity := range []int{-1, 0} {
-			_, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(quantity)}}, IdempotencyKey: fmt.Sprint("invalid-quantity-", quantity)})
+			_, err := a.alphaRemote.CreateOrder(t.Context(), fmt.Sprint("invalid-quantity-", quantity), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(quantity)}}})
 			require.Error(t, err)
 		}
 		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
@@ -212,14 +212,14 @@ func TestPublicCatalog(t *testing.T) {
 		access, err := a.alphaRemote.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: order.CustomerID, Entitlements: []string{"library:read"}})
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["library:read"])
-		_, err = a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: order.CustomerID, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "after-archive"})
+		_, err = a.alphaRemote.CreateOrder(t.Context(), "after-archive", billing.CreateOrderParams{CustomerID: order.CustomerID, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
 		require.Error(t, err)
 		require.Len(t, p.effects(t), 1)
 	})
 	t.Run("OR-J05-S05/accepted-order-terms-survive-price-and-PSP-edits", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		product, price := publicSale(t, a, "immutable", 9_990_000, ptr(24))
-		order, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}, IdempotencyKey: "accepted-terms"})
+		order, err := a.alphaRemote.CreateOrder(t.Context(), "accepted-terms", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}})
 		require.NoError(t, err)
 		next, err := a.alphaRemote.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AccessDurationHours: ptr(48), ExpectedRevision: &price.Revision})
 		require.NoError(t, err)

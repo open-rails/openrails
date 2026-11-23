@@ -21,7 +21,7 @@ const merchantBillingArchivePath = "/v1/merchant/billing-archive"
 // The writer may contain incomplete bytes when an error is returned; publish a
 // file only after success. The Client verifies the archive's integrity footer,
 // and uses the same credential, merchant binding and timeout as other methods.
-func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error {
+func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer) error {
 	if dst == nil {
 		return invalidErr("archive writer is required")
 	}
@@ -40,7 +40,7 @@ func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, reques
 // with the same merchant UUID. Provision destination authority separately and
 // keep destination workers stopped through restoration and reconfiguration.
 // No provider call is made. A lost response can be retried with the same archive.
-func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*billing.BillingArchiveImport, error) {
+func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader) (*billing.BillingArchiveImport, error) {
 	if src == nil {
 		return nil, invalidErr("archive reader is required")
 	}

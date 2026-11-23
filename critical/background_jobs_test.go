@@ -265,7 +265,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, price := publicSale(t, a, "retained-order", 9_990_000, nil)
-		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, IdempotencyKey: "closed-unpaid"})
+		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), "closed-unpaid", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		_, err = a.alphaRemote.CancelOrder(t.Context(), unpaid.ID)
 		require.NoError(t, err)

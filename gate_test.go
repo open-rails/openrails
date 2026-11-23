@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
 )
 
@@ -28,6 +29,7 @@ import (
 // money, balance counts 1000 micros per unit.
 type fakeSync struct {
 	mu        sync.Mutex
+	merchant  billing.MerchantID
 	capacity  map[string]int64
 	balance   int64
 	money     bool
@@ -75,7 +77,7 @@ type fakeLease struct {
 const fakeSet = "standard"
 
 func newFakeSync(capacity map[string]int64) *fakeSync {
-	return &fakeSync{capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{}, versions: map[fakeHold]int64{},
+	return &fakeSync{merchant: billing.MerchantID(uuid.New()), capacity: capacity, settled: map[fakeLine]int64{}, holds: map[fakeHold]map[string]int64{}, versions: map[fakeHold]int64{},
 		leases: map[billing.LeaseID]*fakeLease{}, dead: map[billing.LeaseID]bool{}}
 }
 
@@ -96,7 +98,11 @@ func (f *fakeSync) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (f *fakeSync) client(t *testing.T) *Client {
 	t.Helper()
-	c, err := NewRemoteMerchant("http://openrails.test", RemoteCredential{APIKey: "test-key"}, RemoteMerchantOptions{HTTPClient: &http.Client{Transport: f}})
+	remote, err := NewRemote("http://openrails.test", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{f.merchant: {APIKey: "test-key"}}, HTTPClient: &http.Client{Transport: f}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := remote.Merchant(f.merchant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +158,7 @@ func (f *fakeSync) heldBy(customer billing.CustomerID, limit string, except bill
 }
 
 func (f *fakeSync) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(merchant.BoundHeader, f.merchant.String())
 	if r.URL.Path != "/v1/app/leases/sync" {
 		http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 		return
@@ -372,7 +379,7 @@ func capture(units int64) billing.CaptureUsage {
 	return billing.CaptureUsage{Dimensions: map[string]int64{"units": units}}
 }
 
-func newTestGate(t *testing.T, f *fakeSync, cfg GateConfig) *Gate {
+func newTestGate(t *testing.T, f *fakeSync, cfg GateDeps) *Gate {
 	t.Helper()
 	f.mu.Lock()
 	if len(f.clients) == 0 {
@@ -428,7 +435,7 @@ func TestGateRacesNeverExceedEitherHold(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(cost int64) int64 { return 4 * cost }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		var mu sync.Mutex
@@ -476,7 +483,7 @@ func TestGateHoldingEightyAndCapturingThirtyLeavesSeventy(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 100})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		ticket := mustAdmit(t, g, work(customer, "eighty", 80))
@@ -486,7 +493,7 @@ func TestGateHoldingEightyAndCapturingThirtyLeavesSeventy(t *testing.T) {
 		if err := ticket.Release(t.Context()); err != nil {
 			t.Fatal("release after capture is a no-op:", err)
 		}
-		lines, err := g.Limits(t.Context(), customer)
+		lines, err := g.ListCustomerLimits(t.Context(), customer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -514,7 +521,7 @@ func TestGateNumbersUsageOnceAndResendsAfterALostReply(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(cost int64) int64 { return 100 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		for i := range 5 {
@@ -552,7 +559,7 @@ func TestGateWaitsOutCapacityHeld(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.capHeld = 2
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		started := time.Now()
@@ -578,7 +585,7 @@ func TestGateSendsADeferredWantAgain(t *testing.T) {
 	f.pool(t, 1)
 	synctest.Test(t, func(t *testing.T) {
 		f.deferred = 2
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		lease := leaseOf(g)
 		mustAdmit(t, g, work(billing.CustomerID(uuid.New()), "deferred", 1))
@@ -600,7 +607,7 @@ func TestGateDecidesWarmWhileUnreachableAndSpendsSafe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f.money, f.balance = true, 100_000
 		f.size = func(cost int64) int64 { return 3 * cost }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
@@ -659,7 +666,7 @@ func TestGateSpendsSafeOnMoneyNeverOnUnits(t *testing.T) {
 		safe := int64(50_000)
 		f.money, f.balance, f.safe = true, 100_000, &safe
 		f.size = func(cost int64) int64 { return 2 * cost }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		stated := func(id string, amount int64) billing.AdmitParams {
@@ -686,7 +693,7 @@ func TestGateReturnsLeastRecentlyUsedHolds(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 10})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		g.local.mu.Lock()
 		g.local.maxHolds = 2
@@ -713,7 +720,7 @@ func TestGateTicketLivesAcrossSyncs(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 10})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		ticket := mustAdmit(t, g, work(customer, "long", 4))
@@ -741,7 +748,7 @@ func TestGateRollsOverADeadLease(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 10})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		ticket := mustAdmit(t, g, work(customer, "first", 10))
@@ -818,8 +825,8 @@ func TestGateRestartResendsTheOutboxAndForgetsMemory(t *testing.T) {
 		outbox := &memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}
 		customer := billing.CustomerID(uuid.New())
 
-		durable := newTestGate(t, f, GateConfig{Outbox: outbox})
-		plain := newTestGate(t, f, GateConfig{})
+		durable := newTestGate(t, f, GateDeps{Outbox: outbox})
+		plain := newTestGate(t, f, GateDeps{})
 		for i := range 3 {
 			mustAdmit(t, durable, work(customer, fmt.Sprintf("d-%d", i), 2))
 		}
@@ -837,7 +844,7 @@ func TestGateRestartResendsTheOutboxAndForgetsMemory(t *testing.T) {
 			t.Fatalf("outbox holds %d items, want the unsent capture", len(outbox.items))
 		}
 		f.set(func(f *fakeSync) { f.down = false })
-		restarted := newTestGate(t, f, GateConfig{Outbox: outbox})
+		restarted := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, restarted)
 		time.Sleep(2 * time.Second)
 		f.mu.Lock()
@@ -860,7 +867,7 @@ func TestGateCloseSendsUsageAndReturnsHolds(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 10 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		a, b := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 		for i, c := range []billing.CustomerID{a, b} {
 			if _, err := g.Consume(t.Context(), work(c, fmt.Sprint(i), 3)); err != nil {
@@ -897,7 +904,7 @@ func TestGateRefusesBadInput(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 100})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		bad := work(customer, "", 1)
@@ -922,7 +929,7 @@ func TestGateRefusesBadInput(t *testing.T) {
 	})
 	rdb := nilRedisForTest()
 	defer rdb.Close()
-	if _, err := NewGate(newFakeSync(nil).client(t), GateConfig{Outbox: &memOutbox{}, Redis: rdb}); err == nil {
+	if _, err := NewGate(newFakeSync(nil).client(t), GateDeps{Outbox: &memOutbox{}, Redis: rdb}); err == nil {
 		t.Fatal("Redis and an outbox together are refused")
 	}
 }
@@ -1045,7 +1052,7 @@ func TestGateLeavesADeadLeasesHoldsToSafeSpending(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 100})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		_ = mustAdmit(t, g, work(customer, "warm", 1)).Release(t.Context())
@@ -1119,7 +1126,7 @@ func TestGateRollsOverWhenAnAnswerReportsTheLeaseDead(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 10 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 2)).Release(t.Context())
@@ -1150,7 +1157,7 @@ func TestGateTakesOverloadAsUnreachableAndKeepsUsage(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 20 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
@@ -1202,7 +1209,7 @@ func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
 		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
-		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		g := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1252,7 +1259,7 @@ func TestGateKeepsALiveLeaseItRolledOverUntilItsTicketsEnd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
 		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
-		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		g := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1309,7 +1316,7 @@ func TestGateLeavesARolledOverLeaseToExpireWhileATicketOutlivesIt(t *testing.T) 
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1387,7 +1394,7 @@ func TestGateNeverReusesTheNumberOfAFailedPut(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
 		outbox := &leakyOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, puts: map[billing.LeaseUsageRef]int{}}
-		g := newTestGate(t, f, GateConfig{Outbox: outbox})
+		g := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1425,7 +1432,7 @@ func TestGateResendsUsageASyncLeftUnsettled(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
@@ -1450,7 +1457,7 @@ func TestGateRollsOverWhenTheLeaseSettledNumbersItNeverIssued(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1478,7 +1485,7 @@ func TestGateNeverMakesAnEmptyHold(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.noHolds = true
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		ticket, err := g.Admit(t.Context(), work(billing.CustomerID(uuid.New()), "no-hold", 1))
 		if err != nil {
@@ -1499,7 +1506,7 @@ func TestGateSmallerWaiterSendsItsOwnWant(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		block := make(chan struct{})
 		f.set(func(f *fakeSync) { f.block = block })
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		type result struct {
@@ -1534,7 +1541,7 @@ func TestGateReportsAppliedVersionsUntilASyncIsAnswered(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(cost int64) int64 { return 10 * cost }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
@@ -1561,7 +1568,7 @@ func TestGateFlushIsBoundedWithoutADeadline(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 100})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		if _, err := g.Consume(t.Context(), work(customer, "one", 1)); err != nil {
@@ -1582,7 +1589,7 @@ func TestGateClosesTheEarlierLeasesItResends(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 20 }
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
 		mustAdmit(t, g, work(customer, "warm-up", 1)).Release(t.Context())
@@ -1611,7 +1618,7 @@ func TestGateNeverReturnsAHoldWithAnOpenTicket(t *testing.T) {
 	f := newFakeSync(map[string]int64{"quota": 10})
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
-		g := newTestGate(t, f, GateConfig{})
+		g := newTestGate(t, f, GateDeps{})
 		defer closeGate(t, g)
 		g.local.mu.Lock()
 		g.local.maxHolds = 2

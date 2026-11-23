@@ -20,7 +20,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // EntitlementCheckCacheOptions configures the remote Go client's entitlement
@@ -181,10 +180,9 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 		defer cancel()
 	}
 	cache := c.entitlementChecks
-	var scope entitlementCacheScope
+	scope := c.entitlementCacheScopeOf(c.merchantID, params.CustomerID, keys)
 	var state entitlementCacheState
-	if mid := c.MerchantID(); !mid.IsZero() && ctx.Err() == nil {
-		scope = c.entitlementCacheScopeOf(mid, params.CustomerID, keys)
+	if ctx.Err() == nil {
 		if live {
 			state = cache.probe(ctx, scope)
 		} else {
@@ -209,19 +207,8 @@ func (c *Client) checkEntitlementsCached(ctx context.Context, params billing.Che
 	if err := decodeJSON(response.body, &out); err != nil {
 		return nil, err
 	}
-	if scope.keys == nil {
-		// The first authenticated reply may have just resolved this handle.
-		// Nothing was read before sending, so its answer only evicts.
-		mid := c.MerchantID()
-		if mid.IsZero() {
-			return normalizeEntitlementCheck(&out), nil
-		}
-		scope = c.entitlementCacheScopeOf(mid, params.CustomerID, keys)
-	}
 	deadline := entitlementCheckDeadline(started, cache.maxAge, out)
-	// doResponse checks the header against the handle when it exists. Require
-	// it for storing so only an explicitly bound response can populate entries.
-	storable := state.ok && response.header.Get(merchant.BoundHeader) != "" && entitlementDeadlineAhead(deadline) && ctx.Err() == nil
+	storable := state.ok && entitlementDeadlineAhead(deadline) && ctx.Err() == nil
 	var allowed []entitlementCacheEntry
 	var denied []string
 	for i, key := range keys {

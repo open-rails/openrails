@@ -2,7 +2,13 @@ package billing
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/cadence"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ApplyCatalogParams is how a catalog document applies. Force overwrites the
@@ -31,6 +37,30 @@ type CatalogApplicationReceipt struct {
 	Changes            []CatalogChange     `json:"changes"`
 	Conflicts          []CatalogConflict   `json:"conflicts"`
 	Warnings           []CatalogWarning    `json:"warnings"`
+}
+
+// String is the receipt for a person, as openrails catalog apply prints it:
+// the revisions, each object changed and each one skipped, with why.
+func (r *CatalogApplicationReceipt) String() string {
+	if r == nil {
+		return ""
+	}
+	var b strings.Builder
+	if r.Replayed {
+		fmt.Fprintf(&b, "%s was already applied; nothing changed\n", r.ApplicationID)
+	} else {
+		fmt.Fprintf(&b, "%s: catalog revision %d -> %d\n", r.ApplicationID, r.BaseRevision, r.AppliedRevision)
+	}
+	for _, c := range r.Changes {
+		fmt.Fprintf(&b, "  changed %s (%s), now revision %d\n", catalogObjectName(c.Object, c.Key, c.ProductKey), strings.Join(c.Fields, ", "), c.Revision)
+	}
+	for _, c := range r.Conflicts {
+		fmt.Fprintf(&b, "  %s\n", c)
+	}
+	if len(r.Conflicts) > 0 {
+		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.\n", len(r.Conflicts))
+	}
+	return b.String()
 }
 
 // CatalogWarning is something a document could not do for one price: Refused
@@ -76,6 +106,58 @@ type CatalogConflict struct {
 	// Currency is a price's live currency, which its money fields are in.
 	Currency *string                `json:"currency"`
 	Fields   []CatalogFieldConflict `json:"fields"`
+}
+
+// String is the skipped object for a person: each field's two values,
+// money and durations in readable units, and who set the live one and when.
+func (c CatalogConflict) String() string {
+	var file, live string
+	if c.Currency != nil {
+		file, live = *c.Currency, *c.Currency
+	}
+	for _, f := range c.Fields {
+		if f.Field == "currency" {
+			_ = json.Unmarshal(f.FileValue, &file)
+			_ = json.Unmarshal(f.LiveValue, &live)
+		}
+	}
+	fields := make([]string, 0, len(c.Fields))
+	for _, f := range c.Fields {
+		fields = append(fields, fmt.Sprintf("%s: the file says %s, an edit set %s (%s, %s)", f.Field,
+			readableCatalogValue(f.Field, f.FileValue, file), readableCatalogValue(f.Field, f.LiveValue, live), f.SetBy, f.SetAt.UTC().Format(time.RFC3339)))
+	}
+	return fmt.Sprintf("%s skipped: %s", catalogObjectName(c.Object, c.Key, c.ProductKey), strings.Join(fields, "; "))
+}
+
+func catalogObjectName(object CatalogObjectKind, key string, productKey *string) string {
+	if productKey != nil {
+		return fmt.Sprintf("price %s of product %s", key, *productKey)
+	}
+	return fmt.Sprintf("%s %s", object, key)
+}
+
+func readableCatalogValue(field string, raw json.RawMessage, currency string) string {
+	if string(raw) == "null" {
+		return "none"
+	}
+	switch field {
+	case "unit_amount", "trial_unit_amount":
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			if amount, err := strconv.ParseInt(text, 10, 64); err == nil {
+				if _, known := moneyutil.LookupCurrency(currency); known {
+					return moneyutil.FormatAmount(amount, currency)
+				}
+				return fmt.Sprintf("%d micros", amount)
+			}
+		}
+	case "access_duration_hours", "billing_interval_hours", "billing_interval_months", "trial_duration_hours":
+		var hours int
+		if json.Unmarshal(raw, &hours) == nil {
+			return cadence.FormatHours(hours)
+		}
+	}
+	return string(raw)
 }
 
 // CatalogFieldConflict is one field a document names whose live value an

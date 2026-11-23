@@ -87,7 +87,7 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, b
 	a.cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
-	a.alpha, err = a.engine.MerchantBySlug("alpha")
+	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
 	armDestructive(t, a, true)
 

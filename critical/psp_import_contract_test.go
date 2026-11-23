@@ -177,7 +177,7 @@ func (iw *importWorld) restart(t *testing.T, change func(openrails.PSPs)) {
 	var err error
 	iw.engine, err = openrails.New(t.Context(), iw.cfg, iw.deps)
 	require.NoError(t, err)
-	iw.alpha, err = iw.engine.MerchantBySlug("alpha")
+	iw.alpha, err = declaredMerchant(iw.engine, "alpha")
 	require.NoError(t, err)
 	iw.api = iw.alpha
 	iw.fleet = hostFleet(t, iw.world, 2)
@@ -514,7 +514,7 @@ func TestPSPImport(t *testing.T) {
 			return out
 		}
 		require.Equal(t, []billing.PriceID{prices["pro"].ID}, options())
-		_, err = iw.alpha.ChangeSubscription(t.Context(), subs[0].ID, billing.ChangeSubscriptionParams{PriceID: &prices["old"].ID, Reason: "retired target", IdempotencyKey: "retired-target"})
+		_, err = iw.alpha.ChangeSubscription(t.Context(), "retired-target", subs[0].ID, billing.ChangeSubscriptionParams{PriceID: &prices["old"].ID, Reason: "retired target"})
 		_, code = refusalCode(t, err)
 		require.Equal(t, billing.CodeSubscriptionChangeTargetInactive, code)
 		old, err := iw.alpha.GetPrice(t.Context(), prices["old"].ID, billing.GetPriceParams{})

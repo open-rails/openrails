@@ -225,8 +225,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 	if in.CancelURL != "" {
 		payURL.CancelURL = &in.CancelURL
 	}
-	order, err := h.shop.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: customer, IdempotencyKey: uuid.NewString(),
-		Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
+	order, err := h.shop.CreateOrder(ctx, uuid.NewString(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

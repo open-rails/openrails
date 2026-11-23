@@ -19,8 +19,6 @@ type PaymentRecovery struct {
 }
 
 type RetrySubscriptionNowParams struct {
-	SubscriptionID SubscriptionID `json:"-"`
-	IdempotencyKey string         `json:"-"`
 	// If supplied, the method must be the subscription's current saved method.
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
 }

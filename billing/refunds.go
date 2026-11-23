@@ -10,10 +10,7 @@ var (
 )
 
 // RefundPaymentParams refunds one charge. Exactly one of Amount (native units
-// at the payment currency's scale) or Full is required. IdempotencyKey is
-// mandatory: a retry with the same key returns the same refund and never
-// refunds twice; the same key with different terms is ErrIdempotencyKeyReused.
-// RevokeAccess removes only access funded by this payment, in the refund's
+// at the payment currency's scale) or Full is required. RevokeAccess removes only access funded by this payment, in the refund's
 // transaction; newer paid periods are preserved. Once the payment is fully
 // refunded, a membership OpenRails renews is canceled with it: it ends now
 // when the payment bought its latest period, else at its period end.
@@ -21,9 +18,8 @@ var (
 // and a merchant finding requests review while access stays intact.
 // Provider notifications of an OpenRails refund preserve this decision.
 type RefundPaymentParams struct {
-	Amount         int64  `json:"amount,omitempty,string"`
-	Full           bool   `json:"full,omitempty"`
-	Reason         string `json:"reason,omitempty"`
-	RevokeAccess   bool   `json:"revoke_access,omitempty"`
-	IdempotencyKey string `json:"-"`
+	Amount       int64  `json:"amount,omitempty,string"`
+	Full         bool   `json:"full,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }

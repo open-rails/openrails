@@ -24,20 +24,20 @@ func admissionPath(requestID string) (string, error) {
 
 // GetAdmission reads an admitted request and its current hold state without
 // replaying admission. Denied or no-longer-retained requests are not found.
-func (c *Client) GetAdmission(ctx context.Context, requestID string, options ...RequestOption) (*billing.Admission, error) {
+func (c *Client) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
 	path, err := admissionPath(requestID)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Admission
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // ListAdmissions reads a page of retained admitted requests, newest first.
-func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams, options ...RequestOption) (*billing.ListPage[billing.Admission], error) {
+func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error) {
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "currency": params.Currency, "state": string(params.State)})
 	if !params.From.IsZero() {
@@ -47,7 +47,7 @@ func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionLis
 		q.Set("to", params.To.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.ListPage[billing.Admission]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/app/admissions", q), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/app/admissions", q), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -14,7 +14,7 @@ import (
 // GetAccessTenure returns the customer's elapsed access to the requested
 // entitlement keys, including past product access and retired keys. At must
 // not be in the future; zero uses OpenRails' clock.
-func (c *Client) GetAccessTenure(ctx context.Context, params billing.AccessTenureParams, options ...RequestOption) (*billing.AccessTenure, error) {
+func (c *Client) GetAccessTenure(ctx context.Context, params billing.AccessTenureParams) (*billing.AccessTenure, error) {
 	path, err := customerIDPath(params.CustomerID)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func (c *Client) GetAccessTenure(ctx context.Context, params billing.AccessTenur
 		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.AccessTenure
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/access-tenure", query), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery(path+"/access-tenure", query), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

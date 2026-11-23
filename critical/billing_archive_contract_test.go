@@ -266,8 +266,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		page := hostCheckoutPage(t, target)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, IdempotencyKey: "destination-order", PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
-		_, err = client.CreateOrder(t.Context(), request)
+		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
+		_, err = client.CreateOrder(t.Context(), "destination-order", request)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeProviderWritesDisabled, held.Code)
@@ -275,8 +275,7 @@ func TestBillingArchive(t *testing.T) {
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
 		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
-		request.IdempotencyKey = "destination-after-arm"
-		order, err := client.CreateOrder(t.Context(), request)
+		order, err := client.CreateOrder(t.Context(), "destination-after-arm", request)
 		require.NoError(t, err)
 		address, err := url.Parse(*order.PayURL)
 		require.NoError(t, err)

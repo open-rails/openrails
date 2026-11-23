@@ -11,9 +11,9 @@ import (
 // at the merchant and its effective programmatic permissions. An engine's
 // handle is the merchant's owner and holds
 // every group.
-func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error) {
+func (c *Client) GetAdminAccess(ctx context.Context) (*billing.AdminAccess, error) {
 	var out billing.AdminAccess
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/access", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/access", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
