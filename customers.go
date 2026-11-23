@@ -40,7 +40,8 @@ func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID) (*billi
 
 // UpdateCustomer changes one customer's settings, only the fields params
 // names, and returns its ID and saved settings; a customer not billed yet is
-// created. A person needs a recent sign-in for it.
+// created. Its authority is the route's permission; no recent sign-in is
+// asked for.
 func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams) (*billing.CustomerSettingsResult, error) {
 	path, err := customerIDPath(id)
 	if err != nil {

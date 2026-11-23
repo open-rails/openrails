@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
@@ -33,6 +34,10 @@ func TestAuthorityBoundaries(t *testing.T) {
 		merchant, err := a.alphaRemote.GetProduct(t.Context(), product.ID)
 		require.NoError(t, err)
 		require.Equal(t, read, merchant)
+		// An admin write's authority is its permission: a stale session updates a customer.
+		stale := a.remote(t, a.alpha.MerchantID(), authtest.StaleSession(t, a.auth, a.aliceToken))
+		_, err = stale.UpdateCustomer(t.Context(), billing.CustomerID(uuid.New()), billing.UpdateCustomerParams{})
+		require.NoError(t, err)
 	})
 	t.Run("OR-J01-S02/missing-and-malformed-credential-create-nothing", func(t *testing.T) {
 		a := newAuthorityWorld(t)
