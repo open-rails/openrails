@@ -51,6 +51,9 @@ type CheckEntitlementsParams struct {
 	Prefixes     []string   `json:"prefixes,omitempty"`
 	PrefixLimit  int        `json:"prefix_limit,omitempty"`
 	At           time.Time  `json:"at,omitzero"`
+	// IncludeValidity asks a current exact-key check (no At, no Prefixes) for
+	// EvaluatedAt and ValidUntil, which a cache may rely on.
+	IncludeValidity bool `json:"include_validity,omitempty"`
 }
 
 // EntitlementCheck answers every requested key, and every requested prefix in
@@ -61,6 +64,12 @@ type EntitlementCheck struct {
 	Entitlements map[string]bool             `json:"entitlements"`
 	Quantities   map[string]*int             `json:"quantities"`
 	Held         map[string]HeldEntitlements `json:"held"`
+	// EvaluatedAt is when a check asked for IncludeValidity was answered; null
+	// otherwise.
+	EvaluatedAt *time.Time `json:"evaluated_at"`
+	// ValidUntil is the exclusive deadline for scheduled access changes; null
+	// when EvaluatedAt is null or no change is scheduled.
+	ValidUntil *time.Time `json:"valid_until"`
 }
 
 // HeldEntitlements is the keys a customer holds under one prefix, in byte

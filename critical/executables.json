@@ -1002,6 +1002,9 @@
     "OR-J27-S12": [
       "TestDeclaredAdminGrantImport/OR-J27-S12/imported-grant-concurrent-and-lost-response-replay"
     ],
+    "OR-J27-S13": [
+      "TestRemoteEntitlementCache/OR-J27-S13/merchant-cache-reuses-only-current-scoped-access"
+    ],
     "OR-J04-S42": [
       "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
     ],

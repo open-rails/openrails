@@ -485,6 +485,7 @@ export type CheckEntitlementsParams = {
   prefixes?: string[]
   prefix_limit?: number
   at?: string
+  include_validity?: boolean
 }
 
 export type ClearDestructiveHoldParams = {
@@ -1053,6 +1054,8 @@ export type EntitlementCheck = {
   entitlements: Record<string, boolean> | null
   quantities: Record<string, number | null> | null
   held: Record<string, HeldEntitlements> | null
+  evaluated_at: string | null
+  valid_until: string | null
 }
 
 export type EntitlementReplacement = {
