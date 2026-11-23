@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,11 +13,11 @@ import (
 	"time"
 
 	auth "github.com/open-rails/authkit/auth"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -199,7 +200,7 @@ func mergeHeaders(base, more []string) []string {
 
 // RecoverHTTP converts a handler panic into a 500 envelope; http.ErrAbortHandler
 // keeps propagating.
-func RecoverHTTP() HTTPMiddleware {
+func RecoverHTTP(logger *slog.Logger) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
@@ -207,7 +208,7 @@ func RecoverHTTP() HTTPMiddleware {
 					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 						panic(rec)
 					}
-					log.WithError(fmt.Errorf("panic: %v", rec)).Error("http handler panicked")
+					logger.ErrorContext(r.Context(), "http handler panicked", logx.Err(fmt.Errorf("panic: %v", rec)))
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = w.Write([]byte(`{"error":{"type":"api_error","code":"internal_error","message":"internal server error"}}`))
@@ -221,7 +222,7 @@ func RecoverHTTP() HTTPMiddleware {
 // RequestLogHTTP logs one line per request: method, path, status, latency and
 // ip, the client resolver names as the rate limiter does (nil: the socket
 // peer). skipPaths (health probes) are not logged.
-func RequestLogHTTP(resolver *iputil.TrustedProxies, skipPaths ...string) HTTPMiddleware {
+func RequestLogHTTP(logger *slog.Logger, resolver *iputil.TrustedProxies, skipPaths ...string) HTTPMiddleware {
 	skip := make(map[string]bool, len(skipPaths))
 	for _, p := range skipPaths {
 		skip[p] = true
@@ -237,12 +238,7 @@ func RequestLogHTTP(resolver *iputil.TrustedProxies, skipPaths ...string) HTTPMi
 			start := time.Now()
 			sw := &statusWriter{ResponseWriter: w}
 			next.ServeHTTP(sw, r)
-			log.WithFields(log.Fields{
-				"status":     sw.status(),
-				"latency":    time.Since(start).String(),
-				"ip":         resolver.ClientIP(r),
-				"request_id": requestID,
-			}).Info(r.Method + " " + r.URL.Path)
+			logger.InfoContext(r.Context(), r.Method+" "+r.URL.Path, "status", sw.status(), "latency", time.Since(start).String(), "ip", resolver.ClientIP(r), "request_id", requestID)
 		})
 	}
 }

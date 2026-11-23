@@ -8,13 +8,14 @@ package abusestate
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 )
 
 // tableLimit bounds each memory table; a full table drops the entry closest
@@ -38,13 +39,15 @@ type Store struct {
 	down     atomic.Bool
 
 	fallbacks atomic.Int64
+	Log       *slog.Logger
 }
 
 // New is the store over rdb; nil keeps everything in memory.
-func New(rdb redis.UniversalClient) *Store {
+func New(logger *slog.Logger, rdb redis.UniversalClient) *Store {
 	return &Store{
 		rdb: rdb, now: time.Now,
 		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit), values: newTable(tableLimit),
+		Log: logger,
 	}
 }
 
@@ -282,9 +285,9 @@ func (s *Store) record(err error) {
 	s.down.Store(err != nil)
 	switch {
 	case err != nil && (first || wasUp):
-		log.WithError(err).Error("redis: unreachable; abuse state is in this process's memory until it answers")
+		s.Log.Error("redis: unreachable; abuse state is in this process's memory until it answers", logx.Err(err))
 	case err == nil && !first && !wasUp:
-		log.Info("redis: reachable")
+		s.Log.Info("redis: reachable")
 	}
 }
 

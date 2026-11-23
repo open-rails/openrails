@@ -12,7 +12,7 @@ func (e *Engine) ResolveCustomer(ctx context.Context, authority auth.Authenticat
 	if err := e.CheckOpen(); err != nil {
 		return config.CustomerProof{}, err
 	}
-	binding, err := routes.ResolveExistingCustomer(ctx, e.App.Runtime, authority, verified)
+	binding, err := routes.ResolveExistingCustomer(ctx, e.Log, e.App.Runtime, authority, verified)
 	if err != nil {
 		return config.CustomerProof{}, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/api"
@@ -80,12 +80,13 @@ type adminRateLimitDecision struct {
 // counted in the process's abuse state.
 type AdminOperationLimiter struct {
 	state *abusestate.Store
+	Log   *slog.Logger
 }
 
 // NewAdminOperationLimiter builds the shared limiter used by both merchant
 // action middleware and the root-only unlock endpoint.
-func NewAdminOperationLimiter(state *abusestate.Store) *AdminOperationLimiter {
-	return &AdminOperationLimiter{state: state}
+func NewAdminOperationLimiter(logger *slog.Logger, state *abusestate.Store) *AdminOperationLimiter {
+	return &AdminOperationLimiter{state: state, Log: logger}
 }
 
 // AdminRateLimitMW applies one operation policy after the route gate has
@@ -232,23 +233,14 @@ func (l *AdminOperationLimiter) emit(ctx context.Context, event AdminRateLimitEv
 	if l == nil {
 		return
 	}
-	entry := log.WithContext(ctx).WithFields(log.Fields{
-		"audit_event":   "admin_rate_limit." + event.Kind,
-		"admin_user_id": event.UserID,
-		"actor_user_id": event.ActorID,
-		"merchant_id":   event.MerchantID,
-		"operation":     event.Operation,
-		"counts":        event.Counts,
-		"retry_after":   cadence.FormatDuration(time.Duration(math.Ceil(event.RetryAfter.Seconds())) * time.Second),
-		"request_id":    event.RequestID,
-	})
+	entry := l.Log.With("audit_event", "admin_rate_limit."+event.Kind, "admin_user_id", event.UserID, "actor_user_id", event.ActorID, "merchant_id", event.MerchantID, "operation", event.Operation, "counts", event.Counts, "retry_after", cadence.FormatDuration(time.Duration(math.Ceil(event.RetryAfter.Seconds()))*time.Second), "request_id", event.RequestID)
 	switch event.Kind {
 	case "lockout":
-		entry.Error("admin operation lockout activated")
+		entry.ErrorContext(ctx, "admin operation lockout activated")
 	case "blocked", "threshold":
-		entry.Warn("admin operation rate limit alert")
+		entry.WarnContext(ctx, "admin operation rate limit alert")
 	default:
-		entry.Info("admin operation rate limit audit")
+		entry.InfoContext(ctx, "admin operation rate limit audit")
 	}
 }
 

@@ -35,7 +35,7 @@ func (e *Engine) serveCheckout(cfg config.Config, declarations []config.Merchant
 		e.checkoutOrigin = origin
 		return
 	}
-	limiter := middleware.RateLimitHTTP(rt.Config.RateLimits, rt.Config.Captcha, rt.AbuseState, rt.CaptchaStore, rt.TrustedProxies)
+	limiter := middleware.RateLimitHTTP(e.Log, rt.Config.RateLimits, rt.Config.Captcha, rt.AbuseState, rt.CaptchaStore, rt.TrustedProxies)
 	if e.checkoutOrigin, e.checkout, err = paymentpagehttp.New(rt, origin, assets, nil, limiter); err != nil {
 		rt.Refuse("checkout_assets", fmt.Errorf("%w; no payment page is served and orders get no pay URL", err))
 	}

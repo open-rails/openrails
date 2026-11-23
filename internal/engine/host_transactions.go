@@ -52,7 +52,7 @@ func (e *Engine) AdmitTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx,
 	if err != nil {
 		return nil, err
 	}
-	return handlers.AdmitVerdicts(ctx, requests, func(billing.CustomerID) bool { return true },
+	return handlers.AdmitVerdicts(ctx, e.Log, requests, func(billing.CustomerID) bool { return true },
 		func(ctx context.Context, in service.AdmitInput) (*billing.Admission, error) {
 			return e.svc.AdmitTx(ctx, tx, in)
 		}), nil
@@ -68,7 +68,7 @@ func (e *Engine) CaptureAdmissionsTx(ctx context.Context, mid billing.MerchantID
 	if err != nil {
 		return nil, err
 	}
-	return handlers.CaptureResults(ctx, items, nil, func(ctx context.Context, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
+	return handlers.CaptureResults(ctx, e.Log, items, nil, func(ctx context.Context, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
 		return e.svc.CaptureAdmissionTx(ctx, tx, params)
 	}), nil
 }
@@ -85,7 +85,7 @@ func (e *Engine) ReleaseAdmissionsTx(ctx context.Context, mid billing.MerchantID
 	}
 	out := make([]billing.AdmissionResult, len(requestIDs))
 	for i, id := range requestIDs {
-		out[i] = handlers.ReleaseResult(ctx, strings.TrimSpace(id), func(ctx context.Context, requestID string) (*billing.Admission, error) {
+		out[i] = handlers.ReleaseResult(ctx, e.Log, strings.TrimSpace(id), func(ctx context.Context, requestID string) (*billing.Admission, error) {
 			return e.svc.ReleaseAdmissionTx(ctx, tx, requestID)
 		})
 	}

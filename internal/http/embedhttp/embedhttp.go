@@ -60,7 +60,7 @@ func FromApp(logger *slog.Logger, a *app.App) *Assembler {
 		Cfg:          a.Config,
 		Runtime:      a.Runtime,
 		CaptchaStore: a.Runtime.CaptchaStore,
-		AdminLimiter: middleware.NewAdminOperationLimiter(a.Runtime.AbuseState),
+		AdminLimiter: middleware.NewAdminOperationLimiter(logger, a.Runtime.AbuseState),
 		Log:          logger,
 	}
 }
@@ -84,14 +84,14 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	// the permissive-CORS browser tier.
 	browserRoutes := make(map[string]bool)
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
-	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, embeddedMount, s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
+	httproutes.RegisterMetaRoutes(s.Log, router.NewMuxRecorded(mux, embeddedMount, s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
 
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 		Auth:           s.Auth,
 		ProviderRoutes: &providerRoutes,
 	})
 	if httproutes.StaffGroups(opts.Groups) || opts.Groups.Programmatic {
-		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+		httproutes.RegisterStaffRoutes(s.Log, router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			AdminLimiter: s.AdminLimiter,
 			Groups:       opts.Groups,
@@ -127,7 +127,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		entry := &mux.Entries[i]
 		entry.Browser = browserRoutes[entry.Method+" "+entry.Path]
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, state, s.CaptchaStore, resolver)
+	limiter := middleware.RateLimitHTTP(s.Log, rateLimits, captchaCfg, state, s.CaptchaStore, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler { return s.chain(entry, limiter) })
 	return mux
 }
@@ -138,7 +138,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 func (s *Assembler) chain(entry router.Entry, limiter middleware.HTTPMiddleware) http.Handler {
 	return middleware.ChainHTTP(entry.Handler,
 		middleware.WithRoutePath(entry.Path),
-		middleware.RecoverHTTP(),
+		middleware.RecoverHTTP(s.Log),
 		middleware.SecurityHeadersHTTP(),
 		// #765: static permissive CORS on exactly the purchase patterns
 		// registered into browserTier above — `*` from any origin, no

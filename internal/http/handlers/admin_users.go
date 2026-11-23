@@ -4,10 +4,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -33,7 +33,7 @@ func customerContacts(r *httprequest.Request, customers []billing.CustomerID) ma
 	}
 	found, err := r.State.Contacts.Contacts(ctx, mid, ids)
 	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("list customer contacts unavailable")
+		r.Log.WarnContext(ctx, "list customer contacts unavailable", logx.Err(err))
 		return nil
 	}
 	out := make(map[billing.CustomerID]*billing.CustomerContact, len(found))

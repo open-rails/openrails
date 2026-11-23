@@ -200,7 +200,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		controlPlane:            deps.ControlPlane,
 		resource:                deps.Resource,
 		captchaStore:            deps.Runtime.CaptchaStore,
-		adminLimiter:            middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
+		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
 		adminConsole:            deps.AdminConsole,
 		groups:                  deps.RouteGroups,
@@ -263,7 +263,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		return nil, err
 	}
 
-	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
+	s.sharedRateLimit = middleware.RateLimitHTTP(logger, s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	if err := s.buildPaymentPage(deps.CheckoutOrigin, deps.CheckoutHandler); err != nil {
 		return nil, err
 	}
@@ -311,11 +311,11 @@ func (s *Server) wrapPublicHandler(mux http.Handler) http.Handler {
 func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool) http.Handler {
 	limiter := s.sharedRateLimit
 	if limiter == nil {
-		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
+		limiter = middleware.RateLimitHTTP(s.Log, s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	}
 	return middleware.ChainHTTP(next,
-		middleware.RecoverHTTP(),
-		middleware.RequestLogHTTP(s.trustedProxies(), "/health/live", "/health/ready"),
+		middleware.RecoverHTTP(s.Log),
+		middleware.RequestLogHTTP(s.Log, s.trustedProxies(), "/health/live", "/health/ready"),
 		middleware.SecurityHeadersHTTP(),
 		// CORS is browser transport policy, not API authorization (#765):
 		// every accepted request carries a bearer credential, never an

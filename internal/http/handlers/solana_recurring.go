@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -150,13 +151,13 @@ func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription
 		firstChargeMicros := quote.ChargeNow
 		decimals, err := solanamodule.RequireTokenDecimals(ctx, r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
 		if err != nil {
-			return nil, solanaFailure(err, "resolve token decimals")
+			return nil, solanaFailure(r.Log, err, "resolve token decimals")
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
 			ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
-			return nil, solanaFailure(err, "convert the first charge")
+			return nil, solanaFailure(r.Log, err, "convert the first charge")
 		}
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the
@@ -176,8 +177,8 @@ var errNilRow = errors.New("no row")
 
 // solanaFailure is a transient outage's refusal, or err as an internal
 // failure.
-func solanaFailure(err error, step string) error {
-	if refusal := solanaUnavailable(err); refusal != nil {
+func solanaFailure(logger *slog.Logger, err error, step string) error {
+	if refusal := solanaUnavailable(logger, err); refusal != nil {
 		return refusal
 	}
 	return fmt.Errorf("%s: %w", step, err)
@@ -257,7 +258,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 			result, err = changes.Hint(ctx, subscriptionID, targetPrice.ID, signature)
 		}
 		if err != nil {
-			r.APIError(solanaClientError(err))
+			r.APIError(solanaClientError(r.Log, err))
 			return
 		}
 		r.SuccessJSON(solanaTierChangeResponse(result.Receipt, target))
@@ -323,7 +324,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		Reference:            reference,
 	})
 	if err != nil {
-		r.APIError(solanaClientError(err))
+		r.APIError(solanaClientError(r.Log, err))
 		return
 	}
 	// The agreement is durable before the wallet can sign: whatever becomes of

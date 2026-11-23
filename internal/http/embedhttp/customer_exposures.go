@@ -27,7 +27,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Ta
 	table := &router.Table{Log: a.Log}
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: auth, Providers: providers})
-	return wrapCustomerRoutes(a.Runtime, table, auth), nil
+	return wrapCustomerRoutes(a.Log, a.Runtime, table, auth), nil
 }
 
 // BuildMappedCustomerRoutes uses a host-authorized binding without entering
@@ -43,7 +43,7 @@ func BuildMappedCustomerRoutes(logger *slog.Logger, a *app.App, selection config
 	table := &router.Table{Log: logger}
 	httproutes.RegisterMappedCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: selection.Auth, Providers: providers}, selection.Resolve)
-	return wrapCustomerRoutes(a.Runtime, table, selection.Auth), nil
+	return wrapCustomerRoutes(logger, a.Runtime, table, selection.Auth), nil
 }
 
 // CustomerPrefix is the customer surface's path beneath the mount.

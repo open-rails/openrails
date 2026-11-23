@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -26,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/internal/webhookauth"
-	log "github.com/sirupsen/logrus"
 )
 
 // Per-rail webhook body caps, tighter than DefaultMaxBodyBytes and sized with
@@ -53,7 +54,7 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			log.WithField("max_bytes", maxBytes).Warn("webhook payload exceeded size limit")
+			r.Log.WarnContext(r.Request.Context(), "webhook payload exceeded size limit", "max_bytes", maxBytes)
 			r.ErrorCode(billing.CodeRequestBodyTooLarge, "webhook payload too large")
 			return nil, false
 		}
@@ -69,7 +70,7 @@ func Webhook(r *httprequest.Request) {
 		return
 	}
 	clientIP := r.ClientIP()
-	log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).Debug("Received webhook")
+	r.Log.DebugContext(r.Request.Context(), "Received webhook", "provider", provider, "client_ip", clientIP)
 	if r.State == nil || r.State.Config == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Webhook processing is not configured")
 		return
@@ -90,14 +91,13 @@ func Webhook(r *httprequest.Request) {
 // release the caller must defer. A webhook resolves its merchant inside the
 // handler, so MerchantDBConnMW cannot have pinned it. Nested calls are a
 // no-op.
-func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
+func pinWebhookMerchantConn(logger *slog.Logger, r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
 	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
 		return func() {}, true
 	}
 	ctx, release, err := r.State.DB.WithMerchantConn(merchant.WithID(r.Request.Context(), merchantID))
 	if err != nil {
-		log.WithError(err).WithField("merchant_id", merchantID.String()).
-			Error("webhook: merchant db connection setup failed")
+		logger.ErrorContext(ctx, "webhook: merchant db connection setup failed", logx.Err(err), "merchant_id", merchantID.String())
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return func() {}, false
 	}
@@ -118,7 +118,7 @@ func dispatchStripeWebhook(r *httprequest.Request, signed stripeSigned, accountI
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeWebhookAccountMismatch, "Webhook account does not match payload"))
 			return
 		}
-		log.WithError(herr).Error("failed to hydrate thin stripe event")
+		r.Log.ErrorContext(r.Request.Context(), "failed to hydrate thin stripe event", logx.Err(herr))
 		r.ErrorCode(billing.CodeServiceUnavailable, "the provider event could not be read; retry")
 		return
 	} else if hydrated != nil {
@@ -152,7 +152,7 @@ func dispatchStripeWebhook(r *httprequest.Request, signed stripeSigned, accountI
 			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 			return
 		}
-		log.WithError(err).Error("merchant stripe webhook processing failed")
+		r.Log.ErrorContext(r.Request.Context(), "merchant stripe webhook processing failed", logx.Err(err))
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return
 	}
@@ -164,7 +164,7 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 		r.ErrorCode(billing.CodeInvalidParam, "Webhook account_id is required")
 		return true, false
 	}
-	if rail == subscriptions.RailCCBill && !ccbillWebhookIPAllowed(r, clientIP) {
+	if rail == subscriptions.RailCCBill && !ccbillWebhookIPAllowed(r.Log, r, clientIP) {
 		r.ErrorCode(billing.CodeResourceAccessDenied, "Unauthorized webhook source")
 		return true, false
 	}
@@ -261,11 +261,11 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 
 // ccbillWebhookIPAllowed binds the request to the ONE CCBill source-IP gate
 // (webhookauth.CCBillIPAllowed) that the embedded Service surface also calls.
-func ccbillWebhookIPAllowed(r *httprequest.Request, clientIP string) bool {
+func ccbillWebhookIPAllowed(logger *slog.Logger, r *httprequest.Request, clientIP string) bool {
 	if r == nil || r.State == nil {
 		return iputil.IsValidCCBillIP(clientIP)
 	}
-	return webhookauth.CCBillIPAllowed(r.Request.Context(), r.State.Config, ccbillAccountProbe(r), clientIP)
+	return webhookauth.CCBillIPAllowed(r.Request.Context(), logger, r.State.Config, ccbillAccountProbe(r), clientIP)
 }
 
 // ccbillAccountProbe asks whether the CCBill account the webhook names moves
@@ -323,10 +323,10 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 	noop := func() {}
 	var none T
 	ctx := r.Request.Context()
-	fields := log.Fields{"rail": rail, "account_id": accountID}
+	fields := []any{"rail", rail, "account_id", accountID}
 	candidates, err := r.State.Merchants.ResolvePSPsByAccount(ctx, rail, accountID)
 	if err != nil {
-		log.WithError(err).WithFields(fields).Error("webhook PSP resolution failed")
+		r.Log.With(fields...).ErrorContext(ctx, "webhook PSP resolution failed", logx.Err(err))
 		r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
 		return merchants.PSPIdentity{}, none, noop, false
 	}
@@ -342,7 +342,7 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 			if errors.Is(err, merchants.ErrConfigUnavailable) {
 				r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
 			} else {
-				log.WithError(err).WithFields(fields).Error("merchant webhook: load PSP secrets failed")
+				r.Log.With(fields...).ErrorContext(ctx, "merchant webhook: load PSP secrets failed", logx.Err(err))
 				r.ErrorCode(billing.CodeInternalError, "Credential load failed")
 			}
 			return merchants.PSPIdentity{}, none, noop, false
@@ -359,7 +359,7 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 	case 1:
 		psp := candidates[won[0]]
 		r.Request = r.Request.WithContext(db.WithPSPID(merchant.WithID(ctx, psp.MerchantID), psp.ID))
-		release, ok := pinWebhookMerchantConn(r, psp.MerchantID)
+		release, ok := pinWebhookMerchantConn(r.Log, r, psp.MerchantID)
 		if !ok {
 			return merchants.PSPIdentity{}, none, noop, false
 		}
@@ -372,7 +372,7 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 			}
 		}
 		if report < 0 {
-			warnUndeclaredWebhook(rail, accountID)
+			warnUndeclaredWebhook(r.Log, rail, accountID)
 			report = 0
 		}
 		if refuse(checks[report].err) {
@@ -382,7 +382,7 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 		}
 		return merchants.PSPIdentity{}, none, noop, false
 	}
-	log.WithFields(fields).Error("webhook refused: the delivery verifies for both the live and the non-live PSP of the account, so it cannot be attributed to either")
+	r.Log.With(fields...).ErrorContext(ctx, "webhook refused: the delivery verifies for both the live and the non-live PSP of the account, so it cannot be attributed to either")
 	r.ErrorCode(billing.CodeInternalError, "PSP resolution failed")
 	return merchants.PSPIdentity{}, none, noop, false
 }
@@ -397,7 +397,7 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID strin
 	ctx := r.Request.Context()
 	candidates, err := r.State.Merchants.ResolveCustodiansByIdentity(ctx, kind, tenantID)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"custodian": kind, "account_id": tenantID}).Error("webhook custodian resolution failed")
+		r.Log.ErrorContext(ctx, "webhook custodian resolution failed", logx.Err(err), "custodian", kind, "account_id", tenantID)
 		r.ErrorCode(billing.CodeInternalError, "Custodian resolution failed")
 		return merchants.CustodianIdentity{}, noop, false
 	}
@@ -424,7 +424,7 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID strin
 			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
 			return merchants.CustodianIdentity{}, noop, false
 		default:
-			log.WithFields(log.Fields{"custodian": kind, "account_id": tenantID}).Error("webhook refused: the event verifies for both money classes of the tenant")
+			r.Log.ErrorContext(ctx, "webhook refused: the event verifies for both money classes of the tenant", "custodian", kind, "account_id", tenantID)
 			r.ErrorCode(billing.CodeInternalError, "Custodian resolution failed")
 			return merchants.CustodianIdentity{}, noop, false
 		}
@@ -433,7 +433,7 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID strin
 	// anything enqueued here is custodian-addressed, never one of its PSPs.
 	ctx = merchant.WithID(ctx, custodian.MerchantID)
 	r.Request = r.Request.WithContext(db.WithCustodianID(ctx, custodian.ID))
-	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
+	release, ok := pinWebhookMerchantConn(r.Log, r, custodian.MerchantID)
 	if !ok {
 		return merchants.CustodianIdentity{}, noop, false
 	}
@@ -522,7 +522,7 @@ func dispatchNMIWebhook(r *httprequest.Request, signed nmiSigned, accountID stri
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}
-		log.WithError(err).Error("merchant nmi webhook processing failed")
+		r.Log.ErrorContext(r.Request.Context(), "merchant nmi webhook processing failed", logx.Err(err))
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return false
 	}
@@ -654,7 +654,7 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}
-		log.WithError(err).Error("merchant ccbill webhook processing failed")
+		r.Log.ErrorContext(ctx, "merchant ccbill webhook processing failed", logx.Err(err))
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return false
 	}
@@ -764,9 +764,8 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 // accounts a deployment serves.
 // warnUndeclaredWebhook says why an event for one of the merchant's accounts
 // is refused: no declared credentials verify it, so it is never recorded.
-func warnUndeclaredWebhook(rail, accountID string) {
-	log.WithFields(log.Fields{"rail": rail, "account_id": accountID}).
-		Warn("webhook refused: the account has no declared webhook signing secret (undeclared or missing), so its events are not recorded")
+func warnUndeclaredWebhook(logger *slog.Logger, rail, accountID string) {
+	logger.Warn("webhook refused: the account has no declared webhook signing secret (undeclared or missing), so its events are not recorded", "rail", rail, "account_id", accountID)
 }
 
 func rejectWebhook(r *httprequest.Request) {

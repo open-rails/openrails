@@ -13,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	auth "github.com/open-rails/authkit/auth"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -23,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/scim"
@@ -133,15 +133,15 @@ func refuse(r *httprequest.Request, route Route, a any, st step, err error) {
 			r.SetHeader(name, strings.Join(values, ", "))
 		}
 	}
-	entry := log.WithFields(log.Fields{"route": route.Key(), "tier": string(route.Auth), "code": gate.Code, "request_id": r.RequestID(), "auth": authName(a)})
+	entry := r.Log.With("route", route.Key(), "tier", string(route.Auth), "code", gate.Code, "request_id", r.RequestID(), "auth", authName(a))
 	var f fault
 	switch {
 	case errors.As(err, &f):
-		entry.Error("openrails: " + f.Error())
+		entry.ErrorContext(r.Request.Context(), "openrails: "+f.Error())
 	case gate.Status >= http.StatusInternalServerError:
-		entry.WithError(err).Warn("openrails: route gate could not decide")
+		entry.WarnContext(r.Request.Context(), "openrails: route gate could not decide", logx.Err(err))
 	default:
-		entry.Info("openrails: route gate refused")
+		entry.InfoContext(r.Request.Context(), "openrails: route gate refused")
 	}
 	r.AbortAPIError(billingauth.RefusalError(gate))
 }
@@ -758,7 +758,7 @@ func (e *Env) provisioner(r *httprequest.Request, route Route) (provisioningToke
 	mid, err := scim.Tokens{DB: e.Runtime.DB}.Resolve(r.Request.Context(), token)
 	if err != nil {
 		if !errors.Is(err, scim.ErrUnauthorized) {
-			log.WithError(err).WithField("route", route.Key()).Error("openrails: provisioning token lookup failed")
+			e.Log.ErrorContext(r.Request.Context(), "openrails: provisioning token lookup failed", logx.Err(err), "route", route.Key())
 		}
 		return provisioningToken{}, false
 	}

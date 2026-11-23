@@ -4,10 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
@@ -28,7 +27,7 @@ func (s *Store) Framing(settings db.MerchantConfig) Framing {
 		ctx := r.Context()
 		mids, err := s.db.GenDirectory().ResolveEmbeddedPayURLMerchant(ctx, order.UUID())
 		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("payment page: cannot resolve an embedded order's merchant")
+			s.Log.WarnContext(ctx, "payment page: cannot resolve an embedded order's merchant", logx.Err(err))
 			return nil
 		}
 		if len(mids) != 1 {
@@ -37,7 +36,7 @@ func (s *Store) Framing(settings db.MerchantConfig) Framing {
 		mid := billing.MerchantID(mids[0])
 		_, doc, err := settings.MerchantSettings(merchant.WithID(ctx, mid), mid)
 		if err != nil {
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("payment page: cannot read the merchant's embed origins")
+			s.Log.WarnContext(ctx, "payment page: cannot read the merchant's embed origins", logx.Err(err), "merchant_id", mid.String())
 			return nil
 		}
 		return merchantconfig.EmbedOrigins(doc)

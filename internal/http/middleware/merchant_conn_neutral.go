@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 // MerchantDBConnMW pins a merchant-scoped DB connection for the request (the
@@ -23,7 +22,7 @@ func MerchantDBConnMW(database *db.DB) router.Middleware {
 			}
 			ctx, release, err := database.WithMerchantConn(r.Request.Context())
 			if err != nil {
-				log.WithError(err).Error("merchant db connection setup failed")
+				r.Log.ErrorContext(ctx, "merchant db connection setup failed", logx.Err(err))
 				r.AbortCode(billing.CodeInternalError, "")
 				return
 			}
