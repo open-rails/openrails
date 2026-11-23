@@ -66,7 +66,7 @@ CREATE INDEX customer_limit_overrides_limit_key_idx ON billing.customer_limit_ov
 CREATE TABLE billing.limit_windows (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
     customer_id uuid NOT NULL,
-    limit_key text NOT NULL CHECK (limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'),
+    limit_key text NOT NULL CHECK (limit_key ~ '^[a-z][a-z0-9_-]{0,63}$' OR limit_key ~ '^spend:[0-9a-f]{64}$'),
     window_starts_at timestamptz NOT NULL,
     window_ends_at timestamptz,
     capacity bigint NOT NULL,
@@ -79,13 +79,14 @@ CREATE TABLE billing.limit_windows (
     CONSTRAINT limit_windows_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT limit_windows_window_check CHECK (window_ends_at IS NULL OR window_ends_at > window_starts_at)
 );
-COMMENT ON TABLE billing.limit_windows IS 'One customer''s use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit''s bucket, or the one row of a lifetime or rate limit. Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.';
+COMMENT ON TABLE billing.limit_windows IS 'One customer''s use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit''s bucket, the one row of a lifetime or rate limit, or a billing policy''s spend window (spend:<identity>). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.';
+COMMENT ON COLUMN billing.limit_windows.limit_key IS 'A declared limit''s key, or spend: and the hashed identity of a billing policy''s spend window, which is a fixed window in the request currency on its hashed anchor.';
 COMMENT ON COLUMN billing.limit_windows.window_starts_at IS 'The window''s start; 1970-01-01 for the one row of a lifetime or rate limit.';
 COMMENT ON COLUMN billing.limit_windows.window_ends_at IS 'The window''s end; null for a lifetime or rate limit.';
 COMMENT ON COLUMN billing.limit_windows.capacity IS 'The capacity products or an override gave the limit at the row''s last write, without adjustments. Reads take the live capacity.';
 COMMENT ON COLUMN billing.limit_windows.settled IS 'Units settled in the window, never clamped: it may pass capacity. For a rate limit, the level as of updated_at, which drains at capacity per window_seconds.';
 COMMENT ON COLUMN billing.limit_windows.adjusted IS 'Capacity staff added to this window only (negative takes it away).';
-COMMENT ON COLUMN billing.limit_windows.reached_at IS 'When settled and held usage first took the window to its capacity.';
+COMMENT ON COLUMN billing.limit_windows.reached_at IS 'When settled and held usage first took the window to its capacity; a rate or lifetime limit''s one row keeps the first time.';
 
 CREATE INDEX limit_windows_window_ends_at_idx ON billing.limit_windows (merchant_id, window_ends_at)
     WHERE window_ends_at IS NOT NULL;
@@ -104,7 +105,8 @@ ALTER TABLE billing.catalog_field_owners ADD CONSTRAINT catalog_field_owners_fie
 COMMENT ON COLUMN billing.catalog_field_owners.key IS 'The product, meter or limit key; a price''s product key.';
 COMMENT ON COLUMN billing.catalog_field_owners.price_key IS 'A price''s key; empty for a product, meter or limit.';
 
--- A billing restore's destination holds none of the merchant's limits.
+-- A billing restore's destination holds none of the merchant's limits, holds
+-- or leases.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -135,7 +137,6 @@ BEGIN
               -- (former names, host claims); a test keeps this list complete.
               AND c.relname = ANY(ARRAY[
                   'access_cutover_approvals',
-                  'admission_operations',
                   'balance_watches',
                   'carts',
                   'catalog_applications',
@@ -162,8 +163,12 @@ BEGIN
                   'grants',
                   'host_outbox',
                   'idempotency_keys',
+                  'leases',
                   'ledger_accounts',
                   'ledger_transfers',
+                  'limit_adjustments',
+                  'limit_hold_parts',
+                  'limit_holds',
                   'limit_windows',
                   'maintenance_runs',
                   'mandates',
@@ -241,5 +246,154 @@ BEGIN
 END;
 $_$;
 
--- Denial statistics are gone: a limit window records when it was reached.
+-- Holds and leases. A hold sets capacity aside for one customer: one admitted
+-- request owns it, or a gate's lease does. Holds replace admission_operations,
+-- and denial statistics are gone: a limit window records when it was reached.
+
+
+CREATE TABLE billing.leases (
+    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
+    id uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_sync_at timestamptz NOT NULL,
+    settled_through_n bigint NOT NULL CHECK (settled_through_n >= 0),
+    closed_at timestamptz,
+    PRIMARY KEY (merchant_id, id),
+    CONSTRAINT leases_last_sync_at_check CHECK (last_sync_at >= created_at),
+    CONSTRAINT leases_closed_at_check CHECK (closed_at IS NULL OR closed_at >= created_at)
+);
+COMMENT ON TABLE billing.leases IS 'One gate''s lease: a running process, or the processes that share one Redis. It is live while it is not closed and its gate synced within the lease lifetime; its holds live and die with it. Retention: rows are deleted 61 days after last_sync_at.';
+COMMENT ON COLUMN billing.leases.id IS 'The UUID the client chose; lse_ on the wire.';
+COMMENT ON COLUMN billing.leases.settled_through_n IS 'The highest usage item number settled. Items are numbered once per lease and settle in order.';
+
+CREATE INDEX leases_last_sync_at_idx ON billing.leases (merchant_id, last_sync_at);
+
+CREATE TABLE billing.limit_holds (
+    merchant_id uuid NOT NULL,
+    id uuid NOT NULL DEFAULT uuidv7(),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    customer_id uuid NOT NULL,
+    currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
+    lease_id uuid,
+    limit_set text CHECK (octet_length(limit_set) BETWEEN 1 AND 255),
+    request_id text CHECK (octet_length(request_id) BETWEEN 1 AND 255),
+    estimated_amount bigint CHECK (estimated_amount >= 0),
+    available_amount bigint CHECK (available_amount >= 0),
+    terms jsonb CHECK (jsonb_typeof(terms) = 'object' AND octet_length(terms::text) <= 65536),
+    estimate_usage jsonb,
+    rate_cards jsonb,
+    requested_expires_at timestamptz,
+    expires_at timestamptz,
+    state text NOT NULL CHECK (state IN ('open', 'released', 'captured')),
+    capture_terms jsonb CHECK (jsonb_typeof(capture_terms) = 'object' AND octet_length(capture_terms::text) <= 65536),
+    captured_amount bigint,
+    captured_at timestamptz,
+    released_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (merchant_id, id, created_at),
+    CONSTRAINT limit_holds_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
+    CONSTRAINT limit_holds_lease_id_fkey FOREIGN KEY (merchant_id, lease_id) REFERENCES billing.leases (merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT limit_holds_owner_check CHECK (
+        (request_id IS NOT NULL AND lease_id IS NULL AND limit_set IS NULL
+            AND estimated_amount IS NOT NULL AND available_amount IS NOT NULL AND terms IS NOT NULL
+            AND (estimate_usage IS NULL) = (rate_cards IS NULL))
+        OR (lease_id IS NOT NULL AND limit_set IS NOT NULL AND request_id IS NULL
+            AND estimated_amount IS NULL AND available_amount IS NULL AND terms IS NULL AND estimate_usage IS NULL
+            AND requested_expires_at IS NULL AND expires_at IS NULL AND state <> 'captured')
+    ),
+    CONSTRAINT limit_holds_requested_expires_at_check CHECK (
+        (requested_expires_at IS NULL OR requested_expires_at > created_at)
+        AND (request_id IS NULL OR estimated_amount = 0 OR requested_expires_at IS NOT NULL)
+    ),
+    CONSTRAINT limit_holds_expires_at_check CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
+    CONSTRAINT limit_holds_hold_lifetime_check CHECK (expires_at IS NULL OR expires_at <= created_at + interval '720 hours'),
+    CONSTRAINT limit_holds_state_fields_check CHECK (
+        (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
+        OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
+        OR (state = 'captured' AND capture_terms IS NOT NULL AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
+    ),
+    CONSTRAINT limit_holds_estimate_usage_check CHECK (
+        (estimate_usage IS NULL OR (jsonb_typeof(estimate_usage) = 'object' AND octet_length(estimate_usage::text) <= 65536))
+        AND (rate_cards IS NULL OR (jsonb_typeof(rate_cards) = 'array' AND octet_length(rate_cards::text) <= 262144))
+    )
+) PARTITION BY RANGE (created_at);
+COMMENT ON TABLE billing.limit_holds IS 'Capacity set aside for one customer, in one currency: an admitted request''s hold (request_id, until it is captured, released or reaches expires_at) or a gate lease''s hold for one limit set (live while its lease is). What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.';
+COMMENT ON COLUMN billing.limit_holds.created_at IS 'When the hold was issued; the partition key. A hold row is live at most 30 days past it: a request''s deadline is at most that, and a lease''s hold is issued again before then. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.';
+COMMENT ON COLUMN billing.limit_holds.limit_set IS 'A lease''s hold: the opaque key of the limits that apply to its invokers after policy resolution; invokers with the same limit set share the hold.';
+COMMENT ON COLUMN billing.limit_holds.estimated_amount IS 'A request''s hold: its money estimate, the host''s or what its usage estimate was priced at.';
+COMMENT ON COLUMN billing.limit_holds.available_amount IS 'A request''s hold: what the customer could spend when it was admitted, before the hold.';
+COMMENT ON COLUMN billing.limit_holds.estimate_usage IS 'The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.';
+COMMENT ON COLUMN billing.limit_holds.rate_cards IS 'The rate cards that priced the money estimate, pinned: the capture is priced by them, whatever the catalog says later.';
+COMMENT ON COLUMN billing.limit_holds.expires_at IS 'A request''s deadline: past it the hold reserves no money and no end-less limit, and still counts in its windows until it is captured or released.';
+
+CREATE INDEX limit_holds_request_id_idx ON billing.limit_holds (merchant_id, request_id, created_at DESC)
+    WHERE request_id IS NOT NULL;
+CREATE INDEX limit_holds_open_idx ON billing.limit_holds (merchant_id, customer_id, currency)
+    WHERE state = 'open';
+CREATE INDEX limit_holds_lease_id_idx ON billing.limit_holds (merchant_id, lease_id, customer_id, limit_set)
+    WHERE lease_id IS NOT NULL;
+CREATE INDEX limit_holds_created_at_request_id_idx ON billing.limit_holds (merchant_id, created_at DESC, request_id COLLATE "C" DESC)
+    WHERE request_id IS NOT NULL;
+CREATE INDEX limit_holds_customer_created_at_request_id_idx ON billing.limit_holds (merchant_id, customer_id, created_at DESC, request_id COLLATE "C" DESC)
+    WHERE request_id IS NOT NULL;
+
+CREATE TRIGGER immutable_request_hold_facts BEFORE DELETE OR UPDATE ON billing.limit_holds
+    FOR EACH ROW WHEN (OLD.request_id IS NOT NULL)
+    EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'released_at', 'updated_at');
+
+CREATE TABLE billing.limit_hold_parts (
+    merchant_id uuid NOT NULL,
+    hold_id uuid NOT NULL,
+    hold_created_at timestamptz NOT NULL,
+    customer_id uuid NOT NULL,
+    limit_key text NOT NULL CHECK (limit_key ~ '^[a-z][a-z0-9_-]{0,63}$' OR limit_key ~ '^spend:[0-9a-f]{64}$'),
+    unit text NOT NULL CHECK (unit ~ '^[a-z][a-z0-9_]{0,63}$' OR unit ~ '^[A-Z0-9]{3,12}$'),
+    window_starts_at timestamptz NOT NULL,
+    window_ends_at timestamptz,
+    held bigint NOT NULL CHECK (held >= 0),
+    PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at),
+    CONSTRAINT limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
+    CONSTRAINT limit_hold_parts_window_check CHECK (window_ends_at IS NULL OR window_ends_at > window_starts_at)
+) PARTITION BY RANGE (hold_created_at);
+COMMENT ON TABLE billing.limit_hold_parts IS 'What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window''s held units are its live holds'' parts. Retention: monthly partitions on hold_created_at, dropped with their hold''s.';
+COMMENT ON COLUMN billing.limit_hold_parts.hold_created_at IS 'The hold''s created_at: the partition key, shared with the hold so both drop together.';
+
+CREATE INDEX limit_hold_parts_window_idx ON billing.limit_hold_parts (merchant_id, customer_id, limit_key, window_starts_at);
+
+-- The migrator and the cleanup job keep the partitions current; these let
+-- the tables take the retained admissions and new rows as soon as they exist.
+SELECT billing.ensure_month_partitions('limit_holds', now() - interval '61 days', now() + interval '2 months');
+SELECT billing.ensure_month_partitions('limit_hold_parts', now() - interval '61 days', now() + interval '2 months');
+
+-- Retained admissions become request holds of their money; their spend
+-- windows count afresh.
+INSERT INTO billing.limit_holds (merchant_id, created_at, customer_id, currency, request_id, estimated_amount, available_amount,
+    terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at)
+SELECT merchant_id, admitted_at, customer_id, currency, request_id, estimated_amount, available_amount,
+    terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at,
+    COALESCE(captured_at, released_at, admitted_at)
+FROM billing.admission_operations
+WHERE admitted_at >= now() - interval '61 days';
+INSERT INTO billing.limit_hold_parts (merchant_id, hold_id, hold_created_at, customer_id, limit_key, unit, window_starts_at, held)
+SELECT merchant_id, id, created_at, customer_id, 'balance', currency, 'epoch'::timestamptz, estimated_amount
+FROM billing.limit_holds;
+
 DROP TABLE billing.admission_denials_hourly;
+DROP TABLE billing.admission_operations;
+
+CREATE TABLE billing.limit_adjustments (
+    merchant_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    source_id text NOT NULL CHECK (octet_length(source_id) BETWEEN 1 AND 255),
+    limit_key text NOT NULL,
+    amount bigint NOT NULL CHECK (amount <> 0),
+    window_starts_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (merchant_id, customer_id, source_id),
+    CONSTRAINT limit_adjustments_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT limit_adjustments_limit_key_fkey FOREIGN KEY (merchant_id, limit_key) REFERENCES billing.catalog_limits (merchant_id, key) ON DELETE RESTRICT
+);
+COMMENT ON TABLE billing.limit_adjustments IS 'One staff adjustment of a customer''s limit window, so a retry with its source_id adds nothing again; the capacity it added is the window''s adjusted. Retention: rows are deleted 61 days after created_at.';
+
+CREATE INDEX limit_adjustments_created_at_idx ON billing.limit_adjustments (merchant_id, created_at);
+CREATE INDEX limit_adjustments_limit_key_idx ON billing.limit_adjustments (merchant_id, limit_key);

@@ -105,8 +105,8 @@ func retainedFrom(from, oldest time.Time) time.Time {
 	return from
 }
 
-// ListAdmissions inspects durable admitted requests. It does not reevaluate
-// policy, extend a reservation, or materialize expiry as a write.
+// ListAdmissions inspects admitted requests' holds. It does not reevaluate
+// policy, extend a hold, or materialize expiry as a write.
 func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -132,7 +132,7 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 	if err != nil {
 		return nil, err
 	}
-	args := gen.ListAdmissionOperationsParams{MerchantID: mid.UUID(), FromAt: retainedFrom(page.from, oldest), ToAt: page.to,
+	args := gen.ListRequestHoldsParams{MerchantID: mid.UUID(), FromAt: retainedFrom(page.from, oldest), ToAt: page.to,
 		AsOf: now, Currency: currency, State: optionalInspectionText(string(params.State)), RowLimit: pagination.Fetch(page.limit)}
 	if !params.CustomerID.IsZero() {
 		customer := params.CustomerID.UUID()
@@ -141,14 +141,14 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 	if page.after != nil {
 		args.AfterAt, args.AfterRequestID = &page.after.At, &page.after.Key
 	}
-	rows, err := s.rt.DB.Gen(ctx).ListAdmissionOperations(ctx, args)
+	rows, err := s.rt.DB.Gen(ctx).ListRequestHolds(ctx, args)
 	if err != nil {
 		return nil, err
 	}
-	cut := pagination.Cut(rows, page.limit, func(row gen.BillingAdmissionOperation) any {
-		return page.position("admissions", row.AdmittedAt, row.RequestID)
+	cut := pagination.Cut(rows, page.limit, func(row gen.BillingLimitHold) any {
+		return page.position("admissions", row.CreatedAt, *row.RequestID)
 	})
-	out := pagination.Map(cut, func(row gen.BillingAdmissionOperation) billing.Admission { return *admissionFromOperation(row, now) })
+	out := pagination.Map(cut, func(row gen.BillingLimitHold) billing.Admission { return *admissionFromHold(row, now) })
 	return &out, nil
 }
 

@@ -382,10 +382,10 @@ var jsonRules = map[string]jsonRule{
 	"provider_intents.solana_pull.payload": object(map[string]jsonRule{"subscription_pda": textValue, "row_id": uuidValue, "next_pull_at": textValue}),
 	"provider_intents.payload":             nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":     nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
-	"admission_operations.terms":           object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
-	"admission_operations.capture_terms":   nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
-	"admission_operations.estimate_usage":  nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
-	"admission_operations.rate_cards":      nullable(array(pinnedRateCardJSON)),
+	"limit_holds.terms":                    object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
+	"limit_holds.capture_terms":            nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue), "amount": moneyStringValue})),
+	"limit_holds.estimate_usage":           nullable(object(map[string]jsonRule{"amount": moneyStringValue, "event_type": textValue, "dimensions": dictionary(integerValue), "metadata": metadataJSON})),
+	"limit_holds.rate_cards":               nullable(array(pinnedRateCardJSON)),
 	// A Solana plan change's frozen agreement, and how its chain outcome ended.
 	"provider_intents.solana_tier_change.payload": object(map[string]jsonRule{
 		"reference": textValue, "last_valid_block_height": unsignedValue, "old_subscription_id": uuidValue, "customer_id": uuidValue, "old_period_ends_at": nullable(textValue),

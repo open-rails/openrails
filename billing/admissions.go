@@ -18,10 +18,10 @@ const (
 	InvokerTypeDelegated InvokerType = "delegated"
 )
 
-// AdmitParams asks to admit one request against a customer's money: payer
-// capacity, delegated spend windows and failed-usage cutoffs. An allowed admit
-// with a nonzero EstimatedAmount holds that much until it is captured,
-// released or reaches ExpiresAt.
+// AdmitParams asks to admit one request against a customer's money (payer
+// capacity, spend windows and failed-usage cutoffs) and the usage limits its
+// usage counts toward. An allowed admit holds its estimate, in money and in
+// each limit's unit, until it is captured, released or reaches ExpiresAt.
 type AdmitParams struct {
 	// RequestID identifies the admission: a retry with the same terms answers
 	// original decision plus current hold state; changed terms are
@@ -44,8 +44,8 @@ type AdmitParams struct {
 	// units per hour; an accrual_rate_cap policy gates on it.
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
 	Source                  string `json:"source,omitempty"`
-	// ExpiresAt is the admitted work's deadline, required when EstimatedAmount
-	// places a hold. A hold lives at most 30 days past its admission.
+	// ExpiresAt is the admitted work's deadline, required when the admission
+	// holds anything. A hold lives at most 30 days past its admission.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Roles are the invoker's role UUIDs; role-scoped spend delegations gate
 	// on them.
@@ -92,6 +92,8 @@ const (
 	AdmissionBlockedByMoney  AdmissionBlock = "money"
 	AdmissionBlockedByBudget AdmissionBlock = "budget"
 	AdmissionBlockedByAbuse  AdmissionBlock = "abuse"
+	// AdmissionBlockedByLimit is a usage limit: deny code limit_reached.
+	AdmissionBlockedByLimit AdmissionBlock = "limit"
 )
 
 // Admission is the verdict on one request and, when it was allowed, its hold.
@@ -100,10 +102,13 @@ type Admission struct {
 	CustomerID CustomerID `json:"customer_id"`
 	Allowed    bool       `json:"allowed"`
 	// BlockedBy and DenyCode name a refusal; RetryAfterSeconds is when a
-	// window refusal clears. All three are null when allowed.
+	// window refusal clears. A limit_reached refusal names its Limit and when
+	// it ResetsAt (null when nothing refills it). All are null when allowed.
 	BlockedBy         *AdmissionBlock `json:"blocked_by"`
 	DenyCode          *string         `json:"deny_code"`
 	RetryAfterSeconds *int64          `json:"retry_after_seconds"`
+	Limit             *string         `json:"limit"`
+	ResetsAt          *time.Time      `json:"resets_at"`
 	Currency          string          `json:"currency"`
 	EstimatedAmount   int64           `json:"estimated_amount,string"`
 	// StartCapacityAmount is what the customer could spend when the request
@@ -122,6 +127,14 @@ type Admission struct {
 // with the same request terms to read its current state.
 func (a *Admission) Active() bool {
 	return a != nil && a.Allowed && a.State != nil && *a.State == AdmissionOpen
+}
+
+// Refusal is why the admission was refused, nil when it was allowed.
+func (a *Admission) Refusal() *Refusal {
+	if a == nil || a.Allowed || a.DenyCode == nil {
+		return nil
+	}
+	return &Refusal{DenyCode: *a.DenyCode, Limit: a.Limit, ResetsAt: a.ResetsAt, RetryAfterSeconds: a.RetryAfterSeconds}
 }
 
 // AdmissionVerdict is one item of an admission batch. Status is the HTTP

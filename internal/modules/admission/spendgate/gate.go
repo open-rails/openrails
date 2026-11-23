@@ -16,22 +16,24 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
 )
 
 var (
-	ErrNotFound          = errors.New("admission operation not found")
+	ErrNotFound          = errors.New("admission not found")
 	ErrExpired           = errors.New("admission deadline has passed")
 	ErrDeadlineRequired  = errors.New("admission deadline is required")
-	ErrCaptured          = errors.New("admission operation is already captured")
+	ErrCaptured          = errors.New("admission is already captured")
 	ErrDeadlineShortened = errors.New("extension cannot shorten the deadline")
 )
 
-// MaxWindow and MaxHold bound what an admission can still matter to, so its
+// MaxWindow and MaxHold bound what a hold can still matter to, so its
 // monthly partition can be dropped by the calendar alone.
 const (
 	MaxWindow = retention.AdmissionMaxWindow
@@ -91,7 +93,7 @@ func (t Terms) normalized() Terms {
 	return t
 }
 
-func OriginalTerms(row gen.BillingAdmissionOperation) (Terms, error) {
+func OriginalTerms(row gen.BillingLimitHold) (Terms, error) {
 	var terms Terms
 	if err := json.Unmarshal(row.Terms, &terms); err != nil {
 		return terms, fmt.Errorf("decode admission terms: %w", err)
@@ -118,6 +120,8 @@ type Decision struct {
 	EstimatedAmount int64
 	BlockedBalance  bool
 	BlockedWindow   *Window
+	// BlockedLimit is the declared limit that refused, and when it resets.
+	BlockedLimit    *LimitBlock
 	RetryAfter      time.Duration
 	Replayed        bool
 	ExpiresAt       *time.Time
@@ -140,6 +144,14 @@ type AdmitInput struct {
 	// the cards that priced it; both nil for a host-stated estimate.
 	EstimateUsage []byte
 	RateCards     []byte
+	// Limits are the declared limits the request counts toward.
+	Limits []limits.Claim
+}
+
+// LimitBlock is a declared limit's refusal.
+type LimitBlock struct {
+	Key      string
+	ResetsAt *time.Time
 }
 
 // Admit runs inside the transaction that owns the payer money lock.
@@ -161,16 +173,20 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	in.Terms = in.Terms.normalized()
 	now := g.Now()
 	// The request id is claimed under this lock: no unique key spans partitions.
-	if err := q.LockAdmissionRequest(ctx, gen.LockAdmissionRequestParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err != nil {
+	if err := q.LockHoldRequest(ctx, gen.LockHoldRequestParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err != nil {
 		return Decision{}, err
 	}
-	if row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID, AdmittedSince: retainedSince(now)}); err == nil {
+	if row, err := q.GetRequestHold(ctx, gen.GetRequestHoldParams{MerchantID: mid.UUID(), RequestID: in.RequestID, CreatedSince: retainedSince(now)}); err == nil {
 		return g.replay(row, in)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Decision{}, err
 	}
 	expiry := deadline(in.ExpiresAt)
-	if in.Cost > 0 && expiry == nil {
+	holds := in.Cost > 0
+	for _, c := range in.Limits {
+		holds = holds || c.Cost > 0
+	}
+	if holds && expiry == nil {
 		return Decision{}, ErrDeadlineRequired
 	}
 	if expiry != nil && !expiry.After(now) {
@@ -188,46 +204,65 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	if in.Cost > capacity {
 		return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
 	}
+	// Spend windows are currency limits on their hashed anchors; they and the
+	// declared limits are taken together, all or none.
 	windows := in.Policy.EffectiveWindows(in.Request)
-	keys := make([]string, 0, len(windows))
+	claims := make([]limits.Claim, 0, len(windows)+len(in.Limits))
 	for _, w := range windows {
 		key, start, end, err := windowPeriod(mid.UUID(), in.Customer, in.Currency, w, now)
 		if err != nil {
 			return Decision{}, err
 		}
-		usage, err := q.AdmissionWindowUsage(ctx, gen.AdmissionWindowUsageParams{
-			MerchantID: mid.UUID(), CustomerID: in.Customer, Currency: in.Currency,
-			WindowKey: key, WindowStart: start, WindowEnd: end, AsOf: now,
-		})
-		if err != nil {
-			return Decision{}, err
+		claims = append(claims, limits.Claim{Key: limits.SpendKeyPrefix + key, Unit: in.Currency,
+			Reset:  catalog.LimitReset{Kind: catalog.ResetFixed, WindowSeconds: int(w.Duration / time.Second)},
+			Window: limits.Window{StartsAt: start, EndsAt: &end, Open: true}, Capacity: w.Limit, Cost: in.Cost, Overrun: catalog.OverrunRequireEstimate})
+	}
+	claims = append(claims, in.Limits...)
+	taken, err := limits.Holder{Q: q, MerchantID: mid.UUID(), CustomerID: in.Customer, Now: now}.Take(ctx, claims)
+	if err != nil {
+		return Decision{}, err
+	}
+	if taken.Refused >= 0 {
+		if taken.Refused < len(windows) {
+			blocked := windows[taken.Refused].Window
+			return Decision{BlockedWindow: &blocked, RetryAfter: claims[taken.Refused].Window.EndsAt.Sub(now), EstimatedAmount: in.Cost}, nil
 		}
-		if in.Cost > w.Limit || usage.Used > w.Limit-in.Cost {
-			blocked := w.Window
-			return Decision{BlockedWindow: &blocked, RetryAfter: end.Sub(now), EstimatedAmount: in.Cost}, nil
-		}
-		keys = append(keys, key)
+		return Decision{BlockedLimit: &LimitBlock{Key: claims[taken.Refused].Key, ResetsAt: taken.ResetsAt}, EstimatedAmount: in.Cost}, nil
 	}
 	body, err := json.Marshal(in.Terms)
 	if err != nil {
 		return Decision{}, err
 	}
-	row, err := q.InsertAdmissionOperation(ctx, gen.InsertAdmissionOperationParams{
-		MerchantID: mid.UUID(), RequestID: in.RequestID, CustomerID: in.Customer,
-		Currency: in.Currency, EstimatedAmount: in.Cost, Terms: body,
-		AvailableAmount:    capacity - in.Cost,
-		RequestedExpiresAt: expiry, AdmittedAt: now, WindowKeys: keys,
-		EstimateUsage: in.EstimateUsage, RateCards: in.RateCards,
+	row, err := q.InsertRequestHold(ctx, gen.InsertRequestHoldParams{
+		MerchantID: mid.UUID(), CreatedAt: now, CustomerID: in.Customer, Currency: in.Currency, RequestID: in.RequestID,
+		EstimatedAmount: in.Cost, AvailableAmount: capacity - in.Cost, Terms: body,
+		EstimateUsage: in.EstimateUsage, RateCards: in.RateCards, RequestedExpiresAt: expiry,
 	})
 	if err != nil {
 		return Decision{}, err
+	}
+	part := func(key, unit string, w limits.Window, held int64) error {
+		return q.InsertHoldPart(ctx, gen.InsertHoldPartParams{MerchantID: mid.UUID(), HoldID: row.ID, HoldCreatedAt: row.CreatedAt, CustomerID: in.Customer,
+			LimitKey: key, Unit: unit, WindowStartsAt: w.StartsAt, WindowEndsAt: w.EndsAt, Held: held})
+	}
+	if in.Cost > 0 {
+		if err := part(catalog.BalanceLimit, in.Currency, limits.Window{StartsAt: limits.Epoch}, in.Cost); err != nil {
+			return Decision{}, err
+		}
+	}
+	// Every limit keeps its window even when it holds nothing: the capture
+	// settles there.
+	for i, c := range claims {
+		if err := part(c.Key, c.Unit, c.Window, taken.Held[i]); err != nil {
+			return Decision{}, err
+		}
 	}
 	// A hold takes from what the customer may spend: one that crosses a line
 	// of its balance watch queues a look.
 	if err := ledger.WatchChange(ctx, q, mid.UUID(), in.Customer, in.Currency, false, now); err != nil {
 		return Decision{}, err
 	}
-	return Decision{Allowed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil
+	return Decision{Allowed: true, EstimatedAmount: in.Cost, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: capacity - in.Cost}, nil
 }
 
 // CheckIdentity refuses key reuse before current policy evaluation can mask a conflict.
@@ -236,7 +271,7 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 	if err != nil {
 		return nil, err
 	}
-	row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID, AdmittedSince: retainedSince(g.Now())})
+	row, err := q.GetRequestHold(ctx, gen.GetRequestHoldParams{MerchantID: mid.UUID(), RequestID: in.RequestID, CreatedSince: retainedSince(g.Now())})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -247,7 +282,7 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 	return &decision, err
 }
 
-func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decision, error) {
+func (g *Gate) replay(row gen.BillingLimitHold, in AdmitInput) (Decision, error) {
 	field := ""
 	estimated := len(row.EstimateUsage) > 0 || len(in.EstimateUsage) > 0
 	switch {
@@ -258,7 +293,7 @@ func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decisio
 	// A usage estimate is the term: its price is what admitting it answered.
 	case estimated && !sameUsageEstimate(row.EstimateUsage, in.EstimateUsage):
 		field = "usage"
-	case !estimated && row.EstimatedAmount != in.Cost:
+	case !estimated && amount(row.EstimatedAmount) != in.Cost:
 		field = "estimated_amount"
 	case !sameDeadline(row.RequestedExpiresAt, deadline(in.ExpiresAt)):
 		field = "expires_at"
@@ -286,7 +321,14 @@ func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decisio
 	if state == "open" && row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
 		state = "expired"
 	}
-	return Decision{Allowed: true, Replayed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
+	return Decision{Allowed: true, Replayed: true, EstimatedAmount: amount(row.EstimatedAmount), ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: amount(row.AvailableAmount)}, nil
+}
+
+func amount(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // sameUsageEstimate compares stored jsonb by value while keeping dimensions
@@ -318,27 +360,28 @@ func sameDeadline(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-func (g *Gate) Get(ctx context.Context, requestID string) (gen.BillingAdmissionOperation, error) {
+func (g *Gate) Get(ctx context.Context, requestID string) (gen.BillingLimitHold, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingAdmissionOperation{}, err
+		return gen.BillingLimitHold{}, err
 	}
-	row, err := g.db.Gen(ctx).GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedSince: retainedSince(g.Now())})
+	row, err := g.db.Gen(ctx).GetRequestHold(ctx, gen.GetRequestHoldParams{MerchantID: mid.UUID(), RequestID: requestID, CreatedSince: retainedSince(g.Now())})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, ErrNotFound
 	}
 	return row, err
 }
 
-// WithOperation locks payer before operation; original ownership is immutable.
-func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(context.Context, *db.DB, gen.BillingAdmissionOperation) error) error {
+// WithOperation locks the customer before the hold; its ownership is
+// immutable.
+func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(context.Context, *db.DB, gen.BillingLimitHold) error) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	return g.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedSince: retainedSince(g.Now())})
+		row, err := q.GetRequestHold(ctx, gen.GetRequestHoldParams{MerchantID: mid.UUID(), RequestID: requestID, CreatedSince: retainedSince(g.Now())})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -348,7 +391,7 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: row.CustomerID}); err != nil {
 			return err
 		}
-		row, err = q.LockAdmissionOperation(ctx, gen.LockAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedAt: row.AdmittedAt})
+		row, err = q.LockHold(ctx, gen.LockHoldParams{MerchantID: mid.UUID(), ID: row.ID, CreatedAt: row.CreatedAt})
 		if err != nil {
 			return err
 		}
@@ -357,14 +400,14 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 }
 
 func (g *Gate) Release(ctx context.Context, requestID string) error {
-	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingLimitHold) error {
 		if row.State == "captured" {
 			return ErrCaptured
 		}
 		if row.State == "released" {
 			return nil
 		}
-		_, err := d.Gen(ctx).ReleaseAdmissionOperation(ctx, gen.ReleaseAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, AsOf: g.Now()})
+		_, err := d.Gen(ctx).ReleaseRequestHold(ctx, gen.ReleaseRequestHoldParams{MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, AsOf: g.Now()})
 		return err
 	})
 }
@@ -373,7 +416,7 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 	if until.IsZero() || !until.After(g.Now()) {
 		return ErrExpired
 	}
-	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingLimitHold) error {
 		if row.State != "open" {
 			return ErrNotFound
 		}
@@ -383,10 +426,10 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 		if row.ExpiresAt != nil && until.Before(*row.ExpiresAt) {
 			return ErrDeadlineShortened
 		}
-		if until.After(row.AdmittedAt.Add(MaxHold)) {
+		if until.After(row.CreatedAt.Add(MaxHold)) {
 			return deadlineTooFar()
 		}
-		_, err := d.Gen(ctx).ExtendAdmissionOperation(ctx, gen.ExtendAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, AsOf: g.Now(), ExpiresAt: until.UTC()})
+		_, err := d.Gen(ctx).ExtendRequestHold(ctx, gen.ExtendRequestHoldParams{MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, AsOf: g.Now(), ExpiresAt: until.UTC()})
 		return err
 	})
 }

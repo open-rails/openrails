@@ -60,23 +60,23 @@ func (q *Queries) GetUsageEventByID(ctx context.Context, arg GetUsageEventByIDPa
 	return i, err
 }
 
-const listAdmissionOperations = `-- name: ListAdmissionOperations :many
+const listRequestHolds = `-- name: ListRequestHolds :many
 
-SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at, estimate_usage, rate_cards FROM billing.admission_operations
-WHERE merchant_id = $1::uuid
-  AND admitted_at >= $2::timestamptz
-  AND admitted_at < $3::timestamptz
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at FROM billing.limit_holds
+WHERE merchant_id = $1::uuid AND request_id IS NOT NULL
+  AND created_at >= $2::timestamptz
+  AND created_at < $3::timestamptz
   AND ($4::uuid IS NULL OR customer_id = $4::uuid)
   AND ($5::text IS NULL OR currency = $5::text)
   AND ($6::text IS NULL OR
        CASE WHEN state = 'open' AND expires_at <= $7::timestamptz THEN 'expired' ELSE state END = $6::text)
   AND ($8::timestamptz IS NULL OR
-       (admitted_at, request_id COLLATE "C") < ($8::timestamptz, $9::text COLLATE "C"))
-ORDER BY admitted_at DESC, request_id COLLATE "C" DESC
+       (created_at, request_id COLLATE "C") < ($8::timestamptz, $9::text COLLATE "C"))
+ORDER BY created_at DESC, request_id COLLATE "C" DESC
 LIMIT $10::int
 `
 
-type ListAdmissionOperationsParams struct {
+type ListRequestHoldsParams struct {
 	MerchantID     uuid.UUID
 	FromAt         time.Time
 	ToAt           time.Time
@@ -91,8 +91,9 @@ type ListAdmissionOperationsParams struct {
 
 // Direct, read-only inspection of the existing durable admission and usage
 // records. Each query bounds its partition key and binds its merchant.
-func (q *Queries) ListAdmissionOperations(ctx context.Context, arg ListAdmissionOperationsParams) ([]BillingAdmissionOperation, error) {
-	rows, err := q.db.Query(ctx, listAdmissionOperations,
+// Admitted requests: request holds.
+func (q *Queries) ListRequestHolds(ctx context.Context, arg ListRequestHoldsParams) ([]BillingLimitHold, error) {
+	rows, err := q.db.Query(ctx, listRequestHolds,
 		arg.MerchantID,
 		arg.FromAt,
 		arg.ToAt,
@@ -108,28 +109,31 @@ func (q *Queries) ListAdmissionOperations(ctx context.Context, arg ListAdmission
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingAdmissionOperation
+	var items []BillingLimitHold
 	for rows.Next() {
-		var i BillingAdmissionOperation
+		var i BillingLimitHold
 		if err := rows.Scan(
 			&i.MerchantID,
-			&i.RequestID,
+			&i.ID,
+			&i.CreatedAt,
 			&i.CustomerID,
 			&i.Currency,
+			&i.LeaseID,
+			&i.LimitSet,
+			&i.RequestID,
 			&i.EstimatedAmount,
 			&i.AvailableAmount,
 			&i.Terms,
+			&i.EstimateUsage,
+			&i.RateCards,
 			&i.RequestedExpiresAt,
 			&i.ExpiresAt,
-			&i.AdmittedAt,
-			&i.WindowKeys,
 			&i.State,
 			&i.CaptureTerms,
 			&i.CapturedAmount,
 			&i.CapturedAt,
 			&i.ReleasedAt,
-			&i.EstimateUsage,
-			&i.RateCards,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

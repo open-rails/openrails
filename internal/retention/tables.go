@@ -59,8 +59,9 @@ var Tables = map[string]Table{
 	"price_migrations":              {Permanent, permanent},
 	"scheduled_changes":             {Permanent, permanent},
 
-	"usage_events":         {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was billed."},
-	"admission_operations": {PartitionedMonthly, "monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days."},
+	"usage_events":     {PartitionedMonthly, "monthly partitions on occurred_at, dropped 24 months after the month's usage was billed."},
+	"limit_holds":      {PartitionedMonthly, "monthly partitions on created_at, dropped once older than the 61-day replay horizon."},
+	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's."},
 
 	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
@@ -82,6 +83,8 @@ var Tables = map[string]Table{
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
+	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
+	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
 

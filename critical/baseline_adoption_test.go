@@ -76,7 +76,7 @@ func TestBaselineAdoption(t *testing.T) {
 		require.Equal(t, 1, made)
 		var old, ahead string
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('usage_events') m ORDER BY m.range_from LIMIT 1").Scan(&old))
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('admission_operations') m ORDER BY m.range_from DESC LIMIT 1").Scan(&ahead))
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('limit_holds') m ORDER BY m.range_from DESC LIMIT 1").Scan(&ahead))
 		_, err = w.pool.Exec(t.Context(), "DROP TABLE "+pgx.Identifier{w.schema, ahead}.Sanitize())
 		require.NoError(t, err)
 

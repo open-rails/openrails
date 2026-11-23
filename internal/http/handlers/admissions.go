@@ -47,7 +47,7 @@ func admissionStatus(a *billing.Admission) int {
 		return http.StatusOK
 	}
 	switch *a.BlockedBy {
-	case billing.AdmissionBlockedByAbuse:
+	case billing.AdmissionBlockedByAbuse, billing.AdmissionBlockedByLimit:
 		return http.StatusTooManyRequests
 	case billing.AdmissionBlockedByMoney:
 		return http.StatusPaymentRequired

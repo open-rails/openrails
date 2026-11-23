@@ -98,6 +98,39 @@ func (q *Queries) DeleteCustomerLimitOverride(ctx context.Context, arg DeleteCus
 	return err
 }
 
+const ensureLimitWindow = `-- name: EnsureLimitWindow :exec
+INSERT INTO billing.limit_windows (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, created_at, updated_at)
+VALUES (
+    $1::uuid, $2::uuid, $3::text,
+    $4::timestamptz, $5::timestamptz, $6::bigint, 0, 0,
+    $7::timestamptz, $7::timestamptz
+)
+ON CONFLICT (merchant_id, customer_id, limit_key, window_starts_at) DO NOTHING
+`
+
+type EnsureLimitWindowParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	LimitKey       string
+	WindowStartsAt time.Time
+	WindowEndsAt   *time.Time
+	Capacity       int64
+	AsOf           time.Time
+}
+
+func (q *Queries) EnsureLimitWindow(ctx context.Context, arg EnsureLimitWindowParams) error {
+	_, err := q.db.Exec(ctx, ensureLimitWindow,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+		arg.WindowEndsAt,
+		arg.Capacity,
+		arg.AsOf,
+	)
+	return err
+}
+
 const getCatalogLimit = `-- name: GetCatalogLimit :one
 SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
 FROM billing.catalog_limits
@@ -136,6 +169,44 @@ func (q *Queries) GetCatalogLimit(ctx context.Context, arg GetCatalogLimitParams
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLimitAdjustment = `-- name: GetLimitAdjustment :one
+SELECT limit_key, amount, window_starts_at, created_at
+FROM billing.limit_adjustments
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND source_id = $3::text AND created_at >= $4::timestamptz
+`
+
+type GetLimitAdjustmentParams struct {
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	SourceID     string
+	CreatedSince time.Time
+}
+
+type GetLimitAdjustmentRow struct {
+	LimitKey       string
+	Amount         int64
+	WindowStartsAt time.Time
+	CreatedAt      time.Time
+}
+
+func (q *Queries) GetLimitAdjustment(ctx context.Context, arg GetLimitAdjustmentParams) (GetLimitAdjustmentRow, error) {
+	row := q.db.QueryRow(ctx, getLimitAdjustment,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.SourceID,
+		arg.CreatedSince,
+	)
+	var i GetLimitAdjustmentRow
+	err := row.Scan(
+		&i.LimitKey,
+		&i.Amount,
+		&i.WindowStartsAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -196,6 +267,55 @@ func (q *Queries) GetLimitWindow(ctx context.Context, arg GetLimitWindowParams) 
 		&i.WindowEndsAt,
 		&i.Settled,
 		&i.Adjusted,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLimitWindowForUpdate = `-- name: GetLimitWindowForUpdate :one
+SELECT limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, reached_at, updated_at
+FROM billing.limit_windows
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND limit_key = $3::text AND window_starts_at = $4::timestamptz
+FOR UPDATE
+`
+
+type GetLimitWindowForUpdateParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	LimitKey       string
+	WindowStartsAt time.Time
+}
+
+type GetLimitWindowForUpdateRow struct {
+	LimitKey       string
+	WindowStartsAt time.Time
+	WindowEndsAt   *time.Time
+	Capacity       int64
+	Settled        int64
+	Adjusted       int64
+	ReachedAt      *time.Time
+	UpdatedAt      time.Time
+}
+
+// A window a hold or a settlement writes, locked; holds lock their windows
+// in key order.
+func (q *Queries) GetLimitWindowForUpdate(ctx context.Context, arg GetLimitWindowForUpdateParams) (GetLimitWindowForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getLimitWindowForUpdate,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+	)
+	var i GetLimitWindowForUpdateRow
+	err := row.Scan(
+		&i.LimitKey,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
+		&i.Capacity,
+		&i.Settled,
+		&i.Adjusted,
+		&i.ReachedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -618,6 +738,40 @@ func (q *Queries) PageCatalogLimits(ctx context.Context, arg PageCatalogLimitsPa
 	return items, nil
 }
 
+const recordLimitAdjustment = `-- name: RecordLimitAdjustment :exec
+INSERT INTO billing.limit_adjustments (merchant_id, customer_id, source_id, limit_key, amount, window_starts_at, created_at)
+VALUES (
+    $1::uuid, $2::uuid, $3::text, $4::text,
+    $5::bigint, $6::timestamptz, $7::timestamptz
+)
+ON CONFLICT (merchant_id, customer_id, source_id) DO UPDATE SET limit_key = EXCLUDED.limit_key, amount = EXCLUDED.amount,
+    window_starts_at = EXCLUDED.window_starts_at, created_at = EXCLUDED.created_at
+`
+
+type RecordLimitAdjustmentParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	SourceID       string
+	LimitKey       string
+	Amount         int64
+	WindowStartsAt time.Time
+	CreatedAt      time.Time
+}
+
+// A source id past the replay horizon names a new adjustment.
+func (q *Queries) RecordLimitAdjustment(ctx context.Context, arg RecordLimitAdjustmentParams) error {
+	_, err := q.db.Exec(ctx, recordLimitAdjustment,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.SourceID,
+		arg.LimitKey,
+		arg.Amount,
+		arg.WindowStartsAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const upsertCatalogLimit = `-- name: UpsertCatalogLimit :exec
 INSERT INTO billing.catalog_limits (merchant_id, key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards)
 VALUES (
@@ -687,5 +841,40 @@ type UpsertCustomerLimitOverrideParams struct {
 
 func (q *Queries) UpsertCustomerLimitOverride(ctx context.Context, arg UpsertCustomerLimitOverrideParams) error {
 	_, err := q.db.Exec(ctx, upsertCustomerLimitOverride, arg.MerchantID, arg.CustomerID, arg.LimitKey, arg.Capacity)
+	return err
+}
+
+const writeLimitWindow = `-- name: WriteLimitWindow :exec
+UPDATE billing.limit_windows
+SET settled = $1::bigint, capacity = $2::bigint,
+    reached_at = COALESCE(reached_at, $3::timestamptz), updated_at = $4::timestamptz
+WHERE merchant_id = $5::uuid AND customer_id = $6::uuid
+  AND limit_key = $7::text AND window_starts_at = $8::timestamptz
+`
+
+type WriteLimitWindowParams struct {
+	Settled        int64
+	Capacity       int64
+	ReachedAt      *time.Time
+	AsOf           time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	LimitKey       string
+	WindowStartsAt time.Time
+}
+
+// A locked window's settled units (a rate limit's level as of as_of), its
+// capacity as of the write, and the first time it reached capacity.
+func (q *Queries) WriteLimitWindow(ctx context.Context, arg WriteLimitWindowParams) error {
+	_, err := q.db.Exec(ctx, writeLimitWindow,
+		arg.Settled,
+		arg.Capacity,
+		arg.ReachedAt,
+		arg.AsOf,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+	)
 	return err
 }

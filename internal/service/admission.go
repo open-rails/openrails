@@ -168,21 +168,35 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 			retry := dec.RetryAfterSeconds
 			res.RetryAfterSeconds = &retry
 		}
+		if dec.Limit != "" {
+			limit := dec.Limit
+			res.Limit, res.ResetsAt = &limit, dec.ResetsAt
+		}
 	}
 	return res, nil
 }
 
-// admissionFromOperation is the stored state of an allowed admission.
-func admissionFromOperation(row gen.BillingAdmissionOperation, now time.Time) *billing.Admission {
+// admissionFromHold is the stored state of an allowed admission: its
+// request's hold.
+func admissionFromHold(row gen.BillingLimitHold, now time.Time) *billing.Admission {
 	state := billing.AdmissionState(row.State)
 	if state == billing.AdmissionOpen && row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
 		state = billing.AdmissionExpired
 	}
-	return &billing.Admission{
-		RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Allowed: true,
-		Currency: row.Currency, EstimatedAmount: row.EstimatedAmount, StartCapacityAmount: row.AvailableAmount,
+	out := &billing.Admission{
+		CustomerID: billing.CustomerID(row.CustomerID), Allowed: true, Currency: row.Currency,
 		State: &state, ExpiresAt: row.ExpiresAt, CapturedAmount: row.CapturedAmount,
 	}
+	if row.RequestID != nil {
+		out.RequestID = *row.RequestID
+	}
+	if row.EstimatedAmount != nil {
+		out.EstimatedAmount = *row.EstimatedAmount
+	}
+	if row.AvailableAmount != nil {
+		out.StartCapacityAmount = *row.AvailableAmount
+	}
+	return out
 }
 
 func startCapacity(accountCapacity, activeHeld int64) int64 {

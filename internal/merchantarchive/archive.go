@@ -440,5 +440,9 @@ func exportWhere(table string) string {
 	if table == "maintenance_runs" {
 		where += " AND t.kind IN ('prune','approval','merchant_purge')"
 	}
+	// A lease's holds die with it; only admitted requests' holds move.
+	if table == "limit_holds" {
+		where += " AND t.request_id IS NOT NULL"
+	}
 	return where
 }

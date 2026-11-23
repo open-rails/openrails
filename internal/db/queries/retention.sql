@@ -116,6 +116,18 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR lw.merchant_id > sqlc.narg(after)::uuid)
         AND lw.window_ends_at < sqlc.arg(limit_window_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT le.merchant_id AS mid
+       FROM billing.leases le
+      WHERE (sqlc.narg(after)::uuid IS NULL OR le.merchant_id > sqlc.narg(after)::uuid)
+        AND le.last_sync_at < sqlc.arg(replay_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT la.merchant_id AS mid
+       FROM billing.limit_adjustments la
+      WHERE (sqlc.narg(after)::uuid IS NULL OR la.merchant_id > sqlc.narg(after)::uuid)
+        AND la.created_at < sqlc.arg(replay_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -281,6 +293,29 @@ WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_s
     FROM billing.meter_period_quantities e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.period_starts_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.period_starts_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- A lease goes with its holds.
+-- name: DeleteLeasesBefore :execrows
+DELETE FROM billing.leases l
+WHERE (l.merchant_id, l.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.leases e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.last_sync_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.last_sync_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteLimitAdjustmentsBefore :execrows
+DELETE FROM billing.limit_adjustments a
+WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.source_id
+    FROM billing.limit_adjustments e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.created_at
     LIMIT sqlc.arg(row_limit)::int
     FOR UPDATE SKIP LOCKED
 );

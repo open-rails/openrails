@@ -73,8 +73,32 @@ type LimitOverride struct {
 // AdjustLimitParams adds Amount (negative takes away) to the capacity of
 // the customer's current window of Limit only; the next window starts from
 // the products' capacity again. It opens a session or first-use window not
-// yet open. A rate limit takes no adjustment.
+// yet open. A rate limit takes no adjustment. SourceID identifies the
+// adjustment per customer for 61 days: a retry with the same terms answers
+// the customer's line without adding again, one with another limit or
+// amount is ErrIdempotencyKeyReused.
 type AdjustLimitParams struct {
-	Limit  string `json:"limit"`
-	Amount int64  `json:"amount,string"`
+	Limit    string `json:"limit"`
+	Amount   int64  `json:"amount,string"`
+	SourceID string `json:"source_id"`
+}
+
+// Deny codes of a limit refusal. Money refusals keep their own codes
+// (insufficient_balance, insufficient_credit, budget_exceeded, ...).
+const (
+	// DenyLimitReached: the request would not fit a limit even if every other
+	// hold were returned. The refusal names the limit and when it resets.
+	DenyLimitReached = "limit_reached"
+	// DenyCapacityHeld: the request would fit but for capacity other gates
+	// hold; retry after RetryAfterSeconds.
+	DenyCapacityHeld = "capacity_held"
+)
+
+// Refusal is why a request was not admitted: the deny code, the limit it
+// names and when that limit resets, and when to retry.
+type Refusal struct {
+	DenyCode          string     `json:"deny_code"`
+	Limit             *string    `json:"limit"`
+	ResetsAt          *time.Time `json:"resets_at"`
+	RetryAfterSeconds *int64     `json:"retry_after_seconds"`
 }

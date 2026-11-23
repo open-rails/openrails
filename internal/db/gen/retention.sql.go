@@ -151,6 +151,59 @@ func (q *Queries) DeleteHostOutboxBefore(ctx context.Context, arg DeleteHostOutb
 	return result.RowsAffected(), nil
 }
 
+const deleteLeasesBefore = `-- name: DeleteLeasesBefore :execrows
+DELETE FROM billing.leases l
+WHERE (l.merchant_id, l.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.leases e
+    WHERE e.merchant_id = $1::uuid AND e.last_sync_at < $2::timestamptz
+    ORDER BY e.last_sync_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLeasesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A lease goes with its holds.
+func (q *Queries) DeleteLeasesBefore(ctx context.Context, arg DeleteLeasesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLeasesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLimitAdjustmentsBefore = `-- name: DeleteLimitAdjustmentsBefore :execrows
+DELETE FROM billing.limit_adjustments a
+WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
+    SELECT e.merchant_id, e.customer_id, e.source_id
+    FROM billing.limit_adjustments e
+    WHERE e.merchant_id = $1::uuid AND e.created_at < $2::timestamptz
+    ORDER BY e.created_at
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type DeleteLimitAdjustmentsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteLimitAdjustmentsBefore(ctx context.Context, arg DeleteLimitAdjustmentsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLimitAdjustmentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteLimitWindowsBefore = `-- name: DeleteLimitWindowsBefore :execrows
 DELETE FROM billing.limit_windows w
 WHERE (w.merchant_id, w.customer_id, w.limit_key, w.window_starts_at) IN (
@@ -537,6 +590,18 @@ FROM (
       WHERE ($1::uuid IS NULL OR lw.merchant_id > $1::uuid)
         AND lw.window_ends_at < $15::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT le.merchant_id AS mid
+       FROM billing.leases le
+      WHERE ($1::uuid IS NULL OR le.merchant_id > $1::uuid)
+        AND le.last_sync_at < $16::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT la.merchant_id AS mid
+       FROM billing.limit_adjustments la
+      WHERE ($1::uuid IS NULL OR la.merchant_id > $1::uuid)
+        AND la.created_at < $16::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -558,6 +623,7 @@ type ListRetentionWorkMerchantsParams struct {
 	ProviderWriteCutoff time.Time
 	ParkCutoff          time.Time
 	LimitWindowCutoff   time.Time
+	ReplayCutoff        time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -581,6 +647,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.ProviderWriteCutoff,
 		arg.ParkCutoff,
 		arg.LimitWindowCutoff,
+		arg.ReplayCutoff,
 	)
 	if err != nil {
 		return nil, err

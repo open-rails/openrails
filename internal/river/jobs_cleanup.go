@@ -143,6 +143,8 @@ type CleanupResult struct {
 	FailedUsageWindows         int64
 	MeterPeriodQuantities      int64
 	LimitWindows               int64
+	Leases                     int64
+	LimitAdjustments           int64
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
 	ProviderIntents            int64
@@ -218,6 +220,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 			ProviderWriteCutoff: now.Add(-retention.ProviderWrites),
 			ParkCutoff:          now.Add(-retention.ReleasedParks),
 			LimitWindowCutoff:   now.Add(-retention.LimitWindows),
+			ReplayCutoff:        now.Add(-retention.Leases),
 			After:               after,
 			MerchantLimit:       limit,
 		})
@@ -269,6 +272,8 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		"failed_usage_windows":         result.FailedUsageWindows,
 		"meter_period_quantities":      result.MeterPeriodQuantities,
 		"limit_windows":                result.LimitWindows,
+		"leases":                       result.Leases,
+		"limit_adjustments":            result.LimitAdjustments,
 		"webhook_health_days":          result.WebhookHealthDays,
 		"reconciliation_findings":      result.ReconciliationFindings,
 		"provider_intents":             result.ProviderIntents,
@@ -503,6 +508,17 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete limit windows", &result.LimitWindows, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteLimitWindowsBefore(ctx, gen.DeleteLimitWindowsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.LimitWindows), RowLimit: limit,
+		})
+	})
+	// Leases (with their holds) and adjustment records past the replay horizon.
+	sweep("delete leases", &result.Leases, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteLeasesBefore(ctx, gen.DeleteLeasesBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.Leases), RowLimit: limit,
+		})
+	})
+	sweep("delete limit adjustments", &result.LimitAdjustments, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteLimitAdjustmentsBefore(ctx, gen.DeleteLimitAdjustmentsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.LimitAdjustments), RowLimit: limit,
 		})
 	})
 

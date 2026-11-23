@@ -67,7 +67,8 @@ func (c *Client) ListCustomerLimits(ctx context.Context, customer billing.Custom
 
 // AdjustCustomerLimit adds params.Amount to the capacity of the customer's
 // current window of params.Limit only, and answers where it stands after.
-// A retry adds again.
+// A retry with the same params.SourceID answers the line without adding
+// again; other terms under it are billing.ErrIdempotencyKeyReused.
 func (c *Client) AdjustCustomerLimit(ctx context.Context, customer billing.CustomerID, params billing.AdjustLimitParams, requestOptions ...RequestOption) (*billing.CustomerLimit, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {

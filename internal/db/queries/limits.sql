@@ -137,3 +137,46 @@ VALUES (
 )
 ON CONFLICT (merchant_id, customer_id, limit_key, window_starts_at) DO UPDATE SET
     adjusted = w.adjusted + EXCLUDED.adjusted, capacity = EXCLUDED.capacity, updated_at = now();
+
+-- A window a hold or a settlement writes, locked; holds lock their windows
+-- in key order.
+-- name: GetLimitWindowForUpdate :one
+SELECT limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, reached_at, updated_at
+FROM billing.limit_windows
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND limit_key = sqlc.arg(limit_key)::text AND window_starts_at = sqlc.arg(window_starts_at)::timestamptz
+FOR UPDATE;
+
+-- name: EnsureLimitWindow :exec
+INSERT INTO billing.limit_windows (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, created_at, updated_at)
+VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(limit_key)::text,
+    sqlc.arg(window_starts_at)::timestamptz, sqlc.narg(window_ends_at)::timestamptz, sqlc.arg(capacity)::bigint, 0, 0,
+    sqlc.arg(as_of)::timestamptz, sqlc.arg(as_of)::timestamptz
+)
+ON CONFLICT (merchant_id, customer_id, limit_key, window_starts_at) DO NOTHING;
+
+-- A locked window's settled units (a rate limit's level as of as_of), its
+-- capacity as of the write, and the first time it reached capacity.
+-- name: WriteLimitWindow :exec
+UPDATE billing.limit_windows
+SET settled = sqlc.arg(settled)::bigint, capacity = sqlc.arg(capacity)::bigint,
+    reached_at = COALESCE(reached_at, sqlc.narg(reached_at)::timestamptz), updated_at = sqlc.arg(as_of)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND limit_key = sqlc.arg(limit_key)::text AND window_starts_at = sqlc.arg(window_starts_at)::timestamptz;
+
+-- name: GetLimitAdjustment :one
+SELECT limit_key, amount, window_starts_at, created_at
+FROM billing.limit_adjustments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND source_id = sqlc.arg(source_id)::text AND created_at >= sqlc.arg(created_since)::timestamptz;
+
+-- A source id past the replay horizon names a new adjustment.
+-- name: RecordLimitAdjustment :exec
+INSERT INTO billing.limit_adjustments (merchant_id, customer_id, source_id, limit_key, amount, window_starts_at, created_at)
+VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(source_id)::text, sqlc.arg(limit_key)::text,
+    sqlc.arg(amount)::bigint, sqlc.arg(window_starts_at)::timestamptz, sqlc.arg(created_at)::timestamptz
+)
+ON CONFLICT (merchant_id, customer_id, source_id) DO UPDATE SET limit_key = EXCLUDED.limit_key, amount = EXCLUDED.amount,
+    window_starts_at = EXCLUDED.window_starts_at, created_at = EXCLUDED.created_at;

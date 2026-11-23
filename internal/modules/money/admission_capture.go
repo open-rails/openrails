@@ -6,17 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -136,7 +139,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	gate.SetClock(s.now)
 	s.db.EnsurePartitions(ctx, s.now())
 	var receipt *billing.CaptureReceipt
-	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
+	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingLimitHold) error {
 		txSvc := s.WithDatabase(d)
 		if row.State == "captured" {
 			var rerr error
@@ -150,15 +153,16 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	return receipt, err
 }
 
-func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, terms []byte, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
+func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, terms []byte, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
 	original, err := spendgate.OriginalTerms(row)
 	if err != nil {
 		return nil, err
 	}
 	payer := identity.CustomerID(row.CustomerID)
 	now := s.now()
-	receipt := &billing.CaptureReceipt{RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
-		EstimatedAmount: row.EstimatedAmount, Charges: []billing.UsageCharge{}}
+	requestID := deref(row.RequestID)
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+		EstimatedAmount: derefInt(row.EstimatedAmount), Charges: []billing.UsageCharge{}}
 
 	// The admitted event type remains binding even when the host states money.
 	if len(row.EstimateUsage) > 0 {
@@ -203,9 +207,14 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 	for _, c := range charges {
 		receipt.Amount += c.Amount
 	}
-	if _, err := q.CaptureAdmissionOperation(ctx, gen.CaptureAdmissionOperationParams{
-		MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, Amount: receipt.Amount, AsOf: now, CaptureTerms: terms,
+	if _, err := q.CaptureRequestHold(ctx, gen.CaptureRequestHoldParams{
+		MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, Amount: receipt.Amount, AsOf: now, CaptureTerms: terms,
 	}); err != nil {
+		return nil, err
+	}
+	// The usage settles into the windows its hold was issued in, in full,
+	// and into the current windows of limits the hold did not take.
+	if err := s.settleLimits(ctx, q, row, receipt.Amount, limits.Usage{EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata}, now); err != nil {
 		return nil, err
 	}
 	transfer, err := s.postChargesTx(ctx, q, payer, original.Invoker, row.Currency, eventID, charges)
@@ -251,7 +260,7 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 // captureCards are the rate cards a capture is priced by: the admission's
 // pinned cards, or those in force when it pinned none. A capture exists to
 // settle money, so usage no card prices is refused.
-func (s *MoneyService) captureCards(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, eventType string) ([]ratingCard, error) {
+func (s *MoneyService) captureCards(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, eventType string) ([]ratingCard, error) {
 	var cards []ratingCard
 	if len(row.RateCards) > 0 {
 		if err := json.Unmarshal(row.RateCards, &cards); err != nil {
@@ -271,19 +280,20 @@ func (s *MoneyService) captureCards(ctx context.Context, q *gen.Queries, row gen
 
 // captureReplay answers a captured admission's receipt for a retry with its
 // exact terms.
-func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row gen.BillingAdmissionOperation, terms []byte, u billing.CaptureUsage) (*billing.CaptureReceipt, error) {
-	matches, err := q.AdmissionCaptureTermsMatch(ctx, gen.AdmissionCaptureTermsMatchParams{
-		MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, CaptureTerms: terms,
+func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, terms []byte, u billing.CaptureUsage) (*billing.CaptureReceipt, error) {
+	matches, err := q.RequestHoldCaptureTermsMatch(ctx, gen.RequestHoldCaptureTermsMatchParams{
+		MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt, CaptureTerms: terms,
 	})
 	if err != nil {
 		return nil, err
 	}
+	requestID := deref(row.RequestID)
 	if !matches {
-		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: row.RequestID,
+		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: requestID,
 			Field: "usage", Committed: "original capture terms", Retried: "different capture terms"}
 	}
-	receipt := &billing.CaptureReceipt{RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
-		EstimatedAmount: row.EstimatedAmount, Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+		EstimatedAmount: derefInt(row.EstimatedAmount), Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
 	if row.CapturedAt != nil {
 		from, to := usageKeyWindow(*row.CapturedAt)
 		event, err := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
@@ -321,4 +331,70 @@ func billingCharges(in []models.UsageCharge) []billing.UsageCharge {
 		}
 	}
 	return out
+}
+
+// settleLimits settles a captured hold's usage: its parts' windows take the
+// charge (a currency limit or spend window) or the units its rate cards
+// count (a named unit); declared limits it took no part of settle in their
+// current windows. Nothing is clamped.
+func (s *MoneyService) settleLimits(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, amount int64, u limits.Usage, now time.Time) error {
+	parts, err := q.ListHoldParts(ctx, gen.ListHoldPartsParams{MerchantID: row.MerchantID, HoldID: row.ID, HoldCreatedAt: row.CreatedAt})
+	if err != nil {
+		return err
+	}
+	defs, err := limits.Definitions(ctx, q, row.MerchantID)
+	if err != nil {
+		return err
+	}
+	if len(defs) == 0 && len(parts) == 0 {
+		return nil
+	}
+	meters, err := limits.Meters(ctx, q, row.MerchantID)
+	if err != nil {
+		return err
+	}
+	reader := limits.Customer{Q: q, MerchantID: row.MerchantID, CustomerID: row.CustomerID, Now: now,
+		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
+			return s.PricingPeriod(ctx, q, row.MerchantID, row.CustomerID, unit, at)
+		}}
+	capacities, err := reader.Capacities(ctx)
+	if err != nil {
+		return err
+	}
+	byKey := make(map[string]limits.Definition, len(defs))
+	for _, def := range defs {
+		byKey[def.Key] = def
+	}
+	held := map[string]bool{}
+	var settlements []limits.Settlement
+	for _, p := range parts {
+		held[p.LimitKey] = true
+		w := limits.Window{StartsAt: p.WindowStartsAt.UTC(), EndsAt: p.WindowEndsAt, Open: true}
+		switch def, declared := byKey[p.LimitKey]; {
+		case p.LimitKey == catalog.BalanceLimit:
+		case strings.HasPrefix(p.LimitKey, limits.SpendKeyPrefix):
+			settlements = append(settlements, limits.Settlement{Key: p.LimitKey, Reset: catalog.LimitReset{Kind: catalog.ResetFixed}, Window: w, KeepCapacity: true, Units: amount})
+		case declared:
+			units := amount
+			if def.Unit != row.Currency {
+				if units, err = limits.Units(def, meters, u); err != nil {
+					return usageParam(err)
+				}
+			}
+			settlements = append(settlements, limits.Settlement{Key: def.Key, Reset: def.Reset, Window: w, Capacity: capacities[def.Key], Units: units})
+		}
+	}
+	current, err := reader.Settlements(ctx, defs, meters, row.Currency, amount, u, held)
+	if err != nil {
+		return usageParam(err)
+	}
+	settlements = append(settlements, current...)
+	return limits.Holder{Q: q, MerchantID: row.MerchantID, CustomerID: row.CustomerID, Now: now}.Settle(ctx, settlements)
+}
+
+func deref(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }

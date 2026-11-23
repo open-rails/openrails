@@ -277,10 +277,92 @@ func (c Customer) standing(ctx context.Context, def Definition, base int64, newe
 			line.WindowStartsAt, line.ResetsAt = ptr(w.StartsAt), w.EndsAt
 		}
 	}
-	// Holds come with leases and request-owned admissions; none are held yet.
-	line.Held = 0
-	line.Remaining = line.Capacity - line.Used - line.Held
+	if w.Open || def.Reset.Kind == catalog.ResetRolling {
+		from := w.StartsAt
+		if def.Reset.Kind == catalog.ResetRolling {
+			from = *line.WindowStartsAt
+		}
+		if line.Held, err = c.holder().Held(ctx, def.Key, from, w.StartsAt, w.EndsAt != nil); err != nil {
+			return line, err
+		}
+	}
+	line.Remaining = subSat(subSat(line.Capacity, line.Used), line.Held)
 	return line, nil
+}
+
+func (c Customer) holder() Holder {
+	return Holder{Q: c.Q, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now}
+}
+
+// Claims are what a request makes of the customer's declared limits: every
+// limit in its currency claims amount, and every limit whose rate cards read
+// its usage claims the units the usage counts. A host-stated request with no
+// usage claims no named-unit limit; its capture counts there.
+func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage *Usage) ([]Claim, error) {
+	c.Now = c.Now.UTC()
+	var applicable []Definition
+	for _, def := range defs {
+		if def.Unit == currency || (usage != nil && !catalog.LimitUnitCurrency(def.Unit) && Counts(def, meters, usage.EventType)) {
+			applicable = append(applicable, def)
+		}
+	}
+	if len(applicable) == 0 {
+		return nil, nil
+	}
+	capacities, err := c.capacities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latest, err := c.latest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Claim, 0, len(applicable))
+	for _, def := range applicable {
+		cost := amount
+		if def.Unit != currency {
+			if cost, err = Units(def, meters, *usage); err != nil {
+				return nil, err
+			}
+		}
+		var newest *Stored
+		if s, ok := latest[def.Key]; ok {
+			newest = &s
+		}
+		w, err := c.window(ctx, def, newest)
+		if err != nil {
+			return nil, err
+		}
+		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacities[def.Key], Cost: cost, Overrun: def.Overrun}
+		if !w.Open {
+			claim.Window, claim.Opens = Opening(def.Reset, c.Now), true
+		}
+		out = append(out, claim)
+	}
+	return out, nil
+}
+
+// Settlements are where usage the customer's declared limits count settles
+// when no hold of theirs names the window: their current windows, opening a
+// session or first-use window. skip names the limits a hold already settles.
+func (c Customer) Settlements(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage Usage, skip map[string]bool) ([]Settlement, error) {
+	claims, err := c.Claims(ctx, defs, meters, currency, amount, &usage)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Settlement, 0, len(claims))
+	for _, claim := range claims {
+		if !skip[claim.Key] {
+			out = append(out, Settlement{Key: claim.Key, Reset: claim.Reset, Window: claim.Window, Capacity: claim.Capacity, Units: claim.Cost})
+		}
+	}
+	return out, nil
+}
+
+// Capacities are the customer's base capacity per limit.
+func (c Customer) Capacities(ctx context.Context) (map[string]int64, error) {
+	c.Now = c.Now.UTC()
+	return c.capacities(ctx)
 }
 
 // MaxAdjustment bounds one adjustment's units.
@@ -288,23 +370,23 @@ const MaxAdjustment = int64(1) << 53
 
 // Adjust adds amount to the capacity of the customer's current window of
 // def, opening a session or first-use window not yet open, and answers the
-// customer's line after. The caller holds the customer's spend lock, which
-// serializes window openings.
-func (c Customer) Adjust(ctx context.Context, def Definition, amount int64) (billing.CustomerLimit, error) {
+// customer's line after and the window it adjusted. The caller holds the
+// customer's spend lock, which serializes window openings.
+func (c Customer) Adjust(ctx context.Context, def Definition, amount int64) (billing.CustomerLimit, time.Time, error) {
 	c.Now = c.Now.UTC()
 	if amount == 0 || amount > MaxAdjustment || amount < -MaxAdjustment {
-		return billing.CustomerLimit{}, apperr.Invalidf("amount must be nonzero and at most %d either way", MaxAdjustment).WithParam("amount")
+		return billing.CustomerLimit{}, time.Time{}, apperr.Invalidf("amount must be nonzero and at most %d either way", MaxAdjustment).WithParam("amount")
 	}
 	if def.Reset.Kind == catalog.ResetRate {
-		return billing.CustomerLimit{}, apperr.Invalidf("limit %q refills continuously and takes no adjustment; set an override instead", def.Key).WithParam("limit")
+		return billing.CustomerLimit{}, time.Time{}, apperr.Invalidf("limit %q refills continuously and takes no adjustment; set an override instead", def.Key).WithParam("limit")
 	}
 	capacities, err := c.capacities(ctx)
 	if err != nil {
-		return billing.CustomerLimit{}, err
+		return billing.CustomerLimit{}, time.Time{}, err
 	}
 	latest, err := c.latest(ctx)
 	if err != nil {
-		return billing.CustomerLimit{}, err
+		return billing.CustomerLimit{}, time.Time{}, err
 	}
 	var newest *Stored
 	if s, ok := latest[def.Key]; ok {
@@ -312,7 +394,7 @@ func (c Customer) Adjust(ctx context.Context, def Definition, amount int64) (bil
 	}
 	w, err := c.window(ctx, def, newest)
 	if err != nil {
-		return billing.CustomerLimit{}, err
+		return billing.CustomerLimit{}, time.Time{}, err
 	}
 	if !w.Open {
 		w = Opening(def.Reset, c.Now)
@@ -321,9 +403,10 @@ func (c Customer) Adjust(ctx context.Context, def Definition, amount int64) (bil
 		MerchantID: c.MerchantID, CustomerID: c.CustomerID, LimitKey: def.Key,
 		WindowStartsAt: w.StartsAt, WindowEndsAt: w.EndsAt, Capacity: capacities[def.Key], Amount: amount,
 	}); err != nil {
-		return billing.CustomerLimit{}, err
+		return billing.CustomerLimit{}, time.Time{}, err
 	}
-	return c.One(ctx, def)
+	line, err := c.One(ctx, def)
+	return line, w.StartsAt, err
 }
 
 // SetOverrides writes a customer's overrides: each replaces what its

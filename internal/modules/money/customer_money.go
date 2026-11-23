@@ -7,10 +7,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/retention"
 )
 
 // CustomerMoney is a customer's money per currency: its balance in every
@@ -101,4 +105,45 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 		return nil
 	})
 	return out, err
+}
+
+// BalanceLimits are the customer's built-in limit balance in each currency
+// it holds a balance in, as admission sees it: capacity is the balance plus
+// the credit line usage billing gives (none when prepaid), used what it owes,
+// and held what live holds, pending refunds and running charges' unposted
+// accruals set aside. Display values: a billing policy's own cap is not
+// applied.
+func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, customer uuid.UUID) ([]billing.CustomerLimit, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := q.ListCustomersMoneyAccounts(ctx, gen.ListCustomersMoneyAccountsParams{MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer}, RowLimit: int32(2 * len(billing.Currencies()))}) // #nosec G115 -- twice the currency registry
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	out := []billing.CustomerLimit{}
+	for _, a := range accounts {
+		if ledger.AccountType(a.AccountType) != ledger.CustomerBalance {
+			continue
+		}
+		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
+			AsOf: now, HeldSince: now.Add(-retention.AdmissionMaxHold), LeaseLiveSince: now.Add(-limits.LeaseLifetime)})
+		if err != nil {
+			return nil, err
+		}
+		capacity, err := s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, admissionCapacityFromRow(row))
+		if err != nil {
+			return nil, err
+		}
+		line := billing.CustomerLimit{CustomerID: billing.CustomerID(customer), Limit: catalog.BalanceLimit, Unit: a.Currency,
+			Capacity: capacity.Balance, Used: capacity.OutstandingOwed, Held: capacity.Held}
+		if capacity.BillingMode == BillingModeArrears && capacity.CreditLimit > 0 {
+			line.Capacity += capacity.CreditLimit
+		}
+		line.Remaining = line.Capacity - line.Used - line.Held
+		out = append(out, line)
+	}
+	return out, nil
 }

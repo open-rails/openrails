@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -231,11 +232,12 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 			return err
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
-			MerchantID: tenantID,
-			CustomerID: payerID,
-			Currency:   cur,
-			AsOf:       now,
-			HeldSince:  now.Add(-retention.AdmissionMaxHold),
+			MerchantID:     tenantID,
+			CustomerID:     payerID,
+			Currency:       cur,
+			AsOf:           now,
+			HeldSince:      now.Add(-retention.AdmissionMaxHold),
+			LeaseLiveSince: now.Add(-limits.LeaseLifetime),
 		})
 		if err != nil {
 			return err
@@ -275,11 +277,12 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	}
 	now := s.now()
 	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
-		MerchantID: tenantID,
-		CustomerID: payerID,
-		Currency:   cur,
-		AsOf:       now,
-		HeldSince:  now.Add(-retention.AdmissionMaxHold),
+		MerchantID:     tenantID,
+		CustomerID:     payerID,
+		Currency:       cur,
+		AsOf:           now,
+		HeldSince:      now.Add(-retention.AdmissionMaxHold),
+		LeaseLiveSince: now.Add(-limits.LeaseLifetime),
 	})
 	if err != nil {
 		return AdmissionCapacity{}, err
@@ -745,7 +748,7 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
 	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
-		HeldSince: now.Add(-retention.AdmissionMaxHold), AccruedAsOf: s.accruedAsOf(),
+		HeldSince: now.Add(-retention.AdmissionMaxHold), LeaseLiveSince: now.Add(-limits.LeaseLifetime), AccruedAsOf: s.accruedAsOf(),
 	})
 	return row.Held, row.Accrued, err
 }

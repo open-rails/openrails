@@ -971,7 +971,7 @@
     {
       "id": "OR-J23-S10",
       "journey": "J23",
-      "name": "A limit adjustment adds to the current window only"
+      "name": "A limit adjustment adds to the current window only, once per source_id"
     },
     {
       "id": "OR-J23-S11",

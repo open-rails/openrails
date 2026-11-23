@@ -26,5 +26,5 @@ var limitsRoutes = []Route{
 	{Method: GET, Path: "/v1/me/limits", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
-		Request: billing.AdjustLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
+		Request: billing.AdjustLimitParams{}, Responses: []Reply{{200, billing.CustomerLimit{}}}, Errors: withCustomer("idempotency_key_reused", "invalid_param", billing.CodeLimitNotFound), Handler: h(handlers.AdjustCustomerLimit)},
 }

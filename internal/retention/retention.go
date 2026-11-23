@@ -29,10 +29,10 @@ const (
 
 	// AdmissionMaxWindow is the longest spend window a policy may declare.
 	AdmissionMaxWindow = 31 * Day
-	// AdmissionMaxHold is the longest a hold may live past its admission.
+	// AdmissionMaxHold is the longest a hold row may live past its creation.
 	AdmissionMaxHold = 30 * Day
-	// Admissions is how long an admitted request is kept: the longest spend
-	// window that may still count it, plus 30 days.
+	// Admissions is how long a hold is kept, the replay horizon: the longest
+	// spend window that may still count it, plus 30 days.
 	Admissions = AdmissionMaxWindow + 30*Day
 
 	// PartitionsAheadMonths is how many months past the current one always
@@ -68,6 +68,11 @@ const (
 	// LimitWindows keeps a closed limit window 61 days past its end: the
 	// replay horizon, within which late usage and replays still resolve.
 	LimitWindows = 61 * Day
+	// Leases keeps a gate's lease 61 days past its last sync, so its late
+	// reports and replays still resolve.
+	Leases = Admissions
+	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
+	LimitAdjustments = Admissions
 	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
 	// period 100 days past the period's start: a month plus the ingest window.
 	MeterPeriodQuantities = 100 * Day
@@ -107,7 +112,8 @@ type MonthlyPartitions struct {
 // Partitioned lists the partitioned tables.
 var Partitioned = []MonthlyPartitions{
 	{Table: "usage_events", Key: "occurred_at", WriteBack: UsageIngestWindow, DropBefore: UsageDropBefore},
-	{Table: "admission_operations", Key: "admitted_at", DropBefore: AdmissionsDropBefore},
+	{Table: "limit_holds", Key: "created_at", DropBefore: AdmissionsDropBefore},
+	{Table: "limit_hold_parts", Key: "hold_created_at", DropBefore: AdmissionsDropBefore},
 }
 
 // MonthStart is the first instant of t's UTC month.
@@ -122,7 +128,7 @@ func UsageDropBefore(now time.Time) time.Time {
 	return MonthStart(now).AddDate(0, -(UsageBilledMonths + UsageBillingLagMonths), 0)
 }
 
-// AdmissionsDropBefore is the oldest admission still kept.
+// AdmissionsDropBefore is the oldest hold still kept.
 func AdmissionsDropBefore(now time.Time) time.Time { return now.UTC().Add(-Admissions) }
 
 // Range is the span of months a row may be written into at now, plus the
