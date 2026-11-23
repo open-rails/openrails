@@ -1631,3 +1631,24 @@ func TestGateNeverReturnsAHoldWithAnOpenTicket(t *testing.T) {
 		}
 	})
 }
+
+func TestGateRecordKeyNamesCustomerEventTypeSourceAndSourceID(t *testing.T) {
+	base := billing.LeaseUsage{CustomerID: billing.CustomerID(uuid.New()), EventType: "work", Source: "api", SourceID: "call-1", Dimensions: map[string]int64{"units": 1}}
+	same := base
+	same.Dimensions = map[string]int64{"units": 9}
+	if recordKey(base) != recordKey(same) {
+		t.Fatal("the same customer, event type, source and source_id are one Record")
+	}
+	for name, change := range map[string]func(*billing.LeaseUsage){
+		"customer":   func(u *billing.LeaseUsage) { u.CustomerID = billing.CustomerID(uuid.New()) },
+		"event type": func(u *billing.LeaseUsage) { u.EventType = "other" },
+		"source":     func(u *billing.LeaseUsage) { u.Source = "batch" },
+		"source_id":  func(u *billing.LeaseUsage) { u.SourceID = "call-2" },
+	} {
+		other := base
+		change(&other)
+		if recordKey(other) == recordKey(base) {
+			t.Fatalf("another %s is another Record", name)
+		}
+	}
+}

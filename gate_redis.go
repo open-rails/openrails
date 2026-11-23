@@ -37,7 +37,8 @@ import (
 //	G:close    set   earlier leases answered dead, to close at once
 //	G:retire   hash  earlier lease -> unix ms it would have expired by: closed
 //	                 once no ticket counts on its holds, dropped after
-//	G:k:<key>  a usage write (a ticket's, or a Record's source and source_id)
+//	G:k:<key>  a usage write (a ticket's, or a Record's customer, event
+//	           type, source and source_id)
 //	           -> lease|n, kept gateWriteKeyTTL past its settlement (at
 //	           most gateWriteKeyBackstop unsettled)
 //	G:lock     the syncing process, renewed while it syncs
@@ -749,9 +750,9 @@ func (s *sharedGate) written(key string) {
 	s.mu.Unlock()
 }
 
-// record writes usage with no admission once per source and source_id: a
-// Record repeated before gateWriteKeyTTL past the first's settlement finds
-// it.
+// record writes usage with no admission once per customer, event type,
+// source and source_id: a Record repeated before gateWriteKeyTTL past the
+// first's settlement finds it.
 func (s *sharedGate) record(ctx context.Context, item billing.LeaseUsage) error {
 	ns, ok := s.namespace()
 	if !ok {
@@ -765,7 +766,7 @@ func (s *sharedGate) record(ctx context.Context, item billing.LeaseUsage) error 
 }
 
 func recordKey(item billing.LeaseUsage) string {
-	sum := sha256.Sum256([]byte(item.Source + "\x00" + item.SourceID))
+	sum := sha256.Sum256([]byte(item.CustomerID.String() + "\x00" + item.EventType + "\x00" + item.Source + "\x00" + item.SourceID))
 	return "r:" + hex.EncodeToString(sum[:16])
 }
 

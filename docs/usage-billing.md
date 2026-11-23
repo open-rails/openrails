@@ -324,10 +324,12 @@ err = ticket.Capture(ctx, billing.CaptureUsage{Dimensions: used}) // or ticket.R
   customer one process served is warm on all. Usage waits in a Redis stream and
   one process at a time syncs. Redis keeps each usage write's key until 15
   minutes after the usage settles: a capture's by its ticket, a `Record`'s by
-  its `source` and `source_id`. A `Capture` or `Record` whose write may or may
-  not have landed returns an error, and retrying it in the same process posts
-  it once: the retry goes to Redis only. A `Record` repeated with the same
-  `source` and `source_id` posts once while Redis answers both. A capture or
+  its customer, event type, `source` and `source_id`. A `Capture` or `Record`
+  whose write may or may not have landed returns an error, and retrying it in
+  the same process posts it once: the retry goes to Redis only. A `Record`
+  repeated with the same four posts once while Redis answers both. Without
+  Redis a gate does not deduplicate: every `Record` that returns nil posts,
+  and one that returns an error stored nothing. A capture or
   `Record` retried more than 15 minutes after such a write can bill twice. A
   process that cannot reach Redis admits from its own lease meanwhile, and
   reports there only usage it knows Redis never took; it closes that lease once

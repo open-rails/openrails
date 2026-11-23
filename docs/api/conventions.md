@@ -30,8 +30,10 @@ response; [every error code](error-codes.md); shapes in
   buy, store it with the order and resend it on every retry; a new key is a new
   purchase (a duplicate subscription or permanent product is refused, a timed pass
   or credit pack sells again). Admissions use `request_id`, running charges
-  `reference`; lease usage is deduplicated by its lease and `n`, never by
-  `source_id` ([usage billing](../usage-billing.md#recording-usage)). There is no
+  `reference`. The server deduplicates lease usage by its lease and `n` only,
+  never by `source_id`; a gate using Redis also posts a `Record` repeated with
+  the same customer, event type, `source` and `source_id` once, until 15 minutes
+  after the first settles ([the gate](../usage-billing.md#the-gate)). There is no
   response cache.
 - **Discovery.** A route the deployment does not serve is not registered
   (`404 route_not_found`).
