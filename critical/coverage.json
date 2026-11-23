@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 435,
+  "scenario_count": 436,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2177,6 +2177,11 @@
       "id": "OR-J39-S23",
       "journey": "J39",
       "name": "A void sends one receipt worded as a canceled charge: the customer was not charged"
+    },
+    {
+      "id": "OR-J39-S24",
+      "journey": "J39",
+      "name": "A subscription's first payment sends its receipt: the amount paid and the billing period"
     }
   ]
 }

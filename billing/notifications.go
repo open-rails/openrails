@@ -105,7 +105,8 @@ type NotificationData struct {
 	EffectiveAt      *time.Time       `json:"effective_at,omitempty"`
 
 	// Renewal receipt (premium_renewed): the renewed period, and whether it
-	// applied a scheduled downgrade.
+	// applied a scheduled downgrade. A start (premium_started) has its first
+	// period and, when it was charged, Amount.
 	PeriodStartsAt   *time.Time `json:"period_starts_at,omitempty"`
 	PeriodEndsAt     *time.Time `json:"period_ends_at,omitempty"`
 	DowngradeApplied bool       `json:"downgrade_applied,omitempty"`

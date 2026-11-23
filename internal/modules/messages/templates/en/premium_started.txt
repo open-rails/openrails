@@ -1,4 +1,10 @@
 Thank you for subscribing{{with .Event.ProductName}} to {{.}}{{end}}. Your subscription is active.
-{{with .Links.ManageBilling}}
+
+{{with .Event.Amount}}Amount paid: {{.}}
+{{end}}{{if .Event.PeriodEndsAt}}Billing period: {{.Event.PeriodStartsAt}} to {{.Event.PeriodEndsAt}}
+{{end}}Date: {{.Event.OccurredAt}}
+{{if .Event.Amount}}{{with .Merchant.StatementDescriptor}}
+The charge appears on your statement as {{.}}.
+{{end}}{{end}}{{with .Links.ManageBilling}}
 Manage or cancel your subscription any time: {{.}}
 {{end}}

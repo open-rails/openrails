@@ -701,6 +701,17 @@ func TestCustomerMessages(t *testing.T) {
 		require.Contains(t, receipt.Text, "was canceled; you weren't charged.")
 		require.NotContains(t, receipt.Text, "refund")
 	})
+	t.Run("OR-J39-S24/a-subscriptions-first-payment-sends-its-receipt", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+		liveMoney(t, a.world)
+		startFleet(t, a.world)
+		receipt := sentAbout(t, a, mail, "premium_started", "Your subscription to Alpha has started")
+		day := func(at *time.Time) string { return at.UTC().Format("January 2, 2006") }
+		require.Contains(t, receipt.Text, "Thank you for subscribing to Membership.")
+		require.Contains(t, receipt.Text, "Amount paid: 10.00 USD\nBilling period: "+day(sub.CurrentPeriodStartsAt)+" to "+day(sub.CurrentPeriodEndsAt))
+		require.Contains(t, receipt.HTML, "<strong>10.00 USD</strong>")
+	})
 }
 
 // declareMessages gives alpha the messages document s.

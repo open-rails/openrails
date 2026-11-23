@@ -573,11 +573,18 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	if params.InitialPaymentReversal == "" {
+		// The first period and, when it was charged, what was paid: the
+		// customer's receipt.
+		start, end := periodStartsAt.UTC(), periodEndsAt.UTC()
+		data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), PeriodStartsAt: &start, PeriodEndsAt: &end}
+		if amount, currency := membershipCharge(params, price); params.TransactionID != "" && amount > 0 {
+			data.Amount, data.Currency = &amount, currency
+		}
 		notification := &models.NotificationEvent{
 			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
-			Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID)},
+			Data:       data,
 		}
 		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
 			return nil, nil, fmt.Errorf("record membership started notification: %w", err)
@@ -588,17 +595,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	// Create Payment record if payment info is provided
 	if params.TransactionID != "" && paymentService != nil && !paymentRecorded {
-		// Use provided amount/currency or fall back to price defaults
-		amount := params.Amount
-		if !params.AmountProvided && amount == 0 {
+		amount, currency := membershipCharge(params, price)
+		if !params.AmountProvided && params.Amount == 0 {
 			// The caller supplied no charged amount: record the catalog list
 			// price, with a warning (expected, not confirmed).
 			s.Log.WarnContext(ctx, "no charged amount supplied for membership payment; recording catalog list price", "price_id", price.ID, "transaction_id", params.TransactionID, "user_id", subscription.CustomerID.String())
-			amount = price.Amount
-		}
-		currency := params.Currency
-		if currency == "" {
-			currency = price.Currency
 		}
 
 		// The provider's transaction time when supplied; now() only as a last
@@ -643,6 +644,20 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	return subscription, notifications, nil
+}
+
+// membershipCharge is what a membership's first payment charged: the
+// caller's amount and currency, else the price's.
+func membershipCharge(params *CreateMembershipParams, price *models.Price) (int64, string) {
+	amount := params.Amount
+	if !params.AmountProvided && amount == 0 {
+		amount = price.Amount
+	}
+	currency := params.Currency
+	if currency == "" {
+		currency = price.Currency
+	}
+	return amount, currency
 }
 
 // RecordConfirmedChargeWithoutRenewal records a provider-confirmed renewal

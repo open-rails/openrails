@@ -1394,6 +1394,9 @@
     ],
     "OR-J39-S23": [
       "TestCustomerMessages/OR-J39-S23/a-void-is-confirmed-as-a-canceled-charge"
+    ],
+    "OR-J39-S24": [
+      "TestCustomerMessages/OR-J39-S24/a-subscriptions-first-payment-sends-its-receipt"
     ]
   }
 }

@@ -133,7 +133,7 @@ func sample(eventType string) fact {
 		d.Amount, d.ProductName, d.PaymentID, d.OrderID, d.OrderNumber = amount(12_500_000), "Field guide", payment, order, 1001
 		d.RefundedPaymentID = billing.PaymentID(uuid.MustParse("019a0000-0000-7000-8000-000000000004"))
 	case models.NotificationPremiumStarted:
-		d.SubscriptionID = sub
+		d.SubscriptionID, d.Amount, d.PeriodStartsAt, d.PeriodEndsAt = sub, amount(9_990_000), &at, &later
 	case models.NotificationPremiumRenewed:
 		d.SubscriptionID, d.PeriodStartsAt, d.PeriodEndsAt = sub, &at, &later
 	case models.NotificationPremiumEnded:

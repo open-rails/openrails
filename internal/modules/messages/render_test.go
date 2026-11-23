@@ -96,6 +96,14 @@ func TestReceipts(t *testing.T) {
 	requireText(t, jpy, "Your receipt from Alpha", "Amount paid: 500 JPY")
 	refund := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
 	requireText(t, refund, "Your refund from Alpha", "We refunded 4.00 USD for Guide.", "Order: 1001\nRefunded: 4.00 USD\nDate: November 23, 2026")
+	start, end := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC), time.Date(2026, 12, 23, 0, 0, 0, 0, time.UTC)
+	subscribed := alpha(t, models.NotificationPremiumStarted, billing.NotificationData{Amount: amount(9_990_000), Currency: "USD", ProductName: "Pro", PeriodStartsAt: &start, PeriodEndsAt: &end})
+	requireText(t, subscribed, "Your subscription to Alpha has started", "Thank you for subscribing to Pro.",
+		"Amount paid: 9.99 USD\nBilling period: November 23, 2026 to December 23, 2026\nDate: November 23, 2026")
+	resumed := alpha(t, models.NotificationPremiumStarted, billing.NotificationData{ProductName: "Pro"})
+	if strings.Contains(resumed.Text, "Amount paid") || strings.Contains(resumed.Text, "Billing period") {
+		t.Errorf("a start without a charge shows none:\n%s", resumed.Text)
+	}
 	void := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001, Voided: true})
 	requireText(t, void, "Your payment to Alpha was canceled", "Your payment of 4.00 USD for Guide was canceled; you weren't charged.", "Order: 1001\nCanceled: 4.00 USD")
 	if strings.Contains(void.Text+void.HTML, "refund") || !strings.Contains(void.HTML, "Canceled</td>") {
