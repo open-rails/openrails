@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/currency"
 )
 
@@ -110,7 +111,7 @@ func (p *ApplyProviderPrice) UnmarshalJSON(raw []byte) error {
 		if *field.hours != nil {
 			return fmt.Errorf("%s and %s_hours cannot both be set", field.name, field.name)
 		}
-		hours, err := ParseDurationHours(*field.text)
+		hours, err := syntax.ParseDurationHours(*field.text)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field.name, err)
 		}
@@ -163,11 +164,11 @@ func (p ApplyProviderPrice) Validate() error {
 		return fmt.Errorf("a trial takes trial_unit_amount and trial_duration on recurring declared terms")
 	}
 	for _, hours := range []*int{p.BillingIntervalHours, p.TrialDurationHours} {
-		if hours != nil && (*hours <= 0 || *hours > MaxDurationHours) {
-			return fmt.Errorf("duration must be between 1 and %d hours", MaxDurationHours)
+		if hours != nil && (*hours <= 0 || *hours > syntax.MaxDurationHours) {
+			return fmt.Errorf("duration must be between 1 and %d hours", syntax.MaxDurationHours)
 		}
 	}
-	if p.AccessDurationHours.Set && !p.AccessDurationHours.Null && (p.AccessDurationHours.Value <= 0 || p.AccessDurationHours.Value > MaxDurationHours) {
+	if p.AccessDurationHours.Set && !p.AccessDurationHours.Null && (p.AccessDurationHours.Value <= 0 || p.AccessDurationHours.Value > syntax.MaxDurationHours) {
 		return fmt.Errorf("access duration must be positive supported hours, or %s", AccessForever)
 	}
 	if p.AccessDurationHours.Set && p.AccessDurationHours.Null && !p.OneOff {

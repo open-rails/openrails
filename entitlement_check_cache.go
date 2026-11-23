@@ -19,7 +19,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // EntitlementCheckCacheOptions configures the remote Go client's entitlement
@@ -145,7 +145,7 @@ func cacheableEntitlementKeys(params billing.CheckEntitlementsParams) []string {
 		return nil
 	}
 	for _, key := range params.Entitlements {
-		if len(key) > catalog.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+		if len(key) > syntax.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 			return nil
 		}
 	}

@@ -298,8 +298,4 @@ type MerchantName struct {
 // forwarding to it under the deployment's naming policy.
 type RenameMerchantParams struct {
 	Name string `json:"name"`
-	// ActorUserID is the user renaming their own merchant: the name then
-	// answers to the creation policy's reserved names and pattern and to the
-	// rename interval. Empty is the operator's rename.
-	ActorUserID string `json:"-"`
 }

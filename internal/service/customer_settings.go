@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 
 	"github.com/google/uuid"
@@ -238,7 +239,7 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 	seen := map[string]bool{}
 	for j, o := range params.Limits {
 		field := fmt.Sprintf("limits[%d]", j)
-		if err := catalog.ValidateLimitKey(o.Limit); err != nil {
+		if err := syntax.ValidateLimitKey(o.Limit); err != nil {
 			return c, apperr.Invalidf("%s", err).WithParam(field + ".limit")
 		}
 		if seen[o.Limit] {

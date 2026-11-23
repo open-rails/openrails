@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -37,7 +37,7 @@ func accessTenure(r *httprequest.Request, customer billing.CustomerID) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("entitlement must name 1 to %d keys", billing.MaxEntitlementChecks)).WithParam("entitlement"))
 		return
 	}
-	keys, err := catalog.NormalizeEntitlements(keys)
+	keys, err := syntax.NormalizeEntitlements(keys)
 	if err != nil {
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("entitlement"))
 		return

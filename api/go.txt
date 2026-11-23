@@ -1007,7 +1007,7 @@ pkg openrails/billing, func ParseRunningChargeID(string) (RunningChargeID, error
 pkg openrails/billing, func ParseSubscriptionID(string) (SubscriptionID, error)
 pkg openrails/billing, func PaymentFailureFrom(error) (*PaymentFailure, bool)
 pkg openrails/billing, func Permissions() []Permission
-pkg openrails/billing, func SourceRef(string, string) string
+pkg openrails/billing, func ReservedMerchantSlugs() []string
 pkg openrails/billing, func SubscriptionSorts() []SubscriptionSort
 pkg openrails/billing, func ValidateMerchantSlug(string) error
 pkg openrails/billing, method (*Admission) Active() bool
@@ -1899,9 +1899,9 @@ pkg openrails/billing, type DeclaredPurchase struct, SourceID string `json:"sour
 pkg openrails/billing, type DeclaredPurchase struct, TransactionID string `json:"transaction_id"`
 pkg openrails/billing, type DeclaredSettlement struct
 pkg openrails/billing, type DeclaredSettlement struct, Asset string `json:"asset"`
-pkg openrails/billing, type DeclaredSettlement struct, Payer string `json:"payer,omitempty"`
+pkg openrails/billing, type DeclaredSettlement struct, FromWallet string `json:"from_wallet,omitempty"`
 pkg openrails/billing, type DeclaredSettlement struct, Quantity string `json:"quantity"`
-pkg openrails/billing, type DeclaredSettlement struct, Recipient string `json:"recipient,omitempty"`
+pkg openrails/billing, type DeclaredSettlement struct, ToWallet string `json:"to_wallet,omitempty"`
 pkg openrails/billing, type DeclaredStripeInvoice struct
 pkg openrails/billing, type DeclaredStripeInvoice struct, AmountDue int64 `json:"amount_due,string"`
 pkg openrails/billing, type DeclaredStripeInvoice struct, AmountOffStripe int64 `json:"amount_off_stripe,string"`
@@ -3436,7 +3436,6 @@ pkg openrails/billing, type Refusal struct, RetryAfterSeconds *int64 `json:"retr
 pkg openrails/billing, type ReleaseAdmissionBatchParams struct
 pkg openrails/billing, type ReleaseAdmissionBatchParams struct, RequestIDs []string `json:"request_ids"`
 pkg openrails/billing, type RenameMerchantParams struct
-pkg openrails/billing, type RenameMerchantParams struct, ActorUserID string `json:"-"`
 pkg openrails/billing, type RenameMerchantParams struct, Name string `json:"name"`
 pkg openrails/billing, type Renewal struct
 pkg openrails/billing, type Renewal struct, Amount int64 `json:"amount,string"`
@@ -3926,7 +3925,6 @@ pkg openrails/billing, var ErrRequestBodyTooLarge error
 pkg openrails/billing, var ErrUnauthorized error
 pkg openrails/billing, var ErrUnreachable error
 pkg openrails/billing, var ErrUsageNotPriced error
-pkg openrails/billing, var ReservedMerchantSlugs []string
 pkg openrails/catalog, const AccessForever untyped string = "forever"
 pkg openrails/catalog, const AggregationCount Aggregation = "count"
 pkg openrails/catalog, const AggregationLatest Aggregation = "latest"
@@ -3940,13 +3938,9 @@ pkg openrails/catalog, const ApplicationSchemaVersion untyped int = 1
 pkg openrails/catalog, const BalanceLimit untyped string = "balance"
 pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
-pkg openrails/catalog, const MaxDurationHours int = 2562047
-pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
 pkg openrails/catalog, const MaxEntitlementReplacements untyped int = 100
 pkg openrails/catalog, const MaxLimitWindowSeconds untyped int = 31622400
-pkg openrails/catalog, const MaxProductEntitlements untyped int = 10000
 pkg openrails/catalog, const MaxQuantity untyped int = 10000
-pkg openrails/catalog, const MaxRequiredEntitlements untyped int = 100
 pkg openrails/catalog, const ModelDynamic Model = "dynamic"
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
@@ -3973,21 +3967,11 @@ pkg openrails/catalog, const SellViaSolana SellVia = "solana"
 pkg openrails/catalog, const TierModeGraduated TierMode = "graduated"
 pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func Currencies() []CurrencyUnits
-pkg openrails/catalog, func DeriveOwnership(Ownership, bool, []OwnershipPrice) Ownership
-pkg openrails/catalog, func LimitUnitCurrency(string) bool
-pkg openrails/catalog, func NormalizeEntitlements([]string) ([]string, error)
-pkg openrails/catalog, func NormalizeProductEntitlements([]string) ([]string, error)
-pkg openrails/catalog, func NormalizeRequiredEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
-pkg openrails/catalog, func ParseBillingInterval(string) (int, int, error)
 pkg openrails/catalog, func ParseCurrency(string) (Currency, error)
-pkg openrails/catalog, func ParseDurationHours(string) (int, error)
 pkg openrails/catalog, func ReadFile(string) (*Application, error)
-pkg openrails/catalog, func ValidateLimitKey(string) error
-pkg openrails/catalog, func ValidateLimitUnit(string) error
-pkg openrails/catalog, func ValidateSellVia([]SellVia) error
 pkg openrails/catalog, func Value[T any](T) Field[T]
 pkg openrails/catalog, method (*ApplyPrice) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*ApplyProviderPrice) UnmarshalJSON([]byte) error
@@ -4114,9 +4098,6 @@ pkg openrails/catalog, type MatrixCell struct, UnitAmount int64 `json:"unit_amou
 pkg openrails/catalog, type Model string
 pkg openrails/catalog, type Overrun string
 pkg openrails/catalog, type Ownership string
-pkg openrails/catalog, type OwnershipPrice struct
-pkg openrails/catalog, type OwnershipPrice struct, AccessDuration bool
-pkg openrails/catalog, type OwnershipPrice struct, Recurring bool
 pkg openrails/catalog, type PackagePrice struct
 pkg openrails/catalog, type PackagePrice struct, Amount int64 `json:"amount,omitempty,string"`
 pkg openrails/catalog, type PackagePrice struct, FreeUnits int64 `json:"free_units,omitempty"`
@@ -4318,6 +4299,7 @@ pkg openrails/server, method (*Server) PrivateHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 pkg openrails/server, method (*Server) PurgeMerchant(context.Context, billing.MerchantID, billing.PurgeMerchantParams) (*billing.MerchantPurge, error)
 pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)
+pkg openrails/server, method (*Server) RenameUserMerchant(context.Context, billing.MerchantID, string, billing.RenameMerchantParams) (*billing.MerchantName, error)
 pkg openrails/server, method (*Server) RestoreMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) RetireUnusedMerchant(context.Context, billing.MerchantID, string) (billing.MerchantRetirement, error)
 pkg openrails/server, method (*Server) RiverJobs() river.Contribution

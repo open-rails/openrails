@@ -946,8 +946,8 @@ export type DeclaredPurchase = {
 export type DeclaredSettlement = {
   asset?: string
   quantity?: string
-  payer?: string
-  recipient?: string
+  from_wallet?: string
+  to_wallet?: string
 }
 
 export type DeclaredStripeInvoice = {

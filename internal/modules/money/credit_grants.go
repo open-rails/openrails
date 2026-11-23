@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 
@@ -260,6 +261,6 @@ func sourceRef(sourceType string, id *string) *string {
 	if id == nil {
 		return nil
 	}
-	ref := billing.SourceRef(sourceType, *id)
+	ref := catalogrules.SourceRef(sourceType, *id)
 	return &ref
 }

@@ -17188,10 +17188,10 @@
           "quantity": {
             "type": "string"
           },
-          "payer": {
+          "from_wallet": {
             "type": "string"
           },
-          "recipient": {
+          "to_wallet": {
             "type": "string"
           }
         }

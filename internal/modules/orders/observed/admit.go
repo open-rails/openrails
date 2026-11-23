@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -179,7 +180,7 @@ func freezeLineOwnership(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 		if err != nil {
 			return err
 		}
-		l.Ownership = string(catalog.DeriveOwnership(catalog.Ownership(models.DerefStr(p.Ownership)), len(p.CreditGrant) > 0 && string(p.CreditGrant) != "null", []catalog.OwnershipPrice{{Recurring: recurring || l.BillingIntervalHours != nil, AccessDuration: l.AccessDurationHours != nil}}))
+		l.Ownership = string(catalogrules.DeriveOwnership(catalog.Ownership(models.DerefStr(p.Ownership)), len(p.CreditGrant) > 0 && string(p.CreditGrant) != "null", []catalogrules.OwnershipPrice{{Recurring: recurring || l.BillingIntervalHours != nil, AccessDuration: l.AccessDurationHours != nil}}))
 		if l.Ownership == "unique" {
 			l.ClaimKey = "product:" + p.ID.String()
 			if p.TierGroup != nil && strings.TrimSpace(*p.TierGroup) != "" {

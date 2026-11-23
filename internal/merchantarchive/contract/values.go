@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -159,7 +159,7 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 			switch p.Name + "." + c.Name {
 			case "prices.access_duration_hours", "prices.billing_interval_hours", "prices.trial_duration_hours", "subscriptions.access_duration_hours_snapshot":
-				if x <= 0 || x > int64(catalog.MaxDurationHours) {
+				if x <= 0 || x > int64(syntax.MaxDurationHours) {
 					return bad()
 				}
 			case "prices.billing_interval_months", "order_lines.billing_interval_months":

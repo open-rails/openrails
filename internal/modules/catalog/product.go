@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -87,7 +88,7 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 		return fmt.Errorf("product merchant does not match the authorized merchant")
 	}
 	product.MerchantID = mid.UUID()
-	entitlements, err := catalogwire.NormalizeProductEntitlements(product.Entitlements)
+	entitlements, err := syntax.NormalizeProductEntitlements(product.Entitlements)
 	if err != nil {
 		return apperr.Invalidf("%v", err)
 	}
@@ -100,7 +101,7 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 		}
 	}
 	product.Entitlements = entitlements
-	required, err := catalogwire.NormalizeRequiredEntitlements(product.RequiredEntitlements)
+	required, err := syntax.NormalizeRequiredEntitlements(product.RequiredEntitlements)
 	if err != nil {
 		return apperr.Invalidf("%v", err)
 	}
@@ -309,7 +310,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		if params.Entitlements == nil {
 			return nil, change, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
 		}
-		keys, err := catalogwire.NormalizeProductEntitlements(params.Entitlements)
+		keys, err := syntax.NormalizeProductEntitlements(params.Entitlements)
 		if err != nil {
 			return nil, change, apperr.Invalidf("%v", err)
 		}
@@ -328,7 +329,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		if params.RequiredEntitlements == nil {
 			return nil, change, apperr.Invalidf("required_entitlements must be a string list, not null; use [] for none")
 		}
-		keys, err := catalogwire.NormalizeRequiredEntitlements(params.RequiredEntitlements)
+		keys, err := syntax.NormalizeRequiredEntitlements(params.RequiredEntitlements)
 		if err != nil {
 			return nil, change, apperr.Invalidf("%v", err)
 		}

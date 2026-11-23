@@ -166,7 +166,7 @@ type Config struct {
 	Naming NamingConfig
 	// MerchantCreation is the policy for the merchants users create and
 	// rename through a hosted product (ProvisionMerchant with an owner,
-	// RenameMerchant with an ActorUserID); nil for operator-provisioned
+	// RenameUserMerchant); nil for operator-provisioned
 	// deployments. Hosted products with LocalSignIn may explicitly enable
 	// open Auth.Registration; contact verification still defaults to required.
 	MerchantCreation *MerchantCreationConfig

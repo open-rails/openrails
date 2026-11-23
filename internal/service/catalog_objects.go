@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -389,7 +390,7 @@ func documentProductFields(key string, d catalogwire.ApplyProduct) (map[string]j
 		out["ownership"] = catalogOptionalText(&value)
 	}
 	if d.Entitlements.Set {
-		keys, err := catalogwire.NormalizeEntitlements(d.Entitlements.Value)
+		keys, err := syntax.NormalizeEntitlements(d.Entitlements.Value)
 		if err != nil {
 			return nil, apperr.Invalidf("product %q: %v", key, err)
 		}
@@ -398,7 +399,7 @@ func documentProductFields(key string, d catalogwire.ApplyProduct) (map[string]j
 		out["entitlements"] = catalogJSON(keys)
 	}
 	if d.RequiredEntitlements.Set {
-		keys, err := catalogwire.NormalizeRequiredEntitlements(d.RequiredEntitlements.Value)
+		keys, err := syntax.NormalizeRequiredEntitlements(d.RequiredEntitlements.Value)
 		if err != nil {
 			return nil, apperr.Invalidf("product %q: %v", key, err)
 		}

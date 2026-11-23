@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 )
 
 // LegacyEntitlementNames converts only the archived map representation. The
@@ -28,7 +28,7 @@ func LegacyEntitlementNames(raw string) (string, map[string]int, error) {
 		}
 		names = append(names, name)
 		if duration != nil {
-			if *duration < 0 || *duration > catalog.MaxDurationHours {
+			if *duration < 0 || *duration > syntax.MaxDurationHours {
 				return "", nil, fmt.Errorf("legacy entitlement duration is outside the supported range")
 			}
 			if *duration > 0 {

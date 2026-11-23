@@ -128,7 +128,7 @@ func (c *commandControlPlane) GetMerchant(ctx context.Context, id billing.Mercha
 }
 
 func (c *commandControlPlane) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error) {
-	m, err := c.cp.RenameMerchant(ctx, id, req.Name, req.ActorUserID, req.ActorUserID == "")
+	m, err := c.cp.RenameMerchant(ctx, id, req.Name, "", true)
 	if err != nil {
 		return nil, err
 	}

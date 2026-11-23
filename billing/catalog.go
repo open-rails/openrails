@@ -29,7 +29,9 @@ type Product struct {
 	CreditGrant          *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 	TierGroup            *string                  `json:"tier_group"`
 	TierRank             int                      `json:"tier_rank"`
-	// Ownership is the declared rule; null derives it (catalog.DeriveOwnership).
+	// Ownership is the declared rule; null derives it: consumable for a one-time
+	// credit product, unique for recurring credit, extend when every live price
+	// is one-time with an access duration, unique otherwise.
 	Ownership *catalog.Ownership `json:"ownership"`
 	Archived  bool               `json:"archived"`
 	// Prices are the product's current prices; archived ones are listed with

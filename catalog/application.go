@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/currency"
 )
 
@@ -125,7 +126,7 @@ func validateReplacements(pairs []EntitlementReplacement) error {
 		if pair.To != "" {
 			keys = append(keys, pair.To)
 		}
-		if _, err := NormalizeEntitlements(keys); err != nil {
+		if _, err := syntax.NormalizeEntitlements(keys); err != nil {
 			return fmt.Errorf("entitlement_replacements: %w", err)
 		}
 		if from[pair.From] {
@@ -231,13 +232,13 @@ func (a Application) Validate() error {
 		if p.Entitlements.Set && (p.Entitlements.Null || p.Entitlements.Value == nil) {
 			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", key)
 		}
-		if _, err := NormalizeProductEntitlements(p.Entitlements.Value); err != nil {
+		if _, err := syntax.NormalizeProductEntitlements(p.Entitlements.Value); err != nil {
 			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if p.RequiredEntitlements.Set && (p.RequiredEntitlements.Null || p.RequiredEntitlements.Value == nil) {
 			return fmt.Errorf("product %q: required_entitlements must be a string list, not null; use [] for none", key)
 		}
-		if _, err := NormalizeRequiredEntitlements(p.RequiredEntitlements.Value); err != nil {
+		if _, err := syntax.NormalizeRequiredEntitlements(p.RequiredEntitlements.Value); err != nil {
 			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
@@ -277,7 +278,7 @@ func (a Application) Validate() error {
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
 				return fmt.Errorf("price %q: money cannot be negative", priceKey)
 			}
-			if err := ValidateSellVia(price.SellVia.Value); err != nil {
+			if err := syntax.ValidateSellVia(price.SellVia.Value, SellViaCard, SellViaSolana); err != nil {
 				return fmt.Errorf("price %q: %w", priceKey, err)
 			}
 			if price.Quantity.Set && !price.Quantity.Null {
@@ -291,8 +292,8 @@ func (a Application) Validate() error {
 				}
 			}
 			for _, duration := range []Field[int]{price.BillingIntervalHours, price.AccessDurationHours, price.TrialDurationHours} {
-				if duration.Set && !duration.Null && (duration.Value <= 0 || duration.Value > MaxDurationHours) {
-					return fmt.Errorf("price %q: duration must be between 1 and %d hours or null", priceKey, MaxDurationHours)
+				if duration.Set && !duration.Null && (duration.Value <= 0 || duration.Value > syntax.MaxDurationHours) {
+					return fmt.Errorf("price %q: duration must be between 1 and %d hours or null", priceKey, syntax.MaxDurationHours)
 				}
 			}
 		}
@@ -306,7 +307,7 @@ func (a Application) Validate() error {
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(a.Limits)) {
-		if err := ValidateLimitKey(key); err != nil {
+		if err := syntax.ValidateLimitKey(key); err != nil {
 			return err
 		}
 		limit := a.Limits[key]
@@ -382,18 +383,3 @@ const (
 	SellViaCard   SellVia = "card"
 	SellViaSolana SellVia = "solana"
 )
-
-// ValidateSellVia refuses an unknown or repeated method; nil is every method.
-func ValidateSellVia(methods []SellVia) error {
-	if methods != nil && len(methods) == 0 {
-		return fmt.Errorf("sell_via names at least one method; null sells through every method")
-	}
-	seen := map[SellVia]bool{}
-	for _, m := range methods {
-		if m != SellViaCard && m != SellViaSolana || seen[m] {
-			return fmt.Errorf("sell_via lists methods once each: %s, %s", SellViaCard, SellViaSolana)
-		}
-		seen[m] = true
-	}
-	return nil
-}

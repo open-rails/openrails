@@ -602,7 +602,7 @@
       "func ParseSubscriptionID(s string) (SubscriptionID, error)",
       "func PaymentFailureFrom(err error) (*PaymentFailure, bool)",
       "func Permissions() []Permission",
-      "func SourceRef(sourceType, id string) string",
+      "func ReservedMerchantSlugs() []string",
       "func SubscriptionSorts() []SubscriptionSort",
       "func ValidateMerchantSlug(s string) error",
       "type AccessLevel string",
@@ -741,7 +741,7 @@
       "type DeclaredPaymentMethod struct {\n\tCustomer CustomerID `json:\"customer\"`\n\tRail     Rail       `json:\"rail\"`\n\n\tPSP             PSPRef `json:\"psp,omitzero\"`\n\tRailCustomerRef string `json:\"rail_customer_ref\"`\n\tRailMethodRef   string `json:\"rail_method_ref\"`\n\n\tRecurringTransactionID string `json:\"recurring_transaction_id,omitempty\"`\n\n\tCard      *CardDetails `json:\"card,omitempty\"`\n\tCreatedAt time.Time    `json:\"created_at,omitempty\"`\n}",
       "type DeclaredProviderSchedule struct {\n\tSourceReference string           `json:\"source_reference\"`\n\tAmount          int64            `json:\"amount,string\"`\n\tCurrency        catalog.Currency `json:\"currency\"`\n\tQuantity        *int             `json:\"quantity,omitempty\"`\n\tIntervalHours   int              `json:\"interval_hours,omitempty\"`\n\n\tIntervalMonths int       `json:\"interval_months,omitempty\"`\n\tFirstDueAt     time.Time `json:\"first_due_at\"`\n}",
       "type DeclaredPurchase struct {\n\tSourceID string     `json:\"source_id\"`\n\tCustomer CustomerID `json:\"customer\"`\n\tRail     Rail       `json:\"rail\"`\n\n\tPSP           PSPRef              `json:\"psp,omitzero\"`\n\tTransactionID string              `json:\"transaction_id\"`\n\tCurrency      catalog.Currency    `json:\"currency\"`\n\tAmount        int64               `json:\"amount,string\"`\n\tPaidAt        time.Time           `json:\"paid_at\"`\n\tLines         []DeclaredOrderLine `json:\"lines\"`\n\tSettlement    *DeclaredSettlement `json:\"settlement,omitempty\"`\n\n\tEvidence json.RawMessage `json:\"evidence,omitempty\"`\n}",
-      "type DeclaredSettlement struct {\n\tAsset     string `json:\"asset\"`\n\tQuantity  string `json:\"quantity\"`\n\tPayer     string `json:\"payer,omitempty\"`\n\tRecipient string `json:\"recipient,omitempty\"`\n}",
+      "type DeclaredSettlement struct {\n\tAsset      string `json:\"asset\"`\n\tQuantity   string `json:\"quantity\"`\n\tFromWallet string `json:\"from_wallet,omitempty\"`\n\tToWallet   string `json:\"to_wallet,omitempty\"`\n}",
       "type DeclaredStripeInvoice struct {\n\tID                string                         `json:\"id\"`\n\tCustomerReference string                         `json:\"customer_reference\"`\n\tStatus            string                         `json:\"status\"`\n\tReason            string                         `json:\"reason\"`\n\tCurrency          catalog.Currency               `json:\"currency\"`\n\tTotal             int64                          `json:\"total,string\"`\n\tAmountDue         int64                          `json:\"amount_due,string\"`\n\tAmountPaid        int64                          `json:\"amount_paid,string\"`\n\tAmountRemaining   int64                          `json:\"amount_remaining,string\"`\n\tAmountOffStripe   int64                          `json:\"amount_off_stripe,string\"`\n\tStartingBalance   int64                          `json:\"starting_balance,string\"`\n\tPrePaymentCredit  int64                          `json:\"pre_payment_credit,string\"`\n\tDueAt             time.Time                      `json:\"due_at\"`\n\tLines             []DeclaredStripeInvoiceLine    `json:\"lines\"`\n\tPayments          []DeclaredStripeInvoicePayment `json:\"payments\"`\n}",
       "type DeclaredStripeInvoiceLine struct {\n\tID             string    `json:\"id\"`\n\tPriceReference string    `json:\"price_reference,omitempty\"`\n\tDescription    string    `json:\"description\"`\n\tQuantity       *int      `json:\"quantity,omitempty\"`\n\tAmount         int64     `json:\"amount,string\"`\n\tPeriodStart    time.Time `json:\"period_start\"`\n\tPeriodEnd      time.Time `json:\"period_end\"`\n}",
       "type DeclaredStripeInvoicePayment struct {\n\tID              string    `json:\"id\"`\n\tChargeID        string    `json:\"charge_id\"`\n\tPaymentIntentID string    `json:\"payment_intent_id,omitempty\"`\n\tAmount          int64     `json:\"amount,string\"`\n\tPaidAt          time.Time `json:\"paid_at\"`\n}",
@@ -1023,7 +1023,7 @@
       "type RefundPaymentParams struct {\n\tAmount       int64  `json:\"amount,omitempty,string\"`\n\tFull         bool   `json:\"full,omitempty\"`\n\tReason       string `json:\"reason,omitempty\"`\n\tRevokeAccess bool   `json:\"revoke_access,omitempty\"`\n}",
       "type Refusal struct {\n\tDenyCode          DenyCode   `json:\"deny_code\"`\n\tLimit             *string    `json:\"limit\"`\n\tResetsAt          *time.Time `json:\"resets_at\"`\n\tRetryAfterSeconds *int64     `json:\"retry_after_seconds\"`\n}",
       "type ReleaseAdmissionBatchParams struct {\n\tRequestIDs []string `json:\"request_ids\"`\n}",
-      "type RenameMerchantParams struct {\n\tName string `json:\"name\"`\n\n\tActorUserID string `json:\"-\"`\n}",
+      "type RenameMerchantParams struct {\n\tName string `json:\"name\"`\n}",
       "type Renewal struct {\n\tID             RenewalID        `json:\"id\"`\n\tSubscriptionID SubscriptionID   `json:\"subscription_id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tPSPID          PSPID            `json:\"psp_id\"`\n\tRail           Rail             `json:\"rail\"`\n\tOwner          string           `json:\"owner\"`\n\tDueAt          time.Time        `json:\"due_at\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tCurrency       catalog.Currency `json:\"currency\"`\n\n\tFirstOutcome string     `json:\"first_outcome\"`\n\tOutcome      string     `json:\"outcome\"`\n\tMissedAt     *time.Time `json:\"missed_at\"`\n\tMissReason   string     `json:\"miss_reason\"`\n\tCollectedAt  *time.Time `json:\"collected_at\"`\n\n\tRecoveredBy string    `json:\"recovered_by\"`\n\tClosesAt    time.Time `json:\"closes_at\"`\n\n\tAttempts []PaymentAttempt `json:\"attempts\"`\n}",
       "type RenewalID uuid.UUID",
       "type RenewalListParams struct {\n\tPageRequest\n\tIDs            []RenewalID    `form:\"ids,comma\"`\n\tOwner          []string       `form:\"owner,comma\"`\n\tFirstOutcome   []string       `form:\"first_outcome,comma\"`\n\tMissReason     []string       `form:\"miss_reason,comma\"`\n\tOutcome        []string       `form:\"outcome,comma\"`\n\tPSPID          PSPID          `form:\"psp_id\"`\n\tSubscriptionID SubscriptionID `form:\"subscription_id\"`\n\tDueSince       time.Time      `form:\"due_since\"`\n\tDueUntil       time.Time      `form:\"due_until\"`\n}",
@@ -1133,8 +1133,7 @@
       "var ErrRequestBodyTooLarge error = newCodedError(CodeRequestBodyTooLarge, ErrInvalid)",
       "var ErrUnauthorized = errors.New(\"openrails: unauthorized\")",
       "var ErrUnreachable = errors.New(\"openrails: unreachable\")",
-      "var ErrUsageNotPriced error = newCodedError(CodeUsageNotPriced, ErrInvalid)",
-      "var ReservedMerchantSlugs = []string{\n\t\"www\", \"api\", \"app\", \"admin\", \"auth\",\n\t\"billing\", \"platform\", \"openrails\", \"saas\",\n\t\"docs\", \"status\", \"support\", \"dev\", \"staging\",\n\t\"checkout\", \"pay\", \"root\", \"internal\",\n}"
+      "var ErrUsageNotPriced error = newCodedError(CodeUsageNotPriced, ErrInvalid)"
     ],
     "catalog": [
       "const (\n\tAggregationSum         Aggregation = \"sum\"\n\tAggregationCount       Aggregation = \"count\"\n\tAggregationMax         Aggregation = \"max\"\n\tAggregationMin         Aggregation = \"min\"\n\tAggregationUniqueCount Aggregation = \"unique_count\"\n\tAggregationLatest      Aggregation = \"latest\"\n)",
@@ -1150,13 +1149,9 @@
       "const (\n\tTierModeVolume TierMode = \"volume\"\n\n\tTierModeGraduated TierMode = \"graduated\"\n)",
       "const AccessForever = \"forever\"",
       "const BalanceLimit = \"balance\"",
-      "const MaxDurationHours = int((1\u003c\u003c63 - 1) / time.Hour)",
-      "const MaxEntitlementKeyBytes = 256",
       "const MaxEntitlementReplacements = 100",
       "const MaxLimitWindowSeconds = 366 * 24 * 60 * 60",
-      "const MaxProductEntitlements = 10000",
       "const MaxQuantity = 10000",
-      "const MaxRequiredEntitlements = 100",
       "func (a Application) CanonicalDigest() ([32]byte, error)",
       "func (a Application) Validate() error",
       "func (c *Capacity) UnmarshalJSON(raw []byte) error",
@@ -1181,21 +1176,11 @@
       "func (q Quantity) Validate() error",
       "func (r LimitReset) Validate() error",
       "func Currencies() []CurrencyUnits",
-      "func DeriveOwnership(declared Ownership, creditGrant bool, prices []OwnershipPrice) Ownership",
-      "func LimitUnitCurrency(unit string) bool",
-      "func NormalizeEntitlements(entitlements []string) ([]string, error)",
-      "func NormalizeProductEntitlements(entitlements []string) ([]string, error)",
-      "func NormalizeRequiredEntitlements(entitlements []string) ([]string, error)",
       "func Null[T any]() Field[T]",
       "func ParseApplicationJSON(raw []byte) (*Application, error)",
       "func ParseApplicationYAML(raw []byte) (*Application, error)",
-      "func ParseBillingInterval(input string) (hours, months int, err error)",
       "func ParseCurrency(s string) (Currency, error)",
-      "func ParseDurationHours(input string) (int, error)",
       "func ReadFile(path string) (*Application, error)",
-      "func ValidateLimitKey(key string) error",
-      "func ValidateLimitUnit(unit string) error",
-      "func ValidateSellVia(methods []SellVia) error",
       "func Value[T any](v T) Field[T]",
       "type Aggregation string",
       "type Allowance struct {\n\tIncluded int64 `json:\"included,omitempty\"`\n}",
@@ -1220,7 +1205,6 @@
       "type Model string",
       "type Overrun string",
       "type Ownership string",
-      "type OwnershipPrice struct {\n\tRecurring      bool\n\tAccessDuration bool\n}",
       "type PackagePrice struct {\n\tAmount      int64 `json:\"amount,omitempty,string\"`\n\tPackageSize int64 `json:\"package_size,omitempty\"`\n\tFreeUnits   int64 `json:\"free_units,omitempty\"`\n}",
       "type PaymentTerm string",
       "type PerUnitPrice struct {\n\tUnitAmount    int64   `json:\"unit_amount,omitempty,string\"`\n\tDivideBy      int64   `json:\"divide_by,omitempty\"`\n\tRound         Round   `json:\"round,omitempty\"`\n\tMaximumAmount int64   `json:\"maximum_amount,omitempty,string\"`\n\tMatrix        *Matrix `json:\"matrix,omitempty\"`\n}",
@@ -1340,6 +1324,7 @@
       "func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)",
       "func (s *Server) PurgeMerchant(ctx context.Context, id billing.MerchantID, params billing.PurgeMerchantParams) (*billing.MerchantPurge, error)",
       "func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error)",
+      "func (s *Server) RenameUserMerchant(ctx context.Context, id billing.MerchantID, userID string, req billing.RenameMerchantParams) (*billing.MerchantName, error)",
       "func (s *Server) RestoreMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error)",
       "func (s *Server) RetireUnusedMerchant(ctx context.Context, id billing.MerchantID, groupID string) (billing.MerchantRetirement, error)",
       "func (s *Server) RiverJobs() riverhelpers.Contribution",
@@ -1446,8 +1431,8 @@
       "func (c Capacity) MarshalJSON() ([]byte, error) {\n\treturn json.Marshal(strconv.FormatInt(int64(c), 10))\n}",
       "func (f *Field[T]) UnmarshalJSON(raw []byte) error {\n\t*f = Field[T]{Set: true}\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(\"null\")) {\n\t\tf.Null = true\n\t\treturn nil\n\t}\n\tif value, ok := any(\u0026f.Value).(*int64); ok {\n\t\ttext := string(raw)\n\t\tif len(raw) \u003e 0 \u0026\u0026 raw[0] == '\"' {\n\t\t\tif err := json.Unmarshal(raw, \u0026text); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\tparsed, err := strconv.ParseInt(text, 10, 64)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"money must be an exact int64: %w\", err)\n\t\t}\n\t\t*value = parsed\n\t\treturn nil\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\treturn decoder.Decode(\u0026f.Value)\n}",
       "func (f Field[T]) MarshalJSON() ([]byte, error) {\n\tif err := f.validateField(); err != nil {\n\t\treturn nil, err\n\t}\n\tif !f.Set || f.Null {\n\t\treturn []byte(\"null\"), nil\n\t}\n\n\tif v, ok := any(f.Value).(int64); ok {\n\t\treturn json.Marshal(strconv.FormatInt(v, 10))\n\t}\n\treturn json.Marshal(f.Value)\n}",
-      "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAmount          Field[string] `json:\"amount,omitzero\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Amount.Set {\n\t\tif decoded.Amount.Null {\n\t\t\treturn fmt.Errorf(\"amount cannot be null\")\n\t\t}\n\t\tif decoded.UnitAmount.Set || decoded.Currency.Set {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, currency, err := parseAmount(decoded.Amount.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.UnitAmount = Value(amount)\n\t\tdecoded.Currency = Value(currency)\n\t}\n\tif decoded.BillingInterval.Set {\n\t\tif decoded.BillingIntervalHours.Set || decoded.BillingIntervalMonths.Set {\n\t\t\treturn fmt.Errorf(\"billing_interval cannot be combined with billing_interval_hours or billing_interval_months\")\n\t\t}\n\t\tdecoded.BillingIntervalHours = Null[int]()\n\t\tif !decoded.BillingInterval.Null {\n\t\t\thours, months, err := ParseBillingInterval(decoded.BillingInterval.Value)\n\t\t\tif err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tif months \u003e 0 {\n\t\t\t\tdecoded.BillingIntervalMonths = Value(months)\n\t\t\t} else {\n\t\t\t\tdecoded.BillingIntervalHours = Value(hours)\n\t\t\t}\n\t\t}\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\tif decoded.AccessDuration.Set {\n\t\tif decoded.AccessDurationHours.Set {\n\t\t\treturn fmt.Errorf(\"access_duration and access_duration_hours cannot both be set\")\n\t\t}\n\t\thours, err := parseAccessDuration(decoded.AccessDuration)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdecoded.AccessDurationHours = hours\n\t\tif decoded.BillingIntervalMonths.Set \u0026\u0026 !decoded.BillingIntervalMonths.Null \u0026\u0026 hours.Null {\n\t\t\treturn fmt.Errorf(\"a calendar price cannot grant access forever; omit access_duration to follow its billing period\")\n\t\t}\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}",
-      "func (p *ApplyProviderPrice) UnmarshalJSON(raw []byte) error {\n\ttype provider ApplyProviderPrice\n\tvar decoded struct {\n\t\tprovider\n\t\tUnitAmount      Field[int64]  `json:\"unit_amount,omitzero\"`\n\t\tTrialUnitAmount Field[int64]  `json:\"trial_unit_amount,omitzero\"`\n\t\tAmount          *string       `json:\"amount,omitempty\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitempty\"`\n\t\tBillingInterval *string       `json:\"billing_interval,omitempty\"`\n\t\tTrialDuration   *string       `json:\"trial_duration,omitempty\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\n\tfor _, money := range []struct {\n\t\tfield Field[int64]\n\t\tinto  **int64\n\t}{{decoded.UnitAmount, \u0026decoded.provider.UnitAmount}, {decoded.TrialUnitAmount, \u0026decoded.provider.TrialUnitAmount}} {\n\t\tif money.field.Null {\n\t\t\treturn fmt.Errorf(\"money cannot be null\")\n\t\t}\n\t\tif money.field.Set {\n\t\t\tvalue := money.field.Value\n\t\t\t*money.into = \u0026value\n\t\t}\n\t}\n\tif decoded.Amount != nil {\n\t\tif decoded.provider.UnitAmount != nil || decoded.Currency != \"\" {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, code, err := parseAmount(*decoded.Amount)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.provider.UnitAmount, decoded.Currency = \u0026amount, code\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  *string\n\t\thours **int\n\t}{\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif field.text == nil {\n\t\t\tcontinue\n\t\t}\n\t\tif *field.hours != nil {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\thours, err := ParseDurationHours(*field.text)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = \u0026hours\n\t}\n\tif decoded.AccessDuration.Set {\n\t\tif decoded.AccessDurationHours.Set {\n\t\t\treturn fmt.Errorf(\"access_duration and access_duration_hours cannot both be set\")\n\t\t}\n\t\thours, err := parseAccessDuration(decoded.AccessDuration)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdecoded.AccessDurationHours = hours\n\t}\n\t*p = ApplyProviderPrice(decoded.provider)\n\treturn nil\n}",
+      "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAmount          Field[string] `json:\"amount,omitzero\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Amount.Set {\n\t\tif decoded.Amount.Null {\n\t\t\treturn fmt.Errorf(\"amount cannot be null\")\n\t\t}\n\t\tif decoded.UnitAmount.Set || decoded.Currency.Set {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, currency, err := parseAmount(decoded.Amount.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.UnitAmount = Value(amount)\n\t\tdecoded.Currency = Value(currency)\n\t}\n\tif decoded.BillingInterval.Set {\n\t\tif decoded.BillingIntervalHours.Set || decoded.BillingIntervalMonths.Set {\n\t\t\treturn fmt.Errorf(\"billing_interval cannot be combined with billing_interval_hours or billing_interval_months\")\n\t\t}\n\t\tdecoded.BillingIntervalHours = Null[int]()\n\t\tif !decoded.BillingInterval.Null {\n\t\t\thours, months, err := syntax.ParseBillingInterval(decoded.BillingInterval.Value)\n\t\t\tif err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tif months \u003e 0 {\n\t\t\t\tdecoded.BillingIntervalMonths = Value(months)\n\t\t\t} else {\n\t\t\t\tdecoded.BillingIntervalHours = Value(hours)\n\t\t\t}\n\t\t}\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := syntax.ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\tif decoded.AccessDuration.Set {\n\t\tif decoded.AccessDurationHours.Set {\n\t\t\treturn fmt.Errorf(\"access_duration and access_duration_hours cannot both be set\")\n\t\t}\n\t\thours, err := parseAccessDuration(decoded.AccessDuration)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdecoded.AccessDurationHours = hours\n\t\tif decoded.BillingIntervalMonths.Set \u0026\u0026 !decoded.BillingIntervalMonths.Null \u0026\u0026 hours.Null {\n\t\t\treturn fmt.Errorf(\"a calendar price cannot grant access forever; omit access_duration to follow its billing period\")\n\t\t}\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}",
+      "func (p *ApplyProviderPrice) UnmarshalJSON(raw []byte) error {\n\ttype provider ApplyProviderPrice\n\tvar decoded struct {\n\t\tprovider\n\t\tUnitAmount      Field[int64]  `json:\"unit_amount,omitzero\"`\n\t\tTrialUnitAmount Field[int64]  `json:\"trial_unit_amount,omitzero\"`\n\t\tAmount          *string       `json:\"amount,omitempty\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitempty\"`\n\t\tBillingInterval *string       `json:\"billing_interval,omitempty\"`\n\t\tTrialDuration   *string       `json:\"trial_duration,omitempty\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\n\tfor _, money := range []struct {\n\t\tfield Field[int64]\n\t\tinto  **int64\n\t}{{decoded.UnitAmount, \u0026decoded.provider.UnitAmount}, {decoded.TrialUnitAmount, \u0026decoded.provider.TrialUnitAmount}} {\n\t\tif money.field.Null {\n\t\t\treturn fmt.Errorf(\"money cannot be null\")\n\t\t}\n\t\tif money.field.Set {\n\t\t\tvalue := money.field.Value\n\t\t\t*money.into = \u0026value\n\t\t}\n\t}\n\tif decoded.Amount != nil {\n\t\tif decoded.provider.UnitAmount != nil || decoded.Currency != \"\" {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, code, err := parseAmount(*decoded.Amount)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.provider.UnitAmount, decoded.Currency = \u0026amount, code\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  *string\n\t\thours **int\n\t}{\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif field.text == nil {\n\t\t\tcontinue\n\t\t}\n\t\tif *field.hours != nil {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\thours, err := syntax.ParseDurationHours(*field.text)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = \u0026hours\n\t}\n\tif decoded.AccessDuration.Set {\n\t\tif decoded.AccessDurationHours.Set {\n\t\t\treturn fmt.Errorf(\"access_duration and access_duration_hours cannot both be set\")\n\t\t}\n\t\thours, err := parseAccessDuration(decoded.AccessDuration)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdecoded.AccessDurationHours = hours\n\t}\n\t*p = ApplyProviderPrice(decoded.provider)\n\treturn nil\n}",
       "func (q *Quantity) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMin int `json:\"min\"`\n\t\tMax int `json:\"max\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*q = Quantity(value)\n\treturn nil\n}"
     ],
     "internal/api": [
@@ -2266,7 +2251,8 @@
       "sha256": "crypto/sha256",
       "slices": "slices",
       "strconv": "strconv",
-      "strings": "strings"
+      "strings": "strings",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "catalog/application_decode.go": {
       "bytes": "bytes",
@@ -2288,25 +2274,17 @@
     },
     "catalog/duration.go": {
       "fmt": "fmt",
-      "strconv": "strconv",
       "strings": "strings",
-      "time": "time"
-    },
-    "catalog/entitlements.go": {
-      "fmt": "fmt",
-      "slices": "slices",
-      "strings": "strings",
-      "utf8": "unicode/utf8"
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "catalog/limit.go": {
       "bytes": "bytes",
-      "currency": "github.com/open-rails/openrails/internal/currency",
       "fmt": "fmt",
       "json": "encoding/json",
       "maps": "maps",
-      "regexp": "regexp",
       "slices": "slices",
-      "strconv": "strconv"
+      "strconv": "strconv",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "catalog/ownership.go": {
       "fmt": "fmt"
@@ -2314,14 +2292,16 @@
     "catalog/price_decode.go": {
       "bytes": "bytes",
       "fmt": "fmt",
-      "json": "encoding/json"
+      "json": "encoding/json",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "catalog/provider_price.go": {
       "bytes": "bytes",
       "currency": "github.com/open-rails/openrails/internal/currency",
       "fmt": "fmt",
       "json": "encoding/json",
-      "strings": "strings"
+      "strings": "strings",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "catalog/quantity.go": {
       "bytes": "bytes",
@@ -2398,7 +2378,6 @@
     "entitlement_check_cache.go": {
       "atomic": "sync/atomic",
       "billing": "github.com/open-rails/openrails/billing",
-      "catalog": "github.com/open-rails/openrails/catalog",
       "context": "context",
       "fmt": "fmt",
       "hex": "encoding/hex",
@@ -2410,6 +2389,7 @@
       "slices": "slices",
       "strings": "strings",
       "sync": "sync",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
       "utf8": "unicode/utf8",
       "v9": "github.com/redis/go-redis/v9"
@@ -2511,7 +2491,8 @@
       "routes": "github.com/open-rails/openrails/internal/http/routes",
       "sort": "sort",
       "strconv": "strconv",
-      "strings": "strings"
+      "strings": "strings",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax"
     },
     "internal/contractaudit/snapshot.go": {
       "ast": "go/ast",
@@ -3729,6 +3710,7 @@
       "sha256": "crypto/sha256",
       "slices": "slices",
       "strings": "strings",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
@@ -4472,6 +4454,7 @@
     },
     "internal/reconcile/converge/converge_passes.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "context": "context",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
@@ -4865,6 +4848,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "slices": "slices",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
@@ -5144,7 +5128,8 @@
     },
     "server/merchants.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "context": "context"
+      "context": "context",
+      "fmt": "fmt"
     },
     "server/operations.go": {
       "billing": "github.com/open-rails/openrails/billing",

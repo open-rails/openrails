@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -271,7 +272,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if decl.Entitlements.Set {
 				req.SetEntitlements = true
 				var err error
-				req.Entitlements, err = catalogwire.NormalizeEntitlements(decl.Entitlements.Value)
+				req.Entitlements, err = syntax.NormalizeEntitlements(decl.Entitlements.Value)
 				if err != nil {
 					return err
 				}
@@ -279,7 +280,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if decl.RequiredEntitlements.Set {
 				req.SetRequiredEntitlements = true
 				var err error
-				req.RequiredEntitlements, err = catalogwire.NormalizeRequiredEntitlements(decl.RequiredEntitlements.Value)
+				req.RequiredEntitlements, err = syntax.NormalizeRequiredEntitlements(decl.RequiredEntitlements.Value)
 				if err != nil {
 					return err
 				}

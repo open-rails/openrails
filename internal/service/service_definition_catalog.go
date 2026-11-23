@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/logx"
@@ -552,7 +553,7 @@ func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 		req.Archived = &p.Archived.Value
 	}
 	if p.SellVia.Set {
-		if err := catalogwire.ValidateSellVia(p.SellVia.Value); err != nil {
+		if err := syntax.ValidateSellVia(p.SellVia.Value, catalogwire.SellViaCard, catalogwire.SellViaSolana); err != nil {
 			return req, apperr.Invalidf("%v", err)
 		}
 		req.SetSellVia, req.SellVia = true, p.SellVia.Value
@@ -676,7 +677,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 			return apperr.Invalidf("calendar prices require Stripe or NMI engine collection")
 		}
 	}
-	if err := catalogwire.ValidateSellVia(req.SellVia); err != nil {
+	if err := syntax.ValidateSellVia(req.SellVia, catalogwire.SellViaCard, catalogwire.SellViaSolana); err != nil {
 		return apperr.Invalidf("%v", err)
 	}
 	if req.CustomerAmount != nil {
@@ -716,8 +717,8 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 		{"billing_interval_hours", req.BillingIntervalHours},
 		{"trial_duration_hours", req.TrialDurationHours},
 	} {
-		if duration.hours != nil && (*duration.hours <= 0 || *duration.hours > catalogwire.MaxDurationHours) {
-			return apperr.Invalidf("%s must be between 1 and %d hours or null", duration.name, catalogwire.MaxDurationHours)
+		if duration.hours != nil && (*duration.hours <= 0 || *duration.hours > syntax.MaxDurationHours) {
+			return apperr.Invalidf("%s must be between 1 and %d hours or null", duration.name, syntax.MaxDurationHours)
 		}
 	}
 	// #622 trial: both-or-neither; non-negative amount (0 = free trial); positive

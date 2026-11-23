@@ -17,6 +17,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -83,12 +84,12 @@ func TestPublicCatalog(t *testing.T) {
 				input string
 				hours int
 			}{{"1 hour", 1}, {"30 days", 720}, {"2 weeks", 336}, {"2562047 hours", 2562047}} {
-				hours, err := catalog.ParseDurationHours(sample.input)
+				hours, err := syntax.ParseDurationHours(sample.input)
 				require.NoError(t, err)
 				require.Equal(t, sample.hours, hours)
 			}
 			for _, invalid := range []string{"0 hours", "-1 day", "1.5 days", "1 month", "2562048 hours", "9223372036854775807 weeks"} {
-				_, err := catalog.ParseDurationHours(invalid)
+				_, err := syntax.ParseDurationHours(invalid)
 				require.Error(t, err, invalid)
 			}
 			id, err := billing.NewPriceID("media/a:b", "monthly plus", 7)

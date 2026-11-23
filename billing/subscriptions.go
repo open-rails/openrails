@@ -150,7 +150,8 @@ type SubscriptionDunning struct {
 // SubscriptionAccess is how a customer currently holds premium access: Kind
 // is subscription (the subscription itself) or entitlement (a standing
 // entitlement window, e.g. a one-off purchase or an admin grant). SourceID is
-// the source's own wire id (see SourceRef).
+// the source's own wire id: a SubscriptionID for a subscription or grace
+// source, a PaymentID for a purchase, the host's declared id otherwise.
 type SubscriptionAccess struct {
 	Kind           string         `json:"kind"`
 	ProductID      ProductID      `json:"product_id"`

@@ -102,12 +102,12 @@ type DeclaredOrderLine struct {
 
 // DeclaredSettlement is how the rail settled a purchase, as its record shows:
 // for Solana, the transfer's token mint, its amount in the token's base units
-// and the paying and receiving wallets.
+// and the wallets it moved from and to.
 type DeclaredSettlement struct {
-	Asset     string `json:"asset"`
-	Quantity  string `json:"quantity"`
-	Payer     string `json:"payer,omitempty"`
-	Recipient string `json:"recipient,omitempty"`
+	Asset      string `json:"asset"`
+	Quantity   string `json:"quantity"`
+	FromWallet string `json:"from_wallet,omitempty"`
+	ToWallet   string `json:"to_wallet,omitempty"`
 }
 
 // DeclaredCustomer ensures a customer row for a host subject. Who the

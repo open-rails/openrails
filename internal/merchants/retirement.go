@@ -174,8 +174,9 @@ func (s *Service) releaseRetiredGroup(ctx context.Context, mid billing.MerchantI
 }
 
 func normalizeReserved(slugs []string) []string {
-	out := make([]string, 0, len(billing.ReservedMerchantSlugs)+len(slugs))
-	for _, slug := range append(append([]string{}, billing.ReservedMerchantSlugs...), slugs...) {
+	reserved := billing.ReservedMerchantSlugs()
+	out := make([]string, 0, len(reserved)+len(slugs))
+	for _, slug := range append(reserved, slugs...) {
 		if slug = billing.NormalizeMerchantSlug(slug); slug != "" && !containsSlug(out, slug) {
 			out = append(out, slug)
 		}

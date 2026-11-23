@@ -4,11 +4,9 @@ enum-field billing.AlertWebhookConfig.Format
 enum-field billing.CustodianConfig.Environment
 enum-field billing.PSPConfig.Environment
 enum-field openrails.Config.ProviderWriteMode
-json-dash billing.RenameMerchantParams.ActorUserID
 untyped-const openrails.ProviderWritesFull
 untyped-const openrails.ProviderWritesLimited
 untyped-const openrails.ProviderWritesReadOnly
 untyped-const server.ConsoleClientID
 untyped-const server.MerchantRolesManage
 untyped-const server.MerchantRolesRead
-var billing.ReservedMerchantSlugs

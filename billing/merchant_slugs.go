@@ -29,10 +29,13 @@ func ValidateMerchantSlug(s string) error {
 // ReservedMerchantSlugs is the default reserved-slug list for hosted products
 // where merchants self-provision by slug: platform routes, brand terms and
 // common infrastructure subdomains. The control plane reserves these plus its
-// configured ReservedSlugs; ValidateMerchantSlug does not consult it.
-var ReservedMerchantSlugs = []string{
-	"www", "api", "app", "admin", "auth",
-	"billing", "platform", "openrails", "saas",
-	"docs", "status", "support", "dev", "staging",
-	"checkout", "pay", "root", "internal",
+// configured ReservedSlugs; ValidateMerchantSlug does not consult it. Each
+// call returns a new slice.
+func ReservedMerchantSlugs() []string {
+	return []string{
+		"www", "api", "app", "admin", "auth",
+		"billing", "platform", "openrails", "saas",
+		"docs", "status", "support", "dev", "staging",
+		"checkout", "pay", "root", "internal",
+	}
 }

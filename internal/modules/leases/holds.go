@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -789,7 +790,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 		}
 		if def, ok := r.def(p.key); ok {
 			line.Overrun = def.Overrun
-			if !catalog.LimitUnitCurrency(def.Unit) {
+			if !syntax.LimitUnitCurrency(def.Unit) {
 				for _, card := range def.RateCards {
 					m := r.meters[card.Meter]
 					key := def.Key
