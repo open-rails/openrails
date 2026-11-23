@@ -179,7 +179,7 @@ deadline short.
 denial: a check is answered from the cache only when every requested key is
 allowed there, and otherwise asks OpenRails for the whole set. A newly held key
 is therefore visible at once. A change to a held key, such as its seats or a
-revocation, can take up to `MaxAge` (10 s by default,
+revocation, can take up to `MaxAge` (2 minutes by default,
 `DefaultEntitlementCheckMaxAge`) unless `CheckEntitlementsLive` sees it, and so
 can an API key permission change. An allowed answer also expires at the next
 scheduled access change, such as a rental's end.

@@ -47,7 +47,7 @@ type EntitlementCheckCacheOptions struct {
 
 // DefaultEntitlementCheckMaxAge is how long an allowed answer is reused when
 // EntitlementCheckCacheOptions.MaxAge is zero.
-const DefaultEntitlementCheckMaxAge = 10 * time.Second
+const DefaultEntitlementCheckMaxAge = 2 * time.Minute
 
 const (
 	entitlementCheckPath          = "/v1/app/entitlements/check"

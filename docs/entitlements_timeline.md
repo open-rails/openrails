@@ -42,7 +42,7 @@ the `Client`):
   remote Go SDK's [entitlement cache](standalone.md#backend), on by default
   for API keys, asks on the caller's behalf. The cache keeps allowed keys
   only, so a newly held key is seen at once. An allowed key is reused until
-  its `valid_until` or for at most `MaxAge` (10 s by default), which bounds
+  its `valid_until` or for at most `MaxAge` (2 minutes by default), which bounds
   how late a revocation or a seat change appears unless
   `CheckEntitlementsLive` sees it; that call always asks and drops the entries
   of the keys it finds denied. `Disabled` turns the cache off.
