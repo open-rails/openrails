@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 409,
+  "scenario_count": 410,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2007,6 +2007,11 @@
       "id": "OR-J04-S74",
       "journey": "J04",
       "name": "A slug declared twice provisions neither entry and is reported; the other declarations serve"
+    },
+    {
+      "id": "OR-J04-S75",
+      "journey": "J04",
+      "name": "The generated client gets the server's own refusals: a malformed query value is invalid_query before any handler, a batch or field the client no longer checks is the server's invalid_param, and an empty path segment is refused before any I/O"
     },
     {
       "id": "OR-J25-S37",
