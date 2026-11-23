@@ -29,7 +29,7 @@ type UsageParams struct {
 	// InvokerType says whose credential the invoker presented (customer when
 	// empty); it decides how a failure is handled.
 	InvokerType InvokerType      `json:"invoker_type,omitempty"`
-	Currency    string           `json:"currency"`
+	Currency    catalog.Currency `json:"currency"`
 	EventType   string           `json:"event_type"`
 	Dimensions  map[string]int64 `json:"dimensions,omitempty"`
 	// Amount is the optional native-unit cost a dynamic card charges. Other
@@ -88,10 +88,10 @@ const (
 // A cursor reads only the report it came from: the same currency, window and
 // grouping.
 type GetUsageParams struct {
-	Currency string       `form:"currency"`
-	From     time.Time    `form:"from"`
-	To       time.Time    `form:"to"`
-	GroupBy  UsageGroupBy `form:"group_by"`
+	Currency catalog.Currency `form:"currency"`
+	From     time.Time        `form:"from"`
+	To       time.Time        `form:"to"`
+	GroupBy  UsageGroupBy     `form:"group_by"`
 	PageRequest
 }
 
@@ -112,13 +112,13 @@ type UsageRow struct {
 // amount, largest first, then by key. NextCursor reads the next page; nil on
 // the last.
 type Usage struct {
-	CustomerID CustomerID   `json:"customer_id"`
-	Currency   string       `json:"currency"`
-	From       time.Time    `json:"from"`
-	To         time.Time    `json:"to"`
-	GroupBy    UsageGroupBy `json:"group_by"`
-	Rows       []UsageRow   `json:"rows"`
-	NextCursor *string      `json:"next_cursor"`
+	CustomerID CustomerID       `json:"customer_id"`
+	Currency   catalog.Currency `json:"currency"`
+	From       time.Time        `json:"from"`
+	To         time.Time        `json:"to"`
+	GroupBy    UsageGroupBy     `json:"group_by"`
+	Rows       []UsageRow       `json:"rows"`
+	NextCursor *string          `json:"next_cursor"`
 }
 
 // UsageDeduction is what one posting of a customer's day of usage was for:

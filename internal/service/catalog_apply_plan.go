@@ -180,7 +180,7 @@ func fieldConflicts(obj catalogObject, fields map[string]json.RawMessage, live *
 	if obj.kind == billing.CatalogObjectPrice {
 		var currency string
 		if json.Unmarshal(live.fields["currency"], &currency) == nil {
-			conflict.Currency = &currency
+			conflict.Currency = (*catalogwire.Currency)(&currency)
 		}
 	}
 	for _, field := range catalogFields[obj.kind] {

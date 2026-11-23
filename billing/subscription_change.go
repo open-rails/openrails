@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // ChangeSubscriptionParams changes a subscription's price, its seats, or both.
 // PriceID names another price of the subscription's tier group; nil keeps the
@@ -41,25 +45,25 @@ type SubscriptionChange struct {
 	// NextChargeAmount and NextChargeDate are the next renewal. For a Stripe
 	// provider subscription AmountDueNow is an estimate: Stripe finalizes the
 	// proration.
-	Currency         string     `json:"currency,omitempty"`
-	AmountDueNow     int64      `json:"amount_due_now,string"`
-	NextChargeAmount int64      `json:"next_charge_amount,string"`
-	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
+	Currency         catalog.Currency `json:"currency,omitempty"`
+	AmountDueNow     int64            `json:"amount_due_now,string"`
+	NextChargeAmount int64            `json:"next_charge_amount,string"`
+	NextChargeDate   *time.Time       `json:"next_charge_date,omitempty"`
 }
 
 // SubscriptionChangePreview is what a change would charge now and at the next
 // renewal, without making it.
 type SubscriptionChangePreview struct {
-	Effective        string     `json:"effective"` // now | period_end
-	PriceID          PriceID    `json:"price_id"`
-	Quantity         *int       `json:"quantity"`
-	Rail             Rail       `json:"rail"`
-	Currency         string     `json:"currency"`
-	AmountDueNow     int64      `json:"amount_due_now,string"`
-	NextChargeAmount int64      `json:"next_charge_amount,string"`
-	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
-	IsEstimate       bool       `json:"is_estimate"` // the rail finalizes the amount (Stripe provider changes)
-	Message          string     `json:"message,omitempty"`
+	Effective        string           `json:"effective"` // now | period_end
+	PriceID          PriceID          `json:"price_id"`
+	Quantity         *int             `json:"quantity"`
+	Rail             Rail             `json:"rail"`
+	Currency         catalog.Currency `json:"currency"`
+	AmountDueNow     int64            `json:"amount_due_now,string"`
+	NextChargeAmount int64            `json:"next_charge_amount,string"`
+	NextChargeDate   *time.Time       `json:"next_charge_date,omitempty"`
+	IsEstimate       bool             `json:"is_estimate"` // the rail finalizes the amount (Stripe provider changes)
+	Message          string           `json:"message,omitempty"`
 }
 
 // SubscriptionChangeOption is a price a subscription can change to now, with

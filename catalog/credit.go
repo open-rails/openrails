@@ -10,10 +10,10 @@ import (
 // The accepted terms are frozen at purchase; later catalog edits do not
 // alter a purchased lot. Expiry starts when the credits become available.
 type CreditGrantSpec struct {
-	Currency         string `json:"currency"`
-	Amount           *int64 `json:"amount,omitempty,string"`
-	FromPayment      bool   `json:"from_payment,omitempty"`
-	ExpiresAfterDays *int   `json:"expires_after_days,omitempty"`
+	Currency         Currency `json:"currency"`
+	Amount           *int64   `json:"amount,omitempty,string"`
+	FromPayment      bool     `json:"from_payment,omitempty"`
+	ExpiresAfterDays *int     `json:"expires_after_days,omitempty"`
 }
 
 // CustomerAmount is an immutable, inclusive range, in native units of the
@@ -28,7 +28,7 @@ type CustomerAmount struct {
 // strings used on the JSON wire. Field[int64] never passes through float64.
 func (c *CreditGrantSpec) UnmarshalJSON(raw []byte) error {
 	var value struct {
-		Currency         string       `json:"currency"`
+		Currency         Currency     `json:"currency"`
 		Amount           Field[int64] `json:"amount"`
 		FromPayment      bool         `json:"from_payment"`
 		ExpiresAfterDays *int         `json:"expires_after_days"`

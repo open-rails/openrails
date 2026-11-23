@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -173,7 +174,7 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 	}
 	now := s.now()
 	requestID := deref(row.RequestID)
-	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
 		EstimatedAmount: derefInt(row.EstimatedAmount), Charges: []billing.UsageCharge{}}
 
 	// The admitted event type remains binding even when the host states money.
@@ -243,7 +244,7 @@ func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row ge
 		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: requestID,
 			Field: "usage", Committed: "original capture terms", Retried: "different capture terms"}
 	}
-	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
 		EstimatedAmount: derefInt(row.EstimatedAmount), Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
 	if len(row.CapturedCharges) > 0 {
 		if err := json.Unmarshal(row.CapturedCharges, &receipt.Charges); err != nil {

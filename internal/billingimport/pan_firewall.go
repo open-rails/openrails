@@ -84,13 +84,13 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	}
 	for i, txn := range book.Transactions {
 		if err := scan(fmt.Sprintf("transactions[%d]", i),
-			txn.SourceID, txn.OriginalTransactionID, txn.RailSubscriptionID, txn.TransactionID, txn.Type, txn.Currency,
+			txn.SourceID, txn.OriginalTransactionID, txn.RailSubscriptionID, txn.TransactionID, txn.Type, string(txn.Currency),
 		); err != nil {
 			return err
 		}
 	}
 	for i, payment := range book.HistoricalPayments {
-		if err := scan(fmt.Sprintf("historical_payments[%d]", i), payment.SourceID, string(payment.Rail), payment.PSP.Key, payment.TransactionID, payment.Currency); err != nil {
+		if err := scan(fmt.Sprintf("historical_payments[%d]", i), payment.SourceID, string(payment.Rail), payment.PSP.Key, payment.TransactionID, string(payment.Currency)); err != nil {
 			return err
 		}
 		for j, refund := range payment.Refunds {

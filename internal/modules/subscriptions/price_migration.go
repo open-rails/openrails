@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	catalogwire "github.com/open-rails/openrails/catalog"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -712,7 +714,7 @@ func (s *PriceMigrationService) notify(ctx context.Context, d *db.DB, change *mo
 	effective := effectiveAt.UTC()
 	data := billing.NotificationData{
 		SubscriptionID: billing.SubscriptionID(sub.ID), FromPriceID: from.PublicID, ToPriceID: to.PublicID,
-		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: to.Currency, EffectiveAt: &effective,
+		OldAmount: &from.Amount, NewAmount: &to.Amount, Currency: catalogwire.Currency(to.Currency), EffectiveAt: &effective,
 	}
 	if change.PriceMigrationID != nil {
 		data.PriceMigrationID = billing.PriceMigrationID(*change.PriceMigrationID)

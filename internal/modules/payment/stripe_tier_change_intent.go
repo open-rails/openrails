@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -790,7 +791,7 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.Pric
 	resp := &TierChangeResponse{
 		PriceID: priceID,
 		Rail:    billing.RailStripe, SubscriptionID: &subID,
-		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
+		Currency: catalog.Currency(p.Currency), AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		Effective: effectiveOf(p.Action),
 	}
 	switch in.Status {

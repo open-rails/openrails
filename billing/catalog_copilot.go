@@ -1,5 +1,7 @@
 package billing
 
+import "github.com/open-rails/openrails/catalog"
+
 // AskCatalogParams is a question about the merchant's catalog.
 type AskCatalogParams struct {
 	Question string `json:"question"`
@@ -45,11 +47,11 @@ type CatalogDraft struct {
 // to it (its to_price_id is the created price), and they keep their price
 // when it is nil.
 type PriceChangeDraft struct {
-	ProductKey    string `json:"product_key"`
-	PriceKey      string `json:"price_key"`
-	CurrentAmount int64  `json:"current_amount,string"`
-	NewAmount     int64  `json:"new_amount,string"`
-	Currency      string `json:"currency"`
+	ProductKey    string           `json:"product_key"`
+	PriceKey      string           `json:"price_key"`
+	CurrentAmount int64            `json:"current_amount,string"`
+	NewAmount     int64            `json:"new_amount,string"`
+	Currency      catalog.Currency `json:"currency"`
 	// AffectedCount is how many subscribers hold an earlier version.
 	AffectedCount int                         `json:"affected_count"`
 	ReviewText    string                      `json:"review_text"`

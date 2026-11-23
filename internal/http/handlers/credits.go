@@ -267,7 +267,7 @@ func getBalance(r *httprequest.Request, customer billing.CustomerID) {
 	if !ok {
 		return
 	}
-	balance, err := svc.GetBalance(r.Request.Context(), customer, q.Currency)
+	balance, err := svc.GetBalance(r.Request.Context(), customer, string(q.Currency))
 	if err != nil {
 		writeMoneyError(r, err, "balance read failed")
 		return

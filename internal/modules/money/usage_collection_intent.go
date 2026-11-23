@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/mandates"
@@ -709,7 +710,7 @@ func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid
 func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := usage.Due(order)
 	data := billing.NotificationData{
-		OrderID: billing.OrderID(order.ID), Currency: order.Currency, AmountDue: &amountDue,
+		OrderID: billing.OrderID(order.ID), Currency: catalog.Currency(order.Currency), AmountDue: &amountDue,
 		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
 		RetryStatus: billing.NotificationRetryUnknown, RecoveryAction: billing.NotificationRecoveryContactSupport,
 	}
@@ -801,7 +802,7 @@ func derefInt32(v *int32) int32 {
 // queueUsageReceipt queues the receipt of a usage order charged under the
 // customer's collection agreement, once per payment.
 func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, order gen.BillingOrder, payment uuid.UUID, amount int64, currency string, now time.Time) error {
-	data := billing.NotificationData{OrderID: billing.OrderID(order.ID), PaymentID: billing.PaymentID(payment), Amount: &amount, Currency: currency}
+	data := billing.NotificationData{OrderID: billing.OrderID(order.ID), PaymentID: billing.PaymentID(payment), Amount: &amount, Currency: catalog.Currency(currency)}
 	if order.Number != nil {
 		data.OrderNumber = *order.Number
 	}

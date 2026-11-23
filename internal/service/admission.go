@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -153,7 +154,7 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 		RequestID:           in.SourceID,
 		CustomerID:          billing.CustomerID(in.CustomerID),
 		Allowed:             dec.Allowed,
-		Currency:            currency,
+		Currency:            catalog.Currency(currency),
 		EstimatedAmount:     dec.EstimatedAmount,
 		StartCapacityAmount: startCapacity(dec.AvailableAmount, dec.HeldAmount),
 		Replayed:            dec.Replayed,
@@ -184,7 +185,7 @@ func admissionFromHold(row gen.BillingLimitHold, now time.Time) *billing.Admissi
 		state = billing.AdmissionExpired
 	}
 	out := &billing.Admission{
-		CustomerID: billing.CustomerID(row.CustomerID), Allowed: true, Currency: row.Currency,
+		CustomerID: billing.CustomerID(row.CustomerID), Allowed: true, Currency: catalog.Currency(row.Currency),
 		State: &state, ExpiresAt: row.ExpiresAt, CapturedAmount: row.CapturedAmount,
 	}
 	if row.RequestID != nil {

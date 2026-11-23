@@ -299,7 +299,7 @@ func routingRuleMatches(m models.PSPRoutingMatch, in RoutingInput) bool {
 	if in.Price != nil {
 		currency = in.Price.Currency
 	}
-	return eq(m.Currency, currency) &&
+	return eq(string(m.Currency), currency) &&
 		eq(m.Product, productKey) &&
 		eq(m.Price, priceKey) &&
 		eq(m.Mode, string(in.Mode)) &&

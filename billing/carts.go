@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // MaxCartLines bounds one cart, as MaxOrderLines bounds an order.
 const MaxCartLines = MaxOrderLines
@@ -11,7 +15,7 @@ const MaxCartLines = MaxOrderLines
 // 30 days after its last change, and an order made from it (cart: true)
 // takes its lines.
 type Cart struct {
-	Currency       string               `json:"currency"`
+	Currency       catalog.Currency     `json:"currency"`
 	Total          int64                `json:"total,string"`
 	Lines          []OrderPreviewLine   `json:"lines"`
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // DeclaredBilling is one merchant's declared billing facts: what a host knows
@@ -53,7 +55,7 @@ type DeclaredHistoricalPayment struct {
 	Rail          Rail                       `json:"rail"`
 	TransactionID string                     `json:"transaction_id"`
 	Amount        int64                      `json:"amount,string"`
-	Currency      string                     `json:"currency"`
+	Currency      catalog.Currency           `json:"currency"`
 	PaidAt        time.Time                  `json:"paid_at"`
 	Refunds       []DeclaredHistoricalRefund `json:"refunds,omitempty"`
 }
@@ -78,7 +80,7 @@ type DeclaredPurchase struct {
 	// PSP is the account that took the payment; falls back to DefaultPSP.
 	PSP           PSPRef              `json:"psp,omitzero"`
 	TransactionID string              `json:"transaction_id"`
-	Currency      string              `json:"currency"`
+	Currency      catalog.Currency    `json:"currency"`
 	Amount        int64               `json:"amount,string"`
 	PaidAt        time.Time           `json:"paid_at"`
 	Lines         []DeclaredOrderLine `json:"lines"`
@@ -213,14 +215,14 @@ type DeclaredTransaction struct {
 	// SourceID requests a receipt outcome independently of the subscription (NMI).
 	SourceID string `json:"source_id,omitempty"`
 	// OriginalTransactionID links a separate NMI refund to its successful charge.
-	OriginalTransactionID string    `json:"original_transaction_id,omitempty"`
-	RailSubscriptionID    string    `json:"rail_subscription_id"`
-	TransactionID         string    `json:"transaction_id"`
-	Type                  string    `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
-	Success               bool      `json:"success"`
-	Amount                int64     `json:"amount,string"`
-	Currency              string    `json:"currency"`
-	OccurredAt            time.Time `json:"occurred_at"`
+	OriginalTransactionID string           `json:"original_transaction_id,omitempty"`
+	RailSubscriptionID    string           `json:"rail_subscription_id"`
+	TransactionID         string           `json:"transaction_id"`
+	Type                  string           `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
+	Success               bool             `json:"success"`
+	Amount                int64            `json:"amount,string"`
+	Currency              catalog.Currency `json:"currency"`
+	OccurredAt            time.Time        `json:"occurred_at"`
 	// NextBillingAt is the verified provider boundary accompanying this receipt.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 	// StripeInvoice is the complete verified bill, repeated identically for each receipt.
@@ -253,11 +255,11 @@ type DeclaredSubscription struct {
 // DeclaredProviderSchedule is the accepted recurring obligation of a provider
 // schedule. FirstDueAt anchors its first renewal; retry dates do not move it.
 type DeclaredProviderSchedule struct {
-	SourceReference string `json:"source_reference"`
-	Amount          int64  `json:"amount,string"`
-	Currency        string `json:"currency"`
-	Quantity        *int   `json:"quantity,omitempty"`
-	IntervalHours   int    `json:"interval_hours,omitempty"`
+	SourceReference string           `json:"source_reference"`
+	Amount          int64            `json:"amount,string"`
+	Currency        catalog.Currency `json:"currency"`
+	Quantity        *int             `json:"quantity,omitempty"`
+	IntervalHours   int              `json:"interval_hours,omitempty"`
 	// IntervalMonths selects calendar cadence; exactly one interval is set.
 	IntervalMonths int       `json:"interval_months,omitempty"`
 	FirstDueAt     time.Time `json:"first_due_at"`
@@ -297,7 +299,7 @@ type DeclaredStripeInvoice struct {
 	CustomerReference string                         `json:"customer_reference"`
 	Status            string                         `json:"status"`
 	Reason            string                         `json:"reason"`
-	Currency          string                         `json:"currency"`
+	Currency          catalog.Currency               `json:"currency"`
 	Total             int64                          `json:"total,string"`
 	AmountDue         int64                          `json:"amount_due,string"`
 	AmountPaid        int64                          `json:"amount_paid,string"`

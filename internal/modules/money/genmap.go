@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -101,7 +102,7 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 		amount = -amount
 	}
 	out := billing.BalanceTransaction{
-		ID: billing.BalanceTransactionID(r.ID), Currency: r.Currency, Type: txType, Amount: amount,
+		ID: billing.BalanceTransactionID(r.ID), Currency: catalog.Currency(r.Currency), Type: txType, Amount: amount,
 		Invoker: r.InvokerID, Resource: r.Resource, Source: r.Source, SourceID: r.SourceID, CreatedAt: r.CreatedAt,
 	}
 	if r.CustomerID != nil {

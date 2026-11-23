@@ -86,7 +86,7 @@ func usageCards(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, event
 	}
 	priced := cards[:0:0]
 	for _, card := range cards {
-		if c := strings.ToUpper(strings.TrimSpace(card.Price.Currency)); c == "" || c == currency {
+		if c := strings.ToUpper(strings.TrimSpace(string(card.Price.Currency))); c == "" || c == currency {
 			priced = append(priced, card)
 		}
 	}

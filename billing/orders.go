@@ -186,11 +186,11 @@ type Order struct {
 	// facts. They never authorize local collection.
 	ProviderBills []OrderProviderBill `json:"provider_bills"`
 	// Number is the order number: taken when the order completes, unique per merchant, not consecutive.
-	Number   *int64       `json:"number"`
-	Currency string       `json:"currency"`
-	Total    int64        `json:"total,string"`
-	Lines    []OrderLine  `json:"lines"`
-	Payment  OrderPayment `json:"payment"`
+	Number   *int64           `json:"number"`
+	Currency catalog.Currency `json:"currency"`
+	Total    int64            `json:"total,string"`
+	Lines    []OrderLine      `json:"lines"`
+	Payment  OrderPayment     `json:"payment"`
 	// PaymentOptions are the PSPs that can take this order while it is open.
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`
 	// PayURL is where the customer pays the order on the checkout origin,
@@ -326,7 +326,7 @@ type OrderPaymentOption struct {
 
 // OrderPreview prices lines as an order would freeze them.
 type OrderPreview struct {
-	Currency       string               `json:"currency"`
+	Currency       catalog.Currency     `json:"currency"`
 	Total          int64                `json:"total,string"`
 	Lines          []OrderPreviewLine   `json:"lines"`
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`

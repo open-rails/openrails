@@ -452,7 +452,7 @@ func documentPriceFields(d catalogwire.ApplyPrice) map[string]json.RawMessage {
 		trial = catalogMoney(d.TrialUnitAmount.Value)
 	}
 	values := map[string]json.RawMessage{
-		"currency":                catalogJSON(moneyutil.NormalizeCurrency(d.Currency.Value)),
+		"currency":                catalogJSON(moneyutil.NormalizeCurrency(string(d.Currency.Value))),
 		"unit_amount":             catalogMoney(d.UnitAmount.Value),
 		"access_duration_hours":   hours(d.AccessDurationHours),
 		"billing_interval_hours":  hours(d.BillingIntervalHours),

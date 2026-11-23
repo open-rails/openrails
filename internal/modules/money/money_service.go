@@ -334,7 +334,7 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		}
 		return page, nil
 	}
-	cur := normalizeCurrency(params.Currency)
+	cur := normalizeCurrency(string(params.Currency))
 	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return page, err
 	}

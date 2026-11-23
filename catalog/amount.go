@@ -10,7 +10,7 @@ import (
 
 // parseAmount converts a decimal major-unit amount and an explicit currency
 // into the registry's native integer units. It never rounds or converts FX.
-func parseAmount(input string) (int64, string, error) {
+func parseAmount(input string) (int64, Currency, error) {
 	parts := strings.Fields(input)
 	if len(parts) != 2 {
 		return 0, "", fmt.Errorf("amount requires a decimal value and currency, for example 9.99 USD")
@@ -41,7 +41,7 @@ func parseAmount(input string) (int64, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("amount exceeds int64 native units for %s", units.Code)
 	}
-	return amount, units.Code, nil
+	return amount, Currency(units.Code), nil
 }
 
 func recognizedCurrencies() string {

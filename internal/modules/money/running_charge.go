@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -93,8 +94,8 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if s == nil || txDB == nil {
 		return nil, false, fmt.Errorf("running charge requires a bound transaction")
 	}
-	in.Currency = normalizeCurrency(in.Currency)
-	if err := moneyutil.ValidateCurrency(in.Currency); err != nil {
+	in.Currency = catalog.Currency(normalizeCurrency(string(in.Currency)))
+	if err := moneyutil.ValidateCurrency(string(in.Currency)); err != nil {
 		return nil, false, apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, err.Error()).WithParam("currency")
 	}
 	txSvc := s.WithDatabase(txDB)
@@ -109,7 +110,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	}
 	q := txDB.Gen(ctx)
 	customer := identity.CustomerID(in.CustomerID)
-	bal, err := txSvc.lockBalance(ctx, q, customer, customer.UUID().String(), in.Currency)
+	bal, err := txSvc.lockBalance(ctx, q, customer, customer.UUID().String(), string(in.Currency))
 	if err != nil {
 		return nil, false, err
 	}
@@ -122,7 +123,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 		return nil, false, err
 	}
 	running, err := q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{
-		MerchantID: merchantID.UUID(), CustomerID: customer.UUID(), Currency: in.Currency,
+		MerchantID: merchantID.UUID(), CustomerID: customer.UUID(), Currency: string(in.Currency),
 	})
 	if err != nil {
 		return nil, false, err
@@ -133,7 +134,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 		if len(running) == 0 {
 			lines.overdraft = in.OverdraftAmount
 		}
-		floor, _, err := txSvc.capacityFloor(ctx, q, merchantID.UUID(), customer.UUID(), in.Currency, lines.overdraft)
+		floor, _, err := txSvc.capacityFloor(ctx, q, merchantID.UUID(), customer.UUID(), string(in.Currency), lines.overdraft)
 		if err != nil {
 			return nil, false, err
 		}
@@ -142,7 +143,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 		}
 	}
 	// A customer never funded has no balance account yet; postings draw it.
-	if _, err := ledger.New(q, merchantID.UUID()).EnsureCustomerBalance(ctx, customer.UUID(), in.Currency); err != nil {
+	if _, err := ledger.New(q, merchantID.UUID()).EnsureCustomerBalance(ctx, customer.UUID(), string(in.Currency)); err != nil {
 		return nil, false, err
 	}
 	var resource *string
@@ -150,7 +151,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 		resource = &in.Resource
 	}
 	row, err := q.InsertRunningCharge(ctx, gen.InsertRunningChargeParams{
-		MerchantID: merchantID.UUID(), Reference: in.Reference, CustomerID: customer.UUID(), Currency: in.Currency,
+		MerchantID: merchantID.UUID(), Reference: in.Reference, CustomerID: customer.UUID(), Currency: string(in.Currency),
 		RatePerHour: in.RatePerHour, OverdraftAmount: in.OverdraftAmount,
 		Resource: resource, StartedAt: startedAt, Now: now,
 	})
@@ -164,7 +165,7 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if err != nil {
 		return nil, false, err
 	}
-	if err := txSvc.watchBalance(ctx, q, merchantID.UUID(), customer.UUID(), in.Currency); err != nil {
+	if err := txSvc.watchBalance(ctx, q, merchantID.UUID(), customer.UUID(), string(in.Currency)); err != nil {
 		return nil, false, err
 	}
 	charge, err = runningChargeFromRow(row, now)
@@ -184,7 +185,7 @@ func replayRunningChargeStart(row gen.BillingRunningCharge, in billing.StartRunn
 		committed, retried any
 	}{
 		{"customer_id", row.CustomerID == in.CustomerID.UUID(), row.CustomerID, in.CustomerID},
-		{"currency", row.Currency == in.Currency, row.Currency, in.Currency},
+		{"currency", row.Currency == string(in.Currency), row.Currency, in.Currency},
 		{"rate_per_hour", row.RatePerHour == in.RatePerHour, row.RatePerHour, in.RatePerHour},
 		{"overdraft_amount", row.OverdraftAmount == in.OverdraftAmount, row.OverdraftAmount, in.OverdraftAmount},
 		{"resource", resource == in.Resource, resource, in.Resource},
@@ -377,7 +378,7 @@ func (s *MoneyService) ListRunningCharges(ctx context.Context, params billing.Ru
 func runningChargeFromRow(row gen.BillingRunningCharge, now time.Time) (*billing.RunningCharge, error) {
 	out := &billing.RunningCharge{
 		ID: billing.RunningChargeID(row.ID), Reference: row.Reference, CustomerID: billing.CustomerID(row.CustomerID),
-		Currency: row.Currency, RatePerHour: row.RatePerHour, State: billing.RunningChargeRunning,
+		Currency: catalog.Currency(row.Currency), RatePerHour: row.RatePerHour, State: billing.RunningChargeRunning,
 		StartedAt: row.StartedAt.UTC(), ChargedAmount: row.PostedAmount, PostedAmount: row.PostedAmount, AsOf: now,
 		OverdraftAmount: row.OverdraftAmount, Resource: row.Resource,
 		CreatedAt: row.CreatedAt.UTC(), UpdatedAt: row.UpdatedAt.UTC(),
@@ -476,7 +477,7 @@ func (s *MoneyService) PublicBalance(ctx context.Context, bal *models.MoneyBalan
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	out := &billing.Balance{
-		CustomerID: billing.CustomerID(bal.CustomerID), Currency: bal.Currency, BillingMode: mode,
+		CustomerID: billing.CustomerID(bal.CustomerID), Currency: catalog.Currency(bal.Currency), BillingMode: mode,
 		BalanceAmount: bal.Balance, HeldAmount: bal.HeldBalance - bal.Accrued, AccruedAmount: bal.Accrued,
 		AvailableAmount: bal.Balance - bal.HeldBalance, OwedAmount: owed, AsOf: bal.AsOf,
 	}

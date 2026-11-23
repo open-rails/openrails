@@ -64,8 +64,8 @@ const (
 // dynamic, which takes the amount from the event and has no block.
 // Amounts are native units of Currency.
 type RatePrice struct {
-	Model    Model  `json:"model"`
-	Currency string `json:"currency,omitempty"`
+	Model    Model    `json:"model"`
+	Currency Currency `json:"currency,omitempty"`
 
 	Flat    *FlatPrice    `json:"flat,omitempty"`
 	PerUnit *PerUnitPrice `json:"per_unit,omitempty"`

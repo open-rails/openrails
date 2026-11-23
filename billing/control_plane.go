@@ -3,6 +3,8 @@ package billing
 import (
 	"errors"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // Control-plane vocabulary: the operations the standalone server (package
@@ -140,9 +142,9 @@ type FleetMerchantFunnel struct {
 // FleetCurrencyRevenue is one currency's settled window volume, in the
 // currency's native units as an exact decimal string.
 type FleetCurrencyRevenue struct {
-	Currency      string `json:"currency"`
-	Payments      int64  `json:"payments"`
-	SettledAmount int64  `json:"settled_amount,string"`
+	Currency      catalog.Currency `json:"currency"`
+	Payments      int64            `json:"payments"`
+	SettledAmount int64            `json:"settled_amount,string"`
 }
 
 // FleetRailHealth is one rail's approved and declined charge attempts and
@@ -156,9 +158,9 @@ type FleetRailHealth struct {
 
 // FleetMRR is one currency's monthly-normalized recurring run rate.
 type FleetMRR struct {
-	Currency      string `json:"currency"`
-	Subscriptions int64  `json:"subscriptions"`
-	MonthlyAmount int64  `json:"monthly_amount,string"`
+	Currency      catalog.Currency `json:"currency"`
+	Subscriptions int64            `json:"subscriptions"`
+	MonthlyAmount int64            `json:"monthly_amount,string"`
 }
 
 // FleetSnapshot is one operator snapshot of the hosted fleet.
@@ -180,10 +182,10 @@ type FleetWeeklyPoint struct {
 
 // FleetWeeklyVolume is one week's settled sale volume in one currency.
 type FleetWeeklyVolume struct {
-	WeekStart     time.Time `json:"week_start"`
-	Currency      string    `json:"currency"`
-	Payments      int64     `json:"payments"`
-	SettledAmount int64     `json:"settled_amount,string"`
+	WeekStart     time.Time        `json:"week_start"`
+	Currency      catalog.Currency `json:"currency"`
+	Payments      int64            `json:"payments"`
+	SettledAmount int64            `json:"settled_amount,string"`
 }
 
 // FleetSeries is the windowed weekly trend series of the hosted fleet.

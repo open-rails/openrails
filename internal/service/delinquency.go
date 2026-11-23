@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -24,7 +25,7 @@ func (s *Service) delinquencyService() *delinquency.Service {
 // delinquency state in, in the caller's transaction (d is bound to it).
 func evaluateDelinquency(ctx context.Context, d *db.DB, merchantID, customer uuid.UUID, now time.Time) error {
 	rows, err := d.Gen(ctx).ListCustomersDelinquency(ctx, gen.ListCustomersDelinquencyParams{
-		MerchantID: merchantID, CustomerIds: []uuid.UUID{customer}, RowLimit: int32(len(billing.Currencies())), // #nosec G115 -- the currency registry
+		MerchantID: merchantID, CustomerIds: []uuid.UUID{customer}, RowLimit: int32(len(catalog.Currencies())), // #nosec G115 -- the currency registry
 	})
 	if err != nil {
 		return err
@@ -62,7 +63,7 @@ func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Order) e
 		return err
 	}
 	rows, err := s.rt.DB.Gen(ctx).ListCustomersDelinquency(ctx, gen.ListCustomersDelinquencyParams{
-		MerchantID: mid.UUID(), CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies())), // #nosec G115 -- customers is at most one page (MaxPageLimit), times the currency registry
+		MerchantID: mid.UUID(), CustomerIds: customers, RowLimit: int32(len(customers) * len(catalog.Currencies())), // #nosec G115 -- customers is at most one page (MaxPageLimit), times the currency registry
 	})
 	if err != nil {
 		return err
@@ -79,7 +80,7 @@ func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Order) e
 	}
 	for _, o := range views {
 		if o != nil && overdue(o, now) {
-			o.Usage.Delinquent = delinquent[key{o.CustomerID.UUID(), o.Currency}]
+			o.Usage.Delinquent = delinquent[key{o.CustomerID.UUID(), string(o.Currency)}]
 		}
 	}
 	return nil

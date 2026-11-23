@@ -47,10 +47,10 @@ func declaredStripeBill(book DeclaredBilling, txn DeclaredTransaction, snapshots
 	}
 	snapshots[key] = raw
 	minor := func(amount int64) (int64, error) {
-		n, err := moneyutil.NativeToRailMinorExact(invoice.Currency, amount)
+		n, err := moneyutil.NativeToRailMinorExact(string(invoice.Currency), amount)
 		return int64(n), err
 	}
-	bill := &subscriptions.StripeBill{ID: invoice.ID, SubscriptionID: txn.RailSubscriptionID, CustomerID: invoice.CustomerReference, Status: invoice.Status, Reason: invoice.Reason, Currency: moneyutil.NormalizeCurrency(invoice.Currency), DueAt: invoice.DueAt}
+	bill := &subscriptions.StripeBill{ID: invoice.ID, SubscriptionID: txn.RailSubscriptionID, CustomerID: invoice.CustomerReference, Status: invoice.Status, Reason: invoice.Reason, Currency: moneyutil.NormalizeCurrency(string(invoice.Currency)), DueAt: invoice.DueAt}
 	pairs := []struct {
 		input  int64
 		output *int64
@@ -87,7 +87,7 @@ func declaredStripeBill(book DeclaredBilling, txn DeclaredTransaction, snapshots
 		}
 		bill.Payments = append(bill.Payments, subscriptions.StripeBillPayment{ID: payment.ID, ChargeID: payment.ChargeID, PaymentIntentID: payment.PaymentIntentID, Status: "paid", Kind: "charge", Currency: bill.Currency, Amount: amount, PaidAt: payment.PaidAt})
 		if payment.ChargeID == txn.TransactionID || payment.PaymentIntentID != "" && payment.PaymentIntentID == txn.TransactionID {
-			if !txn.Success || txn.Amount != payment.Amount || !strings.EqualFold(txn.Currency, bill.Currency) || !txn.OccurredAt.Equal(payment.PaidAt) {
+			if !txn.Success || txn.Amount != payment.Amount || !strings.EqualFold(string(txn.Currency), bill.Currency) || !txn.OccurredAt.Equal(payment.PaidAt) {
 				return nil, errors.New("transaction differs from its invoice monetary allocation")
 			}
 			found = true

@@ -419,7 +419,7 @@ func (p *Product) View() billing.Product {
 func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.KeyRevision, Version: p.Revision + 1,
 		ID: p.PublicID, Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
-		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours, BillingIntervalMonths: p.BillingIntervalMonths,
+		UnitAmount: p.Amount, Currency: catalog.Currency(p.Currency), AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours, BillingIntervalMonths: p.BillingIntervalMonths,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount, Quantity: p.Quantity,
 		SellVia: slices.Clone(p.SellVia), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}

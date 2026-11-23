@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -170,7 +171,7 @@ func (s *PurchaseService) addEngineSeats(ctx context.Context, req *SubscriptionC
 	end := terms.PeriodEnd
 	return &TierChangeResponse{
 		Status: "succeeded", Effective: "now", PriceID: c.currentPrice.PublicID, Quantity: subscriptions.CloneQuantity(terms.Quantity), Rail: billing.Rail(c.sub.Rail), SubscriptionID: &subID,
-		Currency: terms.Currency, NextChargeAmount: terms.RecurringAmount, NextChargeDate: &end,
+		Currency: catalog.Currency(terms.Currency), NextChargeAmount: terms.RecurringAmount, NextChargeDate: &end,
 		Message: fmt.Sprintf("Now %d seats; nothing is due before %s.", *terms.Quantity, end.UTC().Format("January 2, 2006")),
 	}, nil
 }
@@ -316,7 +317,7 @@ func (s *PurchaseService) scheduleEngineChange(ctx context.Context, c *changeTar
 	return &TierChangeResponse{
 		Status: "succeeded", Effective: "period_end", PriceID: next.PublicID, Quantity: quantity,
 		Rail: billing.Rail(sub.Rail), SubscriptionID: &subID, DelayedStart: &end,
-		Currency: next.Currency, NextChargeAmount: amount, NextChargeDate: &end,
+		Currency: catalog.Currency(next.Currency), NextChargeAmount: amount, NextChargeDate: &end,
 		Message: fmt.Sprintf("Scheduled: %s%s from %s. Nothing is charged now.", product.DisplayName, seatsText(quantity), end.UTC().Format("January 2, 2006")),
 	}, nil
 }
@@ -344,7 +345,7 @@ func (s *PurchaseService) cancelEngineChange(ctx context.Context, c *changeTarge
 	return &TierChangeResponse{
 		Status: "succeeded", Effective: "now", PriceID: c.currentPrice.PublicID, Quantity: subscriptions.CloneQuantity(sub.Quantity),
 		Rail: billing.Rail(sub.Rail), SubscriptionID: &subID,
-		Currency: c.currentPrice.Currency, NextChargeAmount: amount, NextChargeDate: &end,
+		Currency: catalog.Currency(c.currentPrice.Currency), NextChargeAmount: amount, NextChargeDate: &end,
 		Message: "The scheduled change is canceled; nothing is charged.",
 	}, nil
 }
@@ -485,7 +486,7 @@ func engineChangeResponse(in gen.BillingProviderIntent, priceID billing.PriceID)
 	resp := &TierChangeResponse{
 		Effective: "now", PriceID: priceID, Quantity: subscriptions.CloneQuantity(p.Terms.Quantity),
 		Rail: billing.Rail(in.Rail), SubscriptionID: &subID,
-		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
+		Currency: catalog.Currency(p.Terms.Currency), AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:

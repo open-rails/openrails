@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/authkit/userinfo"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -261,7 +262,7 @@ func TestMerchantConsole(t *testing.T) {
 		require.True(t, silver.Archived, "mapped from an import, it is no tier-change target by default")
 		require.Equal(t, products["silver"], silver.ProductID)
 		require.EqualValues(t, 10_000_000, silver.UnitAmount)
-		require.Equal(t, "USD", silver.Currency)
+		require.Equal(t, catalog.Currency("USD"), silver.Currency)
 		all, err := iw.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{})
 		require.NoError(t, err)
 		require.Len(t, all.Items, 3, "Apply and Apply again land each subscription once")

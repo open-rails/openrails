@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +29,7 @@ func TestRefundBoundaryContract(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrNotFound)
 		charge, err := a.alpha.GetPayment(t.Context(), paymentID)
 		require.NoError(t, err)
-		require.Equal(t, "USD", charge.Currency)
+		require.Equal(t, catalog.Currency("USD"), charge.Currency)
 		require.EqualValues(t, 30_000_000, charge.Amount)
 		require.Zero(t, charge.AmountRefunded)
 		require.Empty(t, charge.Refunds)

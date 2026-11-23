@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -292,7 +293,7 @@ func notify(ctx context.Context, database *db.DB, t Transition, exposure Exposur
 	}
 	overdue := exposure.OverdueAmount
 	data := billing.NotificationData{
-		Currency: t.Currency, OverdueAmount: &overdue, OverdueOrders: exposure.OverdueOrders,
+		Currency: catalog.Currency(t.Currency), OverdueAmount: &overdue, OverdueOrders: exposure.OverdueOrders,
 		FromState: t.From.String(), ToState: t.To.String(),
 	}
 	if exposure.Owes() {

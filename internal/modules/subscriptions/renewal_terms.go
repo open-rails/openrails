@@ -206,7 +206,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		if policy.ExpiresAfterDays != nil {
 			days = *policy.ExpiresAfterDays
 		}
-		terms.CreditGrant = &models.CreditGrantSnapshot{Amount: amount, Currency: policy.Currency, ExpiresAfterDays: days}
+		terms.CreditGrant = &models.CreditGrantSnapshot{Amount: amount, Currency: string(policy.Currency), ExpiresAfterDays: days}
 	}
 	return terms, terms.Validate()
 }

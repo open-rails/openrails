@@ -51,7 +51,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 		known, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 		require.NoError(t, err)
 		require.EqualValues(t, 9_990_000, known.UnitAmount)
-		require.Equal(t, "USD", known.Currency)
+		require.Equal(t, catalog.Currency("USD"), known.Currency)
 	}
 	var recurring []billing.PriceID
 	for i, key := range []string{"sdk-basic", "sdk-premium"} {

@@ -2,6 +2,8 @@ package billing
 
 import (
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // PaymentMethodListParams pages a customer's saved cards, newest first. IDs
@@ -65,8 +67,8 @@ type PaymentMethod struct {
 	Subscriptions []PaymentMethodSubscription `json:"subscriptions"`
 	// DefaultCurrencies are the currencies the card is the customer's default
 	// for (PUT /me/default-payment-methods/{currency}).
-	DefaultCurrencies []string  `json:"default_currencies"`
-	CreatedAt         time.Time `json:"created_at"`
+	DefaultCurrencies []catalog.Currency `json:"default_currencies"`
+	CreatedAt         time.Time          `json:"created_at"`
 }
 
 // PaymentMethodSubscription is a subscription a card pays.
@@ -182,8 +184,8 @@ type SetDefaultPaymentMethodParams struct {
 
 // DefaultPaymentMethod is the customer's default card for one currency.
 type DefaultPaymentMethod struct {
-	Currency        string          `json:"currency"`
-	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+	Currency        catalog.Currency `json:"currency"`
+	PaymentMethodID PaymentMethodID  `json:"payment_method_id"`
 }
 
 // ConfirmPaymentMethodParams finishes a pending card save. Capture is required

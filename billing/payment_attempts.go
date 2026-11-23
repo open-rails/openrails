@@ -2,6 +2,8 @@ package billing
 
 import (
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // PaymentAttempt is one authorization a PSP answered (#1110): a card
@@ -34,16 +36,16 @@ type PaymentAttempt struct {
 	AVSResult  string `json:"avs_result"`
 	CVVResult  string `json:"cvv_result"`
 	// Card is the card the PSP answered for; CardBIN its leading digits.
-	Card          *CardDetails `json:"card"`
-	CardBIN       string       `json:"card_bin"`
-	TokenType     string       `json:"token_type"`
-	TransactionID string       `json:"transaction_id"`
-	Rail          Rail         `json:"rail"`
-	PSPID         PSPID        `json:"psp_id"`
-	CustomerID    CustomerID   `json:"customer_id"`
-	Amount        int64        `json:"amount,string"`
-	Currency      string       `json:"currency"`
-	AttemptedAt   time.Time    `json:"attempted_at"`
+	Card          *CardDetails     `json:"card"`
+	CardBIN       string           `json:"card_bin"`
+	TokenType     string           `json:"token_type"`
+	TransactionID string           `json:"transaction_id"`
+	Rail          Rail             `json:"rail"`
+	PSPID         PSPID            `json:"psp_id"`
+	CustomerID    CustomerID       `json:"customer_id"`
+	Amount        int64            `json:"amount,string"`
+	Currency      catalog.Currency `json:"currency"`
+	AttemptedAt   time.Time        `json:"attempted_at"`
 	// OrderID is the order the attempt tried to pay.
 	OrderID         *OrderID         `json:"order_id"`
 	CycleID         *RenewalID       `json:"cycle_id"`
@@ -91,15 +93,15 @@ type PaymentAttemptListParams struct {
 // a cycle closes when collected, when its subscription is canceled, or 15
 // days past due.
 type Renewal struct {
-	ID             RenewalID      `json:"id"`
-	SubscriptionID SubscriptionID `json:"subscription_id"`
-	CustomerID     CustomerID     `json:"customer_id"`
-	PSPID          PSPID          `json:"psp_id"`
-	Rail           Rail           `json:"rail"`
-	Owner          string         `json:"owner"`
-	DueAt          time.Time      `json:"due_at"`
-	Amount         int64          `json:"amount,string"`
-	Currency       string         `json:"currency"`
+	ID             RenewalID        `json:"id"`
+	SubscriptionID SubscriptionID   `json:"subscription_id"`
+	CustomerID     CustomerID       `json:"customer_id"`
+	PSPID          PSPID            `json:"psp_id"`
+	Rail           Rail             `json:"rail"`
+	Owner          string           `json:"owner"`
+	DueAt          time.Time        `json:"due_at"`
+	Amount         int64            `json:"amount,string"`
+	Currency       catalog.Currency `json:"currency"`
 	// FirstOutcome is approved, declined, error, missed or pending.
 	FirstOutcome string     `json:"first_outcome"`
 	Outcome      string     `json:"outcome"`

@@ -33,9 +33,9 @@ const MaxLowBalanceRunwayHours = 8760
 // and its burn rate times RunwayHours. 0 turns that part off; null inherits
 // the merchant's settings.balance_notices, and RunwayHours then 24.
 type LowBalanceLine struct {
-	Currency    string `json:"currency"`
-	Amount      *int64 `json:"amount,string"`
-	RunwayHours *int   `json:"runway_hours"`
+	Currency    catalog.Currency `json:"currency"`
+	Amount      *int64           `json:"amount,string"`
+	RunwayHours *int             `json:"runway_hours"`
 }
 
 // SetLowBalanceLineParams sets the signed-in customer's low-balance line in
@@ -61,7 +61,7 @@ const (
 // one currency is judged at, each part resolved customer, merchant, built in.
 // Source is the most specific that set a part.
 type EffectiveLowBalanceLine struct {
-	Currency    string               `json:"currency"`
+	Currency    catalog.Currency     `json:"currency"`
 	Amount      int64                `json:"amount,string"`
 	RunwayHours int                  `json:"runway_hours"`
 	Source      LowBalanceLineSource `json:"source"`
@@ -71,16 +71,16 @@ type EffectiveLowBalanceLine struct {
 // zero allows no arrears.
 type CreditLimit struct {
 	// Inherit clears an override. Amount zero without Inherit explicitly disables credit.
-	Inherit  bool   `json:"inherit,omitempty"`
-	Currency string `json:"currency"`
-	Amount   int64  `json:"amount,string"`
+	Inherit  bool             `json:"inherit,omitempty"`
+	Currency catalog.Currency `json:"currency"`
+	Amount   int64            `json:"amount,string"`
 }
 
 // TrustLevel is the trust tier a customer's admissions are judged at in one
 // currency when a request names none; empty is the default tier.
 type TrustLevel struct {
-	Currency   string `json:"currency"`
-	TrustLevel string `json:"trust_level"`
+	Currency   catalog.Currency `json:"currency"`
+	TrustLevel string           `json:"trust_level"`
 }
 
 // UpdateCustomerParams changes the settings it names for one customer; an

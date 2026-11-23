@@ -9,6 +9,8 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 
 	"github.com/google/uuid"
@@ -102,7 +104,7 @@ func (l lowBalanceLine) at(burnPerHour int64) int64 {
 }
 
 func (l lowBalanceLine) effective(currency string) billing.EffectiveLowBalanceLine {
-	return billing.EffectiveLowBalanceLine{Currency: currency, Amount: l.amount, RunwayHours: l.runwayHours, Source: l.source}
+	return billing.EffectiveLowBalanceLine{Currency: catalog.Currency(currency), Amount: l.amount, RunwayHours: l.runwayHours, Source: l.source}
 }
 
 // satMul multiplies two nonnegative amounts, saturating.
@@ -422,7 +424,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 		}
 	}
 	event := billing.BalanceHostEvent{
-		CustomerID: billing.CustomerID(customer), Currency: currency, AvailableAmount: bal.Balance - bal.HeldBalance,
+		CustomerID: billing.CustomerID(customer), Currency: catalog.Currency(currency), AvailableAmount: bal.Balance - bal.HeldBalance,
 		OwedAmount: view.owed, AccrualRatePerHour: view.accrualRate, UsageRatePerHour: usageRate, LowBalanceAmount: out.line,
 		AsOf: bal.AsOf, DepletesAt: out.depletesAt, RunwayEndsAt: out.runwayEndsAt,
 	}
@@ -569,7 +571,7 @@ func (s *MoneyService) LowBalanceLines(ctx context.Context, customer identity.Cu
 	out := make([]billing.EffectiveLowBalanceLine, 0, len(currencies))
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, err := s.db.Gen(ctx).ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{
-			MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer.UUID()}, RowLimit: int32(len(billing.Currencies())), // #nosec G115 -- the currency registry
+			MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer.UUID()}, RowLimit: int32(len(catalog.Currencies())), // #nosec G115 -- the currency registry
 		})
 		if err != nil {
 			return err
@@ -592,7 +594,7 @@ func (s *MoneyService) LowBalanceLines(ctx context.Context, customer identity.Cu
 // notice and the watch is looked at on the next pass; the same line again
 // writes nothing.
 func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, line billing.LowBalanceLine, now time.Time) error {
-	current, err := customerLine(ctx, q, merchantID, customer, line.Currency)
+	current, err := customerLine(ctx, q, merchantID, customer, string(line.Currency))
 	if err != nil {
 		return err
 	}
@@ -610,16 +612,16 @@ func SetLowBalanceLineTx(ctx context.Context, q *gen.Queries, merchantID, custom
 		return nil
 	}
 	if line.Amount == nil && hours == nil {
-		err = q.DeleteCustomerLowBalanceLine(ctx, gen.DeleteCustomerLowBalanceLineParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency})
+		err = q.DeleteCustomerLowBalanceLine(ctx, gen.DeleteCustomerLowBalanceLineParams{MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency)})
 	} else {
 		err = q.UpsertCustomerLowBalanceLine(ctx, gen.UpsertCustomerLowBalanceLineParams{
-			MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, Amount: line.Amount, RunwayHours: hours, Now: now,
+			MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency), Amount: line.Amount, RunwayHours: hours, Now: now,
 		})
 	}
 	if err != nil {
 		return err
 	}
-	return ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: customer, Currency: line.Currency, RearmLow: true, Now: now})
+	return ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: merchantID, CustomerID: customer, Currency: string(line.Currency), RearmLow: true, Now: now})
 }
 
 func equalPtr[T comparable](a, b *T) bool {
@@ -647,7 +649,7 @@ func enqueueBalanceEvent(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 	}
 	_, err = q.EnqueueHostLifecycleEvent(ctx, gen.EnqueueHostLifecycleEventParams{
 		MerchantID: merchantID, EventType: string(eventType), SubjectType: "customer", SubjectID: event.CustomerID.UUID(),
-		Currency: event.Currency, OccurredAt: event.AsOf, Data: data,
+		Currency: string(event.Currency), OccurredAt: event.AsOf, Data: data,
 		DedupeKey: fmt.Sprintf("%s:%s:%s:%s", eventType, event.CustomerID, event.Currency, event.AsOf.Format(runningChargeInstantLayout)),
 	})
 	return err
@@ -666,7 +668,7 @@ func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ki
 	}
 	customer := event.CustomerID.UUID()
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuid.NewSHA1(customer, []byte(string(kind)+":"+event.Currency+":"+event.AsOf.Format(runningChargeInstantLayout))),
+		ID:         uuid.NewSHA1(customer, []byte(string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout))),
 		MerchantID: merchantID, CustomerID: customer, EventType: string(kind), Data: data, CreatedAt: event.AsOf,
 	})
 }

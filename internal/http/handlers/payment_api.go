@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 )
@@ -40,7 +41,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		Status:         paymentStatus(p.Status),
 		Amount:         p.Amount,
 		AmountRefunded: amountRefunded,
-		Currency:       p.Currency,
+		Currency:       catalog.Currency(p.Currency),
 		CustomerID:     billing.CustomerID(p.CustomerID),
 		Quantity:       p.Quantity,
 		Channel:        billing.ChannelRail,

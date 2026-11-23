@@ -122,18 +122,18 @@ type Price struct {
 	Revision int64 `json:"revision"`
 	// Version numbers this price's immutable terms within its key, from one.
 	// It is the v1 suffix in ID; restoring archived terms keeps that version.
-	Version               int64     `json:"version"`
-	ID                    PriceID   `json:"id"`
-	Key                   string    `json:"key"`
-	ProductID             ProductID `json:"product_id"`
-	Archived              bool      `json:"archived"`
-	UnitAmount            int64     `json:"unit_amount,string"`
-	Currency              string    `json:"currency"`
-	AccessDurationHours   *int      `json:"access_duration_hours"`
-	BillingIntervalHours  *int      `json:"billing_interval_hours"`
-	BillingIntervalMonths *int      `json:"billing_interval_months"`
-	TrialUnitAmount       *int64    `json:"trial_unit_amount,string"`
-	TrialDurationHours    *int      `json:"trial_duration_hours"`
+	Version               int64            `json:"version"`
+	ID                    PriceID          `json:"id"`
+	Key                   string           `json:"key"`
+	ProductID             ProductID        `json:"product_id"`
+	Archived              bool             `json:"archived"`
+	UnitAmount            int64            `json:"unit_amount,string"`
+	Currency              catalog.Currency `json:"currency"`
+	AccessDurationHours   *int             `json:"access_duration_hours"`
+	BillingIntervalHours  *int             `json:"billing_interval_hours"`
+	BillingIntervalMonths *int             `json:"billing_interval_months"`
+	TrialUnitAmount       *int64           `json:"trial_unit_amount,string"`
+	TrialDurationHours    *int             `json:"trial_duration_hours"`
 	// SellVia are the methods one of ours sells through. Null: every method
 	// the merchant has. A provider price sells through its provider.
 	SellVia []catalog.SellVia `json:"sell_via"`
@@ -229,7 +229,7 @@ type CreatePriceParams struct {
 	Key         string              `json:"key,omitempty"`
 	UnitAmount  int64               `json:"unit_amount,string"`
 	// Currency is fiat or SOL; a stablecoin is refused.
-	Currency string `json:"currency"`
+	Currency catalog.Currency `json:"currency"`
 	// AccessDurationHours is the access window (nil: no scheduled expiry),
 	// independently of billing cadence. Credit lot expiry belongs to the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
@@ -279,7 +279,7 @@ type CreateProviderPriceParams struct {
 	FlexID                   string    `json:"flex_id,omitempty"`
 	RecurringBillingOptionID string    `json:"recurring_billing_option_id,omitempty"`
 	// Currency prices an NMI plan; USD when omitted.
-	Currency             string             `json:"currency,omitempty"`
+	Currency             catalog.Currency   `json:"currency,omitempty"`
 	UnitAmount           *int64             `json:"unit_amount,omitempty,string"`
 	BillingIntervalHours *int               `json:"billing_interval_hours,omitempty"`
 	AccessDurationHours  catalog.Field[int] `json:"access_duration_hours,omitzero"`
@@ -315,13 +315,13 @@ type GetPriceParams struct {
 // are absent.
 type PriceListParams struct {
 	PageRequest
-	IDs        []PriceID `form:"ids,comma"`
-	ProductID  ProductID `form:"product_id"`
-	ProductKey string    `form:"product_key"`
-	Key        string    `form:"key"`
-	Currency   string    `form:"currency"`
-	Recurring  *bool     `form:"recurring"`
-	Archived   *bool     `form:"archived"`
+	IDs        []PriceID        `form:"ids,comma"`
+	ProductID  ProductID        `form:"product_id"`
+	ProductKey string           `form:"product_key"`
+	Key        string           `form:"key"`
+	Currency   catalog.Currency `form:"currency"`
+	Recurring  *bool            `form:"recurring"`
+	Archived   *bool            `form:"archived"`
 }
 
 // PriceKeyMovement is one point in a price key's history: from EffectiveAt

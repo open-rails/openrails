@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // CreditGrantID names one credit grant: a lot of prepaid credit.
@@ -57,14 +58,14 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 // expiry differs is ErrIdempotencyKeyReused. Source labels where the money
 // came from; Invoker records who granted it (default: the customer).
 type CreateCreditGrantParams struct {
-	CustomerID  CustomerID `json:"customer_id"`
-	Currency    string     `json:"currency"`
-	Amount      int64      `json:"amount,string"`
-	SourceID    string     `json:"source_id"`
-	Source      string     `json:"source"`
-	Invoker     string     `json:"invoker,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	Description *string    `json:"description,omitempty"`
+	CustomerID  CustomerID       `json:"customer_id"`
+	Currency    catalog.Currency `json:"currency"`
+	Amount      int64            `json:"amount,string"`
+	SourceID    string           `json:"source_id"`
+	Source      string           `json:"source"`
+	Invoker     string           `json:"invoker,omitempty"`
+	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+	Description *string          `json:"description,omitempty"`
 }
 
 // CreditGrantState is where a credit grant stands.
@@ -87,7 +88,7 @@ const (
 type CreditGrant struct {
 	ID                CreditGrantID    `json:"id"`
 	CustomerID        CustomerID       `json:"customer_id"`
-	Currency          string           `json:"currency"`
+	Currency          catalog.Currency `json:"currency"`
 	Amount            int64            `json:"amount,string"`
 	SpentAmount       int64            `json:"spent_amount,string"`
 	RemainingAmount   int64            `json:"remaining_amount,string"`
@@ -108,9 +109,9 @@ type CreditGrant struct {
 // CreditGrantListParams filters a customer's credit grants, newest first.
 type CreditGrantListParams struct {
 	// CustomerID is whose grants to list; required unless IDs is set.
-	CustomerID CustomerID `form:"customer_id"`
-	Currency   string     `form:"currency"`
-	SourceID   string     `form:"source_id"`
+	CustomerID CustomerID       `form:"customer_id"`
+	Currency   catalog.Currency `form:"currency"`
+	SourceID   string           `form:"source_id"`
 	// IDs instead reads 1 to MaxBatchItems named grants in one page, whatever
 	// their state; unknown ones are absent.
 	IDs []CreditGrantID `form:"ids,comma"`
@@ -157,7 +158,7 @@ const (
 type BalanceTransaction struct {
 	ID            BalanceTransactionID   `json:"id"`
 	CustomerID    CustomerID             `json:"customer_id"`
-	Currency      string                 `json:"currency"`
+	Currency      catalog.Currency       `json:"currency"`
 	Type          BalanceTransactionType `json:"type"`
 	Amount        int64                  `json:"amount,string"`
 	CreditGrantID *CreditGrantID         `json:"credit_grant_id"`
@@ -175,7 +176,7 @@ type BalanceTransaction struct {
 // newest first. IDs instead reads 1 to MaxBatchItems of the customer's named
 // transactions in one page, in any currency; unknown ones are absent.
 type BalanceTransactionListParams struct {
-	Currency string                 `form:"currency"`
+	Currency catalog.Currency       `form:"currency"`
 	IDs      []BalanceTransactionID `form:"ids,comma"`
 	PageRequest
 }
@@ -191,7 +192,7 @@ const (
 
 // GetBalanceParams names the currency of a customer's balance.
 type GetBalanceParams struct {
-	Currency string `form:"currency"`
+	Currency catalog.Currency `form:"currency"`
 }
 
 // Balance is a customer's money in one currency, as of AsOf. AvailableAmount
@@ -206,26 +207,26 @@ type GetBalanceParams struct {
 // reaches zero at that rate, counting each credit lot's expiry; null with no
 // running charge.
 type Balance struct {
-	CustomerID         CustomerID  `json:"customer_id"`
-	Currency           string      `json:"currency"`
-	BillingMode        BillingMode `json:"billing_mode"`
-	BalanceAmount      int64       `json:"balance_amount,string"`
-	HeldAmount         int64       `json:"held_amount,string"`
-	AccruedAmount      int64       `json:"accrued_amount,string"`
-	AvailableAmount    int64       `json:"available_amount,string"`
-	OwedAmount         int64       `json:"owed_amount,string"`
-	AccrualRatePerHour int64       `json:"accrual_rate_per_hour,string"`
-	AsOf               time.Time   `json:"as_of"`
-	DepletesAt         *time.Time  `json:"depletes_at"`
+	CustomerID         CustomerID       `json:"customer_id"`
+	Currency           catalog.Currency `json:"currency"`
+	BillingMode        BillingMode      `json:"billing_mode"`
+	BalanceAmount      int64            `json:"balance_amount,string"`
+	HeldAmount         int64            `json:"held_amount,string"`
+	AccruedAmount      int64            `json:"accrued_amount,string"`
+	AvailableAmount    int64            `json:"available_amount,string"`
+	OwedAmount         int64            `json:"owed_amount,string"`
+	AccrualRatePerHour int64            `json:"accrual_rate_per_hour,string"`
+	AsOf               time.Time        `json:"as_of"`
+	DepletesAt         *time.Time       `json:"depletes_at"`
 }
 
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
 // request's currency when empty). A spend window is at most 31 days.
 type BudgetWindow struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit,string"`
-	Currency      string `json:"currency,omitempty"`
+	Key           string           `json:"key"`
+	WindowSeconds int64            `json:"window_seconds"`
+	Limit         int64            `json:"limit,string"`
+	Currency      catalog.Currency `json:"currency,omitempty"`
 }
 
 // MerchantProfile is the merchant's public and communication metadata; its
@@ -282,8 +283,8 @@ type BalanceNoticeSettings struct {
 
 // BalanceNoticeAmount is an amount line in one currency.
 type BalanceNoticeAmount struct {
-	Currency string `json:"currency"`
-	Amount   int64  `json:"amount,string"`
+	Currency catalog.Currency `json:"currency"`
+	Amount   int64            `json:"amount,string"`
 }
 
 // CardVaultPlatform is the card_vault holding new cards in the deployment's
@@ -372,8 +373,8 @@ type BillingPolicy struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  string         `json:"policy_currency,omitempty"`
+	BadSpendWindows []BudgetWindow   `json:"bad_spend_windows,omitempty"`
+	PolicyCurrency  catalog.Currency `json:"policy_currency,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.

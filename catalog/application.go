@@ -188,7 +188,7 @@ type ApplyProduct struct {
 // stablecoin.
 type ApplyPrice struct {
 	ID                    string                `json:"id,omitempty"`
-	Currency              Field[string]         `json:"currency,omitzero"`
+	Currency              Field[Currency]       `json:"currency,omitzero"`
 	UnitAmount            Field[int64]          `json:"unit_amount,omitzero"`
 	AccessDurationHours   Field[int]            `json:"access_duration_hours,omitzero"`
 	BillingIntervalHours  Field[int]            `json:"billing_interval_hours,omitzero"`
@@ -270,7 +270,7 @@ func (a Application) Validate() error {
 				return fmt.Errorf("price %q: nonnullable field is null", priceKey)
 			}
 			if price.Currency.Set {
-				if _, err := currency.ForPrice(price.Currency.Value); err != nil {
+				if _, err := currency.ForPrice(string(price.Currency.Value)); err != nil {
 					return fmt.Errorf("price %q: %w", priceKey, err)
 				}
 			}

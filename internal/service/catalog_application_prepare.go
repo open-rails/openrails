@@ -334,7 +334,7 @@ func sellViaRefusal(req billing.CreatePriceParams, accounts []merchants.PSPScope
 		card := false
 		for _, a := range accounts {
 			rail := models.Rail(a.Rail)
-			if !a.Archived && a.Declared && !a.Superseded && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) && moneyutil.RequireFiatCurrency(req.Currency) == nil {
+			if !a.Archived && a.Declared && !a.Superseded && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) && moneyutil.RequireFiatCurrency(string(req.Currency)) == nil {
 				card = true
 			}
 		}

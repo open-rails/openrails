@@ -346,7 +346,7 @@ func priceDeterministicID(productID uuid.UUID, key string, amount int64, currenc
 // newPriceID is the id a price with req's complete terms at key takes when no
 // stored price already holds them.
 func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) uuid.UUID {
-	id := priceDeterministicID(productID, key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
+	id := priceDeterministicID(productID, key, req.UnitAmount, string(req.Currency), req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
 	if req.BillingIntervalMonths != nil {
 		id = uuidutil.DeterministicID(id, "calendar_months", strconv.Itoa(*req.BillingIntervalMonths))
 	}
@@ -408,7 +408,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// CUR-6: canonicalise at the price WRITE boundary. currency.ForPrice below
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
-	req.Currency = money.NormalizeCurrency(req.Currency)
+	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
 	defaultRecurringAccess(&req)
 	if err := validateCatalogPriceTerms(req); err != nil {
 		return nil, err
@@ -687,7 +687,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 			return apperr.Invalidf("customer_amount requires positive inclusive min_amount and max_amount")
 		}
 		for _, amount := range []int64{req.CustomerAmount.MinAmount, req.CustomerAmount.MaxAmount} {
-			if _, err := moneyutil.NativeToRailMinorExact(req.Currency, amount); err != nil {
+			if _, err := moneyutil.NativeToRailMinorExact(string(req.Currency), amount); err != nil {
 				return apperr.Invalidf("customer_amount: %v", err)
 			}
 		}
@@ -733,7 +733,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 			return apperr.Invalidf("trial pricing requires billing_interval_hours")
 		}
 	}
-	if _, err := currency.ForPrice(req.Currency); err != nil {
+	if _, err := currency.ForPrice(string(req.Currency)); err != nil {
 		return apperr.Invalidf("%v", err)
 	}
 	return nil
@@ -742,7 +742,7 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 // samePriceTerms compares stored terms instead of assuming how an imported ID
 // was minted. Financial identity includes the product-local key.
 func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
-	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
+	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(string(p.Currency), string(req.Currency)) &&
 		reflect.DeepEqual(p.BillingIntervalHours, req.BillingIntervalHours) && reflect.DeepEqual(p.BillingIntervalMonths, req.BillingIntervalMonths) && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
 		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount) &&
 		reflect.DeepEqual(p.Quantity, req.Quantity)

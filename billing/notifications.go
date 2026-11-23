@@ -3,6 +3,8 @@ package billing
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // NotificationEvent is an immutable billing fact. Applications own its delivery,
@@ -84,8 +86,8 @@ type NotificationData struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 	// AccessEnded distinguishes observed access loss from stopping recurrence.
 	// A subscription_canceled fact may retain paid access until EndedAt.
-	AccessEnded bool   `json:"access_ended,omitempty"`
-	Currency    string `json:"currency,omitempty"`
+	AccessEnded bool             `json:"access_ended,omitempty"`
+	Currency    catalog.Currency `json:"currency,omitempty"`
 
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).

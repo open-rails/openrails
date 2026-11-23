@@ -28,7 +28,7 @@ type ApplyProviderPrice struct {
 	FlexID                   string `json:"flex_id,omitempty"`
 	RecurringBillingOptionID string `json:"recurring_billing_option_id,omitempty"`
 	// Currency prices an NMI plan, whose amount names none; USD when omitted.
-	Currency             string     `json:"currency,omitempty"`
+	Currency             Currency   `json:"currency,omitempty"`
 	UnitAmount           *int64     `json:"unit_amount,omitempty,string"`
 	BillingIntervalHours *int       `json:"billing_interval_hours,omitempty"`
 	AccessDurationHours  Field[int] `json:"access_duration_hours,omitzero"`
@@ -149,7 +149,7 @@ func (p ApplyProviderPrice) Validate() error {
 		return fmt.Errorf("name the provider's object: plan_id (NMI), price_id (Stripe), or flex_id and recurring_billing_option_id (CCBill)")
 	}
 	if p.Currency != "" {
-		if _, err := currency.ForPrice(p.Currency); err != nil {
+		if _, err := currency.ForPrice(string(p.Currency)); err != nil {
 			return err
 		}
 	}

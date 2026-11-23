@@ -52,7 +52,7 @@ func TestPublicCatalog(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, product.ID, read.ProductID)
 		require.EqualValues(t, 9_990_000, read.UnitAmount)
-		require.Equal(t, "USD", read.Currency)
+		require.Equal(t, catalog.Currency("USD"), read.Currency)
 		preview, err := a.alphaRemote.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}})
 		require.NoError(t, err)
 		require.EqualValues(t, 29_970_000, preview.Total)
@@ -77,7 +77,7 @@ func TestPublicCatalog(t *testing.T) {
 				require.NoError(t, err)
 				price := doc.Products["exact"].Prices["exact"]
 				require.Equal(t, sample.units, price.UnitAmount.Value)
-				require.Equal(t, sample.currency, price.Currency.Value)
+				require.Equal(t, catalog.Currency(sample.currency), price.Currency.Value)
 			}
 			for _, sample := range []struct {
 				input string

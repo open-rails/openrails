@@ -127,7 +127,7 @@ func planPurchases(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ps
 
 // planPurchase returns why a purchase cannot be recorded, or its plan.
 func planPurchase(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID, p DeclaredPurchase, asOf time.Time) (plannedPurchase, string, error) {
-	plan := plannedPurchase{decl: p, psp: psp, currency: moneyutil.NormalizeCurrency(p.Currency)}
+	plan := plannedPurchase{decl: p, psp: psp, currency: moneyutil.NormalizeCurrency(string(p.Currency))}
 	switch {
 	case p.Customer.IsZero():
 		return plan, "customer is required", nil

@@ -33,7 +33,7 @@ func TestCheckout(t *testing.T) {
 		require.Equal(t, billing.OrderComplete, order.Status)
 		require.Equal(t, billing.OrderPaymentSucceeded, order.Payment.Status)
 		require.EqualValues(t, 29_970_000, order.Total)
-		require.Equal(t, "USD", order.Currency)
+		require.Equal(t, catalog.Currency("USD"), order.Currency)
 		require.NotNil(t, order.Payment.PaymentID)
 		money, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
 		require.NoError(t, err)

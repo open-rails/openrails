@@ -671,7 +671,7 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 	if product.Archived && decl.Archived.Set && !decl.Archived.Value {
 		return nil, req, apperr.Invalidf("cannot explicitly activate price %q under archived product", key)
 	}
-	req.Currency = money.NormalizeCurrency(req.Currency)
+	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
 	if decl.ID != "" && !samePriceTerms(*current, req) {
 		return nil, req, apperr.Invalidf("price id pins immutable terms; omit id to create a new price revision")
 	}

@@ -99,7 +99,7 @@ type LeaseUsage struct {
 	LimitSet    *string          `json:"limit_set"`
 	Invoker     string           `json:"invoker"`
 	InvokerType InvokerType      `json:"invoker_type"`
-	Currency    string           `json:"currency"`
+	Currency    catalog.Currency `json:"currency"`
 	Source      string           `json:"source"`
 	SourceID    string           `json:"source_id"`
 	Outcome     UsageOutcome     `json:"outcome"`
@@ -125,14 +125,14 @@ type OutboxItem struct {
 // LeaseWant asks for a hold for one customer and the invoker attributes of
 // a request, as AdmitParams names them, with the request's usage estimate.
 type LeaseWant struct {
-	CustomerID  CustomerID     `json:"customer_id"`
-	Invoker     string         `json:"invoker"`
-	InvokerType InvokerType    `json:"invoker_type"`
-	TrustLevel  *string        `json:"trust_level"`
-	Roles       []uuid.UUID    `json:"roles"`
-	Resource    *string        `json:"resource"`
-	Currency    string         `json:"currency"`
-	Usage       *UsageEstimate `json:"usage"`
+	CustomerID  CustomerID       `json:"customer_id"`
+	Invoker     string           `json:"invoker"`
+	InvokerType InvokerType      `json:"invoker_type"`
+	TrustLevel  *string          `json:"trust_level"`
+	Roles       []uuid.UUID      `json:"roles"`
+	Resource    *string          `json:"resource"`
+	Currency    catalog.Currency `json:"currency"`
+	Usage       *UsageEstimate   `json:"usage"`
 	// EstimatedAmount is a host-stated money estimate, for a want with no
 	// Usage, as AdmitParams states one.
 	EstimatedAmount *int64 `json:"estimated_amount,string"`
@@ -199,13 +199,13 @@ type LeaseWantResult struct {
 // unreserved while OpenRails is unreachable; null unless the merchant sets
 // usage_gate_safe_spend. It never covers unit limits.
 type Hold struct {
-	CustomerID  CustomerID     `json:"customer_id"`
-	LimitSet    string         `json:"limit_set"`
-	Currency    string         `json:"currency"`
-	Limits      []HoldLimit    `json:"limits"`
-	RateCards   []HoldRateCard `json:"rate_cards"`
-	PriceBounds []PriceBound   `json:"price_bounds"`
-	Safe        *int64         `json:"safe,string"`
+	CustomerID  CustomerID       `json:"customer_id"`
+	LimitSet    string           `json:"limit_set"`
+	Currency    catalog.Currency `json:"currency"`
+	Limits      []HoldLimit      `json:"limits"`
+	RateCards   []HoldRateCard   `json:"rate_cards"`
+	PriceBounds []PriceBound     `json:"price_bounds"`
+	Safe        *int64           `json:"safe,string"`
 	// Version increases each time the server answers this hold a new size;
 	// the gate reports the latest it applied in SyncLeasesParams.Applied.
 	Version int64 `json:"version"`

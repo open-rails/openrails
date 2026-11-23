@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -27,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/paymentpage"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -518,7 +521,7 @@ func SetDefaultPaymentMethod(r *httprequest.Request) {
 		writeMoveRefusal(r, err, "failed to set the default payment method")
 		return
 	}
-	r.SuccessJSON(billing.DefaultPaymentMethod{Currency: currency, PaymentMethodID: req.PaymentMethodID})
+	r.SuccessJSON(billing.DefaultPaymentMethod{Currency: catalog.Currency(currency), PaymentMethodID: req.PaymentMethodID})
 }
 
 func writePaymentMethod(r *httprequest.Request, status int, customer identity.CustomerID, pm *models.PaymentMethod) {
@@ -603,7 +606,7 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		ContactCardholderAt: pm.ContactCardholderAt,
 		Mandates:            []billing.Mandate{},
 		Subscriptions:       subs,
-		DefaultCurrencies:   defaults,
+		DefaultCurrencies:   normalize.Strings[catalog.Currency](defaults),
 		CreatedAt:           pm.CreatedAt,
 	}
 	if !pm.Chargeable() {

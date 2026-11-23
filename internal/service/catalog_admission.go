@@ -411,7 +411,7 @@ func priceEditPlan(id billing.PriceID, req UpdatePriceRequest) catalogClassifica
 
 func createPricePlan(req billing.CreatePriceParams) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
-		req.Currency = money.NormalizeCurrency(req.Currency)
+		req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
 		if err := validateCatalogPriceTerms(req); err != nil {
 			return nil, err
 		}

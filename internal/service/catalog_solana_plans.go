@@ -60,7 +60,7 @@ func solanaPlanRefusal(req billing.CreatePriceParams) string {
 	switch {
 	case req.BillingIntervalHours == nil:
 		return ""
-	case !strings.EqualFold(req.Currency, "USD"):
+	case !strings.EqualFold(string(req.Currency), "USD"):
 		return "a recurring Solana price bills in USD (USDC); SOL and other currencies sell one-time only"
 	case req.TrialUnitAmount != nil || req.TrialDurationHours != nil:
 		return "a Solana plan bills one amount every period, so it runs no trial"
@@ -172,7 +172,7 @@ func (s *Service) solanaPlanLink(ctx context.Context, account solanaAccount, req
 	if req.Archived {
 		return nil, apperr.Invalidf("an archived price publishes no Solana plan")
 	}
-	ref, err := s.publishSolanaPlan(ctx, solanaPlanContext{PriceID: priceID, UnitAmount: req.UnitAmount, Currency: req.Currency,
+	ref, err := s.publishSolanaPlan(ctx, solanaPlanContext{PriceID: priceID, UnitAmount: req.UnitAmount, Currency: string(req.Currency),
 		BillingIntervalHours: req.BillingIntervalHours, RemoteWritesDisabled: s.catalogRemoteWritesDisabled()})
 	if err != nil {
 		return nil, err

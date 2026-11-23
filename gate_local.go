@@ -1429,7 +1429,7 @@ func (g *localGate) limits(ctx context.Context, customer billing.CustomerID) ([]
 	for _, q := range g.queues {
 		for _, e := range q.items {
 			if e.item.CustomerID == customer {
-				addUnsent(unsent, e.item.Currency, e.takes)
+				addUnsent(unsent, string(e.item.Currency), e.takes)
 			}
 		}
 	}

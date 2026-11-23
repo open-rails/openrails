@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"fmt"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
-		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, Rail: billing.Rail(r.Rail),
+		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, Rail: billing.Rail(r.Rail),
 			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
@@ -73,7 +74,7 @@ func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r Authent
 	n := &models.NotificationEvent{
 		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
-		Data: billing.NotificationData{Amount: &amount, Currency: r.Currency, ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
+		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)

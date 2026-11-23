@@ -1,5 +1,7 @@
 package billing
 
+import "github.com/open-rails/openrails/catalog"
+
 // PublicConfig is what a browser needs to know about this deployment, at
 // GET /v1/config: no credential, the same for every merchant. Every value
 // is public by nature.
@@ -7,7 +9,7 @@ type PublicConfig struct {
 	// Capabilities is what the mount serving the request serves.
 	Capabilities Capabilities `json:"capabilities"`
 	// Currencies is the scale registry behind every amount on the wire.
-	Currencies []CurrencyUnits `json:"currencies"`
+	Currencies []catalog.CurrencyUnits `json:"currencies"`
 	// Rails is the rail registry: each rail a PSP can be declared on, with
 	// the credentials and settings it takes.
 	Rails []RailDefinition `json:"rails"`

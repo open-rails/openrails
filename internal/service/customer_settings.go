@@ -126,7 +126,7 @@ func (s *Service) SetLowBalanceLine(ctx context.Context, customer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	line := billing.LowBalanceLine{Currency: currency, Amount: params.Amount, RunwayHours: params.RunwayHours}
+	line := billing.LowBalanceLine{Currency: catalog.Currency(currency), Amount: params.Amount, RunwayHours: params.RunwayHours}
 	if err := money.ValidateLowBalanceLine(line, ""); err != nil {
 		return nil, err
 	}
@@ -178,11 +178,11 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 	usageCurrencies := map[string]bool{}
 	for i, account := range params.UsageBilling {
 		field := fmt.Sprintf("usage_billing[%d]", i)
-		currency, err := settingsCurrency(account.Currency, field+".currency", usageCurrencies)
+		currency, err := settingsCurrency(string(account.Currency), field+".currency", usageCurrencies)
 		if err != nil {
 			return c, err
 		}
-		account.Currency = currency
+		account.Currency = catalog.Currency(currency)
 		if account.BillingAnchor.Set && !account.BillingAnchor.Null {
 			if account.BillingAnchor.Value.IsZero() {
 				return c, apperr.Invalidf("billing_anchor must be a timestamp").WithParam(field + ".billing_anchor")
@@ -197,7 +197,7 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 	currencies := map[string]bool{}
 	for j, limit := range params.CreditLimits {
 		field := fmt.Sprintf("credit_limits[%d]", j)
-		currency, err := settingsCurrency(limit.Currency, field+".currency", currencies)
+		currency, err := settingsCurrency(string(limit.Currency), field+".currency", currencies)
 		if err != nil {
 			return c, err
 		}
@@ -207,12 +207,12 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 		if limit.Amount < 0 {
 			return c, apperr.Invalidf("amount must be nonnegative").WithParam(field + ".amount")
 		}
-		c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: currency, Amount: limit.Amount, Inherit: limit.Inherit})
+		c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: catalog.Currency(currency), Amount: limit.Amount, Inherit: limit.Inherit})
 	}
 	currencies = map[string]bool{}
 	for j, level := range params.TrustLevels {
 		field := fmt.Sprintf("trust_levels[%d]", j)
-		currency, err := settingsCurrency(level.Currency, field+".currency", currencies)
+		currency, err := settingsCurrency(string(level.Currency), field+".currency", currencies)
 		if err != nil {
 			return c, err
 		}
@@ -220,16 +220,16 @@ func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerP
 		if len(name) > maxTrustLevelBytes {
 			return c, apperr.Invalidf("trust_level exceeds %d bytes", maxTrustLevelBytes).WithParam(field + ".trust_level")
 		}
-		c.trustLevels = append(c.trustLevels, billing.TrustLevel{Currency: currency, TrustLevel: name})
+		c.trustLevels = append(c.trustLevels, billing.TrustLevel{Currency: catalog.Currency(currency), TrustLevel: name})
 	}
 	currencies = map[string]bool{}
 	for j, line := range params.LowBalanceLines {
 		field := fmt.Sprintf("low_balance_lines[%d]", j)
-		currency, err := settingsCurrency(line.Currency, field+".currency", currencies)
+		currency, err := settingsCurrency(string(line.Currency), field+".currency", currencies)
 		if err != nil {
 			return c, err
 		}
-		line.Currency = currency
+		line.Currency = catalog.Currency(currency)
 		if err := money.ValidateLowBalanceLine(line, field+"."); err != nil {
 			return c, err
 		}
@@ -321,30 +321,30 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 	for _, limit := range c.creditLimits {
 		if !limit.Inherit {
 			if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-				MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, BillingMode: money.BillingModeArrears, Now: now,
+				MerchantID: mid, CustomerID: c.customer, Currency: string(limit.Currency), BillingMode: money.BillingModeArrears, Now: now,
 			}); err != nil {
 				return err
 			}
 		}
 		if limit.Inherit {
-			if err := q.InheritMoneyAccountCreditLimit(ctx, gen.InheritMoneyAccountCreditLimitParams{MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, Now: now}); err != nil {
+			if err := q.InheritMoneyAccountCreditLimit(ctx, gen.InheritMoneyAccountCreditLimitParams{MerchantID: mid, CustomerID: c.customer, Currency: string(limit.Currency), Now: now}); err != nil {
 				return err
 			}
 		} else if err := q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
-			MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, CreditLimit: limit.Amount, Now: now,
+			MerchantID: mid, CustomerID: c.customer, Currency: string(limit.Currency), CreditLimit: limit.Amount, Now: now,
 		}); err != nil {
 			return err
 		}
 		// A credit line moves what an arrears customer may spend, and may
 		// make it one: its watch follows, re-armed as by a funding.
 		if err := ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{
-			MerchantID: mid, CustomerID: c.customer, Currency: limit.Currency, Funded: true, Now: now,
+			MerchantID: mid, CustomerID: c.customer, Currency: string(limit.Currency), Funded: true, Now: now,
 		}); err != nil {
 			return err
 		}
 	}
 	for _, account := range c.usageBilling {
-		if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: mid, CustomerID: c.customer, Currency: account.Currency, BillingMode: money.BillingModePrepaid, Now: now}); err != nil {
+		if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{MerchantID: mid, CustomerID: c.customer, Currency: string(account.Currency), BillingMode: money.BillingModePrepaid, Now: now}); err != nil {
 			return err
 		}
 		var anchor, next *time.Time
@@ -358,7 +358,7 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 			v := account.MinimumInvoiceAmount.Value
 			minimum = &v
 		}
-		if err := q.UpdateUsageBillingAccount(ctx, gen.UpdateUsageBillingAccountParams{MerchantID: mid, CustomerID: c.customer, Currency: account.Currency, SetAnchor: account.BillingAnchor.Set, Anchor: anchor, NextBillAt: next, SetMinimum: account.MinimumInvoiceAmount.Set, MinimumInvoiceAmount: minimum, Now: now}); err != nil {
+		if err := q.UpdateUsageBillingAccount(ctx, gen.UpdateUsageBillingAccountParams{MerchantID: mid, CustomerID: c.customer, Currency: string(account.Currency), SetAnchor: account.BillingAnchor.Set, Anchor: anchor, NextBillAt: next, SetMinimum: account.MinimumInvoiceAmount.Set, MinimumInvoiceAmount: minimum, Now: now}); err != nil {
 			return err
 		}
 	}
@@ -370,13 +370,13 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 	for _, level := range c.trustLevels {
 		if level.TrustLevel != "" {
 			if _, err := q.InsertMoneyAccountSettingsIfAbsent(ctx, gen.InsertMoneyAccountSettingsIfAbsentParams{
-				MerchantID: mid, CustomerID: c.customer, Currency: level.Currency, BillingMode: money.BillingModePrepaid, Now: now,
+				MerchantID: mid, CustomerID: c.customer, Currency: string(level.Currency), BillingMode: money.BillingModePrepaid, Now: now,
 			}); err != nil {
 				return err
 			}
 		}
 		if err := q.SetMoneyAccountTier(ctx, gen.SetMoneyAccountTierParams{
-			MerchantID: mid, CustomerID: c.customer, Currency: level.Currency, Tier: level.TrustLevel, Now: now,
+			MerchantID: mid, CustomerID: c.customer, Currency: string(level.Currency), Tier: level.TrustLevel, Now: now,
 		}); err != nil {
 			return err
 		}
@@ -403,17 +403,17 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 	if len(customers) == 0 {
 		return out, nil
 	}
-	accounts, err := q.ListCustomerSettingsAccounts(ctx, gen.ListCustomerSettingsAccountsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
+	accounts, err := q.ListCustomerSettingsAccounts(ctx, gen.ListCustomerSettingsAccountsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(catalog.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
 	if err != nil {
 		return nil, err
 	}
 	for _, a := range accounts {
 		doc := out[a.CustomerID]
 		if a.CreditLimitOverride {
-			doc.CreditLimits = append(doc.CreditLimits, billing.CreditLimit{Currency: a.Currency, Amount: a.CreditLimitAmount})
+			doc.CreditLimits = append(doc.CreditLimits, billing.CreditLimit{Currency: catalog.Currency(a.Currency), Amount: a.CreditLimitAmount})
 		}
 		if a.Tier != nil && *a.Tier != "" {
-			doc.TrustLevels = append(doc.TrustLevels, billing.TrustLevel{Currency: a.Currency, TrustLevel: *a.Tier})
+			doc.TrustLevels = append(doc.TrustLevels, billing.TrustLevel{Currency: catalog.Currency(a.Currency), TrustLevel: *a.Tier})
 		}
 		out[a.CustomerID] = doc
 	}
@@ -431,16 +431,16 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 			v := account.UsageNextBillAt.UTC()
 			account.UsageNextBillAt = &v
 		}
-		doc.UsageBilling = append(doc.UsageBilling, billing.UsageBillingAccount{Currency: account.Currency, BillingAnchor: account.UsageBillingAnchor, NextBillAt: account.UsageNextBillAt, MinimumInvoiceAmount: account.UsageMinimumInvoiceAmount})
+		doc.UsageBilling = append(doc.UsageBilling, billing.UsageBillingAccount{Currency: catalog.Currency(account.Currency), BillingAnchor: account.UsageBillingAnchor, NextBillAt: account.UsageNextBillAt, MinimumInvoiceAmount: account.UsageMinimumInvoiceAmount})
 		out[account.CustomerID] = doc
 	}
-	lines, err := q.ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
+	lines, err := q.ListCustomerLowBalanceLines(ctx, gen.ListCustomerLowBalanceLinesParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(catalog.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
 	if err != nil {
 		return nil, err
 	}
 	for _, l := range lines {
 		doc := out[l.CustomerID]
-		line := billing.LowBalanceLine{Currency: l.Currency, Amount: l.Amount}
+		line := billing.LowBalanceLine{Currency: catalog.Currency(l.Currency), Amount: l.Amount}
 		if l.RunwayHours != nil {
 			hours := int(*l.RunwayHours)
 			line.RunwayHours = &hours

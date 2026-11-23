@@ -69,7 +69,7 @@ func (r *syncRun) want(i int) error {
 		status, d := Details(prefixParam(err, fmt.Sprintf("wants[%d]", i)))
 		*res = billing.LeaseWantResult{Status: status, Error: &d}
 	}
-	currency := money.NormalizeCurrency(w.Currency)
+	currency := money.NormalizeCurrency(string(w.Currency))
 	switch {
 	case w.CustomerID.IsZero():
 		fail(invalid("customer_id", "customer_id required"))
@@ -772,7 +772,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 	if err != nil {
 		return billing.Hold{}, false, err
 	}
-	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: h.row.Currency,
+	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: catalog.Currency(h.row.Currency),
 		Limits: make([]billing.HoldLimit, 0, len(h.parts)), RateCards: cards, PriceBounds: bounds, Version: h.version}
 	for _, p := range h.parts {
 		line := billing.HoldLimit{Limit: p.key, Unit: p.unit, Held: p.answered, Overrun: cmp.Or(p.overrun, catalog.OverrunRequireEstimate)}

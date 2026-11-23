@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/catalog"
+
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -426,7 +428,7 @@ func TestPSPImport(t *testing.T) {
 		price, err := iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-gold", PSP: "nmi", PlanID: "gold"})
 		require.NoError(t, err)
 		require.EqualValues(t, 20_000_000, price.UnitAmount)
-		require.Equal(t, "USD", price.Currency)
+		require.Equal(t, catalog.Currency("USD"), price.Currency)
 		require.Equal(t, 720, *price.BillingIntervalHours)
 		require.False(t, price.Archived)
 		require.Equal(t, reads, iw.nmi.Reads()["v5:plans/{id}"], "mapping reads the observed plan, not NMI")
@@ -678,7 +680,7 @@ func TestPSPImport(t *testing.T) {
 		require.Equal(t, 1, iw.stripe.Reads("/v1/prices/price_inline"), "an inline price is never listed: one by-id read observes it")
 		inline := iw.catalog(t, billing.ProviderCatalogListParams{PSP: stripeImp.PSP.String(), Import: &stripeImp.ID})
 		require.Equal(t, "15.00", *inline["price:price_inline"].Terms.StatedAmount)
-		require.Equal(t, "USD", *inline["price:price_inline"].Terms.Currency)
+		require.Equal(t, catalog.Currency("USD"), *inline["price:price_inline"].Terms.Currency)
 		require.Equal(t, 1, *inline["price:price_inline"].Subscriptions)
 
 		first := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP.String()})
@@ -802,7 +804,7 @@ func TestPSPImport(t *testing.T) {
 		imp := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
 		all := iw.catalog(t, billing.ProviderCatalogListParams{PSP: imp.PSP.String()})
 		require.Nil(t, all["price:price_xyz"].Terms.StatedAmount, "an unsupported currency leaves no amount")
-		require.Equal(t, "XYZ", *all["price:price_xyz"].Terms.Currency)
+		require.Equal(t, catalog.Currency("XYZ"), *all["price:price_xyz"].Terms.Currency)
 		require.Nil(t, all["price:price_custom"].Terms.StatedAmount)
 		require.False(t, all["price:price_flip"].Active, "seen active, then inactive: the later read wins")
 		require.True(t, all["price:price_flip"].Retired)
@@ -1300,13 +1302,13 @@ func TestPSPImport(t *testing.T) {
 		for plan, currency := range map[string]string{"yen": "JPY", "euro": "EUR"} {
 			_, err := iw.api.CreateProduct(t.Context(), billing.CreateProductParams{Key: plan, DisplayName: plan, Entitlements: []string{"member:" + plan}})
 			require.NoError(t, err)
-			prices[plan], err = iw.api.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: plan, Key: "nmi-" + plan, PSP: "nmi", PlanID: plan, Currency: currency})
+			prices[plan], err = iw.api.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductKey: plan, Key: "nmi-" + plan, PSP: "nmi", PlanID: plan, Currency: catalog.Currency(currency)})
 			require.NoError(t, err)
 		}
 		// Native units: JPY has four decimals, EUR six.
-		require.Equal(t, "JPY", prices["yen"].Currency)
+		require.Equal(t, catalog.Currency("JPY"), prices["yen"].Currency)
 		require.EqualValues(t, 10_000_000, prices["yen"].UnitAmount)
-		require.Equal(t, "EUR", prices["euro"].Currency)
+		require.Equal(t, catalog.Currency("EUR"), prices["euro"].Currency)
 		require.EqualValues(t, 12_500_000, prices["euro"].UnitAmount)
 		require.NoError(t, iw.link(t, imp.ID, billing.LinkPSPImportParams{}))
 		recs := iw.apply(t, imp.ID)
@@ -1340,7 +1342,7 @@ func TestPSPImport(t *testing.T) {
 			payments, err := iw.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: want.customer})
 			require.NoError(t, err)
 			require.Len(t, payments.Items, 1)
-			require.Equal(t, want.currency, payments.Items[0].Currency)
+			require.Equal(t, catalog.Currency(want.currency), payments.Items[0].Currency)
 			require.Equal(t, want.amount, payments.Items[0].Amount)
 		}
 		require.Equal(t, billing.PSPImportBlocked, recs[odd].State)
@@ -1354,7 +1356,7 @@ func TestPSPImport(t *testing.T) {
 		book := func(currency string, amount int64) billing.BillingImportResult {
 			t.Helper()
 			return iw.hostBook(t, iw.clock.Now(), billing.DeclaredSubscription{SourceID: "dave-yen", Customer: customerOf(dave), Price: prices["yen"].ID, Rail: "nmi", RailSubscriptionID: "host-yen",
-				StartedAt: start, PaidThrough: &next, AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "host-yen", Amount: amount, Currency: currency, IntervalHours: 720, FirstDueAt: next}})
+				StartedAt: start, PaidThrough: &next, AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: "host-yen", Amount: amount, Currency: catalog.Currency(currency), IntervalHours: 720, FirstDueAt: next}})
 		}
 		res := book("USD", 1_000_000_000)
 		require.Equal(t, []string{"dave-yen"}, res.Blocked)

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -94,7 +95,7 @@ func (o *Observer) List(ctx context.Context, p billing.ProviderCatalogListParams
 			item.DeletedAt = new(item.DeletedAt.UTC())
 		}
 		if r.Kind == string(Price) {
-			item.Terms = &billing.ProviderCatalogTerms{StatedAmount: r.Amount, Currency: r.Currency, BillingIntervalHours: intOf(r.BillingIntervalHours), BillingIntervalMonths: intOf(r.BillingIntervalMonths)}
+			item.Terms = &billing.ProviderCatalogTerms{StatedAmount: r.Amount, Currency: (*catalog.Currency)(r.Currency), BillingIntervalHours: intOf(r.BillingIntervalHours), BillingIntervalMonths: intOf(r.BillingIntervalMonths)}
 			item.Parked = new(int(r.Parked))
 			if r.Finding != uuid.Nil {
 				item.Finding = new(billing.FindingID(r.Finding))

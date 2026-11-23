@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // A running charge bills a customer at a rate per hour from StartedAt until it
@@ -63,14 +64,14 @@ const MaxRunningChargeRatePerHour = 1_000_000_000_000
 // capacity reach before the customer counts as depleted; among a customer's
 // running charges the smallest applies. Resource is attribution only.
 type StartRunningChargeParams struct {
-	Reference       string     `json:"reference"`
-	CustomerID      CustomerID `json:"customer_id"`
-	Currency        string     `json:"currency"`
-	RatePerHour     int64      `json:"rate_per_hour,string"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	MinimumAmount   int64      `json:"minimum_amount,omitempty,string"`
-	OverdraftAmount int64      `json:"overdraft_amount,omitempty,string"`
-	Resource        string     `json:"resource,omitempty"`
+	Reference       string           `json:"reference"`
+	CustomerID      CustomerID       `json:"customer_id"`
+	Currency        catalog.Currency `json:"currency"`
+	RatePerHour     int64            `json:"rate_per_hour,string"`
+	StartedAt       *time.Time       `json:"started_at,omitempty"`
+	MinimumAmount   int64            `json:"minimum_amount,omitempty,string"`
+	OverdraftAmount int64            `json:"overdraft_amount,omitempty,string"`
+	Resource        string           `json:"resource,omitempty"`
 }
 
 // StopRunningChargeParams stops a running charge at StoppedAt, the host's
@@ -90,7 +91,7 @@ type RunningCharge struct {
 	ID              RunningChargeID    `json:"id"`
 	Reference       string             `json:"reference"`
 	CustomerID      CustomerID         `json:"customer_id"`
-	Currency        string             `json:"currency"`
+	Currency        catalog.Currency   `json:"currency"`
 	RatePerHour     int64              `json:"rate_per_hour,string"`
 	State           RunningChargeState `json:"state"`
 	StartedAt       time.Time          `json:"started_at"`

@@ -54,7 +54,7 @@ func (q *Quote) Refused() int {
 
 // Preview is the quote as the customer reads it.
 func (q *Quote) Preview(options []billing.OrderPaymentOption) billing.OrderPreview {
-	out := billing.OrderPreview{Currency: q.Currency, Total: q.Total, Lines: make([]billing.OrderPreviewLine, 0, len(q.Lines)), PaymentOptions: options}
+	out := billing.OrderPreview{Currency: catalog.Currency(q.Currency), Total: q.Total, Lines: make([]billing.OrderPreviewLine, 0, len(q.Lines)), PaymentOptions: options}
 	if out.PaymentOptions == nil {
 		out.PaymentOptions = []billing.OrderPaymentOption{}
 	}
@@ -462,7 +462,7 @@ func creditSnapshot(product *models.Product, price *models.Price) (*models.Credi
 	if price.IsRecurring() && price.ProviderOwned {
 		return nil, fmt.Errorf("recurring credit benefits require an engine-owned price")
 	}
-	currency := strings.ToUpper(strings.TrimSpace(policy.Currency))
+	currency := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
 	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {
 		return nil, fmt.Errorf("purchased credit currency must match payment currency")
 	}

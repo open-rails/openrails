@@ -22,6 +22,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -203,7 +204,7 @@ func TestPSPControls(t *testing.T) {
 		require.Equal(t, billing.OrderComplete, order.Status)
 		payment, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
 		require.NoError(t, err)
-		require.Equal(t, "USD", payment.Currency)
+		require.Equal(t, catalog.Currency("USD"), payment.Currency)
 		require.EqualValues(t, 30_000_000, payment.Amount)
 		effects := p.provider.effects(t)
 		require.Len(t, effects, 1)

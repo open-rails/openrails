@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -457,7 +458,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				d.receipts[src] = append([]uuid.UUID{r.ID}, refundIDs...)
 				d.book.HistoricalPayments = append(d.book.HistoricalPayments, billing.DeclaredHistoricalPayment{
 					SourceID: src, Customer: customer, Rail: billing.Rail(l.scope.Rail), TransactionID: data.TransactionID,
-					Amount: data.Amount, Currency: data.Currency, PaidAt: data.OccurredAt, Refunds: refunds,
+					Amount: data.Amount, Currency: catalog.Currency(data.Currency), PaidAt: data.OccurredAt, Refunds: refunds,
 				})
 				continue
 			}
@@ -504,7 +505,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 					d.receipts[source] = []uuid.UUID{refundIDs[i]}
 					d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{
 						SourceID: source, RailSubscriptionID: subRef, TransactionID: refund.TransactionID, OriginalTransactionID: data.TransactionID,
-						Type: "refund", Success: true, Amount: refund.Amount, Currency: data.Currency, OccurredAt: refund.RefundedAt,
+						Type: "refund", Success: true, Amount: refund.Amount, Currency: catalog.Currency(data.Currency), OccurredAt: refund.RefundedAt,
 					})
 				}
 			}
@@ -513,7 +514,7 @@ func (l *lander) declare(groups []customerGroup, known map[string]bool) (declara
 				typ = ""
 			}
 			d.book.Transactions = append(d.book.Transactions, billing.DeclaredTransaction{SourceID: receiptSource, RailSubscriptionID: subRef, TransactionID: data.TransactionID, Type: typ,
-				Success: data.Success, Amount: data.Amount, Currency: data.Currency, OccurredAt: data.OccurredAt, StripeInvoice: data.StripeInvoice})
+				Success: data.Success, Amount: data.Amount, Currency: catalog.Currency(data.Currency), OccurredAt: data.OccurredAt, StripeInvoice: data.StripeInvoice})
 			if receiptSource == "" {
 				d.txns[src] = append(d.txns[src], r.ID)
 			}
@@ -637,7 +638,7 @@ func (l *lander) subscription(customer billing.CustomerID, r gen.BillingPspImpor
 		// A paused schedule bills nothing: access runs to its paid date.
 		sub.Cancel = billing.CancelEvidence{Kind: "user_canceled", At: l.asOf}
 	case scheduled && data.NextBillingAt != nil && (data.IntervalHours > 0) != (data.IntervalMonths > 0):
-		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: data.Currency,
+		sub.AcceptedSchedule = &billing.DeclaredProviderSchedule{SourceReference: l.scope.Rail + "_subscription:" + r.Ref, Amount: data.Amount, Currency: catalog.Currency(data.Currency),
 			IntervalHours: data.IntervalHours, IntervalMonths: data.IntervalMonths, FirstDueAt: *data.NextBillingAt}
 	}
 	return sub, price, "", nil

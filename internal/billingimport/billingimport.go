@@ -327,7 +327,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 					continue
 				}
 			}
-			minor, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount)
+			minor, err := moneyutil.NativeToRailMinorExact(string(t.Currency), t.Amount)
 			if err != nil {
 				return apperr.Invalidf("transaction %s amount: %v", t.TransactionID, err).WithParam("transactions")
 			}
@@ -343,7 +343,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 				Type:                  typ,
 				Success:               t.Success,
 				AmountCents:           int64(minor),
-				Currency:              t.Currency,
+				Currency:              string(t.Currency),
 				OccurredAt:            t.OccurredAt.UTC(),
 				NextBillingAt:         t.NextBillingAt,
 			})

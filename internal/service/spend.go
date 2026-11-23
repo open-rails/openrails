@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -85,7 +86,7 @@ func (r usageReport) days() (time.Time, time.Time) {
 // its own report: a window the request leaves out is the cursor's, and
 // without a cursor it ends now and starts a month before.
 func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usageReport, error) {
-	currency, err := requireCurrency(params.Currency)
+	currency, err := requireCurrency(string(params.Currency))
 	if err != nil {
 		return usageReport{}, err
 	}
@@ -137,7 +138,7 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	if err != nil {
 		return nil, err
 	}
-	out := &billing.Usage{CustomerID: customer, Currency: report.currency, From: report.from, To: report.to, GroupBy: report.groupBy, Rows: []billing.UsageRow{}}
+	out := &billing.Usage{CustomerID: customer, Currency: catalog.Currency(report.currency), From: report.from, To: report.to, GroupBy: report.groupBy, Rows: []billing.UsageRow{}}
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		mid, err := merchant.Require(ctx)
 		if err != nil {

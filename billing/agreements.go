@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // Agreement is one charge agreement a customer gave a merchant: a mandate
 // that lets the merchant charge a saved card without the customer present.
@@ -12,7 +16,7 @@ type Agreement struct {
 	Kind   MandateKind   `json:"kind"`
 	Status MandateStatus `json:"status"`
 	// Currency is what the agreement charges in.
-	Currency string `json:"currency"`
+	Currency catalog.Currency `json:"currency"`
 	// PaymentMethodID and Card are the card it charges; null once the card
 	// of an ended agreement was deleted.
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
@@ -48,10 +52,10 @@ type AgreementRevocation struct {
 // MandateHostEvent is mandate.revoked: which agreement the customer revoked
 // and what it covered.
 type MandateHostEvent struct {
-	MandateID      MandateID       `json:"mandate_id"`
-	Kind           MandateKind     `json:"kind"`
-	CustomerID     CustomerID      `json:"customer_id"`
-	Currency       string          `json:"currency"`
-	SubscriptionID *SubscriptionID `json:"subscription_id"`
-	RevokedAt      time.Time       `json:"revoked_at"`
+	MandateID      MandateID        `json:"mandate_id"`
+	Kind           MandateKind      `json:"kind"`
+	CustomerID     CustomerID       `json:"customer_id"`
+	Currency       catalog.Currency `json:"currency"`
+	SubscriptionID *SubscriptionID  `json:"subscription_id"`
+	RevokedAt      time.Time        `json:"revoked_at"`
 }

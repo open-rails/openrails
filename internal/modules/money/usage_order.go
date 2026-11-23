@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -158,7 +159,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 			return err
 		}
 		if due > 0 {
-			data, err := json.Marshal(billing.NotificationData{OrderID: billing.OrderID(order.ID), AmountDue: &due, Currency: cur, DueAt: &u.DueAt,
+			data, err := json.Marshal(billing.NotificationData{OrderID: billing.OrderID(order.ID), AmountDue: &due, Currency: catalog.Currency(cur), DueAt: &u.DueAt,
 				CollectionMethod: billing.InvoiceCollectionMethod(u.CollectionMethod)})
 			if err != nil {
 				return err

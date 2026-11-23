@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	paymentattempts "github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 
@@ -674,7 +675,7 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent, priceID billing.
 	resp := &TierChangeResponse{
 		Effective: effectiveOf(action), PriceID: priceID,
 		Rail: billing.Rail(in.Rail), SubscriptionID: &subID,
-		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
+		Currency: catalog.Currency(p.Currency), AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 	}
 	if p.Downgrade() {
 		resp.DelayedStart = &end
