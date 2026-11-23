@@ -346,16 +346,19 @@ func (r *syncRun) size(h *hold, k holdKey, currency string, slots []slot, dry bo
 				return nil, err
 			}
 		}
+		// A want's hold is always answered, its size changed or not.
 		h.wanted = h.wanted || dry
 		h.active = h.active || dry || anyUsed(h)
-		h.changed = h.changed || changed
+		h.changed = h.changed || changed || dry
 		return refusal, nil
 	}
 	total := int64(0)
 	for _, held := range helds {
 		total = satAdd(total, held)
 	}
-	if total == 0 {
+	// Nothing to set aside issues no hold, but for a want that fits: its
+	// gate decides its free requests against an empty hold.
+	if total == 0 && (refusal != nil || !dry) {
 		if live {
 			return refusal, r.retire(h)
 		}
