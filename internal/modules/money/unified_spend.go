@@ -71,9 +71,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 	var spendable int64
 	for _, lot := range lots {
-		if lot.Remaining > 0 {
-			spendable += lot.Remaining
-		}
+		spendable += lot.Available
 	}
 	if available > spendable {
 		available = spendable

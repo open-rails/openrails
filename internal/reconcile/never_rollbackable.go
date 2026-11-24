@@ -13,6 +13,8 @@ var NeverRollbackableTables = map[string]string{
 	"ledger_accounts":  "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
+	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",
+	"credit_grant_events":             "the revocations a lot's revoked_at follows; a reversal appends a reinstatement, never rewinds",
 	"subscription_billing_changes":    "subscription billing audit; never rewound",
 	"subscription_status_transitions": "lifecycle audit trail; a reversal appends to it, never rewinds it",
 	"provider_mutation_logs":          "the record of what we did to the outside world — the divergence manifest an undo READS, never edits",

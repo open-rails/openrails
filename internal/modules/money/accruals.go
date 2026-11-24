@@ -19,7 +19,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 )
 
 // A usage accrual posts once its UTC day ends (the billing pass's accrual
@@ -31,9 +31,9 @@ import (
 
 const usageAccrualSourcePrefix = "usage_accrual:"
 
-func init() { grants.PostUsageAccruals = postUsageAccrualsHook }
+func init() { credits.PostUsageAccruals = postUsageAccrualsHook }
 
-// postUsageAccrualsHook is grants.PostUsageAccruals, on the caller's clock.
+// postUsageAccrualsHook is credits.PostUsageAccruals, on the caller's clock.
 func postUsageAccrualsHook(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, liveAt *time.Time, now time.Time) (bool, error) {
 	if _, bound := merchant.FromContext(ctx); !bound {
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))

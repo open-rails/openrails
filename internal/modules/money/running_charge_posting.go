@@ -14,7 +14,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 )
 
 // A posting moves what a running charge accrued through an instant to the
@@ -31,7 +31,7 @@ const (
 	runningChargeInstantLayout = "2006-01-02T15:04:05.000000Z"
 )
 
-func init() { grants.PostRunningCharges = postRunningChargesThrough }
+func init() { credits.PostRunningCharges = postRunningChargesThrough }
 
 // runningChargePosting is what a posting's ledger write runs under: accrual is
 // held as of through, the lots that had not lapsed just before it are drawn,
@@ -132,7 +132,7 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 	return row, nil
 }
 
-// postRunningChargesThrough is grants.PostRunningCharges: it posts every
+// postRunningChargesThrough is credits.PostRunningCharges: it posts every
 // running charge of the customer in the currency through an instant, under the
 // customer lock, on the caller's clock.
 func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, through, now time.Time) (bool, error) {

@@ -11,48 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const getPurchasedCreditGrant = `-- name: GetPurchasedCreditGrant :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity, import_as_of, import_root_id FROM billing.grants
-WHERE merchant_id=$1::uuid AND payment_id=$2::uuid
-  AND kind='credit' AND event='grant'
-  AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
-`
-
-type GetPurchasedCreditGrantParams struct {
-	MerchantID uuid.UUID
-	PaymentID  uuid.UUID
-}
-
-func (q *Queries) GetPurchasedCreditGrant(ctx context.Context, arg GetPurchasedCreditGrantParams) (BillingGrant, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditGrant, arg.MerchantID, arg.PaymentID)
-	var i BillingGrant
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.ProductID,
-		&i.Kind,
-		&i.SourceType,
-		&i.SourceID,
-		&i.PaymentID,
-		&i.Event,
-		&i.SupersedesID,
-		&i.SpecSnapshot,
-		&i.StartsAt,
-		&i.EndsAt,
-		&i.Amount,
-		&i.Currency,
-		&i.Reason,
-		&i.CreatedAt,
-		&i.Actor,
-		&i.GrantReason,
-		&i.Quantity,
-		&i.ImportAsOf,
-		&i.ImportRootID,
-	)
-	return i, err
-}
-
 const getPurchasedCreditPendingRefunds = `-- name: GetPurchasedCreditPendingRefunds :one
 SELECT COALESCE(sum(-amount),0)::bigint AS amount
 FROM billing.payments
@@ -75,37 +33,38 @@ func (q *Queries) GetPurchasedCreditPendingRefunds(ctx context.Context, arg GetP
 const getPurchasedCreditRecoveryTotal = `-- name: GetPurchasedCreditRecoveryTotal :one
 SELECT COALESCE(sum(amount),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND grant_id=$2::uuid
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
  AND operation='purchased_credit_refund' AND transfer_type='credit_refund_cash_restore'
  AND source='cash_restore:' || $3::text
 `
 
 type GetPurchasedCreditRecoveryTotalParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
-	ReversalID string
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    string
 }
 
 func (q *Queries) GetPurchasedCreditRecoveryTotal(ctx context.Context, arg GetPurchasedCreditRecoveryTotalParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditRecoveryTotal, arg.MerchantID, arg.GrantID, arg.ReversalID)
+	row := q.db.QueryRow(ctx, getPurchasedCreditRecoveryTotal, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var amount int64
 	err := row.Scan(&amount)
 	return amount, err
 }
 
 const getPurchasedCreditRefundState = `-- name: GetPurchasedCreditRefundState :one
+
 SELECT
  COALESCE(sum(CASE transfer_type WHEN 'credit_refund_cash' THEN amount WHEN 'credit_refund_cash_restore' THEN -amount ELSE 0 END),0)::bigint AS cash,
  COALESCE(sum(CASE transfer_type WHEN 'credit_refund' THEN amount WHEN 'credit_refund_restore' THEN -amount ELSE 0 END),0)::bigint AS withdrawn,
  count(*)::bigint AS sequence
 FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND grant_id=$2::uuid
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
  AND operation='purchased_credit_refund'
 `
 
 type GetPurchasedCreditRefundStateParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
 }
 
 type GetPurchasedCreditRefundStateRow struct {
@@ -114,8 +73,9 @@ type GetPurchasedCreditRefundStateRow struct {
 	Sequence  int64
 }
 
+// What reversals of purchased credit lots posted, from the lots' ledger legs.
 func (q *Queries) GetPurchasedCreditRefundState(ctx context.Context, arg GetPurchasedCreditRefundStateParams) (GetPurchasedCreditRefundStateRow, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditRefundState, arg.MerchantID, arg.GrantID)
+	row := q.db.QueryRow(ctx, getPurchasedCreditRefundState, arg.MerchantID, arg.CreditGrantID)
 	var i GetPurchasedCreditRefundStateRow
 	err := row.Scan(&i.Cash, &i.Withdrawn, &i.Sequence)
 	return i, err
@@ -128,18 +88,18 @@ SELECT COALESCE(sum(CASE
     WHEN operation='purchased_credit_refund' AND source LIKE 'repaid_owed_restore:%' THEN amount
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND grant_id=$2::uuid
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
 `
 
 type GetPurchasedCreditRepaidOwedParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
 }
 
 // Owed the lot repaid and still stands repaid: repayments, less what reversals
 // revived, plus what recoveries repaid again.
 func (q *Queries) GetPurchasedCreditRepaidOwed(ctx context.Context, arg GetPurchasedCreditRepaidOwedParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditRepaidOwed, arg.MerchantID, arg.GrantID)
+	row := q.db.QueryRow(ctx, getPurchasedCreditRepaidOwed, arg.MerchantID, arg.CreditGrantID)
 	var amount int64
 	err := row.Scan(&amount)
 	return amount, err
@@ -152,12 +112,12 @@ SELECT
 FROM billing.ledger_transfers lt
 JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
 JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
-WHERE lt.merchant_id=$1::uuid AND lt.grant_id=$2::uuid
+WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
 `
 
 type GetPurchasedCreditRetiredBalanceParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
 }
 
 type GetPurchasedCreditRetiredBalanceRow struct {
@@ -166,7 +126,7 @@ type GetPurchasedCreditRetiredBalanceRow struct {
 }
 
 func (q *Queries) GetPurchasedCreditRetiredBalance(ctx context.Context, arg GetPurchasedCreditRetiredBalanceParams) (GetPurchasedCreditRetiredBalanceRow, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditRetiredBalance, arg.MerchantID, arg.GrantID)
+	row := q.db.QueryRow(ctx, getPurchasedCreditRetiredBalance, arg.MerchantID, arg.CreditGrantID)
 	var i GetPurchasedCreditRetiredBalanceRow
 	err := row.Scan(&i.Expired, &i.Revoked)
 	return i, err
@@ -183,14 +143,14 @@ SELECT
  COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund_cash_restore'),0)::bigint AS recovery,
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
-WHERE lt.merchant_id=$1::uuid AND lt.grant_id=$2::uuid
+WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
  AND lt.operation='purchased_credit_refund' AND lt.source_id=$3::text
 `
 
 type GetPurchasedCreditReversalStateParams struct {
-	MerchantID uuid.UUID
-	GrantID    uuid.UUID
-	ReversalID string
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    string
 }
 
 type GetPurchasedCreditReversalStateRow struct {
@@ -205,7 +165,7 @@ type GetPurchasedCreditReversalStateRow struct {
 }
 
 func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPurchasedCreditReversalStateParams) (GetPurchasedCreditReversalStateRow, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditReversalState, arg.MerchantID, arg.GrantID, arg.ReversalID)
+	row := q.db.QueryRow(ctx, getPurchasedCreditReversalState, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var i GetPurchasedCreditReversalStateRow
 	err := row.Scan(
 		&i.Cash,
