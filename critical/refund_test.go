@@ -126,6 +126,15 @@ func TestRefunds(t *testing.T) {
 				}
 			}
 			require.True(t, found, "the charge is listed")
+			for _, filter := range []billing.PaymentStatus{billing.PaymentSucceeded, billing.PaymentPartiallyRefunded, billing.PaymentRefunded} {
+				page, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: paid.CustomerID, Status: filter})
+				require.NoError(t, err)
+				listed := false
+				for _, item := range page.Items {
+					listed = listed || item.ID == paymentID
+				}
+				require.Equal(t, filter == status, listed, "?status=%s", filter)
+			}
 		}
 		dispute := stripemock.Object{"id": "dp_won", "object": "dispute", "amount": 3000, "currency": "usd", "charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"}
 		notice("evt_dispute_opened", "charge.dispute.created", dispute)

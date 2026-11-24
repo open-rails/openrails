@@ -968,13 +968,14 @@ WHERE p.merchant_id = $1::uuid
   AND ($6::text IS NULL OR p.transaction_id = $6::text)
   AND ($7::text IS NULL OR COALESCE(p.reversal_kind,
         CASE WHEN p.refunded_payment_id IS NOT NULL OR p.amount < 0 THEN 'refund' ELSE 'charge' END) = $7::text)
-  -- status is the wire's: a charge's succeeded refunds make it
-  -- partially_refunded or refunded.
+  -- status is the wire's: a charge's succeeded reversals, net (a won
+  -- dispute gives back its chargeback), make it partially_refunded or
+  -- refunded.
   AND ($8::text IS NULL OR $8::text = CASE
         WHEN p.status <> 'succeeded' THEN p.status
         WHEN p.reversal_kind IS NOT NULL OR p.refunded_payment_id IS NOT NULL OR p.amount <= 0 THEN 'succeeded'
-        ELSE (SELECT CASE WHEN COALESCE(sum(abs(r.amount::numeric)), 0) = 0 THEN 'succeeded'
-                          WHEN sum(abs(r.amount::numeric)) >= p.amount THEN 'refunded' ELSE 'partially_refunded' END
+        ELSE (SELECT CASE WHEN GREATEST(-COALESCE(sum(r.amount::numeric), 0), 0) = 0 THEN 'succeeded'
+                          WHEN -sum(r.amount::numeric) >= p.amount THEN 'refunded' ELSE 'partially_refunded' END
               FROM billing.payments r
               WHERE r.merchant_id = p.merchant_id AND r.refunded_payment_id = p.id AND r.status = 'succeeded' AND r.deleted_at IS NULL)
       END)
