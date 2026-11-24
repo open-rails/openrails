@@ -197,7 +197,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
+**Contacts.** OpenRails holds each customer's contact (email, username, name), from your directory, and emails its billing messages there. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -452,15 +452,7 @@ return shop.CreatePrice(ctx, billing.CreatePriceParams{
 })
 ```
 
-A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are merge
-patches (`catalog.Field`, `catalog.Null` clears); send the `Revision` you read as
-`ExpectedRevision` to refuse a concurrent change. No public route reads the
-catalog: your server reads it and puts products in its own pages with
-`billing.BuyerPrices`. A price migration moves each subscription at its first
-renewal on or after `effective_at`, skips rises inside the merchant's
-`reprice_notice_window_days` unless acknowledged, and blocks subscriptions a
-provider cannot move (CCBill, Solana). `openrails catalog export` keeps a full
-snapshot with ids and history ([standalone.md](standalone.md#commands)).
+A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are merge patches (`catalog.Field`, `catalog.Null` clears); send the `Revision` you read as `ExpectedRevision` to refuse a concurrent change. No public route reads the catalog: your server reads it and puts products in its own pages with `billing.BuyerPrices`. A price migration moves each subscription at its first renewal on or after `effective_at`, skips rises inside the merchant's `reprice_notice_window_days` unless acknowledged, and blocks subscriptions a provider cannot move (CCBill, Solana). Creating one admits each subscriber it counts and each source it archives as one destructive command before reading any, archives the sources, then reaches the subscribers 100 at a time: `preparing` is true until the last; a source it could not archive is in `warnings`; a preview classifies the first 1,000 (`classified`). `openrails catalog export` keeps a full snapshot with ids and history ([standalone.md](standalone.md#commands)).
 
 ## Orders and checkout
 

@@ -367,7 +367,9 @@ func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.Su
 }
 
 // CreatePriceMigration moves the subscribers of one price, or of every
-// version of a price key, to another price at each one's renewal.
+// version of a price key, to another price at each one's renewal. It admits
+// every subscriber it counts before reading any and reaches them a page at a
+// time: preparing is true until the last page.
 func (c *Client) CreatePriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams) (*billing.PriceMigration, error) {
 	var out billing.PriceMigration
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/price-migrations", body: params}, &out); err != nil {

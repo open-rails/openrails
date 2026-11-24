@@ -12,7 +12,7 @@ var customersRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/customers", Group: Admin, Auth: AuthMerchant, Name: "ListCustomers", Level: LevelRead,
 		Doc:   "ListCustomers lists the merchant's customers, newest first.",
 		Query: billing.CustomerListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Customer]{}}},
-		Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListCustomers)},
+		Errors: codes("invalid_cursor", "invalid_param", "service_unavailable"), Handler: h(handlers.ListCustomers)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}", Group: Admin, Auth: AuthMerchant, Name: "GetCustomer", Level: LevelRead,
 		Args: []any{billing.CustomerID{}},
 		Doc: "GetCustomer reads one customer: its contact, its settings, and per currency its balance and the card " +

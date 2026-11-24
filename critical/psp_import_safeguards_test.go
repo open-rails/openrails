@@ -5,16 +5,19 @@ package critical_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,28 +37,35 @@ func TestPSPImportSafeguards(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, iw.link(t, id, billing.LinkPSPImportParams{}))
 
-		// Every landing of the import's book loses its answer after it
-		// commits: the apply fails.
+		// Every landing of the import's book fails before it commits: the
+		// apply fails. (One that loses its answer after committing is not a
+		// failure: the next attempt finds the book landed.)
 		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
-			if site.Point == failpoint.Committed && site.Kind == "billing_import" {
-				return errors.New("lost billing import answer")
+			if site.Point == failpoint.BeforeComplete && site.Kind == billingimport.FailpointKind {
+				return errors.New("billing import landing failed")
 			}
 			return nil
 		})
 		t.Cleanup(remove)
 		_, err = iw.alpha.ApplyPSPImport(t.Context(), id)
 		require.NoError(t, err)
-		require.Eventually(t, func() bool {
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
 			imp, err := iw.api.GetPSPImport(t.Context(), id)
-			if err == nil && imp.Status == billing.PSPImportFailed {
-				return true
+			if !assert.NoError(c, err) || imp.Status == billing.PSPImportFailed {
+				return
 			}
+			var jobs []string
 			for _, job := range iw.jobs(t, id) {
+				var errs []string
+				for _, e := range job.Errors {
+					errs = append(errs, e.Error)
+				}
+				jobs = append(jobs, fmt.Sprintf("%s attempt %d errors %q", job.State, job.Attempt, errs))
 				if job.State == rivertype.JobStateRetryable {
 					_, _ = iw.fleet.JobRetry(t.Context(), job.ID)
 				}
 			}
-			return false
+			assert.Equal(c, billing.PSPImportFailed, imp.Status, "error %v; jobs %v", deref(imp.Error), jobs)
 		}, 60*time.Second, 50*time.Millisecond, "the apply fails")
 		remove()
 

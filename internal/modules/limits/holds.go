@@ -147,8 +147,7 @@ func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 // its row, which it adds for a window that has none (a rolling limit's
 // bucket, a rate or lifetime limit's one row).
 func (h Holder) Reach(ctx context.Context, c Claim, s Standing, row *gen.GetLimitWindowForUpdateRow) error {
-	total := addSat(s.Settled, s.Held)
-	if c.Ungranted || total <= 0 || total < s.Capacity || row != nil && row.ReachedAt != nil {
+	if !Reached(c, s, row) {
 		return nil
 	}
 	if row == nil {
@@ -158,6 +157,13 @@ func (h Holder) Reach(ctx context.Context, c Claim, s Standing, row *gen.GetLimi
 	}
 	return h.Q.ReachLimitWindow(ctx, gen.ReachLimitWindowParams{Capacity: c.Capacity, ReachedAt: h.Now.UTC(),
 		MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: c.Key, WindowStartsAt: c.Window.StartsAt})
+}
+
+// Reached reports a claim's window found at capacity whose row (nil: none)
+// has not recorded it: what Reach records.
+func Reached(c Claim, s Standing, row *gen.GetLimitWindowForUpdateRow) bool {
+	total := addSat(s.Settled, s.Held)
+	return !c.Ungranted && total > 0 && total >= s.Capacity && (row == nil || row.ReachedAt == nil)
 }
 
 // ResetsAt is when a refused claim's limit resets.
@@ -201,13 +207,24 @@ func (h Holder) Standing(ctx context.Context, c Claim) (Standing, *gen.GetLimitW
 // standing is a claim's limit's standing in its window given the window's
 // row (nil: none). A rolling limit counts its buckets from the window's
 // start; a rate limit's level is read from its recent buckets. An expired
-// request hold still counts in a window that ends.
+// request hold still counts in a window that ends. What is held is read
+// before the event store: a sync inserts its events before it commits the
+// end of what held them (an in-flight report, a captured hold), so an item
+// is counted twice at worst, never not at all.
 func (h Holder) standing(ctx context.Context, c Claim, row *gen.GetLimitWindowForUpdateRow) (Standing, error) {
 	s := Standing{Capacity: c.Capacity}
 	w, from := c.Window, c.Window.StartsAt
+	if c.Reset.Kind == catalog.ResetRolling {
+		from = RollingFrom(c.Reset.WindowSeconds, h.Now)
+	}
+	current := !h.Now.Before(w.StartsAt) && (w.EndsAt == nil || h.Now.Before(*w.EndsAt)) || c.Reset.Kind == catalog.ResetRolling
+	held, err := h.Held(ctx, c.Key, from, w.StartsAt, w.EndsAt != nil, current)
+	if err != nil {
+		return s, err
+	}
+	s.Held = held
 	switch c.Reset.Kind {
 	case catalog.ResetRolling:
-		from = RollingFrom(c.Reset.WindowSeconds, h.Now)
 		adjusted, err := h.Q.ListLimitWindowsFrom(ctx, gen.ListLimitWindowsFromParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: c.Key, WindowStartsAt: from})
 		if err != nil {
 			return s, err
@@ -242,10 +259,7 @@ func (h Holder) standing(ctx context.Context, c Claim, row *gen.GetLimitWindowFo
 			}
 		}
 	}
-	current := !h.Now.Before(w.StartsAt) && (w.EndsAt == nil || h.Now.Before(*w.EndsAt)) || c.Reset.Kind == catalog.ResetRolling
-	held, err := h.Held(ctx, c.Key, from, w.StartsAt, w.EndsAt != nil, current)
-	s.Held = held
-	return s, err
+	return s, nil
 }
 
 // Units is what usage took of one limit in its windows (or buckets) that

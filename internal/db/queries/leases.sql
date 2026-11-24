@@ -86,8 +86,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lease_id = sqlc.arg(lease_id
   AND created_at >= sqlc.arg(held_since)::timestamptz
   AND (sqlc.narg(request_ids)::text[] IS NULL OR request_id = ANY(sqlc.narg(request_ids)::text[]));
 
--- name: ListCustomerRunningRates :many
--- What each currency's running charges of a customer accrue per hour.
-SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND stopped_at IS NULL
-GROUP BY currency;
+-- name: ListRunningRatesOf :many
+-- What many customers' running charges accrue per hour, by currency.
+SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND stopped_at IS NULL
+GROUP BY customer_id, currency;
+

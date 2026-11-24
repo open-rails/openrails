@@ -478,7 +478,7 @@ func TestLeaseVersions(t *testing.T) {
 			require.EqualValues(t, 20, customerLimit(t, w.alpha, c, "quota").Used, "every report settled once")
 		}
 	})
-	t.Run("OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing", func(t *testing.T) {
+	t.Run("OR-J24-S31/a-sync-takes-no-customer-lock-and-one-that-cannot-take-its-locks-in-time-fails-fast", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
@@ -490,28 +490,43 @@ func TestLeaseVersions(t *testing.T) {
 				w.alpha.MerchantID().UUID(), lease.UUID()).Scan(&at))
 			return at
 		}
-		before := lastSync()
-		w.clock.Advance(time.Second)
-		// Another transaction holds the customer's spend lock past the sync's
+		hold := func(query string) func() {
+			tx, err := w.pool.Begin(t.Context())
+			require.NoError(t, err)
+			tag, err := tx.Exec(t.Context(), query, w.alpha.MerchantID().UUID(), customer.UUID())
+			require.NoError(t, err)
+			require.EqualValues(t, 1, tag.RowsAffected(), "the row is held")
+			var once sync.Once
+			release := func() { once.Do(func() { _ = tx.Rollback(context.Background()) }) }
+			t.Cleanup(release)
+			return release
+		}
+		// Another transaction holds the customer's spend lock, as an admission
+		// or a posting does, past the sync's timeout: the sync settles at once.
+		release := hold("SELECT id FROM " + pgx.Identifier{w.schema, "customers"}.Sanitize() + " WHERE merchant_id = $1 AND id = $2 FOR NO KEY UPDATE")
+		first := numbered(1, usageInput(customer, "beside-a-spend", 1))
+		started := time.Now()
+		out := settleUsage(t, w.alpha, lease, first...)
+		require.Less(t, time.Since(started), limits.SyncTimeout, "the sync never waited for the customer's lock")
+		require.EqualValues(t, 1, out.Usage.ThroughN)
+		release()
+		balance(t, w.alpha, customer, 900, 100, 1000)
+
+		// A posting holds the customer's unposted mark past the sync's
 		// timeout: the sync gives up waiting well inside its work budget,
 		// before the commit guard, and is answered a retryable 503.
-		tx, err := w.pool.Begin(t.Context())
-		require.NoError(t, err)
-		var rolledBack sync.Once
-		release := func() { rolledBack.Do(func() { _ = tx.Rollback(context.Background()) }) }
-		defer release()
-		_, err = tx.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{w.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE",
-			w.alpha.MerchantID().UUID(), customer.UUID())
-		require.NoError(t, err)
+		before := lastSync()
+		w.clock.Advance(time.Second)
+		release = hold("SELECT customer_id FROM " + pgx.Identifier{w.schema, "usage_unposted"}.Sanitize() + " WHERE merchant_id = $1 AND customer_id = $2 FOR UPDATE")
 		unlocked := make(chan struct{})
-		started := time.Now()
 		unlock := time.AfterFunc(limits.SyncTimeout+time.Second, func() {
 			release()
 			close(unlocked)
 		})
 		defer unlock.Stop()
-		items := numbered(1, usageInput(customer, "slow", 1))
-		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		second := numbered(2, usageInput(customer, "behind-a-posting", 1))
+		started = time.Now()
+		_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease, Usage: second})
 		require.Less(t, time.Since(started), limits.SyncTimeout-time.Second, "the sync failed fast, before the commit guard")
 		var failure *billing.StatusError
 		require.ErrorAs(t, err, &failure, "the sync never commits")
@@ -519,10 +534,9 @@ func TestLeaseVersions(t *testing.T) {
 		require.Equal(t, billing.CodeServiceUnavailable, failure.Code)
 		<-unlocked
 		require.Equal(t, before, lastSync(), "the lease was not renewed")
-		balance(t, w.alpha, customer, 1000, 0, 1000)
-		out := settleUsage(t, w.alpha, lease, items...)
-		require.EqualValues(t, 1, out.Usage.ThroughN, "the retry settles what the refused sync rolled back")
-		balance(t, w.alpha, customer, 900, 100, 1000)
+		out = settleUsage(t, w.alpha, lease, second...)
+		require.EqualValues(t, 2, out.Usage.ThroughN, "the retry settles what the refused sync rolled back")
+		balance(t, w.alpha, customer, 800, 200, 1000)
 	})
 
 	t.Run("OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-decide-apart", func(t *testing.T) {
@@ -601,7 +615,7 @@ func TestLeaseVersions(t *testing.T) {
 		through, syncs := int64(0), 0
 		for through < int64(len(items)) {
 			syncs++
-			require.LessOrEqual(t, syncs, len(items)/20, "each sync settles at least one chunk of 20 customers")
+			require.LessOrEqual(t, syncs, len(items)/100+1, "each sync settles a whole prefix of 100 customers")
 			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items[through:]})
 			require.Empty(t, out.Usage.Refused, "items past the prefix are neither settled nor refused")
 			require.Greater(t, out.Usage.ThroughN, through, "every sync settles a prefix")

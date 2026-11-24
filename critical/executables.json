@@ -582,7 +582,7 @@
       "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
     ],
     "OR-J24-S31": [
-      "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
+      "TestLeaseVersions/OR-J24-S31/a-sync-takes-no-customer-lock-and-one-that-cannot-take-its-locks-in-time-fails-fast"
     ],
     "OR-J24-S32": [
       "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-decide-apart"
@@ -803,6 +803,15 @@
       "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission",
       "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/host",
       "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/staff"
+    ],
+    "OR-J34-S41": [
+      "TestDestructiveSafeguards/OR-J34-S41/an-archive-exports-right-after-a-catalog-edit"
+    ],
+    "OR-J34-S42": [
+      "TestDestructiveSafeguards/OR-J34-S42/an-archive-export-beside-a-pending-destructive-action-is-refused"
+    ],
+    "OR-J34-S43": [
+      "TestDestructiveSafeguards/OR-J34-S43/a-restore-waits-a-day-after-a-prune-that-can-be-undone"
     ],
     "OR-J34-S34": [
       "TestDestructiveSafeguards/OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget"
@@ -1710,6 +1719,27 @@
     "OR-J28-S16": [
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
+    "OR-J48-S13": [
+      "TestMerchantUnits/OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency"
+    ],
+    "OR-J48-S14": [
+      "TestMerchantUnits/OR-J48-S14/a-chargeback-of-a-pack-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S15": [
+      "TestMerchantUnits/OR-J48-S15/a-line-paid-with-given-units-books-no-revenue"
+    ],
+    "OR-J48-S16": [
+      "TestMerchantUnits/OR-J48-S16/a-unit-lines-later-money-adds-to-its-schedule-and-the-audit-fails-money-with-none"
+    ],
+    "OR-J48-S17": [
+      "TestMerchantUnits/OR-J48-S17/a-refund-of-a-pack-at-the-provider-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S18": [
+      "TestMerchantUnits/OR-J48-S18/a-packs-chargeback-splits-what-its-spends-earned-between-usage-and-a-schedule"
+    ],
+    "OR-J48-S19": [
+      "TestMerchantUnits/OR-J48-S19/a-chargeback-of-one-currencys-pack-reduces-only-that-currencys-schedule"
+    ],
     "OR-J53-S01": [
       "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
     ],
@@ -1983,6 +2013,9 @@
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/a-print-a-card-in-force-names-is-recorded-again",
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/one-nothing-names-is-left-out"
+    ],
+    "OR-J24-S65": [
+      "TestUsageRecovery/OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads"
     ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
@@ -2308,6 +2341,64 @@
     ],
     "OR-J06-S72": [
       "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
+    ],
+    "OR-J07-S10": [
+      "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
+    ],
+    "OR-J37-S71": [
+      "TestSolanaCatalog/OR-J37-S71/a-price-created-with-its-product-publishes-its-plan-outside-the-catalog-lock"
+    ],
+    "OR-J19-S08": [
+      "TestPriceMigrationContracts/OR-J19-S08/named-plan",
+      "TestPriceMigrationContracts/OR-J19-S08/unstated-plan-payments",
+      "TestPriceMigrationContracts/OR-J19-S08"
+    ],
+    "OR-J19-S09": [
+      "TestPriceMigrationScale/OR-J19-S09/a-migrations-source-archive-is-a-catalog-edit-a-document-does-not-undo"
+    ],
+    "OR-J19-S10": [
+      "TestPriceMigrationScale/OR-J19-S10/a-migration-admits-every-subscriber-before-reading-any-and-reaches-them-a-page-at-a-time"
+    ],
+    "OR-J19-S11": [
+      "TestPriceMigrationScale/OR-J19-S11/a-solana-subscription-is-blocked-and-nothing-is-sent"
+    ],
+    "OR-J19-S12": [
+      "TestPriceMigrationScale/OR-J19-S12/by-key-and-cross-product-moves-send-their-notices-and-apply-at-renewal"
+    ],
+    "OR-J19-S13": [
+      "TestPriceMigrationScale/OR-J19-S13/canceling-a-pushed-stripe-move-names-the-schedule-to-release"
+    ],
+    "OR-J19-S14": [
+      "TestPriceMigrationScale/OR-J19-S14/an-interrupted-create-records-nothing-and-its-retry-moves-everyone-once"
+    ],
+    "OR-J04-S78": [
+      "TestOrderPaymentBrowser/OR-J04-S78/a-lost-pay-answer-is-read-back-under-its-key-and-a-retry-keeps-it"
+    ],
+    "OR-J04-S79": [
+      "TestOrderPaymentBrowser/OR-J04-S79/an-order-awaiting-its-wallet-is-read-and-confirmed-well-under-the-purchase-limit"
+    ],
+    "OR-J07-S11": [
+      "TestCustomerDirectory/OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest"
+    ],
+    "OR-J38-S82": [
+      "TestCCBillIdentity/OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain"
+    ],
+    "OR-J19-S15": [
+      "TestPriceMigrationScale/OR-J19-S15/one-short",
+      "TestPriceMigrationScale/OR-J19-S15/exactly",
+      "TestPriceMigrationScale/OR-J19-S15"
+    ],
+    "OR-J19-S16": [
+      "TestPriceMigrationScale/OR-J19-S16/a-cancel-ends-a-walk-whose-next-page-never-ran"
+    ],
+    "OR-J19-S17": [
+      "TestPriceMigrationScale/OR-J19-S17/concurrent-identical-creates-answer-one-migration"
+    ],
+    "OR-J19-S18": [
+      "TestPriceMigrationScale/OR-J19-S18/a-create-whose-caller-leaves-after-its-archive-is-recorded-under-one-command"
+    ],
+    "OR-J19-S19": [
+      "TestPriceMigrationScale/OR-J19-S19/an-identical-create-while-the-first-records-is-refused-at-once-and-stalls-no-admission"
     ]
   }
 }
