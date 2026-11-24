@@ -3835,6 +3835,7 @@
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hex": "encoding/hex",
