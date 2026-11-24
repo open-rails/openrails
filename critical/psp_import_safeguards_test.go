@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -36,11 +37,12 @@ func TestPSPImportSafeguards(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, iw.link(t, id, billing.LinkPSPImportParams{}))
 
-		// Every landing of the import's book loses its answer after it
-		// commits: the apply fails.
+		// Every landing of the import's book fails before it commits: the
+		// apply fails. (One that loses its answer after committing is not a
+		// failure: the next attempt finds the book landed.)
 		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
-			if site.Point == failpoint.Committed && site.Kind == "billing_import" {
-				return errors.New("lost billing import answer")
+			if site.Point == failpoint.BeforeComplete && site.Kind == billingimport.FailpointKind {
+				return errors.New("billing import landing failed")
 			}
 			return nil
 		})
