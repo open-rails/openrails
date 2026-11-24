@@ -410,7 +410,7 @@ func TestDueWork(t *testing.T) {
 		charge := func(key, via string, at time.Time) {
 			t.Helper()
 			_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "payment_attempts"}.Sanitize()+
-				` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, amount, currency, attempted_at, step)
+				` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, outcome, amount, currency, attempted_at, step)
 				VALUES ($1, $2, $3, $4, 'initial', 'provider', 'saved', 'provider_schedule', $5, 'approved', 10000000, 'USD', $6, '')`,
 				merchantID, customer, psps[key].ID.UUID(), string(psps[key].Rail), via, at)
 			require.NoError(t, err)
