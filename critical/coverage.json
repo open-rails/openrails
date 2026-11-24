@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 686,
+  "scenario_count": 689,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3021,7 +3021,22 @@
     {
       "id": "OR-J48-S13",
       "journey": "J48",
-      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window"
+      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the order again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the order in money no lot paid it with"
+    },
+    {
+      "id": "OR-J48-S14",
+      "journey": "J48",
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up, and recognition goes on at the lower price"
+    },
+    {
+      "id": "OR-J48-S15",
+      "journey": "J48",
+      "name": "A unit-priced line paid only with given units has no revenue schedule and moves nothing in the general ledger"
+    },
+    {
+      "id": "OR-J48-S16",
+      "journey": "J48",
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, and ledger-audit fails money released under a schedule that does not exist"
     },
     {
       "id": "OR-J53-S01",

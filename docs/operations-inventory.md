@@ -161,7 +161,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 495 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 496 named SQL statements in 91 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -240,6 +240,7 @@ The source scan found 495 named SQL statements in 90 files with an explicit qual
 | [reconciliation.sql](../internal/db/queries/reconciliation.sql) | 26 | `nmi_bulk_checkpoints`, `payment_methods`, `reconciliation_findings`, `reconciliation_state`, `subscription_verifications`, `subscriptions` |
 | [refund_access.sql](../internal/db/queries/refund_access.sql) | 1 | `payments` |
 | [retention.sql](../internal/db/queries/retention.sql) | 13 | `host_outbox`, `leases`, `limit_adjustments`, `limit_windows`, `operation_log`, `order_attempts`, `parked_provider_subscriptions`, `periodic_leases`, `provider_intents`, `reconciliation_findings`, `subscription_billing_changes`, `subscription_status_transitions`, `usage_daily`, `usage_minutes`, `webhook_health_daily` |
+| [reversals.sql](../internal/db/queries/reversals.sql) | 1 | `revenue_schedules` |
 | [running_charges.sql](../internal/db/queries/running_charges.sql) | 2 | `running_charges` |
 | [scheduled_changes.sql](../internal/db/queries/scheduled_changes.sql) | 8 | `destructive_actions`, `provider_intents`, `scheduled_changes` |
 | [solana_crankers.sql](../internal/db/queries/solana_crankers.sql) | 1 | `solana_crankers` |

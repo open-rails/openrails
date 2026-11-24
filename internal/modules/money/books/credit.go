@@ -367,7 +367,14 @@ type CreditReversal struct {
 	CashAccount Ref
 	// Repaid is the units of it that had repaid owed: owed again, at face.
 	Repaid int64
-	At     time.Time
+	// Consumed and Lapsed are the units of it the lot had spent, and that had
+	// expired or been revoked: what the cash beyond the lot's deferred money
+	// paid for. The consumed share comes from what the spends funded.
+	Consumed, Lapsed int64
+	At               time.Time
+	// Zone is the merchant's accounting zone, for the schedules the lot's
+	// spends funded.
+	Zone *time.Location
 }
 
 // The labels of a reversal's legs, by what of the lot's money they return.
@@ -404,6 +411,14 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 	}
 	receivableRef := Ref{Type: UsageReceivable, Customer: ptrUUID(l.Customer)}
 	c := l.PaidCurrency
+	recognized := r.Cash - paid - repaid
+	shares, err := b.lotTakes(ctx, l, recognized, r.Consumed, r.Lapsed)
+	if err != nil {
+		return err
+	}
+	for _, sh := range shares {
+		recognized -= sh.amount
+	}
 	for _, leg := range []struct {
 		debit, credit Ref
 		amount        int64
@@ -414,9 +429,16 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 		{l.deferredRef(), Ref{Type: contra}, deferred - paid, deferredType, reversedExcess},
 		{receivableRef, r.CashAccount, repaid, UsageReopened, reversedRepaid},
 		{receivableRef, Ref{Type: PromotionalCredit}, r.Repaid - repaid, UsageReopened, reversedPromotion},
-		{Ref{Type: contra}, r.CashAccount, r.Cash - paid - repaid, recognizedType, reversedRecognized},
+		{Ref{Type: contra}, r.CashAccount, recognized, recognizedType, reversedRecognized},
 	} {
 		if err := b.postLot(ctx, l, leg.debit, leg.credit, leg.amount, c, leg.typ, coord(leg.label), r.At); err != nil {
+			return err
+		}
+	}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, deferredType: deferredType, recognizedType: recognizedType,
+		coord: coord(reversedRecognized), at: r.At, loc: r.Zone}
+	for _, sh := range shares {
+		if err := b.changeSchedule(ctx, sh, true, legs); err != nil {
 			return err
 		}
 	}
@@ -438,6 +460,9 @@ type CreditRecovery struct {
 	// money the caller then forfeits or breaks (MoveCredit).
 	Repaid, Retired int64
 	At              time.Time
+	// Zone is the merchant's accounting zone, for the schedules the origin
+	// took from.
+	Zone *time.Location
 }
 
 // RecoverCredit posts a recovery as the units book allocated it, mirroring
@@ -465,6 +490,14 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 	coord := func(label string) Coord {
 		return Coord{Operation: OpCreditRefund, Source: label + "_restore:" + r.Origin.String(), SourceID: r.Recovery.String()}
 	}
+	recognized := r.Cash - paid - repaid
+	shares, err := b.lotRestores(ctx, l, r.Origin, recognized)
+	if err != nil {
+		return err
+	}
+	for _, sh := range shares {
+		recognized -= sh.amount
+	}
 	receivableRef := Ref{Type: UsageReceivable, Customer: ptrUUID(l.Customer)}
 	for _, leg := range []struct {
 		debit, credit Ref
@@ -475,9 +508,15 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 		{Ref{Type: contra}, l.deferredRef(), deferred - paid, reversedExcess},
 		{r.CashAccount, receivableRef, repaid, reversedRepaid},
 		{Ref{Type: PromotionalCredit}, receivableRef, owed - repaid, reversedPromotion},
-		{r.CashAccount, Ref{Type: contra}, r.Cash - paid - repaid, reversedRecognized},
+		{r.CashAccount, Ref{Type: contra}, recognized, reversedRecognized},
 	} {
 		if err := b.postLot(ctx, l, leg.debit, leg.credit, leg.amount, l.PaidCurrency, DisputeWon, coord(leg.label), r.At); err != nil {
+			return err
+		}
+	}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), at: r.At, loc: r.Zone}
+	for _, sh := range shares {
+		if err := b.changeSchedule(ctx, sh, false, legs); err != nil {
 			return err
 		}
 	}

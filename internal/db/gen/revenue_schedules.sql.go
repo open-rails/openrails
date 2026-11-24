@@ -169,7 +169,8 @@ func (q *Queries) GetPurchaseAccessByPayment(ctx context.Context, arg GetPurchas
 }
 
 const listCreditLineReleases = `-- name: ListCreditLineReleases :many
-SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount
+SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount,
+    max(t.effective_at)::timestamptz AS released_at
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = $1::uuid AND t.source = 'order_line' AND t.source_id = ANY($2::text[])
@@ -189,6 +190,7 @@ type ListCreditLineReleasesRow struct {
 	Currency          string
 	RevenueScheduleID uuid.UUID
 	Amount            int64
+	ReleasedAt        time.Time
 }
 
 // What spends of credit released into an order's lines priced in a merchant's
@@ -208,6 +210,117 @@ func (q *Queries) ListCreditLineReleases(ctx context.Context, arg ListCreditLine
 			&i.Currency,
 			&i.RevenueScheduleID,
 			&i.Amount,
+			&i.ReleasedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCreditLotRevenue = `-- name: ListCreditLotRevenue :many
+SELECT t.revenue_schedule_id, t.order_id, t.order_line_id, sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END)::bigint AS held
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = $1::uuid AND t.credit_grant_id = $2::uuid AND t.book = 'general'
+GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
+ORDER BY t.revenue_schedule_id NULLS LAST
+`
+
+type ListCreditLotRevenueParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+type ListCreditLotRevenueRow struct {
+	RevenueScheduleID *uuid.UUID
+	OrderID           *uuid.UUID
+	OrderLineID       *uuid.UUID
+	Held              int64
+}
+
+// What a lot's money funds now, per revenue schedule its spends paid and its
+// order line (NULL: usage revenue): what the spends released, less what the
+// lot's reversals took back of it, plus what recoveries restored.
+func (q *Queries) ListCreditLotRevenue(ctx context.Context, arg ListCreditLotRevenueParams) ([]ListCreditLotRevenueRow, error) {
+	rows, err := q.db.Query(ctx, listCreditLotRevenue, arg.MerchantID, arg.CreditGrantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCreditLotRevenueRow
+	for rows.Next() {
+		var i ListCreditLotRevenueRow
+		if err := rows.Scan(
+			&i.RevenueScheduleID,
+			&i.OrderID,
+			&i.OrderLineID,
+			&i.Held,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCreditReversalSchedules = `-- name: ListCreditReversalSchedules :many
+SELECT t.revenue_schedule_id, t.order_id, t.order_line_id,
+    COALESCE(sum(CASE WHEN t.source = 'money_recognized' AND t.transfer_type IN ('refund_recognized', 'chargeback_recognized') THEN t.amount
+        WHEN t.source <> 'money_recognized' AND c.account_type IN ('refunds', 'chargebacks') THEN -t.amount ELSE 0 END), 0)::bigint AS contra,
+    COALESCE(sum(CASE WHEN t.source = 'money_recognized' AND t.transfer_type IN ('refund_deferred', 'chargeback_deferred') THEN t.amount
+        WHEN t.source <> 'money_recognized' AND c.account_type = 'deferred_revenue' THEN -t.amount ELSE 0 END), 0)::bigint AS deferred
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = $1::uuid AND t.credit_grant_id = $2::uuid AND t.book = 'general'
+  AND t.operation = 'purchased_credit_refund'
+  AND (t.source = 'money_recognized' AND t.source_id = $3::text OR t.source = 'money_recognized_restore:' || $3::text)
+GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
+ORDER BY t.revenue_schedule_id NULLS LAST
+`
+
+type ListCreditReversalSchedulesParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    string
+}
+
+type ListCreditReversalSchedulesRow struct {
+	RevenueScheduleID *uuid.UUID
+	OrderID           *uuid.UUID
+	OrderLineID       *uuid.UUID
+	Contra            int64
+	Deferred          int64
+}
+
+// What one reversal of a lot's payment took, per revenue schedule and its
+// order line (NULL: usage revenue's contra), that its recoveries have not
+// brought back: of its recognised part (contra) and of its deferred part.
+func (q *Queries) ListCreditReversalSchedules(ctx context.Context, arg ListCreditReversalSchedulesParams) ([]ListCreditReversalSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listCreditReversalSchedules, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCreditReversalSchedulesRow
+	for rows.Next() {
+		var i ListCreditReversalSchedulesRow
+		if err := rows.Scan(
+			&i.RevenueScheduleID,
+			&i.OrderID,
+			&i.OrderLineID,
+			&i.Contra,
+			&i.Deferred,
 		); err != nil {
 			return nil, err
 		}
@@ -436,6 +549,56 @@ func (q *Queries) ListOverappliedPayments(ctx context.Context, merchantID uuid.U
 	return items, nil
 }
 
+const listScheduleLotMoney = `-- name: ListScheduleLotMoney :many
+SELECT t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END)::bigint AS held
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.revenue_schedule_id = ANY($2::uuid[])
+  AND t.credit_grant_id IN (
+      SELECT l.credit_grant_id FROM billing.ledger_transfers l
+      WHERE l.merchant_id = $1::uuid AND l.source = 'order_line' AND l.source_id = ANY($3::text[])
+        AND l.credit_grant_id IS NOT NULL)
+GROUP BY t.revenue_schedule_id
+ORDER BY t.revenue_schedule_id
+`
+
+type ListScheduleLotMoneyParams struct {
+	MerchantID         uuid.UUID
+	RevenueScheduleIds []uuid.UUID
+	OrderLineIds       []string
+}
+
+type ListScheduleLotMoneyRow struct {
+	RevenueScheduleID uuid.UUID
+	Held              int64
+}
+
+// What the lots' money funds now of each schedule of an order's lines, as
+// ListCreditLotRevenue counts it per lot, read through the lots that paid the
+// lines.
+func (q *Queries) ListScheduleLotMoney(ctx context.Context, arg ListScheduleLotMoneyParams) ([]ListScheduleLotMoneyRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleLotMoney, arg.MerchantID, arg.RevenueScheduleIds, arg.OrderLineIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListScheduleLotMoneyRow
+	for rows.Next() {
+		var i ListScheduleLotMoneyRow
+		if err := rows.Scan(&i.RevenueScheduleID, &i.Held); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScheduledOrderLines = `-- name: ListScheduledOrderLines :many
 SELECT order_line_id FROM billing.revenue_schedules
 WHERE merchant_id = $1::uuid AND order_line_id = ANY($2::uuid[])
@@ -460,6 +623,50 @@ func (q *Queries) ListScheduledOrderLines(ctx context.Context, arg ListScheduled
 			return nil, err
 		}
 		items = append(items, order_line_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnscheduledCreditReleases = `-- name: ListUnscheduledCreditReleases :many
+SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(t.amount)::bigint AS amount
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.transfer_type = 'credit_released'
+  AND t.revenue_schedule_id IS NOT NULL AND t.order_line_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id = t.merchant_id AND s.id = t.revenue_schedule_id)
+GROUP BY t.order_id, t.order_line_id, t.currency
+ORDER BY t.order_id, t.order_line_id, t.currency
+`
+
+type ListUnscheduledCreditReleasesRow struct {
+	OrderID     uuid.UUID
+	OrderLineID uuid.UUID
+	Currency    string
+	Amount      int64
+}
+
+// Lots' money released into a line priced in a merchant's own unit under a
+// schedule that does not exist: revenue the books never recognise.
+func (q *Queries) ListUnscheduledCreditReleases(ctx context.Context, merchantID uuid.UUID) ([]ListUnscheduledCreditReleasesRow, error) {
+	rows, err := q.db.Query(ctx, listUnscheduledCreditReleases, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnscheduledCreditReleasesRow
+	for rows.Next() {
+		var i ListUnscheduledCreditReleasesRow
+		if err := rows.Scan(
+			&i.OrderID,
+			&i.OrderLineID,
+			&i.Currency,
+			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

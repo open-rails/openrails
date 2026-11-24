@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -18,6 +19,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -42,6 +46,9 @@ func TestMerchantUnits(t *testing.T) {
 	t.Run("OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit", unitLeaseUsage)
 	t.Run("OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock", unitFirstBalance)
 	t.Run("OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency", unitOrderRevenue)
+	t.Run("OR-J48-S14/a-chargeback-of-a-pack-reduces-the-schedules-its-spends-funded", unitPackChargebackSchedule)
+	t.Run("OR-J48-S15/a-line-paid-with-given-units-books-no-revenue", unitGiftOrder)
+	t.Run("OR-J48-S16/a-unit-lines-later-money-adds-to-its-schedule-and-the-audit-fails-money-with-none", unitLineReleases)
 }
 
 // unitPaymentWorld declares GOLD and CREDITS on alpha, whose card PSP is
@@ -1076,10 +1083,16 @@ func unitOrderRevenue(t *testing.T) {
 	// One schedule per currency, each funded with what its lots released,
 	// recognised at once.
 	bought := order(statue, "statue")
-	require.Equal(t, map[string]schedule{
+	want := map[string]schedule{
 		"USD": {"USD", "point_in_time", "one_time_revenue", 20_000_000, 20_000_000},
 		"EUR": {"EUR", "point_in_time", "one_time_revenue", 9_000_000, 9_000_000},
-	}, schedules(bought.ID))
+	}
+	require.Equal(t, want, schedules(bought.ID))
+	// Applying the order again makes nothing new.
+	legs := glLegCount(t, a)
+	reapplyOrder(t, a, bought.ID)
+	require.Equal(t, want, schedules(bought.ID))
+	require.Equal(t, legs, glLegCount(t, a), "no leg posts twice")
 
 	// A 30-day pass of 100 GOLD is €4.50 of the euro lot, recognised over
 	// its 30 days.
@@ -1093,4 +1106,163 @@ func unitOrderRevenue(t *testing.T) {
 	a.clock.Advance(31 * 24 * time.Hour)
 	runRegistered(t, fleet, "openrails.billing_pass", 1)
 	require.EqualValues(t, 4_500_000, schedules(timed.ID)["EUR"].Recognized, "all of it once the pass ends")
+
+	// The schedules and their legs move with a billing archive: a leg naming
+	// the order is in the money of a lot that paid it.
+	archive := archiveBytes(t, a.alpha)
+	_, restored := archiveTarget(t, a.world)
+	_, err = restored.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	// A leg naming the order in money no lot paid it with is refused.
+	require.NoError(t, booksRawTx(t, a.world, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+		alice, order := s.alice.UUID(), bought.ID.UUID()
+		_, _, err := books.New(q, a.alpha.MerchantID().UUID()).Post(ctx, books.Posting{Debit: books.Ref{Type: books.RevenueAdjustments}, Credit: books.Ref{Type: books.OneTimeRevenue},
+			Amount: 1_000, Currency: "GBP", Type: books.RevenueAdjusted, Coord: books.Coord{Operation: books.OpApplication, Source: "order", SourceID: order.String()},
+			EffectiveAt: a.clock.Now(), Customer: &alice, Order: &order})
+		return err
+	}))
+	require.ErrorContains(t, a.alpha.ExportBillingArchive(t.Context(), &bytes.Buffer{}), "ledger_transfers", "pounds paid none of the GOLD order")
+}
+
+// reapplyOrder applies a completed order to the books again.
+func reapplyOrder(t *testing.T, a *authorityWorld, order billing.OrderID) {
+	t.Helper()
+	require.NoError(t, booksRawTx(t, a.world, func(ctx context.Context, tx pgx.Tx, _ *gen.Queries) error {
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		if err != nil {
+			return err
+		}
+		return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), order.UUID(), nil)
+	}))
+}
+
+// glLegCount is how many general-ledger legs the merchant posted.
+func glLegCount(t *testing.T, a *authorityWorld) int {
+	t.Helper()
+	var n int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" WHERE merchant_id = $1 AND book = 'general'",
+		a.alpha.MerchantID().UUID()).Scan(&n))
+	return n
+}
+
+// unitSchedule is the one revenue schedule of order's line in currency.
+type unitSchedule struct {
+	Funded, Recognized int64
+}
+
+func unitScheduleOf(t *testing.T, a *authorityWorld, order billing.OrderID, currency string) unitSchedule {
+	t.Helper()
+	var r unitSchedule
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT funded, recognized_net FROM "+pgx.Identifier{a.schema, "revenue_schedules"}.Sanitize()+
+		" WHERE merchant_id = $1 AND order_id = $2 AND currency = $3", a.alpha.MerchantID().UUID(), order.UUID(), currency).Scan(&r.Funded, &r.Recognized))
+	return r
+}
+
+func unitPackChargebackSchedule(t *testing.T) {
+	s, p := unitPaymentWorld(t, 0)
+	a := s.a
+	dollars := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+	s.buy(t, dollars["usd"], 20_000_000, "buy-gold")
+	passProduct, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pass", DisplayName: "Pass", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"pass:active"}})
+	require.NoError(t, err)
+	pass, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: passProduct.ID, Key: "price", UnitAmount: 200, Currency: "GOLD", AccessDurationHours: ptr(720)})
+	require.NoError(t, err)
+	// A 30-day pass of 200 GOLD is $10 of the pack, recognised over its window.
+	status, raw := s.spend(t, pass.ID, "pass")
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.Equal(t, unitSchedule{10_000_000, 0}, unitScheduleOf(t, a, order.ID, "USD"))
+
+	// Halfway through, a $15 chargeback of the pack: the 200 GOLD left are
+	// $10 of it, and the other $5 paid for the pass. The pass's price falls
+	// to $5: what the $10 earned by now is recognised, and the lower price's
+	// share of it stands.
+	a.clock.Advance(15 * 24 * time.Hour)
+	var charge, intent string
+	for _, effect := range p.effects(t) {
+		if effect.Kind == "charge" && effect.ID != "" {
+			charge, intent = effect.ID, effect.Operation
+		}
+	}
+	require.NotEmpty(t, charge)
+	body := stripeNotice(t, "evt_pass_dispute", "charge.dispute.created", stripemock.Object{"id": "dp_pass", "object": "dispute", "amount": 1500, "currency": "usd",
+		"charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"})
+	status, out := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+	require.Equal(t, http.StatusOK, status, out)
+	reduced := unitScheduleOf(t, a, order.ID, "USD")
+	require.EqualValues(t, 5_000_000, reduced.Funded, "the chargeback took $5 of the pass")
+	require.Positive(t, reduced.Recognized)
+	require.Less(t, reduced.Recognized, reduced.Funded)
+	var taken int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(t.amount), 0)::bigint FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" t JOIN "+
+		pgx.Identifier{a.schema, "revenue_schedules"}.Sanitize()+" r ON r.merchant_id = t.merchant_id AND r.id = t.revenue_schedule_id"+
+		" WHERE t.merchant_id = $1 AND r.order_id = $2 AND t.operation = 'purchased_credit_refund' AND t.transfer_type IN ('chargeback_recognized', 'chargeback_deferred')",
+		a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&taken))
+	require.EqualValues(t, 5_000_000, taken, "the $5 leaves the pass's revenue: recognised to chargebacks, the rest from deferred revenue")
+
+	// Recognition goes on at the lower price: $5 in all once the pass ends.
+	fleet := startFleet(t, a.world)
+	a.clock.Advance(16 * 24 * time.Hour)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	require.Equal(t, unitSchedule{5_000_000, 5_000_000}, unitScheduleOf(t, a, order.ID, "USD"))
+}
+
+func unitGiftOrder(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	statue := s.item(t, "statue", catalog.OwnershipConsumable, 100, "GOLD", "statue:owned")
+	_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 100, Source: "critical", SourceID: "gift"}})
+	require.NoError(t, err)
+	legs := glLegCount(t, a)
+	status, raw := s.spend(t, statue, "statue")
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.Equal(t, billing.OrderComplete, order.Status)
+	var schedules int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "revenue_schedules"}.Sanitize()+" WHERE merchant_id = $1 AND order_id = $2",
+		a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&schedules))
+	require.Zero(t, schedules, "given units carry no money to recognise")
+	require.Equal(t, legs, glLegCount(t, a), "and the general ledger moves nothing")
+	require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
+}
+
+func unitLineReleases(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	dollars := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+	s.buy(t, dollars["usd"], 20_000_000, "buy-gold")
+	statue := s.item(t, "statue", catalog.OwnershipConsumable, 100, "GOLD", "statue:owned")
+	status, raw := s.spend(t, statue, "statue")
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	audit := "id:" + a.alpha.MerchantID().String()
+	require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK", "each release has its schedule")
+	require.Equal(t, unitSchedule{5_000_000, 5_000_000}, unitScheduleOf(t, a, order.ID, "USD"))
+
+	// More of the lot's money released into the line's schedule after it was
+	// made: applying the order again adds it to the funding.
+	line, lot := order.Lines[0].ID.UUID(), lots(t, a.alpha, s.alice, "GOLD")[0].ID.UUID()
+	release := func(schedule uuid.UUID, key string) {
+		t.Helper()
+		require.NoError(t, booksRawTx(t, a.world, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+			alice, id := s.alice.UUID(), order.ID.UUID()
+			_, _, err := books.New(q, a.alpha.MerchantID().UUID()).Post(ctx, books.Posting{Debit: books.Ref{Type: books.DeferredRevenueCredit, Customer: &alice}, Credit: books.Ref{Type: books.DeferredRevenue},
+				Amount: 1_000_000, Currency: "USD", Type: books.CreditReleased, Coord: books.Coord{Operation: books.Operation("critical_" + key), Source: "order_line", SourceID: line.String()},
+				EffectiveAt: a.clock.Now(), Customer: &alice, CreditGrant: &lot, Order: &id, OrderLine: &line, RevenueSchedule: &schedule})
+			return err
+		}))
+	}
+	release(books.CreditLineSchedule(line, "USD"), "more")
+	reapplyOrder(t, a, order.ID)
+	require.Equal(t, unitSchedule{6_000_000, 6_000_000}, unitScheduleOf(t, a, order.ID, "USD"), "the later release is funded and recognised")
+
+	// Money released into the line under a schedule that does not exist is
+	// revenue the books never recognise.
+	release(uuid.New(), "lost")
+	output, err := hostCLIResult(t, a.world, "ledger-audit", "--merchant", audit)
+	require.Error(t, err)
+	require.Contains(t, output, "unscheduled line: order="+order.ID.UUID().String()+" line="+line.String())
 }

@@ -251,6 +251,18 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 	if err != nil {
 		return err
 	}
+	schedules := make([]uuid.UUID, len(released))
+	for i, r := range released {
+		schedules[i] = r.RevenueScheduleID
+	}
+	money, err := q.ListScheduleLotMoney(ctx, gen.ListScheduleLotMoneyParams{MerchantID: order.MerchantID, RevenueScheduleIds: schedules, OrderLineIds: ids})
+	if err != nil {
+		return err
+	}
+	held := make(map[uuid.UUID]int64, len(money))
+	for _, m := range money {
+		held[m.RevenueScheduleID] = m.Held
+	}
 	at := order.CompletedAt.UTC().Truncate(time.Microsecond)
 	b := New(q, order.MerchantID)
 	var loc *time.Location
@@ -279,7 +291,10 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 					return err
 				}
 			}
-			s := schedule{service: plan.service, funded: r.Amount, through: plan.service.Starts, ended: plan.ended}
+			s := schedule{service: plan.service, funded: held[r.RevenueScheduleID], through: plan.service.Starts, ended: plan.ended}
+			if s.funded <= 0 {
+				continue
+			}
 			steps, next := s.catchUp(at, loc)
 			params := gen.CreateRevenueScheduleParams{
 				MerchantID: order.MerchantID, ID: r.RevenueScheduleID, CustomerID: order.CustomerID, Currency: r.Currency, OrderID: order.ID, OrderLineID: line.ID,
@@ -289,6 +304,15 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 			}
 			row, err := q.CreateRevenueSchedule(ctx, params)
 			if errors.Is(err, pgx.ErrNoRows) {
+				// Money released into it since it was made adds to its funding.
+				if loc == nil {
+					if loc, err = AccountingZone(ctx, d); err != nil {
+						return err
+					}
+				}
+				if err := b.fundMore(ctx, r.RevenueScheduleID, held[r.RevenueScheduleID], maxTime(at, r.ReleasedAt.UTC()), loc); err != nil {
+					return err
+				}
 				continue
 			}
 			if err != nil {

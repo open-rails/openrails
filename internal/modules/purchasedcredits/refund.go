@@ -295,9 +295,14 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			if g, err = lots.Get(ctx, g.ID); err != nil {
 				return err
 			}
+			zone, err := books.AccountingZone(ctx, s.db.NewWithPgxTx(tx))
+			if err != nil {
+				return err
+			}
 			return gl.ReverseCredit(ctx, books.CreditLotOf(g), books.CreditReversal{
 				Reversal: reversalID, Chargeback: reversal.ReversalKind != nil && *reversal.ReversalKind == reversalChargeback,
-				Cash: cashDelta, CashAccount: account, Repaid: units.repaid, At: at,
+				Cash: cashDelta, CashAccount: account, Repaid: units.repaid, Consumed: units.consumed, Lapsed: units.expired + units.revoked,
+				At: at, Zone: zone,
 			})
 		}
 		restore := ":" + reversesID.String()
@@ -323,9 +328,13 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return err
 		}
 		lot := books.CreditLotOf(g)
+		zone, err := books.AccountingZone(ctx, s.db.NewWithPgxTx(tx))
+		if err != nil {
+			return err
+		}
 		if err := gl.RecoverCredit(ctx, lot, books.CreditRecovery{
 			Recovery: reversalID, Origin: *reversesID, Chargeback: original.ReversalKind != nil && *original.ReversalKind == reversalChargeback,
-			Cash: cashDelta, CashAccount: account, Repaid: units.repaid, Retired: units.retired, At: at,
+			Cash: cashDelta, CashAccount: account, Repaid: units.repaid, Retired: units.retired, At: at, Zone: zone,
 		}); err != nil {
 			return err
 		}

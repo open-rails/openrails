@@ -2226,6 +2226,15 @@
     ],
     "OR-J48-S13": [
       "TestMerchantUnits/OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency"
+    ],
+    "OR-J48-S14": [
+      "TestMerchantUnits/OR-J48-S14/a-chargeback-of-a-pack-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S15": [
+      "TestMerchantUnits/OR-J48-S15/a-line-paid-with-given-units-books-no-revenue"
+    ],
+    "OR-J48-S16": [
+      "TestMerchantUnits/OR-J48-S16/a-unit-lines-later-money-adds-to-its-schedule-and-the-audit-fails-money-with-none"
     ]
   }
 }

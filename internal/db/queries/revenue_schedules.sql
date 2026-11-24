@@ -37,7 +37,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 -- What spends of credit released into an order's lines priced in a merchant's
 -- own unit: per line and paid currency, the lots' money credited to
 -- deferred_revenue under the schedule the spends named.
-SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount
+SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount,
+    max(t.effective_at)::timestamptz AS released_at
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.source = 'order_line' AND t.source_id = ANY(sqlc.arg(order_line_ids)::text[])
@@ -45,6 +46,66 @@ WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.source = 'order_line' AN
   AND c.account_type = 'deferred_revenue'
 GROUP BY t.order_line_id, t.currency, t.revenue_schedule_id
 ORDER BY t.order_line_id, t.currency;
+
+-- name: ListCreditLotRevenue :many
+-- What a lot's money funds now, per revenue schedule its spends paid and its
+-- order line (NULL: usage revenue): what the spends released, less what the
+-- lot's reversals took back of it, plus what recoveries restored.
+SELECT t.revenue_schedule_id, t.order_id, t.order_line_id, sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END)::bigint AS held
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id = sqlc.arg(credit_grant_id)::uuid AND t.book = 'general'
+GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
+ORDER BY t.revenue_schedule_id NULLS LAST;
+
+-- name: ListCreditReversalSchedules :many
+-- What one reversal of a lot's payment took, per revenue schedule and its
+-- order line (NULL: usage revenue's contra), that its recoveries have not
+-- brought back: of its recognised part (contra) and of its deferred part.
+SELECT t.revenue_schedule_id, t.order_id, t.order_line_id,
+    COALESCE(sum(CASE WHEN t.source = 'money_recognized' AND t.transfer_type IN ('refund_recognized', 'chargeback_recognized') THEN t.amount
+        WHEN t.source <> 'money_recognized' AND c.account_type IN ('refunds', 'chargebacks') THEN -t.amount ELSE 0 END), 0)::bigint AS contra,
+    COALESCE(sum(CASE WHEN t.source = 'money_recognized' AND t.transfer_type IN ('refund_deferred', 'chargeback_deferred') THEN t.amount
+        WHEN t.source <> 'money_recognized' AND c.account_type = 'deferred_revenue' THEN -t.amount ELSE 0 END), 0)::bigint AS deferred
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id = sqlc.arg(credit_grant_id)::uuid AND t.book = 'general'
+  AND t.operation = 'purchased_credit_refund'
+  AND (t.source = 'money_recognized' AND t.source_id = sqlc.arg(reversal_id)::text OR t.source = 'money_recognized_restore:' || sqlc.arg(reversal_id)::text)
+GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
+ORDER BY t.revenue_schedule_id NULLS LAST;
+
+-- name: ListScheduleLotMoney :many
+-- What the lots' money funds now of each schedule of an order's lines, as
+-- ListCreditLotRevenue counts it per lot, read through the lots that paid the
+-- lines.
+SELECT t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END)::bigint AS held
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.revenue_schedule_id = ANY(sqlc.arg(revenue_schedule_ids)::uuid[])
+  AND t.credit_grant_id IN (
+      SELECT l.credit_grant_id FROM billing.ledger_transfers l
+      WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid AND l.source = 'order_line' AND l.source_id = ANY(sqlc.arg(order_line_ids)::text[])
+        AND l.credit_grant_id IS NOT NULL)
+GROUP BY t.revenue_schedule_id
+ORDER BY t.revenue_schedule_id;
+
+-- name: ListUnscheduledCreditReleases :many
+-- Lots' money released into a line priced in a merchant's own unit under a
+-- schedule that does not exist: revenue the books never recognise.
+SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(t.amount)::bigint AS amount
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.transfer_type = 'credit_released'
+  AND t.revenue_schedule_id IS NOT NULL AND t.order_line_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id = t.merchant_id AND s.id = t.revenue_schedule_id)
+GROUP BY t.order_id, t.order_line_id, t.currency
+ORDER BY t.order_id, t.order_line_id, t.currency;
 
 -- name: ListDueRevenueSchedules :many
 -- CROSS-MERCHANT: the schedules due, in key order, by the due index alone: an
