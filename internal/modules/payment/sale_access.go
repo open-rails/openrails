@@ -41,15 +41,7 @@ func (s *FulfillmentService) applyAcceptedPurchaseAccess(ctx context.Context, us
 	if err != nil {
 		return err
 	}
-	access := original[:0]
-	for _, event := range original {
-		// Purchased credit has its own immutable promise validation and source
-		// lot; it shares the payment but is not an access window.
-		if event.Kind != string(grants.Credit) {
-			access = append(access, event)
-		}
-	}
-	recorded, err := grants.RecordedPurchaseAccess(mid.UUID(), customer, product, payment, access)
+	recorded, err := grants.RecordedPurchaseAccess(mid.UUID(), customer, product, payment, original)
 	if err != nil {
 		return err
 	}

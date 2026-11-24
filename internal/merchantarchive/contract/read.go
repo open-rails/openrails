@@ -78,6 +78,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			r.Values = values
 		}
+		if p.Name == "grants" && len(r.Values) == len(p.Columns)+2 {
+			if kind := r.Values[4]; kind != nil && *kind == "credit" {
+				return errArchivedCreditGrants
+			}
+		}
 		if err := dropUnreadColumns(p, &r.Values); err != nil {
 			return err
 		}
@@ -188,7 +193,7 @@ const (
 	orderPayURLColumns   = 5
 	orderRenewalColumns  = 5
 	orderUsageColumns    = 10
-	orderCheckoutColumns = 13
+	orderCheckoutColumns = 15
 )
 
 // hostedIfPayURL is embedded for an order archived before it had one: false
@@ -247,7 +252,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true}
+	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
@@ -264,6 +269,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 		empty = map[int]*string{len(p.Columns) - 1: nil} // routing_reason
 	case p.Name == "payment_methods" && len(*values) == len(p.Columns)+1:
 		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
+	case p.Name == "grants" && len(*values) == len(p.Columns)+2:
+		empty = map[int]*string{13: nil, 14: nil} // amount, currency
 	default:
 		return nil
 	}
@@ -281,6 +288,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 }
 
 var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage orders, then export it again")
+
+var errArchivedCreditGrants = fmt.Errorf("an archive with credit lots among its grants: restore it on a release before credit_grants, then export it again")
 
 // normalizePreUsage moves a row exported before usage orders to their
 // shapes, as migration 61 moved the database. Rows naming an invoice are

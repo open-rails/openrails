@@ -381,12 +381,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		_, creator := publicSale(t, a, "funnel-attribution-creator", 9_990_000, nil)
 		_, merchantPrice := publicSale(t, a, "funnel-attribution-app", 9_990_000, nil)
 		given := &billing.OrderAttribution{Source: ptr(" newsletter "), Medium: ptr("email"), Campaign: ptr("spring%2D2026"),
-			Referrer: ptr("https://Blog.Example.com/post/42?email=x"), Affiliate: ptr("partner-7")}
+			Term: ptr("running shoes"), Content: ptr("banner%20a"), Referrer: ptr("https://Blog.Example.com/post/42?email=x"), Affiliate: ptr("partner-7")}
 		order := openCheckout(t, a, price.ID, given, nil)
 		got := checkoutOf(t, a, order.ID).Attribution
 		require.Equal(t, "newsletter", *got.Source)
 		require.Equal(t, "email", *got.Medium)
 		require.Equal(t, "spring-2026", *got.Campaign, "percent escapes are decoded")
+		require.Equal(t, "running shoes", *got.Term)
+		require.Equal(t, "banner a", *got.Content)
 		require.Equal(t, "blog.example.com", *got.Referrer, "never the path or query")
 		require.Equal(t, "partner-7", *got.Affiliate)
 		reopened := openCheckout(t, a, price.ID, &billing.OrderAttribution{Source: ptr("search")}, nil)
@@ -421,6 +423,8 @@ func TestCheckoutFunnel(t *testing.T) {
 			{Campaign: ptr("alice\ufe6bexample.com")},
 			{Campaign: ptr("alice%40example.com")},
 			{Campaign: ptr("alice%2540example.com")},
+			{Term: ptr("alice@example.com")},
+			{Content: ptr(strings.Repeat(" ", 4096) + "short")},
 			{Affiliate: ptr("4242424242424242")},
 			{Affiliate: ptr("4242.4242.4242.4242")},
 			{Affiliate: ptr("4242/4242/4242/4242")},
@@ -433,7 +437,7 @@ func TestCheckoutFunnel(t *testing.T) {
 			made, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-attribution-bad-"+string(rune('a'+i)), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: merchantPrice.ID}}, Attribution: &bad})
 			require.NoError(t, err, "case %d", i)
 			got := made.Checkout.Attribution
-			for _, field := range []*string{got.Medium, got.Campaign, got.Referrer, got.Affiliate} {
+			for _, field := range []*string{got.Medium, got.Campaign, got.Term, got.Content, got.Referrer, got.Affiliate} {
 				require.Nil(t, field, "case %d is left out", i)
 			}
 			if i == 0 {
@@ -509,6 +513,35 @@ func TestCheckoutFunnel(t *testing.T) {
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"country"}, Filters: usd, Range: window}), "country", "cash"))
 		require.Equal(t, map[string]int64{"renewals": 20_000_000},
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_campaign"}, Filters: usd, Range: window}), "attribution_campaign", "cash"))
+
+		// An upgrade's membership keeps the checkout, and so do its bills.
+		higher := upgradePrice(t, a, sub)
+		a.clock.Advance(12 * time.Hour)
+		status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", a.aliceToken, map[string]any{"price_id": higher.ID}, map[string]string{"Idempotency-Key": "funnel-upgrade"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var changed billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &changed))
+		require.Equal(t, "succeeded", changed.Status, string(raw))
+		require.NotNil(t, changed.SubscriptionID)
+		require.NotEqual(t, sub.ID, *changed.SubscriptionID)
+		upgraded, err := a.alpha.GetSubscription(t.Context(), *changed.SubscriptionID)
+		require.NoError(t, err)
+		upgradeDue := *upgraded.CurrentPeriodEndsAt
+		renewedAt(t, a, fleet, upgraded.ID, upgradeDue, upgradeDue)
+		bills, err = a.alpha.ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: upgraded.ID})
+		require.NoError(t, err)
+		renewed := 0
+		for _, bill := range bills.Items {
+			if bill.Origin != billing.OrderOriginSubscription || bill.Renewal == nil {
+				continue
+			}
+			require.NotNil(t, bill.Renewal.CheckoutOrderID, "%s names the checkout", bill.ID)
+			require.Equal(t, bought.ID, *bill.Renewal.CheckoutOrderID)
+			if bill.Renewal.PeriodStartsAt.Equal(upgradeDue) {
+				renewed++
+			}
+		}
+		require.Equal(t, 1, renewed, "the upgraded membership's renewal")
 	})
 }
 

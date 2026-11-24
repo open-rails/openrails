@@ -526,7 +526,7 @@ if err != nil {
 return *order.PayURL, nil // redirect the buyer there
 ```
 
-**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.OrderAttribution`: source, medium and campaign as your `utm_*`, referrer, affiliate) on `CreateOrder`, or as billing-ui's `attribution` prop on `BuyButton`, `ProductList` and `Cart`. Attribution never refuses an order: a field over 100 bytes, unprintable, or carrying an email address or card number is left out (null on the order); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on orders your server creates. Staff and application reads of a checkout carry `checkout`: `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (`CF-IPCountry`, read only from `CloudflareProxies`; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. billing-ui sends its `BillingProvider` `locale` (or the client's `language`) as `Accept-Language`, which the order records. A renewal names the checkout that bought its subscription (`renewal.checkout_order_id`).
+**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.OrderAttribution`: source, medium, campaign, term and content as your `utm_*`, referrer, affiliate) on `CreateOrder`, or as billing-ui's `attribution` prop on `BuyButton`, `ProductList` and `Cart`. Attribution never refuses an order: a field over 100 bytes, unprintable, or carrying an email address or card number is left out (null on the order); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on orders your server creates. Staff and application reads of a checkout carry `checkout`: `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (`CF-IPCountry`, read only from `CloudflareProxies`; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. billing-ui sends its `BillingProvider` `locale` (or the client's `language`) as `Accept-Language`, which the order records. A renewal names the checkout that bought its subscription (`renewal.checkout_order_id`).
 
 Generate the idempotency key when the buyer decides to buy, store it with the
 cart, and resend it on every retry: the same key recovers the same order and URL;
@@ -719,8 +719,8 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
-| `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
+| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
+| `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
 ```go guide:credit-grant

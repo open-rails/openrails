@@ -15967,6 +15967,14 @@
           "source": {
             "type": "string"
           },
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion"
+            ]
+          },
           "invoker": {
             "type": "string"
           },
@@ -16536,19 +16544,52 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "refunded_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "state": {
             "type": "string",
             "enum": [
               "active",
               "expired",
+              "pending",
+              "refunded",
               "revoked",
               "scheduled",
-              "spent",
-              "terminated"
+              "spent"
             ]
           },
-          "source_type": {
-            "type": "string"
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion",
+              "purchase",
+              "recurring"
+            ]
+          },
+          "paid_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paid_currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_id": {
             "oneOf": [
@@ -16589,7 +16630,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "terminated_at": {
+          "revoked_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16600,7 +16641,7 @@
               }
             ]
           },
-          "termination_reason": {
+          "revoke_reason": {
             "oneOf": [
               {
                 "type": "string"
@@ -16623,15 +16664,18 @@
           "remaining_amount",
           "revoked_amount",
           "expired_amount",
+          "refunded_amount",
           "state",
-          "source_type",
+          "funding_source",
+          "paid_amount",
+          "paid_currency",
           "source_id",
           "description",
           "starts_at",
           "expires_at",
           "created_at",
-          "terminated_at",
-          "termination_reason",
+          "revoked_at",
+          "revoke_reason",
           "replayed"
         ]
       },
@@ -21166,6 +21210,26 @@
               }
             ]
           },
+          "term": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "referrer": {
             "oneOf": [
               {
@@ -21191,6 +21255,8 @@
           "source",
           "medium",
           "campaign",
+          "term",
+          "content",
           "referrer",
           "affiliate"
         ]

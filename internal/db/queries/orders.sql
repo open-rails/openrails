@@ -5,7 +5,8 @@ INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
     idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at,
     purchase_number, ip_country, language,
-    attribution_source, attribution_medium, attribution_campaign, attribution_referrer, attribution_affiliate
+    attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content,
+    attribution_referrer, attribution_affiliate
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
@@ -14,7 +15,7 @@ INSERT INTO billing.orders (
     sqlc.arg(purchase_number)::int,
     sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
     sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
-    sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
+    sqlc.narg(attribution_term)::text, sqlc.narg(attribution_content)::text, sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
 );
 
 -- name: CountCustomerPurchases :one
@@ -59,10 +60,22 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(c
   AND (o.submitted_at IS NULL OR (asked.billing_country IS NOT NULL AND asked.billing_country IS DISTINCT FROM o.billing_country));
 
 -- name: SetSubscriptionCheckout :execrows
--- The checkout whose payment created the subscription, kept from the first.
-UPDATE billing.subscriptions
-SET checkout_order_id = sqlc.arg(order_id)::uuid
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND checkout_order_id IS NULL;
+-- The checkout whose payment created the subscription, kept from the first;
+-- nothing when the order is not a checkout.
+UPDATE billing.subscriptions s
+SET checkout_order_id = o.id
+FROM billing.orders o
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.checkout_order_id IS NULL
+  AND o.merchant_id = s.merchant_id AND o.id = sqlc.arg(order_id)::uuid AND o.purchase_number IS NOT NULL;
+
+-- name: InheritSubscriptionCheckout :execrows
+-- A membership that replaces another (an upgrade, a tier change) keeps the
+-- checkout of the one it replaces.
+UPDATE billing.subscriptions s
+SET checkout_order_id = p.checkout_order_id
+FROM billing.subscriptions p
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.checkout_order_id IS NULL
+  AND p.merchant_id = s.merchant_id AND p.id = sqlc.arg(predecessor_id)::uuid AND p.checkout_order_id IS NOT NULL;
 
 -- name: GetOpenOrderByLines :one
 -- The customer's open order of these lines, expired or not.

@@ -128,14 +128,16 @@ type CreateMyOrderParams struct {
 }
 
 // OrderAttribution is where the merchant says a checkout came from: the
-// marketing source, medium and campaign (as utm_*), the referrer and an
-// affiliate. Each is optional, 1 to 100 bytes of printable text without
+// marketing source, medium, campaign, term and content (as utm_*), the
+// referrer and an affiliate. Each is optional, 1 to 100 bytes of printable text without
 // "@" or a card number; Referrer is a URL or host, kept as its lowercase
 // host only.
 type OrderAttribution struct {
 	Source    *string `json:"source"`
 	Medium    *string `json:"medium"`
 	Campaign  *string `json:"campaign"`
+	Term      *string `json:"term"`
+	Content   *string `json:"content"`
 	Referrer  *string `json:"referrer"`
 	Affiliate *string `json:"affiliate"`
 }

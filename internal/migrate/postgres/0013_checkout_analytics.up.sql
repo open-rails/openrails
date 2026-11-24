@@ -17,6 +17,8 @@ ALTER TABLE billing.orders
     ADD COLUMN attribution_source text,
     ADD COLUMN attribution_medium text,
     ADD COLUMN attribution_campaign text,
+    ADD COLUMN attribution_term text,
+    ADD COLUMN attribution_content text,
     ADD COLUMN attribution_referrer text,
     ADD COLUMN attribution_affiliate text,
     ADD COLUMN checkout_order_id uuid;
@@ -28,7 +30,7 @@ ALTER TABLE billing.orders ADD CONSTRAINT orders_checkout_facts_check CHECK (
     purchase_number IS NOT NULL
     OR (opened_at IS NULL AND submitted_at IS NULL AND billing_country IS NULL AND card_country IS NULL AND ip_country IS NULL
         AND language IS NULL AND attribution_source IS NULL AND attribution_medium IS NULL AND attribution_campaign IS NULL
-        AND attribution_referrer IS NULL AND attribution_affiliate IS NULL)
+        AND attribution_term IS NULL AND attribution_content IS NULL AND attribution_referrer IS NULL AND attribution_affiliate IS NULL)
 ) NOT VALID;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_submitted_check CHECK (submitted_at IS NULL OR opened_at IS NOT NULL) NOT VALID;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_country_check CHECK (
@@ -39,6 +41,8 @@ ALTER TABLE billing.orders ADD CONSTRAINT orders_attribution_check CHECK (
     octet_length(attribution_source) >= 1 AND octet_length(attribution_source) <= 100
     AND octet_length(attribution_medium) >= 1 AND octet_length(attribution_medium) <= 100
     AND octet_length(attribution_campaign) >= 1 AND octet_length(attribution_campaign) <= 100
+    AND octet_length(attribution_term) >= 1 AND octet_length(attribution_term) <= 100
+    AND octet_length(attribution_content) >= 1 AND octet_length(attribution_content) <= 100
     AND attribution_referrer ~ '^[a-z0-9_]([a-z0-9_.-]{0,251}[a-z0-9_])?$'
     AND octet_length(attribution_affiliate) >= 1 AND octet_length(attribution_affiliate) <= 100
 ) NOT VALID;

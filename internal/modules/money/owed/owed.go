@@ -21,12 +21,12 @@ import (
 // claim and its amount. Every leg is an owed_repayment transfer on the lot at
 // the funding's coordinate, so the funding's own once-only deposit makes the
 // repayment once-only too. It returns the amount repaid.
-func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingGrant, funded int64, now time.Time) (int64, error) {
+func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingCreditGrant, funded int64, now time.Time) (int64, error) {
 	q := d.Gen(ctx)
-	if lot.Currency == nil || funded <= 0 {
+	if funded <= 0 {
 		return 0, nil
 	}
-	currency, customer := *lot.Currency, lot.CustomerID
+	currency, customer := lot.Unit, lot.CustomerID
 	l := ledger.New(q, merchantID)
 	owed, err := l.OutstandingOwed(ctx, customer, currency)
 	if err != nil || owed <= 0 {
@@ -48,7 +48,7 @@ func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingG
 		return 0, nil
 	}
 	repaid := int64(0)
-	// The funding coordinate grants.MaterializeGrant deposits the lot at.
+	// The funding coordinate credits.Lots.Materialize deposits the lot at.
 	coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.ID.String()}
 	for _, c := range claims {
 		if remaining == 0 {

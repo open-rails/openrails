@@ -50,6 +50,21 @@ type CreateMembershipParams struct {
 	// Paid is what an order's charge took for this membership, for its
 	// premium_started receipt only: the order records the payment.
 	Paid *Paid
+	// Succeeds is the membership this one replaces (a Solana tier change),
+	// whose checkout it keeps; an engine upgrade names it in
+	// Prepared.Replaces.
+	Succeeds *uuid.UUID
+}
+
+// succeeds is the membership the new one replaces, nil when none.
+func (p *CreateMembershipParams) succeeds() *uuid.UUID {
+	if p.Succeeds != nil {
+		return p.Succeeds
+	}
+	if p.Prepared != nil && p.Prepared.Replaces != nil {
+		return &p.Prepared.Replaces.SubscriptionID
+	}
+	return nil
 }
 
 // Paid is an amount a charge took, in micros of Currency.

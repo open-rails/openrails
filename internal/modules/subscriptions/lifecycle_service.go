@@ -524,6 +524,17 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err := subService.Create(ctx, subscription); err != nil {
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
+		// A successor keeps the checkout that won its customer, before any
+		// of its bills is written.
+		if from := params.succeeds(); from != nil {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := dbb.Gen(ctx).InheritSubscriptionCheckout(ctx, gen.InheritSubscriptionCheckoutParams{MerchantID: mid.UUID(), ID: subscription.ID, PredecessorID: *from}); err != nil {
+				return nil, nil, err
+			}
+		}
 		s.Log.InfoContext(ctx, "Created new subscription record for membership", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "price_id", subscription.PriceID, "rail", subscription.Rail, "rail_subscription_id", subscription.RailSubscriptionID, "period_start", periodStartsAt, "period_end", periodEndsAt)
 	}
 

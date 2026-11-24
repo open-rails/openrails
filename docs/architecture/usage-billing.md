@@ -40,7 +40,7 @@ units to their limit windows; `accrueTx` adds amounts to `usage_accruals`;
 
 **Posting.** An accrual posts once its UTC day ends (`UsageAccrualWorker`, the
 first scan of the hourly billing pass), or before any other movement of that
-balance (`grants.PostUsageAccruals`): balance first, one `credit_spend` per lot,
+balance (`credits.PostUsageAccruals`): balance first, one `credit_spend` per lot,
 the rest one `owed_accrual` dated on its day (`owedAt`), so the usage order of
 that period bills it. Until then the unposted amount counts as held.
 

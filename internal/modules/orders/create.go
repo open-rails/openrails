@@ -286,7 +286,7 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 			ExpiresAt: now.Add(in.TTL), Now: now, PurchaseNumber: purchases + 1,
 			IpCountry: optional(Country(in.Checkout.IPCountry)), Language: optional(language(in.Checkout.Language)),
 			AttributionSource: a.Source, AttributionMedium: a.Medium, AttributionCampaign: a.Campaign,
-			AttributionReferrer: a.Referrer, AttributionAffiliate: a.Affiliate}); err != nil {
+			AttributionTerm: a.Term, AttributionContent: a.Content, AttributionReferrer: a.Referrer, AttributionAffiliate: a.Affiliate}); err != nil {
 			return err
 		}
 		for i, l := range quote.Lines {

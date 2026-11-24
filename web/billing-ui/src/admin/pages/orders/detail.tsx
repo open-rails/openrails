@@ -307,7 +307,7 @@ export function OrderDetail({ order }: { order: Order }) {
 // how far they got, where they are and the merchant's attribution.
 function CheckoutFacts({ checkout }: { checkout: OrderCheckout }) {
   const a = checkout.attribution
-  const attribution = [a.source, a.medium, a.campaign, a.referrer, a.affiliate]
+  const attribution = [a.source, a.medium, a.campaign, a.term, a.content, a.referrer, a.affiliate]
     .filter(Boolean)
     .join(" · ")
   return (

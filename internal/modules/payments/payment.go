@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -289,8 +289,10 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 		if err := purchasedcredits.New(d, s.clock).ValidateRefund(ctx, originalPaymentID, amount); err != nil {
 			return err
 		}
-		reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, metadata)
-		return err
+		if reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, metadata); err != nil {
+			return err
+		}
+		return credits.New(d.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, originalPaymentID)
 	})
 	return reservation, err
 }
@@ -383,7 +385,7 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 	if err != nil {
 		return err
 	}
-	credits := purchasedcredits.New(s.db, s.clock)
+	purchased := purchasedcredits.New(s.db, s.clock)
 	// ListRefunds is newest first. Apply negative events oldest first, then
 	// their positive recoveries, so every recovery finds its exact effect.
 	// A reversal that took no credit is applied again on every pass: passes
@@ -394,7 +396,7 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 		for i := len(rows) - 1; i >= 0; i-- {
 			row := rows[i]
 			if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
-				p, err := credits.ApplyReversal(ctx, paymentID, row.ID, nil)
+				p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, nil)
 				if err != nil {
 					return err
 				}
@@ -414,14 +416,20 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 				}
 				reversed = &id
 			}
-			p, err := credits.ApplyReversal(ctx, paymentID, row.ID, reversed)
+			p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, reversed)
 			if err != nil {
 				return err
 			}
 			posted = posted || p
 		}
 		if !posted {
-			return nil
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			// What the payment's pending refunds reserve of its lot follows
+			// every settled reversal.
+			return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
 		}
 	}
 }
@@ -552,11 +560,14 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 			}
 			return err
 		}
-		// Releasing a pending refund must not expose a lot which expired while
-		// the provider result was unresolved. Retire it in the same transaction.
-		ledger := grants.New(d.Gen(ctx), mid.UUID())
-		ledger.SetClock(s.now)
-		_, err = ledger.ExpireLapsed(ctx, payment.CustomerID, payment.Currency)
+		// The released refund reserves nothing. It must not expose a lot which
+		// expired while the provider result was unresolved: retire it in the
+		// same transaction.
+		lots := credits.New(d.Gen(ctx), mid.UUID(), s.now)
+		if err := lots.SyncReservation(ctx, *payment.RefundedPaymentID); err != nil {
+			return err
+		}
+		_, err = lots.ExpireLapsed(ctx, payment.CustomerID, payment.Currency)
 		return err
 	})
 }

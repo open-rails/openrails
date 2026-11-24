@@ -66,7 +66,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 
 -- name: RebuildBalanceWatches :exec
 -- A restored merchant's balances are watched again: one with a running charge
--- or a credit lot not yet expired that lapses is due at once, a prepaid one
+-- or a credit lot with units left that lapses is due at once, a prepaid one
 -- when a change marks it due.
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
 SELECT w.merchant_id, w.customer_id, w.currency,
@@ -76,12 +76,10 @@ FROM (
     FROM billing.running_charges rc
     WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.stopped_at IS NULL
     UNION ALL
-    SELECT g.merchant_id, g.customer_id, g.currency::text, true
-    FROM billing.grants g
-    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.event = 'grant'
-      AND g.ends_at IS NOT NULL AND g.currency IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede'))
-      AND NOT EXISTS (SELECT 1 FROM billing.ledger_transfers lt WHERE lt.merchant_id = g.merchant_id AND lt.grant_id = g.id AND lt.transfer_type = 'credit_expire')
+    SELECT g.merchant_id, g.customer_id, g.unit, true
+    FROM billing.credit_grants g
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.expires_at IS NOT NULL
+      AND g.revoked_at IS NULL AND g.units_credited > g.units_debited
     UNION ALL
     SELECT a.merchant_id, a.customer_id::uuid, a.currency, false
     FROM billing.ledger_accounts a

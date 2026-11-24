@@ -11,11 +11,13 @@ import (
 
 func TestCheckAttribution(t *testing.T) {
 	text := func(s string) *string { return &s }
-	got, drops := CheckAttribution(&billing.OrderAttribution{Source: text(" ads "), Medium: text("  "), Campaign: text("spring%2D2026"), Referrer: text("https://Shop.Example.COM./p?q=1")})
+	got, drops := CheckAttribution(&billing.OrderAttribution{Source: text(" ads "), Medium: text("  "), Campaign: text("spring%2D2026"), Term: text("shoes"), Content: text("banner%20a"), Referrer: text("https://Shop.Example.COM./p?q=1")})
 	require.Empty(t, drops)
 	require.Equal(t, "ads", *got.Source)
 	require.Nil(t, got.Medium, "blank is absent")
 	require.Equal(t, "spring-2026", *got.Campaign)
+	require.Equal(t, "shoes", *got.Term)
+	require.Equal(t, "banner a", *got.Content)
 	require.Equal(t, "shop.example.com", *got.Referrer)
 	got, drops = CheckAttribution(&billing.OrderAttribution{Referrer: text("partner_shop.example.org:8443/landing"), Campaign: text("50%off")})
 	require.Empty(t, drops)
@@ -30,6 +32,9 @@ func TestCheckAttribution(t *testing.T) {
 		{"medium", "personal_data"}:    {Medium: text("someone\ufe6bexample.com")},
 		{"source", "personal_data"}:    {Source: text("someone%2540example.com")},
 		{"affiliate", "personal_data"}: {Affiliate: text("4242.4242.4242.4242")},
+		{"term", "personal_data"}:      {Term: text("a@example.com")},
+		{"content", "too_long"}:        {Content: text(strings.Repeat(" ", maxRawAttribution) + "x")},
+		{"referrer", "too_long"}:       {Referrer: text("example.com/" + strings.Repeat("a", maxRawAttribution))},
 	} {
 		kept, drops := CheckAttribution(&bad)
 		require.Equal(t, []AttributionDrop{want}, drops)

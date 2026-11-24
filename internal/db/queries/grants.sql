@@ -1,17 +1,16 @@
 -- The append-only grant ledger (billing.grants). derive-1 appends events here;
--- derive-2 folds them into projections (product_access windows, credit
--- deposits). entitlement and ownership events are history.
+-- derive-2 folds them into product_access windows. entitlement and ownership
+-- events are history; credit lots are credit_grants.
 
 -- name: InsertGrant :one
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason, quantity
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, reason, actor, grant_reason, quantity
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(product_id)::uuid,
     sqlc.arg(kind)::text, sqlc.arg(source_type)::text, NULLIF(sqlc.arg(source_id)::text, ''), sqlc.narg(payment_id)::uuid,
     sqlc.arg(event)::text, sqlc.narg(supersedes_id)::uuid, sqlc.narg(spec_snapshot)::jsonb,
-    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
-    sqlc.narg(amount)::bigint, sqlc.narg(currency)::text, sqlc.narg(reason)::text,
+    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz, sqlc.narg(reason)::text,
     sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text, sqlc.narg(quantity)::int
 )
 RETURNING *;
@@ -86,17 +85,6 @@ ORDER BY g.id;
 SELECT * FROM billing.grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
--- GetCreditGrantBySourceID: idempotency lookup for a deposit-as-credit-grant by
--- its natural source_id key (the deposit's SourceID).
--- name: GetCreditGrantBySourceID :one
-SELECT * FROM billing.grants
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND kind = 'credit' AND event = 'grant'
-  AND source_id = sqlc.arg(source_id)::text
-ORDER BY created_at ASC
-LIMIT 1;
-
 -- ListGrantsByCustomer: every grant-event for the customer (live or terminated),
 -- the full input to a customer-scoped re-derive.
 -- name: ListGrantsByCustomer :many
@@ -114,80 +102,8 @@ SELECT EXISTS (
       AND t.event IN ('revoke', 'expire', 'supersede')
 ) AS terminated;
 
--- GrantCreditDeposited: whether derive-2 already posted this credit grant's
--- deposit transfer (the credit projection's idempotency).
--- name: GrantCreditDeposited :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND transfer_type = 'deposit' AND grant_id = sqlc.arg(grant_id)::uuid
-) AS deposited;
-
--- GetCreditLotRemaining: a credit lot's unspent remainder, net of every transfer
--- drawn from it. Deducting credit_revoke makes the revoke clawback idempotent.
--- name: GetCreditLotRemaining :one
-SELECT (g.amount - COALESCE((
-    SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-    WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-      AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
-), 0))::bigint AS remaining
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id)::uuid
-  AND g.kind = 'credit' AND g.event = 'grant';
-
--- ListSpendableCreditLots: live (started, unexpired, non-terminated) credit lots
--- with their remainder, less the share a pending refund reserves: refunds
--- return the credit line's paid amount first. FIFO:
--- soonest expiry first. A running charge's posting through an instant draws
--- the lots that had not lapsed just before it (live_at).
--- name: ListSpendableCreditLots :many
-SELECT g.id, g.amount, g.ends_at,
-    (g.amount - COALESCE((
-        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
-    ), 0) - COALESCE((
-        SELECT ceil(g.amount::numeric * LEAST(sum(-refund.amount), (g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric)
-        FROM billing.payments refund JOIN billing.payments payment
-          ON payment.merchant_id=g.merchant_id AND payment.id=g.payment_id AND payment.deleted_at IS NULL
-        WHERE refund.merchant_id=g.merchant_id AND refund.customer_id=g.customer_id
-          AND refund.currency=g.currency AND refund.refunded_payment_id=g.payment_id
-          AND refund.status='pending' AND refund.amount<0 AND refund.deleted_at IS NULL
-          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
-        GROUP BY payment.amount
-    ), 0))::bigint AS remaining
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
-  AND g.starts_at <= sqlc.arg(as_of)::timestamptz
-  AND (g.ends_at IS NULL OR g.ends_at > COALESCE(sqlc.narg(live_at)::timestamptz, sqlc.arg(as_of)::timestamptz))
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
-  )
-ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC;
-
--- ListLapsedCreditLots: credit lots past their expiry with an unspent remainder
--- to claw to expired_credits.
--- name: ListLapsedCreditLots :many
-SELECT g.id, g.ends_at::timestamptz AS ends_at,
-    (g.amount - COALESCE((
-        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
-    ), 0))::bigint AS remaining
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
-  AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
-  )
-ORDER BY g.ends_at ASC;
-
 -- derive.grant.missing: succeeded, positive, non-subscription payments that
--- produced no grant (every purchase grants its product or a credit lot). A
+-- produced no grant and no credit lot (every purchase grants one). A
 -- refunded purchase keeps its grant event, so it is not flagged. Surface-only:
 -- re-granting re-runs derive-1. NULL customer_id = merchant-wide.
 -- name: ListUngrantedGrantablePayments :many
@@ -206,6 +122,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND (g.payment_id = p.id OR g.source_id = p.id::text)
   )
+  AND NOT EXISTS (SELECT 1 FROM billing.credit_grants c WHERE c.merchant_id = p.merchant_id AND c.payment_id = p.id)
 ORDER BY p.id
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -237,9 +154,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY g.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- derive.grant_effect.missing: live access/credit grants without their effect:
--- access has no window (revoked windows count), credit has no deposit transfer.
--- NULL customer_id = merchant-wide. Repair = MaterializeGrant.
+-- derive.grant_effect.missing: live access grants without a window (revoked
+-- windows count). NULL customer_id = merchant-wide. Repair = MaterializeGrant.
 -- name: ListLiveGrantsMissingEffects :many
 SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -256,15 +172,10 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
         AND g.starts_at >= s.canceled_at
   )
-  AND (
-    (g.kind = 'access' AND NOT (g.import_root_id IS NOT NULL AND g.ends_at IS NOT NULL AND g.ends_at <= g.import_as_of) AND NOT EXISTS (
-        SELECT 1 FROM billing.product_access pa
-        WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id AND pa.deleted_at IS NULL))
-    OR
-    (g.kind = 'credit' AND NOT EXISTS (
-        SELECT 1 FROM billing.ledger_transfers lt
-        WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
-  )
+  AND g.kind = 'access' AND NOT (g.import_root_id IS NOT NULL AND g.ends_at IS NOT NULL AND g.ends_at <= g.import_as_of)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.product_access pa
+      WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id AND pa.deleted_at IS NULL)
 ORDER BY g.created_at, g.id
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -286,9 +197,9 @@ SELECT EXISTS (
       )
 ) AS beyond_boundary;
 
--- derive.grant_effect.excess: terminated grants whose effect is still live (an
--- unrevoked window, or a credit remainder > 0). NULL customer_id =
--- merchant-wide. Repair = MaterializeGrant, idempotent.
+-- derive.grant_effect.excess: terminated access grants whose window is still
+-- unrevoked. NULL customer_id = merchant-wide. Repair = MaterializeGrant,
+-- idempotent.
 -- name: ListUnretractedTerminations :many
 SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -299,25 +210,16 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
   )
-  AND (
-    (g.kind = 'access' AND EXISTS (
-        SELECT 1 FROM billing.product_access pa
-        WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id
-          AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM billing.grants t
-              WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-                AND t.event IN ('revoke', 'supersede') AND t.actor = 'import'
-                AND g.source_type = 'grant' AND g.grant_reason = 'import' AND g.actor = 'import'
-                AND pa.ends_at <= t.starts_at)))
-    OR
-    (g.kind = 'credit' AND (
-        g.amount - COALESCE((
-            SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
-            WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-              AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
-        ), 0)) > 0)
-  )
+  AND g.kind = 'access' AND EXISTS (
+      SELECT 1 FROM billing.product_access pa
+      WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id
+        AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM billing.grants t
+            WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+              AND t.event IN ('revoke', 'supersede') AND t.actor = 'import'
+              AND g.source_type = 'grant' AND g.grant_reason = 'import' AND g.actor = 'import'
+              AND pa.ends_at <= t.starts_at))
 ORDER BY g.created_at, g.id
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -374,6 +276,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
+  AND NOT EXISTS (SELECT 1 FROM billing.credit_grants c WHERE c.merchant_id = p.merchant_id AND c.payment_id = p.id)
 ORDER BY p.purchased_at, p.id
 LIMIT sqlc.arg(row_limit)::int;
 

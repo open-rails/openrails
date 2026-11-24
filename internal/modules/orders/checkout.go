@@ -29,7 +29,11 @@ type CheckoutFacts struct {
 	Attribution billing.OrderAttribution
 }
 
-const maxAttribution = 100
+const (
+	maxAttribution = 100
+	// maxRawAttribution bounds a value before it is decoded and normalized.
+	maxRawAttribution = 4096
+)
 
 var (
 	countryShape  = regexp.MustCompile(`^[A-Z]{2}$`)
@@ -79,7 +83,8 @@ func CheckAttribution(a *billing.OrderAttribution) (kept billing.OrderAttributio
 		name string
 		in   *string
 		out  **string
-	}{{"source", a.Source, &kept.Source}, {"medium", a.Medium, &kept.Medium}, {"campaign", a.Campaign, &kept.Campaign}, {"affiliate", a.Affiliate, &kept.Affiliate}} {
+	}{{"source", a.Source, &kept.Source}, {"medium", a.Medium, &kept.Medium}, {"campaign", a.Campaign, &kept.Campaign},
+		{"term", a.Term, &kept.Term}, {"content", a.Content, &kept.Content}, {"affiliate", a.Affiliate, &kept.Affiliate}} {
 		v, reason := attributionText(f.in)
 		if reason != "" {
 			drops = append(drops, AttributionDrop{Field: f.name, Reason: reason})
@@ -118,6 +123,9 @@ func attributionText(in *string) (*string, string) {
 	if in == nil {
 		return nil, ""
 	}
+	if len(*in) > maxRawAttribution {
+		return nil, "too_long"
+	}
 	v := decoded(*in)
 	switch {
 	case v == "":
@@ -150,7 +158,7 @@ func referrerHost(in *string) (*string, string) {
 		return nil, ""
 	}
 	v := strings.TrimSpace(*in)
-	if len(v) > 2048 {
+	if len(v) > maxRawAttribution {
 		return nil, "too_long"
 	}
 	host := v
@@ -221,7 +229,7 @@ func (o *Order) Checkout() *billing.OrderCheckout {
 	out := &billing.OrderCheckout{PurchaseNumber: int(*o.PurchaseNumber), OpenedAt: o.OpenedAt, SubmittedAt: o.SubmittedAt,
 		BillingCountry: o.BillingCountry, CardCountry: o.CardCountry, IPCountry: o.IpCountry, Language: o.Language,
 		Attribution: billing.OrderAttribution{Source: o.AttributionSource, Medium: o.AttributionMedium, Campaign: o.AttributionCampaign,
-			Referrer: o.AttributionReferrer, Affiliate: o.AttributionAffiliate}}
+			Term: o.AttributionTerm, Content: o.AttributionContent, Referrer: o.AttributionReferrer, Affiliate: o.AttributionAffiliate}}
 	for _, evidence := range []struct {
 		country *string
 		source  billing.CountrySource
