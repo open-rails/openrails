@@ -31,6 +31,8 @@ sql:
       - "internal/migrate/postgres/0031_credit_books.up.sql"
       - "internal/migrate/postgres/0032_run_leases.up.sql"
       - "internal/migrate/postgres/0033_merchant_unit_spending.up.sql"
+      - "internal/migrate/postgres/0034_reporting_mrr.up.sql"
+      - "internal/migrate/postgres/0035_dashboard_retired_mrr_measures.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

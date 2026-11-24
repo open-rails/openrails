@@ -220,8 +220,14 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   await page.addStyleTag({
     content: "#app { max-width: 1230px; margin: auto }",
   })
-  for (const section of ["Revenue and cash", "Recurring", "Payment health"])
+  for (const section of [
+    "Revenue and cash",
+    "Recurring",
+    "Retention",
+    "Payment health",
+  ])
     await expect(page.getByRole("heading", { name: section })).toBeVisible()
+  await expect(page.locator('[data-widget="cohort-retention"]')).toBeVisible()
   await expect(
     page
       .locator('[data-widget="cash-by-psp"]')

@@ -57,12 +57,9 @@ type Family string
 
 const (
 	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at)
-	FamSubsNew        Family = "subs_new"        // flow over subscriptions (started_at)
-	FamSubsCanceled   Family = "subs_canceled"   // flow over subscriptions (canceled_at)
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
 	FamUsage          Family = "usage"           // flow over the event store's usage history (day)
 	FamUsageCharged   Family = "usage_charged"   // flow over usage history, one row per charge (day)
-	FamTransitions    Family = "transitions"     // flow over subscription_status_transitions (occurred_at)
 	FamLimitsReached  Family = "limits_reached"  // flow over limit windows (reached_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over product access and product keys
@@ -81,6 +78,16 @@ const (
 	FamNetworkPrior   Family = "network_prior"   // flow over network_activity_daily, each day counted a month later
 	FamRiskTotals     Family = "risk_totals"     // at-risk MRR totals less the flows after t
 	FamRiskFlows      Family = "risk_flows"      // flow over mrr_risk_flows (bucket_at)
+	FamMRR            Family = "mrr"             // MRR totals less the flows after t; by product, the product flows before t
+	FamMRRProduct     Family = "mrr_product"     // product totals less the product flows after t: FamMRR by product
+	FamMRRCustomers   Family = "mrr_customers"   // distinct customers with MRR: FamMRR without a currency
+	FamMRRFlows       Family = "mrr_flows"       // flow over mrr_flows: movements by kind
+	FamMRRChurn       Family = "mrr_churn"       // flow over mrr_streak_flows' churn rows of the opening base, by churn_type
+	FamMRRStreak      Family = "mrr_streak"      // flow over mrr_streak_flows: the opening base's expansion, contraction, churn and corrections
+	FamMRRTrailing    Family = "mrr_trailing"    // the opening base and its churn over the three months ending at each bucket's end
+	FamScheduled      Family = "mrr_scheduled"   // flow over pending mrr_scheduled entries (effective_at)
+	FamCohort         Family = "mrr_cohort"      // mrr_cohort_flows by cohort month and months since it
+	FamCancellations  Family = "cancellations"   // flow over subscription_cancellations (decided_at)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -140,6 +147,21 @@ type Measure struct {
 	// SnapshotAtPeriodStart: snapshot evaluated at bucket/range START instead of
 	// bucket start/range END (used by churn's denominator).
 	SnapshotAtPeriodStart bool
+	// ByProduct is a FamMRR measure's Expr over FamMRRProduct, read when a
+	// query groups or filters by product_id.
+	ByProduct string
+	// ByCustomer is a FamMRR measure's Expr over FamMRRCustomers, read when a
+	// query neither groups nor filters by currency: each customer once.
+	ByCustomer string
+	// PerMonth is a rate over a period read as a monthly rate: the period's
+	// rate p over m months (in the accounting timezone) is 1 - (1 - p)^(1/m).
+	// Its period is the bucket's, or with Trailing the three months ending
+	// at the bucket's end.
+	PerMonth, Trailing bool
+	// Program is the dispute monitoring program whose ratio the measure is.
+	Program billing.DisputeProgram
+	// Untimed measures take no time grouping (their own dimensions order them).
+	Untimed bool
 
 	// values: each allowed dimension's closed vocabulary on this measure
 	// (nil: open), set by registry.
@@ -204,7 +226,12 @@ var Dimensions = []Dimension{
 	{Name: "price_id", Description: "immutable price id (product:price:v1)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
-	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
+	{Name: "reversed", Description: "whether a cancellation was later reversed (a resume): true | false", Values: []string{"true", "false"}},
+	{Name: "movement", Description: "what moved MRR: new (first MRR) | expansion | contraction | churn (to none) | reactivation (MRR again after none) | opening (an import adopting subscriptions) | correction (a prune or its undo); on scheduled_mrr churn | contraction | expansion", Values: []string{"new", "expansion", "contraction", "churn", "reactivation", "opening", "correction"}},
+	{Name: "churn_type", Description: "why a customer churned: voluntary (their or the merchant's cancel) | chargeback | involuntary (failed payment, expiry and the rest)", Values: []string{"voluntary", "involuntary", "chargeback"}},
+	{Name: "cohort", Description: "the month (YYYY-MM, accounting timezone) a customer first had MRR"},
+	{Name: "months_since_start", Description: "whole months since the cohort's month: 0 is the cohort's own month"},
+	{Name: "basis", Description: "what cohort_retention counts: subscribers (customers with MRR; default) | mrr", Values: []string{"subscribers", "mrr"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
 	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined (the issuer said no) | refused (the merchant or its gateway refused it first) | error (it did not complete); purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; usage succeeded | failed; disputes open | won | lost | closed | unreported; fraud_reports recorded | refunded | nothing_to_refund | disputed"},
@@ -214,7 +241,6 @@ var Dimensions = []Dimension{
 	{Name: "rate_card", Description: "metered event type (the usage's event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); authorization_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
-	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
@@ -278,6 +304,94 @@ var families = map[Family]familySpec{
 	// At-risk MRR at t is the total now less the flows of the buckets from t
 	// on; riskSpec picks the per-reason rows or, without risk_reason, the
 	// rows that count each subscription once.
+	// MRR at t is the totals now less the movements of the buckets from t on,
+	// a product's its totals less its flows (FamMRRProduct). Each churn_type
+	// sees every subscriber, so a rate by it divides by all.
+	FamMRR: {
+		Kind:     "mrr",
+		From:     `billing.mrr_totals t`,
+		DimJoins: map[string]string{"churn_type": `CROSS JOIN (VALUES ('voluntary'), ('involuntary'), ('chargeback')) ct(churn_type)`},
+		DimExprs: map[string]string{"currency": `t.currency`, "churn_type": `ct.churn_type`},
+	},
+	FamMRRProduct: {
+		Kind:     "snapshot",
+		From:     `billing.mrr_product_totals pt`,
+		DimExprs: map[string]string{"currency": `pt.currency`, "product_id": `'prod_' || pt.product_id::text`},
+	},
+	FamMRRCustomers: {
+		Kind: "snapshot",
+		From: `billing.mrr_customer_totals ct`,
+	},
+	FamMRRFlows: {
+		Kind:      "flow",
+		From:      `billing.mrr_flows f`,
+		TimeExpr:  `f.bucket_at`,
+		DimExprs:  map[string]string{"currency": `f.currency`, "movement": `f.measure`},
+		BaseWhere: `f.measure NOT IN ('churn_voluntary', 'churn_chargeback')`,
+	},
+	// The opening base's churn: a churn row is involuntary unless its
+	// voluntary or chargeback part says otherwise, each part moving its count
+	// from involuntary.
+	FamMRRChurn: {
+		Kind: "flow",
+		From: `billing.mrr_streak_flows sf CROSS JOIN LATERAL (SELECT ct.churn_type, ct.sign FROM (VALUES
+			('churn', 'involuntary', 1), ('churn_voluntary', 'voluntary', 1), ('churn_voluntary', 'involuntary', -1),
+			('churn_chargeback', 'chargeback', 1), ('churn_chargeback', 'involuntary', -1)) ct(measure, churn_type, sign)
+			WHERE ct.measure = sf.measure) ct`,
+		TimeExpr:  `sf.bucket_at`,
+		DimExprs:  map[string]string{"currency": `sf.currency`, "churn_type": `ct.churn_type`},
+		BaseWhere: `sf.measure IN ('churn', 'churn_voluntary', 'churn_chargeback')`,
+	},
+	// A run begun before a period's start is in its opening base:
+	// @period_start is the start of the row's bucket.
+	FamMRRStreak: {
+		Kind:     "flow",
+		From:     `billing.mrr_streak_flows sf`,
+		TimeExpr: `sf.bucket_at`,
+		DimJoins: map[string]string{"churn_type": `CROSS JOIN (VALUES ('voluntary'), ('involuntary'), ('chargeback')) ct(churn_type)`},
+		DimExprs: map[string]string{"currency": `sf.currency`, "churn_type": `ct.churn_type`},
+	},
+	// Each window is the three months ending at a bucket's end (w.starts_at,
+	// w.ends_at), labelled by the bucket.
+	FamMRRTrailing: {
+		Kind:     "trailing",
+		From:     `billing.mrr_totals t`,
+		DimExprs: map[string]string{"currency": `t.currency`},
+	},
+	FamScheduled: {
+		Kind:      "flow",
+		From:      `billing.mrr_scheduled ms`,
+		TimeExpr:  `ms.effective_at`,
+		DimExprs:  map[string]string{"currency": `ms.currency`, "movement": `ms.kind`},
+		DimValues: map[string][]string{"movement": {"churn", "contraction", "expansion"}},
+		BaseWhere: `ms.status = 'scheduled'`,
+	},
+	FamCohort: {
+		Kind:     "cohort",
+		From:     `billing.mrr_cohort_flows c`,
+		DimExprs: map[string]string{"currency": `c.currency`},
+	},
+	// A cancel decision is a subscription's move into canceled, dated by its
+	// writer's clock; a resume reverses it.
+	FamCancellations: {
+		Kind: "flow",
+		From: `billing.subscription_cancellations sc
+		JOIN billing.subscriptions s ON s.merchant_id = sc.merchant_id AND s.id = sc.subscription_id`,
+		TimeExpr: `sc.decided_at`,
+		DimJoins: map[string]string{
+			"currency": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"price_id": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+		},
+		DimExprs: map[string]string{
+			"currency":    `COALESCE(pr.currency, '')`,
+			"rail":        `s.rail`,
+			"psp":         `COALESCE('psp_' || s.psp_id::text, '')`,
+			"product_id":  `'prod_' || s.product_id::text`,
+			"price_id":    `COALESCE(pr.public_id, '')`,
+			"cancel_type": `COALESCE(sc.cancel_type, 'unknown')`,
+			"reversed":    `CASE WHEN sc.reversed_at IS NULL THEN 'false' ELSE 'true' END`,
+		},
+	},
 	FamRiskTotals: {
 		Kind: "risk",
 		From: `billing.mrr_risk_totals t`,
@@ -378,47 +492,6 @@ var families = map[Family]familySpec{
 			"psp":  `'psp_' || nap.psp_id::text`,
 		},
 	},
-	FamSubsNew: {
-		Kind:     "flow",
-		From:     `billing.subscriptions s`,
-		TimeExpr: `s.started_at`,
-		DimJoins: map[string]string{
-			"currency":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
-			"price_id":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
-			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
-		},
-		DimExprs: map[string]string{
-			"currency":      `COALESCE(pr.currency, '')`,
-			"rail":          `s.rail`,
-			"psp":           `COALESCE('psp_' || s.psp_id::text, '')`,
-			"product_id":    `'prod_' || s.product_id::text`,
-			"price_id":      `COALESCE(pr.public_id, '')`,
-			"billing_cycle": billingCycleExpr,
-			"subscriber_type": `CASE WHEN EXISTS (
-				SELECT 1 FROM billing.subscriptions s2
-				WHERE s2.merchant_id = s.merchant_id AND s2.customer_id = s.customer_id
-				  AND s2.id <> s.id AND s2.ended_at IS NOT NULL AND s2.ended_at <= s.started_at
-			) THEN 'returning' ELSE 'first_time' END`,
-		},
-	},
-	FamSubsCanceled: {
-		Kind:     "flow",
-		From:     `billing.subscriptions s`,
-		TimeExpr: `s.canceled_at`,
-		DimJoins: map[string]string{
-			"currency": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
-			"price_id": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
-		},
-		DimExprs: map[string]string{
-			"currency":    `COALESCE(pr.currency, '')`,
-			"rail":        `s.rail`,
-			"psp":         `COALESCE('psp_' || s.psp_id::text, '')`,
-			"product_id":  `'prod_' || s.product_id::text`,
-			"price_id":    `COALESCE(pr.public_id, '')`,
-			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
-		},
-		BaseWhere: `s.canceled_at IS NOT NULL`,
-	},
 	FamGrants: {
 		Kind:     "flow",
 		From:     `billing.credit_grants g`,
@@ -456,14 +529,6 @@ var families = map[Family]familySpec{
 		},
 		DimValues: map[string][]string{"outcome": usageOutcomes},
 	},
-	FamTransitions: {
-		Kind:     "flow",
-		From:     `billing.subscription_status_transitions st`,
-		TimeExpr: `st.occurred_at`,
-		DimExprs: map[string]string{
-			"cancel_type": `COALESCE(st.cancel_type, 'unknown')`,
-		},
-	},
 	FamLimitsReached: {
 		Kind:     "flow",
 		From:     `billing.limit_windows lw`,
@@ -488,7 +553,6 @@ var families = map[Family]familySpec{
 			"product_id":    `'prod_' || s.product_id::text`,
 			"price_id":      `COALESCE(pr.public_id, '')`,
 			"billing_cycle": billingCycleExpr,
-			"status":        `s.status::text`,
 		},
 	},
 	FamEntitlSnapshot: {
@@ -758,17 +822,16 @@ func quoted(values []string) string {
 
 // Dimension sets.
 var (
-	attemptDims     = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type", "advice_code", "network_advice_code", "visa_category", "network_transaction_id"}
-	purchaseDims    = []string{"currency", "rail", "psp", "owner", "card_entry"}
-	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover", "card_brand", "card_bin", "token_type", "network_transaction_id"}
-	nmiHistDims     = []string{"psp", "nmi_kind", "decline_cause", "reason"}
-	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}
-	disputeDims     = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
-	networkDims     = []string{"rail", "psp"}
-	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
-	creditDims      = []string{"currency", "product_id", "customer"}
-	webhookDims     = []string{"rail", "psp"}
-	subscriptionDim = []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}
+	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type", "advice_code", "network_advice_code", "visa_category", "network_transaction_id"}
+	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
+	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover", "card_brand", "card_bin", "token_type", "network_transaction_id"}
+	nmiHistDims  = []string{"psp", "nmi_kind", "decline_cause", "reason"}
+	cashDims     = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}
+	disputeDims  = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
+	networkDims  = []string{"rail", "psp"}
+	usageDims    = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
+	creditDims   = []string{"currency", "product_id", "customer"}
+	webhookDims  = []string{"rail", "psp"}
 	// What a sale and its reversals both carry.
 	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network"}
 )
@@ -776,6 +839,25 @@ var (
 // with is dims and more, copied.
 func with(dims []string, more ...string) []string {
 	return append(slices.Clone(dims), more...)
+}
+
+// MRR and its customers at t: the totals less the flows of the buckets from t
+// on (a voluntary or chargeback churn row is a part of churn's).
+const (
+	mrrAt = `COALESCE(SUM(t.mrr - COALESCE((SELECT SUM(f.amount) FROM billing.mrr_flows f
+		WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.measure NOT IN ('churn_voluntary', 'churn_chargeback')
+		  AND f.bucket_at >= edge.bucket), 0)), 0)::bigint`
+	subscribersAt = `COALESCE(SUM(t.customers - COALESCE((SELECT SUM(f.logos) FROM billing.mrr_flows f
+		WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.measure NOT IN ('churn_voluntary', 'churn_chargeback')
+		  AND f.bucket_at >= edge.bucket), 0)), 0)::bigint`
+)
+
+// productAt is a product's total column at t: its totals now less its flows
+// of the buckets from t on.
+func productAt(flow, total string) string {
+	return `COALESCE(SUM(pt.` + total + ` - COALESCE((SELECT SUM(pf.` + flow + `) FROM billing.mrr_product_flows pf
+		WHERE pf.merchant_id = pt.merchant_id AND pf.currency = pt.currency AND pf.product_id = pt.product_id
+		  AND pf.bucket_at >= edge.bucket), 0)), 0)::bigint`
 }
 
 // verificationPressure is an unverified subscription past its paid-through
@@ -853,8 +935,8 @@ var declared = []Measure{
 	{Name: "vamp_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "vamp_count", Den: "vamp_sales",
 		Description: "Visa's VAMP ratio as the dispute monitor counts it: Visa chargebacks and fraud reports / settled Visa sales, in the same bucket (use grain month); its lines are VAMP's levels",
 		Formula:     "(visa chargebacks + visa fraud reports) / visa sales",
-		Thresholds:  disputerules.ProgramLines(billing.ProgramVisaVAMP),
-		Dims:        networkDims},
+		Thresholds:  disputerules.ProgramLines(billing.ProgramVisaVAMP), Program: billing.ProgramVisaVAMP,
+		Dims: networkDims},
 	{Name: "ecm_count", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(na.chargebacks) FILTER (WHERE na.network = 'mastercard'), 0)::bigint`, Dims: networkDims},
 	{Name: "ecm_prior_sales", Class: ClassAdditive, Family: FamNetworkPrior, Unit: "count", Internal: true,
@@ -862,8 +944,8 @@ var declared = []Measure{
 	{Name: "ecm_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "ecm_count", Den: "ecm_prior_sales",
 		Description: "Mastercard's excessive chargeback ratio as the dispute monitor counts it: Mastercard chargebacks / settled Mastercard sales of the month before (use grain month); its lines are its levels",
 		Formula:     "mastercard chargebacks / mastercard sales a month earlier",
-		Thresholds:  disputerules.ProgramLines(billing.ProgramMastercardECP),
-		Dims:        networkDims},
+		Thresholds:  disputerules.ProgramLines(billing.ProgramMastercardECP), Program: billing.ProgramMastercardECP,
+		Dims: networkDims},
 	{Name: "disputes", Class: ClassAdditive, Family: FamDisputes, Unit: "count", Direction: DownIsGood,
 		Description: "provider dispute cases opened in the bucket, by dispute_kind (inquiry, chargeback, prevented), dispute_reason, outcome and kind (the disputed charge: initial or renewal)",
 		Formula:     "COUNT(disputes opened in the bucket)",
@@ -879,40 +961,103 @@ var declared = []Measure{
 		Agg:         count(""),
 		Dims:        []string{"currency", "rail", "psp", "network", "outcome"}},
 	// --- subscriptions ------------------------------------------------------------
-	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count", Direction: UpIsGood,
-		Description: "subscriptions started in the bucket (excludes never-activated pending)",
-		Formula:     "COUNT(subscriptions started in the bucket, not pending)",
-		// A subscription whose first charge failed is past_due or canceled;
-		// only pending still means never-activated.
-		Expr: `COUNT(*) FILTER (WHERE s.status <> 'pending')`,
-		Dims: []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
-	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count", Direction: DownIsGood,
-		Description: "subscriptions canceled in the bucket, by cancel_type",
-		Formula:     "COUNT(subscriptions canceled in the bucket)",
+	{Name: "mrr", Class: ClassSnapshot, Family: FamMRR, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "monthly recurring revenue at t: each subscription's price normalised to a month times its seats (trials count none, a cancel at period end until its end), from the MRR rollups; by product_id, each product's",
+		Formula:     "MRR now - SUM(MRR movements from t on); by product, the product's MRR now - SUM(its flows from t on)",
+		Expr:        mrrAt, ByProduct: productAt("amount", "mrr"),
+		Dims: []string{"currency", "product_id"}},
+	{Name: "subscribers", Class: ClassSnapshot, Family: FamMRR, Unit: "count", Direction: UpIsGood,
+		Description: "customers with MRR at t: without a currency each customer once, by currency those with MRR in it; by product_id, the product's subscriptions adding MRR",
+		Formula:     "customers with MRR now - SUM(their changes from t on)",
+		Expr:        subscribersAt, ByProduct: productAt("subscribers", "subscribers"),
+		ByCustomer: `COALESCE(SUM(ct.customers - COALESCE((SELECT SUM(cf.logos) FROM billing.mrr_customer_flows cf
+			WHERE cf.merchant_id = ct.merchant_id AND cf.bucket_at >= edge.bucket), 0)), 0)::bigint`,
+		Dims: []string{"currency", "product_id"}},
+	{Name: "mrr_at_period_start", Class: ClassSnapshot, Family: FamMRR, Money: true, Unit: UnitMoney, Internal: true,
+		SnapshotAtPeriodStart: true, Expr: mrrAt, Dims: []string{"currency"}},
+	{Name: "subscribers_at_period_start", Class: ClassSnapshot, Family: FamMRR, Unit: "count", Internal: true,
+		SnapshotAtPeriodStart: true, Expr: subscribersAt, Dims: []string{"currency", "churn_type"}},
+	{Name: "mrr_movements", Class: ClassAdditive, Family: FamMRRFlows, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "MRR change in the bucket by movement: new, expansion, contraction, churn, reactivation, opening (an import adopting subscriptions), correction (a prune or its undo); its total is net new MRR",
+		Formula:     "SUM(MRR movements)",
+		Expr:        `COALESCE(SUM(f.amount), 0)::bigint`,
+		Dims:        []string{"currency", "movement"}},
+	{Name: "subscriber_movements", Class: ClassAdditive, Family: FamMRRFlows, Unit: "count", Direction: UpIsGood,
+		Description: "change in customers with MRR in the bucket by movement: new, reactivation, churn (negative), opening, correction; its total is net new subscribers",
+		Formula:     "SUM(customers gaining MRR from none - customers losing all of it)",
+		Expr:        `COALESCE(SUM(f.logos), 0)::bigint`,
+		Dims:        []string{"currency", "movement"}},
+	{Name: "scheduled_mrr", Class: ClassAdditive, Family: FamScheduled, Money: true, Unit: UnitMoney, Direction: Neutral,
+		Description: "MRR still scheduled to change, by when it takes effect and movement: churn (a cancel at period end) and contraction (negative) or expansion (a scheduled change at a renewal)",
+		Formula:     "SUM(pending scheduled MRR changes effective in the bucket)",
+		Expr:        `COALESCE(SUM(ms.mrr_delta), 0)::bigint`,
+		Dims:        []string{"currency", "movement"}},
+	{Name: "cancellations", Class: ClassAdditive, Family: FamCancellations, Unit: "count", Direction: DownIsGood,
+		Description: "cancel decisions, at period end or at once, dated when they were made, by cancel_type and reversed (a resume took it back since)",
+		Formula:     "COUNT(subscriptions moved into canceled)",
 		Expr:        `COUNT(*)`,
-		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type"}},
-	{Name: "net_new_subscriptions", Class: ClassDifference, Unit: "count", Direction: UpIsGood, Num: "new_subscriptions", Den: "cancellations",
-		Description: "subscriptions started minus subscriptions canceled in the bucket",
-		Formula:     "new_subscriptions - cancellations",
-		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id"}},
-	{Name: "subscriptions_at_period_start", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Internal: true,
-		SnapshotAtPeriodStart: true,
-		Expr:                  `COUNT(s.id)`,
-		Dims:                  subscriptionDim},
-	{Name: "churn_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "cancellations", Den: "subscriptions_at_period_start",
-		Description: "cancellations in the bucket / subscriptions existing at bucket start; currency groups by price currency",
-		Formula:     "cancellations / subscriptions(at period start)",
-		Dims:        []string{"currency", "rail", "product_id", "price_id"}},
-	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Direction: UpIsGood,
-		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
-		Formula:     "COUNT(subscriptions started at or before t and not ended)",
-		Expr:        `COUNT(s.id)`,
-		Dims:        subscriptionDim},
-	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "recurring price normalised to a month, times seats (billing.price_mrr), of auto-renew subs existing at t and not canceled by t; group by status to split healthy vs in-dunning",
-		Formula:     "SUM(billing.price_mrr(price, seats)) over auto-renewing subscriptions at t that were not canceled by t",
-		Expr:        `COALESCE(SUM(` + priceMRRExpr + `) FILTER (WHERE s.canceled_at IS NULL OR s.canceled_at > edge.bucket), 0)::bigint`,
-		Dims:        subscriptionDim},
+		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type", "reversed"}},
+	{Name: "churned_subscribers", Class: ClassAdditive, Family: FamMRRChurn, Unit: "count", Internal: true,
+		Expr: `COALESCE(-SUM(sf.logos * ct.sign) FILTER (WHERE sf.streak_at < @period_start), 0)::bigint`, Dims: []string{"currency", "churn_type"}},
+	{Name: "base_pruned", Class: ClassAdditive, Family: FamMRRStreak, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(-sf.logos) FILTER (WHERE sf.streak_at < @period_start AND sf.measure = 'correction'), 0)::bigint`, Dims: []string{"currency", "churn_type"}},
+	{Name: "churn_base", Class: ClassDifference, Unit: "count", Internal: true,
+		Num: "subscribers_at_period_start", Den: "base_pruned", Dims: []string{"currency", "churn_type"}},
+	{Name: "subscriber_churn_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "churned_subscribers", Den: "churn_base", PerMonth: true,
+		Description: "the period's own churn as a monthly rate: of the customers with MRR at its start, less those a prune took out in it (neither churned nor retained), the share whose MRR went to none in it; a period of m months in the accounting timezone with rate p reads 1 - (1 - p)^(1/m), a calendar month as counted; by churn_type, each type alone",
+		Formula:     "1 - (1 - churned customers of the opening base / (customers with MRR at period start - those pruned in it))^(1 / months in the period)",
+		Dims:        []string{"currency", "churn_type"}},
+	{Name: "trailing_base", Class: ClassSnapshot, Family: FamMRRTrailing, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(t.customers - COALESCE((SELECT SUM(f.logos) FROM billing.mrr_flows f
+			WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.measure NOT IN ('churn_voluntary', 'churn_chargeback')
+			  AND f.bucket_at >= w.starts_at), 0)
+			+ COALESCE((SELECT SUM(sf.logos) FROM billing.mrr_streak_flows sf
+			WHERE sf.merchant_id = t.merchant_id AND sf.currency = t.currency AND sf.measure = 'correction'
+			  AND sf.bucket_at >= w.starts_at AND sf.bucket_at < w.ends_at AND sf.streak_at < w.starts_at), 0)), 0)::bigint`,
+		Dims: []string{"currency"}},
+	{Name: "trailing_churned", Class: ClassSnapshot, Family: FamMRRTrailing, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(-COALESCE((SELECT SUM(sf.logos) FROM billing.mrr_streak_flows sf
+			WHERE sf.merchant_id = t.merchant_id AND sf.currency = t.currency AND sf.measure = 'churn'
+			  AND sf.bucket_at >= w.starts_at AND sf.bucket_at < w.ends_at AND sf.streak_at < w.starts_at), 0)), 0)::bigint`,
+		Dims: []string{"currency"}},
+	{Name: "trailing_churn_rate", Class: ClassRatio, Unit: "ratio", Internal: true, Num: "trailing_churned", Den: "trailing_base", PerMonth: true, Trailing: true,
+		Dims: []string{"currency"}},
+	{Name: "base_mrr_drop", Class: ClassAdditive, Family: FamMRRStreak, Money: true, Unit: UnitMoney, Internal: true,
+		Expr: `COALESCE(-SUM(sf.amount) FILTER (WHERE sf.streak_at < @period_start AND sf.measure IN ('expansion', 'contraction', 'churn')), 0)::bigint`, Dims: []string{"currency"}},
+	{Name: "base_mrr_lost", Class: ClassAdditive, Family: FamMRRStreak, Money: true, Unit: UnitMoney, Internal: true,
+		Expr: `COALESCE(-SUM(sf.amount) FILTER (WHERE sf.streak_at < @period_start AND sf.measure IN ('contraction', 'churn')), 0)::bigint`, Dims: []string{"currency"}},
+	{Name: "base_mrr_corrected", Class: ClassAdditive, Family: FamMRRStreak, Money: true, Unit: UnitMoney, Internal: true,
+		Expr: `COALESCE(-SUM(sf.amount) FILTER (WHERE sf.streak_at < @period_start AND sf.measure = 'correction'), 0)::bigint`, Dims: []string{"currency"}},
+	{Name: "retention_base", Class: ClassDifference, Money: true, Unit: UnitMoney, Internal: true,
+		Num: "mrr_at_period_start", Den: "base_mrr_corrected", Dims: []string{"currency"}},
+	{Name: "nrr_retained", Class: ClassDifference, Money: true, Unit: UnitMoney, Internal: true,
+		Num: "retention_base", Den: "base_mrr_drop", Dims: []string{"currency"}},
+	{Name: "grr_retained", Class: ClassDifference, Money: true, Unit: UnitMoney, Internal: true,
+		Num: "retention_base", Den: "base_mrr_lost", Dims: []string{"currency"}},
+	{Name: "nrr", Class: ClassRatio, Money: true, Unit: "ratio", Direction: UpIsGood, Num: "nrr_retained", Den: "retention_base",
+		Description: "net revenue retention over the period: of the customers with MRR at its start, their MRR then plus their expansion and less their contraction and churn in it, / their MRR then; a correction (a prune or its undo) is neither churn nor retained and leaves the base; monthly NRR is grain month",
+		Formula:     "(base MRR + expansion - contraction - churn of the opening base) / base MRR, base MRR = MRR at start less the base's corrections",
+		Dims:        []string{"currency"}},
+	{Name: "grr", Class: ClassRatio, Money: true, Unit: "ratio", Direction: UpIsGood, Num: "grr_retained", Den: "retention_base",
+		Description: "gross revenue retention: nrr without expansion, at most 100%",
+		Formula:     "(base MRR - contraction - churn of the opening base) / base MRR",
+		Dims:        []string{"currency"}},
+	{Name: "arpa", Class: ClassRatio, Money: true, Unit: UnitMoney, Direction: UpIsGood, Num: "mrr", Den: "subscribers",
+		Description: "average MRR per customer with MRR at t",
+		Formula:     "mrr / subscribers",
+		Dims:        []string{"currency"}},
+	{Name: "ltv", Class: ClassRatio, Money: true, Unit: UnitMoney, Direction: UpIsGood, Num: "arpa", Den: "trailing_churn_rate",
+		Description: "lifetime value, revenue only: arpa / the monthly subscriber churn rate over the trailing three months ending at the bucket's end (the range's end without time), at every grain",
+		Formula:     "arpa / monthly subscriber churn over the trailing 3 months",
+		Dims:        []string{"currency"}},
+	{Name: "cohort_value", Class: ClassAdditive, Family: FamCohort, Unit: "count", Internal: true,
+		Dims: []string{"currency", "cohort", "months_since_start", "basis"}},
+	{Name: "cohort_size", Class: ClassAdditive, Family: FamCohort, Unit: "count", Internal: true,
+		Dims: []string{"currency", "cohort", "months_since_start", "basis"}},
+	{Name: "cohort_retention", Class: ClassRatio, Money: true, Unit: "ratio", Direction: UpIsGood, Untimed: true, Num: "cohort_value", Den: "cohort_size",
+		Description: "each cohort (the customers who first had MRR in a month) at the end of each month since, by cohort and months_since_start; basis subscribers (default): its members with MRR / the members it acquired, at most 100%; basis mrr: their MRR / their MRR at the end of month 0, above 100% with expansion. No time grouping: the range picks the cohorts",
+		Formula:     "subscribers: cohort members with MRR at the end of month k / members acquired; mrr: cohort MRR at the end of month k / at the end of month 0",
+		Dims:        []string{"currency", "cohort", "months_since_start", "basis"}},
 	{Name: "mrr_at_risk", Class: ClassSnapshot, Family: FamRiskTotals, Money: true, Unit: UnitMoney, Direction: DownIsGood,
 		Description: "MRR of subscriptions at risk at t, by risk_reason; without it each subscription counts once whatever its reasons",
 		Formula:     "at-risk MRR now − SUM(at-risk MRR flows from t on)",
@@ -933,10 +1078,6 @@ var declared = []Measure{
 		Formula:     "COUNT(payment attempts)",
 		Agg:         count(""),
 		Dims:        with(attemptDims, "outcome")},
-	{Name: "attempt_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
-		Num: "attempts", NumSlice: Slice{"outcome": {"declined", "refused", "error"}}, Den: "attempts",
-		Description: "declined / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
-		Formula:     "attempts(declined) / attempts"},
 	{Name: "authorization_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
 		Num: "attempts", NumSlice: Slice{"outcome": {"approved"}}, Den: "attempts", DenSlice: Slice{"outcome": {"approved", "declined"}},
 		Description: "approved / authorizations the issuer answered; refusals by the merchant or its gateway and errors are left out. kind=rebill is each renewal's first try, kind in (initial, rebill) Visa's first attempts",
@@ -950,10 +1091,6 @@ var declared = []Measure{
 		Formula:     "COUNT(purchases)",
 		Agg:         count(""),
 		Dims:        with(purchaseDims, "outcome")},
-	{Name: "purchase_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
-		Num: "purchases", NumSlice: Slice{"outcome": {"failed"}}, Den: "purchases", DenSlice: Slice{"outcome": {"approved", "recovered", "failed"}},
-		Description: "failed / settled purchases: the failure rate per buyer rather than per attempt",
-		Formula:     "purchases(failed) / purchases(approved, recovered, failed)"},
 	{Name: "rebills", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Direction: Neutral,
 		Description: "rebill cycles by the period that came due, attempted or missed; by outcome as of the range end: approved (the first try collected), recovered (collected after a failed or missed first try), lost (closed uncollected), open (in dunning)",
 		Formula:     "COUNT(rebill cycles)",
@@ -973,12 +1110,6 @@ var declared = []Measure{
 		Description: "collected / closed cycles whose first rebill failed or was missed",
 		Formula:     "rebills(recovered) / rebills(recovered, lost with first_outcome declined, refused, error or missed)",
 		Dims:        cycleDims},
-	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
-		Num: "rebills", NumSlice: Slice{"first_outcome": {"declined", "refused", "error", "missed"}},
-		Den: "rebills", DenSlice: Slice{"first_outcome": {"approved", "declined", "refused", "error", "missed"}},
-		Description: "failed or missed first rebills / cycles with a first outcome",
-		Formula:     "rebills(first_outcome declined, refused, error, missed) / rebills(first_outcome not pending)"},
-	// --- credits and usage ---------------------------------------------------------
 	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: UnitMoney, Direction: UpIsGood,
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
@@ -1095,8 +1226,8 @@ var Removed = map[string]Retired{
 	"refund_count":                  {"payments", "with by payment_kind: refund"},
 	"chargeback_count":              {"payments", "with by payment_kind: chargeback"},
 	"unique_rebilled_customers":     {"rebills", "renewal cycles by outcome"},
-	"realized_revenue_per_customer": {"", "arpa and ltv replace it (planned)"},
-	"avg_membership_duration_days":  {"", "cohort_retention and ltv replace it (planned)"},
+	"realized_revenue_per_customer": {"arpa", "with ltv"},
+	"avg_membership_duration_days":  {"cohort_retention", "with ltv"},
 	"approved_attempts":             {"attempts", "with filters outcome: approved"},
 	"failed_attempts":               {"attempts", "with filters outcome: declined, refused, error"},
 	"failed_purchases":              {"purchases", "with filters outcome: failed"},
@@ -1117,20 +1248,25 @@ var Removed = map[string]Retired{
 	"usage_revenue":                 {"usage_charged", "with filters charge: charged"},
 	"forgiven_usage":                {"usage_charged", "with filters charge: forgiven"},
 	"credit_utilization":            {"usage_charged", "beside credits_sold"},
-	"billable_subscriptions":        {"subscriptions", "subscribers less scheduled churn replaces it (planned)"},
+	"billable_subscriptions":        {"subscribers", "less scheduled_mrr by movement churn"},
+	"subscriptions":                 {"subscribers", "customers with MRR; by product_id, the product's subscriptions; mrr_at_risk by risk_reason for the ones in trouble"},
+	"new_subscriptions":             {"subscriber_movements", "with filters movement: new, reactivation"},
+	"net_new_subscriptions":         {"subscriber_movements", "its total"},
+	"churn_rate":                    {"subscriber_churn_rate", "customers whose MRR went to none / customers with MRR at the start"},
+	"attempt_failure_rate":          {"authorization_rate", "1 - authorization_rate; declines by decline_cause"},
+	"purchase_failure_rate":         {"purchases", "with by outcome: failed against approved, recovered and failed; authorization_rate"},
+	"rebill_first_failure_rate":     {"first_try_rebill_approval_rate", "1 - first_try_rebill_approval_rate"},
 	"orphaned_members":              {"open_findings", "with filters finding_group: orphaned"},
 	"freeloaders":                   {"open_findings", "with filters finding_group: freeloader"},
 	"duplicate_coverage":            {"open_findings", "with filters finding_group: duplicate_coverage"},
 }
 
 // RemovedDimensions names each retired dimension's replacement.
-var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause"}
+var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause", "status": "risk_reason"}
 
 // Deferred names the measures later phases build (MRR movements, retention,
 // the books, trials); naming one is refused as planned.
 var Deferred = []string{
-	"mrr_movements", "subscriber_movements", "subscribers", "scheduled_mrr", "subscriber_churn_rate",
-	"nrr", "grr", "cohort_retention", "arpa", "ltv",
 	"recognized_revenue", "balance", "trials", "trial_conversion_rate", "revenue_nrr",
 }
 
@@ -1139,7 +1275,7 @@ var Caveats = []string{
 	"all money is GROSS OF PROCESSOR FEES (fees are not captured per-charge); cash differs from bank deposits by fee amounts",
 	"money never sums across currencies; when a money measure is grouped without a single-currency filter, 'currency' is added as an implicit group-by dimension",
 	"cash is signed: refunds and chargebacks are negative, a won dispute's return positive; its total is net cash",
-	"snapshot measures reconstruct state from interval columns; the 'status' dimension reflects each subscription's CURRENT status, not its status at historical t",
+	"MRR measures read the MRR rollups: a value at a past t is today's totals less the movements recorded after t, so a correction (a prune or its undo) moves the past it corrects; netted per customer and currency per transaction",
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
 	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; kind on payments exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them",
 	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; their outcome is as of the range end: a purchase quiet for an hour has failed, a cycle past its 15-day dunning window is lost",
