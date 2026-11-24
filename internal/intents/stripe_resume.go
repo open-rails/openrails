@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // TypeStripeResumeSubscription undoes the Stripe cancel of a membership its
@@ -35,13 +36,9 @@ type StripeResumePayload struct {
 }
 
 // StripeResumeIdempotencyKey: one remote resume per cancellation undone,
-// named by when the subscription was canceled.
-func StripeResumeIdempotencyKey(subscriptionID uuid.UUID, canceledAt *time.Time) string {
-	key := TypeStripeResumeSubscription + ":" + subscriptionID.String()
-	if canceledAt != nil {
-		key += ":" + canceledAt.UTC().Format(time.RFC3339Nano)
-	}
-	return key
+// named by when the locked row was canceled.
+func StripeResumeIdempotencyKey(subscriptionID uuid.UUID, canceledAt time.Time) string {
+	return TypeStripeResumeSubscription + ":" + subscriptionID.String() + ":" + canceledAt.UTC().Format(time.RFC3339Nano)
 }
 
 // StripeResumeHandler reads, then resumes, through the cancel's Stripe reads
@@ -89,6 +86,9 @@ func (h *StripeResumeHandler) Execute(ctx context.Context, intent gen.BillingPro
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
+	}
+	if outcome, wait := awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock); wait {
+		return outcome
 	}
 	rec, err := h.probe(ctx, key, psid)
 	if err != nil {
@@ -142,6 +142,29 @@ func (h *StripeResumeHandler) Verify(ctx context.Context, intent gen.BillingProv
 		return outcome
 	}
 	return Retryable("subscription still set to cancel at Stripe; resume verified not applied")
+}
+
+// stripeOrderWait is how long a Stripe cancel or resume waits for an earlier
+// one of its subscription before it looks again.
+const stripeOrderWait = time.Minute
+
+// awaitEarlierStripeWrite holds a Stripe cancel or resume while one of the
+// same subscription committed before it is in flight or unresolved, so they
+// reach Stripe in the order they were committed. The wait is no attempt.
+func awaitEarlierStripeWrite(ctx context.Context, d *db.DB, intent gen.BillingProviderIntent, clock clockwork.Clock) (Outcome, bool) {
+	if intent.SubscriptionID == nil {
+		return Outcome{}, false
+	}
+	waiting, err := d.Gen(ctx).HasEarlierStripeScheduleWrite(ctx, gen.HasEarlierStripeScheduleWriteParams{
+		MerchantID: intent.MerchantID, SubscriptionID: *intent.SubscriptionID, CreatedAt: intent.CreatedAt, ID: intent.ID,
+	})
+	if err != nil {
+		return Retryable("read earlier Stripe operations of the subscription: " + err.Error()), true
+	}
+	if waiting {
+		return Deferred("an earlier Stripe cancel or resume of the subscription is unresolved", timeutil.FirstClock(clock).Now().UTC().Add(stripeOrderWait)), true
+	}
+	return Outcome{}, false
 }
 
 // stripeResumeSettled is what a read alone answers: Stripe bills the

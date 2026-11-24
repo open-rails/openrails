@@ -108,6 +108,9 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if psid == "" {
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
 	}
+	if outcome, wait := awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock); wait {
+		return outcome
+	}
 	rec, err := h.probe(ctx, key, psid)
 	if err != nil {
 		return Retryable("stripe read before cancel failed: " + err.Error())

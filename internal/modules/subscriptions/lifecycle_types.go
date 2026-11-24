@@ -103,8 +103,9 @@ type ReactivateMembershipParams struct {
 type ResumeMembershipParams struct {
 	SubscriptionID uuid.UUID
 	// Within runs in the resume's transaction, after the row is resumed: the
-	// provider write the resume needs commits with it.
-	Within func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription) error
+	// provider write the resume needs commits with it. canceledAt is when the
+	// locked row was canceled.
+	Within func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error
 }
 
 var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")

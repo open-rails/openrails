@@ -1255,6 +1255,61 @@ func (q *Queries) GetUnresolvedSubscriptionCollection(ctx context.Context, arg G
 	return i, err
 }
 
+const hasEarlierStripeScheduleWrite = `-- name: HasEarlierStripeScheduleWrite :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+      AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription')
+      AND (created_at, id) < ($3::timestamptz, $4::uuid)
+      AND status IN ('in_flight', 'unknown_needs_verify')
+)
+`
+
+type HasEarlierStripeScheduleWriteParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CreatedAt      time.Time
+	ID             uuid.UUID
+}
+
+// Another Stripe cancel or resume of the subscription, committed before this
+// one, whose write is in flight or unresolved: this one waits for it, so they
+// reach Stripe in the order they were committed.
+func (q *Queries) HasEarlierStripeScheduleWrite(ctx context.Context, arg HasEarlierStripeScheduleWriteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasEarlierStripeScheduleWrite,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.CreatedAt,
+		arg.ID,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const hasOpenStripeResume = `-- name: HasOpenStripeResume :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+      AND intent_type = 'stripe_resume_subscription'
+      AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+)
+`
+
+type HasOpenStripeResumeParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// A Stripe resume of the subscription not settled yet: until it is, Stripe's
+// cancel_at_period_end is the cancel it undoes, not a new one.
+func (q *Queries) HasOpenStripeResume(ctx context.Context, arg HasOpenStripeResumeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenStripeResume, arg.MerchantID, arg.SubscriptionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasSubmittedSolanaPull = `-- name: HasSubmittedSolanaPull :one
 SELECT EXISTS (
   SELECT 1 FROM billing.provider_intents i

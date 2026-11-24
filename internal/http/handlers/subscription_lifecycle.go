@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -22,7 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/redact"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A customer's cancel carries their reason: 4 to 500 characters.
@@ -219,15 +223,22 @@ func resume(r *httprequest.Request, sub *models.Subscription, origin intents.Ori
 // resumeStripe resumes a subscription Stripe bills: the local resume and the
 // Stripe resume operation (cancel_at_period_end false) commit together, then
 // the operation runs here; one that cannot finish now its worker carries out.
+// A resume Stripe could not be told of now is refused before anything
+// commits: provider writes off, or Stripe not configured for its PSP.
 func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subscription, origin intents.Origin) error {
-	key := intents.StripeResumeIdempotencyKey(sub.ID, sub.CanceledAt)
+	if posture := (writeposture.View{Config: r.State.Config, DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
+		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so Stripe cannot be told of the resume: "+posture.Reason)
+	}
+	if _, _, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs); err != nil {
+		return err
+	}
 	var operation uuid.UUID
 	_, err := r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID,
-		Within: func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription) error {
+		Within: func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error {
 			row, err := intents.NewStore(r.State.DB.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
 				MerchantID: resumed.MerchantID, Provider: string(models.RailStripe), IntentType: intents.TypeStripeResumeSubscription,
 				SubscriptionID: &resumed.ID, PspID: resumed.PspID, Payload: intents.StripeResumePayload{RailSubscriptionID: resumed.RailSubscriptionID},
-				IdempotencyKey: key, NextAttemptAt: r.Clock.Now().UTC(), Origin: origin, OriginReason: "subscription resumed", Inline: true,
+				IdempotencyKey: intents.StripeResumeIdempotencyKey(resumed.ID, canceledAt), NextAttemptAt: r.Clock.Now().UTC(), Origin: origin, OriginReason: "subscription resumed", Inline: true,
 			})
 			operation = row.ID
 			return err

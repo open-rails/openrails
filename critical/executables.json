@@ -322,6 +322,12 @@
     "OR-J17-S07": [
       "TestCancellationRecoveryContracts/OR-J17-S07/a-stripe-resume-is-a-provider-operation"
     ],
+    "OR-J17-S08": [
+      "TestCancellationRecoveryContracts/OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off"
+    ],
+    "OR-J17-S09": [
+      "TestCancellationRecoveryContracts/OR-J17-S09/a-stripe-resume-waits-for-the-cancel-in-flight-before-it"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

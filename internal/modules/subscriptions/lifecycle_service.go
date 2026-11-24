@@ -1161,6 +1161,15 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume engine: %w", err)
 			}
 		}
+		var canceledAt time.Time
+		switch {
+		case subscription.CanceledAt != nil:
+			canceledAt = *subscription.CanceledAt
+		case subscription.EndedAt != nil:
+			canceledAt = *subscription.EndedAt
+		default:
+			return fmt.Errorf("resume membership: canceled subscription %s records no cancel", subscription.ID)
+		}
 		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {
 			return fmt.Errorf("resume membership %s: %w", subscription.ID, err)
 		}
@@ -1180,7 +1189,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			}
 		}
 		if params.Within != nil {
-			if err := params.Within(ctx, tx, subscription); err != nil {
+			if err := params.Within(ctx, tx, subscription, canceledAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}

@@ -868,3 +868,25 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type <> ALL(sqlc.arg(request_only_types)::text[])
 ORDER BY id
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: HasEarlierStripeScheduleWrite :one
+-- Another Stripe cancel or resume of the subscription, committed before this
+-- one, whose write is in flight or unresolved: this one waits for it, so they
+-- reach Stripe in the order they were committed.
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
+      AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription')
+      AND (created_at, id) < (sqlc.arg(created_at)::timestamptz, sqlc.arg(id)::uuid)
+      AND status IN ('in_flight', 'unknown_needs_verify')
+);
+
+-- name: HasOpenStripeResume :one
+-- A Stripe resume of the subscription not settled yet: until it is, Stripe's
+-- cancel_at_period_end is the cancel it undoes, not a new one.
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
+      AND intent_type = 'stripe_resume_subscription'
+      AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+);

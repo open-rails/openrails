@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 456,
+  "scenario_count": 458,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -452,6 +452,16 @@
       "id": "OR-J17-S07",
       "journey": "J17",
       "name": "A Stripe resume is a provider operation: the local resume and the Stripe write commit together, run once, logged"
+    },
+    {
+      "id": "OR-J17-S08",
+      "journey": "J17",
+      "name": "A Stripe resume Stripe cannot be told of (provider writes off) is refused, and nothing commits"
+    },
+    {
+      "id": "OR-J17-S09",
+      "journey": "J17",
+      "name": "A Stripe resume committed while its cancel is in flight waits for it: Stripe ends as the member last asked"
     },
     {
       "id": "OR-J18-S01",

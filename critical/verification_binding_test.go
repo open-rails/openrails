@@ -93,8 +93,8 @@ func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 }
 
 // stripeMembership imports a provider-owned Stripe subscription on account
-// "old", the merchant's only Stripe PSP.
-func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
+// "old", the merchant's only Stripe PSP; configure changes the world after.
+func stripeMembership(t *testing.T, configure ...func(*world)) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
 	t.Helper()
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
@@ -103,6 +103,9 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
+		for _, change := range configure {
+			change(w)
+		}
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")

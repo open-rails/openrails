@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -219,5 +220,52 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
 			" WHERE merchant_id = $1 AND provider_intent_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
 		require.Positive(t, logged)
+	})
+	t.Run("OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		stripe := accounts.accounts["sk_test_old"].core
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+		require.Contains(t, string(raw), string(billing.CodeProviderWritesDisabled))
+		subscriptionState(t, a, sub.ID, "canceled")
+		var resumes int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" WHERE merchant_id = $1 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID()).Scan(&resumes))
+		require.Zero(t, resumes, "a resume Stripe cannot hear commits nothing")
+		require.Empty(t, stripe.Mutations(""))
+	})
+	t.Run("OR-J17-S09/a-stripe-resume-waits-for-the-cancel-in-flight-before-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the cancel never reached Stripe")
+		}
+		// The member resumes while the cancel is in flight.
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		subscriptionState(t, a, sub.ID, "active")
+		held.Release()
+		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond, "the cancel lands")
+		a.clock.Advance(2 * time.Minute)
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			return stripe.Subscription(remote)["cancel_at_period_end"] == false
+		}, 20*time.Second, 100*time.Millisecond, "the resume follows it, as the two were committed")
+		subscriptionState(t, a, sub.ID, "active")
 	})
 }

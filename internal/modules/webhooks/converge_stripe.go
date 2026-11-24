@@ -359,8 +359,14 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			return fmt.Errorf("stripe converge: load subscription for mirror facts: %w", err)
 		}
 
+		// A resume not yet at Stripe leaves its cancel_at_period_end standing:
+		// that is the cancel it undoes, not a portal cancel.
+		resuming, err := gen.New(tx).HasOpenStripeResume(ctx, gen.HasOpenStripeResumeParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+		if err != nil {
+			return fmt.Errorf("stripe converge: read pending resume: %w", err)
+		}
 		switch {
-		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCanceled:
+		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCanceled && !resuming:
 			if err := s.mirrorPortalCancel(ctx, txdb, sub, now); err != nil {
 				return err
 			}
