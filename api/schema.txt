@@ -25,7 +25,7 @@ migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
-migration 0031_credit_books.up.sql sha256:7b32ad90358fe426a7250443b2309d8c5a000fe032e4de9e32a7b6cd725454ac
+migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -259,14 +259,17 @@ table billing.credit_grant_events
   column reason text
   column actor text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column request_key text
   constraint credit_grant_events_actor_check CHECK (((octet_length(actor) >= 1) AND (octet_length(actor) <= 255)))
   constraint credit_grant_events_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants(merchant_id, id)
   constraint credit_grant_events_event_check CHECK ((event = ANY (ARRAY['revoke'::text, 'reinstate'::text])))
   constraint credit_grant_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint credit_grant_events_pkey PRIMARY KEY (merchant_id, id)
   constraint credit_grant_events_reason_check CHECK ((reason <> ''::text))
+  constraint credit_grant_events_request_key_check CHECK (((octet_length(request_key) >= 1) AND (octet_length(request_key) <= 200)))
   index CREATE INDEX credit_grant_events_credit_grant_id_idx ON billing.credit_grant_events USING btree (merchant_id, credit_grant_id, created_at)
   index CREATE UNIQUE INDEX credit_grant_events_pkey ON billing.credit_grant_events USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX credit_grant_events_request_key_key ON billing.credit_grant_events USING btree (merchant_id, credit_grant_id, request_key) WHERE (request_key IS NOT NULL)
   trigger CREATE TRIGGER immutable_credit_grant_events BEFORE DELETE OR UPDATE ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_credit_grant_events_truncate BEFORE TRUNCATE ON billing.credit_grant_events FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER trg_credit_grant_events_apply AFTER INSERT ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.credit_grant_events_apply()
@@ -4104,7 +4107,9 @@ function billing.credit_grants_require_books()
   BEGIN
       IF billing.billing_restore_active(NEW.merchant_id) OR NEW.paid_amount IS NULL THEN RETURN NULL; END IF;
       IF NOT EXISTS (SELECT 1 FROM billing.ledger_transfers
-          WHERE merchant_id = NEW.merchant_id AND credit_grant_id = NEW.id AND book = 'general' AND operation = 'credit_issue') THEN
+          WHERE merchant_id = NEW.merchant_id AND credit_grant_id = NEW.id AND book = 'general' AND operation = 'credit_issue')
+         AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings
+          WHERE merchant_id = NEW.merchant_id AND finding_type = 'books.credit.unapplied' AND subject_key = 'credit_grant:' || NEW.id) THEN
           RAISE EXCEPTION 'credit_books_unposted: paid credit lot % has no general-ledger issue', NEW.id USING ERRCODE = '23514';
       END IF;
       RETURN NULL;

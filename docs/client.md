@@ -725,7 +725,7 @@ A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ 
 | `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
 | `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot; a retry under the same idempotency key replays, even after a reinstatement |
-| `ReinstateCreditGrant` | reverse a revocation: what it took returns to the balance |
+| `ReinstateCreditGrant` | reverse a revocation: what it took returns to the balance; a retry under the same idempotency key replays, even after a later revocation |
 
 ```go guide:credit-grant
 _, err := shop.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{

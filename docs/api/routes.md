@@ -107,7 +107,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/credit-grants` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `CreditGrant` |  |
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | `Idempotency-Key` |
-| POST | `/v1/admin/credit-grants/{id}/reinstate` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ReinstateCreditGrantParams` | 200 `CreditGrant` |  |
+| POST | `/v1/admin/credit-grants/{id}/reinstate` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ReinstateCreditGrantParams` | 200 `CreditGrant` | `Idempotency-Key` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
 | POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant`; event store |

@@ -27,6 +27,7 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -135,32 +136,69 @@ func (b *Books) postLot(ctx context.Context, l CreditLot, debit, credit Ref, amo
 // import's declaration: its caller defers it once the payment is recorded.
 var ErrCreditUnfunded = errors.New("books: a paid credit lot is deferred from its payment")
 
-// IssueCredit defers a paid lot's price, once at (credit_issue, credit_grant,
-// lot), effective when the lot was recorded: DR unapplied_cash / CR
-// deferred_revenue_credit, after receiving payment's cash; an import that
-// declares a paid amount without a payment is deferred from
-// opening_balance_equity. A gift posts nothing.
+// UnappliedCreditFindingType is the finding a paid lot raises when its
+// payment brought less cash than its price beyond what was already applied.
+const UnappliedCreditFindingType = "books.credit.unapplied"
+
+// IssueCredit defers a paid lot's price, effective when the lot was
+// recorded: DR unapplied_cash / CR deferred_revenue_credit at (credit_issue,
+// payment, payment id), what its payment applies like a bill's line. It
+// applies no more than the payment's receipt left unapplied: what does not
+// fit raises UnappliedCreditFindingType, so a payment is never applied beyond
+// what it brought. An import that declares a paid amount without a payment is
+// deferred from opening_balance_equity at (credit_issue, credit_grant, lot).
+// A gift, or a lot already issued, posts nothing.
 func (b *Books) IssueCredit(ctx context.Context, l CreditLot, payment *gen.BillingPayment) error {
-	if !l.Paid() {
+	if !l.Paid() || l.DeferredCredited > 0 {
 		return nil
 	}
 	if err := CheckCurrency(l.PaidCurrency); err != nil {
 		return err
 	}
-	coord := Coord{Operation: OpCreditIssue, Source: "credit_grant", SourceID: l.ID.String()}
 	switch {
 	case payment != nil:
-		if payment.CustomerID != l.Customer || payment.Currency != l.PaidCurrency || payment.Amount < l.PaidAmount {
+		if payment.CustomerID != l.Customer || payment.Currency != l.PaidCurrency {
 			return fmt.Errorf("books: payment %s did not pay for credit lot %s", payment.ID, l.ID)
 		}
 		if err := ReceivePayment(ctx, b.q, *payment); err != nil {
 			return err
 		}
-		return b.postLot(ctx, l, Ref{Type: UnappliedCash}, l.deferredRef(), l.PaidAmount, l.PaidCurrency, CashApplied, coord, l.CreatedAt)
+		cash, err := b.q.GetPaymentCashApplication(ctx, gen.GetPaymentCashApplicationParams{MerchantID: b.merchant, PaymentID: payment.ID.String()})
+		if err != nil {
+			return fmt.Errorf("books: read payment %s's application: %w", payment.ID, err)
+		}
+		fits := min(l.PaidAmount, max(cash.Received-cash.Applied, 0))
+		if fits < l.PaidAmount {
+			if err := b.unappliedCredit(ctx, l, payment.ID, cash.Received, cash.Applied); err != nil {
+				return err
+			}
+		}
+		coord := Coord{Operation: OpCreditIssue, Source: "payment", SourceID: payment.ID.String()}
+		return b.postLot(ctx, l, Ref{Type: UnappliedCash}, l.deferredRef(), fits, l.PaidCurrency, CashApplied, coord, l.CreatedAt)
 	case l.Funding == "import":
+		coord := Coord{Operation: OpCreditIssue, Source: "credit_grant", SourceID: l.ID.String()}
 		return b.postLot(ctx, l, Ref{Type: OpeningBalanceEquity}, l.deferredRef(), l.PaidAmount, l.PaidCurrency, OpeningBalance, coord, l.CreatedAt)
 	}
 	return fmt.Errorf("%w: lot %s", ErrCreditUnfunded, l.ID)
+}
+
+// unappliedCredit records a paid lot whose payment brought too little cash
+// to defer its whole price.
+func (b *Books) unappliedCredit(ctx context.Context, l CreditLot, payment uuid.UUID, received, applied int64) error {
+	raw, err := json.Marshal(map[string]any{"credit_grant_id": l.ID, "payment_id": payment, "currency": l.PaidCurrency,
+		"paid_amount": l.PaidAmount, "received": received, "applied": applied})
+	if err != nil {
+		return err
+	}
+	action := "The payment that bought this credit lot brought less cash than its price beyond what the books had already applied of it. The lot defers only what fit; review the payment's receipt and applications."
+	_, err = b.q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: b.merchant, FindingType: UnappliedCreditFindingType, SubjectKey: "credit_grant:" + l.ID.String(),
+		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: raw,
+	})
+	if err != nil {
+		return fmt.Errorf("books: raise %s: %w", UnappliedCreditFindingType, err)
+	}
+	return nil
 }
 
 // CreditMoveKind is what happened to a lot's units.

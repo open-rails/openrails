@@ -119,7 +119,7 @@
       "func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsParams) (*billing.MetricsResult, error)",
       "func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (*billing.Payment, error)",
       "func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id billing.PaymentID, params billing.RefundPaymentParams) (*billing.Payment, error)",
-      "func (c *Client) ReinstateCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)",
+      "func (c *Client) ReinstateCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error)",

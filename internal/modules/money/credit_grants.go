@@ -161,13 +161,16 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	current := creditGrantFromRow(addressed, s.now())
-	if current.State == billing.CreditGrantRevoked {
-		current.Replayed = true
-		return &current, nil
-	}
-	if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
-		return nil, ErrCreditGrantUnavailable
+	// Without a key, a revoked grant replays and one with nothing left is
+	// refused here; under a key, the command first finds its own replay.
+	if current := creditGrantFromRow(addressed, s.now()); idempotencyKey == "" {
+		if current.State == billing.CreditGrantRevoked {
+			current.Replayed = true
+			return &current, nil
+		}
+		if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+			return nil, ErrCreditGrantUnavailable
+		}
 	}
 	// The caller's key names one revocation; without one, a grant reinstated
 	// since its last revocation is revoked anew.
@@ -268,9 +271,10 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 
 // ReinstateCreditGrant reverses a grant's revocation under the payer's money
 // lock: the units the revocation froze return to its balance and their money
-// to deferral. Reinstating a live grant returns it with Replayed set. actor is
-// the staff subject the event names, "" for none.
-func (s *MoneyService) ReinstateCreditGrant(ctx context.Context, grantID uuid.UUID, reason, actor string) (*billing.CreditGrant, error) {
+// to deferral. Reinstating a live grant returns it with Replayed set, as does
+// a retry under idempotencyKey, even after a later revocation. actor is the
+// staff subject the event names, "" for none.
+func (s *MoneyService) ReinstateCreditGrant(ctx context.Context, grantID uuid.UUID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -303,7 +307,15 @@ func (s *MoneyService) ReinstateCreditGrant(ctx context.Context, grantID uuid.UU
 		if err != nil {
 			return err
 		}
-		if row.RevokedAt == nil {
+		made := false
+		if idempotencyKey != "" {
+			_, kerr := q.GetCreditGrantEventByKey(ctx, gen.GetCreditGrantEventByKeyParams{MerchantID: mid.UUID(), CreditGrantID: grantID, RequestKey: idempotencyKey})
+			if kerr != nil && !errors.Is(kerr, pgx.ErrNoRows) {
+				return kerr
+			}
+			made = kerr == nil
+		}
+		if made || row.RevokedAt == nil {
 			current := creditGrantFromRow(row, s.now())
 			current.Replayed = true
 			result = &current
@@ -313,7 +325,7 @@ func (s *MoneyService) ReinstateCreditGrant(ctx context.Context, grantID uuid.UU
 		if row.ExpiresAt != nil && !row.ExpiresAt.After(s.now()) {
 			return ErrCreditGrantUnavailable
 		}
-		if _, err := s.creditLots(q, mid.UUID()).Reinstate(ctx, grantID, reason, actor); err != nil {
+		if _, err := s.creditLots(q, mid.UUID()).Reinstate(ctx, grantID, reason, actor, idempotencyKey); err != nil {
 			return err
 		}
 		if row, err = q.GetCreditGrant(ctx, args); err != nil {

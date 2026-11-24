@@ -39,10 +39,11 @@ var creditsRoutes = []Route{
 			"Without a key, revoking a reinstated grant revokes it again.",
 		Request: billing.RevokeCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: codes("credit_grant_held", "credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.RevokeCreditGrant)},
-	{Method: POST, Path: "/v1/admin/credit-grants/{id}/reinstate", Group: Admin, Auth: AuthMerchant, Name: "ReinstateCreditGrant", Level: LevelUpdate,
+	{Method: POST, Path: "/v1/admin/credit-grants/{id}/reinstate", Group: Admin, Auth: AuthMerchant, Name: "ReinstateCreditGrant", Level: LevelUpdate, IdempotencyKey: true,
 		Args: []any{billing.CreditGrantID{}},
 		Doc: "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. " +
-			"Reinstating a live grant returns it with Replayed set; a lapsed grant is refused.",
+			"Reinstating a live grant returns it with Replayed set, as does a retry under the same idempotencyKey, " +
+			"even after a later revocation; a lapsed grant is refused.",
 		Request: billing.ReinstateCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: codes("credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.ReinstateCreditGrant)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/balance/transactions", Group: Admin, Auth: AuthMerchant, Name: "ListBalanceTransactions", Level: LevelRead,

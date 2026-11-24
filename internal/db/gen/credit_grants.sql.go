@@ -142,6 +142,36 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 	return i, err
 }
 
+const getCreditGrantEventByKey = `-- name: GetCreditGrantEventByKey :one
+SELECT merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key FROM billing.credit_grant_events
+WHERE merchant_id = $1::uuid AND credit_grant_id = $2::uuid
+  AND request_key = $3::text
+`
+
+type GetCreditGrantEventByKeyParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	RequestKey    string
+}
+
+// The event a caller's key made, if any.
+func (q *Queries) GetCreditGrantEventByKey(ctx context.Context, arg GetCreditGrantEventByKeyParams) (BillingCreditGrantEvent, error) {
+	row := q.db.QueryRow(ctx, getCreditGrantEventByKey, arg.MerchantID, arg.CreditGrantID, arg.RequestKey)
+	var i BillingCreditGrantEvent
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CreditGrantID,
+		&i.Event,
+		&i.EffectiveAt,
+		&i.Reason,
+		&i.Actor,
+		&i.CreatedAt,
+		&i.RequestKey,
+	)
+	return i, err
+}
+
 const getCreditLot = `-- name: GetCreditLot :one
 SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND id = $2::uuid
@@ -186,7 +216,7 @@ func (q *Queries) GetCreditLot(ctx context.Context, arg GetCreditLotParams) (Bil
 }
 
 const getLatestCreditGrantEvent = `-- name: GetLatestCreditGrantEvent :one
-SELECT merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at FROM billing.credit_grant_events
+SELECT merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key FROM billing.credit_grant_events
 WHERE merchant_id = $1::uuid AND credit_grant_id = $2::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT 1
@@ -210,7 +240,36 @@ func (q *Queries) GetLatestCreditGrantEvent(ctx context.Context, arg GetLatestCr
 		&i.Reason,
 		&i.Actor,
 		&i.CreatedAt,
+		&i.RequestKey,
 	)
+	return i, err
+}
+
+const getPaymentCashApplication = `-- name: GetPaymentCashApplication :one
+SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
+       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
+  AND source_id = $2::text AND transfer_type IN ('cash_received', 'cash_applied')
+`
+
+type GetPaymentCashApplicationParams struct {
+	MerchantID uuid.UUID
+	PaymentID  string
+}
+
+type GetPaymentCashApplicationRow struct {
+	Received int64
+	Applied  int64
+}
+
+// What a payment's receipt brought and what the general ledger applied of
+// it: to its bill's lines at (application, payment, id) and to the credit lot
+// it bought at (credit_issue, payment, id).
+func (q *Queries) GetPaymentCashApplication(ctx context.Context, arg GetPaymentCashApplicationParams) (GetPaymentCashApplicationRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentCashApplication, arg.MerchantID, arg.PaymentID)
+	var i GetPaymentCashApplicationRow
+	err := row.Scan(&i.Received, &i.Applied)
 	return i, err
 }
 
@@ -347,10 +406,10 @@ func (q *Queries) InsertCreditGrant(ctx context.Context, arg InsertCreditGrantPa
 }
 
 const insertCreditGrantEvent = `-- name: InsertCreditGrantEvent :one
-INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor)
+INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor, request_key)
 VALUES ($1::uuid, $2::uuid, $3::text,
-    $4::timestamptz, $5::text, $6::text)
-RETURNING merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at
+    $4::timestamptz, $5::text, $6::text, $7::text)
+RETURNING merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key
 `
 
 type InsertCreditGrantEventParams struct {
@@ -360,6 +419,7 @@ type InsertCreditGrantEventParams struct {
 	EffectiveAt   time.Time
 	Reason        *string
 	Actor         *string
+	RequestKey    *string
 }
 
 // Its trigger sets or clears the lot's revoked_at, and refuses a revoke of a
@@ -372,6 +432,7 @@ func (q *Queries) InsertCreditGrantEvent(ctx context.Context, arg InsertCreditGr
 		arg.EffectiveAt,
 		arg.Reason,
 		arg.Actor,
+		arg.RequestKey,
 	)
 	var i BillingCreditGrantEvent
 	err := row.Scan(
@@ -383,6 +444,7 @@ func (q *Queries) InsertCreditGrantEvent(ctx context.Context, arg InsertCreditGr
 		&i.Reason,
 		&i.Actor,
 		&i.CreatedAt,
+		&i.RequestKey,
 	)
 	return i, err
 }

@@ -360,4 +360,12 @@ func usageOrderChangeIsBought(t *testing.T) {
 	require.EqualValues(t, 6_299, deferred)
 	require.Zero(t, released)
 	require.EqualValues(t, 3_703_701, glBalance(t, a.world, "unapplied_cash"), "the order's share of the $3.71 waits for its application")
+	// The change applies its payment's cash, as a bill's line would: the
+	// per-payment audit counts it.
+	var payment, issued string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT p.id::text, t.source || ':' || t.source_id FROM "+booksTable(a.world, "payments")+" p, "+booksTable(a.world, "ledger_transfers")+" t"+
+		" WHERE p.merchant_id = $1 AND p.order_id = $2 AND t.merchant_id = $1 AND t.credit_grant_id = $3 AND t.operation = 'credit_issue'",
+		a.alpha.MerchantID().UUID(), order.ID.UUID(), change.ID.UUID()).Scan(&payment, &issued))
+	require.Equal(t, "payment:"+payment, issued)
+	booksAudited(t, a.world)
 }

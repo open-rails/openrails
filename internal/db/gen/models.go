@@ -236,6 +236,8 @@ type BillingCreditGrantEvent struct {
 	Reason      *string
 	Actor       *string
 	CreatedAt   time.Time
+	// The Idempotency-Key the event was made under, if any: a retry under it replays the event.
+	RequestKey *string
 }
 
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.

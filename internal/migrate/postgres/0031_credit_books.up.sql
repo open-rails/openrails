@@ -56,14 +56,17 @@ END;
 $$;
 
 -- A paid lot defers its price in the transaction that records it: its
--- credit_issue leg exists at commit. A restore brings lots and legs as they
--- were, a lot from before the credit books with none.
+-- credit_issue leg exists at commit, or the books.credit.unapplied finding
+-- that its payment brought too little to apply. A restore brings lots and
+-- legs as they were, a lot from before the credit books with none.
 CREATE FUNCTION billing.credit_grants_require_books() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
     IF billing.billing_restore_active(NEW.merchant_id) OR NEW.paid_amount IS NULL THEN RETURN NULL; END IF;
     IF NOT EXISTS (SELECT 1 FROM billing.ledger_transfers
-        WHERE merchant_id = NEW.merchant_id AND credit_grant_id = NEW.id AND book = 'general' AND operation = 'credit_issue') THEN
+        WHERE merchant_id = NEW.merchant_id AND credit_grant_id = NEW.id AND book = 'general' AND operation = 'credit_issue')
+       AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings
+        WHERE merchant_id = NEW.merchant_id AND finding_type = 'books.credit.unapplied' AND subject_key = 'credit_grant:' || NEW.id) THEN
         RAISE EXCEPTION 'credit_books_unposted: paid credit lot % has no general-ledger issue', NEW.id USING ERRCODE = '23514';
     END IF;
     RETURN NULL;
@@ -86,6 +89,12 @@ BEGIN
         WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
 END;
 $_$;
+
+-- A revocation or reinstatement retried under its caller's key replays.
+ALTER TABLE billing.credit_grant_events ADD COLUMN request_key text CHECK (octet_length(request_key) BETWEEN 1 AND 200);
+COMMENT ON COLUMN billing.credit_grant_events.request_key IS 'The Idempotency-Key the event was made under, if any: a retry under it replays the event.';
+CREATE UNIQUE INDEX credit_grant_events_request_key_key ON billing.credit_grant_events (merchant_id, credit_grant_id, request_key)
+    WHERE request_key IS NOT NULL;
 
 -- A reinstated lot can be revoked again: credit_revoke is no longer once per
 -- lot.

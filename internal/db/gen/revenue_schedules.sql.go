@@ -338,25 +338,15 @@ func (q *Queries) ListOrderReceipts(ctx context.Context, arg ListOrderReceiptsPa
 }
 
 const listOverappliedPayments = `-- name: ListOverappliedPayments :many
-WITH legs AS (
-    SELECT source_id AS payment_id, currency, transfer_type, amount
-    FROM billing.ledger_transfers
-    WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
-      AND transfer_type IN ('cash_received', 'cash_applied')
-    UNION ALL
-    SELECT g.payment_id::text, t.currency, t.transfer_type, t.amount
-    FROM billing.ledger_transfers t
-    JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
-    WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.operation = 'credit_issue'
-      AND t.transfer_type = 'cash_applied' AND g.payment_id IS NOT NULL
-)
-SELECT payment_id::text AS payment_id, currency::text AS currency,
+SELECT source_id AS payment_id, currency,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
-FROM legs
-GROUP BY payment_id, currency
+FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
+  AND transfer_type IN ('cash_received', 'cash_applied')
+GROUP BY source_id, currency
 HAVING COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0) > COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)
-ORDER BY payment_id, currency
+ORDER BY source_id, currency
 `
 
 type ListOverappliedPaymentsRow struct {
@@ -367,7 +357,8 @@ type ListOverappliedPaymentsRow struct {
 }
 
 // A payment whose cash the general ledger applied beyond what it received:
-// to its bill's lines, and to the credit lot it bought (its credit_issue).
+// to its bill's lines at (application, payment, id) and to the credit lot it
+// bought at (credit_issue, payment, id).
 func (q *Queries) ListOverappliedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListOverappliedPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listOverappliedPayments, merchantID)
 	if err != nil {

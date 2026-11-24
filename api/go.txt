@@ -130,7 +130,7 @@ pkg openrails, method (*Client) PreviewSubscriptionChange(context.Context, billi
 pkg openrails, method (*Client) QueryMetrics(context.Context, billing.QueryMetricsParams) (*billing.MetricsResult, error)
 pkg openrails, method (*Client) RecordExternalPayment(context.Context, billing.RecordExternalPaymentParams) (*billing.Payment, error)
 pkg openrails, method (*Client) RefundPayment(context.Context, string, billing.PaymentID, billing.RefundPaymentParams) (*billing.Payment, error)
-pkg openrails, method (*Client) ReinstateCreditGrant(context.Context, billing.CreditGrantID, billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)
+pkg openrails, method (*Client) ReinstateCreditGrant(context.Context, string, billing.CreditGrantID, billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) ReleaseAdmissions(context.Context, []string) ([]billing.AdmissionResult, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingParams) (*billing.FindingResolution, error)
 pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.SubscriptionID) (*billing.Subscription, error)

@@ -152,14 +152,15 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantI
 	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason, idempotencyKey, actor)
 }
 
-// ReinstateCreditGrant reverses a grant's revocation on actor's behalf.
-func (s *Service) ReinstateCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, actor string) (*billing.CreditGrant, error) {
+// ReinstateCreditGrant reverses a grant's revocation on actor's behalf, once
+// per idempotencyKey when one is given.
+func (s *Service) ReinstateCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().ReinstateCreditGrant(ctx, id.UUID(), reason, actor)
+	return s.moneyService().ReinstateCreditGrant(ctx, id.UUID(), reason, idempotencyKey, actor)
 }
 
 // ListBalanceTransactions lists a customer's ledger in one currency, newest

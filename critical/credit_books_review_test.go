@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"net/http"
 	"testing"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/stripemock"
 )
 
@@ -35,6 +35,7 @@ func TestCreditBooksEdges(t *testing.T) {
 	t.Run("OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency", piecedAndUnitRefunds)
 	t.Run("OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated", revocationKeysAndLapsedReinstatement)
 	t.Run("OR-J40-S25/a-lot-applied-beyond-its-payments-cash-fails-ledger-audit", overappliedLotFailsAudit)
+	t.Run("OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding", unfundedLotRaisesAFinding)
 }
 
 // A credit lot's issue applies its payment's cash: ledger-audit holds it to
@@ -47,13 +48,13 @@ func overappliedLotFailsAudit(t *testing.T) {
 
 	// A second application of the lot, as a broken writer would post it.
 	customer := s.customer.UUID()
-	lotID := lot.UUID()
+	require.Len(t, lotLegs(t, w, lot, "cash_applied"), 1)
 	require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 		_, _, err := books.New(q, w.alpha.MerchantID().UUID()).Post(ctx, books.Posting{
 			Debit: books.Ref{Type: books.UnappliedCash}, Credit: books.Ref{Type: books.DeferredRevenueCredit, Customer: &customer},
 			Amount: 1_000_000, Currency: "USD", Type: books.CashApplied,
-			Coord:       books.Coord{Operation: books.OpCreditIssue, Source: "credit_grant", SourceID: lotID.String() + ":again"},
-			EffectiveAt: w.clock.Now(), Customer: &customer, CreditGrant: &lotID,
+			Coord:       books.Coord{Operation: books.OpCreditIssue, Source: "payment", SourceID: payment.UUID().String()},
+			EffectiveAt: w.clock.Now(), Customer: &customer,
 		})
 		return err
 	}))
@@ -128,7 +129,7 @@ func restoresCreditBooks(t *testing.T) {
 	s.spend(t, 11_000_000, "before-the-revocation")
 	_, err := a.alpha.RevokeCreditGrant(t.Context(), "", reinstated, billing.RevokeCreditGrantParams{Reason: "abuse"})
 	require.NoError(t, err)
-	_, err = a.alpha.ReinstateCreditGrant(t.Context(), reinstated, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+	_, err = a.alpha.ReinstateCreditGrant(t.Context(), "", reinstated, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
 	require.NoError(t, err)
 	deferred, released := lotMoney(t, w, reinstated)
 	require.EqualValues(t, 90_000_000, deferred, "the forfeit's reversal deferred again")
@@ -324,31 +325,14 @@ func piecedAndUnitRefunds(t *testing.T) {
 		balance(t, s.a.alpha, s.customer, 0, 0, 0)
 		booksAudited(t, w)
 	})
-	// A lot of a merchant's own unit (400 GOLD for $20, as #1379 sells it)
-	// refunds its units in GOLD and its money in USD.
+	// A lot of a merchant's own unit, 400 GOLD bought for $20 as #1379 sells
+	// it: the pack's line is a credit line, so its payment's cash is the lot's
+	// alone to apply. It reverses its units in GOLD and its money in USD.
 	t.Run("merchant-unit", func(t *testing.T) {
 		s := newCreditShop(t)
-		a, w := s.a, s.a.world
-		toolkit, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "gold-pouch", DisplayName: "Gold pouch"})
-		require.NoError(t, err)
-		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: toolkit.ID, Key: "gold-pouch", UnitAmount: 20_000_000, Currency: "USD"})
-		require.NoError(t, err)
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(20_000_000)), Reusable: ptr(true),
-			Payment: &billing.OrderPaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "gold"})
-		require.Equal(t, http.StatusCreated, status, string(raw))
-		var payment uuid.UUID
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "payments")+" WHERE merchant_id=$1 AND customer_id=$2 AND amount=20000000",
-			w.alpha.MerchantID().UUID(), s.customer.UUID()).Scan(&payment))
-		var lot uuid.UUID
-		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
-			issued, err := credits.New(q, w.alpha.MerchantID().UUID(), w.clock.Now).Issue(ctx, credits.Issue{
-				Customer: s.customer.UUID(), Unit: "GOLD", Units: 400, Funding: credits.Purchase, PaidAmount: ptr(int64(20_000_000)), PaidCurrency: ptr("USD"),
-				Source: "payment", SourceID: payment.String(), Invoker: s.customer.String(), Payment: &payment,
-			})
-			lot = issued.ID
-			return err
-		}))
+		w := s.a.world
+		payment := s.cardPayment(t, 20_000_000, models.MoneyMovementRail, "gold-pack")
+		lot := s.issue(t, "GOLD", 400, 20_000_000, payment)
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			_, err := credits.New(q, w.alpha.MerchantID().UUID(), w.clock.Now).Spend(ctx, s.customer.UUID(), "GOLD", 100, s.customer.String(), "critical",
 				ledger.Coord{Operation: ledger.OpCapture, Source: "critical", SourceID: "gold-spend"})
@@ -356,17 +340,93 @@ func piecedAndUnitRefunds(t *testing.T) {
 		}))
 		require.Equal(t, []int64{5_000_000}, lotLegs(t, w, billing.CreditGrantID(lot), "credit_released"), "100 GOLD at $0.05")
 
-		refund, err := a.alpha.RefundPayment(t.Context(), "half-the-gold", billing.PaymentID(payment), billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Half back"})
-		require.NoError(t, err)
-		require.Equal(t, billing.PaymentSucceeded, refund.Status)
+		s.reverse(t, payment, -10_000_000, payments.ReversalChargeback, "gold-chargeback")
 		require.EqualValues(t, 100, lotUnits(t, w, lot), "200 GOLD withdrawn")
-		require.Equal(t, []int64{10_000_000}, lotLegs(t, w, billing.CreditGrantID(lot), "refund_deferred"), "in dollars")
+		require.Equal(t, []int64{10_000_000}, lotLegs(t, w, billing.CreditGrantID(lot), "chargeback_deferred"), "in dollars")
 		var refunded int64
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT credits_posted FROM "+booksTable(w, "ledger_type_totals")+" WHERE merchant_id=$1 AND book='units' AND currency='GOLD' AND account_type='units_refunded'",
 			w.alpha.MerchantID().UUID()).Scan(&refunded))
 		require.EqualValues(t, 200, refunded)
 		booksAudited(t, w)
 	})
+}
+
+// cardPayment stores a succeeded card payment with no order, as a checkout's
+// credit line leaves its cash: for the lot it bought alone.
+func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.MoneyMovement, key string) uuid.UUID {
+	t.Helper()
+	w := s.a.world
+	_, err := s.a.alpha.UpdateCustomer(t.Context(), s.customer, billing.UpdateCustomerParams{})
+	require.NoError(t, err)
+	var psp uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "psps")+" WHERE merchant_id=$1 AND rail='stripe' ORDER BY created_at LIMIT 1",
+		w.alpha.MerchantID().UUID()).Scan(&psp))
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+	id := uuid.New()
+	require.NoError(t, payments.NewPaymentService(database, w.clock).Create(ctx, &models.Payment{
+		ID: id, CustomerID: s.customer.UUID(), Channel: models.ChannelRail, Rail: models.RailStripe, PspID: &psp, TransactionID: key,
+		Amount: amount, ListAmount: amount, Currency: "USD", Status: payments.PaymentStatusSucceededValue, MoneyMovement: movement,
+		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
+	}))
+	return id
+}
+
+// issue records the lot a payment bought, as purchasedcredits.Fund does.
+func (s *creditShop) issue(t *testing.T, unit string, units, paid int64, payment uuid.UUID) uuid.UUID {
+	t.Helper()
+	w := s.a.world
+	var lot uuid.UUID
+	require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+		issued, err := credits.New(q, w.alpha.MerchantID().UUID(), w.clock.Now).Issue(ctx, credits.Issue{
+			Customer: s.customer.UUID(), Unit: unit, Units: units, Funding: credits.Purchase, PaidAmount: ptr(paid), PaidCurrency: ptr("USD"),
+			Source: "payment", SourceID: payment.String(), Invoker: s.customer.String(), Payment: &payment,
+		})
+		lot = issued.ID
+		return err
+	}))
+	return lot
+}
+
+// reverse records a succeeded reversal of payment and applies it to the lot
+// the payment bought, as every reversal path does.
+func (s *creditShop) reverse(t *testing.T, payment uuid.UUID, amount int64, kind, key string) {
+	t.Helper()
+	w := s.a.world
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+	service := payments.NewPaymentService(database, w.clock)
+	original, err := service.GetByID(ctx, payment)
+	require.NoError(t, err)
+	id := uuid.New()
+	require.NoError(t, service.Create(ctx, &models.Payment{
+		ID: id, CustomerID: original.CustomerID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail, PspID: original.PspID,
+		TransactionID: key, Amount: amount, ListAmount: original.ListAmount, Currency: original.Currency, ReversalKind: &kind,
+		Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
+	}))
+	posted, err := purchasedcredits.New(database, w.clock).ApplyReversal(ctx, payment, id, nil)
+	require.NoError(t, err)
+	require.True(t, posted)
+}
+
+// A lot whose payment brought no cash (a bookkeeping row) defers nothing, raises
+// books.credit.unapplied and still commits: a payment is never applied beyond
+// its receipt.
+func unfundedLotRaisesAFinding(t *testing.T) {
+	s := newCreditShop(t)
+	w := s.a.world
+	payment := s.cardPayment(t, 20_000_000, models.MoneyMovementNone, "bookkeeping")
+	lot := s.issue(t, "USD", 20_000_000, 20_000_000, payment)
+	require.Empty(t, lotLegs(t, w, billing.CreditGrantID(lot), "cash_applied"))
+	deferred, _ := lotMoney(t, w, billing.CreditGrantID(lot))
+	require.Zero(t, deferred)
+	page, err := s.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.credit.unapplied"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	balance(t, s.a.alpha, s.customer, 20_000_000, 0, 20_000_000)
+	booksAudited(t, w)
 }
 
 func revocationKeysAndLapsedReinstatement(t *testing.T) {
@@ -377,7 +437,7 @@ func revocationKeysAndLapsedReinstatement(t *testing.T) {
 		revoked, err := a.alpha.RevokeCreditGrant(t.Context(), "first", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
 		require.NoError(t, err)
 		require.Equal(t, billing.CreditGrantRevoked, revoked.State)
-		_, err = a.alpha.ReinstateCreditGrant(t.Context(), lot, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+		_, err = a.alpha.ReinstateCreditGrant(t.Context(), "", lot, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
 		require.NoError(t, err)
 
 		// The first revocation retried under its key replays; the lot stays
@@ -394,6 +454,31 @@ func revocationKeysAndLapsedReinstatement(t *testing.T) {
 		require.False(t, again.Replayed)
 		require.Equal(t, billing.CreditGrantRevoked, again.State)
 		require.Len(t, lotLegs(t, a.world, lot, "credit_forfeited"), 2)
+
+		// The first reinstatement retried under its key after that revocation
+		// replays; it does not undo it.
+		_, err = a.alpha.ReinstateCreditGrant(t.Context(), "first-reinstate", lot, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+		require.NoError(t, err)
+		_, err = a.alpha.RevokeCreditGrant(t.Context(), "third", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
+		require.NoError(t, err)
+		stale, err := a.alpha.ReinstateCreditGrant(t.Context(), "first-reinstate", lot, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+		require.NoError(t, err)
+		require.True(t, stale.Replayed)
+		require.Equal(t, billing.CreditGrantRevoked, stale.State)
+		balance(t, a.alpha, s.customer, 0, 0, 0)
+	})
+	t.Run("idempotency-key-after-the-lot-is-spent", func(t *testing.T) {
+		s := newCreditShop(t)
+		a := s.a
+		_, lot := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
+		_, err := a.alpha.RevokeCreditGrant(t.Context(), "spent-later", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
+		require.NoError(t, err)
+		_, err = a.alpha.ReinstateCreditGrant(t.Context(), "", lot, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+		require.NoError(t, err)
+		s.spend(t, 55_000_000, "all-of-it")
+		retried, err := a.alpha.RevokeCreditGrant(t.Context(), "spent-later", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
+		require.NoError(t, err, "a retry under its key replays before the lot's remainder is read")
+		require.True(t, retried.Replayed)
 	})
 	t.Run("lapsed", func(t *testing.T) {
 		s := newCreditShop(t)
@@ -402,7 +487,7 @@ func revocationKeysAndLapsedReinstatement(t *testing.T) {
 		_, err := a.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "abuse"})
 		require.NoError(t, err)
 		a.clock.Advance(49 * time.Hour)
-		_, err = a.alpha.ReinstateCreditGrant(t.Context(), lot, billing.ReinstateCreditGrantParams{Reason: "too late"})
+		_, err = a.alpha.ReinstateCreditGrant(t.Context(), "", lot, billing.ReinstateCreditGrantParams{Reason: "too late"})
 		var refusal *billing.StatusError
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodeCreditGrantUnavailable, refusal.Code)

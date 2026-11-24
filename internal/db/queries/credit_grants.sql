@@ -32,10 +32,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(paymen
 -- name: InsertCreditGrantEvent :one
 -- Its trigger sets or clears the lot's revoked_at, and refuses a revoke of a
 -- revoked lot or a reinstatement of a live one.
-INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor)
+INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor, request_key)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(credit_grant_id)::uuid, sqlc.arg(event)::text,
-    sqlc.arg(effective_at)::timestamptz, sqlc.narg(reason)::text, sqlc.narg(actor)::text)
+    sqlc.arg(effective_at)::timestamptz, sqlc.narg(reason)::text, sqlc.narg(actor)::text, sqlc.narg(request_key)::text)
 RETURNING *;
+
+-- name: GetCreditGrantEventByKey :one
+-- The event a caller's key made, if any.
+SELECT * FROM billing.credit_grant_events
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND credit_grant_id = sqlc.arg(credit_grant_id)::uuid
+  AND request_key = sqlc.arg(request_key)::text;
 
 -- name: ListSpendableCreditLots :many
 -- Live lots (started, not lapsed, not revoked) with units left, soonest
@@ -255,3 +261,13 @@ SELECT * FROM billing.credit_grant_events
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND credit_grant_id = sqlc.arg(credit_grant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- name: GetPaymentCashApplication :one
+-- What a payment's receipt brought and what the general ledger applied of
+-- it: to its bill's lines at (application, payment, id) and to the credit lot
+-- it bought at (credit_issue, payment, id).
+SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
+       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+FROM billing.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
+  AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied');

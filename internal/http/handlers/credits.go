@@ -231,6 +231,12 @@ func ReinstateCreditGrant(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is required (at most 500 characters)").WithParam("reason"))
 		return
 	}
+	// The key is optional: with one, a retry replays this reinstatement.
+	key := strings.TrimSpace(r.Header("Idempotency-Key"))
+	if len(key) > 200 {
+		r.ErrorCode(billing.CodeInvalidParam, "Idempotency-Key is at most 200 bytes")
+		return
+	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
@@ -239,7 +245,7 @@ func ReinstateCreditGrant(r *httprequest.Request) {
 	if admin, ok := r.Staff(); ok {
 		actor = admin.Subject
 	}
-	grant, err := svc.ReinstateCreditGrant(r.Request.Context(), id, params.Reason, actor)
+	grant, err := svc.ReinstateCreditGrant(r.Request.Context(), id, params.Reason, key, actor)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant reinstatement failed")
 		return

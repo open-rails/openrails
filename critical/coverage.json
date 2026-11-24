@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 663,
+  "scenario_count": 664,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3317,6 +3317,11 @@
       "id": "OR-J40-S25",
       "journey": "J40",
       "name": "A credit lot applied beyond its payment's cash fails ledger-audit, as a bill's lines would"
+    },
+    {
+      "id": "OR-J40-S26",
+      "journey": "J40",
+      "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
     }
   ]
 }

@@ -238,7 +238,7 @@ func creditBreakageAndReinstatement(t *testing.T) {
 	balance(t, a.alpha, s.customer, 0, 0, 0)
 
 	// Reinstating it returns its 44 credits and their $40 to deferral.
-	reinstated, err := a.alpha.ReinstateCreditGrant(t.Context(), long, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+	reinstated, err := a.alpha.ReinstateCreditGrant(t.Context(), "", long, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
 	require.NoError(t, err)
 	require.Equal(t, billing.CreditGrantActive, reinstated.State)
 	require.EqualValues(t, 44_000_000, reinstated.RemainingAmount)
@@ -247,7 +247,7 @@ func creditBreakageAndReinstatement(t *testing.T) {
 	require.EqualValues(t, 40_000_000, deferred-released)
 	require.EqualValues(t, 9_090_910, glBalance(t, w, "breakage_revenue"))
 	balance(t, a.alpha, s.customer, 44_000_000, 0, 44_000_000)
-	again, err := a.alpha.ReinstateCreditGrant(t.Context(), long, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
+	again, err := a.alpha.ReinstateCreditGrant(t.Context(), "", long, billing.ReinstateCreditGrantParams{Reason: "appeal upheld"})
 	require.NoError(t, err)
 	require.True(t, again.Replayed, "reinstating a live grant replays")
 

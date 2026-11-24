@@ -6132,7 +6132,7 @@
           "admin"
         ],
         "operationId": "ReinstateCreditGrant",
-        "description": "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. Reinstating a live grant returns it with Replayed set; a lapsed grant is refused.",
+        "description": "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. Reinstating a live grant returns it with Replayed set, as does a retry under the same idempotencyKey, even after a later revocation; a lapsed grant is refused.",
         "parameters": [
           {
             "name": "id",
@@ -6149,6 +6149,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
             }
           }
         ],

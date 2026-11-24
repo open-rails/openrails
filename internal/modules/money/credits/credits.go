@@ -252,7 +252,7 @@ func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, a
 	if _, err := l.SettleRunningCharges(ctx, lot.CustomerID, lot.Unit, l.now()); err != nil {
 		return lot, err
 	}
-	if _, err := l.event(ctx, id, "revoke", reason, actor, asOf); err != nil {
+	if _, err := l.event(ctx, id, "revoke", reason, actor, "", asOf); err != nil {
 		return lot, err
 	}
 	if err := l.Materialize(ctx, id); err != nil {
@@ -268,8 +268,8 @@ var ErrLapsed = errors.New("credits: the lot has lapsed")
 // Reinstate reverses a lot's revocation: the units it froze return to the
 // balance from units_revoked (credit_reinstate) and their money from breakage
 // to deferral. A lapsed lot is refused (ErrLapsed). actor is who reinstated
-// it, "" for none.
-func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor string) (gen.BillingCreditGrant, error) {
+// it, "" for none; key the caller's idempotency key, "" for none.
+func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor, key string) (gen.BillingCreditGrant, error) {
 	lot, err := l.Get(ctx, id)
 	if err != nil {
 		return lot, fmt.Errorf("credits: load lot %s: %w", id, err)
@@ -277,7 +277,7 @@ func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor string
 	if lot.ExpiresAt != nil && !lot.ExpiresAt.After(l.now()) {
 		return lot, ErrLapsed
 	}
-	event, err := l.event(ctx, id, "reinstate", reason, actor, time.Time{})
+	event, err := l.event(ctx, id, "reinstate", reason, actor, key, time.Time{})
 	if err != nil {
 		return lot, err
 	}
@@ -306,8 +306,9 @@ func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor string
 	return l.Get(ctx, id)
 }
 
-// event appends a revocation or reinstatement, effective at (zero is now).
-func (l *Lots) event(ctx context.Context, id uuid.UUID, kind, reason, actor string, at time.Time) (gen.BillingCreditGrantEvent, error) {
+// event appends a revocation or reinstatement, effective at (zero is now),
+// under the caller's key ("" for none).
+func (l *Lots) event(ctx context.Context, id uuid.UUID, kind, reason, actor, key string, at time.Time) (gen.BillingCreditGrantEvent, error) {
 	if at.IsZero() {
 		at = l.now()
 	}
@@ -317,6 +318,9 @@ func (l *Lots) event(ctx context.Context, id uuid.UUID, kind, reason, actor stri
 	}
 	if actor != "" {
 		params.Actor = &actor
+	}
+	if key != "" {
+		params.RequestKey = &key
 	}
 	event, err := l.q.InsertCreditGrantEvent(ctx, params)
 	if err != nil {

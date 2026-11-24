@@ -42,8 +42,11 @@ func normalizePreBooks(p Profile, values *[]*string) error {
 	case p.Name == "ledger_transfers" && len(*values) == len(p.Columns)-1:
 		*values = append(*values, nil)
 	case p.Name == "credit_grants" && len(*values) == len(p.Columns)-2:
-		// Before the credit books no lot's money was deferred.
+		// Before the credit books no lot's money was deferred,
 		*values = append(*values, new("0"), new("0"))
+	case p.Name == "credit_grant_events" && len(*values) == len(p.Columns)-1:
+		// and no event was made under a caller's key.
+		*values = append(*values, nil)
 	}
 	return nil
 }
