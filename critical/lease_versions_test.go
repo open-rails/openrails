@@ -247,7 +247,8 @@ func TestLeaseVersions(t *testing.T) {
 		order := oneUsageOrder(t, a, customer)
 		require.EqualValues(t, 30_000_000, order.Total)
 		dayEnd := time.Date(2026, 9, 24, 23, 59, 59, 999_999_000, time.UTC)
-		require.True(t, dayEnd.Equal(order.Usage.PeriodStartsAt), "dated at its day's end, not at its posting: %s", order.Usage.PeriodStartsAt)
+		require.True(t, dayEnd.Equal(owedAccruedAt(t, a.world, order.ID)), "dated at its day's end, not at its posting")
+		require.True(t, order.Usage.PeriodStartsAt.Before(dayEnd), "the order's period starts with the usage's: %s", order.Usage.PeriodStartsAt)
 	})
 
 	t.Run("OR-J24-S22/usage-after-a-credit-lot-lapses-never-draws-it", func(t *testing.T) {
