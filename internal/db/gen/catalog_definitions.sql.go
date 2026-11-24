@@ -377,7 +377,7 @@ VALUES (
     $1::uuid, $2::uuid, $3::bigint,
     NULLIF($4::text, ''), NULLIF($5::text, ''), $6::jsonb,
     $7::jsonb, $8::jsonb,
-    COALESCE($9::uuid, gen_random_uuid()), COALESCE($10::timestamptz, now())
+    COALESCE($9::uuid, uuidv7()), COALESCE($10::timestamptz, now())
 )
 ON CONFLICT (merchant_id, product_id, ordinal) DO UPDATE SET meter_key = EXCLUDED.meter_key,
     payment_term = EXCLUDED.payment_term, filter = EXCLUDED.filter, allowance = EXCLUDED.allowance,

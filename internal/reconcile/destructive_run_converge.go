@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // DestructiveRunKindApproval is an approval run's key in
@@ -58,7 +59,7 @@ func (r *PGDestructiveRunRecorder) Open(ctx context.Context, params OpenDestruct
 	if actor == "" {
 		actor = "unknown"
 	}
-	runID := uuid.New()
+	runID := uuidutil.NewV7()
 	expected := int64(params.ExpectedRows)
 	var note *string
 	if params.Note != "" {

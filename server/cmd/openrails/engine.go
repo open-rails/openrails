@@ -27,8 +27,7 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	cfg := server.Config{
 		Engine: hostconfig.EngineConfig(h.Config), Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: serverNaming(h.Naming),
 		RouteGroups: openrails.RouteGroups(h.RouteGroups), AdminConsole: serverConsole(h.AdminConsole),
-		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
-		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
+		Addr: net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 	}
 	// AuthKit takes CF-Connecting-IP from Cloudflare's egress alone.
 	if len(h.Proxies.Cloudflare) > 0 {

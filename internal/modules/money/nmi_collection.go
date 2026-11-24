@@ -35,7 +35,7 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.BillingPaym
 		return nil, fmt.Errorf("nmi collection adapter not initialized")
 	}
 	if a.Charger.Client.ReadOnly {
-		return nil, fmt.Errorf("nmi client is read-only (mode=readonly)")
+		return nil, fmt.Errorf("nmi client is read-only (readonly write posture)")
 	}
 	if strings.TrimSpace(models.DerefStr(method.RailCustomerRef)) == "" {
 		return nil, fmt.Errorf("nmi payment method missing customer vault id")

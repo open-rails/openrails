@@ -44,7 +44,7 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe portal failed: %w", err)

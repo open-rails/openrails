@@ -40,6 +40,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // The declared-facts vocabulary is the shared Client wire (billing.DeclaredBilling);
@@ -257,7 +258,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 			})
 			id, owner, existingRail := existing.ID, existing.CustomerID, existing.Rail
 			if errors.Is(err, pgx.ErrNoRows) {
-				id = uuid.New()
+				id = uuidutil.NewV7()
 				created := pm.CreatedAt.UTC()
 				if created.IsZero() {
 					created = asOf

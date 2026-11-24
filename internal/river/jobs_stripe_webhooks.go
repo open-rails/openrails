@@ -32,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
@@ -203,6 +204,7 @@ func (w StripeWebhookReconcileWorker) reconcile(ctx context.Context, job *river.
 			ProviderEnvironment: psp.Environment,
 			PspID:               psp.AccountID,
 			EnabledEvents:       webhooks.HandledStripeEventTypes,
+			Posture:             writeposture.View{DB: w.DB}.Posture(ctx, mid.UUID()),
 			Now:                 now,
 			AllowRetire:         verdict.Allowed,
 		})

@@ -21,9 +21,9 @@ const (
 )
 
 // Origin identifies who wanted the mutation; it gates execution under the
-// operating modes: user/admin-origin intents are reactive completions and
-// execute under mode=limited, system-origin intents require mode=full, and
-// NOTHING executes under mode=readonly.
+// merchant's write posture: user/admin-origin intents are reactive
+// completions and execute under limited, system-origin intents require full,
+// and NOTHING executes under readonly.
 type Origin string
 
 const (

@@ -3,6 +3,7 @@ package stripeapi
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,12 +12,14 @@ import (
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-// ErrProviderReadOnly is returned for every mutating Stripe request in
-// readonly mode. It survives *url.Error wrapping, so errors.Is works on the
-// error from (*http.Client).Do.
-var ErrProviderReadOnly = errors.New("stripe: provider writes are blocked (mode=readonly)")
+// ErrProviderReadOnly is returned for every mutating Stripe request of a
+// readonly client or of a merchant whose write posture is readonly. It
+// survives *url.Error wrapping, so errors.Is works on the error from
+// (*http.Client).Do.
+var ErrProviderReadOnly = errors.New("stripe: provider writes are blocked (readonly)")
 
 // DefaultTimeout is applied when a caller passes timeout <= 0.
 const DefaultTimeout = 20 * time.Second
@@ -31,21 +34,26 @@ const VersionHeader = "Stripe-Version"
 const APIVersion = "2026-06-24.dahlia"
 
 // guardTransport is the one transport every Stripe call flows through: it
-// rejects mutating methods before the network when readOnly or when their
-// key's posture is not proven, and pins the API version on every request.
+// rejects mutating methods before the network when readOnly, when the
+// request's merchant's write posture is readonly or when their key's posture
+// is not proven, and pins the API version on every request.
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
+	postures writeposture.Reader
 	// fixture marks an injected fake transport.
 	fixture bool
 }
 
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	mutating := req.Method != http.MethodGet && req.Method != http.MethodHead
-	if t.readOnly && mutating {
+	if mutating && (t.readOnly || t.postures == nil) {
 		return nil, ErrProviderReadOnly
 	}
 	if mutating {
+		if p := t.postures.Posture(req.Context(), requestMerchant(req)); p.ReadOnly() {
+			return nil, fmt.Errorf("%w: %s", ErrProviderReadOnly, p.Reason)
+		}
 		if err := t.requirePosture(req); err != nil {
 			return nil, err
 		}
@@ -75,10 +83,9 @@ func (t *guardTransport) transport() http.RoundTripper {
 	return t.base
 }
 
-// ReadOnlyClient returns a Stripe client that blocks writes regardless of
-// mode, for read paths with no *config.Config at hand (reconciliation,
-// payment-state and liveness reads). A write sneaking onto such a path fails
-// loudly and locally.
+// ReadOnlyClient returns a Stripe client that blocks every write, for read
+// paths (reconciliation, payment-state and liveness reads). A write sneaking
+// onto such a path fails loudly and locally.
 func ReadOnlyClient(timeout time.Duration) *http.Client {
 	return (*Factory)(nil).ReadOnlyClient(timeout)
 }
@@ -100,33 +107,41 @@ func SetIdempotencyKey(req *http.Request, key string) {
 
 // Factory owns the immutable HTTP dependency for one runtime. The injected
 // transport is borrowed: closing a runtime never closes a host-owned transport.
-// A nil factory uses the ordinary default transport.
+// A nil factory uses the ordinary default transport and writes nothing.
 type Factory struct {
 	base http.RoundTripper
 	// wired: base is a test wire that exempts nothing (NewWiredFactory).
 	wired bool
+	// postures gates each write on its merchant's write posture; without
+	// one every write is refused.
+	postures writeposture.Reader
 }
 
 // NewFactory sends Stripe's requests to base when it is set: a fake provider,
 // where a test key's writes need no posture and a live key's are refused.
-func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
+func NewFactory(base http.RoundTripper, postures writeposture.Reader) *Factory {
+	return &Factory{base: base, postures: postures}
+}
 
 // ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
 // the loopback Stripe its provider_sandbox.stripe_api_url names.
-func ConfiguredFactory(cfg *config.Config) *Factory {
+func ConfiguredFactory(cfg *config.Config, postures writeposture.Reader) *Factory {
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		return NewFactory(HostRewriteTransport(api))
+		return NewFactory(HostRewriteTransport(api), postures)
 	}
-	return NewFactory(nil)
+	return NewFactory(nil, postures)
 }
 
 // NewWiredFactory sends every request to wire and exempts nothing: posture is
 // checked through wire and every write is gated as against Stripe (a test
 // seam, as nmi.NMIClient.UseTransport is).
-func NewWiredFactory(wire http.RoundTripper) *Factory { return &Factory{base: wire, wired: true} }
+func NewWiredFactory(wire http.RoundTripper, postures writeposture.Reader) *Factory {
+	return &Factory{base: wire, wired: true, postures: postures}
+}
 
-func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), timeout)
+// Client writes as each request's merchant's write posture allows.
+func (f *Factory) Client(timeout time.Duration) *http.Client {
+	return f.newClient(false, timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {
@@ -155,16 +170,17 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
+	var postures writeposture.Reader
 	fixture := false
 	if f != nil {
-		base, fixture = f.base, f.base != nil && !f.wired
+		base, fixture, postures = f.base, f.base != nil && !f.wired, f.postures
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, fixture: fixture, base: base},
+		Transport: &guardTransport{readOnly: readOnly, postures: postures, fixture: fixture, base: base},
 	}
 }
 

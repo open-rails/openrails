@@ -105,7 +105,7 @@ func stripeMembership(t *testing.T, configure ...func(*world)) (*authorityWorld,
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old", "sk_test_new")
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
@@ -413,7 +413,7 @@ func nmiAccountsWorld(t *testing.T) (*authorityWorld, *nmiAccounts) {
 		wire := http.DefaultTransport.(*http.Transport).Clone()
 		t.Cleanup(wire.CloseIdleConnections)
 		w.deps.NMITransport = loopbackWire{target: target, wire: wire}
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"old": nmiPSP("old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)

@@ -61,9 +61,9 @@ type Runner struct {
 
 	Store    *Store
 	Registry *Registry
-	// Config gates execution by origin x operating mode. nil fails closed:
-	// every intent parks, since a runner that cannot tell its mode must not
-	// attempt a provider write.
+	// Config gates execution by origin x the merchant's write posture. nil
+	// fails closed: every intent parks, since a runner that cannot tell the
+	// posture must not attempt a provider write.
 	Config ModeView
 	// Breaker halts destructive intent execution on merchant-level volume
 	// anomalies. Required: nil parks every destructive intent.

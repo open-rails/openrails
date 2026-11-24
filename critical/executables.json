@@ -105,7 +105,8 @@
     "OR-J06-S03": [
       "TestPSPControls/OR-J06-S03",
       "TestPSPControls/OR-J06-S03/readonly",
-      "TestPSPControls/OR-J06-S03/limited"
+      "TestPSPControls/OR-J06-S03/limited",
+      "TestPSPControls/OR-J06-S03/copied-book"
     ],
     "OR-J06-S04": [
       "TestPSPControls/OR-J06-S04/rotation-and-archive-preserve-identity-without-exposing-secrets"
@@ -1154,6 +1155,9 @@
     ],
     "OR-J26-S62": [
       "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+    ],
+    "OR-J26-S63": [
+      "TestUsageBillingContracts/OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills"
     ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
@@ -2301,6 +2305,9 @@
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
+    ],
+    "OR-J06-S72": [
+      "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
     ]
   }
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // deriveBackfillWindow bounds derive-1: only subscriptions/payments whose
@@ -556,11 +557,12 @@ const (
 	stuckVerifyAge     = 2 * time.Hour  // in_flight / unknown_needs_verify
 )
 
-// isModeParkedReason reports whether last_failure_reason records a deliberate
-// park by the operating mode / kill switch (intents.GateExecution "mode=..."
-// strings). Parked is not broken — each intent's job runs it when the
-// blocker lifts — so the finding is informational, not the admin queue.
-func isModeParkedReason(reason string) bool { return strings.Contains(reason, "mode=") }
+// isPostureParkedReason reports whether last_failure_reason records a
+// deliberate park by the merchant's write posture (intents.GateExecution and
+// the wire chokes name it). Parked is not broken — each intent's job runs it
+// when the posture lifts — so the finding is informational, not the admin
+// queue.
+func isPostureParkedReason(reason string) bool { return strings.Contains(reason, "write posture") }
 
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the bare
 // intent id; Provider is the intent's own rail.
@@ -602,7 +604,7 @@ func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFi
 		Evidence:   ev,
 		// surface-only: check and converge never touch the intent itself.
 	}
-	if si.LastFailureReason != nil && isModeParkedReason(*si.LastFailureReason) {
+	if si.LastFailureReason != nil && isPostureParkedReason(*si.LastFailureReason) {
 		f.Class = ClassAuto // no Repair → reconcile_required (informational)
 		f.Severity = "low"
 	}
@@ -677,7 +679,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
 				return repo.CreateIfAbsent(ctx, &models.NotificationEvent{
-					ID:         uuid.NewSHA1(cust, []byte("access-ended:"+closedAt.Format(time.RFC3339Nano))),
+					ID:         uuidutil.DerivedV7(closedAt, cust, "access-ended:"+closedAt.Format(time.RFC3339Nano)),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
 					CreatedAt:  now,

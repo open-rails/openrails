@@ -16,6 +16,8 @@ import (
 // attempt across copies of the same billing book. Transport retries keep it;
 // only a conclusively released attempt allows the next ordinal. Caller keys,
 // admission time, card changes and credential rotation never select a new ID.
+// It stays a UUIDv5: Stripe metadata carries it and history is checked
+// against it.
 func SubscriptionCollectionOperationID(merchantID, pspID uuid.UUID, p SubscriptionCollectionPayload) uuid.UUID {
 	return renewalOperationID(merchantID, pspID, ObligationOrderReference(p.Renewal.SubscriptionID, p.PreviousPeriodEnd), p.Attempt)
 }

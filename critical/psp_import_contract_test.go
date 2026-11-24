@@ -88,7 +88,7 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 		return loopbackWire{target: target, wire: wire}
 	}
 	iw.authorityWorld = newAuthorityWorld(t, func(w *world) {
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		declared := billing.PSPs{}
 		sandbox := openrails.ProviderSandboxConfig{}
 		for _, key := range psps {

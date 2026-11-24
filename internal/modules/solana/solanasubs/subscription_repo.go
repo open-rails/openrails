@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // SolanaSubscriptionRepo persists the on-chain state of recurring Solana
@@ -62,7 +63,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	}
 	now := time.Now().UTC()
 	if s.ID == uuid.Nil {
-		s.ID = uuid.New()
+		s.ID = uuidutil.NewV7()
 	}
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = now

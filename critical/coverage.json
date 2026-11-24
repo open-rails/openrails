@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 711,
+  "scenario_count": 713,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2154,6 +2154,11 @@
       "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
     },
     {
+      "id": "OR-J26-S63",
+      "journey": "J26",
+      "name": "A usage order's period covers the usage it bills, from its pricing period's start to the bill"
+    },
+    {
       "id": "OR-J37-S60",
       "journey": "J37",
       "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
@@ -3557,6 +3562,11 @@
       "id": "OR-J38-S84",
       "journey": "J38",
       "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
+    },
+    {
+      "id": "OR-J06-S72",
+      "journey": "J06",
+      "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
     }
   ]
 }
