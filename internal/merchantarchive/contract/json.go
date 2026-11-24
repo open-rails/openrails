@@ -390,7 +390,7 @@ var jsonRules = map[string]jsonRule{
 	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
 	"catalog_rate_cards.allowance":     nullable(object(map[string]jsonRule{"included": integerValue})),
 	"catalog_rate_cards.price":         rateJSON,
-	"catalog_limits.rate_cards":        array(object(map[string]jsonRule{"meter": textValue, "filter": nullable(dictionary(array(textValue))), "price": rateJSON})),
+	"catalog_limits.counts":            array(object(map[string]jsonRule{"meter": textValue, "weight": integerValue, "per": integerValue, "filter": nullable(dictionary(array(textValue)))})),
 	"orders.tax":                       nullable(emptyObject), "orders.billing_contacts": nullable(contactsJSON),
 	// An order line's credit benefit per unit, frozen when the order was made.
 	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),

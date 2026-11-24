@@ -9,11 +9,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Measure is what one rate card reads of u, as Units reads it: whether the
-// card counts u at all (its meter reads u's event type and its filter admits
-// u), the meter's quantity, and the matrix cell u falls in ("" without a
-// matrix). A matrix with no cell for u's value refuses u.
-func Measure(m Meter, card catalog.LimitRateCard, u Usage) (int64, string, bool, error) {
+// Measure is what one money rate card reads of u: whether the card counts u
+// at all (its meter reads u's event type and its filter admits u), the
+// meter's quantity, and the matrix cell u falls in ("" without a matrix). A
+// matrix with no cell for u's value refuses u.
+func Measure(m Meter, card catalog.RateCard, u Usage) (int64, string, bool, error) {
 	if m.EventType != u.EventType || !admits(m, card.Filter, u) {
 		return 0, "", false, nil
 	}

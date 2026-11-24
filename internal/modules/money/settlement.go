@@ -120,7 +120,7 @@ type pricedItem struct {
 	periodEnd time.Time
 	charges   []itemCharge
 	// units are what the item counts toward each named-unit limit whose
-	// rate cards read it.
+	// counts read it.
 	units map[string]int64
 }
 

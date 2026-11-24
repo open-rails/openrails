@@ -144,7 +144,7 @@ export type ApplyLimit = {
   unit?: string | null
   reset?: LimitReset | null
   overrun?: "admit_while_positive" | "require_estimate" | null
-  rate_cards?: LimitRateCard[] | null
+  counts?: LimitCount[] | null
 }
 
 export type ApplyMeter = {
@@ -1283,6 +1283,7 @@ export type Hold = {
   limit_set: string
   currency: string
   limits: HoldLimit[]
+  counts: HoldCount[]
   rate_cards: HoldRateCard[]
   price_bounds: PriceBound[]
   safe: string | null
@@ -1301,6 +1302,18 @@ export type HoldCommitment = {
   limits?: LimitCommitment[]
 }
 
+export type HoldCount = {
+  limit: string
+  meter: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  group_by: Record<string, string> | null
+  filter: Record<string, string[]> | null
+  weight: number
+  per: number
+}
+
 export type HoldLimit = {
   limit: string
   unit: string
@@ -1311,7 +1324,6 @@ export type HoldLimit = {
 }
 
 export type HoldRateCard = {
-  limit: string | null
   meter: string
   event_type: string
   value_property: string
@@ -1399,7 +1411,7 @@ export type Limit = {
   unit: string
   reset: LimitReset
   overrun: "admit_while_positive" | "require_estimate"
-  rate_cards: LimitRateCard[]
+  counts: LimitCount[]
   products: LimitProduct[]
   revision: number
   created_at: string
@@ -1412,6 +1424,13 @@ export type LimitCommitment = {
   committed?: string
 }
 
+export type LimitCount = {
+  meter: string
+  weight?: number
+  per?: number
+  filter?: Record<string, string[]>
+}
+
 export type LimitOverride = {
   inherit?: boolean
   limit: string
@@ -1422,12 +1441,6 @@ export type LimitProduct = {
   product_id: string
   product_key: string
   capacity: string
-}
-
-export type LimitRateCard = {
-  meter: string
-  filter?: Record<string, string[]>
-  price: RatePrice
 }
 
 export type LimitReset = {
@@ -2575,7 +2588,7 @@ export type SetLimitParams = {
   unit?: string
   reset?: LimitReset
   overrun?: "admit_while_positive" | "require_estimate"
-  rate_cards?: LimitRateCard[]
+  counts?: LimitCount[]
   expected_revision?: number
 }
 

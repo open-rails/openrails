@@ -14396,12 +14396,12 @@
               }
             ]
           },
-          "rate_cards": {
+          "counts": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/LimitRateCard"
+                  "$ref": "#/components/schemas/LimitCount"
                 }
               },
               {
@@ -19733,6 +19733,12 @@
               "$ref": "#/components/schemas/HoldLimit"
             }
           },
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldCount"
+            }
+          },
           "rate_cards": {
             "type": "array",
             "items": {
@@ -19765,6 +19771,7 @@
           "limit_set",
           "currency",
           "limits",
+          "counts",
           "rate_cards",
           "price_bounds",
           "safe",
@@ -19801,6 +19808,80 @@
             }
           }
         }
+      },
+      "HoldCount": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "meter": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "value_property": {
+            "type": "string"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
+          },
+          "group_by": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weight": {
+            "type": "integer"
+          },
+          "per": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "meter",
+          "event_type",
+          "value_property",
+          "aggregation",
+          "group_by",
+          "filter",
+          "weight",
+          "per"
+        ]
       },
       "HoldLimit": {
         "type": "object",
@@ -19857,16 +19938,6 @@
       "HoldRateCard": {
         "type": "object",
         "properties": {
-          "limit": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "meter": {
             "type": "string"
           },
@@ -19931,7 +20002,6 @@
           }
         },
         "required": [
-          "limit",
           "meter",
           "event_type",
           "value_property",
@@ -20298,10 +20368,10 @@
               "require_estimate"
             ]
           },
-          "rate_cards": {
+          "counts": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LimitRateCard"
+              "$ref": "#/components/schemas/LimitCount"
             }
           },
           "products": {
@@ -20327,7 +20397,7 @@
           "unit",
           "reset",
           "overrun",
-          "rate_cards",
+          "counts",
           "products",
           "revision",
           "created_at",
@@ -20356,6 +20426,32 @@
             "description": "A number as a decimal string."
           }
         }
+      },
+      "LimitCount": {
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer"
+          },
+          "per": {
+            "type": "integer"
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "meter"
+        ]
       },
       "LimitOverride": {
         "type": "object",
@@ -20394,30 +20490,6 @@
           "product_id",
           "product_key",
           "capacity"
-        ]
-      },
-      "LimitRateCard": {
-        "type": "object",
-        "properties": {
-          "meter": {
-            "type": "string"
-          },
-          "filter": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          }
-        },
-        "required": [
-          "meter",
-          "price"
         ]
       },
       "LimitReset": {
@@ -26626,10 +26698,10 @@
               "require_estimate"
             ]
           },
-          "rate_cards": {
+          "counts": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LimitRateCard"
+              "$ref": "#/components/schemas/LimitCount"
             }
           },
           "expected_revision": {

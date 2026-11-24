@@ -774,7 +774,7 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 		return billing.Hold{}, false, err
 	}
 	out := billing.Hold{CustomerID: billing.CustomerID(k.customer), LimitSet: k.limitSet, Currency: catalog.Currency(h.row.Currency),
-		Limits: make([]billing.HoldLimit, 0, len(h.parts)), RateCards: cards, PriceBounds: bounds, Version: h.version}
+		Limits: make([]billing.HoldLimit, 0, len(h.parts)), Counts: []billing.HoldCount{}, RateCards: cards, PriceBounds: bounds, Version: h.version}
 	for _, p := range h.parts {
 		line := billing.HoldLimit{Limit: p.key, Unit: p.unit, Held: p.answered, Overrun: cmp.Or(p.overrun, catalog.OverrunRequireEstimate)}
 		if h.released {
@@ -791,11 +791,10 @@ func (r *syncRun) wire(k holdKey, h *hold) (billing.Hold, bool, error) {
 		if def, ok := r.def(p.key); ok {
 			line.Overrun = def.Overrun
 			if !syntax.LimitUnitCurrency(def.Unit) {
-				for _, card := range def.RateCards {
-					m := r.meters[card.Meter]
-					key := def.Key
-					out.RateCards = append(out.RateCards, billing.HoldRateCard{Limit: &key, Meter: card.Meter, EventType: m.EventType,
-						ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, GroupBy: m.GroupBy, Filter: card.Filter, Price: card.Price})
+				for _, c := range def.Counts {
+					m := r.meters[c.Meter]
+					out.Counts = append(out.Counts, billing.HoldCount{Limit: def.Key, Meter: c.Meter, EventType: m.EventType,
+						ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, GroupBy: m.GroupBy, Filter: c.Filter, Weight: c.Weight, Per: c.Per})
 				}
 			}
 		}

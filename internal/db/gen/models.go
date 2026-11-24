@@ -90,11 +90,11 @@ type BillingCatalogFieldOwner struct {
 	SetAt time.Time
 }
 
-// Usage limits the merchant declares: what a limit counts (its unit and rate cards), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
+// Usage limits the merchant declares: what a limit counts (its unit and counts), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
 type BillingCatalogLimit struct {
 	MerchantID uuid.UUID
 	Key        string
-	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no rate cards.
+	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no counts.
 	Unit      string
 	ResetKind string
 	// The window of a fixed, session, rolling or rate limit; null for billing_period and lifetime.
@@ -102,12 +102,12 @@ type BillingCatalogLimit struct {
 	// What a fixed window tiles from: the customer's subscription or its first use; null for every other reset.
 	ResetAnchor *string
 	Overrun     string
-	// How usage counts toward the limit: rate cards (meter, filter, price) priced in the limit's unit, in declaration order.
-	RateCards []byte
 	// Advances on every change to the limit.
 	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// How usage counts toward the limit: each count (meter, weight, per, filter) adds an event's quantity × weight ÷ per, rounded half up, in declaration order.
+	Counts []byte
 }
 
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
