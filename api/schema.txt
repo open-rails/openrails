@@ -27,6 +27,7 @@ migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
 migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
+migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1303,6 +1304,17 @@ table billing.merchant_destructive_policy
   constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
   trigger CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+
+table billing.merchant_leases
+  column merchant_id uuid NOT NULL
+  column kind text NOT NULL
+  column holder uuid NOT NULL
+  column expires_at timestamp with time zone NOT NULL
+  column claimed_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint merchant_leases_kind_check CHECK ((kind = 'pull'::text))
+  constraint merchant_leases_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint merchant_leases_pkey PRIMARY KEY (merchant_id, kind)
+  index CREATE UNIQUE INDEX merchant_leases_pkey ON billing.merchant_leases USING btree (merchant_id, kind)
 
 table billing.merchant_slug_aliases
   column slug text NOT NULL
@@ -4673,6 +4685,7 @@ function billing.guard_billing_restore_receipt()
                     'maintenance_runs',
                     'mandates',
                     'merchant_destructive_policy',
+                    'merchant_leases',
                     'money_settings',
                     'mrr_cohort_flows',
                     'mrr_flows',

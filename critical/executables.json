@@ -2166,6 +2166,18 @@
     ],
     "OR-J40-S26": [
       "TestCreditBooksEdges/OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding"
+    ],
+    "OR-J04-S80": [
+      "TestBillingPass/OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session"
+    ],
+    "OR-J04-S81": [
+      "TestBillingPass/OR-J04-S81/a-dead-passs-lease-lapses-and-the-next-pass-runs"
+    ],
+    "OR-J38-S83": [
+      "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"
+    ],
+    "OR-J38-S84": [
+      "TestMerchantPullLease/OR-J38-S84/a-pull-outlives-its-lease-period-and-a-dead-holders-lease-lapses"
     ]
   }
 }

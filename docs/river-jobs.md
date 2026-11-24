@@ -49,9 +49,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) Â
 
 ## Hourly billing scans
 
-Each `openrails.billing_pass` job runs these scans in order within its own River
-row. Usage billing also has a registered kind for threshold wakes and page
-continuations. The other scan names label work inside the pass.
+Each `openrails.billing_pass` job runs these scans in order within its own River row. Usage billing also has a registered kind for threshold wakes and page continuations. The other scan names label work inside the pass. A pass that starts while another runs, on any fleet, exits: the running pass holds a lease in `periodic_leases`, renewed while it runs and lapsing within two minutes of its holder dying.
 [Scan registration](../internal/app/river_register.go) Â·
 [Pass execution](../internal/river/jobs_billing_pass.go)
 

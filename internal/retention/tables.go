@@ -112,6 +112,7 @@ var Tables = map[string]Table{
 	"event_store":                 {Class: State},
 	"usage_unposted":              {Class: State},
 	"periodic_leases":             {Class: State},
+	"merchant_leases":             {Class: State},
 	"solana_crankers":             {Class: State},
 	"dashboard_configs":           {Class: State},
 	"customer_contacts":           {Class: State},

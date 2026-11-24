@@ -161,7 +161,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 491 named SQL statements in 89 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 494 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -197,6 +197,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
 | [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
 | [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
+| [merchant_leases.sql](../internal/db/queries/merchant_leases.sql) | 2 | `merchant_leases` |
 | [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 19 | `customer_contacts`, `mandates`, `money_settings`, `nmi_history_months`, `operation_log`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provisioning_tokens`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `stripe_fee_reads`, `subscriptions` |
 | [merchant_retirement.sql](../internal/db/queries/merchant_retirement.sql) | 2 | `merchants` |
 | [merchant_secret_cleanup.sql](../internal/db/queries/merchant_secret_cleanup.sql) | 2 | `maintenance_runs` |
@@ -216,7 +217,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [payment_method_versions.sql](../internal/db/queries/payment_method_versions.sql) | 3 | `payment_method_versions`, `payment_methods` |
 | [payment_methods.sql](../internal/db/queries/payment_methods.sql) | 9 | `payment_method_versions`, `payment_methods` |
 | [payments.sql](../internal/db/queries/payments.sql) | 11 | `payments` |
-| [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 1 | `periodic_leases` |
+| [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 2 | `periodic_leases` |
 | [price_migrations.sql](../internal/db/queries/price_migrations.sql) | 3 | `price_migrations` |
 | [price_psp_bindings.sql](../internal/db/queries/price_psp_bindings.sql) | 2 | `price_psp_bindings` |
 | [prices.sql](../internal/db/queries/prices.sql) | 6 | `prices` |
