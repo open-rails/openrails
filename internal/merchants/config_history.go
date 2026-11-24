@@ -176,7 +176,7 @@ func recordedConfig(ctx context.Context, q *gen.Queries, id billing.MerchantID) 
 			switch {
 			case c.Secret():
 			case c.After != nil:
-				d.fields[field] = c.After
+				d.fields[field] = canonical(c.After)
 			default:
 				delete(d.fields, field)
 			}
@@ -217,7 +217,7 @@ func (s *Service) recordDocuments(ctx context.Context, q *gen.Queries, id billin
 			}
 		}
 		for field := range mergedKeys(rec.fields, cur.Fields) {
-			was, is := rec.fields[field], cur.Fields[field]
+			was, is := rec.fields[field], canonical(cur.Fields[field])
 			if !bytes.Equal(was, is) {
 				fields[field] = history.FieldChange{Before: was, After: is}
 			}
@@ -243,12 +243,35 @@ func (s *Service) recordDocuments(ctx context.Context, q *gen.Queries, id billin
 		}
 		entry.Changes = history.Fields{Version: history.Version, Revision: new(cur.Revision), Fields: fields}
 		entries = append(entries, entry)
-		recorded[name] = &recordedDocument{revision: cur.Revision, fields: maps.Clone(cur.Fields)}
+		fieldsAfter := make(map[string]json.RawMessage, len(cur.Fields))
+		for field, v := range cur.Fields {
+			fieldsAfter[field] = canonical(v)
+		}
+		recorded[name] = &recordedDocument{revision: cur.Revision, fields: fieldsAfter}
 	}
 	if len(entries) == 0 {
 		return nil
 	}
 	return history.Record(ctx, q, history.ChangeLog, id.UUID(), p, entries...)
+}
+
+// canonical is a JSON value as Go writes it: jsonb, which the recorded
+// values are read back from, spaces and orders them otherwise.
+func canonical(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var v any
+	if err := decoder.Decode(&v); err != nil {
+		return raw
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func mergedKeys[V any](a, b map[string]V) map[string]bool {

@@ -1,6 +1,7 @@
 package merchantdocs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -54,9 +55,7 @@ func DocumentOf(name string, value any, revision int64) Document {
 			secrets = map[string]string{"scim_token": v.Secrets.SCIMToken}
 		}
 		v.AlertWebhooks, v.Secrets = nil, MerchantSecrets{}
-		if err := json.Unmarshal(jsonValue(v), &fields); err != nil {
-			panic(fmt.Sprintf("merchant document: %v", err))
-		}
+		fields = objectFields(v)
 	case PSP:
 		fields, secrets = config.PSPDocument(v).Fields(), v.Secrets
 	case Custodian:
@@ -75,6 +74,17 @@ func DocumentOf(name string, value any, revision int64) Document {
 		d.Fields["secrets"] = jsonValue(slices.Sorted(maps.Keys(secrets)))
 	}
 	return d
+}
+
+// objectFields are v's JSON object members, numbers kept exact.
+func objectFields(v any) map[string]any {
+	decoder := json.NewDecoder(bytes.NewReader(jsonValue(v)))
+	decoder.UseNumber()
+	var fields map[string]any
+	if err := decoder.Decode(&fields); err != nil {
+		panic(fmt.Sprintf("merchantdocs: document fields: %v", err))
+	}
+	return fields
 }
 
 func jsonValue(v any) json.RawMessage {
