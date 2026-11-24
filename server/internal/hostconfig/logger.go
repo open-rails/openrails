@@ -9,9 +9,9 @@ import (
 
 // LoggerConfig is the binary's logger: logger.level and logger.format.
 type LoggerConfig struct {
-	// Level is debug, info, warn or error.
+	// Level is debug, info, warn or error; unset is info.
 	Level string `koanf:"level"`
-	// Format is json or text.
+	// Format is json or text; unset is json.
 	Format string `koanf:"format"`
 }
 
@@ -19,6 +19,8 @@ type LoggerConfig struct {
 func (c LoggerConfig) Handler(w io.Writer) (slog.Handler, error) {
 	var level slog.Level
 	switch l := strings.ToLower(strings.TrimSpace(c.Level)); l {
+	case "":
+		level = slog.LevelInfo
 	case "debug", "info", "warn", "error":
 		_ = level.UnmarshalText([]byte(l))
 	default:
@@ -26,7 +28,7 @@ func (c LoggerConfig) Handler(w io.Writer) (slog.Handler, error) {
 	}
 	opts := &slog.HandlerOptions{Level: level}
 	switch strings.ToLower(strings.TrimSpace(c.Format)) {
-	case "json":
+	case "", "json":
 		return slog.NewJSONHandler(w, opts), nil
 	case "text":
 		return slog.NewTextHandler(w, opts), nil
