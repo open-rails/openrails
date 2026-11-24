@@ -108,7 +108,7 @@ const (
 // ID. reversalKind says WHAT the reversal is (refund vs chargeback); the rails
 // handle the actual money movement, this persists the event. amount is micros.
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
-	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, time.Time{}, nil)
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, time.Time{}, nil, true)
 }
 
 // RecordObservedRefund retains the provider's occurrence time and provenance.
@@ -118,10 +118,22 @@ func (s *PaymentService) RecordObservedRefund(ctx context.Context, originalPayme
 	if occurredAt.IsZero() {
 		return nil, errors.New("observed refund requires its provider occurrence time")
 	}
-	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt.UTC().Truncate(time.Microsecond), metadata)
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt.UTC().Truncate(time.Microsecond), metadata, true)
 }
 
-func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
+// RecordImportedRefund is RecordObservedRefund for a refund an import brings
+// in from the merchant's history: the customer was told at the time, so it
+// records no refund receipt.
+func (s *PaymentService) RecordImportedRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, occurredAt time.Time) (*models.Payment, error) {
+	if occurredAt.IsZero() {
+		return nil, errors.New("imported refund requires its provider occurrence time")
+	}
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, occurredAt.UTC().Truncate(time.Microsecond), nil, false)
+}
+
+// recordRefund records the reversal; receipt records a new refund's
+// refund_completed fact with it.
+func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any, receipt bool) (*models.Payment, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -148,9 +160,15 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 			return err
 		}
 		scoped := NewPaymentService(transactionDB, s.clock)
-		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt, metadata)
+		var created bool
+		refund, created, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt, metadata)
 		if err != nil {
 			return err
+		}
+		if created && receipt {
+			if err := scoped.queueRefundReceipt(ctx, refund, true); err != nil {
+				return err
+			}
 		}
 		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID); err != nil {
 			return err
@@ -167,13 +185,15 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 // refund of the same payment is unresolved.
 var ErrRefundReservationPending = errors.New("an OpenRails refund of this payment is still in flight; retry")
 
-func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
+// refundLocked records the reversal unless it is recorded already; created
+// reports a new one.
+func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (_ *models.Payment, created bool, _ error) {
 	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
-		return nil, fmt.Errorf("invalid reversal kind %q", reversalKind)
+		return nil, false, fmt.Errorf("invalid reversal kind %q", reversalKind)
 	}
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if orig.PspID != nil {
 		ctx = db.WithPSPID(ctx, *orig.PspID)
@@ -181,12 +201,12 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	existing, err := s.GetByPSPTransactionID(ctx, orig.Rail, refundTransactionID)
 	if err == nil {
 		if existing.RefundedPaymentID == nil || *existing.RefundedPaymentID != orig.ID || existing.Amount != -amount || existing.ReversalKind == nil || *existing.ReversalKind != reversalKind || !PaymentStatusSucceeded(existing.Status) {
-			return nil, errors.New("refund transaction id is already bound to different payment facts")
+			return nil, false, errors.New("refund transaction id is already bound to different payment facts")
 		}
-		return existing, nil
+		return existing, false, nil
 	}
 	if !db.IsNotFound(err) {
-		return nil, err
+		return nil, false, err
 	}
 	// While an OpenRails refund of this payment is in flight, a provider
 	// refund fact may be that same refund; recording it now would count it
@@ -194,19 +214,19 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	if reversalKind == ReversalRefund {
 		refunds, err := s.ListRefunds(ctx, orig.ID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for _, r := range refunds {
 			if r.Amount < 0 && strings.EqualFold(strings.TrimSpace(r.Status), PaymentStatusPendingValue) {
-				return nil, ErrRefundReservationPending
+				return nil, false, ErrRefundReservationPending
 			}
 		}
 	}
 	if err := s.ValidateRefund(ctx, orig, amount); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if strings.TrimSpace(refundTransactionID) == "" {
-		return nil, errors.New("refund transaction id is required")
+		return nil, false, errors.New("refund transaction id is required")
 	}
 	now := s.now()
 	if occurredAt.IsZero() {
@@ -242,9 +262,9 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		Metadata:      metadata,
 	}
 	if err := s.Create(ctx, refund); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return refund, nil
+	return refund, true, nil
 }
 
 func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
@@ -347,8 +367,10 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 				return err
 			}
 		}
-		result, err = scoped.GetByID(ctx, reservationID)
-		return err
+		if result, err = scoped.GetByID(ctx, reservationID); err != nil {
+			return err
+		}
+		return scoped.queueRefundReceipt(ctx, result, false)
 	})
 	return result, err
 }

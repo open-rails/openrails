@@ -1,0 +1,8 @@
+Your {{with .Event.ProductName}}{{.}} {{end}}subscription has renewed{{with .Event.PeriodEndsAt}} and runs until {{.}}{{end}}.
+{{if .Event.DowngradeApplied}}{{with .Event.ToProductName}}
+As you asked, it is now {{.}}.
+{{end}}{{end}}{{with .Event.Amount}}
+Amount: {{.}}
+{{end}}{{with .Links.ManageBilling}}
+Manage or cancel your subscription: {{.}}
+{{end}}

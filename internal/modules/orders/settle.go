@@ -348,6 +348,15 @@ func (s *Service) recordPayment(ctx context.Context, d *db.DB, order *Order, cha
 	return payment, nil
 }
 
+// linePaid is what charge took for line, for its receipt: the charge when the
+// order is the line alone, else the line's amount.
+func linePaid(order *Order, line gen.BillingOrderLine, charge *Charge) *subscriptions.Paid {
+	if len(order.Lines) == 1 && charge.Amount > 0 && charge.Currency != "" {
+		return &subscriptions.Paid{Amount: charge.Amount, Currency: charge.Currency}
+	}
+	return &subscriptions.Paid{Amount: line.Amount, Currency: order.Currency}
+}
+
 // fulfil delivers one paid line: a subscription for a recurring line, a
 // credit lot for a credit product, product access otherwise.
 func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.BillingOrderLine, charge *Charge, now time.Time) error {
@@ -386,7 +395,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		terms.AwaitingMethod = charge.PaymentMethodID == uuid.Nil && charge.TokenType == paycharge.TokenTypePANViaProxy
 		params := &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: models.DerefUUID(line.PriceID), Rail: models.Rail(charge.Rail), PurchasedAt: &now,
-			ExistingOrderID: &order.ID, PaymentMetadata: map[string]any{"order_id": order.ID.String()},
+			ExistingOrderID: &order.ID, PaymentMetadata: map[string]any{"order_id": order.ID.String()}, Paid: linePaid(order, line, charge),
 		}
 		if e := charge.Enrolled; e != nil {
 			if len(order.Lines) != 1 {

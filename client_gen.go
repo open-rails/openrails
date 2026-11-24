@@ -1094,6 +1094,41 @@ func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.Par
 	return &out, nil
 }
 
+// ListCustomerMessages lists the messages OpenRails sent a customer about
+// its billing facts, newest first, and those it did not send and why: each
+// one's event, status, attempts and recipient. It keeps no body.
+func (c *Client) ListCustomerMessages(ctx context.Context, customerID billing.CustomerID, params billing.CustomerMessageListParams) (*billing.ListPage[billing.CustomerMessage], error) {
+	var out billing.ListPage[billing.CustomerMessage]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/messages", args: []string{customerID.String()}, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PreviewMessage renders an event type's message from the merchant's
+// templates over a sample customer and fact, in params.Language or the
+// default language. params.Template, when set, is rendered in place of that
+// language's template and not saved: a template is checked before it is
+// saved.
+func (c *Client) PreviewMessage(ctx context.Context, params billing.PreviewMessageParams) (*billing.MessagePreview, error) {
+	var out billing.MessagePreview
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/messages/preview", body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateTestMessage sends one sample message, as PreviewMessage renders it,
+// to the merchant's alert email address. It is sent to no other address, at
+// most ten an hour.
+func (c *Client) CreateTestMessage(ctx context.Context, params billing.CreateTestMessageParams) (*billing.TestMessage, error) {
+	var out billing.TestMessage
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/messages/test", body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListEvents reads retained facts of the handle's merchant. Reading starts
 // no worker and changes no delivery state. Persist NextCursor after
 // processing.

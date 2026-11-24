@@ -275,6 +275,8 @@ func keepServed(previous, set merchantdocs.Set) merchantdocs.Set {
 		switch {
 		case path == merchantdocs.MerchantDoc:
 			set.Merchant, set.HasMerchant = previous.Merchant, previous.HasMerchant
+		case path == merchantdocs.MessagesDoc:
+			set.Messages, set.HasMessages = previous.Messages, previous.HasMessages
 		case psp != "":
 			if doc, ok := previous.PSPs[psp]; ok {
 				set.PSPs[psp] = doc

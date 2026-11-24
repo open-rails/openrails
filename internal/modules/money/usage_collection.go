@@ -425,7 +425,9 @@ func stopCollectionForAgreement(ctx context.Context, d *db.DB, order gen.Billing
 		return err
 	}
 	action := collection.Action{Decline: decline.Result{Action: decline.FixPaymentMethod}}
-	return queueCollectionOutcome(ctx, d, order, action, charge.AgreementRequiredCode, now)
+	// No attempt or decline names this stop: once stopped, the order is not
+	// stopped again until a card resumes it.
+	return queueCollectionOutcome(ctx, d, uuidutil.NewV7(), order, action, charge.AgreementRequiredCode, now)
 }
 
 // collectionInstrument freezes a collection's card and the mandate it cites:

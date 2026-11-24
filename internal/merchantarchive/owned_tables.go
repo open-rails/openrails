@@ -27,6 +27,7 @@ var ownedTables = []string{
 	"customer_invoice_profiles",
 	"customer_limit_overrides",
 	"customer_low_balance_lines",
+	"customer_messages",
 	"customers",
 	"dashboard_configs",
 	"destructive_action_switch",

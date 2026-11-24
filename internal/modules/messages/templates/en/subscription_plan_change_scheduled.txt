@@ -1,0 +1,3 @@
+Your subscription is changing{{with .Event.ToProductName}} to {{.}}{{end}}{{with .Event.NewAmount}} at {{.}}{{end}}{{with .Event.EffectiveAt}}, starting {{.}}{{end}}.
+
+{{with .Links.ManageBilling}}If you'd rather not continue, you can cancel before then: {{.}}{{else}}If you'd rather not continue, you can cancel in your account before then.{{end}}

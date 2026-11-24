@@ -23,6 +23,10 @@ type MerchantDocument struct {
 	MerchantSettings `yaml:",inline"`
 	// AlertWebhooks are where the merchant's operational alerts are posted.
 	AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
+	// Messages is the merchant's messages document: which event types send
+	// its customers a message, and its own templates. A document whose
+	// templates do not render is refused alone. Nil sends the defaults.
+	Messages *MessageSettings `yaml:"messages,omitempty"`
 	// Secrets are the merchant's own credentials.
 	Secrets MerchantSecrets `yaml:"secrets,omitempty"`
 }

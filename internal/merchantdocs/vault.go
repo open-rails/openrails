@@ -17,8 +17,9 @@ import (
 )
 
 // VaultSource keeps each merchant's configuration under
-// <prefix>/merchants/<merchant_id>/: the merchant document at merchant, a PSP
-// at psps/<key>, a custodian at custodians/<key>.
+// <prefix>/merchants/<merchant_id>/: the merchant document at merchant, the
+// messages document at messages, a PSP at psps/<key>, a custodian at
+// custodians/<key>.
 type VaultSource struct {
 	kv     *vault.KVv2Adapter
 	prefix string
@@ -71,6 +72,18 @@ func (v *VaultSource) Load(ctx context.Context, id billing.MerchantID) (Set, err
 			set.Rejected[merchantDoc] = err.Error()
 		} else {
 			set.Merchant, set.HasMerchant = Doc[Merchant]{Value: m, Revision: doc.Version, UpdatedAt: doc.Updated}, true
+		}
+	}
+	doc, err = v.kv.ReadDocument(ctx, base+messagesDoc)
+	if err != nil {
+		return Set{}, unavailable(err)
+	}
+	if doc.Found {
+		var m billing.MessageSettings
+		if err := decodeStrict(doc.Data, &m); err != nil {
+			set.Rejected[messagesDoc] = err.Error()
+		} else {
+			set.Messages, set.HasMessages = Doc[billing.MessageSettings]{Value: m, Revision: doc.Version, UpdatedAt: doc.Updated}, true
 		}
 	}
 	keys, err := v.keys(ctx, base+pspDir)
@@ -186,8 +199,10 @@ func (v *VaultSource) Delete(ctx context.Context, id billing.MerchantID) error {
 			}
 		}
 	}
-	if err := v.kv.DeleteDocument(ctx, base+merchantDoc); err != nil {
-		return unavailable(err)
+	for _, doc := range []string{messagesDoc, merchantDoc} {
+		if err := v.kv.DeleteDocument(ctx, base+doc); err != nil {
+			return unavailable(err)
+		}
 	}
 	return nil
 }

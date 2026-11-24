@@ -1,0 +1,1 @@
+Your balance{{with .Merchant.Name}} with {{.}}{{end}} is running low

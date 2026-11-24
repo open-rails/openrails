@@ -1,0 +1,5 @@
+The price of your {{with .Event.ProductName}}{{.}} {{end}}subscription is changing{{if and .Event.OldAmount .Event.NewAmount}} from {{.Event.OldAmount}} to {{.Event.NewAmount}}{{end}}{{with .Event.EffectiveAt}}, starting {{.}}{{end}}.
+
+Nothing else changes, and you don't need to do anything to keep your subscription.
+
+{{with .Links.ManageBilling}}If you'd rather not continue, you can cancel before then: {{.}}{{else}}If you'd rather not continue, you can cancel in your account before then.{{end}}

@@ -48,7 +48,7 @@ func recordDeclaredRefunds(ctx context.Context, d *db.DB, sub *models.Subscripti
 		prior, err := svc.GetByPSPTransactionID(ctx, sub.Rail, r.TransactionID)
 		code := DeclaredAlreadyPresent
 		if db.IsNotFound(err) {
-			prior, err = svc.RecordObservedRefund(ctx, original.ID, r.TransactionID, amount, payments.ReversalRefund, r.OccurredAt, nil)
+			prior, err = svc.RecordImportedRefund(ctx, original.ID, r.TransactionID, amount, r.OccurredAt)
 			code = DeclaredImported
 		}
 		if err != nil {
@@ -63,7 +63,7 @@ func recordDeclaredRefunds(ctx context.Context, d *db.DB, sub *models.Subscripti
 		// repeated provider notification. The payment service preserves an
 		// explicit admin refund's keep/revoke choice.
 		if code == DeclaredAlreadyPresent {
-			if _, err := svc.RecordObservedRefund(ctx, original.ID, r.TransactionID, amount, payments.ReversalRefund, r.OccurredAt, nil); err != nil {
+			if _, err := svc.RecordImportedRefund(ctx, original.ID, r.TransactionID, amount, r.OccurredAt); err != nil {
 				return nil, err
 			}
 		}

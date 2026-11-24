@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -143,6 +145,16 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 	}
 }
 
+// declineFailureID is the FailureID of a decline seen at the provider: its
+// transaction, else its time.
+func declineFailureID(subscription uuid.UUID, decline *RemoteTransaction) uuid.UUID {
+	key := "decline:" + strings.TrimSpace(decline.TransactionID)
+	if key == "decline:" {
+		key = "decline_at:" + decline.OccurredAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuid.NewSHA1(subscription, []byte(key))
+}
+
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
 // to FailMembership, the dunning writer: in one transaction it moves the row
 // to dunning, counts and classifies the decline, schedules the next attempt
@@ -165,6 +177,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 	err := lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Rail:              sub.Rail,
 		SubscriptionID:    &sub.ID,
+		FailureID:         declineFailureID(sub.ID, d.Decline),
 		FailureCode:       normalize.OptionalString(code),
 		DeclinedAt:        d.Decline.OccurredAt,
 		Decline:           action,

@@ -1,0 +1,1 @@
+{{if eq .Event.Reason "user_cancel"}}You canceled your subscription{{with .Merchant.Name}} to {{.}}{{end}}{{else}}Your subscription{{with .Merchant.Name}} to {{.}}{{end}} {{if eq .Event.Reason "admin"}}was canceled{{else}}is canceled{{end}}{{end}}

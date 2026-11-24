@@ -1,0 +1,3 @@
+Your bank declined the card on file{{with .Event.ProductName}} for {{.}}{{end}}, and it won't work for future payments, so we've stopped charging it.
+
+{{with .Links.UpdatePaymentMethod}}Add or update a card to keep your access: {{.}}{{else}}Add or update a card in your account to keep your access.{{end}}

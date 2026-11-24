@@ -11639,6 +11639,229 @@
         ]
       }
     },
+    "/v1/admin/customers/{customer_id}/messages": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "ListCustomerMessages",
+        "description": "ListCustomerMessages lists the messages OpenRails sent a customer about its billing facts, newest first, and those it did not send and why: each one's event, status, attempts and recipient. It keeps no body.",
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomerMessage"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/messages/preview": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "PreviewMessage",
+        "description": "PreviewMessage renders an event type's message from the merchant's templates over a sample customer and fact, in params.Language or the default language. params.Template, when set, is rendered in place of that language's template and not saved: a template is checked before it is saved.",
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMessageParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "message_template_invalid",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/messages/test": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "CreateTestMessage",
+        "description": "CreateTestMessage sends one sample message, as PreviewMessage renders it, to the merchant's alert email address. It is sent to no other address, at most ten an hour.",
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTestMessageParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-errors": [
+          "alert_email_required",
+          "invalid_param",
+          "message_send_failed",
+          "message_template_invalid",
+          "rate_limit_exceeded",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/app/events": {
       "get": {
         "tags": [
@@ -16067,6 +16290,27 @@
           }
         }
       },
+      "CreateTestMessageParams": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "template": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreatedProvisioningToken": {
         "type": "object",
         "properties": {
@@ -16690,6 +16934,109 @@
           "remaining",
           "window_starts_at",
           "resets_at"
+        ]
+      },
+      "CustomerMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "email"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "failed",
+              "no_contact",
+              "pending",
+              "queued",
+              "rate_limited",
+              "sending",
+              "sent",
+              "test_environment"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "last_error": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "event_missing",
+                  "event_unreadable",
+                  "invalid_recipient",
+                  "no_sender",
+                  "refused",
+                  "render_failed",
+                  "send_failed",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipient": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sent_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "event_id",
+          "event_type",
+          "channel",
+          "status",
+          "attempts",
+          "last_error",
+          "recipient",
+          "sent_at",
+          "created_at",
+          "updated_at"
         ]
       },
       "CustomerSettings": {
@@ -17751,6 +18098,7 @@
             "enum": [
               "admission_captured",
               "admission_not_found",
+              "alert_email_required",
               "already_owned",
               "application_required",
               "as_of_required",
@@ -17828,6 +18176,8 @@
               "merchant_config_read_only",
               "merchant_mismatch",
               "merchant_unresolved",
+              "message_send_failed",
+              "message_template_invalid",
               "meter_in_use",
               "meter_rate_card_conflict",
               "method_not_allowed",
@@ -19583,6 +19933,61 @@
             "type": "string"
           },
           "statement_descriptor": {
+            "type": "string"
+          }
+        }
+      },
+      "MessagePreview": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "text": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "html": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "event_type",
+          "language",
+          "subject",
+          "text",
+          "html"
+        ]
+      },
+      "MessageTemplate": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
             "type": "string"
           }
         }
@@ -22791,6 +23196,27 @@
           "available"
         ]
       },
+      "PreviewMessageParams": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "template": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "PreviewMyOrderParams": {
         "type": "object",
         "properties": {
@@ -23733,6 +24159,7 @@
             "enum": [
               "admission_captured",
               "admission_not_found",
+              "alert_email_required",
               "already_owned",
               "application_required",
               "as_of_required",
@@ -23810,6 +24237,8 @@
               "merchant_config_read_only",
               "merchant_mismatch",
               "merchant_unresolved",
+              "message_send_failed",
+              "message_template_invalid",
               "meter_in_use",
               "meter_rate_card_conflict",
               "method_not_allowed",
@@ -26305,6 +26734,21 @@
           "limits"
         ]
       },
+      "TestMessage": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessagePreview"
+          }
+        },
+        "required": [
+          "recipient",
+          "message"
+        ]
+      },
       "TieredPrice": {
         "type": "object",
         "properties": {
@@ -27272,6 +27716,11 @@
       "type": "invalid_request_error",
       "meaning": "No admission was made under this request id."
     },
+    "alert_email_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The merchant has no alert_email to send a test message to."
+    },
     "already_owned": {
       "status": 409,
       "type": "invalid_request_error",
@@ -27656,6 +28105,16 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "The credential is bound to no merchant here."
+    },
+    "message_send_failed": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "The email sender did not accept the message."
+    },
+    "message_template_invalid": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The message template does not render against its event type's sample data; the message says why."
     },
     "meter_in_use": {
       "status": 409,

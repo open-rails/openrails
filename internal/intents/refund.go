@@ -227,7 +227,8 @@ func endRefundedMembership(ctx context.Context, d *db.DB, clock clockwork.Clock,
 		reason = "refunded"
 	}
 	_, err = subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, nil, clock).CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
-		SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: endNow, Requested: true,
+		SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: endNow,
+		EndedReason: subscriptions.PremiumEndReasonRefund, Requested: true,
 	})
 	return err
 }

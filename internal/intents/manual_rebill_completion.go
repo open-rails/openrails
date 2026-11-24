@@ -247,7 +247,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Billin
 				blocked = verdict.Reason
 			}
 			reason := "rebill declined"
-			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 			if err != nil {
 				return err
 			}

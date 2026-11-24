@@ -3,6 +3,7 @@ package merchantconfig
 import (
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"strings"
 
@@ -32,6 +33,16 @@ func NormalizeBillingBoundary(boundary string) string {
 	default:
 		return ""
 	}
+}
+
+// mailbox is the address of s, one mailbox, named ("Ops <ops@x.example>")
+// or bare; false for a list or anything else.
+func mailbox(s string) (string, bool) {
+	a, err := mail.ParseAddress(s)
+	if err != nil || len(a.Address) > 320 {
+		return "", false
+	}
+	return a.Address, true
 }
 
 // Settings is a merchant's settings, validated: the configuration readers
@@ -65,7 +76,14 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 				return Settings{}, fmt.Errorf("profile.%s must be an http or https URL", field)
 			}
 		}
-		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
+		cfg.Profile.LogoURL = strings.TrimSpace(p.LogoURL)
+		if from := strings.TrimSpace(p.FromEmail); from != "" {
+			address, ok := mailbox(from)
+			if !ok {
+				return Settings{}, fmt.Errorf("profile.from_email must be one email address")
+			}
+			cfg.Profile.FromEmail = address
+		}
 		cfg.Profile.SupportURL, cfg.Profile.SubscribeURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SubscribeURL)
 		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
 		cfg.Profile.TermsURL, cfg.Profile.PrivacyURL = strings.TrimSpace(p.TermsURL), strings.TrimSpace(p.PrivacyURL)
@@ -93,7 +111,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.BillingPeriodBoundary = in.BillingPeriodBoundary
 	}
 	if in.AlertEmail != nil {
-		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
+		if alert := strings.TrimSpace(*in.AlertEmail); alert != "" {
+			address, ok := mailbox(alert)
+			if !ok {
+				return Settings{}, fmt.Errorf("alert_email must be one email address")
+			}
+			cfg.AlertEmail = address
+		}
 	}
 	if in.UsageGateSafeSpend != nil {
 		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend

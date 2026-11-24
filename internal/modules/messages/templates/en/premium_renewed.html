@@ -1,0 +1,4 @@
+<p style="margin:0 0 16px;">Your {{with .Event.ProductName}}<strong>{{.}}</strong> {{end}}subscription has renewed{{with .Event.PeriodEndsAt}} and runs until {{.}}{{end}}.</p>
+{{if .Event.DowngradeApplied}}{{with .Event.ToProductName}}<p style="margin:0 0 16px;">As you asked, it is now <strong>{{.}}</strong>.</p>{{end}}{{end}}
+{{with .Event.Amount}}<p style="margin:0 0 16px;">Amount: <strong>{{.}}</strong></p>{{end}}
+{{with .Links.ManageBilling}}<p style="margin:0 0 16px;"><a href="{{.}}" style="display:inline-block;padding:10px 18px;background:#1f2933;color:#ffffff;text-decoration:none;border-radius:6px;">Manage your subscription</a></p>{{end}}

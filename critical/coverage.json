@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 419,
+  "scenario_count": 445,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2074,6 +2074,11 @@
       "name": "A Stripe downgrade schedules the new price for the subscription's seats"
     },
     {
+      "id": "OR-J18-S07",
+      "journey": "J18",
+      "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
+    },
+    {
       "id": "OR-J19-S07",
       "journey": "J19",
       "name": "A Stripe migration push keeps the subscription's seats, and a retry after a lost schedule create replays it"
@@ -2097,6 +2102,131 @@
       "id": "OR-J22-S09",
       "journey": "J22",
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+    },
+    {
+      "id": "OR-J39-S01",
+      "journey": "J39",
+      "name": "A paid one-off order sends one receipt: a replayed settlement queues no second message and a refused send is retried once"
+    },
+    {
+      "id": "OR-J39-S02",
+      "journey": "J39",
+      "name": "A fact written inside a billing restore queues no customer message; the same fact outside one queues one"
+    },
+    {
+      "id": "OR-J39-S03",
+      "journey": "J39",
+      "name": "A customer without an address is logged no_contact and the fact is still emitted"
+    },
+    {
+      "id": "OR-J39-S04",
+      "journey": "J39",
+      "name": "A fact on a test PSP is logged test_environment, sends nothing and is still emitted"
+    },
+    {
+      "id": "OR-J39-S05",
+      "journey": "J39",
+      "name": "Past ten messages an hour a customer's message is rate_limited and the merchant has a finding"
+    },
+    {
+      "id": "OR-J39-S06",
+      "journey": "J39",
+      "name": "Erasing a customer over SCIM deletes its message log"
+    },
+    {
+      "id": "OR-J39-S07",
+      "journey": "J39",
+      "name": "A merchant's template in its messages document replaces the built-in message, inside the built-in layout"
+    },
+    {
+      "id": "OR-J39-S08",
+      "journey": "J39",
+      "name": "A messages document whose template does not render is refused on load, naming the event type and the error, and the built-in messages send"
+    },
+    {
+      "id": "OR-J39-S09",
+      "journey": "J39",
+      "name": "Each cancellation cause sends one confirmation in its own words: the customer canceled, staff canceled, or collection stopped after failed payments"
+    },
+    {
+      "id": "OR-J39-S10",
+      "journey": "J39",
+      "name": "A scheduled price change sends its notice: the old and new amounts, the date and how to cancel"
+    },
+    {
+      "id": "OR-J39-S11",
+      "journey": "J39",
+      "name": "A refund sends one refund receipt, whether staff refunded it or the provider reported it, however often it is replayed"
+    },
+    {
+      "id": "OR-J39-S12",
+      "journey": "J39",
+      "name": "The host's message renderer takes precedence over the merchant's templates for the messages it renders"
+    },
+    {
+      "id": "OR-J39-S13",
+      "journey": "J39",
+      "name": "A subscription ended by failed payments sends one confirmation, its ending's, and not the final failure's notice"
+    },
+    {
+      "id": "OR-J39-S14",
+      "journey": "J39",
+      "name": "A staff cancel that ends access now sends one confirmation in staff's words"
+    },
+    {
+      "id": "OR-J39-S15",
+      "journey": "J39",
+      "name": "An access end a refund caused sends no confirmation by default; the refund receipt is sent"
+    },
+    {
+      "id": "OR-J39-S16",
+      "journey": "J39",
+      "name": "The customer messages route lists a customer's messages newest first, paged, with their statuses, attempts, recipients and facts, for the bound merchant only"
+    },
+    {
+      "id": "OR-J39-S17",
+      "journey": "J39",
+      "name": "A preview renders a candidate template against sample data without saving it, and refuses an invalid one with its error"
+    },
+    {
+      "id": "OR-J39-S18",
+      "journey": "J39",
+      "name": "A test message goes to the merchant's alert address only, ten an hour: the request cannot name one, and a merchant without one is refused"
+    },
+    {
+      "id": "OR-J39-S19",
+      "journey": "J39",
+      "name": "Only a mail server's refusal of the recipient is final: a refused sender is retried and opens the merchant's finding, which its next send resolves"
+    },
+    {
+      "id": "OR-J39-S20",
+      "journey": "J39",
+      "name": "A message whose last attempt's job ends while the sender holds it settles failed, not sending"
+    },
+    {
+      "id": "OR-J39-S21",
+      "journey": "J39",
+      "name": "A declined checkout sends no message by default, and turned on it sends none from a sandbox PSP: the decline names its PSP"
+    },
+    {
+      "id": "OR-J39-S22",
+      "journey": "J39",
+      "name": "A refund the refresh finds more than a week after the provider made it, reading on from its last pass, records no receipt; one found minutes late sends one"
+    },
+    {
+      "id": "OR-J39-S23",
+      "journey": "J39",
+      "name": "A void sends one receipt worded as a canceled charge: the customer was not charged"
+    },
+    {
+      "id": "OR-J39-S24",
+      "journey": "J39",
+      "name": "A subscription's first payment sends its receipt: the amount paid and the billing period"
+    },
+    {
+      "id": "OR-J39-S25",
+      "journey": "J39",
+      "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
     }
   ]
 }

@@ -140,6 +140,12 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR um.merchant_id > sqlc.narg(after)::uuid)
         AND um.minute_at < sqlc.arg(usage_minute_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT cm.merchant_id AS mid
+       FROM billing.customer_messages cm
+      WHERE (sqlc.narg(after)::uuid IS NULL OR cm.merchant_id > sqlc.narg(after)::uuid)
+        AND cm.created_at < sqlc.arg(message_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -348,6 +354,17 @@ DELETE FROM billing.limit_adjustments a
 WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
     SELECT e.merchant_id, e.customer_id, e.source_id
     FROM billing.limit_adjustments e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.created_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteCustomerMessagesBefore :execrows
+DELETE FROM billing.customer_messages m
+WHERE (m.merchant_id, m.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.customer_messages e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.created_at
     LIMIT sqlc.arg(row_limit)::int

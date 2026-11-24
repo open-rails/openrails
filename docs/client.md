@@ -356,7 +356,9 @@ and `charge_psps` (where new cards are saved and which PSPs take new charges),
 bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
 `monthly_floor`, `collection_threshold`, `billing_period_boundary`),
 `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access` and `usage_gate_safe_spend`.
+`provider_refund_access` and `usage_gate_safe_spend`. `from_email` and
+`alert_email` are each one mailbox, bare or named. Beside the settings, the
+merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -966,8 +968,9 @@ stop := func(ctx context.Context) error {
 
 ## Events
 
-OpenRails records billing facts in a retained, ordered log. Your app reads it and
-owns everything after: receipts, inboxes, email, preferences. `ListEvents` (or
+OpenRails records billing facts in a retained, ordered log. It emails customers
+the facts the merchant turns on ([customer messages](#customer-messages)); your
+app reads the log for everything else: inboxes, other email, preferences. `ListEvents` (or
 `GET /v1/app/events` with `merchant:events:read`) pages it by cursor; OpenRails
 keeps no readers or acknowledgments.
 
@@ -1032,6 +1035,42 @@ and `destructive.hold_cleared`, among others. Customer notices
 - `MerchantProfile.NotificationURL(type)` picks the profile URL for a notice.
 - Embedded, `Deps.Notifications` publishes selected notices to an AuthKit
   account inbox in the billing transaction ([embedded.md](embedded.md)).
+
+## Customer messages
+
+OpenRails emails customers their receipts, payment problems, cancellation
+confirmations and price-change notices; the merchant's `messages` document turns
+each event type on or off and replaces its template
+([guide](guide.md#customer-messages)).
+
+| Method | Use it to |
+|---|---|
+| `PreviewMessage` | render an event type's message, or a candidate template, over sample data and the merchant's profile; nothing is saved (`merchant:config:read`) |
+| `CreateTestMessage` | send that rendering to the merchant's `alert_email`, the only address a test goes to, ten an hour (`merchant:config:manage`) |
+| `ListCustomerMessages` | read a customer's delivery log, newest first: event, status, attempts, last error, recipient; no body (`merchant:customer:read`) |
+
+```go guide:messages-check
+candidate := &billing.MessageTemplate{
+	Subject: "Your {{.Merchant.Name}} receipt",
+	Text:    "You paid {{.Event.Amount}} for {{.Event.ProductName}}.",
+}
+preview, err := shop.PreviewMessage(ctx, billing.PreviewMessageParams{EventType: "one_off_purchase_completed", Template: candidate})
+if err != nil {
+	return err // 400 message_template_invalid names what does not render
+}
+_ = preview.Subject
+if _, err := shop.CreateTestMessage(ctx, billing.CreateTestMessageParams{EventType: "one_off_purchase_completed", Template: candidate}); err != nil {
+	return err // sent to alert_email only, ten an hour
+}
+log, err := shop.ListCustomerMessages(ctx, customer, billing.CustomerMessageListParams{})
+if err != nil {
+	return err
+}
+for _, m := range log.Items { // newest first; no body
+	_, _, _ = m.EventType, m.Status, m.LastError
+}
+return nil
+```
 
 ## Imports and archives
 

@@ -1,0 +1,1 @@
+Your payment agreement{{with .Merchant.Name}} with {{.}}{{end}} has ended

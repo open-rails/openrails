@@ -1,0 +1,4 @@
+As you asked, we will no longer charge your payment method automatically{{with .Event.EffectiveAt}} from {{.}}{{end}}.{{with .Event.AmountDue}} You still owe {{.}}, which you can pay yourself.{{end}}
+{{with .Event.AmountDue}}{{with $.Links.Pay}}
+Pay it here: {{.}}
+{{end}}{{end}}

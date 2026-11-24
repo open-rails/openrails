@@ -1,0 +1,1 @@
+The price of your subscription{{with .Merchant.Name}} to {{.}}{{end}} is changing

@@ -81,6 +81,9 @@ const (
 	ResolvedFindings = 366 * Day
 	// ReleasedParks keeps a released park 90 days past its release.
 	ReleasedParks = 90 * Day
+	// CustomerMessages keeps a customer message's delivery record two years,
+	// the evidence a dispute response cites.
+	CustomerMessages = 731 * Day
 )
 
 // Days is a period as the whole days the sweep statements take.

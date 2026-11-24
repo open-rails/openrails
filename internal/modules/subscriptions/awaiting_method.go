@@ -12,9 +12,9 @@ import (
 )
 
 // ExpireAwaitingMethod ends a membership whose wait for a new card outlived
-// its dunning window, as a spent schedule would. With the operator's
-// destructive switch off the row keeps waiting, access intact, under a
-// standing finding.
+// its dunning window, as a spent schedule would: its ending's reason is
+// expired. With the operator's destructive switch off the row keeps waiting,
+// access intact, under a standing finding.
 func (s *SubscriptionLifecycleService) ExpireAwaitingMethod(ctx context.Context, d *db.DB, sub *models.Subscription, blocked string) (bool, error) {
 	now := s.now()
 	if blocked != "" {
@@ -23,7 +23,7 @@ func (s *SubscriptionLifecycleService) ExpireAwaitingMethod(ctx context.Context,
 		_, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: sub.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 		return false, err
 	}
-	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
+	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, EffectOptions{EndedReason: PremiumEndReasonExpired}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
 		return locked.Status == models.StatusAwaitingMethod && locked.GraceEndsAt != nil && !locked.GraceEndsAt.After(now), nil
 	})
 }
