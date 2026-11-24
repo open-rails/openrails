@@ -804,6 +804,15 @@
       "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/host",
       "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/staff"
     ],
+    "OR-J34-S41": [
+      "TestDestructiveSafeguards/OR-J34-S41/an-archive-exports-right-after-a-catalog-edit"
+    ],
+    "OR-J34-S42": [
+      "TestDestructiveSafeguards/OR-J34-S42/an-archive-export-beside-a-pending-destructive-action-is-refused"
+    ],
+    "OR-J34-S43": [
+      "TestDestructiveSafeguards/OR-J34-S43/a-restore-waits-a-day-after-a-prune-that-can-be-undone"
+    ],
     "OR-J34-S34": [
       "TestDestructiveSafeguards/OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget"
     ],

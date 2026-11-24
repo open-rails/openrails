@@ -81,9 +81,19 @@ ON CONFLICT(merchant_id,dedupe_key) DO NOTHING;
 UPDATE billing.reconciliation_findings SET status='auto_fixed',resolution='admin_fixed',resolved_at=sqlc.arg(now)::timestamptz,resolved_by=sqlc.arg(actor)::text,operator_notes=sqlc.arg(reason)::text,updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND finding_type='life.destructive.hold' AND subject_key=sqlc.arg(hold_id)::text AND status IN ('requires_review','reconcile_required','ignored');
 
--- name: HasDestructiveArchiveBarrier :one
-SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND greatest(admitted_at,finished_at)>sqlc.arg(since)::timestamptz)))
- OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=sqlc.arg(merchant_id)::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid))))::boolean AS held;
+-- name: DestructiveArchiveBarrier :one
+-- What keeps a merchant's book from moving, empty when nothing does: a
+-- destructive action whose effect may still land (an ordinary catalog or
+-- configuration edit aside), an open incident the book would escape, and for
+-- a restore (undo_since set) a prune or approval run that can still be undone
+-- and ran after undo_since.
+SELECT COALESCE(CASE
+ WHEN EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND state IN ('reserved','started','uncertain')
+   AND NOT (kind='configuration_change' OR kind='catalog_change' AND action_key LIKE 'catalog:%')) THEN 'destructive_actions'
+ WHEN EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=sqlc.arg(merchant_id)::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid))) THEN 'destructive_holds'
+ WHEN sqlc.narg(undo_since)::timestamptz IS NOT NULL AND EXISTS(SELECT 1 FROM billing.maintenance_runs WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND kind IN ('prune','approval')
+   AND status<>'reversed' AND (finished_at IS NULL OR finished_at>sqlc.narg(undo_since)::timestamptz)) THEN 'maintenance_runs'
+END,'')::text AS barrier;
 
 -- Every budget but the erasures' (CountErasureUnits): a reservation holds
 -- budget only while it may still start (reserved_since).

@@ -3,11 +3,13 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,7 +22,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
@@ -365,6 +370,65 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.Error(t, <-errA)
 		remove()
 		require.Len(t, b.actions(t, "no_effect"), 1, "the abandon finishes once its action is free")
+	})
+
+	t.Run("OR-J34-S41/an-archive-exports-right-after-a-catalog-edit", func(t *testing.T) {
+		w := newWorld(t)
+		usageMeter(t, w.alpha, 100)
+		var edits int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "destructive_actions"}.Sanitize()+
+			" WHERE merchant_id = $1 AND kind IN ('catalog_change', 'configuration_change') AND state = 'succeeded'", w.alpha.MerchantID().UUID()).Scan(&edits))
+		require.Positive(t, edits, "the meter's rate card is an admitted catalog edit")
+		archiveBytes(t, w.alpha)
+	})
+
+	t.Run("OR-J34-S42/an-archive-export-beside-a-pending-destructive-action-is-refused", func(t *testing.T) {
+		b := newNMIBook(t)
+		b.land(b.a.alpha, b.owed(b.started.Add(10*24*time.Hour), 1, "pending"))
+		require.Len(t, b.actions(t, "started"), 1, "the owed stop waits for its provider effect")
+		var out bytes.Buffer
+		err := b.a.alpha.ExportBillingArchive(t.Context(), &out)
+		var refused *billing.StatusError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, billing.CodeBillingArchiveUnsupportedState, refused.Code)
+		require.Equal(t, "destructive_actions", refused.Metadata["table"], "its effect may still land")
+	})
+
+	t.Run("OR-J34-S43/a-restore-waits-a-day-after-a-prune-that-can-be-undone", func(t *testing.T) {
+		source := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "pruned-target"}})
+		require.NoError(t, err)
+		archive := archiveBytes(t, source.alpha)
+		target, client := archiveTarget(t, source)
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+
+		// A prune of the restored book ends now, by the target's clock: the
+		// record its undo reads.
+		database, err := db.NewWithPGXPool(slog.Default(), target.pool, target.schema)
+		require.NoError(t, err)
+		mid := client.MerchantID().UUID()
+		require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), client.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+			run := uuid.New()
+			if _, err := q.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{ID: run, MerchantID: mid, Kind: "prune", Actor: "critical operator", Coverage: []byte(`{}`)}); err != nil {
+				return err
+			}
+			_, err := q.FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{MerchantID: mid, ID: run, Status: "completed", Now: target.clock.Now().UTC(), Affected: []byte(`{}`)})
+			return err
+		}))
+
+		// The book's restore, replayed, waits while the prune can be undone.
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		var refused *billing.StatusError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, billing.CodeBillingArchiveUnsupportedState, refused.Code)
+		require.Equal(t, "maintenance_runs", refused.Metadata["table"])
+		target.clock.Advance(25 * time.Hour)
+		replay, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err, "a day on, by the deployment's clock")
+		require.True(t, replay.AlreadyImported)
 	})
 
 	t.Run("OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget", func(t *testing.T) {

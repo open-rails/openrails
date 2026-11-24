@@ -316,7 +316,7 @@ var preflightChecks = []rowCheck{
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+	if err := destructiveArchiveBarrier(ctx, tx, id, nil); err != nil {
 		return err
 	}
 	for _, c := range preflightChecks {
@@ -523,15 +523,22 @@ func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount
 }
 
-// Deployment admission/hold history never travels in a merchant artifact.
-// Refuse moving a book while it could discard live authority or recent budget.
-func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	held, err := gen.New(tx).HasDestructiveArchiveBarrier(ctx, gen.HasDestructiveArchiveBarrierParams{MerchantID: id.UUID(), Since: time.Now().UTC().Add(-24 * time.Hour)})
+// archiveUndoWindow is how long a restore waits after a prune or approval
+// run that can still be undone.
+const archiveUndoWindow = 24 * time.Hour
+
+// destructiveArchiveBarrier refuses moving a merchant's book while a
+// destructive action may still take effect or an incident it would escape is
+// open; deployment admission and hold history never travel with it. A restore
+// (undoSince set) also waits for a run that can still be undone and ran after
+// undoSince.
+func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID, undoSince *time.Time) error {
+	table, err := gen.New(tx).DestructiveArchiveBarrier(ctx, gen.DestructiveArchiveBarrierParams{MerchantID: id.UUID(), UndoSince: undoSince})
 	if err != nil {
 		return err
 	}
-	if held {
-		return &Error{Code: "unsupported_state", Table: "destructive_actions", Count: 1}
+	if table != "" {
+		return &Error{Code: "unsupported_state", Table: table, Count: 1}
 	}
 	return nil
 }
