@@ -29,6 +29,9 @@ const (
 	MarkUncollectible   Kind = "mark_uncollectible"
 	CatalogChange       Kind = "catalog_change"
 	ConfigurationChange Kind = "configuration_change"
+	// EraseContact is a directory's erasure of a customer's contact (SCIM
+	// DELETE).
+	EraseContact Kind = "erase_contact"
 )
 
 // Actor is verified command attribution. Credential is audit only; rotation
@@ -114,7 +117,7 @@ func (c Command) validate() error {
 		return errors.New("destructive command requires a SHA256 digest")
 	}
 	switch c.Kind {
-	case Refund, CancelSubscription, DeletePaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange:
+	case Refund, CancelSubscription, DeletePaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange, EraseContact:
 	default:
 		return fmt.Errorf("unknown destructive command kind %q", c.Kind)
 	}

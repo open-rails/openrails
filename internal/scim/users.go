@@ -481,25 +481,6 @@ func (s *Server) patchUser(ctx context.Context, mid billing.MerchantID, id strin
 	return out, e
 }
 
-// deleteUser erases the User's contact and keeps the customer's billing. The
-// row stays, without values, so an older report cannot restore them.
-func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string) *Error {
-	now := s.now()
-	return s.tx(ctx, func(q *gen.Queries) error {
-		row, err := provisioned(ctx, q, mid, id)
-		if err != nil {
-			return err
-		}
-		_, err = q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
-			MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(now, row.DirectoryUpdatedAt),
-		})
-		if err != nil {
-			return err
-		}
-		return q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID})
-	})
-}
-
 func (s *Server) getUser(ctx context.Context, mid billing.MerchantID, raw string) (gen.BillingCustomerContact, *Error) {
 	id, ok := customerID(raw)
 	if !ok {
@@ -628,7 +609,7 @@ func (s *Server) patchFrom(ctx context.Context, mid billing.MerchantID, id strin
 // DeleteUser serves DELETE /Users/{id}.
 func (s *Server) DeleteUser() http.Handler {
 	return s.serve(func(ctx context.Context, w http.ResponseWriter, r *http.Request, mid billing.MerchantID) {
-		if e := s.deleteUser(ctx, mid, r.PathValue("id")); e != nil {
+		if e := s.deleteUser(ctx, mid, r.PathValue("id"), nil); e != nil {
 			writeError(w, e)
 			return
 		}

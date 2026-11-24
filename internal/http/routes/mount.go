@@ -103,7 +103,7 @@ func (e *Env) scimServer() *scim.Server {
 	}
 	if e.scim == nil {
 		rt := e.Runtime
-		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Now: func() time.Time {
+		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Admissions: rt.DestructiveAdmissions, Now: func() time.Time {
 			if rt.Clock != nil {
 				return rt.Clock.Now()
 			}

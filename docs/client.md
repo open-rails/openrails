@@ -116,6 +116,7 @@ its role's permissions. Grant only what the backend needs:
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
+| push the customer directory over SCIM | `merchant:provisioning:read`, `merchant:provisioning:manage` |
 
 Each permission also has a `root:` name, held in your auth's root scope for
 every merchant; `billing.Permissions()` lists them and roles should be built
@@ -196,15 +197,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's.
-Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your
-own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to
-`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token;
-`externalId` is the user's UUID, and the newest write wins. On a standalone
-server or the hosted platform, your issuer pushes to the server's directory
-(`/directory/scim/v2`), and verified contact claims in customer tokens fill in
-as they are used. OpenRails emails a customer only at an address that was
-verified.
+**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact and spends the token's or application's destructive budget, like a refund; a Bulk whose erasures exceed it applies nothing (`429`) and opens a [hold](#destructive-holds). On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -1131,13 +1124,7 @@ return err
 
 ## Destructive holds
 
-Refunds, cancellations, card removals, access and credit revocations, write-offs
-and substantive catalog or configuration changes share one admission policy per
-staff member or application: by default 5 an hour and 15 a day per actor, with
-merchant and deployment ceilings that grow with active customers. A breach is a
-**hold**: denied `429`, and held until a person reviews and clears it; waiting,
-restarting or rotating a key does not release it. The in-process host's own
-calls spend nothing; a call made for a person through `ActingFor` is theirs.
+Refunds, cancellations, card removals, access and credit revocations, write-offs, substantive catalog or configuration changes and SCIM contact erasures share one admission policy per staff member, application or provisioning token: by default 5 an hour and 15 a day per actor, with merchant and deployment ceilings that grow with active customers. A breach is a **hold**: denied `429`, and held until a person reviews and clears it; waiting, restarting or rotating a key does not release it. The in-process host's own calls spend nothing; a call made for a person through `ActingFor` is theirs.
 
 | Method | Use it to |
 |---|---|

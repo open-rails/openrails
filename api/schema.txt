@@ -5,6 +5,7 @@ migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352ca
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
+migration 0005_contact_erasure_admission.up.sql sha256:788456151df25e1152a0f7878365bfb134411deeaf9a09904e57b6456f83b2a6
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -406,7 +407,7 @@ table billing.destructive_actions
   constraint destructive_actions_actor_key_check CHECK ((actor_key ~ '^[0-9a-f]{64}$'::text))
   constraint destructive_actions_admission_sequence_key UNIQUE (admission_sequence)
   constraint destructive_actions_credential_check CHECK ((credential <> ''::text))
-  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text])))
+  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'erase_contact'::text])))
   constraint destructive_actions_lifecycle_check CHECK ((((state = 'reserved'::text) AND (started_at IS NULL) AND (finished_at IS NULL)) OR ((state = ANY (ARRAY['started'::text, 'uncertain'::text])) AND (started_at IS NOT NULL) AND (finished_at IS NULL)) OR ((state = 'succeeded'::text) AND (started_at IS NOT NULL) AND (finished_at IS NOT NULL) AND (completion_sequence IS NOT NULL)) OR ((state = 'no_effect'::text) AND (finished_at IS NOT NULL))))
   constraint destructive_actions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_actions_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'host'::text, 'automation'::text])))
