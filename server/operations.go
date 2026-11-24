@@ -25,6 +25,6 @@ func (s *Server) UnlockAdminLockout(ctx context.Context, userID string) error {
 }
 
 // PrivateHandler is the operator's private surface (GET /metrics), which Run
-// and Serve listen on at Config.PrivateAddr. Never mount it on a public
+// and Serve listen on at Config.PrivatePort. Never mount it on a public
 // listener.
 func (s *Server) PrivateHandler() http.Handler { return s.surface.PrivateHandler() }

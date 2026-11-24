@@ -44,7 +44,7 @@ type RailPaymentMethodService struct {
 	// one from Config.
 	NMIClients      *railresolve.NMIFactory
 	ProviderSecrets *merchants.Service
-	Config          *config.Config
+	Config          *billing.Config
 	DB              *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
@@ -165,7 +165,7 @@ func (e *PaymentMethodError) Unwrap() error {
 	return e.Err
 }
 
-func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *RailPaymentMethodService {
+func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *billing.Config, clocks ...clockwork.Clock) *RailPaymentMethodService {
 	return &RailPaymentMethodService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,

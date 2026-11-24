@@ -13,20 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// CardVaultConfig is the operator's card vault for this deployment's
-// posture: merchants with settings.card_vault platform store new cards in it,
-// each in its own partition. Its keys are in Vault, at
-// <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
-type CardVaultConfig struct {
-	// Kind is the vault vendor: basis_theory.
-	Kind billing.CardVaultKind
-	// TenantID is the vendor's tenant id.
-	TenantID string
-	// KVMount holds the platform credential document. Empty uses vault.kv_mount.
-	// Setting this does not select Vault as the merchant configuration source.
-	KVMount string
-}
-
 // PlatformCustodianKey is the custodian key of a merchant's identity in the
 // platform vault; no merchant custodian takes it.
 const PlatformCustodianKey = models.CustodianPlatform
@@ -34,8 +20,8 @@ const PlatformCustodianKey = models.CustodianPlatform
 // cardVaultKinds are the vendors a platform vault may be.
 var cardVaultKinds = []string{models.CustodianBasisTheory}
 
-func validateCardVault(cfg *Config) error {
-	if cfg == nil || cfg.CardVault == nil {
+func validateCardVault(cfg *billing.Config) error {
+	if cfg == nil || cfg.CardVault == (billing.CardVaultConfig{}) {
 		return nil
 	}
 	v := cfg.CardVault
@@ -57,8 +43,8 @@ func validateCardVault(cfg *Config) error {
 
 // CardVaultKVMount selects the platform credential store without changing
 // where merchant configuration lives.
-func CardVaultKVMount(cfg *Config) (string, error) {
-	if cfg == nil || cfg.CardVault == nil {
+func CardVaultKVMount(cfg *billing.Config) (string, error) {
+	if cfg == nil || cfg.CardVault == (billing.CardVaultConfig{}) {
 		return "", nil
 	}
 	if raw := cfg.CardVault.KVMount; raw != "" {
@@ -73,6 +59,6 @@ func CardVaultKVMount(cfg *Config) (string, error) {
 
 // PlatformCustodianAccountID is a merchant's identity in the platform vault:
 // the tenant and the merchant's partition.
-func PlatformCustodianAccountID(v *CardVaultConfig, merchant uuid.UUID) string {
+func PlatformCustodianAccountID(v *billing.CardVaultConfig, merchant uuid.UUID) string {
 	return v.TenantID + "/" + merchant.String()
 }

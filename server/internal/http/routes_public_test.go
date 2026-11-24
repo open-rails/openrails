@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // The standalone meta routes are mounted with no runtime of their own: they
@@ -17,7 +17,7 @@ import (
 func TestStandaloneMetaRoutesLogThroughTheServer(t *testing.T) {
 	var out bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&out, nil))
-	s := &Server{Log: logger, runtime: &app.Runtime{Log: logger, Config: &config.Config{}}}
+	s := &Server{Log: logger, runtime: &app.Runtime{Log: logger, Config: &billing.Config{}}}
 	mux := http.NewServeMux()
 	s.registerStandaloneMetaRoutes(mux)
 	for path, status := range map[string]int{"/health/live": http.StatusOK, "/health/nope": http.StatusNotFound} {

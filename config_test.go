@@ -29,32 +29,12 @@ const (
 	configPkg = "github.com/open-rails/openrails/internal/config"
 )
 
-// Every Config field reaches the engine's configuration, and the engine
-// reads nothing Config lacks.
-func TestEngineConfigCopiesEveryField(t *testing.T) {
-	var cfg Config
-	mirror.Fill(&cfg)
-	for _, field := range mirror.Zero(engineConfig(cfg), configPkg) {
-		t.Errorf("engineConfig leaves %s zero", field)
-	}
-	for _, field := range mirror.Missing(reflect.TypeFor[Config](), reflect.TypeFor[config.Config]()) {
-		if field != "Config.ReadCache" { // the handles' own
-			t.Errorf("%s has no field in the engine's configuration", field)
-		}
-	}
-	if engineConfig(Config{}).RateLimits != nil || engineConfig(Config{RateLimits: RateLimitsConfig{}}).RateLimits == nil {
-		t.Error("nil RateLimits (the built-in limits) and empty RateLimits (none) must stay apart")
-	}
-}
-
 // The values Config's fields take are the engine's.
 func TestConfigValuesAreTheEngines(t *testing.T) {
 	for public, engine := range map[string]string{
 		string(billing.EnvironmentLive): config.EnvironmentLive, string(billing.EnvironmentTest): config.EnvironmentTest, string(billing.EnvironmentSandbox): config.EnvironmentSandbox,
 		string(billing.EnvironmentMainnet): config.EnvironmentMainnet, string(billing.EnvironmentDevnet): config.EnvironmentDevnet, string(billing.EnvironmentTestnet): config.EnvironmentTestnet,
 		QueueBilling: riverjobs.QueueBilling, QueuePSPImport: riverjobs.QueuePSPImport,
-		string(ReadCatalog): string(config.ReadCatalog), string(ReadMeters): string(config.ReadMeters),
-		string(ReadPublicConfig): string(config.ReadPublicConfig), string(ReadMerchantConfiguration): string(config.ReadMerchantConfiguration),
 	} {
 		if public != engine {
 			t.Errorf("%q is %q in the engine", public, engine)
@@ -65,7 +45,7 @@ func TestConfigValuesAreTheEngines(t *testing.T) {
 // Every read the route catalog caches has a remote policy, the widest.
 func TestCatalogReadsHavePolicies(t *testing.T) {
 	for _, r := range httproutes.Catalog() {
-		if _, ok := readPolicies[overHTTP][Read(r.Cache)]; r.Cache != "" && !ok {
+		if _, ok := readPolicies[overHTTP][r.Cache]; r.Cache != "" && !ok {
 			t.Errorf("%s %s caches %q, which has no policy", r.Method, r.Path, r.Cache)
 		}
 	}

@@ -244,7 +244,7 @@ func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding.
 	MerchantID billing.MerchantID
-	Config     *config.Config
+	Config     *billing.Config
 	Database   *db.DB
 	// Merchants is the merchants service over the configuration cache the
 	// declaration fills (a file) or seeds (Vault).
@@ -337,7 +337,7 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 // alone, and so does a messages document whose templates do not render. Settings that do not normalize, or a card custody the deployment
 // cannot serve, refuse the merchant document and with it every PSP and
 // custodian, which never serve without their merchant's settings.
-func ScopeDeclaration(cfg *config.Config, mt billing.MerchantDocument) (billing.MerchantDocument, map[string]string) {
+func ScopeDeclaration(cfg *billing.Config, mt billing.MerchantDocument) (billing.MerchantDocument, map[string]string) {
 	refused := map[string]string{}
 	mt.PSPs, mt.Custodians = maps.Clone(mt.PSPs), maps.Clone(mt.Custodians)
 	if mt.Messages != nil {
@@ -393,7 +393,7 @@ func NormalizeManifestRail(raw string) string {
 // ValidateMerchantDeclaration refuses a declaration any of whose documents
 // ScopeDeclaration would refuse: an operator command applies all of it or
 // nothing.
-func ValidateMerchantDeclaration(cfg *config.Config, mt billing.MerchantDocument) error {
+func ValidateMerchantDeclaration(cfg *billing.Config, mt billing.MerchantDocument) error {
 	if _, refused := ScopeDeclaration(cfg, mt); len(refused) > 0 {
 		if why, ok := refused[merchantdocs.MerchantDoc]; ok {
 			return errors.New(why)
@@ -405,14 +405,14 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt billing.MerchantDocument
 
 // validateMerchantDocument checks the merchant document a declaration names
 // before it is served.
-func validateMerchantDocument(cfg *config.Config, mt billing.MerchantDocument) error {
+func validateMerchantDocument(cfg *billing.Config, mt billing.MerchantDocument) error {
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.MerchantSettings); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
 	declared := merchantdocs.Declared(billing.MerchantID{}, mt, time.Time{})
-	var vault *config.CardVaultConfig
-	if cfg != nil {
-		vault = cfg.CardVault
+	var vault *billing.CardVaultConfig
+	if cfg != nil && cfg.CardVault != (billing.CardVaultConfig{}) {
+		vault = &cfg.CardVault
 	}
 	return merchants.CardVaultRefusal(vault, mt.MerchantSettings, declared.PSPs)
 }

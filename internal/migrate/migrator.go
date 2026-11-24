@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/retention"
+	"github.com/open-rails/openrails/internal/sqlschema"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -52,7 +53,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	schema := opts.Schema
 	if schema == "" {
-		schema = config.DefaultSchema
+		schema = sqlschema.Authored
 	}
 	chain := opts.Chain
 	if chain == nil {

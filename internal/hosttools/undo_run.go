@@ -15,7 +15,6 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -24,7 +23,7 @@ import (
 
 // UndoRunOptions mirrors `openrails undo-run`.
 type UndoRunOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID

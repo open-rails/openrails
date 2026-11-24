@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -204,7 +203,7 @@ type Route struct {
 	// the client method's arguments, each a string or a Stringer.
 	Args []any
 	// Cache is the read cache that may answer a client GET; empty reads live.
-	Cache config.Read
+	Cache billing.Read
 	// Client is how the client method is written: generated, or HandWritten.
 	Client ClientSource
 	// ConsoleOnly marks optional catalog assistance owned by the console UI.

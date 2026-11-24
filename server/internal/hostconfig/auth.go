@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/keys"
 )
@@ -16,9 +15,9 @@ import (
 // AUTHKIT_PUBLIC_KEYS, a JSON object {kid: PEM} of further keys trusted for
 // verification, such as the previous one during a rotation).
 type SigningKey struct {
-	ActiveKeyID         string `koanf:"active_key_id"`
-	ActivePrivateKeyPEM string `koanf:"active_private_key_pem"`
-	PublicKeysJSON      string `koanf:"public_keys"`
+	ActiveKeyID         string `yaml:"active_key_id"`
+	ActivePrivateKeyPEM string `yaml:"active_private_key_pem"`
+	PublicKeysJSON      string `yaml:"public_keys"`
 }
 
 // Source is the key as AuthKit's Deps.KeySource; nil without one, when
@@ -40,27 +39,6 @@ func (k SigningKey) Source() (keys.Source, error) {
 		return nil, fmt.Errorf("AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: %w", err)
 	}
 	return src, nil
-}
-
-// authConfig decodes the auth section by AuthKit's own keys: AuthKit
-// documents them, and a key it does not know refuses boot.
-func authConfig(section map[string]any) (authkit.Config, error) {
-	var out authkit.Config
-	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
-			mapstructure.TextUnmarshallerHookFunc(),
-		),
-		Result: &out, WeaklyTypedInput: true, ErrorUnused: true, TagName: "yaml",
-	})
-	if err != nil {
-		return authkit.Config{}, err
-	}
-	if err := dec.Decode(section); err != nil {
-		return authkit.Config{}, fmt.Errorf("auth (AuthKit's configuration): %w", err)
-	}
-	return out, nil
 }
 
 // authPath is the auth section key an AUTH_* environment variable names:

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -17,7 +18,9 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
-	billing "github.com/open-rails/openrails/internal/config"
+
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/server"
 )
 
 func loadConfigIfExists(k *koanf.Koanf, path string) error {
@@ -52,41 +55,46 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 	return nil
 }
 
-// Top-level koanf keys, derived from fileConfig's tags so a new
-// multi-word top-level field can never silently miss the env mapping the way
-// PUBLIC_BILLING_BASE_URL would under first-underscore splitting (#710). Scalar keys map
-// only on an exact env-name match; nested keys (struct/map fields) also map
-// PREFIX_rest -> prefix.rest (DB_URL -> db.url).
-var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKoanfKeys()
+// Top-level keys of both decode targets, from their yaml tags, so a new
+// multi-word top-level key can never miss the environment mapping the way
+// PUBLIC_BILLING_BASE_URL would under first-underscore splitting. Scalar keys
+// map only on an exact name; a section also maps PREFIX_rest to prefix.rest
+// (DATABASE_URL to database.url).
+var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKeys(reflect.TypeFor[server.Config](), reflect.TypeFor[Config]())
 
-func topLevelKoanfKeys() (scalar, nested map[string]bool) {
+func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 	scalar, nested = map[string]bool{}, map[string]bool{}
-	t := reflect.TypeOf(fileConfig{})
-	for i := 0; i < t.NumField(); i++ {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("koanf"), ",")
-		if name == "" || name == "-" {
-			continue
+	var walk func(t reflect.Type)
+	walk = func(t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			name, opts, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+			ft := t.Field(i).Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			switch {
+			case opts == "inline":
+				walk(ft)
+			case name == "" || name == "-":
+			case ft.Kind() == reflect.Struct || ft.Kind() == reflect.Map:
+				nested[name] = true
+			default:
+				scalar[name] = true
+			}
 		}
-		ft := t.Field(i).Type
-		for ft.Kind() == reflect.Pointer {
-			ft = ft.Elem()
-		}
-		if ft.Kind() == reflect.Struct || ft.Kind() == reflect.Map {
-			nested[name] = true
-		} else {
-			scalar[name] = true
-		}
+	}
+	for _, t := range types {
+		walk(t)
 	}
 	return scalar, nested
 }
 
-// envKeyToConfigKey maps an env var name to its koanf config key.
-// Examples: PUBLIC_BILLING_BASE_URL -> public_billing_base_url, DB_URL -> db.url. Names that
-// route to no config section return "" and are never loaded (the process env
-// is full of vars that are not ours — PATH, HOME, compose interpolation vars);
-// or#915 pairs this with a strict ErrorUnused unmarshal, so a name INSIDE one
-// of our sections that hits no field (DB_TYPO) refuses boot instead of
-// silently dropping.
+// envKeyToConfigKey maps an environment variable's name to its key:
+// PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
+// database.url. A name that routes to no section is "" and never loaded (the
+// process environment is full of names that are not ours: PATH, HOME,
+// Compose's interpolation); a name inside a section that hits no key
+// (DATABASE_TYPO) refuses boot like any unknown key.
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
@@ -102,7 +110,7 @@ func envKeyToConfigKey(s string) string {
 
 	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
 	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
-	// (mirrored by cmd/authkit-server). The unprefixed names are poison — Load
+	// (mirrored by cmd/authkit-server). The unprefixed names are poison: Load
 	// refuses boot on them.
 	switch s {
 	case "naming_former_names_mode":
@@ -132,95 +140,29 @@ func envKeyToConfigKey(s string) string {
 	return ""
 }
 
-// LoadOption customizes Load. WithOverride is the CLI-flag path (or#915):
-// flags ride the same koanf pipeline as everything else via a confmap overlay
-// loaded ABOVE env (flag beats env beats yaml) — never by writing into the
-// process environment behind the loader's back.
-type LoadOption func(*loadOptions)
-
-type loadOptions struct {
-	overrides map[string]any
-	quiet     bool
-	directory bool
-}
-
-// WithOverride overlays one koanf config key (e.g. "port") above every other
-// source.
-func WithOverride(key string, value any) LoadOption {
-	return func(o *loadOptions) {
-		if o.overrides == nil {
-			o.overrides = map[string]any{}
-		}
-		o.overrides[key] = value
-	}
-}
-
-func Load(configPath string, opts ...LoadOption) (*Config, error) {
-	return load(configPath, false, opts...)
-}
-
-// LoadForCommand uses the same configuration pipeline without routine startup
-// provenance messages. Validation and configuration failures are unchanged.
-func LoadForCommand(configPath string, opts ...LoadOption) (*Config, error) {
-	return load(configPath, false, append(opts, func(o *loadOptions) { o.quiet = true })...)
-}
-
-// LoadDatabase loads and validates only database configuration for offline
-// operator commands. It preserves the normal file, mounted-secret, environment
-// and flag precedence, without requiring provider or authentication credentials.
-// The returned config is unsuitable for constructing a server runtime.
-func LoadDatabase(configPath string, opts ...LoadOption) (*Config, error) {
-	return load(configPath, true, opts...)
-}
-
-func LoadDatabaseForCommand(configPath string, opts ...LoadOption) (*Config, error) {
-	return load(configPath, true, append(opts, func(o *loadOptions) { o.quiet = true })...)
-}
-
-// LoadDirectoryForCommand keeps the optional merchant configuration store as
-// well as the database, without requiring sign-in or payment-provider settings.
-func LoadDirectoryForCommand(configPath string, opts ...LoadOption) (*Config, error) {
-	return load(configPath, true, append(opts, func(o *loadOptions) { o.quiet, o.directory = true, true })...)
-}
-
-func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, error) {
-	var options loadOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
+// Load reads the binary's configuration: the file at configPath
+// (OPENRAILS_CONFIG, else config.yaml), mounted secret files, then the
+// environment, each over the last, onto the defaults. A key that neither
+// the server nor the binary reads refuses the load.
+func Load(configPath string) (*Config, error) {
 	k := koanf.New(".")
-	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
-		if _, present := os.LookupEnv(retired); present {
-			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_billing_base_url and default engine collection", retired)
-		}
-	}
-
-	// Defaults contain no environment-dependent security exceptions.
-	f := defaults()
+	cfg := defaults()
 
 	// A .env in the working directory is a real config source, so consuming
 	// one is reported (Config.EnvFile): a deployment silently absorbing a
 	// stray .env is the quiet failure mode the env audit flagged.
-	var envFile string
 	if err := godotenv.Load(); err != nil {
 		var pathErr *os.PathError
 		if !errors.As(err, &pathErr) {
 			return nil, err
 		}
-	} else if abs, absErr := filepath.Abs(".env"); absErr == nil && !options.quiet {
-		envFile = abs
+	} else if abs, absErr := filepath.Abs(".env"); absErr == nil {
+		cfg.EnvFile = abs
 	}
 
 	if configPath == "" {
-		if envPath := strings.TrimSpace(os.Getenv("OPENRAILS_CONFIG")); envPath != "" {
-			configPath = envPath
-		} else if envPath := strings.TrimSpace(os.Getenv("BILLING_CONFIG")); envPath != "" {
-			configPath = envPath
-		} else {
-			configPath = "config.yaml"
-		}
+		configPath = cmp.Or(strings.TrimSpace(os.Getenv("OPENRAILS_CONFIG")), "config.yaml")
 	}
-
 	if err := loadConfigIfExists(k, configPath); err != nil {
 		return nil, err
 	}
@@ -248,8 +190,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		v := strings.TrimSpace(value)
 
 		// signing_key.public_keys is a JSON STRING field ({kid: PEM}),
-		// not structured config — decoding it here would hand the strict
-		// unmarshal a map for a string field and refuse boot (or#917).
+		// not structured config: decoding it here would hand the strict
+		// unmarshal a map for a string field and refuse boot.
 		if mapped == "signing_key.public_keys" {
 			return mapped, v
 		}
@@ -271,8 +213,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// Operator-mounted secret files (filename = env-var name) load BELOW env,
 	// so env wins. This is the default self-hosted secret path: Vault renders
 	// files into the mounted dir; no live Vault connection needed.
-	secretsDir := cmp.Or(strings.TrimSpace(os.Getenv("VAULT_SECRETS_PATH")), billing.DefaultSecretsPath)
-	secretFiles, err := billing.SecretFiles(secretsDir)
+	secretsDir := cmp.Or(strings.TrimSpace(os.Getenv("VAULT_SECRETS_PATH")), config.DefaultSecretsPath)
+	secretFiles, err := config.SecretFiles(secretsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -290,14 +232,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
-	}
-
-	// CLI-flag overrides load ABOVE env (or#915): flag beats env beats yaml,
-	// without any os.Setenv back-door.
-	if len(options.overrides) > 0 {
-		if err := k.Load(confmap.Provider(options.overrides, "."), nil); err != nil {
-			return nil, fmt.Errorf("loading flag overrides: %w", err)
-		}
 	}
 
 	// Merchant configuration authority is broader than provider secrets. Retired
@@ -345,56 +279,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		}
 	}
 
-	if databaseOnly {
-		dbConfig := f.DB
-		if err := k.UnmarshalWithConf("db", dbConfig, koanf.UnmarshalConf{
-			DecoderConfig: &mapstructure.DecoderConfig{
-				DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
-				Result:     dbConfig, WeaklyTypedInput: true, ErrorUnused: true,
-				TagName: "koanf", MatchName: matchField,
-			},
-		}); err != nil {
-			return nil, fmt.Errorf("unmarshaling database config: %w", err)
-		}
-		databaseConfig := &Config{DB: *dbConfig, Config: &billing.Config{Database: billing.DatabaseConfig{
-			Schema: k.String("database.schema"), RiverSchema: k.String("database.river_schema"), LeaseConns: dbConfig.LeaseConns,
-		}}}
-		if databaseConfig.DB.URL, err = databaseURL(dbConfig); err != nil {
-			return nil, err
-		}
-		databaseConfig.Database.Schema = billing.SchemaName(databaseConfig.Config)
-		if err := billing.ValidateDatabase(databaseConfig.Database); err != nil {
-			return nil, err
-		}
-		if options.directory && k.Exists("vault") {
-			var vault vaultFile
-			if err := k.UnmarshalWithConf("vault", &vault, koanf.UnmarshalConf{
-				DecoderConfig: &mapstructure.DecoderConfig{
-					DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
-					Result:     &vault, WeaklyTypedInput: true, ErrorUnused: true, TagName: "koanf", MatchName: matchField,
-				},
-			}); err != nil {
-				return nil, fmt.Errorf("unmarshaling directory vault config: %w", err)
-			}
-			vault.SecretsPath = cmp.Or(vault.SecretsPath, secretsDir)
-			databaseConfig.Vault, databaseConfig.Config.Vault = vault.split()
-		}
-		// A purge posts the merchant's unposted usage and deletes it from the
-		// event store.
-		if options.directory && k.Exists("clickhouse") {
-			var clickHouse clickHouseFile
-			if err := k.UnmarshalWithConf("clickhouse", &clickHouse, koanf.UnmarshalConf{
-				DecoderConfig: &mapstructure.DecoderConfig{
-					Result: &clickHouse, WeaklyTypedInput: true, ErrorUnused: true, TagName: "koanf", MatchName: matchField,
-				},
-			}); err != nil {
-				return nil, fmt.Errorf("unmarshaling directory clickhouse config: %w", err)
-			}
-			databaseConfig.ClickHouse, databaseConfig.Config.ClickHouse = clickHouse.split()
-		}
-		return databaseConfig, nil
-	}
-
 	for _, old := range []string{"admin_console.enabled", "admin_console.path"} {
 		if k.Exists(old) {
 			return nil, fmt.Errorf("%s was removed: use admin_console.disabled to omit the console at /admin; configure admin_console.issuers and local_sign_in for sign-in", old)
@@ -418,9 +302,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if k.Exists("ccbill_webhook_ip_allowlist") {
 		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was renamed: set provider_sandbox.ccbill_webhook_sources")
 	}
-	if k.Exists("database.lease_conns") {
-		return nil, fmt.Errorf("database.lease_conns is db.lease_conns (DB_LEASE_CONNS)")
-	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
 	}
@@ -429,7 +310,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
-		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed: set db.sql_trace (env DB_SQL_TRACE)")
+		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed: set database.sql_trace (env DATABASE_SQL_TRACE)")
 	}
 	// HARD CUT (or#917, authkit ak#266/v0.89.0): the inline signing-key env
 	// names are AUTHKIT_-prefixed, matching the authkit binary. The old names
@@ -521,55 +402,80 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("auth.control_plane config was removed: use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 
-	// Unmarshal into fileConfig (overlay onto defaults). Strict (or#915,
-	// matching the merchant overlay's ErrorUnused): a yaml key or an env var
-	// inside one of our sections that hits no struct field refuses boot —
-	// "config I set is silently ignored" is the failure mode this kills.
-	// (envKeyToConfigKey already drops env names outside our sections, so the
-	// ambient process environment cannot trip this.)
-	if err := k.UnmarshalWithConf("", f, koanf.UnmarshalConf{
-		DecoderConfig: &mapstructure.DecoderConfig{
-			DecodeHook: mapstructure.ComposeDecodeHookFunc(
-				mapstructure.StringToTimeDurationHookFunc(),
-				mapstructure.StringToSliceHookFunc(","),
-				mapstructure.TextUnmarshallerHookFunc(),
-			),
-			Result:           f,
-			WeaklyTypedInput: true,
-			ErrorUnused:      true,
-			TagName:          "koanf",
-			MatchName:        matchField,
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot): %w", err)
+	// The db section merged into database.
+	retiredDB := k.Exists("db")
+	for _, name := range retiredDBEnv {
+		_, inEnv := os.LookupEnv(name)
+		_, inSecrets := secretFiles[name]
+		retiredDB = retiredDB || inEnv || inSecrets
+	}
+	if retiredDB {
+		return nil, fmt.Errorf("db was merged into database: set database.url (DATABASE_URL), or database.host, port, name, username and password (DATABASE_HOST, …, DATABASE_NAME for DB_DATABASE); sslmode, sslrootcert, sql_trace and lease_conns moved beside them")
 	}
 
-	if f.RateLimitsDisabled { // defaults() seeded them; off means none
-		f.RateLimits, f.Captcha = billing.RateLimitsConfig{}, nil
+	// One tree, two targets: a key either reads is known, and one neither
+	// reads refuses boot ("config I set is silently ignored" is the failure
+	// this kills). envKeyToConfigKey already drops names outside our
+	// sections, so the ambient environment cannot trip it.
+	var unused [][]string
+	for _, target := range []any{&cfg.Server, cfg} {
+		var meta mapstructure.Metadata
+		if err := k.UnmarshalWithConf("", target, koanf.UnmarshalConf{
+			Tag: "yaml",
+			DecoderConfig: &mapstructure.DecoderConfig{
+				DecodeHook: mapstructure.ComposeDecodeHookFunc(
+					mapstructure.StringToTimeDurationHookFunc(),
+					mapstructure.StringToSliceHookFunc(","),
+					mapstructure.TextUnmarshallerHookFunc(),
+				),
+				Result: target, WeaklyTypedInput: true, Metadata: &meta,
+				SquashTagOption: "inline", MatchName: func(key, field string) bool { return key == field },
+			},
+		}); err != nil {
+			return nil, fmt.Errorf("unmarshaling config: %w", err)
+		}
+		unused = append(unused, meta.Unused)
 	}
-	if f.Vault != nil && f.Vault.SecretsPath == "" {
-		f.Vault.SecretsPath = secretsDir
+	if unknown := unknownKeys(unused...); len(unknown) > 0 {
+		return nil, fmt.Errorf("unknown configuration keys refuse boot: %s", strings.Join(unknown, ", "))
 	}
-	cfg, err := f.config()
-	if err != nil {
+	if err := cfg.finish(secretsDir); err != nil {
 		return nil, err
 	}
-	cfg.EnvFile = envFile
-	if cfg.DB.URL, err = databaseURL(&cfg.DB); err != nil {
-		return nil, err
-	}
-
-	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
-	// stored config value matches what SchemaName resolves to. Validation of the
-	// identifier happens in Validate(). Defaults to `billing` (config.DefaultSchema).
-	cfg.Database.Schema = billing.SchemaName(cfg.Config)
-
-	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
-
 	return cfg, nil
+}
+
+// unknownKeys are the keys every decode left unused: a key, or one of its
+// ancestors, in each list.
+func unknownKeys(unused ...[]string) []string {
+	unusedIn := func(list []string, key string) bool {
+		for _, u := range list {
+			if key == u || strings.HasPrefix(key, u+".") {
+				return true
+			}
+		}
+		return false
+	}
+	var out []string
+	for _, list := range unused {
+		for _, key := range list {
+			all := true
+			for _, other := range unused {
+				all = all && unusedIn(other, key)
+			}
+			if all && !slices.Contains(out, key) {
+				out = append(out, key)
+			}
+		}
+	}
+	// The deepest key of each unknown subtree says the most.
+	slices.Sort(out)
+	return slices.DeleteFunc(slices.Clone(out), func(key string) bool {
+		return slices.ContainsFunc(out, func(other string) bool { return strings.HasPrefix(other, key+".") })
+	})
 }
 
 func hasEnvPrefix(prefix string) bool {
@@ -584,6 +490,9 @@ func hasEnvPrefix(prefix string) bool {
 
 // WritePostureHint is where provider writes are held now.
 const WritePostureHint = "each merchant's write posture decides its provider writes: hold them with `openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`, restore them with `openrails merchant arm`"
+
+// retiredDBEnv are the db section's environment variables.
+var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
 
 // retiredSettings are former settings: a key, its environment variable and
 // what replaced it.

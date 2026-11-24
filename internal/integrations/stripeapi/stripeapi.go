@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -125,7 +126,7 @@ func NewFactory(base http.RoundTripper, postures writeposture.Reader) *Factory {
 
 // ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
 // the loopback Stripe its provider_sandbox.stripe_api_url names.
-func ConfiguredFactory(cfg *config.Config, postures writeposture.Reader) *Factory {
+func ConfiguredFactory(cfg *billing.Config, postures writeposture.Reader) *Factory {
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
 		return NewFactory(HostRewriteTransport(api), postures)
 	}

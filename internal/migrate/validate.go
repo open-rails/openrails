@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 // Validate checks existing OpenRails and River ledgers and writes nothing:
@@ -32,7 +33,7 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	schema := opts.Schema
 	if schema == "" {
-		schema = config.DefaultSchema
+		schema = sqlschema.Authored
 	}
 	chainFS := opts.Chain
 	if chainFS == nil {

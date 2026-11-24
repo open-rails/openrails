@@ -101,7 +101,7 @@ func TestDestructiveControls(t *testing.T) {
 
 		// A deployment's configured lower actor limit holds the third revoke.
 		low := newAuthorityWorld(t, func(w *world) {
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 2}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 2}
 		})
 		var few []billing.CreateCreditGrantParams
 		for i := range 3 {

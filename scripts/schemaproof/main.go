@@ -37,9 +37,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/schemasnapshot"
+	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 const dir = "internal/migrate/postgres"
@@ -92,7 +92,7 @@ func run(ctx context.Context, ref, dsn, keep string) error {
 		return err
 	}
 	fmt.Printf("reference: %s at %s (%d files); candidate: %s in the working tree (%d files)\n", dir, ref, oldCount, dir, len(names))
-	for _, schema := range []string{config.DefaultSchema, otherSchema} {
+	for _, schema := range []string{sqlschema.Authored, otherSchema} {
 		want, err := dump(ctx, dsn, schema, old)
 		if err != nil {
 			return fmt.Errorf("%s chain in %s: %w", ref, schema, err)
@@ -113,9 +113,9 @@ func run(ctx context.Context, ref, dsn, keep string) error {
 			os.Stdout.Write(diff)
 			return fmt.Errorf("schema %s: the dumps differ", schema)
 		}
-		if schema != config.DefaultSchema {
+		if schema != sqlschema.Authored {
 			if left := defaultRef.FindAll(quoted.ReplaceAll(got, nil), -1); len(left) > 0 {
-				return fmt.Errorf("schema %s: %d references to %s survive the rewriter", schema, len(left), config.DefaultSchema)
+				return fmt.Errorf("schema %s: %d references to %s survive the rewriter", schema, len(left), sqlschema.Authored)
 			}
 		}
 		fmt.Printf("schema %s: identical, %d lines (%d bytes)\n", schema, bytes.Count(got, []byte("\n")), len(got))
@@ -126,7 +126,7 @@ func run(ctx context.Context, ref, dsn, keep string) error {
 // A reference to the default schema left outside a string literal is one the
 // rewriter missed.
 var (
-	defaultRef = regexp.MustCompile(`\b` + config.DefaultSchema + `\.\w`)
+	defaultRef = regexp.MustCompile(`\b` + sqlschema.Authored + `\.\w`)
 	quoted     = regexp.MustCompile(`'(?:[^']|'')*'`)
 )
 

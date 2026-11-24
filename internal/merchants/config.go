@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/booktag"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/booktag"
 
 	"github.com/google/uuid"
 

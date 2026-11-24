@@ -216,7 +216,7 @@ func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		}
 		var binding *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {
-			if s.Config.HyperSwitch == nil {
+			if s.Config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 				return errors.New("engine HyperSwitch custody is not configured")
 			}
 			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), charge.CustodyOf(d), method, terms.PSPID, s.Config.HyperSwitch.APIBaseURL)
