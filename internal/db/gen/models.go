@@ -421,12 +421,12 @@ type BillingDispute struct {
 	ID         uuid.UUID
 	PspID      uuid.UUID
 	Rail       string
-	// The case as its rail names it: a Stripe dispute id, an NMI chargeback id or a CCBill transaction id.
+	// The case as its rail names it: a Stripe dispute id, an NMI chargeback id (else the charge's transaction id) or a CCBill transaction id (else the subscription id); its reversal's transaction id is chargeback:<provider_ref> on NMI and CCBill.
 	ProviderRef string
 	CustomerID  *uuid.UUID
 	// The disputed charge; NULL when the rail's report matched no single charge (customer_id is NULL with it).
 	PaymentID *uuid.UUID
-	// inquiry (the issuer asked; nothing was withdrawn), chargeback, or prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block). Only a chargeback counts in a network ratio.
+	// inquiry (the issuer asked; nothing was withdrawn), chargeback, prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block), or unknown (a status the rail had not reported before: nothing is booked). Only a chargeback counts in a network ratio.
 	Kind string
 	// The card network, as billing.card_network names it.
 	Network string
@@ -450,8 +450,10 @@ type BillingDispute struct {
 	ReversalPaymentID *uuid.UUID
 	// The positive payments row that returned the money of a won dispute.
 	RecoveryPaymentID *uuid.UUID
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// When the chargeback's automatic response finished: the customer's other provider-billed subscriptions on the charged card canceled at period end. NULL while it waits, held or parked.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type BillingEventLog struct {
@@ -563,11 +565,13 @@ type BillingFraudReport struct {
 	Amount     int64
 	Currency   string
 	ReportedAt time.Time
-	// What OpenRails did: refunded the charge in full (refund_payment_id) or recorded the report only.
+	// What OpenRails decided: recorded (the report only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).
 	Action          string
 	RefundPaymentID *uuid.UUID
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// When what the charge paid for was ended and its card blocked, with its refund; NULL until then.
+	EndedAt   *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
@@ -1258,6 +1262,8 @@ type BillingPayment struct {
 	Quantity *int32
 	// Why a refund was made: requested_by_customer, duplicate, fraudulent, fraud_warning (an issuer's fraud report), dispute_prevention (resolved before a dispute was filed), charged_after_cancel, other or unknown (a provider dashboard refund that names none). Set exactly on refund rows.
 	RefundReason *string
+	// The saved card a charge was taken from, when its writer knows it; NULL on reversals, off-rail payments and charges no saved card names.
+	PaymentMethodID *uuid.UUID
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. purchase_id groups one buyer's attempts on one target (purchase_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.

@@ -91,42 +91,19 @@ System refunds use the same reservation and intents with `OriginSystem`
   id with the same facts and refuses one with other facts, defers while an
   OpenRails refund of the payment is pending (`ErrRefundReservationPending`), and
   applies the merchant's `provider_refund_access` (`ApplyRefundAccessPolicy`).
-- Disputes come from Stripe's `charge.dispute.*` events (classified by status
-  and card `case_type`, `disputerules.StripeKind`), NMI chargeback batches (every
-  entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a
-  chargeback (`ReversalChargeback`) records the reversal on whichever notice says
-  so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off
-  purchase's access, and blocks the card (`disputes.Service.BlockCard`): the
-  method is `disputed`, its mandates end (`disputed`), and the customer's other
-  provider-billed subscriptions on it end at period end. An inquiry and a CE 3.0
-  block book nothing; an RDR resolution books a refund (`dispute_prevention`). A
-  reversal it cannot book (no matching charge, more than remains) raises
-  `consistency.ledger.unbooked`; access still ends.
+- Disputes come from Stripe's `charge.dispute.*` events (classified by status and card `case_type`, `disputerules.StripeKind`), the reconcile pull's `/v1/disputes` read (`reconcile.DisputeRecorder`), NMI chargeback batches (every entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a case is acted on by the kind its notice reports. A chargeback (`ReversalChargeback`) records the reversal on whichever notice says so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off purchase's access, and blocks the card the charge was taken from (`payments.payment_method_id`, `disputes.Service.BlockCard`): the method is `disputed` and its mandates end (`disputed`). A charge that names no saved card blocks none, and the customer review says so. An inquiry, a status Stripe had not reported before (`unknown`) and a CE 3.0 block book nothing; an RDR resolution books one refund (`dispute_prevention`), whichever of it and Stripe's refund arrives first. A won, lost or closed case stays so against a later notice from before the decision. A reversal it cannot book (no matching charge, more than remains) raises `consistency.ledger.unbooked`; access still ends. A dispute or fraud report on a charge OpenRails has no record of raises `life.disputes.unknown_charge` and is answered.
 - A won Stripe dispute (`handleStripeDisputeWon`) records a positive
   `dispute_reversal` whose `metadata.reverses_payment_id` names the chargeback,
   and reactivates a provider-managed subscription this dispute canceled. The
   dispute's `won` status is final against later notices. An engine-collected
   subscription stays canceled, and a one-off purchase's access is not restored;
   it is only logged for review.
-- A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once; an
-  actionable one refunds its charge in full (`intents.QueueFraudWarningRefund`,
-  `fraud_warning`) and ends what it paid for like a chargeback, unless
-  `fraud_warning_refund` is `record`.
+- A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once, from whichever event reports it, and stays actionable only while every event says so. An actionable one queues `openrails.dispute_response`, which refunds its charge in full (`intents.QueueFraudWarningRefund`, `fraud_warning`, sent to Stripe as `fraudulent`), ends what it paid for and blocks its card, unless `fraud_warning_refund` is `record` or an open dispute (or an unbooked chargeback) decides the charge. A charge with nothing left to refund is recorded `nothing_to_refund` and still ended.
+- `openrails.dispute_response` also answers each chargeback: it blocks the card and cancels at period end the customer's other provider-billed subscriptions on it. A response runs in one transaction, as an autonomous `dispute_response` command (`destructive.Admissions.AdmitAutonomous`), only while the kill switch allows destructive actions and the merchant's write posture is `full`; held, it waits and asks again.
 
 ### Dispute monitoring
 
-Recording a chargeback or a fraud report queues `openrails.dispute_monitor` for
-its PSP in the same transaction (`disputes.QueueMonitor`, unique while queued).
-The job reads at most 62 days of `network_activity_daily` and evaluates each
-program in `disputerules.Programs` (and `AcquirerProgram` for a PSP's
-`dispute_ratio_limit`) over the month so far, scaled to the whole month (the last
-30 days before its 7th day). Mastercard divides by the previous month's sales. A
-program at its warning level raises `life.disputes.threshold` (high), at its
-excessive level (critical), subject `<psp>:<program>:<YYYY-MM>`; both alert
-through `alerting.Service.NotifyFinding`, and an evaluation below the warning
-level resolves it. The job also alerts on `life.disputes.customer_review`
-findings each chargeback raises. `GET /v1/metrics/dispute-programs` evaluates the
-same programs for any month.
+Recording a chargeback or a fraud report queues `openrails.dispute_monitor` for its PSP in the same transaction (`disputejob.QueueMonitor`, unique while queued), and so does a sale settling on a PSP with an open threshold finding (`disputejob.QueueMonitorIfFlagged`). The job reads at most 62 days of `network_activity_daily` and evaluates each program in `disputerules.Programs` (and `AcquirerProgram` for a PSP's `dispute_ratio_limit`) over the month so far, its ratio scaled to the whole month (the last 30 days before its 7th day); a level's minimum counts are met only by what was counted. Mastercard divides by the previous month's sales. A program at its warning level raises `life.disputes.threshold` (high), at its excessive level (critical), subject `<psp>:<program>:<YYYY-MM>`; both alert through `alerting.Service.NotifyFinding`, and an evaluation below the warning level resolves it. A finding of a month that has ended is settled on the whole month at the PSP's next evaluation. The job also alerts on `life.disputes.customer_review` findings each chargeback raises. `GET /v1/metrics/dispute-programs` evaluates the same programs for any month.
 
 After any reversal of a charge that funded a lot, `syncPurchasedCreditRefund` runs
 `purchasedcredits.Service.ApplyReversal` per reversal, negatives oldest first and
@@ -258,8 +235,7 @@ Checks:
 - Refund paths read reversals by `refunded_payment_id` or a provider transaction
   id (`ListRefundsForPayment`, `ListRefundRowsForTotal`, `GetByPSPTransactionID`).
 - `syncPurchasedCreditRefund` loops over one charge's reversals only.
-- The dispute monitor runs per chargeback or fraud report and reads a PSP's
-  `network_activity_daily` days, never its payments.
+- The dispute monitor runs per chargeback or fraud report, or per sale while a finding is open (`PSPHasOpenThresholdFinding`), and reads a PSP's `network_activity_daily` days, never its payments.
 
 ### 8. Abuse protection
 Refunds are staff-only. Provider webhooks use the `webhook` bucket and per-rail
@@ -274,10 +250,7 @@ Checks:
   (`cardguard.ContainsPAN`).
 
 ### 9. Destructive-action safeguards
-Every staff refund is a `destructive.Refund` command, admitted before anything is
-reserved and finished with its outcome; a replay spends nothing again. The intent
-records `OriginAdmin` and the staff subject, which `finalize` names on revoked
-access. System refunds are autonomous maintenance and spend no staff allowance.
+Every staff refund is a `destructive.Refund` command, admitted before anything is reserved and finished with its outcome; a replay spends nothing again. The intent records `OriginAdmin` and the staff subject, which `finalize` names on revoked access. System refunds are autonomous maintenance and spend no staff allowance; a dispute response spends the merchant's automation allowance and waits behind the kill switch, a hold and a write posture below `full`.
 
 Checks:
 - `executeAdminRefund` refuses when `DestructiveAdmissions` is nil;
@@ -296,10 +269,7 @@ Checks:
   (`TestCCBillRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
-- J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation
-  and the reconcile pull; S03 RDR and CE 3.0; S04 a won dispute; S06 CCBill; S07
-  early fraud warnings; S08 the monitor's findings and alerts; S09 Mastercard's
-  previous-month basis; S10 the levels in force; S14 refund reasons.
+- J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
 - Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
   refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
 - OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends

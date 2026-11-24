@@ -32,7 +32,7 @@ CREATE TABLE billing.disputes (
     provider_ref text NOT NULL CHECK (provider_ref <> ''),
     customer_id uuid,
     payment_id uuid,
-    kind text NOT NULL CHECK (kind IN ('inquiry', 'chargeback', 'prevented')),
+    kind text NOT NULL CHECK (kind IN ('inquiry', 'chargeback', 'prevented', 'unknown')),
     network text NOT NULL CHECK (network IN ('visa', 'mastercard', 'amex', 'discover', 'jcb', 'diners', 'unionpay', 'other', 'unknown')),
     reason text NOT NULL CHECK (reason IN ('fraud', 'unrecognized', 'not_received', 'canceled_recurring', 'not_as_described', 'credit_not_processed', 'duplicate', 'processing_error', 'authorization', 'other', 'unknown')),
     reason_code text CHECK (reason_code <> ''),
@@ -46,6 +46,7 @@ CREATE TABLE billing.disputes (
     closed_at timestamptz,
     reversal_payment_id uuid,
     recovery_payment_id uuid,
+    responded_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
@@ -63,9 +64,9 @@ CREATE TABLE billing.disputes (
     CONSTRAINT disputes_closed_check CHECK ((closed_at IS NOT NULL) = (status IN ('won', 'lost', 'closed')))
 );
 COMMENT ON TABLE billing.disputes IS 'One provider dispute case: an issuer''s inquiry, a chargeback, or a dispute resolved before it was filed. Its money is the payments mirror rows it names. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.disputes.provider_ref IS 'The case as its rail names it: a Stripe dispute id, an NMI chargeback id or a CCBill transaction id.';
+COMMENT ON COLUMN billing.disputes.provider_ref IS 'The case as its rail names it: a Stripe dispute id, an NMI chargeback id (else the charge''s transaction id) or a CCBill transaction id (else the subscription id); its reversal''s transaction id is chargeback:<provider_ref> on NMI and CCBill.';
 COMMENT ON COLUMN billing.disputes.payment_id IS 'The disputed charge; NULL when the rail''s report matched no single charge (customer_id is NULL with it).';
-COMMENT ON COLUMN billing.disputes.kind IS 'inquiry (the issuer asked; nothing was withdrawn), chargeback, or prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block). Only a chargeback counts in a network ratio.';
+COMMENT ON COLUMN billing.disputes.kind IS 'inquiry (the issuer asked; nothing was withdrawn), chargeback, prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block), or unknown (a status the rail had not reported before: nothing is booked). Only a chargeback counts in a network ratio.';
 COMMENT ON COLUMN billing.disputes.network IS 'The card network, as billing.card_network names it.';
 COMMENT ON COLUMN billing.disputes.reason IS 'The reason family the network code or the provider''s reason belongs to.';
 COMMENT ON COLUMN billing.disputes.reason_code IS 'The network''s reason code (Visa 10.4, Mastercard 4853), verbatim.';
@@ -75,6 +76,7 @@ COMMENT ON COLUMN billing.disputes.status IS 'open (awaiting the decision), won,
 COMMENT ON COLUMN billing.disputes.chargeback_at IS 'When the case became a chargeback: when it opened, or when the issuer escalated its inquiry. It dates the chargeback in the network ratios.';
 COMMENT ON COLUMN billing.disputes.reversal_payment_id IS 'The negative payments row that reversed the charge.';
 COMMENT ON COLUMN billing.disputes.recovery_payment_id IS 'The positive payments row that returned the money of a won dispute.';
+COMMENT ON COLUMN billing.disputes.responded_at IS 'When the chargeback''s automatic response finished: the customer''s other provider-billed subscriptions on the charged card canceled at period end. NULL while it waits, held or parked.';
 
 CREATE INDEX disputes_disputed_at_id_idx ON billing.disputes (merchant_id, disputed_at DESC, id DESC);
 CREATE INDEX disputes_customer_id_disputed_at_idx ON billing.disputes (merchant_id, customer_id, disputed_at DESC)
@@ -97,8 +99,9 @@ CREATE TABLE billing.fraud_reports (
     amount bigint NOT NULL CHECK (amount > 0),
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     reported_at timestamptz NOT NULL,
-    action text NOT NULL CHECK (action IN ('refunded', 'recorded')),
+    action text NOT NULL CHECK (action IN ('recorded', 'refunded', 'nothing_to_refund', 'disputed')),
     refund_payment_id uuid,
+    ended_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
@@ -114,7 +117,8 @@ COMMENT ON COLUMN billing.fraud_reports.provider_ref IS 'The report as its rail 
 COMMENT ON COLUMN billing.fraud_reports.fraud_type IS 'The kind of fraud the issuer reported, as Stripe names it.';
 COMMENT ON COLUMN billing.fraud_reports.actionable IS 'Whether the charge could still be refunded to head off a dispute when the report arrived.';
 COMMENT ON COLUMN billing.fraud_reports.amount IS 'The reported charge''s amount, in native units of currency.';
-COMMENT ON COLUMN billing.fraud_reports.action IS 'What OpenRails did: refunded the charge in full (refund_payment_id) or recorded the report only.';
+COMMENT ON COLUMN billing.fraud_reports.action IS 'What OpenRails decided: recorded (the report only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).';
+COMMENT ON COLUMN billing.fraud_reports.ended_at IS 'When what the charge paid for was ended and its card blocked, with its refund; NULL until then.';
 
 CREATE INDEX fraud_reports_payment_id_idx ON billing.fraud_reports (merchant_id, payment_id);
 CREATE INDEX fraud_reports_reported_at_idx ON billing.fraud_reports (merchant_id, reported_at);
@@ -129,6 +133,26 @@ ALTER TABLE billing.payments
     ADD CONSTRAINT payments_refund_reason_check CHECK ((refund_reason IS NULL) OR (refund_reason IN ('requested_by_customer', 'duplicate', 'fraudulent', 'fraud_warning', 'dispute_prevention', 'charged_after_cancel', 'other', 'unknown'))),
     ADD CONSTRAINT payments_refund_reason_kind_check CHECK ((refund_reason IS NOT NULL) = ((reversal_kind IS NOT NULL) AND (reversal_kind = 'refund')));
 COMMENT ON COLUMN billing.payments.refund_reason IS 'Why a refund was made: requested_by_customer, duplicate, fraudulent, fraud_warning (an issuer''s fraud report), dispute_prevention (resolved before a dispute was filed), charged_after_cancel, other or unknown (a provider dashboard refund that names none). Set exactly on refund rows.';
+
+-- The card a charge was taken from, where the charge names it.
+ALTER TABLE billing.payments ADD COLUMN payment_method_id uuid,
+    ADD CONSTRAINT payments_customer_id_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods (merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id);
+-- Charges so far: the card their approved attempt charged, else their order's.
+UPDATE billing.payments p SET payment_method_id = c.payment_method_id
+    FROM (
+        SELECT p.merchant_id, p.id, COALESCE(
+            (SELECT a.payment_method_id FROM billing.payment_attempts a
+             WHERE a.merchant_id = p.merchant_id AND a.payment_id = p.id AND a.payment_method_id IS NOT NULL
+             ORDER BY a.attempted_at DESC LIMIT 1),
+            o.payment_method_id) AS payment_method_id
+        FROM billing.payments p
+        LEFT JOIN billing.orders o ON o.merchant_id = p.merchant_id AND o.id = p.order_id
+        WHERE p.channel = 'rail' AND p.refunded_payment_id IS NULL AND p.amount > 0
+    ) c
+    JOIN billing.payment_methods m ON m.merchant_id = c.merchant_id AND m.id = c.payment_method_id
+    WHERE p.merchant_id = c.merchant_id AND p.id = c.id AND m.customer_id = p.customer_id;
+CREATE INDEX payments_payment_method_id_idx ON billing.payments (merchant_id, payment_method_id) WHERE payment_method_id IS NOT NULL;
+COMMENT ON COLUMN billing.payments.payment_method_id IS 'The saved card a charge was taken from, when its writer knows it; NULL on reversals, off-rail payments and charges no saved card names.';
 
 -- A card that was charged back is never charged again.
 ALTER TABLE billing.payment_methods DROP CONSTRAINT payment_methods_status_check,
@@ -264,13 +288,15 @@ CREATE TRIGGER fraud_reports_network_activity AFTER INSERT OR DELETE OR UPDATE O
 -- recovery, and Stripe's others may still be open.
 INSERT INTO billing.disputes (merchant_id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, amount, currency, status,
     disputed_at, chargeback_at, closed_at, reversal_payment_id, recovery_payment_id)
-SELECT c.merchant_id, c.psp_id, c.rail, c.transaction_id, c.customer_id, c.refunded_payment_id, 'chargeback', billing.card_network(o.card_brand), 'unknown', -c.amount, c.currency,
+SELECT c.merchant_id, c.psp_id, c.rail,
+    CASE WHEN c.rail IN ('nmi', 'ccbill') THEN regexp_replace(c.transaction_id, '^chargeback:', '') ELSE c.transaction_id END, c.customer_id, c.refunded_payment_id, 'chargeback', billing.card_network(o.card_brand), 'unknown', -c.amount, c.currency,
     CASE WHEN w.id IS NOT NULL THEN 'won' WHEN c.rail = 'stripe' THEN 'open' ELSE 'unreported' END,
     c.purchased_at, c.purchased_at, w.purchased_at, c.id, w.id
 FROM billing.payments c
 JOIN billing.payments o ON o.merchant_id = c.merchant_id AND o.id = c.refunded_payment_id
 LEFT JOIN billing.payments w ON w.merchant_id = c.merchant_id AND w.reversal_kind = 'dispute_reversal' AND w.metadata ->> 'reverses_payment_id' = c.id::text
-WHERE c.reversal_kind = 'chargeback' AND c.psp_id IS NOT NULL AND c.amount < 0;
+    AND w.deleted_at IS NULL
+WHERE c.reversal_kind = 'chargeback' AND c.psp_id IS NOT NULL AND c.amount < 0 AND c.deleted_at IS NULL;
 
 -- The restore guard names the new tables.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger

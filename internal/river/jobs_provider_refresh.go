@@ -101,6 +101,8 @@ type ProviderRefreshWorker struct {
 	Verifier *reconcile.Verifier
 	// Positive usage-order recovery does not authorize provider or lifecycle writes.
 	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
+	// Disputes records the dispute cases each pull reads.
+	Disputes reconcile.DisputeRecorder
 
 	// Overlap is re-read for late provider indexing; Batch bounds one window
 	// before the same request continues with the next window.
@@ -392,6 +394,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 
 	engine := reconcile.NewEngine(w.DB, w.Config, w.Contacts, fetchers, w.DeferDelete)
 	engine.RecoverUsagePayment = w.RecoverUsagePayment
+	engine.Disputes = w.Disputes
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // nil-check: see runConvergence

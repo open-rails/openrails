@@ -223,15 +223,16 @@ func (p Program) Evaluate(w Window) Standing {
 	} else {
 		s.Projected = ratio(projected, denominator)
 	}
+	// Only the ratio is projected: a minimum is met by what was counted.
 	for _, l := range p.InForce(w.Month) {
 		if s.Projected*10_000 < float64(l.RatioBPS) {
 			continue
 		}
 		if p.Basis == FraudAmount {
-			if projected < l.MinAmountUSD || w.Prior.Sales < l.MinPriorSales {
+			if count < l.MinAmountUSD || w.Prior.Sales < l.MinPriorSales {
 				continue
 			}
-		} else if projected < l.MinCount {
+		} else if count < l.MinCount {
 			continue
 		}
 		if s.Reached == nil || rank(l.Level) > rank(s.Reached.Level) {

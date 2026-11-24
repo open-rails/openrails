@@ -222,8 +222,10 @@ type RemoteSnapshot struct {
 	Subscriptions  []RemoteSubscription  `json:"subscriptions"`
 	Transactions   []RemoteTransaction   `json:"transactions"`
 	PaymentMethods []RemotePaymentMethod `json:"vault_entries"`
-	Capabilities   Capabilities          `json:"capabilities"`
-	Coverage       SnapshotCoverage      `json:"coverage"`
+	// Disputes are the dispute cases read, of every kind.
+	Disputes     []json.RawMessage `json:"-"`
+	Capabilities Capabilities      `json:"capabilities"`
+	Coverage     SnapshotCoverage  `json:"coverage"`
 }
 
 // SnapshotCoverage says which provider domains were exhaustively covered by a

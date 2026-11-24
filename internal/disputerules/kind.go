@@ -11,7 +11,8 @@ import (
 
 // StripeKind classifies a Stripe dispute by its status, then its card
 // case_type. An inquiry the issuer escalated keeps no warning_ status, so the
-// status wins over a case_type of inquiry.
+// status wins over a case_type of inquiry. A status Stripe had not reported
+// before is unknown: it books nothing.
 func StripeKind(status, caseType string) billing.DisputeKind {
 	status = strings.ToLower(strings.TrimSpace(status))
 	caseType = strings.ToLower(strings.TrimSpace(caseType))
@@ -20,13 +21,12 @@ func StripeKind(status, caseType string) billing.DisputeKind {
 		return billing.DisputePrevented
 	case strings.HasPrefix(status, "warning_"):
 		return billing.DisputeInquiry
-	case status == "needs_response", status == "under_review", status == "won", status == "lost",
-		strings.HasPrefix(status, "appeal_"):
+	case status == "needs_response", status == "under_review", status == "won", status == "lost":
 		return billing.DisputeChargeback
 	case caseType == "inquiry":
 		return billing.DisputeInquiry
 	}
-	return billing.DisputeChargeback
+	return billing.DisputeUnknownKind
 }
 
 // StripePreventionRefunds reports whether a prevented Stripe dispute returned

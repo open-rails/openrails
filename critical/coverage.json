@@ -2334,11 +2334,6 @@
       "name": "A won dispute books its recovery and stays won against a late notice that it opened; a lost one stays lost against a late notice from before the decision"
     },
     {
-      "id": "OR-J46-S07",
-      "journey": "J46",
-      "name": "An actionable early fraud warning is a fraud report Visa counts once; it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; a charge already in dispute is not refunded; recording reports only refunds nothing; limited mode does none of it"
-    },
-    {
       "id": "OR-J46-S08",
       "journey": "J46",
       "name": "Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise one high finding that alerts; at the limit it escalates to critical and alerts again; sales settling afterwards re-evaluate and resolve it; minimums are actual counts"
@@ -2362,6 +2357,11 @@
       "id": "OR-J46-S02",
       "journey": "J46",
       "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull records it without proposing it"
+    },
+    {
+      "id": "OR-J46-S07",
+      "journey": "J46",
+      "name": "An actionable early fraud warning is a fraud report Visa counts once; it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge already in dispute is not refunded; recording reports only refunds nothing; limited mode does none of it"
     }
   ]
 }

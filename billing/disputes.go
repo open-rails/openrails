@@ -40,6 +40,9 @@ const (
 	// DisputePrevented was resolved before it was filed: an RDR refund or a
 	// Compelling Evidence 3.0 block.
 	DisputePrevented DisputeKind = "prevented"
+	// DisputeUnknownKind is a case whose status the rail had not reported
+	// before: nothing is booked or ended until a known one arrives.
+	DisputeUnknownKind DisputeKind = "unknown"
 )
 
 // DisputeStatus is where a case stands.

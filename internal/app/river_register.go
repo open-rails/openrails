@@ -70,6 +70,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		Alerts:        r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:    r.NMIClients,
 		Verifier:      r.Verifier,
+		Disputes:      r.Disputes,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
 			if err != nil {
@@ -127,9 +128,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		return fmt.Errorf("add customer converge worker: %w", err)
 	}
 	// A PSP's dispute monitoring programs, queued by each chargeback and
-	// fraud report.
+	// fraud report, and by a sale while one of its findings is open.
 	if err := addWorker(workers, &riverjobs.DisputeMonitorWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
 		return fmt.Errorf("add dispute monitor worker: %w", err)
+	}
+	// What a chargeback or fraud report calls for, once the gates admit it.
+	if err := addWorker(workers, &riverjobs.DisputeResponseWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute response worker: %w", err)
 	}
 	// Health findings and timed access lapses, for merchants with activity.
 	if err := addWorker(workers, &riverjobs.MerchantHealthWorker{

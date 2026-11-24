@@ -42,7 +42,7 @@ func SetCard(p *models.Payment, c models.Card) {
 	p.CardBrand, p.CardLast4, _, _ = c.Columns()
 }
 
-// SetMethodCard stamps p with the card of the saved method it charged; a
+// SetMethodCard stamps p with the saved method it charged and its card; a
 // method that is gone leaves p as it is.
 func SetMethodCard(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID, p *models.Payment) error {
 	pm, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: methodID})
@@ -53,6 +53,9 @@ func SetMethodCard(ctx context.Context, q *gen.Queries, merchantID, methodID uui
 		return err
 	}
 	SetCard(p, models.CardFromColumns(pm.CardBrand, pm.CardLast4, nil, nil))
+	if pm.CustomerID == p.CustomerID {
+		p.PaymentMethodID = &pm.ID
+	}
 	return nil
 }
 

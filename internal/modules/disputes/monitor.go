@@ -2,107 +2,76 @@ package disputes
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 const (
-	// MonitorKind evaluates one PSP's monitoring programs after a chargeback
-	// or a fraud report: event-driven, never a sweep.
-	MonitorKind = "openrails.dispute_monitor"
-	// FindingThreshold is a PSP's projected ratio at a program's warning or
-	// excessive level in a month.
-	FindingThreshold reconcile.FindingType = "life.disputes.threshold"
+	// FindingThreshold is a PSP's ratio at a program's warning or excessive
+	// level in a month.
+	FindingThreshold reconcile.FindingType = disputejob.FindingThreshold
 	// FindingCustomerReview asks staff to review a customer a chargeback was
 	// filed against: only the disputed card is blocked.
 	FindingCustomerReview reconcile.FindingType = "life.disputes.customer_review"
+	// FindingUnknownCharge is a dispute or fraud report on a charge OpenRails
+	// has no record of.
+	FindingUnknownCharge reconcile.FindingType = "life.disputes.unknown_charge"
 )
 
-// MonitorArgs names one PSP. After is the job already running when the
-// dispute committed: it may have read before it, so this one reads again.
-type MonitorArgs struct {
-	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
-	PSPID      uuid.UUID `json:"psp_id" river:"unique"`
-	After      int64     `json:"after,omitempty" river:"unique"`
-}
-
-func (MonitorArgs) Kind() string { return MonitorKind }
-
-var uniqueStates = []rivertype.JobState{
-	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable,
-	rivertype.JobStateRunning, rivertype.JobStateScheduled,
-}
-
-// InsertOpts coalesce a batch of disputes on one PSP into one evaluation.
-func (MonitorArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "billing", Priority: 3, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: uniqueStates}}
-}
-
-// QueueMonitor commits the PSP's evaluation with d's transaction. A handle
-// outside a transaction, or a process with no River producer, queues none.
-func QueueMonitor(ctx context.Context, d *db.DB, mid billing.MerchantID, psp uuid.UUID) error {
-	tx := d.Tx()
-	if tx == nil || mid.IsZero() || psp == uuid.Nil {
-		return nil
-	}
-	args := MonitorArgs{MerchantID: mid.UUID(), PSPID: psp}
-	opts := args.InsertOpts()
-	for range 4 {
-		res, err := d.InsertRiverJobTx(ctx, tx, args, &opts)
-		if errors.Is(err, db.ErrNoRiverProducer) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("queue dispute monitor: %w", err)
-		}
-		if res == nil || !res.UniqueSkippedAsDuplicate || res.Job == nil || res.Job.State != rivertype.JobStateRunning {
-			return nil
-		}
-		args.After = res.Job.ID
-	}
-	return fmt.Errorf("queue dispute monitor: jobs already running for PSP %s", psp)
-}
-
-// Evaluate settles the findings of psp's programs in the current month and
-// alerts on the customer reviews waiting.
+// Evaluate settles the findings of psp's programs in the current month, and
+// once a month has ended its open findings on the whole of it, then alerts
+// on the customer reviews waiting.
 func (s *Service) Evaluate(ctx context.Context, psp uuid.UUID) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	now := s.now()
-	standings, err := s.standings(ctx, mid, &psp, now)
+	current := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	months := []time.Time{current}
+	open, err := s.DB.Gen(ctx).ListOpenThresholdFindings(ctx, gen.ListOpenThresholdFindingsParams{MerchantID: mid.UUID(), PspID: psp})
 	if err != nil {
-		return err
+		return fmt.Errorf("list open dispute thresholds: %w", err)
+	}
+	for _, subject := range open {
+		parts := strings.Split(subject, ":")
+		month, err := time.Parse("2006-01", parts[len(parts)-1])
+		if err == nil && month.Before(current) && !slices.Contains(months, month) {
+			months = append(months, month)
+		}
 	}
 	store := &reconcile.PGStore{DB: s.DB}
-	for _, st := range standings {
-		subject := strings.Join([]string{billing.PSPID(psp).String(), string(st.Program), st.Month.Format("2006-01")}, ":")
-		if st.Level == billing.DisputeLevelNone {
-			if err := store.ResolveRaisedFinding(ctx, FindingThreshold, subject); err != nil {
-				return fmt.Errorf("resolve dispute threshold %s: %w", subject, err)
-			}
-			continue
-		}
-		rec, err := store.RaiseFinding(ctx, thresholdFinding(subject, st))
+	for _, month := range months {
+		standings, err := s.standings(ctx, mid, &psp, month)
 		if err != nil {
-			return fmt.Errorf("raise dispute threshold %s: %w", subject, err)
-		}
-		if err := s.notify(ctx, rec); err != nil {
 			return err
+		}
+		for _, st := range standings {
+			subject := thresholdSubject(psp, st.Program, st.Month)
+			if st.Level == billing.DisputeLevelNone {
+				if err := store.ResolveRaisedFinding(ctx, FindingThreshold, subject); err != nil {
+					return fmt.Errorf("resolve dispute threshold %s: %w", subject, err)
+				}
+				continue
+			}
+			rec, err := store.RaiseFinding(ctx, thresholdFinding(subject, st))
+			if err != nil {
+				return fmt.Errorf("raise dispute threshold %s: %w", subject, err)
+			}
+			if err := s.notify(ctx, rec); err != nil {
+				return err
+			}
 		}
 	}
 	reviews, err := s.DB.Gen(ctx).ListUnnotifiedFindings(ctx, gen.ListUnnotifiedFindingsParams{MerchantID: mid.UUID(), FindingType: string(FindingCustomerReview)})
@@ -127,6 +96,10 @@ func (s *Service) notify(ctx context.Context, rec reconcile.FindingRecord) error
 	return nil
 }
 
+func thresholdSubject(psp uuid.UUID, program billing.DisputeProgram, month time.Time) string {
+	return strings.Join([]string{billing.PSPID(psp).String(), string(program), month.Format("2006-01")}, ":")
+}
+
 func thresholdFinding(subject string, st billing.DisputeStanding) reconcile.RaisedFinding {
 	severity := reconcile.SeverityHigh
 	if st.Level != billing.DisputeLevelWarning {
@@ -138,12 +111,13 @@ func thresholdFinding(subject string, st billing.DisputeStanding) reconcile.Rais
 			reached = t
 		}
 	}
-	action := fmt.Sprintf("%s is projected at %.2f%% in %s, at the %s level (%.2f%%). Find the products, prices and reasons drawing disputes; refund unrecognized charges before they become disputes; check the statement descriptor and the cancellation path.",
+	action := fmt.Sprintf("%s is at %.2f%% in %s, projected over the month, at the %s level (%.2f%%). Find the products, prices and reasons drawing disputes; refund unrecognized charges before they become disputes; check the statement descriptor and the cancellation path.",
 		st.Program, st.ProjectedRatio*100, st.Month.Format("January 2006"), st.Level, reached.Ratio*100)
 	if !st.FraudReportsVisible && st.Program == billing.ProgramVisaVAMP {
 		action += " This rail passes on no fraud reports, so the real ratio is higher."
 	}
-	return reconcile.RaisedFinding{Type: FindingThreshold, SubjectKey: subject, Severity: severity, RecommendedAction: action,
+	psp := st.PSPID.UUID()
+	return reconcile.RaisedFinding{Type: FindingThreshold, SubjectKey: subject, PSPID: &psp, Severity: severity, RecommendedAction: action,
 		Evidence: map[string]any{
 			"psp_id": st.PSPID.String(), "rail": string(st.Rail), "program": string(st.Program), "month": st.Month.Format("2006-01"),
 			"count": st.Count, "denominator": st.Denominator, "ratio": st.Ratio, "projected_ratio": st.ProjectedRatio,

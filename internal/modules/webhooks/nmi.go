@@ -833,8 +833,11 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 			// The charged-back card is never charged again.
 			if disputed != nil {
-				cause := fmt.Sprintf("CHARGEBACK: %s (Code: %s, Dispute: %s)", reasonText, reasonCode, cb.ID.Trimmed())
-				if err := s.disputes().BlockCard(ctx, s.DB, s.SubscriptionLifecycleService, disputed, cause, subscriptionIDs); err != nil {
+				var review *gen.BillingDispute
+				if recorded != nil {
+					review = &recorded.BillingDispute
+				}
+				if err := s.disputes().BlockCard(ctx, s.DB, disputed, review); err != nil {
 					reconcileErrors++
 					rememberTerminationError(fmt.Errorf("block the charged-back card: %w", err))
 				}

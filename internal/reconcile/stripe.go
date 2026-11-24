@@ -137,6 +137,7 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		return nil, fmt.Errorf("stripe disputes: %w", err)
 	}
 	for _, obj := range cases {
+		snap.Disputes = append(snap.Disputes, obj)
 		if txn, ok := normalizeStripeDispute(obj); ok {
 			snap.Transactions = append(snap.Transactions, txn)
 		}
@@ -162,6 +163,7 @@ func (f *StripeFetcher) fetchReversals(ctx context.Context, params FetchParams, 
 		return nil, fmt.Errorf("stripe disputes: %w", err)
 	}
 	for _, obj := range cases {
+		snap.Disputes = append(snap.Disputes, obj)
 		if txn, ok := normalizeStripeDispute(obj); ok {
 			snap.Transactions = append(snap.Transactions, txn)
 		}

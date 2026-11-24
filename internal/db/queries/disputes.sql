@@ -21,6 +21,52 @@ SELECT * FROM billing.disputes
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND provider_ref = sqlc.arg(provider_ref)::text
 FOR UPDATE;
 
+-- name: LinkDisputePayments :exec
+-- Names the payments that took the case's money back and returned it,
+-- leaving everything else as the latest report left it.
+UPDATE billing.disputes SET
+    reversal_payment_id = COALESCE(sqlc.narg(reversal_payment_id)::uuid, reversal_payment_id),
+    recovery_payment_id = COALESCE(sqlc.narg(recovery_payment_id)::uuid, recovery_payment_id),
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: MarkDisputeResponded :exec
+UPDATE billing.disputes SET responded_at = sqlc.arg(responded_at)::timestamptz, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND responded_at IS NULL;
+
+-- name: PaymentDisputeDecides :one
+-- Whether a dispute decides the charge: an open inquiry or chargeback, or a
+-- chargeback whose reversal was not booked.
+SELECT EXISTS (
+    SELECT 1 FROM billing.disputes
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid
+      AND (status = 'open' OR (kind = 'chargeback' AND reversal_payment_id IS NULL))
+)::boolean;
+
+-- name: PaymentPreventionRefunded :one
+-- Whether a prevented dispute already returned the charge's money.
+SELECT EXISTS (
+    SELECT 1 FROM billing.disputes
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid
+      AND kind = 'prevented' AND reversal_payment_id IS NOT NULL
+)::boolean;
+
+-- name: PSPHasOpenThresholdFinding :one
+-- Whether a dispute threshold finding of the PSP is open: its sales then
+-- re-evaluate it.
+SELECT EXISTS (
+    SELECT 1 FROM billing.reconciliation_findings
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'life.disputes.threshold' AND psp_id = sqlc.arg(psp_id)::uuid
+      AND status IN ('reconcile_required', 'requires_review')
+)::boolean;
+
+-- name: ListOpenThresholdFindings :many
+-- The PSP's open dispute threshold findings: a past month's is finalized.
+SELECT subject_key FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'life.disputes.threshold' AND psp_id = sqlc.arg(psp_id)::uuid
+  AND status IN ('reconcile_required', 'requires_review')
+ORDER BY subject_key;
+
 -- name: UpdateDispute :one
 -- What a later report of a case says; the recorder decides each transition.
 UPDATE billing.disputes SET
@@ -81,9 +127,23 @@ SELECT * FROM billing.fraud_reports
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND provider_ref = sqlc.arg(provider_ref)::text
 FOR UPDATE;
 
--- name: MarkFraudReportRefunded :execrows
-UPDATE billing.fraud_reports SET action = 'refunded', refund_payment_id = sqlc.arg(refund_payment_id)::uuid, updated_at = now()
+-- name: NoteFraudReportActionable :one
+-- A report stays actionable only while every report of it says so.
+UPDATE billing.fraud_reports SET actionable = actionable AND sqlc.arg(actionable)::boolean, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+RETURNING *;
+
+-- name: DecideFraudReport :execrows
+-- What OpenRails does about a report, decided once.
+UPDATE billing.fraud_reports SET action = sqlc.arg(action)::text, refund_payment_id = sqlc.narg(refund_payment_id)::uuid, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND action = 'recorded';
+
+-- name: MarkFraudReportEnded :exec
+UPDATE billing.fraud_reports SET ended_at = sqlc.arg(ended_at)::timestamptz, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND ended_at IS NULL;
+
+-- name: GetFraudReport :one
+SELECT * FROM billing.fraud_reports WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ListNetworkActivity :many
 -- The rollup's days in [from_at, to_at) for every card PSP, or one.
@@ -118,20 +178,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(find
   AND status = 'requires_review' AND notified_at IS NULL
 ORDER BY created_at
 LIMIT 100;
-
--- name: ListChargeCards :many
--- The saved card a charge was taken from: its order's, else the one its
--- subscription charges.
-SELECT pm.id, pm.status FROM billing.payment_methods pm
-WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id IN (
-    SELECT o.payment_method_id FROM billing.orders o
-    JOIN billing.payments p ON p.merchant_id = o.merchant_id AND p.order_id = o.id
-    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid
-    UNION ALL
-    SELECT billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy)
-    FROM billing.subscriptions s
-    JOIN billing.payments p ON p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(payment_id)::uuid);
 
 -- name: ListLiveSubscriptionsOnCard :many
 -- The customer's live subscriptions that charge one card.

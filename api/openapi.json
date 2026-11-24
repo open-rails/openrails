@@ -8534,7 +8534,8 @@
                 "enum": [
                   "chargeback",
                   "inquiry",
-                  "prevented"
+                  "prevented",
+                  "unknown"
                 ]
               },
               "maxItems": 100
@@ -18422,7 +18423,8 @@
             "enum": [
               "chargeback",
               "inquiry",
-              "prevented"
+              "prevented",
+              "unknown"
             ]
           },
           "status": {

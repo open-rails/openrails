@@ -19,13 +19,18 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-// Service records disputes and evaluates the monitoring programs.
+// Service records disputes, responds to them and evaluates the monitoring
+// programs.
 type Service struct {
 	DB    *db.DB
 	Clock clockwork.Clock
@@ -34,7 +39,14 @@ type Service struct {
 	// Limits are each PSP's declared dispute_ratio_limit, in basis points;
 	// nil declares none.
 	Limits func(ctx context.Context, psp uuid.UUID) (int64, bool)
-	Log    *slog.Logger
+	// Admissions, Postures and Lifecycle carry out the responses; without
+	// them a response waits.
+	Admissions *destructive.Admissions
+	Postures   interface {
+		Posture(context.Context, uuid.UUID) writeposture.Posture
+	}
+	Lifecycle *subscriptions.SubscriptionLifecycleService
+	Log       *slog.Logger
 }
 
 // New is a Service on database.
@@ -80,8 +92,9 @@ type Case struct {
 func (c Case) ID() billing.DisputeID { return billing.DisputeID(c.BillingDispute.ID) }
 
 // Record writes what r reports, in d's transaction (one of its own when d
-// holds none). A won case stays won; a chargeback stays one. A case that
-// becomes a chargeback queues its PSP's monitor and its customer's review.
+// holds none). A decided case stays decided; a chargeback stays one. A case
+// that becomes a chargeback queues its PSP's monitor, its response and its
+// customer's review.
 func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -148,12 +161,17 @@ func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) 
 		if !out.BecameChargeback {
 			return nil
 		}
-		if out.CustomerID != nil {
-			if err := raiseCustomerReview(ctx, txDB, *out.CustomerID, out.BillingDispute); err != nil {
-				return err
-			}
+		note := ""
+		if out.Status == string(billing.DisputeWon) {
+			note = "It was won before OpenRails heard of it: nothing was blocked."
 		}
-		return QueueMonitor(ctx, txDB, mid, r.PSPID)
+		if err := raiseCustomerReview(ctx, txDB, out.BillingDispute, note); err != nil {
+			return err
+		}
+		if err := disputejob.QueueResponse(ctx, txDB, mid.UUID(), disputejob.SubjectDispute, out.BillingDispute.ID); err != nil {
+			return err
+		}
+		return disputejob.QueueMonitor(ctx, txDB, mid.UUID(), r.PSPID)
 	})
 	return out, err
 }
@@ -165,8 +183,9 @@ func (s *Service) update(ctx context.Context, q *gen.Queries, existing gen.Billi
 		Status: existing.Status, ChargebackAt: existing.ChargebackAt, EvidenceDueAt: existing.EvidenceDueAt, ClosedAt: existing.ClosedAt,
 		ReversalPaymentID: existing.ReversalPaymentID, RecoveryPaymentID: existing.RecoveryPaymentID,
 	}
-	became := false
-	if existing.Kind != string(billing.DisputeChargeback) && r.Kind != "" {
+	became, escalated := false, false
+	if existing.Kind != string(billing.DisputeChargeback) && r.Kind != "" && r.Kind != billing.DisputeUnknownKind {
+		escalated = existing.Kind != string(r.Kind)
 		next.Kind = string(r.Kind)
 		if r.Kind == billing.DisputeChargeback {
 			next.ChargebackAt, became = &at, true
@@ -190,8 +209,10 @@ func (s *Service) update(ctx context.Context, q *gen.Queries, existing gen.Billi
 	if r.EvidenceDueAt != nil {
 		next.EvidenceDueAt = r.EvidenceDueAt
 	}
-	// Won is final; anything else follows the latest report.
-	if existing.Status != string(billing.DisputeWon) && r.Status != "" {
+	// A decided case stays decided against a late notice from before the
+	// decision; only a new stage, an inquiry escalated, reopens it.
+	decided := closes(billing.DisputeStatus(existing.Status))
+	if r.Status != "" && r.Kind != billing.DisputeUnknownKind && (!decided || escalated) {
 		if next.Kind == string(billing.DisputeChargeback) || (r.Status != billing.DisputeWon && r.Status != billing.DisputeLost && r.Status != billing.DisputeUnreported) {
 			next.Status = string(r.Status)
 		}
@@ -215,24 +236,8 @@ func (s *Service) Link(ctx context.Context, d *db.DB, c Case, reversal, recovery
 	if reversal == nil && recovery == nil {
 		return nil
 	}
-	q := d.Gen(ctx)
-	current, err := q.GetDispute(ctx, gen.GetDisputeParams{MerchantID: c.MerchantID, ID: c.BillingDispute.ID})
-	if err != nil {
-		return fmt.Errorf("load dispute %s: %w", c.ProviderRef, err)
-	}
-	next := gen.UpdateDisputeParams{
-		MerchantID: current.MerchantID, ID: current.ID, Kind: current.Kind, Network: current.Network, Reason: current.Reason,
-		ReasonCode: current.ReasonCode, ProviderReason: current.ProviderReason, Amount: current.Amount, Currency: current.Currency,
-		Status: current.Status, ChargebackAt: current.ChargebackAt, EvidenceDueAt: current.EvidenceDueAt, ClosedAt: current.ClosedAt,
-		ReversalPaymentID: current.ReversalPaymentID, RecoveryPaymentID: current.RecoveryPaymentID,
-	}
-	if reversal != nil {
-		next.ReversalPaymentID = reversal
-	}
-	if recovery != nil {
-		next.RecoveryPaymentID = recovery
-	}
-	if _, err := q.UpdateDispute(ctx, next); err != nil {
+	if err := d.Gen(ctx).LinkDisputePayments(ctx, gen.LinkDisputePaymentsParams{MerchantID: c.MerchantID, ID: c.BillingDispute.ID,
+		ReversalPaymentID: reversal, RecoveryPaymentID: recovery}); err != nil {
 		return fmt.Errorf("link dispute %s: %w", c.ProviderRef, err)
 	}
 	return nil

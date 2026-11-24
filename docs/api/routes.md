@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (188), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (189), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -171,6 +171,7 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | GET | `/v1/merchant/configuration` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits` |
+| GET | `/v1/merchant/changes` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<LogEntry>` |  |
 | GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits` |
 | DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits` |

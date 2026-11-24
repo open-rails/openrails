@@ -331,7 +331,10 @@ func adminRefundMatchesRequest(existing *models.Payment, req RefundRequest) bool
 		return false
 	}
 	revoke, _ := existing.Metadata["admin_refund_revoke_access"].(bool)
-	sameReason := existing.RefundReason != nil && *existing.RefundReason == string(adminRefundReason(req))
+	// A refund booked before reasons were recorded is unknown: a replay that
+	// names no reason is the same request.
+	sameReason := existing.RefundReason != nil && (*existing.RefundReason == string(adminRefundReason(req)) ||
+		req.RefundReason == "" && *existing.RefundReason == string(billing.RefundUnknown))
 	return revoke == req.RevokeAccess && sameReason && strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
 }
 

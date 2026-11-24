@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -127,6 +128,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureReason:       p.FailureReason,
 		ReversalKind:        p.ReversalKind,
 		RefundReason:        refundReason(p),
+		PaymentMethodID:     p.PaymentMethodID,
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
@@ -174,7 +176,19 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	if err := queueSaleMonitor(ctx, s.db, params); err != nil {
+		return err
+	}
 	return convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
+}
+
+// queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a
+// sale settled on it.
+func queueSaleMonitor(ctx context.Context, d *db.DB, p gen.CreatePaymentParams) error {
+	if p.PspID == nil || p.Status != PaymentStatusSucceededValue || p.Amount <= 0 || p.RefundedPaymentID != nil || p.MoneyMovement != string(models.MoneyMovementRail) {
+		return nil
+	}
+	return disputejob.QueueMonitorIfFlagged(ctx, d, p.MerchantID, *p.PspID)
 }
 
 func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
@@ -200,6 +214,9 @@ func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.
 	}
 	rows, err := s.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil || rows == 0 {
+		return false, err
+	}
+	if err := queueSaleMonitor(ctx, s.db, params); err != nil {
 		return false, err
 	}
 	return true, convergejob.Queue(ctx, s.db, tid, payment.CustomerID)

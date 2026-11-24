@@ -44,7 +44,7 @@ func TestStripeKind(t *testing.T) {
 		{"lost", "chargeback", billing.DisputeChargeback},
 		{"prevented", "", billing.DisputePrevented},
 		{"lost", "resolution", billing.DisputePrevented},
-		{"charge_refunded", "", billing.DisputeKind("unknown")},
+		{"charge_refunded", "", billing.DisputeUnknownKind},
 	}
 	for _, c := range cases {
 		if got := StripeKind(c.status, c.caseType); got != c.want {
@@ -106,16 +106,22 @@ func TestEvaluateProjectsTheMonth(t *testing.T) {
 	for d := 0; d < 15; d++ {
 		days[month.AddDate(0, 0, d)] = Activity{Sales: 1000}
 	}
-	// 1,000 VAMP items over 15,000 sales so far: 6.7%, 2,000 projected.
+	// 1,000 VAMP items over 15,000 sales so far: 6.7%, 2,000 projected, but
+	// short of the 1,500 counted that excessive needs.
 	days[month.AddDate(0, 0, 3)] = Activity{Sales: 1000, Chargebacks: 600, FraudReports: 400}
 	st := program(billing.ProgramVisaVAMP).Evaluate(WindowFor(month, now, days))
-	if st.Level != billing.DisputeLevelExcessive || st.ProjectedCount != 2000 {
-		t.Fatalf("VAMP standing %+v, want excessive with 2000 projected", st)
+	if st.Level != billing.DisputeLevelWarning || st.ProjectedCount != 2000 {
+		t.Fatalf("VAMP standing %+v, want warning with 2000 projected", st)
 	}
-	// Mastercard divides by the previous month's sales.
+	days[month.AddDate(0, 0, 4)] = Activity{Sales: 1000, Chargebacks: 600}
+	if st := program(billing.ProgramVisaVAMP).Evaluate(WindowFor(month, now, days)); st.Level != billing.DisputeLevelExcessive {
+		t.Fatalf("VAMP standing %+v, want excessive at 1,600 counted", st)
+	}
+	// Mastercard divides by the previous month's sales; 60 counted reach the
+	// warning's 50, not excessive's 100.
 	prior := map[time.Time]Activity{month.AddDate(0, -1, 0): {Sales: 1000}, month.AddDate(0, 0, 10): {Chargebacks: 60}}
 	ecp := program(billing.ProgramMastercardECP).Evaluate(WindowFor(month, now, prior))
-	if ecp.Denominator != 1000 || ecp.ProjectedCount != 120 || ecp.Level != billing.DisputeLevelExcessive {
+	if ecp.Denominator != 1000 || ecp.ProjectedCount != 120 || ecp.Level != billing.DisputeLevelWarning {
 		t.Fatalf("ECP standing %+v", ecp)
 	}
 	busy := map[time.Time]Activity{month.AddDate(0, -1, 0): {Sales: 100_000}, month.AddDate(0, 0, 10): {Chargebacks: 60}}

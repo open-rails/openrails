@@ -1076,7 +1076,7 @@ export type Dispute = {
   psp_id: string
   customer_id: string | null
   payment_id: string | null
-  kind: "chargeback" | "inquiry" | "prevented"
+  kind: "chargeback" | "inquiry" | "prevented" | "unknown"
   status: "closed" | "lost" | "open" | "unreported" | "won"
   network: "amex" | "diners" | "discover" | "jcb" | "mastercard" | "other" | "unionpay" | "unknown" | "visa"
   reason: "authorization" | "canceled_recurring" | "credit_not_processed" | "duplicate" | "fraud" | "not_as_described" | "not_received" | "other" | "processing_error" | "unknown" | "unrecognized"

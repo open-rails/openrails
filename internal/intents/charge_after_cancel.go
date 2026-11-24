@@ -168,7 +168,7 @@ func queueFullRefund(ctx context.Context, d *db.DB, merchantID uuid.UUID, paymen
 		MerchantID: merchantID, Provider: provider, IntentType: intentType,
 		SubscriptionID: payment.SubscriptionID, PaymentID: &payment.ID, PspID: *payment.PspID,
 		Payload: RefundPayload{OriginalPaymentID: payment.ID, ReservationID: reservation.ID, AmountCents: cents,
-			Currency: payment.Currency, Reason: reason, ProviderTarget: target},
+			Currency: payment.Currency, Reason: reason, RefundReason: why, ProviderTarget: target},
 		IdempotencyKey: key, NextAttemptAt: clock.Now().UTC(), Origin: OriginSystem, OriginReason: reason,
 	})
 	if err != nil {

@@ -380,6 +380,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
+	runtime.Disputes.Admissions, runtime.Disputes.Postures = runtime.DestructiveAdmissions, runtime.Posture()
+	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)

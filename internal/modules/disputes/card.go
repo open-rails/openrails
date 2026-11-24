@@ -2,6 +2,7 @@ package disputes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -22,11 +23,10 @@ import (
 
 // BlockCard keeps the card a disputed charge was taken from from being
 // charged again: the card is disputed and its mandates end, so engine
-// subscriptions on it wait for another card, and the customer's other
-// subscriptions a provider bills on it are canceled to end at period end.
-// ended are the subscriptions the dispute already ended. A charge whose card
-// OpenRails does not hold blocks nothing.
-func (s *Service) BlockCard(ctx context.Context, d *db.DB, lc *subscriptions.SubscriptionLifecycleService, payment *models.Payment, cause string, ended []uuid.UUID) error {
+// subscriptions on it wait for another card. Only the card the charge names
+// is blocked; a charge that names none blocks nothing. review, when a
+// chargeback calls for it, tells staff which.
+func (s *Service) BlockCard(ctx context.Context, d *db.DB, payment *models.Payment, review *gen.BillingDispute) error {
 	if payment == nil {
 		return nil
 	}
@@ -36,48 +36,98 @@ func (s *Service) BlockCard(ctx context.Context, d *db.DB, lc *subscriptions.Sub
 	}
 	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := d.NewWithPgxTx(tx)
-		q := txDB.Gen(ctx)
-		cards, err := q.ListChargeCards(ctx, gen.ListChargeCardsParams{MerchantID: mid.UUID(), PaymentID: payment.ID})
-		if err != nil {
-			return fmt.Errorf("find the disputed card: %w", err)
-		}
-		now := s.now()
-		for _, card := range cards {
-			if _, err := q.MarkPaymentMethodDisputed(ctx, gen.MarkPaymentMethodDisputedParams{MerchantID: mid.UUID(), ID: card.ID}); err != nil {
+		note := "The card the charge was taken from is blocked."
+		switch {
+		case payment.Rail == models.RailCCBill:
+			note = "CCBill holds the card, so OpenRails blocked none."
+		case payment.PaymentMethodID == nil:
+			note = "No saved card is known to have made the charge, so none was blocked."
+		default:
+			q := txDB.Gen(ctx)
+			if _, err := q.MarkPaymentMethodDisputed(ctx, gen.MarkPaymentMethodDisputedParams{MerchantID: mid.UUID(), ID: *payment.PaymentMethodID}); err != nil {
 				return fmt.Errorf("block disputed card: %w", err)
 			}
-			if _, err := mandates.EndForPaymentMethod(ctx, q, mid.UUID(), card.ID, mandates.EndDisputed, now); err != nil {
+			if _, err := mandates.EndForPaymentMethod(ctx, q, mid.UUID(), *payment.PaymentMethodID, mandates.EndDisputed, s.now()); err != nil {
 				return fmt.Errorf("end the disputed card's mandates: %w", err)
 			}
-			subs, err := q.ListLiveSubscriptionsOnCard(ctx, gen.ListLiveSubscriptionsOnCardParams{MerchantID: mid.UUID(), CustomerID: payment.CustomerID, PaymentMethodID: card.ID})
-			if err != nil {
-				return fmt.Errorf("list subscriptions on the disputed card: %w", err)
-			}
-			for _, sub := range subs {
-				if slices.Contains(ended, sub.ID) || sub.CollectionPolicy == string(models.CollectionPolicyEngine) || lc == nil {
-					continue
-				}
-				if err := endAtPeriodEnd(ctx, txDB, lc, sub.ID, cause); err != nil {
-					return err
-				}
-			}
 		}
-		return nil
+		if review == nil {
+			return nil
+		}
+		return raiseCustomerReview(ctx, txDB, *review, note)
 	})
 }
 
-// endAtPeriodEnd cancels a provider-billed subscription without ending its
-// paid access, and queues the provider's cancel.
-func endAtPeriodEnd(ctx context.Context, d *db.DB, lc *subscriptions.SubscriptionLifecycleService, id uuid.UUID, cause string) error {
+// providerBilledOnCard are the customer's live subscriptions a provider bills
+// on the charge's card, but for those the charge itself paid for.
+func providerBilledOnCard(ctx context.Context, d *db.DB, payment *models.Payment) ([]uuid.UUID, error) {
+	if payment == nil || payment.PaymentMethodID == nil {
+		return nil, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	subs, err := d.Gen(ctx).ListLiveSubscriptionsOnCard(ctx, gen.ListLiveSubscriptionsOnCardParams{MerchantID: mid.UUID(), CustomerID: payment.CustomerID, PaymentMethodID: *payment.PaymentMethodID})
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions on the disputed card: %w", err)
+	}
+	own, err := ChargeSubscriptions(ctx, d, payment)
+	if err != nil {
+		return nil, err
+	}
+	var out []uuid.UUID
+	for _, sub := range subs {
+		if sub.CollectionPolicy != string(models.CollectionPolicyEngine) && !slices.Contains(own, sub.ID) {
+			out = append(out, sub.ID)
+		}
+	}
+	return out, nil
+}
+
+// ChargeSubscriptions are the subscriptions a charge paid for: its own and
+// its order's.
+func ChargeSubscriptions(ctx context.Context, d *db.DB, payment *models.Payment) ([]uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	if payment.SubscriptionID != nil {
+		ids = append(ids, *payment.SubscriptionID)
+	}
+	if payment.OrderID == nil {
+		return ids, nil
+	}
+	lines, err := d.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{*payment.OrderID}})
+	if err != nil {
+		return nil, fmt.Errorf("load the charge's order lines: %w", err)
+	}
+	for _, line := range lines {
+		if line.SubscriptionID != nil && !slices.Contains(ids, *line.SubscriptionID) {
+			ids = append(ids, *line.SubscriptionID)
+		}
+	}
+	return ids, nil
+}
+
+// endSubscription cancels a subscription and queues its provider's cancel:
+// at once with its access when revoke, else at period end. A subscription
+// no longer active is left as it is.
+func endSubscription(ctx context.Context, d *db.DB, lc *subscriptions.SubscriptionLifecycleService, id uuid.UUID, cancelType models.CancelType, revoke bool, cause string) error {
 	sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, id)
 	if err != nil {
 		return fmt.Errorf("lock subscription %s: %w", id, err)
 	}
 	rail := sub.Rail
-	if _, err := lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
-		SubscriptionID: &id, Rail: &rail, CancelType: models.CancelTypeChargeback, CancelFeedback: &cause,
-	}); err != nil {
-		return fmt.Errorf("cancel subscription %s on the disputed card: %w", id, err)
+	_, err = lc.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{
+		SubscriptionID: &id, Rail: &rail, CancelType: cancelType, CancelFeedback: &cause, RevokeAccess: revoke,
+	})
+	if errors.Is(err, subscriptions.ErrSubscriptionNotActive) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cancel subscription %s: %w", id, err)
 	}
 	if sub, err = subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, id); err != nil {
 		return fmt.Errorf("reload subscription %s: %w", id, err)
@@ -89,16 +139,22 @@ func endAtPeriodEnd(ctx context.Context, d *db.DB, lc *subscriptions.Subscriptio
 }
 
 // raiseCustomerReview asks staff to review a customer a chargeback was filed
-// against. Only the disputed card is blocked: whether to keep serving the
-// customer is staff's decision.
-func raiseCustomerReview(ctx context.Context, d *db.DB, customer uuid.UUID, dispute gen.BillingDispute) error {
-	count, err := d.Gen(ctx).CountCustomerChargebacks(ctx, gen.CountCustomerChargebacksParams{MerchantID: dispute.MerchantID, CustomerID: customer})
+// against: whether to keep serving them is staff's decision. note says what
+// OpenRails did about the card.
+func raiseCustomerReview(ctx context.Context, d *db.DB, dispute gen.BillingDispute, note string) error {
+	if dispute.CustomerID == nil {
+		return nil
+	}
+	count, err := d.Gen(ctx).CountCustomerChargebacks(ctx, gen.CountCustomerChargebacksParams{MerchantID: dispute.MerchantID, CustomerID: *dispute.CustomerID})
 	if err != nil {
 		return fmt.Errorf("count the customer's chargebacks: %w", err)
 	}
-	id := billing.CustomerID(customer).String()
-	action := fmt.Sprintf("Customer %s filed a chargeback (%s, %s); %d in all. The card is blocked. Review the customer: refund or block further purchases if the pattern continues.",
-		id, dispute.Reason, billing.DisputeID(dispute.ID).String(), count)
+	id := billing.CustomerID(*dispute.CustomerID).String()
+	action := fmt.Sprintf("Customer %s filed a chargeback (%s, %s); %d in all.", id, dispute.Reason, billing.DisputeID(dispute.ID).String(), count)
+	if note != "" {
+		action += " " + note
+	}
+	action += " Review the customer: refund or block further purchases if the pattern continues."
 	_, err = (&reconcile.PGStore{DB: d}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerReview, SubjectKey: id, Severity: reconcile.SeverityMedium, RecommendedAction: action,
 		Evidence: map[string]any{"customer_id": id, "dispute_id": billing.DisputeID(dispute.ID).String(), "reason": dispute.Reason,

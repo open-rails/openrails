@@ -364,17 +364,19 @@ func waitDisputeJobs(t *testing.T, a *authorityWorld, keep ...rivertype.JobState
 // An actionable early fraud warning is a fraud report Visa counts; it refunds
 // the charge in full once (fraud_warning, sent to Stripe as fraudulent), ends
 // what it paid for and blocks the card, however often and in whatever events
-// the report arrives. A charge already in dispute is not refunded. A merchant
-// that records reports only refunds nothing; in limited mode nothing happens
-// until provider writes resume.
+// the report arrives; one any event calls unactionable is not acted on. A
+// charge already in dispute is not refunded. A merchant that records reports
+// only refunds nothing; in limited mode nothing happens until provider writes
+// resume.
 func disputeFraudWarning(t *testing.T) {
 	t.Run("refunds-by-default", func(t *testing.T) {
 		m := newDisputedMembership(t)
+		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
 		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
 		m.fraudWarning(t, "evt_efw_again", "radar.early_fraud_warning.created", "issfr_refund", true)
-		m.fraudWarning(t, "evt_efw_updated", "radar.early_fraud_warning.updated", "issfr_refund", false)
+		m.fraudWarning(t, "evt_efw_updated", "radar.early_fraud_warning.updated", "issfr_refund", true)
 		require.Eventually(t, func() bool {
 			reversals := m.reversals(t)
 			return len(reversals) == 1 && reversals[0].Status == billing.PaymentSucceeded
@@ -396,11 +398,22 @@ func disputeFraudWarning(t *testing.T) {
 	})
 	t.Run("a-disputed-charge-is-not-refunded", func(t *testing.T) {
 		m := newDisputedMembership(t)
+		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.notice(t, "evt_open_inquiry", "charge.dispute.created", m.dispute("dp_open_inquiry", "warning_needs_response", "inquiry", "fraudulent"))
 		m.fraudWarning(t, "evt_efw_disputed", "radar.early_fraud_warning.created", "issfr_disputed", true)
 		waitDisputeJobs(t, m.a)
 		require.Empty(t, m.reversals(t), "the open inquiry decides the charge")
+		require.True(t, m.entitled(t))
+	})
+	t.Run("unactionable-stays-so", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		enableLifecycleMaintenance(t, m.a)
+		startFleet(t, m.a.world)
+		m.fraudWarning(t, "evt_efw_unactionable", "radar.early_fraud_warning.created", "issfr_unactionable", false)
+		m.fraudWarning(t, "evt_efw_actionable", "radar.early_fraud_warning.updated", "issfr_unactionable", true)
+		waitDisputeJobs(t, m.a)
+		require.Empty(t, m.reversals(t), "a report one event called unactionable stays so")
 		require.True(t, m.entitled(t))
 	})
 	t.Run("record-only", func(t *testing.T) {
@@ -409,6 +422,7 @@ func disputeFraudWarning(t *testing.T) {
 			declaration.FraudWarningRefund = ptr(billing.FraudWarningRecord)
 			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
+		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_record", "radar.early_fraud_warning.created", "issfr_record", true)
 		waitDisputeJobs(t, m.a)
@@ -418,6 +432,7 @@ func disputeFraudWarning(t *testing.T) {
 	})
 	t.Run("limited-mode-waits", func(t *testing.T) {
 		m := newDisputedMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesLimited })
+		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_limited", "radar.early_fraud_warning.created", "issfr_limited", true)
 		waitDisputeJobs(t, m.a, rivertype.JobStateScheduled)
@@ -711,7 +726,7 @@ func disputeUnknownCharge(t *testing.T) {
 	m.notice(t, "evt_unknown_update", "charge.dispute.updated", d)
 	m.notice(t, "evt_unknown_efw", "radar.early_fraud_warning.created", stripemock.Object{"id": "issfr_unknown", "object": "radar.early_fraud_warning",
 		"charge": "ch_unknown", "payment_intent": "pi_unknown", "fraud_type": "misc", "actionable": true, "created": m.a.clock.Now().Unix()})
-	page, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	page, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.disputes.unknown_charge"})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 2, "each unbooked report is a finding")
 }

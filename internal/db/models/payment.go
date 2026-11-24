@@ -78,6 +78,8 @@ type Payment struct {
 	ReversalKind *string `json:"reversal_kind,omitempty"`
 	// RefundReason is why a refund row was made; set exactly on refunds.
 	RefundReason *string `json:"refund_reason,omitempty"`
+	// PaymentMethodID is the saved card the charge was taken from, when known.
+	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
 	// TokenType is the credential form presented at charge time:
 	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`

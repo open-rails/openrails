@@ -87,10 +87,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
 			r.Values = append(r.Values, new("true"), nil, nil, nil, new("false"))
 		}
-		// Payments before refund reasons: a refund's is unknown, as the
-		// migration that added them reads it.
-		if p.Name == "payments" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, legacyRefundReason(p, r.Values))
+		// Payments before refund reasons and charged cards: a refund's reason
+		// is unknown, as the migration that added them reads it, and no card
+		// is named.
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, legacyRefundReason(p, r.Values), nil)
 		}
 		if p.Name == "subscription_status_transitions" && len(r.Values) == len(p.Columns)-4 {
 			r.Values = append(r.Values, nil, nil, nil, nil)
