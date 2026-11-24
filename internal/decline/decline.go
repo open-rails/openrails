@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -83,6 +84,9 @@ type Result struct {
 	// NoReattempt: the network or issuer forbids charging this card again
 	// (advice.go).
 	NoReattempt bool
+	// RetryAfter is the network's earliest next attempt after this decline
+	// (Mastercard's MAC 24 to 30); zero for none.
+	RetryAfter time.Duration
 }
 
 // NeedsMapping reports a code the rail's table does not know.

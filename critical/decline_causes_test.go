@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -43,6 +44,7 @@ func TestDeclineCauses(t *testing.T) {
 				require.Equal(t, tc.code, rebill.ResponseCode)
 				if tc.reason == billing.DeclineBlockedByPSP {
 					waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+					require.NotNil(t, waiting.Dunning)
 					require.True(t, waiting.Dunning.WaitingForNewCard, "a block never cancels the subscription")
 				}
 			})
@@ -94,6 +96,64 @@ func TestDeclineCauses(t *testing.T) {
 			subscriptionState(t, a, sub.ID, "awaiting_method")
 		})
 	})
+	t.Run("OR-J45-S05/mastercard-retry-after-advice-delays-dunning-and-past-the-window-waits-for-a-new-card", func(t *testing.T) {
+		t.Run("mac-26-retries-two-days-after-the-decline", func(t *testing.T) {
+			a, p, sub := purchasedMembership(t, 7*24)
+			p.core.SetDecline("4242", "insufficient_funds")
+			p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "26", NetworkDeclineCode: "51"})
+			a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+			fleet := startFleet(t, a.world)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			rebill := awaitAttempt(t, a, sub.ID, "rebill")
+			require.Equal(t, billing.DeclineInsufficientFunds, rebill.Reason)
+			dunned := subscriptionState(t, a, sub.ID, "past_due")
+			require.NotNil(t, dunned.Dunning)
+			require.NotNil(t, dunned.Dunning.NextRetryAt)
+			// The weekly schedule's first retry is a day out; the advice says two.
+			require.WithinDuration(t, rebill.AttemptedAt.Add(48*time.Hour), *dunned.Dunning.NextRetryAt, time.Minute)
+		})
+		t.Run("mac-27-past-the-window-waits-for-a-new-card", func(t *testing.T) {
+			a, p, sub := purchasedMembership(t, 7*24)
+			p.core.SetDecline("4242", "insufficient_funds")
+			p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "27", NetworkDeclineCode: "51"})
+			a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+			fleet := startFleet(t, a.world)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			rebill := awaitAttempt(t, a, sub.ID, "rebill")
+			require.Equal(t, "retry", rebill.Action, "the decline itself is retryable")
+			waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+			require.NotNil(t, waiting.Dunning)
+			require.True(t, waiting.Dunning.WaitingForNewCard, "four days is past the weekly case: it waits, it doesn't cancel")
+			require.Nil(t, waiting.Dunning.NextRetryAt)
+		})
+	})
+	t.Run("OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			advice stripemock.Advice
+			reason billing.DeclineReason
+		}{
+			{"mastercard-01-new-account-information", stripemock.Advice{NetworkAdviceCode: "01"}, billing.DeclineUpdateCardholderData},
+			{"stripe-confirm-card-data", stripemock.Advice{Code: "confirm_card_data"}, billing.DeclineUpdateCardholderData},
+			{"mastercard-40-non-reloadable-prepaid", stripemock.Advice{NetworkAdviceCode: "40"}, billing.DeclineGeneric},
+			{"mastercard-41-single-use-virtual-card", stripemock.Advice{NetworkAdviceCode: "41"}, billing.DeclineGeneric},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a, p, sub := purchasedMembership(t, 7*24)
+				p.core.SetDecline("4242", "generic_decline")
+				p.core.SetAdvice("4242", tc.advice)
+				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+				fleet := startFleet(t, a.world)
+				runRegistered(t, fleet, "openrails.billing_pass", 1)
+				rebill := awaitAttempt(t, a, sub.ID, "rebill")
+				require.Equal(t, tc.reason, rebill.Reason)
+				require.Equal(t, "fix_payment_method", rebill.Action)
+				waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+				require.NotNil(t, waiting.Dunning)
+				require.True(t, waiting.Dunning.WaitingForNewCard)
+			})
+		}
+	})
 	t.Run("OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code", func(t *testing.T) {
 		for _, tc := range []struct {
 			name, issuer string
@@ -136,10 +196,12 @@ func TestDeclineCauses(t *testing.T) {
 				require.Equal(t, "200", retry.ResponseCode, "NMI's own code is kept")
 				if !tc.waits {
 					retried := subscriptionState(t, a, sub.ID, "past_due")
+					require.NotNil(t, retried.Dunning)
 					require.NotNil(t, retried.Dunning.NextRetryAt, "the schedule goes on")
 					return
 				}
 				waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+				require.NotNil(t, waiting.Dunning)
 				require.True(t, waiting.Dunning.WaitingForNewCard)
 				require.Nil(t, waiting.Dunning.NextRetryAt, "no retry is scheduled on the card")
 			})

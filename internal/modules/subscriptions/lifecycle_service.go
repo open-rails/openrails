@@ -2037,6 +2037,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				if err != nil {
 					return err
 				}
+				if ok && params.RetryNotBefore.After(nextRetry) {
+					window, err := policy.Window(cycleHours)
+					if err != nil {
+						return err
+					}
+					nextRetry = params.RetryNotBefore.UTC()
+					if nextRetry.After(periodStart.Add(window)) {
+						// The network's earliest retry falls past the case: wait
+						// for a new card, never cancel after fewer attempts.
+						event, ok = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.FixMethod, At: now}, false
+						needsPaymentMethodUpdate = true
+					}
+				}
 				subscription.NextRetryAt = nil
 				if ok {
 					subscription.NextRetryAt = &nextRetry

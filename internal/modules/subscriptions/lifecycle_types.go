@@ -179,6 +179,10 @@ type FailMembershipParams struct {
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.
 	DeclinedAt time.Time
+	// RetryNotBefore is the network's earliest next attempt (Mastercard's MAC
+	// 24 to 30); zero for none. A retry it would push past the case's window
+	// waits for a new card instead.
+	RetryNotBefore time.Time
 	// Terminal requests immediate cancellation (entitlements revoked, no
 	// further retries) without incrementing the retry count. It is a request:
 	// without TerminalCertainty the row parks as `unknown` instead.
