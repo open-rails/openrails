@@ -65,56 +65,38 @@ func VerifyStripe(secret, header string, body []byte, tolerance time.Duration) e
 	return fmt.Errorf("stripe signature mismatch")
 }
 
-// ParseNMISignatureHeader extracts the timestamp and signature from an NMI
-// webhook signature header ("t=...,s=...").
+// ParseNMISignatureHeader splits an NMI Webhook-Signature header,
+// "t=<nonce>,s=<hex>", as NMI's sample reads it: the nonce runs to the last
+// ",s=". The nonce is opaque; it only enters the HMAC.
 func ParseNMISignatureHeader(header string) (string, string, error) {
-	var ts, sig string
-	for _, part := range strings.Split(header, ",") {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		switch strings.TrimSpace(kv[0]) {
-		case "t":
-			ts = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		case "s":
-			sig = strings.Trim(strings.TrimSpace(kv[1]), `"'`)
-		}
-	}
-	if ts == "" || sig == "" {
+	header = strings.TrimSpace(header)
+	cut := strings.LastIndex(header, ",s=")
+	if !strings.HasPrefix(header, "t=") || cut < len("t=") {
 		return "", "", fmt.Errorf("unrecognized webhook signature format")
 	}
-	return ts, sig, nil
+	nonce, sig := header[len("t="):cut], header[cut+len(",s="):]
+	if nonce == "" || sig == "" {
+		return "", "", fmt.Errorf("unrecognized webhook signature format")
+	}
+	return nonce, sig, nil
 }
 
-// VerifyNMI authenticates an NMI webhook's HMAC and, when tolerance > 0, rejects
-// timestamps outside that window. A non-positive tolerance verifies the HMAC
-// only and SKIPS the replay-window check.
-func VerifyNMI(secret, header string, body []byte, tolerance time.Duration) error {
-	timestamp, signature, err := ParseNMISignatureHeader(header)
+// VerifyNMI authenticates an NMI webhook: HMAC-SHA256 over "<nonce>.<body>".
+// NMI's t is a nonce, not a time, so there is no replay window; a replay is
+// the same event_id, which webhook deduplication answers once.
+func VerifyNMI(secret, header string, body []byte) error {
+	nonce, signature, err := ParseNMISignatureHeader(header)
 	if err != nil {
 		return err
 	}
-	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid webhook signature timestamp")
-	}
-	if tolerance > 0 {
-		now := time.Now().Unix()
-		tol := int64(tolerance.Seconds())
-		if now-tsInt > tol || tsInt-now > tol {
-			return fmt.Errorf("webhook signature timestamp outside tolerance")
-		}
-	}
-
 	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
-	expectedSig := mac.Sum(nil)
+	_, _ = mac.Write([]byte(nonce + "."))
+	_, _ = mac.Write(body)
 	providedSig, err := hex.DecodeString(strings.ToLower(signature))
 	if err != nil {
 		return fmt.Errorf("invalid webhook signature")
 	}
-	if !hmac.Equal(providedSig, expectedSig) {
+	if !hmac.Equal(providedSig, mac.Sum(nil)) {
 		return fmt.Errorf("invalid webhook signature")
 	}
 	return nil

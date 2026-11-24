@@ -138,22 +138,29 @@ func callbackSettlesSale(t *testing.T, a *authorityWorld, p *providerLedger, que
 // for a schedule.
 func nmiScheduleNotice(t *testing.T, a *authorityWorld, id, schedule string) {
 	t.Helper()
+	status, raw := nmiSignedNotice(t, a, id, schedule, fmt.Sprint(time.Now().Unix()))
+	require.Equal(t, http.StatusOK, status, raw)
+}
+
+// nmiSignedNotice posts that notice signed under nonce, as NMI signs:
+// HMAC-SHA256 over "<nonce>.<body>", sent as "t=<nonce>,s=<hex>".
+func nmiSignedNotice(t *testing.T, a *authorityWorld, id, schedule, nonce string) (int, string) {
+	t.Helper()
 	body, err := json.Marshal(map[string]any{"event_id": id, "event_type": "recurring.subscription.update", "event_body": map[string]any{"subscription_id": schedule, "merchant": map[string]string{"id": "critical-gateway"}}})
 	require.NoError(t, err)
-	at := fmt.Sprint(time.Now().Unix())
 	h := hmac.New(sha256.New, []byte("critical-nmi-webhook"))
-	_, _ = h.Write([]byte(at + "."))
+	_, _ = h.Write([]byte(nonce + "."))
 	_, _ = h.Write(body)
 	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/nmi/critical-gateway", bytes.NewReader(body))
 	require.NoError(t, err)
 	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Webhook-Signature", "t="+at+",s="+hex.EncodeToString(h.Sum(nil)))
+	r.Header.Set("Webhook-Signature", "t="+nonce+",s="+hex.EncodeToString(h.Sum(nil)))
 	response, err := a.server.Client().Do(r)
 	require.NoError(t, err)
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	return response.StatusCode, string(raw)
 }
 
 func TestCallbackContracts(t *testing.T) {

@@ -75,9 +75,10 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   path's account must equal the payload's. `routeSignedWebhook` accepts a
   delivery only when exactly one PSP on that account verifies it (Stripe's
   `livemode` breaks a live/test tie).
-- NMI and Stripe are HMAC-signed with a 5-minute window (`NMISignatureTolerance`
-  for NMI, a literal in the Stripe path of `handlers/webhook.go`); a thin Stripe
-  event is read back first. CCBill signs nothing: its source address
+- NMI and Stripe are HMAC-signed. Stripe's signed `t` is a time, checked within
+  5 minutes (a literal in the Stripe path of `handlers/webhook.go`); NMI's is a
+  nonce, so an NMI replay is answered by the event's `event_id` alone. A thin
+  Stripe event is read back first. CCBill signs nothing: its source address
   (`webhookauth.CCBillIPAllowed`) and the payload's account authenticate it.
 - A rotated secret verifies for `webhook_secret_overlap` (default 24 h);
   `retire_webhook_overlap` ends it at once. A delivery is claimed in
@@ -273,7 +274,7 @@ declines from charge operations feed the card-testing ledger
 
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
-- The public path passes `NMISignatureTolerance`; only the queued re-verification skips the window.
+- Stripe's public path checks its signed time within 5 minutes; only the queued re-verification skips it. NMI's signed `t` is a nonce (`sigverify.VerifyNMI`): no window, and a replay is its `event_id`, applied once (`DeduplicationService.ProcessWebhook`).
 - `webhookauth.CCBillIPAllowed` refuses an allowlisted source when the account's money class is unknown; `internal/config` refuses a `/0` entry.
 
 ### 9. Destructive-action safeguards

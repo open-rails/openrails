@@ -38,9 +38,11 @@
 // Server card entry (settings.card_entry: server) vaults the card with
 // customer_vault=add_customer and keeps only brand, last four and expiry; it
 // puts the receiving servers in SAQ D scope and is refused on other rails and
-// on custodian-held cards. Webhooks verify HMAC-SHA256 over "<t>.<body>" from
-// Webhook-Signature with a 5-minute window; subscription events only wake
-// convergence, which re-reads NMI. An unknown live schedule is adopted
+// on custodian-held cards. Webhooks verify HMAC-SHA256 over "<nonce>.<body>"
+// from Webhook-Signature "t=<nonce>,s=<hex>". The nonce is not a time, so no
+// replay window applies: a replay or retry carries its event_id, which is
+// applied once. Subscription events only wake convergence, which re-reads
+// NMI. An unknown live schedule is adopted
 // through the billing import or parked (price_unmapped, customer_unlinked,
 // product_held, import_owned). Unverified schedules are read in batches of 50,
 // or in bulk above 200. nmi_history_months holds a daily read of 25 months of
