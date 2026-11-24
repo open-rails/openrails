@@ -185,11 +185,15 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	window, err := policy.Window(*cycle)
+	failures := 0
+	if sub.RetryAttempts != nil {
+		failures = *sub.RetryAttempts
+	}
+	caseEnd, err := policy.CaseEnd(*cycle, *sub.CurrentPeriodEndsAt, failures, sub.NextRetryAt)
 	if err != nil {
 		return nil, err
 	}
-	if !sub.CurrentPeriodEndsAt.Add(window).After(s.now().UTC()) {
+	if !caseEnd.After(s.now().UTC()) {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}

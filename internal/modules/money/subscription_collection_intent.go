@@ -568,11 +568,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			var notBefore time.Time
-			if verdict.RetryAfter > 0 {
-				notBefore = h.now().Add(verdict.RetryAfter)
-			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, DeclinedMethodRef: p.Instrument.RailMethodRef, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked, RetryNotBefore: notBefore})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, DeclinedMethodRef: p.Instrument.RailMethodRef, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked, RetryAfter: verdict.RetryAfter})
 		}
 		return nil
 	})

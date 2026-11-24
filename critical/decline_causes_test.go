@@ -241,7 +241,7 @@ func TestDeclineCauses(t *testing.T) {
 			subscriptionState(t, a, sub.ID, "awaiting_method")
 		})
 	})
-	t.Run("OR-J45-S05/mastercard-retry-after-advice-delays-dunning-and-past-the-window-waits-for-a-new-card", func(t *testing.T) {
+	t.Run("OR-J45-S05/mastercard-retry-after-advice-delays-dunning-even-past-the-window", func(t *testing.T) {
 		t.Run("mac-26-retries-two-days-after-the-decline", func(t *testing.T) {
 			a, p, sub := purchasedMembership(t, 7*24)
 			p.core.SetDecline("4242", "insufficient_funds")
@@ -257,7 +257,7 @@ func TestDeclineCauses(t *testing.T) {
 			// The weekly schedule's first retry is a day out; the advice says two.
 			require.WithinDuration(t, rebill.AttemptedAt.Add(48*time.Hour), *dunned.Dunning.NextRetryAt, time.Minute)
 		})
-		t.Run("mac-27-past-the-window-waits-for-a-new-card", func(t *testing.T) {
+		t.Run("mac-27-past-the-window-keeps-the-retry-and-recovers", func(t *testing.T) {
 			a, p, sub := purchasedMembership(t, 7*24)
 			p.core.SetDecline("4242", "insufficient_funds")
 			p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "27", NetworkDeclineCode: "51"})
@@ -265,11 +265,26 @@ func TestDeclineCauses(t *testing.T) {
 			fleet := startFleet(t, a.world)
 			runRegistered(t, fleet, "openrails.billing_pass", 1)
 			rebill := awaitAttempt(t, a, sub.ID, "rebill")
-			require.Equal(t, "retry", rebill.Action, "the decline itself is retryable")
-			waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
-			require.NotNil(t, waiting.Dunning)
-			require.True(t, waiting.Dunning.WaitingForNewCard, "four days is past the weekly case: it waits, it doesn't cancel")
-			require.Nil(t, waiting.Dunning.NextRetryAt)
+			require.Equal(t, "retry", rebill.Action)
+			// Four days is past the weekly case's window (two days and a day's
+			// slack): the retry runs at the advised time all the same.
+			dunned := subscriptionState(t, a, sub.ID, "past_due")
+			require.NotNil(t, dunned.Dunning)
+			require.NotNil(t, dunned.Dunning.NextRetryAt)
+			require.WithinDuration(t, rebill.AttemptedAt.Add(96*time.Hour), *dunned.Dunning.NextRetryAt, time.Minute)
+			require.False(t, dunned.Dunning.WaitingForNewCard, "the card is fine: nobody is asked for another")
+			a.clock.Advance(rebill.AttemptedAt.Add(84 * time.Hour).Sub(a.clock.Now()))
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			subscriptionState(t, a, sub.ID, "past_due")
+			require.Zero(t, noticeCount(t, a, "payment_method_update_required"))
+			// The advised retry is paid.
+			p.core.SetDecline("4242", "")
+			a.clock.Advance(dunned.Dunning.NextRetryAt.Sub(a.clock.Now()) + time.Minute)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			require.Eventually(t, func() bool {
+				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				return err == nil && current.Status == billing.SubscriptionActive && current.CurrentPeriodEndsAt.After(*sub.CurrentPeriodEndsAt)
+			}, 20*time.Second, 20*time.Millisecond, "the advised retry collects the renewal")
 		})
 	})
 	t.Run("OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card", func(t *testing.T) {

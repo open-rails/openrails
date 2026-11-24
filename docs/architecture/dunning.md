@@ -58,10 +58,11 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
 - The first decline opens the case (`openCase`). It stores the policy in full
   (`collection.DeclaredOf`) in `subscriptions.dunning_policy`.
 - `Retry` bumps `transient_retries` or `retry_attempts` and sets
-  `next_retry_at`, no sooner than the network advised
-  (`FailMembershipParams.RetryNotBefore`). Advice past the window waits for a
-  new card, as `FixPaymentMethod` does. A spent schedule is
-  `lifecycle.DunningExhausted`.
+  `next_retry_at`, no sooner than the network advised after the decline
+  (`FailMembershipParams.RetryAfter`). The case then ends at
+  `collection.Policy.CaseEnd`: the window's end, or the slack past the last
+  retry the schedule will make, so a delayed case still makes every attempt
+  its policy allows. A spent schedule is `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;

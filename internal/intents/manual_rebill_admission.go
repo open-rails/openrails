@@ -184,11 +184,10 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if err != nil {
 			return err
 		}
-		window, err := policy.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
+		windowEnd, err := policy.CaseEnd(int(terms.PeriodEnd.Sub(terms.PeriodStart)/time.Hour), terms.PeriodStart, failures, sub.NextRetryAt)
 		if err != nil {
 			return err
 		}
-		windowEnd := terms.PeriodStart.Add(window)
 		if !windowEnd.After(now) {
 			return ErrRebillNotRetryable
 		}

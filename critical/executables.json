@@ -1519,6 +1519,40 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J45-S02": [
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/stop-order-waits-and-never-cancels",
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/insufficient-funds-is-retried",
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/suspected-fraud-is-retried"
+    ],
+    "OR-J45-S03": [
+      "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud",
+      "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud/radar-block-waits-for-a-new-card",
+      "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud/issuer-fraud-is-the-issuers"
+    ],
+    "OR-J45-S04": [
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-do_not_try_again",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-new_account_information_available",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-service_not_allowed",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-mobile_device_authentication_required",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-invalid_amount",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/stripe-testmode_decline",
+      "TestDeclineCauses/OR-J45-S04/newly-mapped-codes-decline-with-their-cause/nmi-461-the-merchants-account-takes-no-such-brand"
+    ],
+    "OR-J45-S05": [
+      "TestDeclineCauses/OR-J45-S05/mastercard-retry-after-advice-delays-dunning-even-past-the-window",
+      "TestDeclineCauses/OR-J45-S05/mastercard-retry-after-advice-delays-dunning-even-past-the-window/mac-26-retries-two-days-after-the-decline",
+      "TestDeclineCauses/OR-J45-S05/mastercard-retry-after-advice-delays-dunning-even-past-the-window/mac-27-past-the-window-keeps-the-retry-and-recovers"
+    ],
+    "OR-J45-S06": [
+      "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card",
+      "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/mastercard-01-new-account-information",
+      "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/stripe-confirm-card-data",
+      "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/mastercard-40-non-reloadable-prepaid",
+      "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/mastercard-41-single-use-virtual-card"
     ]
   }
 }

@@ -471,7 +471,15 @@ func (w *DunningWorker) processSubscription(
 		}
 		return dunningOutcomeRefused, nil
 	}
-	if w.now().UTC().After(periodEnd.Add(window)) {
+	failures := 0
+	if sub.RetryAttempts != nil {
+		failures = *sub.RetryAttempts
+	}
+	caseEnd, err := policy.CaseEnd(cycleHours, periodEnd, failures, sub.NextRetryAt)
+	if err != nil {
+		return dunningOutcomeRefused, err
+	}
+	if w.now().UTC().After(caseEnd) {
 		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
 	}
 
