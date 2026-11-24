@@ -11718,7 +11718,7 @@
           "merchant_config"
         ],
         "operationId": "ApplyPSPImport",
-        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
+        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage too approves the corrections that move a subscription's price or terms, and without it an import with one open is refused. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
         "parameters": [
           {
             "name": "id",
@@ -11765,6 +11765,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "invalid_param",
           "person_required",
           "psp_import_in_progress",
@@ -12491,7 +12492,7 @@
           "merchant_config"
         ],
         "operationId": "ClearDestructiveHold",
-        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant configuration authority: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
+        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding merchant configuration authority and root:admin-rate-limits:unlock, or for the merchant's contact-erasure hold merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
         "parameters": [
           {
             "name": "id",
@@ -12545,6 +12546,80 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-errors": [
+          "invalid_param",
+          "permission_required",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/erasure-holds/{id}/clear": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "ClearErasureHold",
+        "description": "ClearErasureHold clears the merchant's contact-erasure hold after review, recording who and why; its waiting erasures then run. It needs a person holding merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearDestructiveHoldParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestructiveHold"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
+        },
+        "x-openrails-person": true,
         "x-openrails-errors": [
           "invalid_param",
           "permission_required",
@@ -13254,7 +13329,7 @@
           "merchant_config"
         ],
         "operationId": "ApproveProposals",
-        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. idempotencyKey is required: a retry with it answers the first call's results.",
+        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is required: a retry with it answers the first call's results.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -13309,6 +13384,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -13392,7 +13468,7 @@
           "merchant_config"
         ],
         "operationId": "ResolveFinding",
-        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
+        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a refund, cancellation or product-access recommendation also needs what that action's own route needs: merchant:customer:manage.",
         "parameters": [
           {
             "name": "id",
@@ -13541,8 +13617,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:read",
-          "root": "root:config:read"
+          "merchant": "merchant:provisioning:read",
+          "root": "root:provisioning:read"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
@@ -13599,8 +13675,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13653,8 +13729,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13757,11 +13833,12 @@
                 "merchant:config:read",
                 "merchant:customer:manage",
                 "merchant:customer:read",
-                "merchant:customers:read",
                 "merchant:entitlements:read",
                 "merchant:events:read",
                 "merchant:metrics:read",
                 "merchant:orders:manage",
+                "merchant:provisioning:manage",
+                "merchant:provisioning:read",
                 "merchant:usage:manage",
                 "merchant:usage:read",
                 "root:admin-rate-limits:unlock",
@@ -13771,7 +13848,6 @@
                 "root:config:read",
                 "root:customer:manage",
                 "root:customer:read",
-                "root:customers:read",
                 "root:entitlements:read",
                 "root:events:read",
                 "root:merchants:delete",
@@ -13779,6 +13855,8 @@
                 "root:merchants:restore",
                 "root:metrics:read",
                 "root:orders:manage",
+                "root:provisioning:manage",
+                "root:provisioning:read",
                 "root:usage:manage",
                 "root:usage:read",
                 "root:worker-health:read"

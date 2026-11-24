@@ -1713,6 +1713,42 @@
     ],
     "OR-J24-S41": [
       "TestEventStore/OR-J24-S41/public-config-reports-whether-usage-is-served"
+    ],
+    "OR-J01-S20": [
+      "TestRoutePermissions/OR-J01-S20/every-route-refuses-a-credential-without-its-permission"
+    ],
+    "OR-J07-S07": [
+      "TestDirectoryAuthority/OR-J07-S07/an-application-without-the-provisioning-permission-is-refused"
+    ],
+    "OR-J07-S08": [
+      "TestDirectoryAuthority/OR-J07-S08/erasures-keep-their-own-budget-and-are-never-lost"
+    ],
+    "OR-J01-S21": [
+      "TestRoutePermissions/OR-J01-S21/a-config-only-credential-cannot-approve-a-refund"
+    ],
+    "OR-J34-S32": [
+      "TestDestructiveReservations/OR-J34-S32/a-reservation-that-never-starts-stops-holding-budget"
+    ],
+    "OR-J01-S22": [
+      "TestRoutePermissions/OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal"
+    ],
+    "OR-J01-S23": [
+      "TestRoutePermissions/OR-J01-S23/a-finding-approval-spends-its-actions-operation-limit"
+    ],
+    "OR-J01-S24": [
+      "TestRoutePermissions/OR-J01-S24/a-psp-import-applies-only-the-corrections-its-approver-may-approve"
+    ],
+    "OR-J07-S09": [
+      "TestDirectoryAuthority/OR-J07-S09/a-waiting-erasure-takes-the-contact-at-once-and-a-stale-report-cannot-restore-it"
+    ],
+    "OR-J34-S33": [
+      "TestDestructiveReservations/OR-J34-S33/a-reservation-started-past-its-life-is-admitted-again"
+    ],
+    "OR-J01-S25": [
+      "TestRoutePermissions/OR-J01-S25/an-approval-is-one-operation-however-many-changes-it-carries"
+    ],
+    "OR-J01-S26": [
+      "TestRoutePermissions/OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed"
     ]
   }
 }

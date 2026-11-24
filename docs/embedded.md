@@ -126,7 +126,7 @@ Go. Libraries never read the environment.
 | `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
 | `Captcha` | `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`): challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
-| `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)). |
+| `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
 | `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix`, `TransitMount` (Solana signing). The client is `Deps.Vault`. |
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |

@@ -3,6 +3,7 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
@@ -16,9 +17,16 @@ var opsRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/destructive-holds/{id}/clear", Group: MerchantConfig, Auth: AuthMerchant, Name: "ClearDestructiveHold", Level: LevelUpdate, Request: billing.ClearDestructiveHoldParams{}, Responses: []Reply{{200, billing.DestructiveHold{}}}, Errors: codes("invalid_param", "permission_required", "resource_not_found", "resource_conflict", "service_unavailable"), Bind: incidentClear,
 		Args: []any{billing.DestructiveHoldID{}},
 		Doc: "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other " +
-			"than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant " +
-			"configuration authority: over HTTP a self-acting human's own credential; in process the handle " +
+			"than the one whose action opened it, holding merchant configuration authority and " +
+			"root:admin-rate-limits:unlock, or for the merchant's contact-erasure hold " +
+			"merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle " +
 			"ActingFor names them, once the host has authenticated them."},
+	{Method: POST, Path: "/v1/merchant/erasure-holds/{id}/clear", Group: MerchantConfig, Permission: needProvisioning, Auth: AuthMerchant, Name: "ClearErasureHold", Level: LevelUpdate, Person: true,
+		Request: billing.ClearDestructiveHoldParams{}, Responses: []Reply{{200, billing.DestructiveHold{}}}, Errors: codes("invalid_param", "permission_required", "resource_not_found", "resource_conflict", "service_unavailable"), Bind: erasureClear,
+		Args: []any{billing.DestructiveHoldID{}},
+		Doc: "ClearErasureHold clears the merchant's contact-erasure hold after review, recording who and why; " +
+			"its waiting erasures then run. It needs a person holding merchant:provisioning:manage: over HTTP a " +
+			"self-acting human's own credential; in process the handle ActingFor names them."},
 
 	{Method: GET, Path: "/v1/admin/access", Group: Access, Auth: AuthSignedIn, Name: "GetAdminAccess",
 		Doc: "GetAdminAccess reports what the caller may use of each staff route group at the merchant and its " +
@@ -58,15 +66,18 @@ var opsRoutes = []Route{
 		Query: billing.ProposalListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListProposals)},
 	{Method: POST, Path: "/v1/merchant/proposals/approve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ApproveProposals", Level: LevelUpdate, Person: true, IdempotencyKey: true,
 		Doc: "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run " +
-			"that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. " +
-			"idempotencyKey is required: a retry with it answers the first call's results.",
-		Request: billing.ApproveProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.ApproveProposals)},
+			"that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; " +
+			"a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is " +
+			"required: a retry with it answers the first call's results.",
+		Request: billing.ApproveProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("finding_not_actionable", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "person_required", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.ApproveProposals(e.staffCan)) }},
 	{Method: POST, Path: "/v1/merchant/proposals/dismiss", Group: MerchantConfig, Auth: AuthMerchant, Name: "DismissProposals", Level: LevelUpdate, Person: true,
 		Doc: "DismissProposals closes 1 to 100 proposals without applying them; notes are required. Only a person " +
 			"signed in, or the in-process host, dismisses.",
 		Request: billing.DismissProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.DismissProposals)},
 	{Method: POST, Path: "/v1/merchant/findings/{id}/resolve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ResolveFinding", Level: LevelUpdate,
-		Args:    []any{billing.FindingID{}},
-		Doc:     "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
-		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "finding_requires_merchant_config", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
+		Args: []any{billing.FindingID{}},
+		Doc: "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a " +
+			"refund, cancellation or product-access recommendation also needs what that action's own route " +
+			"needs: merchant:customer:manage.",
+		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "finding_requires_merchant_config", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.AdminResolveFinding(e.staffCan)) }},
 }

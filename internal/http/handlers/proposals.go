@@ -62,11 +62,76 @@ func ListProposals(r *httprequest.Request) {
 // approveOperation names approve calls in the idempotency store.
 const approveOperation = "proposals.approve"
 
+// ProposalChangeRoutes are the staff routes whose effect each change kind
+// runs: approving a proposal needs what calling them needs, besides the
+// approve route's merchant:config:manage. Every kind is listed; one missing
+// here is refused. A kind that charges a customer or changes a
+// subscription's price, billing or access names customer support's route. The
+// kinds with none only record what the provider already did and billed: a
+// subscription, charge, refund, renewal or card it holds, none of them a
+// charge, price or access OpenRails decides.
+var ProposalChangeRoutes = map[billing.ChangeKind][]string{
+	billing.ChangeCreateSubscription: nil,
+	billing.ChangeRecordCharge:       nil,
+	billing.ChangeRecordRefund:       nil,
+	// An adoption records a renewal the provider charged, confirms an
+	// unverified row's running period without moving it, or marks the row
+	// past due or unverified: access stands and nothing is charged, so no
+	// adopted period end ever ends it.
+	billing.ChangeAdoptSubscription:       nil,
+	billing.ChangeUpdateCard:              nil,
+	billing.ChangeCancelSubscription:      {"POST /v1/admin/subscriptions/{id}/cancel"},
+	billing.ChangeRevokeAccess:            {"POST /v1/admin/product-access/{id}/revoke"},
+	billing.ChangeRefundChargeAfterCancel: {"POST /v1/admin/payments/{id}/refunds"},
+	billing.ChangeCancelProviderSchedule:  {"POST /v1/admin/subscriptions/{id}/cancel"},
+	// Collecting a skipped renewal charges the customer; a correction moves
+	// the price, schedule and start a subscription bills on, and can end a
+	// product's access.
+	billing.ChangeCollectSkippedRenewal: {"POST /v1/admin/subscriptions/{id}/change"},
+	billing.ChangeCorrectSubscription:   {"POST /v1/admin/subscriptions/{id}/change"},
+}
+
+// changeAuthorizer asks can for each change kind's routes, spending each
+// route's limit once per request: a kind this version does not list is
+// refused, a route's refusal is a staffCanRefusal.
+func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind) error {
+	spent := map[string]bool{}
+	return func(kind billing.ChangeKind) error {
+		keys, known := ProposalChangeRoutes[kind]
+		if !known {
+			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
+		}
+		for _, key := range keys {
+			// One approval is one operation: each route's limit is spent once
+			// per request, whatever number of changes it carries; the
+			// destructive budgets bound what those changes do.
+			var items int64
+			if !spent[key] {
+				items, spent[key] = 1, true
+			}
+			if err := can(r, key, items); err != nil {
+				return staffCanRefusal{err}
+			}
+		}
+		return nil
+	}
+}
+
+// staffCanRefusal is a proposal whose change's own route refused the caller.
+type staffCanRefusal struct{ err error }
+
+func (e staffCanRefusal) Error() string { return e.err.Error() }
+
 // ApproveProposals handles POST /v1/merchant/proposals/approve: a person
 // approves 1 to 100 proposals, each in its own transaction, under one
 // approval run. The Idempotency-Key replays the first answer; the same key
-// with another body is refused.
-func ApproveProposals(r *httprequest.Request) {
+// with another body is refused. A change that refunds, revokes or cancels
+// also needs what its own route needs, asked of can before anything runs.
+func ApproveProposals(can StaffCan) func(r *httprequest.Request) {
+	return func(r *httprequest.Request) { approveProposals(r, can) }
+}
+
+func approveProposals(r *httprequest.Request, can StaffCan) {
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
 	if key == "" {
 		r.ErrorCode(billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required")
@@ -109,9 +174,14 @@ func ApproveProposals(r *httprequest.Request) {
 		replayApproval(r, rec, digest)
 		return
 	}
-	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r)})
+	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r), Authorize: changeAuthorizer(r, can)})
 	if err != nil {
 		_ = claim.Fail(ctx, err)
+		var refused staffCanRefusal
+		if errors.As(err, &refused) {
+			refuseStaffCan(r, refused.err)
+			return
+		}
 		writeRefusal(r, err, "approve proposals failed")
 		return
 	}

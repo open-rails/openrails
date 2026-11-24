@@ -174,8 +174,10 @@ type UserActionRateLimitConfig struct {
 // DestructiveActionLimitsConfig is how many destructive actions staff may
 // take in a rolling hour and day before a hold stops them: each actor's, each
 // merchant's and the deployment's. The merchant and deployment limits are
-// floors that rise with active customers. Zero fields select the defaults
-// (actor 5/15, merchant 15/25, deployment 50/100).
+// floors that rise with active customers. Contact erasures keep their own
+// budget per merchant, whose floors rise with its directory; past it they
+// wait rather than fail. Zero fields select the defaults (actor 5/15,
+// merchant 15/25, deployment 50/100, erasures 100/1000).
 type DestructiveActionLimitsConfig struct {
 	ActorPerHour      int64
 	ActorPerDay       int64
@@ -183,6 +185,8 @@ type DestructiveActionLimitsConfig struct {
 	MerchantPerDay    int64
 	DeploymentPerHour int64
 	DeploymentPerDay  int64
+	ErasurePerHour    int64
+	ErasurePerDay     int64
 }
 
 // VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount

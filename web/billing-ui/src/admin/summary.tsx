@@ -316,8 +316,9 @@ const permissionAreas: Record<string, string> = {
     "Read retained billing events through the application API.",
   "orders:manage":
     "Preview, create, and withdraw merchant orders through the application API.",
-  "customers:read":
-    "Read merchant customer identity and billing settings.",
+  "provisioning:read": "Read the customer directory over SCIM.",
+  "provisioning:manage":
+    "Push and erase the customer directory over SCIM; an erasure spends the destructive budget.",
 }
 
 /** Descriptions for a host's role editor; permissions are enforced by the API. */
