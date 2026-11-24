@@ -214,13 +214,7 @@ Checks:
   page in key order.
 
 ### 8. Abuse protection
-Customers buy credit only through checkout (`POST /v1/me/orders`: the `purchase`
-bucket and card-testing checks). `middleware.AdminOperationGrant` meters each
-invoker by item: 10 a minute, shared by `UpdateCustomer`, `AdjustCustomerLimit`,
-`CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out
-for an hour. An application acting as itself is not metered. Admission routes
-are server-to-server; they, the customer's balance reads and its low-balance line
-are in no bucket.
+Customers buy credit only through checkout (`POST /v1/me/orders`: the `purchase` bucket and card-testing checks). `middleware.AdminOperationGrant` meters each invoker by item: `billing.MaxBatchItems` (100) a minute, one full batch, shared by `UpdateCustomer`, `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out for an hour. An application acting as itself is not metered. Admission routes are server-to-server; they, the customer's balance reads and its low-balance line are in no bucket.
 
 Checks:
 - `CreateCreditGrants` carries `Limit: middleware.AdminOperationGrant` in

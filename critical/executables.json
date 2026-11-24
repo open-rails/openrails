@@ -1275,6 +1275,9 @@
     "OR-J22-S09": [
       "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
     ],
+    "OR-J22-S12": [
+      "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
+    ],
     "OR-J37-S10": [
       "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
     ],

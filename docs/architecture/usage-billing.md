@@ -161,16 +161,11 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J24**, settlement: OR-J24-S01, S02, S04 to S11, S21, S22 (replay, pricing on
-  totals, daily posting, owed dating, lots). Its lease scenarios are in
-  [entitlements and limits](entitlements.md).
-- **J25**, running charges and balance looks: OR-J25-S01 to S04, S37, S40 to S42.
+- **J24**, settlement: OR-J24-S01, S02, S04 to S11, S21, S22, S36 (replay, pricing on totals, daily posting, owed dating, lots). Its lease scenarios are in [entitlements and limits](entitlements.md).
+- **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
 
 Other tests: `internal/modules/money/rating_test.go` prices every accepted model.
 
 Gaps:
 - Nothing checks that `retention.Tables` matches the schema; it is review-only.
-- A meter correction locks all of `usage_daily`
-  (`LockUsageDailyForMeterCorrection`), every merchant's settlement included,
-  until its catalog transaction commits.

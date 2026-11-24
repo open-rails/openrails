@@ -128,8 +128,7 @@ Checks:
 - `payOrder` enqueues the intent and `CreateOrderAttempt` in one `MerchantTx`; a
   unique violation answers `order_payment_in_progress`.
 - `Verify` returns `Retryable` for an unsubmitted sale and never calls `RunSale`.
-- OR-J10-S01 (one debit per key), OR-J10-S03 (key reused for another request),
-  OR-J29-S02 (death after acceptance).
+- OR-J10-S01 (one debit per key), OR-J10-S03 (key reused for another request), OR-J10-S06 (a merchant order's key is unique per merchant, whichever customer), OR-J29-S02 (death after acceptance).
 
 ### 2. Agreement with providers
 `ConfirmOrder` reads the provider, never trusting the browser. A lost sale answer
