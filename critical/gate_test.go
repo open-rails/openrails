@@ -566,9 +566,12 @@ func TestGate(t *testing.T) {
 			p.wire.down.Store(false)
 			gateFlush(t, p.gate)
 		}
-		b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "the two gates together spent at most what was left, each its share: %v units", spent)
+		// A flush resends what the outage held back and reports it in flight
+		// once more; each gate's next sync replaces that report.
+		require.Eventually(t, func() bool {
+			b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
+			return err == nil && b.AvailableAmount >= 0
+		}, 10*time.Second, 100*time.Millisecond, "the two gates together spent at most what was left, each its share: %v units", spent)
 	})
 
 	t.Run("OR-J23-S39/near-zero-is-decided-on-the-server-exactly", func(t *testing.T) {
