@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // DestructiveRunKindPrune is this run kind's key in billing.maintenance_runs.
@@ -245,7 +246,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 	}
 
 	// --- open the run BEFORE writing, so a crash mid-pass stays reversible ---
-	runID := uuid.New()
+	runID := uuidutil.NewV7()
 	coverage, err := json.Marshal(snap.Coverage)
 	if err != nil {
 		return res, fmt.Errorf("marshal coverage proof: %w", err)

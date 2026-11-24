@@ -393,6 +393,33 @@ func (q *Queries) DestructiveActionProviderState(ctx context.Context, arg Destru
 	return i, err
 }
 
+const destructiveArchiveBarrier = `-- name: DestructiveArchiveBarrier :one
+SELECT COALESCE(CASE
+ WHEN EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND state IN ('reserved','started','uncertain')
+   AND NOT (kind='configuration_change' OR kind='catalog_change' AND action_key LIKE 'catalog:%')) THEN 'destructive_actions'
+ WHEN EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=$1::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=$1::uuid))) THEN 'destructive_holds'
+ WHEN $2::timestamptz IS NOT NULL AND EXISTS(SELECT 1 FROM billing.maintenance_runs WHERE merchant_id=$1::uuid AND kind IN ('prune','approval')
+   AND status<>'reversed' AND (finished_at IS NULL OR finished_at>$2::timestamptz)) THEN 'maintenance_runs'
+END,'')::text AS barrier
+`
+
+type DestructiveArchiveBarrierParams struct {
+	MerchantID uuid.UUID
+	UndoSince  *time.Time
+}
+
+// What keeps a merchant's book from moving, empty when nothing does: a
+// destructive action whose effect may still land (an ordinary catalog or
+// configuration edit aside), an open incident the book would escape, and for
+// a restore (undo_since set) a prune or approval run that can still be undone
+// and ran after undo_since.
+func (q *Queries) DestructiveArchiveBarrier(ctx context.Context, arg DestructiveArchiveBarrierParams) (string, error) {
+	row := q.db.QueryRow(ctx, destructiveArchiveBarrier, arg.MerchantID, arg.UndoSince)
+	var barrier string
+	err := row.Scan(&barrier)
+	return barrier, err
+}
+
 const destructiveDeploymentActivityAtLeast = `-- name: DestructiveDeploymentActivityAtLeast :one
 SELECT count(*)::bigint AS active FROM (
  (SELECT DISTINCT s.merchant_id,s.customer_id FROM billing.subscriptions s
@@ -742,23 +769,6 @@ func (q *Queries) GetDestructiveHold(ctx context.Context, arg GetDestructiveHold
 	return i, err
 }
 
-const hasDestructiveArchiveBarrier = `-- name: HasDestructiveArchiveBarrier :one
-SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND greatest(admitted_at,finished_at)>$2::timestamptz)))
- OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=$1::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=$1::uuid))))::boolean AS held
-`
-
-type HasDestructiveArchiveBarrierParams struct {
-	MerchantID uuid.UUID
-	Since      time.Time
-}
-
-func (q *Queries) HasDestructiveArchiveBarrier(ctx context.Context, arg HasDestructiveArchiveBarrierParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasDestructiveArchiveBarrier, arg.MerchantID, arg.Since)
-	var held bool
-	err := row.Scan(&held)
-	return held, err
-}
-
 const listDestructiveHolds = `-- name: ListDestructiveHolds :many
 SELECT merchant_id, id, scope, scope_key, actor_issuer, actor_id, credential, action_kind, target, window_name, observed, requested, ceiling, opened_at, cleared_at, clear_through_sequence, cleared_by_issuer, cleared_by_id, clear_reason FROM billing.destructive_holds WHERE merchant_id=$1::uuid AND ($2::uuid IS NULL OR id>$2::uuid)
 ORDER BY id LIMIT $3::int
@@ -962,6 +972,44 @@ type LockDestructiveActionParams struct {
 
 func (q *Queries) LockDestructiveAction(ctx context.Context, arg LockDestructiveActionParams) (BillingDestructiveAction, error) {
 	row := q.db.QueryRow(ctx, lockDestructiveAction, arg.MerchantID, arg.ID)
+	var i BillingDestructiveAction
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.AdmissionSequence,
+		&i.Kind,
+		&i.Target,
+		&i.ActionKey,
+		&i.RequestDigest,
+		&i.Origin,
+		&i.ActorIssuer,
+		&i.ActorID,
+		&i.ActorKey,
+		&i.Credential,
+		&i.Units,
+		&i.AdmittedAt,
+		&i.State,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CompletionSequence,
+		&i.Result,
+	)
+	return i, err
+}
+
+const lockDestructiveActionNowait = `-- name: LockDestructiveActionNowait :one
+SELECT merchant_id, id, admission_sequence, kind, target, action_key, request_digest, origin, actor_issuer, actor_id, actor_key, credential, units, admitted_at, state, started_at, finished_at, completion_sequence, result FROM billing.destructive_actions
+WHERE merchant_id=$1::uuid AND id=$2::uuid FOR UPDATE NOWAIT
+`
+
+type LockDestructiveActionNowaitParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The command, unless another transaction holds it: then 55P03 at once.
+func (q *Queries) LockDestructiveActionNowait(ctx context.Context, arg LockDestructiveActionNowaitParams) (BillingDestructiveAction, error) {
+	row := q.db.QueryRow(ctx, lockDestructiveActionNowait, arg.MerchantID, arg.ID)
 	var i BillingDestructiveAction
 	err := row.Scan(
 		&i.MerchantID,

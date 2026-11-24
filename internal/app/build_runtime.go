@@ -82,8 +82,6 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// idempotencyLeaseConns is the default cap for the lease renewal pool.
-	idempotencyLeaseConns int32 = 4
 )
 
 type runtimeOverrides struct {
@@ -169,7 +167,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisClient redis.UniversalClient
 		err         error
 	)
-	leaseConns := idempotencyLeaseConns
+	leaseConns := int32(config.DefaultLeaseConns)
 	if cfg.Database.LeaseConns > 0 {
 		leaseConns, err = safecast.Convert[int32](cfg.Database.LeaseConns)
 		if err != nil {
@@ -235,9 +233,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil && overrides.StripeTransport != nil {
 		stripeTransport = overrides.StripeTransport
 	}
-	stripeClients := stripeapi.NewFactory(stripeTransport)
+	// Every provider write waits on its merchant's write posture.
+	postures := writeposture.View{DB: database}
+	stripeClients := stripeapi.NewFactory(stripeTransport, postures)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg, Log: logger}
+	nmiClients := &railresolve.NMIFactory{Config: cfg, Postures: postures, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -257,9 +257,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
 	// request-plane transaction builds).
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
-		Config:      cfg,
 		MerchantsFn: merchantsFn,
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Postures:    postures,
 		Log:         logger,
 	}
 	solanaPriceProvider, err := createPythPriceProvider(logger, solanaRPCResolver.Network)
@@ -469,11 +469,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// job runs it. Two instances of the one mechanism, differing only in
 	// origin:
 	//   - user-origin for user-asked cancellations (UserSubscriptionService):
-	//     reactive completion, executes under mode=limited;
+	//     reactive completion, executes under a limited write posture;
 	//   - system-origin for dunning exhaustion (the lifecycle service shared
 	//     by the webhook handlers, and Runtime.DeferredDeletes threaded into
-	//     the dunning worker's per-run lifecycle): proactive, requires
-	//     mode=full. The window-expiry path no longer deletes inline — every
+	//     the dunning worker's per-run lifecycle): proactive, requires a
+	//     full write posture. The window-expiry path no longer deletes inline — every
 	//     terminal cancellation funnels through the one ledger, so no
 	//     double-delete is possible.
 	// #732: every destructive cancel passes the rate ceiling before its
@@ -495,7 +495,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	// or#896: a merchant-initiated cancel goes through the same durable
 	// intents as the user path — admin-origin (a human asked for it, so it
-	// executes under mode=limited like the user cancel) and rate-ceiling gated.
+	// executes under a limited write posture like the user cancel) and
+	// rate-ceiling gated.
 	if runtime.AdminSubscriptionService != nil {
 		runtime.AdminSubscriptionService.SetProviderCancelScheduler(newProviderCancelScheduler(database, rateCeiling, intents.OriginAdmin,
 			"merchant-initiated cancellation; the provider schedule must stop billing"))
@@ -609,7 +610,7 @@ type servicesInstances struct {
 func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
-	// Domain services publish immutable notification facts; applications consume them.
+	// Domain services record immutable notification facts; customer messages and applications read them.
 	notificationService := subscriptions.NewNotificationService(database)
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	paymentService := payments.NewPaymentService(database, clock)
@@ -697,7 +698,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		return nil, err
 	}
 
-	postures := writeposture.View{Config: cfg, DB: database}
+	postures := writeposture.View{DB: database}
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
 		subscriptionService,
 		productService,

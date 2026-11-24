@@ -1,6 +1,15 @@
 // Package leases syncs gates' leases: in one transaction per sync it settles
-// their usage in order, keeps their in-flight reports, releases the request
-// holds they give back, and answers views of the customers they serve.
+// their usage in order, keeps their in-flight reports and releases the
+// request holds they give back; once it committed it answers views of the
+// customers they serve.
+//
+// A sync takes no customer's lock. Its transaction locks its own lease row
+// and shares the merchant's catalog fence; its intake is append-only (events
+// into the event store, then the lease's numbering and receipts, an unposted
+// mark held by key share), and its in-flight report and releases write only
+// its own rows. Only a window that must open or a failed item's charge takes
+// that customer's lock (money.PrepareUsageTx). Views are read after the
+// commit, in batches, in one snapshot (views.go).
 package leases
 
 import (
@@ -29,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -54,17 +64,13 @@ const (
 	// workBudget is how far into its transaction a sync still starts a view:
 	// one it has no time for is answered null and asked again.
 	workBudget = 2500 * time.Millisecond
-	// lockBudget is how far into its transaction a sync may still wait for
-	// a lock; past lockTimeoutStep of drift the timeout is cut to what is left.
-	lockBudget      = workBudget - 500*time.Millisecond
-	lockTimeoutStep = 250 * time.Millisecond
-	// A sync settles a prefix of its new usage: the items of at most
-	// maxSettleCustomers customers, in chunks of settleChunk customers, and
-	// no chunk after the first once settleBudget of real transaction time
-	// has passed. The rest come again.
+	// lockBudget is how long a sync's statement may wait for a lock: a
+	// posting holding an unposted mark, or a customer whose window opens.
+	lockBudget = workBudget - 500*time.Millisecond
+	// A sync settles a prefix of its new usage, the items of at most
+	// maxSettleCustomers customers, in one intake (one event store insert).
+	// The rest come again.
 	maxSettleCustomers = 100
-	settleChunk        = 20
-	settleBudget       = 1500 * time.Millisecond
 	// recentWindow is how far back a view's Recent reads spend.
 	recentWindow = time.Minute
 )
@@ -196,8 +202,9 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	}
 	s.DB.EnsurePartitions(ctx, s.Now().UTC())
 	var out *billing.SyncLeasesResult
+	var run *syncRun
+	began := time.Now()
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		began := time.Now()
 		q := gen.New(tx)
 		if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "transaction_timeout", Value: strconv.Itoa(int(limits.SyncTimeout / time.Millisecond)), IsLocal: true}); err != nil {
 			return err
@@ -207,7 +214,7 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 		}
 		now := s.Now().UTC().Truncate(time.Microsecond)
 		d := s.DB.NewWithPgxTx(tx)
-		run := &syncRun{Syncer: s, ctx: ctx, q: q, merchant: mid.UUID(), now: now, p: p, began: began, lockTimeout: lockBudget,
+		run = &syncRun{Syncer: s, ctx: ctx, q: q, merchant: mid.UUID(), now: now, p: p, began: began,
 			money: s.Money.WithDatabase(d), admitter: s.Admitter.Bind(d, func() time.Time { return now }), failed: func(u billing.LeaseUsage) []money.FailedUsageWindow {
 				return failed[windowKey{u.CustomerID, cmp.Or(u.InvokerType, billing.InvokerTypeCustomer), money.NormalizeCurrency(string(u.Currency))}]
 			}}
@@ -220,7 +227,20 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 	if lockTimedOut(err) {
 		return nil, errLockBudget
 	}
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	// The balances its usage moved are watched, outside the transaction: a
+	// watch it misses (a crash between) looks at its own next instant.
+	if err := s.Money.WatchUsage(ctx, s.DB, run.changed); err != nil && s.DB.Log != nil {
+		s.DB.Log.WarnContext(ctx, "lease sync: watching the balances its usage moved failed; each looks at its next instant", logx.Err(err))
+	}
+	// A failure here leaves the sync committed: its answer is lost, and the
+	// gate's resend answers the receipts and fresh views.
+	if err := run.views(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // errLockBudget answers a sync that could not take its locks within
@@ -236,43 +256,6 @@ func lockTimedOut(err error) bool {
 func setLockTimeout(ctx context.Context, q *gen.Queries, d time.Duration) error {
 	_, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "lock_timeout", Value: strconv.FormatInt(max(d.Milliseconds(), 1), 10), IsLocal: true})
 	return err
-}
-
-// lockWaiting takes the customer locks a sync waits for, in the order
-// given, within lockBudget of the transaction's real time: before a wait,
-// lock_timeout is cut to what is left once that has drifted lockTimeoutStep
-// below it, and set back after.
-func (r *syncRun) lockWaiting(ids []uuid.UUID) error {
-	for _, id := range ids {
-		left := lockBudget - time.Since(r.began)
-		if left <= 0 {
-			return errLockBudget
-		}
-		if left < r.lockTimeout-lockTimeoutStep {
-			if err := setLockTimeout(r.ctx, r.q, left); err != nil {
-				return err
-			}
-			r.lockTimeout = left
-		}
-		if err := db.EnsureCustomerRowQ(r.ctx, r.q, r.merchant, id); err != nil {
-			return err
-		}
-		if _, err := r.q.LockCustomerForSpend(r.ctx, gen.LockCustomerForSpendParams{MerchantID: r.merchant, ID: id}); err != nil {
-			return err
-		}
-	}
-	if r.lockTimeout == lockBudget {
-		return nil
-	}
-	r.lockTimeout = lockBudget
-	return setLockTimeout(r.ctx, r.q, lockBudget)
-}
-
-// pastBudget reports a sync past budget, by the transaction's real elapsed
-// time.
-func (r *syncRun) pastBudget(budget time.Duration) (bool, error) {
-	elapsed, err := r.q.SyncElapsed(r.ctx)
-	return time.Duration(elapsed)*time.Microsecond > budget, err
 }
 
 // withinTimeout is a sync's last statement: one that ran past its timeout
@@ -299,10 +282,8 @@ type syncRun struct {
 	money    *money.MoneyService
 	admitter *admission.Admitter
 	failed   func(billing.LeaseUsage) []money.FailedUsageWindow
-	// began is the transaction's start by the real clock, and lockTimeout
-	// the lock_timeout in force.
-	began       time.Time
-	lockTimeout time.Duration
+	// began is the sync's start by the real clock.
+	began time.Time
 
 	lease  gen.BillingLease
 	result *billing.SyncLeasesResult
@@ -313,6 +294,8 @@ type syncRun struct {
 	settled map[settledKey]int64
 	// spend caches the billing policy of each item's attributes.
 	spend map[string]*admission.SpendPolicy
+	// changed are the balances its usage moved.
+	changed []money.UsageAccount
 }
 
 // settledKey names one customer's limit: balance's key carries its currency.
@@ -362,22 +345,6 @@ func (r *syncRun) usagePrefix() prefix {
 	return p
 }
 
-// chunkEnd is where the chunk of the prefix from start ends: before the item
-// naming its (settleChunk+1)th customer.
-func (r *syncRun) chunkEnd(start int) int {
-	seen := map[billing.CustomerID]bool{}
-	for i := start; i < r.prefix.end; i++ {
-		c := r.p.Usage[i].CustomerID
-		if !seen[c] {
-			if len(seen) == settleChunk {
-				return i
-			}
-			seen[c] = true
-		}
-	}
-	return r.prefix.end
-}
-
 func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	if err := r.lockLease(); err != nil {
 		return nil, err
@@ -390,9 +357,6 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 	r.result = &billing.SyncLeasesResult{Views: []billing.View{}, LimitSets: make([]*billing.LimitSet, len(r.p.Views)), RefusedViews: []billing.ViewRefusal{}, Pricing: []billing.ViewPricing{},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}}
 	if err := r.findReleases(); err != nil {
-		return nil, err
-	}
-	if err := r.lockCustomers(); err != nil {
 		return nil, err
 	}
 	// Usage settles first, always.
@@ -421,9 +385,6 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		if r.now.Before(r.lease.CreatedAt) {
 			closedAt = &r.lease.CreatedAt
 		}
-	}
-	if err := r.views(); err != nil {
-		return nil, err
 	}
 	encoded, err := encodeReceipts(receipts)
 	if err != nil {
@@ -501,31 +462,8 @@ func (r *syncRun) findReleases() error {
 	return err
 }
 
-// lockCustomers locks, in id order, the customers of the usage prefix and
-// of the holds the sync releases: every writer of a customer's money or
-// windows holds its lock.
-func (r *syncRun) lockCustomers() error {
-	locked := map[uuid.UUID]bool{}
-	var ids []uuid.UUID
-	add := func(c uuid.UUID) {
-		if c == uuid.Nil || locked[c] || (r.Allows != nil && !r.Allows(billing.CustomerID(c))) {
-			return
-		}
-		locked[c] = true
-		ids = append(ids, c)
-	}
-	for _, c := range r.prefix.customers {
-		add(c.UUID())
-	}
-	for _, h := range r.holds {
-		add(h.CustomerID)
-	}
-	slices.SortFunc(ids, compareUUID)
-	return r.lockWaiting(ids)
-}
-
 // report replaces the lease's in-flight report, writing only the lines that
-// changed.
+// changed: its own rows, never the customer's.
 func (r *syncRun) report() error {
 	type line struct {
 		customer    uuid.UUID
@@ -567,11 +505,6 @@ func (r *syncRun) report() error {
 	for _, k := range keys {
 		if have[k] == want[k] {
 			continue
-		}
-		if _, known := have[k]; !known {
-			if err := db.EnsureCustomerRowQ(r.ctx, r.q, r.merchant, k.customer); err != nil {
-				return err
-			}
 		}
 		if err := r.q.UpsertLeaseInFlight(r.ctx, gen.UpsertLeaseInFlightParams{MerchantID: r.merchant, LeaseID: r.lease.ID, CustomerID: k.customer,
 			LimitKey: k.limit, Unit: k.unit, Amount: want[k], Now: r.now}); err != nil {
@@ -626,25 +559,16 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 			}
 		}
 	}
-	// New items settle in order, chunk by chunk while the sync has time; a
-	// gap stops them once every item before it settled.
+	// New items settle in order, in one intake; a gap stops them once every
+	// item before it settled.
 	var refusals []billing.LeaseUsageRefusal
 	refuseNew := func(i int, err error) {
 		status, details := Details(err)
 		refusals = append(refusals, billing.LeaseUsageRefusal{N: r.p.Usage[i].N, Status: status, Error: &details})
 	}
 	end := first
-	for end < r.prefix.end {
-		if end > first {
-			over, err := r.pastBudget(settleBudget)
-			if err != nil {
-				return 0, nil, err
-			}
-			if over {
-				break
-			}
-		}
-		stop := r.chunkEnd(end)
+	if end < r.prefix.end {
+		stop := r.prefix.end
 		var items []money.UsageItem
 		var index []int
 		for i := end; i < stop; i++ {

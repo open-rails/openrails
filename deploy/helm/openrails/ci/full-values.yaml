@@ -3,7 +3,6 @@ replicaCount: 2
 image:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 config:
-  provider_write_mode: full
   public_billing_base_url: https://billing.example.com
   auth:
     default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11

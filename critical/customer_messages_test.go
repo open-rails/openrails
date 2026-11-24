@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/adapters/smtpmail"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -272,7 +273,7 @@ func TestCustomerMessages(t *testing.T) {
 			require.NoError(t, err)
 			intents, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
 			require.NoError(t, err)
-			require.True(t, slices.ContainsFunc(intents, func(id uuid.UUID) bool { return uuid.NewSHA1(id, []byte("collection_outcome")) == stopped }),
+			require.True(t, slices.ContainsFunc(intents, func(id uuid.UUID) bool { return uuidutil.ChildV7(id, "collection_outcome") == stopped }),
 				"the fact's id derives from its collection attempt")
 		})
 	})
@@ -756,7 +757,9 @@ func TestCustomerMessages(t *testing.T) {
 	})
 	t.Run("OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt", func(t *testing.T) {
 		mail := &alertMailbox{}
-		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		// Begun nine days ago: the refund settles eight days on, never in
+		// the future.
+		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail; w.clock.Advance(-9 * 24 * time.Hour) })
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-late-by-staff"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order

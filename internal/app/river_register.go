@@ -199,6 +199,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
+	if err := addWorker(workers, &riverjobs.PriceMigrationWorker{Migrations: r.PriceMigrationService}); err != nil {
+		return fmt.Errorf("add price migration worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -293,7 +296,7 @@ func (w jobLogged[T]) Work(ctx context.Context, job *river.Job[T]) error {
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Every provider intent arms per merchant at drain time: NMI through
 	// CollectionResolver, CCBill and Stripe through RailConfigs.
-	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // an unarmed rail parks
+	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.RailConfigs, clock) // an unarmed rail parks
 	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
@@ -382,7 +385,7 @@ func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
 
 // Posture reads merchants' provider write postures.
 func (r *Runtime) Posture() writeposture.View {
-	return writeposture.View{Config: r.Config, DB: r.DB}
+	return writeposture.View{DB: r.DB}
 }
 
 // IntentRunner returns a Runner for synchronous enqueue+execute from request

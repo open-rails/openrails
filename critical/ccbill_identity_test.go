@@ -226,7 +226,7 @@ func TestCCBillIdentity(t *testing.T) {
 
 		t.Run("an-order-sale-names-the-card-ccbill-billed", func(t *testing.T) {
 			// Selling a FlexForm is a provider write.
-			a := ccbillWebhookWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+			a := ccbillWebhookWorld(t, func(w *world) { w.posture = "full" })
 			price := ccbillMemberPrice(t, a.alpha)
 			erin := authtest.NewUser(t, a.auth)
 			token := authtest.SignIn(t, a.auth, erin).AccessToken
@@ -310,6 +310,26 @@ func TestCCBillIdentity(t *testing.T) {
 		})
 	})
 
+	t.Run("OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		name := "member" + uuid.NewString()[:8]
+		user := func(username string) iam.User {
+			t.Helper()
+			u, err := a.auth.CreateUser(t.Context(), iam.NewUser{Email: username + "@example.com", Username: username, Password: authtest.Password, EmailVerified: true})
+			require.NoError(t, err)
+			return u
+		}
+		// More than one search's worth of people whose usernames contain the
+		// buyer's join the host's directory first.
+		for i := range 55 {
+			user(fmt.Sprintf("%sx%02d", name, i))
+		}
+		buyer := billing.CustomerID(uuid.MustParse(user(name).ID))
+		status, body := ccbillNotice(t, a, "NewSaleFailure", map[string]any{"transactionId": "0912233445566778897", "username": name,
+			"flexId": "critical-flex", "billedCurrencyCode": "840", "failureCode": "15", "failureReason": "Insufficient funds"})
+		require.Equal(t, http.StatusOK, status, body)
+		require.True(t, factEmitted(t, a.alpha, "payment_method_failed", buyer), "the decline names the one customer whose username it is")
+	})
 	t.Run("OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
@@ -351,6 +371,9 @@ func TestCCBillIdentity(t *testing.T) {
 			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled, due)
 			declareCCBill(w, feed.URL)
 			w.cfg.ProviderSandbox.CCBillWebhookSources = []string{"127.0.0.1/32"}
+			// Lifecycle repairs need full writes: a readonly merchant's pull
+			// observes, and never reads its unverified rows.
+			w.posture = "full"
 		})
 		price := ccbillMemberPrice(t, a.alpha)
 		alice := customerOf(a.alice)

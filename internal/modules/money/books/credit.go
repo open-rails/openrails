@@ -36,6 +36,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // OpCreditIssue is the operation a paid lot's price is deferred at.
@@ -224,6 +225,13 @@ type CreditMove struct {
 	Into *Line
 }
 
+// CreditLineSchedule is the revenue schedule of an order line priced in a
+// merchant's unit, in one currency its lots were paid in: the spends name it
+// as they release the lots' money, before the order's application makes it.
+func CreditLineSchedule(line uuid.UUID, currency string) uuid.UUID {
+	return uuidutil.DeterministicID(line, "revenue_schedule", currency)
+}
+
 // Line is an order line a spend of credit pays, and its order, which the
 // spend's legs in both books name.
 type Line struct {
@@ -278,9 +286,10 @@ func (b *Books) postInto(ctx context.Context, l CreditLot, debit Ref, amount int
 	if m.Into.Order != uuid.Nil {
 		order = &m.Into.Order
 	}
+	schedule := CreditLineSchedule(line, currency)
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: currency, Type: typ, Coord: m.Coord,
-		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product,
+		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product, RevenueSchedule: &schedule,
 	})
 	if err != nil {
 		return fmt.Errorf("books: credit lot %s %s into line %s: %w", l.ID, typ, line, err)
@@ -342,7 +351,15 @@ type CreditReversal struct {
 	CashAccount Ref
 	// Repaid is the units of it that had repaid owed: owed again, at face.
 	Repaid int64
-	At     time.Time
+	// Consumed and Lapsed are the units of it the lot had spent, and that had
+	// expired or been revoked: what the cash beyond the lot's deferred money
+	// paid for. The consumed share comes from what the spends funded.
+	Consumed, Lapsed int64
+	// At is when the reversal settled, Now when it is booked.
+	At, Now time.Time
+	// Zone is the merchant's accounting zone, for the schedules the lot's
+	// spends funded.
+	Zone *time.Location
 }
 
 // The labels of a reversal's legs, by what of the lot's money they return.
@@ -352,6 +369,9 @@ const (
 	reversedRepaid     = "money_repaid"
 	reversedPromotion  = "money_repaid_promotion"
 	reversedRecognized = "money_recognized"
+	// reversedRecognizedDeferred is a recovery's part of what a schedule's
+	// reduction took from deferred revenue.
+	reversedRecognizedDeferred = "money_recognized_deferred"
 )
 
 // ReverseCredit posts a reversal of a booked lot's payment at
@@ -379,6 +399,14 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 	}
 	receivableRef := Ref{Type: UsageReceivable, Customer: ptrUUID(l.Customer)}
 	c := l.PaidCurrency
+	recognized := r.Cash - paid - repaid
+	shares, err := b.lotTakes(ctx, l, recognized, r.Consumed, r.Lapsed)
+	if err != nil {
+		return err
+	}
+	for _, sh := range shares {
+		recognized -= sh.amount
+	}
 	for _, leg := range []struct {
 		debit, credit Ref
 		amount        int64
@@ -389,9 +417,16 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 		{l.deferredRef(), Ref{Type: contra}, deferred - paid, deferredType, reversedExcess},
 		{receivableRef, r.CashAccount, repaid, UsageReopened, reversedRepaid},
 		{receivableRef, Ref{Type: PromotionalCredit}, r.Repaid - repaid, UsageReopened, reversedPromotion},
-		{Ref{Type: contra}, r.CashAccount, r.Cash - paid - repaid, recognizedType, reversedRecognized},
+		{Ref{Type: contra}, r.CashAccount, recognized, recognizedType, reversedRecognized},
 	} {
 		if err := b.postLot(ctx, l, leg.debit, leg.credit, leg.amount, c, leg.typ, coord(leg.label), r.At); err != nil {
+			return err
+		}
+	}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, deferredType: deferredType, recognizedType: recognizedType,
+		coord: coord(reversedRecognized), at: r.At, now: r.Now, loc: r.Zone}
+	for _, sh := range shares {
+		if err := b.changeSchedule(ctx, sh, true, legs); err != nil {
 			return err
 		}
 	}
@@ -412,7 +447,11 @@ type CreditRecovery struct {
 	// units it restored to a revoked or lapsed lot's retired account, whose
 	// money the caller then forfeits or breaks (MoveCredit).
 	Repaid, Retired int64
-	At              time.Time
+	// At is when the recovery settled, Now when it is booked.
+	At, Now time.Time
+	// Zone is the merchant's accounting zone, for the schedules the origin
+	// took from.
+	Zone *time.Location
 }
 
 // RecoverCredit posts a recovery as the units book allocated it, mirroring
@@ -440,6 +479,14 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 	coord := func(label string) Coord {
 		return Coord{Operation: OpCreditRefund, Source: label + "_restore:" + r.Origin.String(), SourceID: r.Recovery.String()}
 	}
+	recognized := r.Cash - paid - repaid
+	shares, err := b.lotRestores(ctx, l, r.Origin, recognized)
+	if err != nil {
+		return err
+	}
+	for _, sh := range shares {
+		recognized -= sh.amount
+	}
 	receivableRef := Ref{Type: UsageReceivable, Customer: ptrUUID(l.Customer)}
 	for _, leg := range []struct {
 		debit, credit Ref
@@ -450,9 +497,16 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 		{Ref{Type: contra}, l.deferredRef(), deferred - paid, reversedExcess},
 		{r.CashAccount, receivableRef, repaid, reversedRepaid},
 		{Ref{Type: PromotionalCredit}, receivableRef, owed - repaid, reversedPromotion},
-		{r.CashAccount, Ref{Type: contra}, r.Cash - paid - repaid, reversedRecognized},
+		{r.CashAccount, Ref{Type: contra}, recognized, reversedRecognized},
 	} {
 		if err := b.postLot(ctx, l, leg.debit, leg.credit, leg.amount, l.PaidCurrency, DisputeWon, coord(leg.label), r.At); err != nil {
+			return err
+		}
+	}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), deferredSource: coord(reversedRecognizedDeferred).Source,
+		at: r.At, now: r.Now, loc: r.Zone}
+	for _, sh := range shares {
+		if err := b.changeSchedule(ctx, sh, false, legs); err != nil {
 			return err
 		}
 	}

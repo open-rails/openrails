@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 716,
+  "scenario_count": 747,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -766,7 +766,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the unposted mark) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -781,7 +781,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers in one insert, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
       "id": "OR-J24-S36",
@@ -927,6 +927,11 @@
       "id": "OR-J24-S64",
       "journey": "J24",
       "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
+      "id": "OR-J24-S65",
+      "journey": "J24",
+      "name": "A merchant's configuration first read inside a balance look's transaction loads on its own: the look expires the lapsed lot and the pass succeeds"
     },
     {
       "id": "OR-J25-S01",
@@ -1929,6 +1934,21 @@
       "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
     },
     {
+      "id": "OR-J34-S41",
+      "journey": "J34",
+      "name": "An archive exports right after a catalog edit: a completed action or an ordinary edit never bars it"
+    },
+    {
+      "id": "OR-J34-S42",
+      "journey": "J34",
+      "name": "An archive export beside a destructive action whose effect may still land is refused"
+    },
+    {
+      "id": "OR-J34-S43",
+      "journey": "J34",
+      "name": "A restore waits a day, by the deployment's clock, after a prune that can still be undone"
+    },
+    {
       "id": "OR-J34-S34",
       "journey": "J34",
       "name": "A staff card removal is a staff admission and spends no customer-action budget"
@@ -2152,6 +2172,11 @@
       "id": "OR-J26-S62",
       "journey": "J26",
       "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
+    },
+    {
+      "id": "OR-J26-S63",
+      "journey": "J26",
+      "name": "A usage order's period covers the usage it bills, from its pricing period's start to the bill"
     },
     {
       "id": "OR-J37-S60",
@@ -3034,6 +3059,41 @@
       "name": "The first balance in a unit waits for the units lock a settings change takes before it locks any customer, and records the unit's scale; a gift in a counted unit takes no lock"
     },
     {
+      "id": "OR-J48-S13",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the order again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the order in money no lot paid it with"
+    },
+    {
+      "id": "OR-J48-S14",
+      "journey": "J48",
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts each under its own label, and recognition resumes at the restored price"
+    },
+    {
+      "id": "OR-J48-S15",
+      "journey": "J48",
+      "name": "A unit-priced line paid only with given units has no revenue schedule and moves nothing in the general ledger"
+    },
+    {
+      "id": "OR-J48-S16",
+      "journey": "J48",
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
+    },
+    {
+      "id": "OR-J48-S17",
+      "journey": "J48",
+      "name": "A $15 refund at Stripe of a $20 pack of 400 GOLD whose 200 GOLD paid for a 30-day pass takes the 200 left and $5 of the pass's schedule against refunds, as a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J48-S18",
+      "journey": "J48",
+      "name": "A full chargeback of a pack whose units paid $5 of usage and a $10 pass takes the $15 it spent pro rata: the pass's schedule to zero and $5 against usage revenue"
+    },
+    {
+      "id": "OR-J48-S19",
+      "journey": "J48",
+      "name": "A statue paid from a dollar lot and a euro lot: a chargeback of the euro pack reduces the statue's euro schedule alone, and the dollar schedule stands"
+    },
+    {
       "id": "OR-J53-S01",
       "journey": "J53",
       "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
@@ -3552,6 +3612,101 @@
       "id": "OR-J38-S84",
       "journey": "J38",
       "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
+    },
+    {
+      "id": "OR-J06-S72",
+      "journey": "J06",
+      "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
+    },
+    {
+      "id": "OR-J07-S10",
+      "journey": "J07",
+      "name": "A customer search finds the merchant's customers however many people of the host's directory who are not its customers match first"
+    },
+    {
+      "id": "OR-J37-S71",
+      "journey": "J37",
+      "name": "A price created with its product publishes its Solana plan before the catalog transaction: another catalog edit commits while the publication waits on the chain, and a retry binds the same plan"
+    },
+    {
+      "id": "OR-J19-S08",
+      "journey": "J19",
+      "name": "A migration push NMI can never take (a schedule on a named plan, or one stating no plan_payments) blocks its move with a finding, settles its migration and is never sent again"
+    },
+    {
+      "id": "OR-J19-S09",
+      "journey": "J19",
+      "name": "A price migration archives its sources as a catalog edit: a later catalog document still declaring a source on sale reports the conflict and does not sell it again"
+    },
+    {
+      "id": "OR-J19-S10",
+      "journey": "J19",
+      "name": "A migration of 101 CCBill subscribers admits every one before reading any, blocks the first page with its creation and the rest by its page job, records cancel_at_period_end without canceling any, and a second migration past the actor's ceiling is refused whole"
+    },
+    {
+      "id": "OR-J19-S11",
+      "journey": "J19",
+      "name": "A Solana subscriber's move is blocked, its migration settles, and nothing is sent to the chain"
+    },
+    {
+      "id": "OR-J19-S12",
+      "journey": "J19",
+      "name": "A migration by price key moves every earlier version's subscribers with a price-change notice; one to another product sends a plan-change notice naming it and applies at renewal"
+    },
+    {
+      "id": "OR-J19-S13",
+      "journey": "J19",
+      "name": "Canceling a migration whose Stripe move was pushed lists the subscription in rail_release_required and leaves Stripe's schedule in place"
+    },
+    {
+      "id": "OR-J19-S14",
+      "journey": "J19",
+      "name": "A creation interrupted while reaching its subscribers records nothing, not even the moves it made, and its retry moves everyone once and answers again with the same migration"
+    },
+    {
+      "id": "OR-J04-S78",
+      "journey": "J04",
+      "name": "OrderPayment reads back a pay whose answer was lost with getOrderPaymentAttempt under its key, and retries a pay that never arrived under the same key: one attempt"
+    },
+    {
+      "id": "OR-J04-S79",
+      "journey": "J04",
+      "name": "OrderPayment reads a Solana order awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
+    },
+    {
+      "id": "OR-J07-S11",
+      "journey": "J07",
+      "name": "A kept customer search lists the contact whose username is the query first, then the newest customers, and the list keeps that order"
+    },
+    {
+      "id": "OR-J38-S82",
+      "journey": "J38",
+      "name": "A CCBill postback names its customer by a username more than one search's worth of the host's users contain, not leaving it unattributable"
+    },
+    {
+      "id": "OR-J19-S15",
+      "journey": "J19",
+      "name": "A migration's subscribers and the source it archives are one destructive command: staff one unit short is refused whole, nothing recorded or archived; at exactly the limit it succeeds with no hold"
+    },
+    {
+      "id": "OR-J19-S16",
+      "journey": "J19",
+      "name": "A cancel ends a migration's walk whose next page never ran: it is no longer preparing, the subscriber it never reached counts as skipped, and the page's job, run later, changes nothing"
+    },
+    {
+      "id": "OR-J19-S17",
+      "journey": "J19",
+      "name": "Two identical creates waiting on the catalog lock answer the one migration, recorded once"
+    },
+    {
+      "id": "OR-J19-S18",
+      "journey": "J19",
+      "name": "A price migration whose caller leaves after its source is archived is still recorded, and the identical retry answers it under the one command: two subscribers and the source, admitted once"
+    },
+    {
+      "id": "OR-J19-S19",
+      "journey": "J19",
+      "name": "An identical price migration created while the first records is refused at once with price_migration_in_progress, another destructive command of the merchant is admitted meanwhile, and once recorded the identical request answers it"
     },
     {
       "id": "OR-J40-S20",

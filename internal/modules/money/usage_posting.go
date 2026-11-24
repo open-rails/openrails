@@ -524,7 +524,7 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	for _, m := range meters {
 		owed = append(owed, owedShare{meter: m, weight: byMeter[m]})
 	}
-	posting.posting = &runningChargePosting{through: cut, owed: owed, usagePosted: true,
+	posting.posting = &runningChargePosting{through: cut, owed: owed, usagePosted: true, from: period,
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)

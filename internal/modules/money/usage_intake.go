@@ -40,13 +40,18 @@ import (
 // next balance movement posts it. A failed item is not priced: what its grace
 // leaves is charged at once, with its own ledger legs.
 //
-// Intake is two steps in the caller's transaction, under the customers'
-// locks: PrepareUsageTx validates, prices and locates, writing nothing; then
-// CommitUsageTx inserts the events (skipping those an earlier attempt
-// inserted), waits until they read back, and writes the PostgreSQL side. An
-// event's identity never depends on a clock read per attempt: a capture
-// occurred when its request was admitted, and an item an earlier attempt
-// inserted keeps the instants that attempt stamped.
+// Intake is two steps in the caller's transaction: PrepareUsageTx validates,
+// prices and locates, writing nothing; then CommitUsageTx inserts the events
+// (skipping those an earlier attempt inserted), waits until they read back,
+// and writes the PostgreSQL side. It is append-only and takes no customer's
+// lock, except to change what that lock guards: to open a session or
+// first-use window (two first uses in different seconds would open two), or
+// to charge a failed item's grace (a balance movement). Concurrent intakes of
+// one customer may price from the same period position; postings price the
+// period's total, so only provisional amounts can differ. An event's identity
+// never depends on a clock read per attempt: a capture occurred when its
+// request was admitted, and an item an earlier attempt inserted keeps the
+// instants that attempt stamped.
 
 // ErrUsageOutsideIngestWindow refuses usage dated before the ingest window or
 // ahead of the clock.
@@ -140,11 +145,15 @@ type UsageIntake struct {
 	existing map[uuid.UUID]eventstore.Existing
 	prints   map[string]ratingCard
 	opens    map[uuid.UUID][]limitOpening
-	failed   []failedCharge
-	now      time.Time
+	// opened are the customers whose items open a window.
+	opened  map[uuid.UUID]bool
+	failed  []failedCharge
+	changed []UsageAccount
+	now     time.Time
 }
 
-// limitOpening is a session or first-use window a batch opens.
+// limitOpening is a session or first-use window a batch opens, or a granted
+// window it gives a row.
 type limitOpening struct {
 	key      string
 	window   limits.Window
@@ -175,8 +184,10 @@ func settleRefusal(err error) error {
 }
 
 // PrepareUsageTx validates and prices a batch, locates its limit windows and
-// reads its failed items' grace, under the customers' locks it takes in id
-// order. It writes nothing. An item that cannot be priced is refused alone.
+// reads its failed items' grace. It locks only the customers whose items
+// open a window or charge a failure, in id order, and locates their items
+// again under the lock. It writes nothing. An item that cannot be priced is
+// refused alone.
 func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store *eventstore.Store, items []UsageItem) (*UsageIntake, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -188,7 +199,7 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	merchantID := mid.UUID()
 	now := instant(s.now())
 	b := &UsageIntake{store: store, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
-		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, now: now}
+		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
 	for i := range items {
@@ -233,8 +244,8 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 			return nil, err
 		}
 	}
-	// Customers in id order, then each currency's balance account: a
-	// customer's first usage opens it, the mark its periods anchor on.
+	// Each currency's balance account: a customer's first usage opens it,
+	// the mark its periods anchor on.
 	var accounts []account
 	seen := map[account]bool{}
 	var keys []eventstore.UsageKey
@@ -252,18 +263,15 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	slices.SortFunc(accounts, func(x, y account) int {
 		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
 	})
-	locked := map[uuid.UUID]bool{}
+	ensured := map[uuid.UUID]bool{}
 	anchors := map[account]periodAnchor{}
 	l := ledger.New(q, merchantID)
 	for _, a := range accounts {
-		if !locked[a.customer] {
+		if !ensured[a.customer] {
 			if err := ensureCustomer(ctx, q, merchantID, a.customer); err != nil {
 				return nil, err
 			}
-			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: a.customer}); err != nil {
-				return nil, err
-			}
-			locked[a.customer] = true
+			ensured[a.customer] = true
 		}
 		if _, err := l.EnsureCustomerBalance(ctx, a.customer, a.currency); err != nil {
 			return nil, err
@@ -315,7 +323,10 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	if err != nil {
 		return nil, err
 	}
-	if err := s.locateItems(ctx, q, b, defs, priced); err != nil {
+	if err := s.locateItems(ctx, q, b, defs, priced, nil); err != nil {
+		return nil, err
+	}
+	if err := s.lockWhereGuarded(ctx, q, b, defs, priced); err != nil {
 		return nil, err
 	}
 	if err := b.chargeFailures(ctx, now); err != nil {
@@ -556,12 +567,56 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 	return priced, nil
 }
 
+// lockWhereGuarded takes, in id order, the lock of each customer whose items
+// open a session or first-use window or charge a failure, and locates those
+// customers' items again under it: a window another intake opened meanwhile
+// is found, not opened twice.
+func (s *MoneyService) lockWhereGuarded(ctx context.Context, q *gen.Queries, b *UsageIntake, defs []limits.Definition, priced []pricedItem) error {
+	guarded := map[uuid.UUID]bool{}
+	for c := range b.opened {
+		guarded[c] = true
+	}
+	for i, it := range b.items {
+		if b.Results[i].Err == nil && it.Failed && !it.Delegated && len(it.FailedWindows) > 0 {
+			guarded[it.Customer.UUID()] = true
+		}
+	}
+	if len(guarded) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(guarded))
+	for c := range guarded {
+		ids = append(ids, c)
+	}
+	slices.SortFunc(ids, compareUUID)
+	for _, c := range ids {
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: b.merchant, ID: c}); err != nil {
+			return err
+		}
+	}
+	if len(b.opened) == 0 {
+		return nil
+	}
+	again := b.opened
+	b.opened = map[uuid.UUID]bool{}
+	for c := range again {
+		delete(b.opens, c)
+	}
+	for i, it := range b.items {
+		if b.Results[i].Err == nil && again[it.Customer.UUID()] {
+			priced[i].limits, b.Results[i].Units = nil, nil
+		}
+	}
+	return s.locateItems(ctx, q, b, defs, priced, again)
+}
+
 // locateItems finds the limit windows each item counts in: its hold's for a
 // limit the hold holds, those current when it was admitted for the rest, its
 // spend windows, and a failed item's grace or cutoff windows. A session or
 // first-use window not yet open opens at the item's second; later items of
-// the batch inside it count there too.
-func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *UsageIntake, defs []limits.Definition, priced []pricedItem) error {
+// the batch inside it count there too. only narrows it to some customers'
+// items.
+func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *UsageIntake, defs []limits.Definition, priced []pricedItem, only map[uuid.UUID]bool) error {
 	type located struct {
 		customer uuid.UUID
 		at       time.Time
@@ -569,7 +624,7 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 	windows := map[located]map[string]limits.Claim{}
 	for i := range b.items {
 		it, res, p := b.items[i], &b.Results[i], &priced[i]
-		if res.Err != nil {
+		if res.Err != nil || only != nil && !only[it.Customer.UUID()] {
 			continue
 		}
 		customer := it.Customer.UUID()
@@ -621,11 +676,18 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 		if len(defs) == 0 {
 			continue
 		}
+		// Windows are read once per customer and second, at its last instant
+		// (or now): a grant made earlier in the item's second is in force, as
+		// a window the item opens starts at that second.
 		k := located{customer, at.Truncate(time.Second)}
 		current, ok := windows[k]
 		if !ok {
 			var err error
-			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: k.at,
+			readAt := k.at.Add(time.Second - time.Microsecond)
+			if b.now.Before(readAt) {
+				readAt = b.now
+			}
+			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
 				Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 					return s.PricingPeriod(ctx, q, b.merchant, customer, unit, at)
 				}}
@@ -649,8 +711,13 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 				continue
 			}
 			w := c.Window
-			if c.Opens {
+			switch {
+			case c.Opens:
 				w = b.opening(customer, def, c, at)
+			case !c.Ungranted && !c.Stored && def.Reset.Kind != catalog.ResetRolling && def.Reset.Kind != catalog.ResetRate:
+				// Granted usage gives its window a row: should the grant lapse,
+				// later usage still counts there while the window lasts.
+				b.keep(customer, def.Key, c)
 			}
 			add(def.Key, bucketed(def.Reset, w, at), units)
 		}
@@ -668,7 +735,18 @@ func (b *UsageIntake) opening(customer uuid.UUID, def limits.Definition, c limit
 	}
 	w := limits.Opening(def.Reset, at)
 	b.opens[customer] = append(b.opens[customer], limitOpening{key: def.Key, window: w, capacity: c.Capacity})
+	b.opened[customer] = true
 	return w
+}
+
+// keep records the row of a granted window that has none.
+func (b *UsageIntake) keep(customer uuid.UUID, key string, c limits.Claim) {
+	for _, o := range b.opens[customer] {
+		if o.key == key && o.window.StartsAt.Equal(c.Window.StartsAt) {
+			return
+		}
+	}
+	b.opens[customer] = append(b.opens[customer], limitOpening{key: key, window: c.Window, capacity: c.Capacity})
 }
 
 // bucketed is where a limit counts an item in window w: a rolling or rate
@@ -810,7 +888,8 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 // customers' usage unposted, records the card prints, opens the session and
 // first-use windows, posts what failed items charge and records captures.
 // Should the transaction not commit, a resend finds the events and redoes
-// only this side, which is idempotent.
+// only this side, which is idempotent. Changed names the balances the usage
+// moved, for the caller to watch (watchUsageTx, WatchUsage).
 func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *UsageIntake) error {
 	if b == nil {
 		return nil
@@ -882,15 +961,11 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 	slices.SortFunc(accounts, func(x, y account) int {
 		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
 	})
-	for _, a := range accounts {
+	if err := b.markUnposted(ctx, q, accounts, func(a account) (time.Time, time.Time) {
 		m := marks[a]
-		if m.since.IsZero() {
-			continue
-		}
-		if err := q.UpsertUsageUnposted(ctx, gen.UpsertUsageUnpostedParams{MerchantID: b.merchant, CustomerID: a.customer, Currency: a.currency,
-			SinceAt: m.since, DueAt: later(m.due, m.since.Add(time.Microsecond)), Now: b.now}); err != nil {
-			return err
-		}
+		return m.since, m.due
+	}); err != nil {
+		return err
 	}
 	customers := make([]uuid.UUID, 0, len(b.opens))
 	for c := range b.opens {
@@ -930,18 +1005,62 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 			return err
 		}
 	}
-	// Usage takes from what the customer may spend: one that crosses a line
-	// of its balance watch queues a look, and one that takes arrears to the
-	// threshold asks for a usage order.
+	b.changed = b.changed[:0]
 	for _, a := range accounts {
-		if marks[a].amount <= 0 {
+		if marks[a].amount > 0 {
+			b.changed = append(b.changed, UsageAccount{Customer: a.customer, Currency: a.currency})
+		}
+	}
+	return nil
+}
+
+// Changed are the balances the committed usage took from: one that crosses
+// a line of its balance watch queues a look, and one that takes arrears to
+// the threshold asks for a usage order.
+func (b *UsageIntake) Changed() []UsageAccount {
+	if b == nil {
+		return nil
+	}
+	return b.changed
+}
+
+// markUnposted marks each account's usage unposted from its period (mark;
+// a zero since marks nothing). Most accounts already carry a mark that
+// covers it: those are only held, by key share, so a posting (which locks
+// the mark for update) waits for this transaction or has already read its
+// events, and intakes never wait on each other. The rest are written.
+func (b *UsageIntake) markUnposted(ctx context.Context, q *gen.Queries, accounts []account, mark func(account) (since, due time.Time)) error {
+	byCurrency := map[string][]uuid.UUID{}
+	var currencies []string
+	for _, a := range accounts {
+		if since, _ := mark(a); since.IsZero() {
 			continue
 		}
-		if err := ledger.WatchChange(ctx, q, b.merchant, a.customer, a.currency, false, b.now); err != nil {
+		if _, ok := byCurrency[a.currency]; !ok {
+			currencies = append(currencies, a.currency)
+		}
+		byCurrency[a.currency] = append(byCurrency[a.currency], a.customer)
+	}
+	slices.Sort(currencies)
+	for _, currency := range currencies {
+		held, err := q.ShareUsageUnposted(ctx, gen.ShareUsageUnpostedParams{MerchantID: b.merchant, Currency: currency, CustomerIds: byCurrency[currency]})
+		if err != nil {
 			return err
 		}
-		if err := s.queueAccruedUsageBilling(ctx, q, b.merchant, a.customer, a.currency); err != nil {
-			return err
+		have := make(map[uuid.UUID]gen.ShareUsageUnpostedRow, len(held))
+		for _, h := range held {
+			have[h.CustomerID] = h
+		}
+		for _, c := range byCurrency[currency] {
+			since, due := mark(account{c, currency})
+			due = later(due, since.Add(time.Microsecond))
+			if h, ok := have[c]; ok && !since.Before(h.SinceAt) && !due.Before(h.DueAt) {
+				continue
+			}
+			if err := q.UpsertUsageUnposted(ctx, gen.UpsertUsageUnpostedParams{MerchantID: b.merchant, CustomerID: c, Currency: currency,
+				SinceAt: since, DueAt: due, Now: b.now}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

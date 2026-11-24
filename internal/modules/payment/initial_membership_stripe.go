@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
@@ -26,8 +26,11 @@ func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context
 	return service, nil
 }
 func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Context, in gen.BillingProviderIntent, p InitialMembershipPayload) intents.Outcome {
-	if h.Purchases.Config == nil || config.IsProviderReadOnly(h.Purchases.Config) {
+	if h.Purchases.Config == nil {
 		return intents.Parked("Stripe engine writes unavailable")
+	}
+	if posture := (writeposture.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
+		return intents.Parked("Stripe engine writes unavailable: " + posture.Reason)
 	}
 	service, err := h.stripeEngineService(ctx, in)
 	if err != nil {

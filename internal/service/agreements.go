@@ -311,7 +311,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 			return err
 		}
 		return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-			ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, string(models.NotificationAgreementRevoked), mid.String(), m.ID.String()),
+			ID:         uuidutil.DerivedV7(uuidutil.TimeOf(m.ID), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationAgreementRevoked), mid.String(), m.ID.String())),
 			MerchantID: mid.UUID(), CustomerID: customer.UUID(), EventType: string(models.NotificationAgreementRevoked), Data: raw, CreatedAt: now,
 		})
 	})

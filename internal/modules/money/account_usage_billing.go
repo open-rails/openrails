@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/riverqueue/river"
@@ -152,29 +151,6 @@ func usageMinimumInvoice(row gen.BillingMoneySetting, cfg *billing.UsageBillingC
 // source of work; the coalesced River job only wakes its processor.
 func (s *MoneyService) queueUsageBilling(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string) error {
 	return s.requestUsageBilling(ctx, q, customer, currency, false, 0)
-}
-
-// queueAccruedUsageBilling asks for a usage order once what the customer
-// owes, and what its unposted usage will owe beyond its balance, reaches its
-// threshold: the order posts the usage first.
-func (s *MoneyService) queueAccruedUsageBilling(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) error {
-	if _, cur, err := s.usageBillingConfig(ctx, currency); err != nil || cur == nil {
-		return err
-	}
-	unposted, err := s.unpostedUsage(ctx, q, merchantID, customer, currency)
-	if err != nil || unposted <= 0 {
-		return err
-	}
-	l := ledger.New(q, merchantID)
-	var funded int64
-	if acc, found, err := l.CustomerBalanceAccountID(ctx, customer, currency); err != nil {
-		return err
-	} else if found {
-		if funded, err = l.Balance(ctx, acc); err != nil {
-			return err
-		}
-	}
-	return s.requestUsageBilling(ctx, q, customer, currency, false, max(unposted-max(funded, 0), 0))
 }
 
 // RequestUsageCollection asks to collect an existing balance when a new request
@@ -350,8 +326,9 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	if err != nil {
 		return false, err
 	}
+	// Each usage order ends after the last: a close never ends where one did.
 	cutoff := now.Add(time.Microsecond)
-	last, err := q.LatestUsageOrderEnd(ctx, gen.LatestUsageOrderEndParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStart: from})
+	last, err := q.LatestUsageOrderEndInCurrency(ctx, gen.LatestUsageOrderEndInCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}

@@ -33,7 +33,9 @@ func (w *ContactErasureWorker) Work(ctx context.Context, job *river.Job[destruct
 	if err != nil {
 		return err
 	}
-	if waiting {
+	// A recovery drain leaves the waiting erasures to the drain queued
+	// when they began to wait.
+	if waiting && job.Args.Recovers == "" {
 		return river.JobSnooze(erasureRecheck)
 	}
 	return nil

@@ -238,7 +238,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		require.Empty(t, kept, "a finished resume is retained as a cancel is")
 	})
 	t.Run("OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off", func(t *testing.T) {
-		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.posture = "readonly" })
 		stripe := accounts.accounts["sk_test_old"].core
 		path := "/v1/me/subscriptions/" + sub.ID.String()
 		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
@@ -339,7 +339,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		subscriptionState(t, a, sub.ID, "canceled")
 	})
 	t.Run("OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it", func(t *testing.T) {
-		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.posture = "readonly" })
 		stripe := accounts.accounts["sk_test_old"].core
 		remote := *sub.RailSubscriptionID
 		fleet := startFleet(t, a.world)

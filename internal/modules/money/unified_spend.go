@@ -177,11 +177,16 @@ func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, me
 	if s.posting != nil && !s.posting.owedAt.IsZero() {
 		now = s.posting.owedAt
 	}
+	// An item names when its charges began, where its order's period starts.
+	metadata := func(source string) map[string]any {
+		m := map[string]any{"operation": string(key.Operation()), "source": source}
+		if s.posting != nil && !s.posting.from.IsZero() {
+			m[owedPeriodStartKey] = s.posting.from.UTC().Format(time.RFC3339Nano)
+		}
+		return m
+	}
 	if s.posting == nil || len(s.posting.owed) == 0 {
-		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, map[string]any{
-			"operation": string(key.Operation()),
-			"source":    key.Source(),
-		})
+		return insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID(), owed, now, metadata(key.Source()))
 	}
 	weights := make([]int64, len(s.posting.owed))
 	for i, o := range s.posting.owed {
@@ -189,10 +194,7 @@ func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, me
 	}
 	for i, amount := range share(owed, weights) {
 		meter := s.posting.owed[i].meter
-		if err := insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID()+"/"+meter, amount, now, map[string]any{
-			"operation": string(key.Operation()),
-			"source":    "metered:" + meter,
-		}); err != nil {
+		if err := insertPendingOwedItemTx(ctx, q, merchantID, customerID, currency, txOwedAccrual, key.owedItemSourceID()+"/"+meter, amount, now, metadata("metered:"+meter)); err != nil {
 			return err
 		}
 	}

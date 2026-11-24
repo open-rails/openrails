@@ -118,9 +118,11 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 
 ### Posture
 
-- **Write posture** (`writeposture.View`): the lower of `provider_write_mode`
-  and `merchant_write_posture`; `readonly` in a database whose book was never
-  armed (`openrails book arm`). `GateExecution` runs user, admin and provider
+- **Write posture** (`writeposture.View`): the merchant's
+  `merchant_write_posture` (`full` without a row); `readonly` in a database whose
+  book was never armed (`openrails book arm`). Each wire choke (the Stripe
+  transport, the NMI, CCBill, Basis Theory, HyperSwitch and Solana clients)
+  reads the posture of the merchant it writes for. `GateExecution` runs user, admin and provider
   origins under `limited`, system origin only under `full`, nothing under
   `readonly`. The transports refuse writes again in `readonly`
   (`ErrProviderReadOnly` in `stripeapi` and the NMI client).
@@ -143,7 +145,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant hold`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `provider_write_mode`, `webhook_secret_overlap`,
+- **Configuration**: `webhook_secret_overlap`,
   `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
   probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs:
   [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).

@@ -49,6 +49,10 @@ type runningChargePosting struct {
 	// owedAt dates what a usage posting leaves owed: when its usage
 	// occurred. Zero dates it at the posting.
 	owedAt time.Time
+	// from is when what the posting charges began: a usage posting's pricing
+	// period, a running charge's last posting. The usage order that bills
+	// what it leaves owed starts no later.
+	from time.Time
 }
 
 // owedShare is one meter's weight in a usage posting's owed remainder.
@@ -120,7 +124,7 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 		return row, nil
 	}
 	posting := s.WithDatabase(s.db)
-	posting.posting = &runningChargePosting{through: through, usagePosted: s.usagePosted}
+	posting.posting = &runningChargePosting{through: through, usagePosted: s.usagePosted, from: c.PostedThroughAt}
 	if c.Resource != nil {
 		posting.posting.resource = *c.Resource
 	}

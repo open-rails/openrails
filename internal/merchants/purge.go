@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
@@ -435,7 +436,7 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 	if store != nil && s.jobs == nil {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: no job queue for its event store deletion", m.Slug)
 	}
-	runID := uuid.New()
+	runID := uuidutil.NewV7()
 	expected := int64(total)
 	note := fmt.Sprintf("merchant purge %s (%d rows) — one-way; restore path is PITR only", m.Slug, total)
 	proof := map[string]any{

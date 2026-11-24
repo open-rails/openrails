@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -47,12 +46,12 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
+			if cmd.Flags().Changed("provider-write-mode") {
+				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
+			}
 			// Flags are a koanf confmap overlay above env: flag beats env
 			// beats yaml. They never write the process env.
 			var loadOpts []hostconfig.LoadOption
-			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
-				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
-			}
 
 			load := hostconfig.LoadForCommand
 			if cmd.Name() == "run-server" || cmd.Name() == "run-worker" {
@@ -90,8 +89,9 @@ func newRootCmd() *cobra.Command {
 
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
-	rootCmd.PersistentFlags().
-		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required to boot)")
+	// Retired: kept only to refuse it by name.
+	rootCmd.PersistentFlags().String("provider-write-mode", "", "")
+	_ = rootCmd.PersistentFlags().MarkHidden("provider-write-mode")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",
@@ -151,7 +151,6 @@ func newRootCmd() *cobra.Command {
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	noWorkers, err := cmd.Flags().GetBool("no-workers")
 	if err != nil {
 		return fmt.Errorf("failed to read no-workers flag: %w", err)
@@ -161,7 +160,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
 	slog.Default().Info(buildinfo.Get().String())
-	config.LogStartupStatus(slog.Default(), cfg)
 
 	// The boot waits for the database as long as it takes (a failover, a slow
 	// start); only a stop signal ends the wait. Meanwhile the process is not
@@ -210,8 +208,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 }
 
 func runWorker(cmd *cobra.Command, args []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	config.LogStartupStatus(slog.Default(), cfg)
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)

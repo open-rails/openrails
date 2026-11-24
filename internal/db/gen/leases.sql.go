@@ -201,43 +201,6 @@ func (q *Queries) ListCustomerInFlight(ctx context.Context, arg ListCustomerInFl
 	return items, nil
 }
 
-const listCustomerRunningRates = `-- name: ListCustomerRunningRates :many
-SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND stopped_at IS NULL
-GROUP BY currency
-`
-
-type ListCustomerRunningRatesParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-type ListCustomerRunningRatesRow struct {
-	Currency    string
-	RatePerHour int64
-}
-
-// What each currency's running charges of a customer accrue per hour.
-func (q *Queries) ListCustomerRunningRates(ctx context.Context, arg ListCustomerRunningRatesParams) ([]ListCustomerRunningRatesRow, error) {
-	rows, err := q.db.Query(ctx, listCustomerRunningRates, arg.MerchantID, arg.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListCustomerRunningRatesRow
-	for rows.Next() {
-		var i ListCustomerRunningRatesRow
-		if err := rows.Scan(&i.Currency, &i.RatePerHour); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLeaseInFlight = `-- name: ListLeaseInFlight :many
 SELECT customer_id, limit_key, unit, amount FROM billing.lease_in_flight
 WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
@@ -323,6 +286,44 @@ func (q *Queries) ListLeaseOpenHolds(ctx context.Context, arg ListLeaseOpenHolds
 			&i.RequestID,
 			&i.CustomerID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunningRatesOf = `-- name: ListRunningRatesOf :many
+SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[]) AND stopped_at IS NULL
+GROUP BY customer_id, currency
+`
+
+type ListRunningRatesOfParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+}
+
+type ListRunningRatesOfRow struct {
+	CustomerID  uuid.UUID
+	Currency    string
+	RatePerHour int64
+}
+
+// What many customers' running charges accrue per hour, by currency.
+func (q *Queries) ListRunningRatesOf(ctx context.Context, arg ListRunningRatesOfParams) ([]ListRunningRatesOfRow, error) {
+	rows, err := q.db.Query(ctx, listRunningRatesOf, arg.MerchantID, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunningRatesOfRow
+	for rows.Next() {
+		var i ListRunningRatesOfRow
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.RatePerHour); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

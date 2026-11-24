@@ -273,6 +273,8 @@ func TestLimitHolds(t *testing.T) {
 		}
 		eighty := gateAdmit(t, g, gateTokens("eighty", "small", 40_000, 10_000))
 		require.NoError(t, eighty.Capture(t.Context(), used("small", 10_000, 5_000)), "30 units of the 80 held")
+		// A request the server held settles its capture through the gate's next sync.
+		gateFlush(t, g)
 		sixty := gateAdmit(t, g, gateTokens("sixty", "large", 10_000, 5_000))
 		refused, err := g.Admit(t.Context(), gateTokens("past", "large", 1_000, 2_500))
 		require.NoError(t, err)

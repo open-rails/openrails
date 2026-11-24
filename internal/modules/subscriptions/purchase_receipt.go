@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // PurchaseReceipt is a paid one-off purchase: what was bought and what its
@@ -40,7 +41,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	}
 	amount := r.Amount
 	n := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
+		ID:         uuidutil.ChildV7(r.PaymentID, string(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, Rail: billing.Rail(r.Rail),
 			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
@@ -64,15 +65,16 @@ type AuthenticationRequest struct {
 }
 
 // QueuePaymentAuthenticationRequired tells the customer, in d's transaction,
-// that a renewal's payment awaits their authentication on its order; the
-// application consumes it independently. One fact per attempt.
+// that a renewal's payment awaits their authentication on its order:
+// OpenRails emails it unless the merchant turns its type off. One fact per
+// attempt.
 func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r AuthenticationRequest) error {
 	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
 		return fmt.Errorf("an authentication notice needs its attempt and order")
 	}
 	amount := r.Amount
 	n := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
+		ID:         uuidutil.ChildV7(r.AttemptID, string(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
 	}

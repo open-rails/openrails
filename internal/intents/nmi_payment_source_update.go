@@ -202,7 +202,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 		return outcome
 	}
 	if client.ReadOnly {
-		return Parked("nmi client is read-only (mode=readonly)")
+		return Parked("nmi client is read-only (readonly write posture)")
 	}
 
 	// Read-first: already billing the new vault IS success (a prior attempt's
@@ -224,7 +224,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	if err := client.UpdateSubscriptionPaymentSource(ctx, psid, newRailCustomerRef); err != nil {
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
-			return Parked("nmi provider writes blocked (mode=readonly)")
+			return Parked("nmi provider writes blocked (readonly write posture)")
 		case nmi.IsTransportAmbiguous(err):
 			// The update MAY have landed; the verifier resolves via reads.
 			return Ambiguous("payment-source update outcome unknown: " + err.Error())

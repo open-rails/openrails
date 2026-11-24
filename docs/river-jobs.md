@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 19 core River job kinds. Five have recurring schedules.
+OpenRails registers 26 core River job kinds. Five have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -38,6 +38,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.merchant_usage_purge` | `billing` | A merchant purge commits with an event store attached | Deletes the purged merchant's usage from the event store, retried until the store takes it; what posted stays. [Worker](../internal/river/jobs_merchant_usage_purge.go) · [Purge](../internal/merchants/purge.go) |
 | `openrails.operator_alert` | `billing` | A destructive-action hold or a finding notification queues the initial job, which queues one delivery job per applicable channel | Delivers email or webhook alerts to operators, with independent retries per channel. [Worker](../internal/river/jobs_operator_alert.go) · [Delivery](../internal/modules/alerting/delivery.go) |
 | `openrails.paced_provider_refresh` | `provider_refresh` | A merchant's refresh, for each live CCBill PSP | Reads that PSP one DataLink request an hour, a day of transactions each, then its roster; it snoozes between requests. [Provider refresh](standalone.md#provider-refresh) · [Worker](../internal/river/jobs_provider_refresh.go) |
+| `openrails.price_migration` | `billing` | A price migration whose subscribers outnumber its first page commits the next page's job with each page | Reaches the next page of the migration's subscribers in one transaction: schedules or blocks each move, queues its provider push, and, after the last page or a cancel, records what it skipped and ends the migration's preparation. [Worker](../internal/river/jobs_price_migration.go) · [Pages](../internal/modules/subscriptions/price_migration.go) |
 | `openrails.provider_object_observe` | `billing` | Stripe product or price webhooks | Reads the current catalog object from Stripe and records its observed state or retirement. [Worker](../internal/river/jobs_provider_object_observe.go) · [Webhook trigger](../internal/modules/webhooks/stripe_catalog.go) |
 | `openrails.provider_operation` | `billing` | An accepted provider intent commits and schedules a wake for its next attempt, or the hourly scan restores an overdue wake | Executes or verifies one authorized provider operation until it reaches a terminal state. [Worker](../internal/river/jobs_provider_intents.go) · [Wake](../internal/intents/wake/wake.go) |
 | `openrails.provider_refresh_requested` | `provider_refresh` | An operator runs `openrails provider-refresh --merchant <merchant>` | Pulls provider events and history for one merchant and resumes from its watermarks. [Operator command](standalone.md#provider-refresh) · [Upgrade](standalone.md#upgrades-and-migrations) · [Worker](../internal/river/jobs_provider_refresh.go) |

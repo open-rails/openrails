@@ -75,11 +75,15 @@ func (c *DataLinkClient) claimSlot(ctx context.Context) (time.Time, error) {
 
 func (c *DataLinkClient) slotKey() string { return "ccbill:datalink:" + c.ClientAccNum }
 
+// now is the pacing clock read to the millisecond, as slots keep it: a slot
+// taken at now opens at exactly now+DataLinkInterval, and the wait it answers
+// is that interval.
 func (c *DataLinkClient) now() time.Time {
+	now := time.Now
 	if c.Pacing.Now != nil {
-		return c.Pacing.Now().UTC()
+		now = c.Pacing.Now
 	}
-	return time.Now().UTC()
+	return now().UTC().Truncate(time.Millisecond)
 }
 
 func (c *DataLinkClient) slots() Slots {
