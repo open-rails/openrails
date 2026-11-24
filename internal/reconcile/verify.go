@@ -46,7 +46,10 @@ type Verifier struct {
 	// Retries bounds retries of a transiently failing read.
 	Retries int
 
-	once     sync.Once
+	once sync.Once
+	// running are Listen, coalescing timers and batch reads; Close waits
+	// for them.
+	running  sync.WaitGroup
 	mu       sync.Mutex
 	pending  map[billing.MerchantID]map[uuid.UUID]struct{}
 	inflight map[uuid.UUID]struct{}
@@ -101,13 +104,32 @@ func (v *Verifier) init() {
 // Start listens for the unverified trigger's notifications until Close.
 func (v *Verifier) Start() {
 	v.init()
-	go v.Listen(v.ctx)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.spawnLocked(func() { v.Listen(v.ctx) })
 }
 
-// Close stops in-flight reads; their rows stay unverified for the next pass.
+// Close stops in-flight reads, their rows staying unverified for the next
+// pass, and waits for the verifier's goroutines.
 func (v *Verifier) Close() {
 	v.init()
+	v.mu.Lock()
 	v.stop()
+	v.mu.Unlock()
+	v.running.Wait()
+}
+
+// spawnLocked runs fn on a goroutine Close waits for, unless Close has
+// begun. v.mu is held.
+func (v *Verifier) spawnLocked(fn func()) {
+	if v.ctx.Err() != nil {
+		return
+	}
+	v.running.Add(1)
+	go func() {
+		defer v.running.Done()
+		fn()
+	}()
 }
 
 // Enqueue asks for an immediate read of the subscriptions. It never blocks.
@@ -132,14 +154,15 @@ func (v *Verifier) Enqueue(mid billing.MerchantID, ids ...uuid.UUID) {
 		v.mu.Unlock()
 		return
 	}
-	arm := !v.timer[mid]
-	if arm {
+	if !v.timer[mid] && v.ctx.Err() == nil {
 		v.timer[mid] = true
+		v.running.Add(1)
+		time.AfterFunc(v.Coalesce, func() {
+			defer v.running.Done()
+			v.flush(mid)
+		})
 	}
 	v.mu.Unlock()
-	if arm {
-		time.AfterFunc(v.Coalesce, func() { v.flush(mid) })
-	}
 }
 
 // flush batches pending ids for the workers. A row already being read waits
@@ -148,7 +171,7 @@ func (v *Verifier) flush(mid billing.MerchantID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.timer[mid] = false
-	if _, bulking := v.bulking[mid]; bulking {
+	if _, bulking := v.bulking[mid]; bulking || v.ctx.Err() != nil {
 		return
 	}
 	set := v.pending[mid]
@@ -170,7 +193,7 @@ func (v *Verifier) flush(mid billing.MerchantID) {
 			delete(set, id)
 			v.inflight[id] = struct{}{}
 		}
-		go v.runBatch(mid, batch)
+		v.spawnLocked(func() { v.runBatch(mid, batch) })
 	}
 }
 
