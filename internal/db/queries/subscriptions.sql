@@ -404,6 +404,101 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.status = 'scheduled' AND
 ORDER BY sub.canceled_at DESC, sub.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- The subscriptions whose MRR is at risk (for risk_reason, when set), read
+-- from subscription_mrr's index of at-risk rows: the same filters and orders.
+-- name: CountAtRiskSubscriptions :one
+SELECT count(*) FROM billing.subscription_mrr r
+JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
+  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
+        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+  AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
+  AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
+  AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.deleted_at IS NULL;
+
+-- name: ListAtRiskSubscriptionsPage :many
+SELECT sub.* FROM billing.subscription_mrr r
+JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
+  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
+        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+  AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
+  AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
+  AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (sub.created_at, sub.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.created_at DESC, sub.id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListAtRiskSubscriptionsPageByPeriodEnd :many
+-- The subscriptions with a current period, the soonest end first.
+SELECT sub.* FROM billing.subscription_mrr r
+JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
+  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
+        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+  AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
+  AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
+  AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.current_period_ends_at IS NOT NULL
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.current_period_ends_at, sub.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListAtRiskSubscriptionsPageByCanceledAt :many
+-- The canceled subscriptions, the latest cancellation first.
+SELECT sub.* FROM billing.subscription_mrr r
+JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.risk <> '{}'
+  AND (sqlc.narg(risk_reason)::text IS NULL OR sqlc.narg(risk_reason)::text = ANY(r.risk))
+  AND (sqlc.narg(scheduled_change_before)::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
+        AND e.effective_at <= sqlc.narg(scheduled_change_before)::timestamptz))
+  AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
+  AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
+  AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.canceled_at IS NOT NULL
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (sub.canceled_at, sub.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.canceled_at DESC, sub.id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
 SELECT sub.* FROM billing.subscriptions sub
 JOIN billing.products prod ON prod.id = sub.product_id

@@ -20,6 +20,7 @@ sql:
       - "internal/migrate/postgres/0015_event_store.up.sql"
       - "internal/migrate/postgres/0016_mrr.up.sql"
       - "internal/migrate/postgres/0018_contact_erasure_admission.up.sql"
+      - "internal/migrate/postgres/0027_mrr_at_risk.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

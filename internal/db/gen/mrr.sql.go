@@ -12,6 +12,22 @@ import (
 	"github.com/google/uuid"
 )
 
+const effectDueMRRRisk = `-- name: EffectDueMRRRisk :exec
+SELECT billing.effect_due_mrr_risk($1::uuid, $2::uuid, $3::timestamptz)
+`
+
+type EffectDueMRRRiskParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ChangedAt  time.Time
+}
+
+// Re-evaluates one queued customer's subscriptions' risk.
+func (q *Queries) EffectDueMRRRisk(ctx context.Context, arg EffectDueMRRRiskParams) error {
+	_, err := q.db.Exec(ctx, effectDueMRRRisk, arg.MerchantID, arg.CustomerID, arg.ChangedAt)
+	return err
+}
+
 const effectDueSubscriptionMRR = `-- name: EffectDueSubscriptionMRR :one
 SELECT billing.effect_due_mrr($1::uuid, $2::uuid, $3::timestamptz)::boolean AS effected
 `
@@ -28,6 +44,44 @@ func (q *Queries) EffectDueSubscriptionMRR(ctx context.Context, arg EffectDueSub
 	var effected bool
 	err := row.Scan(&effected)
 	return effected, err
+}
+
+const listDueMRRRisk = `-- name: ListDueMRRRisk :many
+SELECT d.merchant_id, d.customer_id, d.changed_at
+FROM billing.mrr_risk_due d
+WHERE $1::uuid IS NULL
+   OR (d.merchant_id, d.customer_id) > ($1::uuid, $2::uuid)
+ORDER BY d.merchant_id, d.customer_id
+LIMIT $3::int
+`
+
+type ListDueMRRRiskParams struct {
+	AfterMerchantID *uuid.UUID
+	AfterCustomerID *uuid.UUID
+	RowLimit        int32
+}
+
+// CROSS-MERCHANT: customers queued by a change of a card, a default card, a
+// provider's decline or delinquency, in key order. Only queued customers are
+// read.
+func (q *Queries) ListDueMRRRisk(ctx context.Context, arg ListDueMRRRiskParams) ([]BillingMrrRiskDue, error) {
+	rows, err := q.db.Query(ctx, listDueMRRRisk, arg.AfterMerchantID, arg.AfterCustomerID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingMrrRiskDue
+	for rows.Next() {
+		var i BillingMrrRiskDue
+		if err := rows.Scan(&i.MerchantID, &i.CustomerID, &i.ChangedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDueSubscriptionMRR = `-- name: ListDueSubscriptionMRR :many
@@ -87,10 +141,12 @@ func (q *Queries) ListDueSubscriptionMRR(ctx context.Context, arg ListDueSubscri
 }
 
 const listSubscriptionMRR = `-- name: ListSubscriptionMRR :many
-SELECT m.subscription_id, m.currency, m.mrr,
-       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at
+SELECT m.subscription_id, m.currency, m.mrr, m.recorded_risk::text[] AS risk,
+       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at,
+       c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
 FROM billing.subscription_mrr m
 LEFT JOIN billing.mrr_scheduled e ON e.merchant_id = m.merchant_id AND e.subscription_id = m.subscription_id AND e.status = 'scheduled'
+LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id AND c.closed_at IS NULL
 WHERE m.merchant_id = $1::uuid AND m.subscription_id = ANY($2::uuid[])
 `
 
@@ -103,12 +159,16 @@ type ListSubscriptionMRRRow struct {
 	SubscriptionID       uuid.UUID
 	Currency             string
 	Mrr                  int64
+	Risk                 []string
 	ScheduledKind        *string
 	ScheduledAmount      *int64
 	ScheduledEffectiveAt *time.Time
+	RiskEntryReason      *string
+	RiskSince            *time.Time
 }
 
-// The MRR of a page of subscriptions, each with its scheduled change.
+// The MRR of a page of subscriptions, each with its scheduled change and its
+// open risk case.
 func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionMRRParams) ([]ListSubscriptionMRRRow, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionMRR, arg.MerchantID, arg.SubscriptionIds)
 	if err != nil {
@@ -122,9 +182,12 @@ func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionM
 			&i.SubscriptionID,
 			&i.Currency,
 			&i.Mrr,
+			&i.Risk,
 			&i.ScheduledKind,
 			&i.ScheduledAmount,
 			&i.ScheduledEffectiveAt,
+			&i.RiskEntryReason,
+			&i.RiskSince,
 		); err != nil {
 			return nil, err
 		}

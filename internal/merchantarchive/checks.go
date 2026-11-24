@@ -74,6 +74,7 @@ var excludedTables = map[string]string{
 	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
+	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is

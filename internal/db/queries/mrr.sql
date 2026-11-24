@@ -18,12 +18,30 @@ LIMIT sqlc.arg(row_limit)::int;
 SELECT billing.effect_due_mrr(sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(at)::timestamptz)::boolean AS effected;
 
 -- name: ListSubscriptionMRR :many
--- The MRR of a page of subscriptions, each with its scheduled change.
-SELECT m.subscription_id, m.currency, m.mrr,
-       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at
+-- The MRR of a page of subscriptions, each with its scheduled change and its
+-- open risk case.
+SELECT m.subscription_id, m.currency, m.mrr, m.recorded_risk::text[] AS risk,
+       e.kind AS scheduled_kind, e.mrr_delta AS scheduled_amount, e.effective_at AS scheduled_effective_at,
+       c.entry_reason AS risk_entry_reason, c.opened_at AS risk_since
 FROM billing.subscription_mrr m
 LEFT JOIN billing.mrr_scheduled e ON e.merchant_id = m.merchant_id AND e.subscription_id = m.subscription_id AND e.status = 'scheduled'
+LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id AND c.closed_at IS NULL
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
+
+-- name: ListDueMRRRisk :many
+-- CROSS-MERCHANT: customers queued by a change of a card, a default card, a
+-- provider's decline or delinquency, in key order. Only queued customers are
+-- read.
+SELECT d.merchant_id, d.customer_id, d.changed_at
+FROM billing.mrr_risk_due d
+WHERE sqlc.narg(after_merchant_id)::uuid IS NULL
+   OR (d.merchant_id, d.customer_id) > (sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid)
+ORDER BY d.merchant_id, d.customer_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: EffectDueMRRRisk :exec
+-- Re-evaluates one queued customer's subscriptions' risk.
+SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(changed_at)::timestamptz);
 
 -- name: SeedMRR :exec
 -- Adopts the subscriptions without MRR state (an archive from before MRR) as
