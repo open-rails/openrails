@@ -25,6 +25,7 @@ migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
+migration 0030_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3488,7 +3489,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_payment_method_id_current_period_ends_at_idx ON billing.subscriptions USING btree (merchant_id, payment_method_id, current_period_ends_at) WHERE ((deleted_at IS NULL) AND (payment_method_id IS NOT NULL) AND (status = ANY (ARRAY['active'::text, 'past_due'::text, 'awaiting_method'::text])))
   index CREATE INDEX subscriptions_payment_method_id_idx ON billing.subscriptions USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX subscriptions_pkey ON billing.subscriptions USING btree (merchant_id, id)
-  index CREATE INDEX subscriptions_price_id_idx ON billing.subscriptions USING btree (merchant_id, price_id)
+  index CREATE INDEX subscriptions_price_id_idx ON billing.subscriptions USING btree (merchant_id, price_id, id)
   index CREATE INDEX subscriptions_product_id_idx ON billing.subscriptions USING btree (merchant_id, product_id)
   index CREATE INDEX subscriptions_psp_id_idx ON billing.subscriptions USING btree (merchant_id, psp_id)
   index CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_key_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_key) WHERE ((rail_subscription_key IS NOT NULL) AND (deleted_at IS NULL))

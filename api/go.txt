@@ -3592,6 +3592,7 @@ pkg openrails/billing, type PriceMigration struct, FallbackPolicy MigrationFallb
 pkg openrails/billing, type PriceMigration struct, FromPriceID *PriceID `json:"from_price_id"`
 pkg openrails/billing, type PriceMigration struct, ID PriceMigrationID `json:"id"`
 pkg openrails/billing, type PriceMigration struct, Matched int `json:"matched"`
+pkg openrails/billing, type PriceMigration struct, Preparing bool `json:"preparing"`
 pkg openrails/billing, type PriceMigration struct, PriceKey *string `json:"price_key"`
 pkg openrails/billing, type PriceMigration struct, ProductKey *string `json:"product_key"`
 pkg openrails/billing, type PriceMigration struct, Scheduled int `json:"scheduled"`
@@ -3616,6 +3617,7 @@ pkg openrails/billing, type PriceMigrationOutcome struct, SubscriptionID Subscri
 pkg openrails/billing, type PriceMigrationPreview struct
 pkg openrails/billing, type PriceMigrationPreview struct, Blocked int `json:"blocked"`
 pkg openrails/billing, type PriceMigrationPreview struct, ByRail map[string]*PriceMigrationRailCounts `json:"by_rail"`
+pkg openrails/billing, type PriceMigrationPreview struct, Classified int `json:"classified"`
 pkg openrails/billing, type PriceMigrationPreview struct, EffectiveAt time.Time `json:"effective_at"`
 pkg openrails/billing, type PriceMigrationPreview struct, Matched int `json:"matched"`
 pkg openrails/billing, type PriceMigrationPreview struct, Outcomes []PriceMigrationOutcome `json:"outcomes"`
@@ -4691,6 +4693,7 @@ pkg openrails/openrailstest/nmimock, type Schedule struct, NextBilling time.Time
 pkg openrails/openrailstest/nmimock, type Schedule struct, Order string
 pkg openrails/openrailstest/nmimock, type Schedule struct, Paused bool
 pkg openrails/openrailstest/nmimock, type Schedule struct, Plan string
+pkg openrails/openrailstest/nmimock, type Schedule struct, UnstatedPayments bool
 pkg openrails/openrailstest/nmimock, type Schedule struct, Vault string
 pkg openrails/openrailstest/nmimock, type Vault struct
 pkg openrails/openrailstest/nmimock, type Vault struct, BillingID string

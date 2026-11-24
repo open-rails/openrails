@@ -143,6 +143,29 @@ func (q *Queries) CountAtRiskSubscriptions(ctx context.Context, arg CountAtRiskS
 	return count, err
 }
 
+const countMigrationCohort = `-- name: CountMigrationCohort :one
+SELECT count(*) FROM billing.subscriptions sub
+WHERE sub.merchant_id = $1::uuid AND sub.price_id = ANY($2::uuid[])
+  AND sub.status IN ('active', 'past_due', 'awaiting_method')
+  AND sub.deleted_at IS NULL
+`
+
+type CountMigrationCohortParams struct {
+	MerchantID uuid.UUID
+	PriceIds   []uuid.UUID
+}
+
+// A price migration's cohort is every subscription still billing (or still
+// being dunned) on one of the prices: a past_due one that recovers would
+// otherwise renew on the old price. It is counted, then walked a page at a
+// time in (price, id) order up to its highest id when counted.
+func (q *Queries) CountMigrationCohort(ctx context.Context, arg CountMigrationCohortParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMigrationCohort, arg.MerchantID, arg.PriceIds)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countScheduledSubscriptions = `-- name: CountScheduledSubscriptions :one
 SELECT count(*) FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
@@ -1164,6 +1187,27 @@ func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg Ge
 	return i, err
 }
 
+const lastMigrationCohortID = `-- name: LastMigrationCohortID :one
+SELECT sub.id FROM billing.subscriptions sub
+WHERE sub.merchant_id = $1::uuid AND sub.price_id = ANY($2::uuid[])
+  AND sub.status IN ('active', 'past_due', 'awaiting_method')
+  AND sub.deleted_at IS NULL
+ORDER BY sub.id DESC
+LIMIT 1
+`
+
+type LastMigrationCohortIDParams struct {
+	MerchantID uuid.UUID
+	PriceIds   []uuid.UUID
+}
+
+func (q *Queries) LastMigrationCohortID(ctx context.Context, arg LastMigrationCohortIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lastMigrationCohortID, arg.MerchantID, arg.PriceIds)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const linkImportedSubscriptionPaymentMethod = `-- name: LinkImportedSubscriptionPaymentMethod :exec
 UPDATE billing.subscriptions SET payment_method_id = $1::uuid
 WHERE id = $2::uuid AND merchant_id = $3::uuid AND payment_method_id IS NULL
@@ -1876,24 +1920,35 @@ func (q *Queries) ListLiveSubscriptionsOnMethod(ctx context.Context, arg ListLiv
 	return items, nil
 }
 
-const listMigratableSubscriptionsByPriceIDs = `-- name: ListMigratableSubscriptionsByPriceIDs :many
+const listMigrationCohortPage = `-- name: ListMigrationCohortPage :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy, access_duration_hours_snapshot, quantity, provider_access_default_snapshot, facts_authority, due_recheck_at, rail_subscription_key, retry_advised_at FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.price_id = ANY($2::uuid[])
   AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
-ORDER BY sub.created_at, sub.id
+  AND sub.id <= $3::uuid
+  AND ($4::uuid IS NULL OR (sub.price_id, sub.id) > ($4::uuid, $5::uuid))
+ORDER BY sub.price_id, sub.id
+LIMIT $6::int
 `
 
-type ListMigratableSubscriptionsByPriceIDsParams struct {
-	MerchantID uuid.UUID
-	PriceIds   []uuid.UUID
+type ListMigrationCohortPageParams struct {
+	MerchantID   uuid.UUID
+	PriceIds     []uuid.UUID
+	Through      uuid.UUID
+	AfterPriceID *uuid.UUID
+	AfterID      *uuid.UUID
+	RowLimit     int32
 }
 
-// A price migration's cohort: every subscription still billing (or still
-// being dunned) on one of the prices. A past_due one that recovers would
-// otherwise renew on the old price.
-func (q *Queries) ListMigratableSubscriptionsByPriceIDs(ctx context.Context, arg ListMigratableSubscriptionsByPriceIDsParams) ([]BillingSubscription, error) {
-	rows, err := q.db.Query(ctx, listMigratableSubscriptionsByPriceIDs, arg.MerchantID, arg.PriceIds)
+func (q *Queries) ListMigrationCohortPage(ctx context.Context, arg ListMigrationCohortPageParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listMigrationCohortPage,
+		arg.MerchantID,
+		arg.PriceIds,
+		arg.Through,
+		arg.AfterPriceID,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

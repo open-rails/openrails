@@ -2128,6 +2128,24 @@
       "TestPriceMigrationContracts/OR-J19-S08/named-plan",
       "TestPriceMigrationContracts/OR-J19-S08/unstated-plan-payments",
       "TestPriceMigrationContracts/OR-J19-S08"
+    ],
+    "OR-J19-S09": [
+      "TestPriceMigrationScale/OR-J19-S09/a-migrations-source-archive-is-a-catalog-edit-a-document-does-not-undo"
+    ],
+    "OR-J19-S10": [
+      "TestPriceMigrationScale/OR-J19-S10/a-migration-admits-every-subscriber-before-reading-any-and-reaches-them-a-page-at-a-time"
+    ],
+    "OR-J19-S11": [
+      "TestPriceMigrationScale/OR-J19-S11/a-solana-subscription-is-blocked-and-nothing-is-sent"
+    ],
+    "OR-J19-S12": [
+      "TestPriceMigrationScale/OR-J19-S12/by-key-and-cross-product-moves-send-their-notices-and-apply-at-renewal"
+    ],
+    "OR-J19-S13": [
+      "TestPriceMigrationScale/OR-J19-S13/canceling-a-pushed-stripe-move-names-the-schedule-to-release"
+    ],
+    "OR-J19-S14": [
+      "TestPriceMigrationScale/OR-J19-S14/an-interrupted-create-records-nothing-and-its-retry-moves-everyone-once"
     ]
   }
 }

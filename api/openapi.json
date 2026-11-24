@@ -3804,7 +3804,7 @@
           "catalog"
         ],
         "operationId": "CreatePriceMigration",
-        "description": "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to another price at each one's renewal.",
+        "description": "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to another price at each one's renewal. It admits every subscriber it counts before reading any and reaches them a page at a time: preparing is true until the last page.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -3852,12 +3852,15 @@
         },
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
+          "catalog_revision_conflict",
+          "idempotency_key_reused",
           "invalid_param",
           "price_change_currency_mismatch",
           "price_change_target_archived",
           "price_key_not_found",
           "price_not_found",
-          "product_not_found"
+          "product_not_found",
+          "rate_limit_exceeded"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5648,6 +5651,7 @@
         },
         "x-openrails-errors": [
           "invalid_cursor",
+          "invalid_param",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -24741,6 +24745,9 @@
                 "type": "null"
               }
             ]
+          },
+          "preparing": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -24758,7 +24765,8 @@
           "canceled",
           "blocked",
           "created_at",
-          "canceled_at"
+          "canceled_at",
+          "preparing"
         ]
       },
       "PriceMigrationCancel": {
@@ -24844,6 +24852,9 @@
           "matched": {
             "type": "integer"
           },
+          "classified": {
+            "type": "integer"
+          },
           "scheduled": {
             "type": "integer"
           },
@@ -24884,6 +24895,7 @@
           "to_price_id",
           "effective_at",
           "matched",
+          "classified",
           "scheduled",
           "skipped",
           "blocked",

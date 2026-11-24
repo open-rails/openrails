@@ -2215,6 +2215,7 @@ export type PriceMigration = {
   blocked: number
   created_at: string
   canceled_at: string | null
+  preparing: boolean
 }
 
 export type PriceMigrationCancel = {
@@ -2234,6 +2235,7 @@ export type PriceMigrationPreview = {
   to_price_id: string | null
   effective_at: string
   matched: number
+  classified: number
   scheduled: number
   skipped: number
   blocked: number

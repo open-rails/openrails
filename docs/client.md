@@ -452,15 +452,7 @@ return shop.CreatePrice(ctx, billing.CreatePriceParams{
 })
 ```
 
-A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are merge
-patches (`catalog.Field`, `catalog.Null` clears); send the `Revision` you read as
-`ExpectedRevision` to refuse a concurrent change. No public route reads the
-catalog: your server reads it and puts products in its own pages with
-`billing.BuyerPrices`. A price migration moves each subscription at its first
-renewal on or after `effective_at`, skips rises inside the merchant's
-`reprice_notice_window_days` unless acknowledged, and blocks subscriptions a
-provider cannot move (CCBill, Solana). `openrails catalog export` keeps a full
-snapshot with ids and history ([standalone.md](standalone.md#commands)).
+A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are merge patches (`catalog.Field`, `catalog.Null` clears); send the `Revision` you read as `ExpectedRevision` to refuse a concurrent change. No public route reads the catalog: your server reads it and puts products in its own pages with `billing.BuyerPrices`. A price migration moves each subscription at its first renewal on or after `effective_at`, skips rises inside the merchant's `reprice_notice_window_days` unless acknowledged, and blocks subscriptions a provider cannot move (CCBill, Solana). Creating one admits each subscriber it counts as a destructive unit before reading any, then reaches them 100 at a time: `preparing` is true until the last; a preview classifies the first 1,000 (`classified`). `openrails catalog export` keeps a full snapshot with ids and history ([standalone.md](standalone.md#commands)).
 
 ## Orders and checkout
 

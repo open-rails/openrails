@@ -36,7 +36,7 @@ The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
 row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
 document, which advances it once with `AdvanceCatalogRevision`).
 
-**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration that archives its sources records their archive and move as it writes them, under the catalog lock. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
+**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration archives its sources with the catalog command, as an edit. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
 
 **Applying a document** (`internal/service/catalog_application.go`):
 
@@ -86,7 +86,7 @@ Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_b
 
 A price migration (`PriceMigrationService`, `internal/modules/subscriptions/price_migration.go`) moves the subscribers of one price (`from_price_id`), or of every version of a price key, archived ones included, but the target (`product_key` and `price_key`, stored as `from_product_id` and `from_price_key`), to `to_price_id`. The target must be recurring and live (`400 invalid_param`, `422 price_change_target_archived`) and may belong to another product; a `from_price_id` in another currency is refused (`422 price_change_currency_mismatch`). Nothing is prorated, charged early or re-anchored: the first renewal on or after `effective_at` (now when omitted) bills the target, as [subscriptions](subscriptions.md) applies it.
 
-**Preview and create.** Both read the cohort (`ListMigratableSubscriptionsByPriceIDs`: every `active`, `past_due` or `awaiting_method` subscription on a source price) and `classify` it without writing; `PreviewPriceMigration` answers the counts by rail and each subscription's disposition (by key, with no `to_price_id`, only the count). `CreatePriceMigration` admits the command, writes the `price_migrations` row, then gives each subscriber, in its own transaction under its lock, its move (`ScheduleChange`), notice and push, or a terminal `blocked` row. With `archive_source` (default true) it archives the sources so they stop selling.
+**Preview and create.** The cohort is every `active`, `past_due` or `awaiting_method` subscription on a source price, counted (`CountMigrationCohort`) up to its highest id then (`LastMigrationCohortID`), and read a page of 100 at a time in (price, id) order (`ListMigrationCohortPage`), never whole. `PreviewPriceMigration` answers `matched` and `classify`s the first 1,000 (`classified`): the counts by rail and each one's disposition (by key, with no `to_price_id`, only the count). `CreatePriceMigration` admits the command for every subscriber counted, then writes the `price_migrations` row and reaches the first page in one transaction: each subscriber, locked under a savepoint, gets its move (`ScheduleChange`), notice and push, or a terminal `blocked` row. A full page queues the next as an `openrails.price_migration` job, which reaches it in one transaction with its own completion; after the last page, or once canceled, `subscriptions_skipped` becomes `matched` less the moves made and the admission's preparation ends: `preparing` is true until then. With `archive_source` (default true) the service then archives each source through the catalog command (`DeactivatePrice`): the catalog lock, its own admission, and the edit's ownership of `archived`, so a document still declaring the source is reported as a conflict instead of selling it again (OR-J19-S09).
 
 **Who moves.** A subscription is skipped, with no move, when it already has a scheduled change, is in another currency, or would pay more inside the notice window unacknowledged; or, while recording, when it left the source price or an accepted renewal owns its terms (`rebill_terms_committed`). It is blocked, by what bills it:
 
@@ -99,11 +99,11 @@ A price migration (`PriceMigrationService`, `internal/modules/subscriptions/pric
 
 **Notice.** `costRises` compares amount × the seats the renewal bills, over the cadence, exactly; a month counts at its least favourable length and a price without a cadence as a rise. A rise whose `effective_at` falls inside `reprice_notice_window_days` (default 30, `DefaultPriceIncreaseNoticeDays`; 0 disables it) is skipped unless `acknowledge_short_notice`, which the move keeps as `acknowledged_short_notice`. Every move queues the customer's price-change notice in its transaction: `subscription_reprice_scheduled`, or `subscription_plan_change_scheduled` naming `to_product_id` when the product changes, with old and new amounts and `effective_at`.
 
-**Admission.** `admitMigration` admits one `destructive.CatalogChange` before anything is written: a unit per moved or blocked subscription and per source it archives, within the destructive ceilings (a breach is a hold, `429 rate_limit_exceeded`). While the command is open, the same request from the same actor answers the migration it prepared. The command stays open, its units reserved, until its last scheduled move resolves (`SettlePriceMigration`).
+**Admission.** `admitMigration` admits one `destructive.CatalogChange` before any subscriber is read: a unit per subscriber counted, within the destructive ceilings (a breach is a hold, `429 rate_limit_exceeded`), so a cohort past them is refused whole. The same request from the same actor answers the migration it recorded; a creation interrupted before its commit recorded nothing, its admission ends `no_effect`, and the retry is admitted afresh (OR-J19-S14). The command stays open, its units reserved, until its last scheduled move resolves (`SettlePriceMigration`).
 
-**Provider-run subscriptions.** A Stripe or NMI move carries a `price_migration_push` operation (`QueuePush`), due at once, or at the period end when `effective_at` lies beyond it, so no rebill flips early. `PushMove` plants a Stripe subscription schedule that switches at period end with the same seats (`ScheduleSubscriptionPriceChange`), or sets the NMI schedule's amount with `update_subscription`, keeping `plan_payments`, and reads it back (`PushPlanAmount`). A failed push retries on the backoff; one the subscription's records cannot support (no provider reference, period end or Stripe price) blocks the move (`rail_push_failed`); one that no longer applies (subscription ended or moved, target gone or archived) skips it. CCBill and Solana are never pushed.
+**Provider-run subscriptions.** A Stripe or NMI move carries a `price_migration_push` operation (`QueuePush`), due at once, or at the period end when `effective_at` lies beyond it, so no rebill flips early. `PushMove` plants a Stripe subscription schedule that switches at period end with the same seats (`ScheduleSubscriptionPriceChange`), or sets the NMI schedule's amount with `update_subscription`, keeping `plan_payments`, and reads it back (`PushPlanAmount`). A failed push retries on the backoff. One the provider can never take blocks the move with a stable reason and raises `life.price_migration.blocked`, one per migration and reason (OR-J19-S08): no provider reference, period end or Stripe price (`rail_push_failed`, `target_price_missing_rail_config`), an NMI schedule on a named plan (`nmi_named_plan`), stating no `plan_payments` (`nmi_plan_payments_unknown`) or gone (`nmi_schedule_missing`), or no declared account reaching it (`rail_requires_user_action`). One that no longer applies (subscription ended or moved, target gone or archived) skips it. CCBill and Solana are never pushed.
 
-**Cancel and list.** `CancelPriceMigration` sets `canceled_at` and cancels each still-scheduled move under its subscription's lock, with its waiting push; resolved moves stay, archived sources stay archived, and it spends no unit. A move an accepted renewal owns refuses it (`409 rebill_terms_committed`) until that renewal resolves. A provider-run Stripe subscription whose schedule may be planted is listed in `rail_release_required`: release that schedule in Stripe, or the price still changes. A staff change back to an engine subscription's current price and seats takes that one out (`ReplaceScheduledChange`). `ListPriceMigrations` pages newest first, by `ids` or by `product_key` and `price_key`; `matched` and creation skips are stored, the other counts are read from the moves.
+**Cancel and list.** `CancelPriceMigration` sets `canceled_at`, which ends a walk still reaching subscribers (each page holds the migration's row, `LockPriceMigration`), and cancels each still-scheduled move under its subscription's lock, with its waiting push; resolved moves stay, archived sources stay archived, and it spends no unit. A move an accepted renewal owns refuses it (`409 rebill_terms_committed`) until that renewal resolves. A provider-run Stripe subscription whose schedule may be planted is listed in `rail_release_required`: release that schedule in Stripe, or the price still changes. A staff change back to an engine subscription's current price and seats takes that one out (`ReplaceScheduledChange`). `ListPriceMigrations` pages newest first, by `ids` or by `product_key` and `price_key`; `matched` and creation skips are stored, the other counts are read from the moves and `preparing` from the admission.
 
 **Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration, a move or a PSP import's price pick refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`; OR-J38-S77): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
 
@@ -130,7 +130,7 @@ Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subsc
 
 ### 1. Exactly-once provider calls
 
-Catalog edits and documents write nothing to NMI, Stripe or CCBill. Their one provider write, a Solana plan, is published before the price row commits: in a document's preparation, or in `createPriceLinks` for one price (inside the inline product's transaction when `ProductData` is used). The address derives from price, mint and treasury, so a publish whose commit failed is reattached, not repeated.
+Catalog edits and documents write nothing to NMI, Stripe or CCBill. Their one provider write, a Solana plan, is published before the price row commits: in a document's preparation, or in `createPriceLinks` for one price, before any transaction or the catalog lock, `ProductData` too (`inlinePriceLinks`, OR-J37-S71); a price written under the lock without prepared links is refused. The address derives from price, mint and treasury, so a publish whose commit failed is reattached, not repeated.
 
 A price migration writes to Stripe and NMI only through its `price_migration_push` operations, each a `provider_intents` row committed with its move and keyed by it. Both Stripe writes carry the move's key, so a retry after a lost answer replays them; the NMI amount push is idempotent and read back.
 
@@ -187,7 +187,7 @@ Checks:
 - OR-J01-S05 and OR-J01-S07 send catalog calls across merchants.
 - OR-J04-S02 keeps cached catalog reads bound to their merchant.
 - Every query in `products.sql` and `prices.sql` names `merchant_id`.
-- Every query in `price_migrations.sql`, and `ListMigratableSubscriptionsByPriceIDs`, names `merchant_id`; OR-J01-S02 sends each migration route without a credential.
+- Every query in `price_migrations.sql`, and the cohort queries, names `merchant_id`; OR-J01-S02 sends each migration route without a credential.
 
 ### 5. Contracts match the code
 
@@ -215,14 +215,15 @@ Checks:
 
 ### 7. Work scales with activity
 
-No catalog job is periodic (`internal/river/periodic.go`); the background work is a `ProviderObjectObserveWorker` job per Stripe product or price an event names, unique per object and debounced, so a burst is one read, and a `price_migration_push` operation per Stripe or NMI move, woken at its `next_attempt_at`; engine moves ride the renewal. But each command reads the merchant's whole catalog up to four times under the merchant's lock, and a migration reads and moves its whole cohort in one request.
+No catalog job is periodic (`internal/river/periodic.go`); the background work is a `ProviderObjectObserveWorker` job per Stripe product or price an event names, unique per object and debounced, so a burst is one read, and a `price_migration_push` operation per Stripe or NMI move, woken at its `next_attempt_at`; engine moves ride the renewal; an `openrails.price_migration` job per further page of 100 subscribers. But each command reads the merchant's whole catalog up to four times under the merchant's lock.
 
 Checks:
 - `EnqueueProviderObjectObserve` is called only from
   `internal/modules/webhooks/stripe_catalog.go`.
 - `catalogLocked` reads `readCatalogState` before, after, and again for
   `recordCatalogEdit`.
-- `move` queues the push at the period end when `effective_at` lies beyond it (`deferredPushRequired`).
+- `reach` queues the push at the period end when `effective_at` lies beyond it (`deferredPushRequired`).
+- A migration reads its cohort a page of `migrationBatch` at a time, and a preview classifies at most `previewLimit`.
 
 ### 8. Abuse protection
 
@@ -245,7 +246,7 @@ starts; a document is admitted after preparation, so a refused one can leave an
 unlinked Solana plan, never a catalog change. Deletes are soft and refused for
 anything referenced. `catalog_field_owners.actor` records who set each field.
 
-A migration is one `destructive.CatalogChange` whose units are its moved or blocked subscribers and archived sources, reserved until its last scheduled move resolves; canceling spends nothing, and `cancel_at_period_end` cancels nothing.
+A migration is one `destructive.CatalogChange` whose units are its counted subscribers, admitted before any is read and reserved until its last scheduled move resolves; each archived source is a catalog command of its own; canceling spends nothing, and `cancel_at_period_end` cancels nothing.
 
 Checks:
 - `catalogLocked` fails a changed object with no admission.
@@ -253,7 +254,7 @@ Checks:
   `AdmitAutonomous`.
 - `pruneCatalogObjects` deletes only through `deleteProduct` and
   `deletePriceKey`, which check references first.
-- `admitMigration` counts a target per non-skipped subscription and unarchived source; `SettlePriceMigration` finishes the command only when no move is `scheduled` (OR-J19-S05).
+- `admitMigration` admits a unit per counted subscriber; `SettlePriceMigration` finishes the command only when preparation ended and no move is `scheduled` (OR-J19-S05).
 
 ## Tests
 
@@ -265,7 +266,8 @@ Journeys:
 - OR-J38-S01, S02, S04, S05, S33, S34, S42: provider-price mapping, retired
   Stripe prices, read-only pulls, Map needing catalog manage, NMI currencies.
 - OR-J15-S08, OR-J15-S12, OR-J29-S05, OR-J01-S05, OR-J01-S07, OR-J04-S02.
-- OR-J19-S01 to OR-J19-S07 (`TestPriceMigrationContracts`): only eligible subscribers move, at the paid boundary; a failed NMI push retries; cancel leaves applied and ineligible ones; an admitted renewal keeps its terms; a move that no longer applies is skipped and settles; notice follows cost per unit of time and a one-time target is refused; a Stripe push keeps seats and replays a lost create.
+- OR-J19-S01 to OR-J19-S08 (`TestPriceMigrationContracts`): only eligible subscribers move, at the paid boundary; a failed NMI push retries; cancel leaves applied and ineligible ones; an admitted renewal keeps its terms; a move that no longer applies is skipped and settles; notice follows cost per unit of time and a one-time target is refused; a Stripe push keeps seats and replays a lost create; a push NMI can never take blocks with a finding.
+- OR-J19-S09 to OR-J19-S14 (`TestPriceMigrationScale`): the source archive is an edit a document does not undo; 101 CCBill subscribers are admitted before any is read, blocked a page at a time, `cancel_at_period_end` cancels none, and a cohort past the ceiling is refused whole; a Solana subscriber is blocked and nothing is sent; by-key and cross-product moves send their notices and apply at renewal; canceling a pushed Stripe move lists it in `rail_release_required`; an interrupted creation records nothing and its retry moves everyone once.
 - OR-J14-S07: a calendar subscription previews as blocked. OR-J01-S02 covers the migration routes.
 - OR-J43-S01, S02, S05, S06, S07 (`TestConfigurationHistory`): an edit and its entry commit and roll back together; a document records each changed object once; the list filters by object and time; a product's revision moves with its keys, not its prices, and its entries carry it; a stale `expected_revision` is refused.
 
@@ -279,7 +281,3 @@ Gaps:
 - No scenario shows a catalog edit spending a unit or held by an incident.
 - No scenario crashes between a Solana plan publish and the commit, or asserts
   the re-publish guard or the `limited`/`readonly` attach.
-- A migration's cohort is one read with no `LIMIT` (`ListMigratableSubscriptionsByPriceIDs`), classified and moved one transaction per subscriber inside the request; only the destructive ceiling, applied after the read, bounds it over HTTP, and nothing bounds a preview or the in-process host's own call. No scenario migrates a cohort large enough to show it.
-- An NMI schedule on a named plan, or without `plan_payments`, fails its push as retryable, so it retries on the backoff instead of blocking.
-- A migration archives its sources with `PriceService.SetArchived`, outside the catalog command: no catalog lock, no edit ownership.
-- No scenario migrates by price key or to another product, blocks a CCBill or Solana subscriber, asserts the price-change notices, `fallback_policy` or `rail_release_required`, or interrupts `CreatePriceMigration` between admission and its last move.
