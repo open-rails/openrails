@@ -64,7 +64,7 @@ The widget kinds are general, so adding a tile or chart is adding a widget to `D
 - `bar` and `area` stack a measure's series split by a dimension, signed values apart (`stackOffset` sign), so refunds stack below the axis and declines by cause make a mix. A bar chart whose series go both ways draws their net as a line (net new MRR over its movements, net cash).
 - `line` draws each of its measures' `thresholds` in force at each bucket's middle (`from`, `until` are instants, so a month in any timezone reads its own month's levels) as a stepped line; one measure alone shades the band from each level towards worse.
 - `cohort`: a heatmap of `cohort_retention` by `cohort` and `months_since_start`, a row per cohort, each cell the share retained; validation requires those two dimensions.
-- The page's currency switch lists the currencies with cash, usage or credits in the range, defaults to the one with the most cash in major units, hides with one, and filters every widget all of whose measures allow `currency`. Money never sums across currencies.
+- The page's currency switch lists the currencies with cash, usage or credits in the range, defaults to the one with the most cash in major units, hides with one, and filters every widget all of whose measures allow `currency`. Money never sums across currencies. Tiles and charts show fiat money to the cent and a merchant's own unit at its scale with its name, read from the merchant's declared currencies (staff who may read the configuration; others see the unit's code).
 - The page's comparison (`previous_period` or `previous_year`) applies to every widget that compares.
 
 ## How it works
@@ -216,6 +216,7 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J42-S30 plans every MRR measure by itself, by each of its dimensions, by two, and filtered by currency and by product, over time and not, in UTC and New York, with sequential scans off (`metrics.Statements`): no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time.
 - OR-J42-S31 restores an archive written before the reporting rollups and finds each rebuilt row for row as the source kept it, and the cancel decisions back from the status transitions.
 - OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`, `scheduled_mrr`), OR-J23-S16 (`limits_reached`) and OR-J42-S11 to S15 (`mrr_at_risk`, `at_risk_recovery_rate`) query through the Go client over real PostgreSQL.
+- OR-J38-S85 shows credits sold in the merchant's own units at each unit's scale with its name.
 - OR-J38-S41 draws the health overview in the console (its sections, the cohort heatmap, the cash donut and the attempts table naming the PSP by key, tile labels that fit), which reads `GET /v1/metrics/dashboard`.
 - OR-J38-S34 counts `POST /v1/metrics/query` as a read when proving a configuration reader writes nothing.
 - OR-J01-S02 probes the metrics and dashboard routes without a credential.
