@@ -73,16 +73,11 @@ if err := bill.Start(ctx); err != nil {
 | Call | Does |
 |---|---|
 | `Engine.Start(ctx, opts...)` | runs OpenRails' River workers, or binds them to your fleet (`WithRiverClient`, [below](#river)). A second `Start` is refused. |
-| `Engine.Ready(ctx)` | nil once PostgreSQL, the merchants and a local River consumer serve. Register it as your readiness check. |
+| `Engine.Ready(ctx)` | nil once PostgreSQL, the merchant directory and River (OpenRails' own after `Start`, or your fleet bound with `WithRiverClient`) serve. Register it as your readiness check. |
 | `Engine.Probes()` | named checks of the optional parts, for your supervisor: `openrails_psp_posture`, `openrails_configuration`, `openrails_solana_crankers`, `openrails_job_progress` |
 | `Engine.Close(ctx)` | stops what `Start` started. Close the engine before your pool; OpenRails never closes `Deps.Postgres`. |
 
-`New` fails only on what it cannot serve without: PostgreSQL and its migrations,
-an unset `ProviderWriteMode`, an invalid River schema, a test seam beside a live
-PSP. Anything else is refused alone and the rest serves: an optional setting is
-turned off, a merchant whose document is invalid is not provisioned, a PSP that
-does not check is not armed. `openrails_configuration` names what is not served
-and why; Vault, PSP posture and Redis reconnect in the background.
+`New` fails only on what it cannot serve without: PostgreSQL and its migrations, an unset or unknown `ProviderWriteMode`, an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is turned off, a merchant whose document is invalid is not provisioned, a PSP that does not check is not armed. `openrails_configuration` names what is not served and why; Vault, PSP posture and Redis reconnect in the background.
 
 ### Health
 
@@ -122,7 +117,7 @@ Go. Libraries never read the environment.
 | `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
 | `TrustedProxies` | Load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
 | `CheckoutOrigin` | The payment page's origin ([checkout page](#checkout-page)). |
-| `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
+| `RateLimits` | Per-minute buckets (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`); no other route is limited. nil is the built-in set, empty is none. |
 | `Captcha` | `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`): challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
 | `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)). |
@@ -153,7 +148,7 @@ and closes none.
 | `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo` or SCIM. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
-| `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
+| `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it, SCIM pushes fill a copy instead, through the `Programmatic` group ([customers](client.md#customers)). |
 | `Notifications` | An account-inbox channel for selected customer notices ([account inbox](#account-inbox)). |
 | `MerchantGroups` | Live group metadata for tenant-bound merchants ([merchants](#merchants)). |
 | `CheckoutAssets` | The built payment page (`web/pay`) as an `fs.FS`. |
@@ -167,12 +162,7 @@ and closes none.
 `billing.MerchantDeclaration`: the merchant's document, the `Issuer` whose
 sign-ins are its customers and staff, and an optional tenant `Binding`.
 
-- **The document** holds the slug, display name, settings, PSPs, custodians,
-  alert webhooks and secrets, in the format [client: merchant
-  configuration](client.md#merchant-configuration-and-psps) describes.
-  `ParseMerchantDocument` reads one from YAML or JSON strictly: unknown or
-  duplicate fields, aliases, anchors and several documents are refused. Keep
-  secret values out of the committed file.
+- **The document** holds the slug, display name, settings, PSPs, custodians, alert webhooks and secrets, in the format [client: merchant configuration](client.md#merchant-configuration-and-psps) describes. `ParseMerchantDocument` reads one from YAML or JSON, refusing unknown or duplicate fields. Keep secret values out of the committed file.
 - **Slugs** are unique per engine; a duplicate is refused and reported. Each
   declared merchant is created on first boot and keeps its UUID;
   `Engine.DeclaredMerchant(slug)` returns it.
@@ -185,11 +175,7 @@ sign-ins are its customers and staff, and an optional tenant `Binding`.
   then names the slug, `Issuer` and `Binding` only, and a document beside Vault
   is refused. Without it the document is read at startup and the edit routes
   are not mounted.
-- **Tenant binding.** The `adapters/authkit` module's `BindMerchant` associates
-  an existing merchant with one AuthKit tenant, once and immutably; declare the
-  result as `Binding` and pass `MerchantGroups` (`MerchantGroups(authClient)`
-  from the same module). Customer routes then also require the user's tenant
-  (`customer_tenant_mismatch` otherwise). Billing archives carry the binding.
+- **Tenant binding.** The `adapters/authkit` module's `BindMerchant` associates an existing merchant with one AuthKit tenant, once and immutably; declare the same `billing.MerchantBinding` as `Binding` and pass `MerchantGroups` (`MerchantGroups(authClient)` from the same module). Customer routes then also require the user's tenant (`customer_tenant_mismatch` otherwise). Billing archives carry the binding.
 
 The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#catalog)).
 
@@ -232,13 +218,7 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 }
 ```
 
-`RiverJobs` adds the `billing`, `psp_import` (2 workers) and `provider_refresh`
-(4 workers) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes
-when unset; each worker declares its own timeout. The fleet must be in
-`DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop.
-`Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused.
-AuthKit joins the same fleet when its River schema matches. Every kind, queue
-and schedule: [River jobs](river-jobs.md).
+`RiverJobs` adds the `billing` (20 workers), `psp_import` (2) and `provider_refresh` (4) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
 
 Replacing a fleet that ran an older release's scheduled provider refresh: stop
 the old workers first; the new fleet cancels the retired refresh jobs in that
@@ -259,15 +239,13 @@ and no sticky session.
 - **Background work** runs on every instance with workers, each job on one.
   River's leader schedules periodic work; a crashed leader is replaced within
   about 20 seconds.
-- **Caches.** An edit through OpenRails reaches every instance at once
-  (`NOTIFY`); an edit made in Vault directly within 30 seconds.
+- **Caches.** A configuration edit through OpenRails reaches every instance at once (`NOTIFY`); one made in Vault directly is reloaded, in the background, by the first use of that merchant 30 seconds or more after its last load, or on restart. A handle's cached catalog reads show another instance's edit within a minute ([caching](client.md#caching)).
 - **Several hosts, one database.** Hosts embedding OpenRails on one schema
   declare the same merchants, each with its own `RiverSchema`, share one Redis
   and clocks within five minutes, and share periodic passes through leases in
   `periodic_leases`.
 
-Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns`
-per instance, plus one per instance with Vault configuration (it listens for edits).
+Size PostgreSQL `max_connections` for every pool, plus, per instance, `DatabaseConfig.LeaseConns` and the sessions OpenRails dials outside the pool: two listeners once started, one more with Vault configuration (it listens for edits), and one for each session lock it holds (a billing pass, a provider refresh, a usage-policy edit).
 
 ## PgBouncer
 
@@ -492,9 +470,7 @@ pay URLs.
 
 ## Testing
 
-- `openrailstest/nmimock` and `openrailstest/stripemock` are provider fakes
-  behind `Deps.NMITransport` and `Deps.StripeTransport`; `openrailstest.UserInfo`
-  is an in-memory directory. Test seams are refused beside a live PSP.
+- `openrailstest/nmimock` and `openrailstest/stripemock` are loopback provider fakes for `Config.ProviderSandbox` (`NMIGatewayURL`, `StripeAPIURL`); `stripemock` also serves in process as `Deps.StripeTransport`. `openrailstest.UserInfo` is an in-memory directory. Test seams are refused beside a live PSP.
 - `openrailstest.CheckAuth` checks your `Authenticator`.
 - Run your tests against a real PostgreSQL 18: `New` migrates a fresh schema in
   seconds.

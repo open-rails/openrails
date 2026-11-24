@@ -145,9 +145,7 @@ products:
         billing_interval: 365 days
 ```
 
-Applying is an operator step, like a deploy: run your app's own command, which
-prints what changed. Applying the same file again changes nothing, and an older
-file never rolls anything back.
+Applying is an operator step, like a deploy: run your app's own command, which prints what changed. Reapplying a file that applied whole, even an older one, replays its receipt and changes nothing.
 
 ```go guide:catalog-apply
 products, err := catalog.ReadFile(path)
