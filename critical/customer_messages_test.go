@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/helpers/smtp"
 	"github.com/open-rails/helpers/smtp/smtptest"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/adapters/smtpmail"
 	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -981,7 +982,7 @@ func (m *alertMailbox) all() []openrails.Email {
 // messageSendAttempts is a message's tries (messages.SendAttempts).
 const messageSendAttempts = 10
 
-// smtpSender is helpers/smtp to server as the engine's EmailSender, as the
+// smtpSender is helpers/smtp to server through adapters/smtpmail, as the
 // server builds it from email_smtp, signing in with password when the server
 // asks for one.
 func smtpSender(t *testing.T, server *smtptest.Server, password string) openrails.EmailSender {
@@ -992,18 +993,7 @@ func smtpSender(t *testing.T, server *smtptest.Server, password string) openrail
 	}
 	sender, err := smtp.New(cfg)
 	require.NoError(t, err)
-	return helpersSMTP{sender}
-}
-
-type helpersSMTP struct{ *smtp.Sender }
-
-func (s helpersSMTP) Send(ctx context.Context, m openrails.Email) error {
-	from := s.From()
-	if m.From.Address != "" {
-		from.Address = m.From.Address
-	}
-	from.Name = m.From.Name
-	return s.Sender.Send(ctx, smtp.Message{From: from, To: m.To, Subject: m.Subject, Text: m.Text, HTML: m.HTML})
+	return smtpmail.EmailSender(sender)
 }
 
 // swappableSender sends through to, which a scenario replaces.
