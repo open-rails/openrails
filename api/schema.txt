@@ -37,6 +37,7 @@ migration 0038_write_posture_comments.up.sql sha256:4e52a41d97043af3c86dffd550e7
 migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef247a2116743b5ddfa57a2f4114056cf4b63b77d82edc
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4c7c7f109ba392dbd60ea90c24c55c6e
+migration 0042_mrr_keyed_reads.up.sql sha256:2f7b9baa629ea9571b5b031ad647433acf2cbd362e297e33fc9785dc82fe7422
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -5612,6 +5613,7 @@ function billing.pending_mrr_lines(uuid,uuid,text)
    RETURNS TABLE(subscription_id uuid, product_id uuid, price_id uuid, mrr_before bigint, mrr_after bigint, cause text, changed_at timestamp with time zone)
    LANGUAGE sql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
   AS $function$
   SELECT m.subscription_id,
          CASE WHEN m.currency = p_currency THEN m.product_id ELSE m.recorded_product_id END,
@@ -5885,6 +5887,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
   AS $function$
   DECLARE
       v_price billing.prices;
@@ -6095,6 +6098,7 @@ function billing.schedule_mrr_change(uuid,uuid,timestamp with time zone)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
   AS $function$
   DECLARE
       v_change billing.scheduled_changes;
@@ -6224,6 +6228,7 @@ function billing.settle_at_commit()
    RETURNS trigger
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
   AS $function$
   BEGIN
       IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
@@ -6323,6 +6328,7 @@ function billing.settle_mrr(uuid)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
   AS $function$
   DECLARE
       v_pair record;

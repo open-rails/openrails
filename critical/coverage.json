@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 742,
+  "scenario_count": 743,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2792,6 +2792,11 @@
       "id": "OR-J42-S32",
       "journey": "J42",
       "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end through the billing pass's MRR scan; the product totals and the distinct customers fall to none and agree with their flows"
+    },
+    {
+      "id": "OR-J42-S33",
+      "journey": "J42",
+      "name": "A full refund that revokes access ends a subscription whose MRR counted its customer: the refund finalizes, its replay returns the same refund, and the customer leaves the distinct customers once, as one churn, with nothing below zero"
     },
     {
       "id": "OR-J28-S09",

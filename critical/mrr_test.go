@@ -239,6 +239,21 @@ func subscriptionMRRReads(t *testing.T, w *world, q interface {
 	return n
 }
 
+// subscriptionMRRScans is the sequential scans of subscription_mrr, as
+// subscriptionMRRReads counts: a keyed write takes none.
+func subscriptionMRRScans(t *testing.T, w *world, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, xact bool) int64 {
+	t.Helper()
+	fn := "pg_stat_get_numscans"
+	if xact {
+		fn = "pg_stat_get_xact_numscans"
+	}
+	var n int64
+	require.NoError(t, q.QueryRow(t.Context(), "SELECT "+fn+"($1::regclass)", pgx.Identifier{w.schema, "subscription_mrr"}.Sanitize()).Scan(&n))
+	return n
+}
+
 // Monthly MRR of the fixture prices. A named cadence divides exactly (720
 // hours by one, 8760 by twelve), a week counts 52 over 12, and any other
 // window 730.485 hours a month: 10.00 a day is 304.36875.
@@ -717,7 +732,7 @@ func TestMRR(t *testing.T) {
 		price := ccbillMemberPrice(t, a.alpha)
 		// The book's request body stays under the 1 MiB cap: some 700 bytes a member.
 		const members = 1200
-		before := subscriptionMRRReads(t, a.world, a.pool, false)
+		before, scans := subscriptionMRRReads(t, a.world, a.pool, false), subscriptionMRRScans(t, a.world, a.pool, false)
 		res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, members))
 		require.NoError(t, err)
 		require.Len(t, res.Imported, members, "%v", res.Reasons)
@@ -731,7 +746,8 @@ func TestMRR(t *testing.T) {
 			reads = subscriptionMRRReads(t, a.world, a.pool, false) - before
 			return reads >= members
 		}, 70*time.Second, 250*time.Millisecond, "the import's reads reach the statistics")
-		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square")
+		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square (%d sequential scans)",
+			subscriptionMRRScans(t, a.world, a.pool, false)-scans)
 	})
 
 	t.Run("OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once", func(t *testing.T) {
@@ -758,7 +774,8 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
 		require.NoError(t, err)
-		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square")
+		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square (%d sequential scans)",
+			subscriptionMRRScans(t, a.world, tx, true))
 		require.NoError(t, tx.Commit(t.Context()))
 
 		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD"))
