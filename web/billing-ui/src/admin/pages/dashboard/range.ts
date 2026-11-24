@@ -2,6 +2,7 @@
 // span of UTC dates (?from=2026-09-01&to=2026-09-30, both inclusive). Every
 // widget runs over it except one that keeps its own (fixed_range).
 import type {
+  Compare,
   QueryMetricsParams,
   MetricsRange,
   Widget,
@@ -126,16 +127,39 @@ export function fitGrain(
   return GRAINS[i]
 }
 
-// widgetQuery is the query a widget runs on a dashboard showing range.
+// DashboardView is what the page applies to every widget: its range, the
+// currency each widget whose measures take one shows alone, and the window
+// a change is measured against.
+export interface DashboardView {
+  range: DashboardRange
+  currency?: string
+  compare?: Compare
+}
+
+// widgetQuery is the query a widget runs on a dashboard showing view;
+// takesCurrency says whether its measures may be filtered by currency.
 export function widgetQuery(
   widget: Widget,
-  range: DashboardRange
+  view: DashboardView,
+  takesCurrency: (query: QueryMetricsParams) => boolean = () => false
 ): QueryMetricsParams {
-  if (widget.fixed_range) return widget.query
-  const query: QueryMetricsParams = {
-    ...widget.query,
-    range: metricsRange(range),
-  }
-  if (query.grain) query.grain = fitGrain(query.grain, range)
+  const query: QueryMetricsParams = widget.fixed_range
+    ? { ...widget.query }
+    : { ...widget.query, range: metricsRange(view.range) }
+  if (!widget.fixed_range && query.grain && query.grain !== "auto")
+    query.grain = fitGrain(query.grain, view.range)
+  if (view.currency && takesCurrency(query))
+    query.filters = { ...query.filters, currency: [view.currency] }
+  if (view.compare && query.compare) query.compare = view.compare
   return query
+}
+
+// sparkQuery is a kpi's query by time, at the grain that fits its range.
+export function sparkQuery(query: QueryMetricsParams): QueryMetricsParams {
+  return {
+    ...query,
+    by: ["time", ...(query.by ?? [])],
+    grain: "auto",
+    compare: undefined,
+  }
 }

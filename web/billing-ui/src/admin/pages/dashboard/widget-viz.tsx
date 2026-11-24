@@ -1,7 +1,8 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
-// Viz renderers: stat tile with compare delta, line/area/bar (shadcn chart on
-// recharts), donut, table. Input is the raw tabular metrics result; nothing
-// re-queries client-side.
+// Viz renderers: kpi (value, change and sparkline), stat, line/area/bar
+// (shadcn chart on recharts), donut, table. Input is the raw tabular metrics
+// result; nothing re-queries client-side. Direction and thresholds come from
+// the registry, so any measure draws.
 import type { ComponentProps } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -17,6 +18,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   XAxis,
   YAxis,
 } from "recharts"
@@ -47,13 +49,13 @@ import { useAdminServices } from "#orck/admin/context"
 import { useMerchantConfig } from "#orck/admin/lib/capabilities"
 
 import {
+  changeText,
   comparedWith,
   donutSlices,
   chartColor,
   exactKey,
   filteredCurrency,
   groupSeries,
-  LOWER_IS_BETTER,
   rowCurrency,
   statDelta,
   type PivotSeries,
@@ -63,29 +65,204 @@ import {
   indexColumns,
   pivotTimeSeries,
 } from "./lib"
+import { registry as emptyRegistry, type Registry } from "./registry"
 
 export function WidgetVizView({
   viz,
   result,
   query,
+  spark,
+  registry = emptyRegistry(),
 }: {
   viz: VizType
   result: MetricsResult
   query?: QueryMetricsParams
+  // spark is a kpi's query by time.
+  spark?: MetricsResult
+  registry?: Registry
 }) {
   const currency = filteredCurrency(query)
   switch (viz) {
+    case "kpi":
+      return (
+        <KpiViz
+          result={result}
+          spark={spark}
+          currency={currency}
+          registry={registry}
+        />
+      )
     case "stat":
-      return <StatViz result={result} currency={currency} />
+      return <StatViz result={result} currency={currency} registry={registry} />
     case "line":
     case "area":
     case "bar":
-      return <TimeSeriesViz viz={viz} result={result} currency={currency} />
+      return (
+        <TimeSeriesViz
+          viz={viz}
+          result={result}
+          currency={currency}
+          registry={registry}
+        />
+      )
     case "donut":
       return <DonutViz result={result} currency={currency} />
     case "table":
       return <TableViz result={result} currency={currency} />
+    case "heading":
+      return null
   }
+}
+
+// usePSPKeys names a PSP by its key, for those who may read the PSPs; an
+// unread PSP keeps its id.
+function usePSPKeys(enabled: boolean): (id: string) => string {
+  const { adminQueries } = useAdminServices()
+  const config = useMerchantConfig()
+  const psps = useQuery({
+    ...adminQueries.psps(),
+    // The widget raises no toast.
+    meta: undefined,
+    enabled: config && enabled,
+  }).data?.data
+  return (id) => psps?.find((p) => p.id === id)?.key ?? id
+}
+
+// better says whether a change of a measure is good news: null when its
+// direction is neutral.
+function better(
+  registry: Registry,
+  measure: string,
+  delta: number
+): boolean | null {
+  switch (registry.direction(measure)) {
+    case "up_is_good":
+      return delta > 0
+    case "down_is_good":
+      return delta < 0
+    default:
+      return null
+  }
+}
+
+function Change({
+  delta,
+  unit,
+  good,
+  against,
+}: {
+  delta: number
+  unit?: string
+  good: boolean | null
+  against: string
+}) {
+  // Shown to one decimal: what rounds to 0.0 is no change.
+  const moved = Math.round(delta * 1000) !== 0
+  const none = unit === "ratio" ? "0.0 pp" : "0.0%"
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1 text-xs font-medium",
+        !moved || good === null
+          ? "text-muted-foreground"
+          : good
+            ? "text-settled"
+            : "text-failed"
+      )}
+    >
+      {moved && (
+        <HugeiconsIcon
+          icon={delta > 0 ? AnalyticsUpIcon : AnalyticsDownIcon}
+          className="size-3"
+        />
+      )}
+      {`${moved ? changeText(delta, unit) : none} vs ${against}`}
+    </span>
+  )
+}
+
+// KpiViz is a tile's value over the range (a snapshot at its end), its
+// change against the comparison coloured by the measure's direction, and a
+// sparkline of the same query by time.
+function KpiViz({
+  result,
+  spark,
+  currency: fallback,
+  registry,
+}: {
+  result: MetricsResult
+  spark?: MetricsResult
+  currency?: string
+  registry: Registry
+}) {
+  const { text: adminText } = useAdminUI()
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  if (!primary) return <Empty label={adminText("no measure")} />
+  const row = result.rows[0]
+  const currency = row ? rowCurrency(row, idx, fallback) : fallback
+  const value =
+    !row && primary.unit === "money" && !currency
+      ? "—"
+      : formatMeasure(row ? row[primary.index] : 0, primary.unit, currency)
+  const delta = row ? statDelta(result, row, primary.index) : null
+  const line = spark ? pivotTimeSeries(spark, fallback) : undefined
+  const series = line?.series.find(
+    (s) =>
+      s.measure === primary.name &&
+      (!currency || !s.currency || s.currency === currency)
+  )
+  return (
+    <div className="flex h-full flex-col justify-between gap-1">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl">
+          {value}
+        </span>
+        {result.rows.length > 1 ? (
+          <span className="text-xs text-muted-foreground">
+            +{result.rows.length - 1}
+            <AdminMessage id={" more"} />
+          </span>
+        ) : null}
+      </div>
+      {delta !== null ? (
+        <Change
+          delta={delta}
+          unit={primary.unit}
+          good={better(registry, primary.name, delta)}
+          against={comparedWith(result)}
+        />
+      ) : null}
+      {line && series && line.data.length > 1 ? (
+        <Sparkline data={line.data} dataKey={series.key} />
+      ) : null}
+    </div>
+  )
+}
+
+function Sparkline({
+  data,
+  dataKey,
+}: {
+  data: Record<string, number | string | null>[]
+  dataKey: string
+}) {
+  const config: ChartConfig = { [dataKey]: { color: chartColor(0) } }
+  return (
+    <ChartContainer config={config} className="aspect-auto h-10 w-full">
+      <LineChart data={data} margin={{ left: 0, right: 0, top: 2, bottom: 2 }}>
+        <Line
+          dataKey={dataKey}
+          type="monotone"
+          stroke={chartColor(0)}
+          strokeWidth={1.5}
+          dot={false}
+          connectNulls
+          isAnimationActive={animate()}
+        />
+      </LineChart>
+    </ChartContainer>
+  )
 }
 
 function Empty({ label }: { label: string }) {
@@ -99,9 +276,11 @@ function Empty({ label }: { label: string }) {
 function StatViz({
   result,
   currency: fallback,
+  registry,
 }: {
   result: MetricsResult
   currency?: string
+  registry: Registry
 }) {
   const { text: adminText } = useAdminUI()
 
@@ -127,11 +306,6 @@ function StatViz({
       {rows.map((row, i) => {
         const currency = rowCurrency(row, idx, fallback)
         const delta = statDelta(result, row, primary.index)
-        // Shown to one decimal: what rounds to 0.0% is no change.
-        const moved = delta !== null && Math.round(delta * 1000) !== 0
-        const better =
-          delta !== null &&
-          (LOWER_IS_BETTER.has(primary.name) ? delta < 0 : delta > 0)
         const dimLabel =
           rows.length > 1
             ? idx.dims
@@ -160,25 +334,13 @@ function StatViz({
               <span className="text-xs text-muted-foreground">{dimLabel}</span>
             ) : null}
             {delta !== null ? (
-              <span
-                className={cn(
-                  "flex basis-full items-center gap-1 text-xs font-medium",
-                  !moved
-                    ? "text-muted-foreground"
-                    : better
-                      ? "text-settled"
-                      : "text-failed"
-                )}
-              >
-                {moved && (
-                  <HugeiconsIcon
-                    icon={delta > 0 ? AnalyticsUpIcon : AnalyticsDownIcon}
-                    className="size-3"
-                  />
-                )}
-                {moved
-                  ? `${delta > 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs ${against}`
-                  : `0.0% vs ${against}`}
+              <span className="basis-full">
+                <Change
+                  delta={delta}
+                  unit={primary.unit}
+                  good={better(registry, primary.name, delta)}
+                  against={against}
+                />
               </span>
             ) : null}
           </div>
@@ -256,10 +418,12 @@ function TimeSeriesViz({
   viz,
   result,
   currency,
+  registry,
 }: {
   viz: "line" | "area" | "bar"
   result: MetricsResult
   currency?: string
+  registry: Registry
 }) {
   const { text: adminText } = useAdminUI()
 
@@ -268,7 +432,14 @@ function TimeSeriesViz({
     return <Empty label={adminText("no data in range")} />
   const groups = groupSeries(series)
   if (groups.length === 1)
-    return <TimeSeriesChart viz={viz} data={data} series={series} />
+    return (
+      <TimeSeriesChart
+        viz={viz}
+        data={data}
+        series={series}
+        registry={registry}
+      />
+    )
   return (
     <div className="flex h-full flex-col gap-4 overflow-auto">
       {groups.map((group) => (
@@ -277,7 +448,12 @@ function TimeSeriesViz({
             {group.label}
           </div>
           <div className="h-36">
-            <TimeSeriesChart viz={viz} data={data} series={group.series} />
+            <TimeSeriesChart
+              viz={viz}
+              data={data}
+              series={group.series}
+              registry={registry}
+            />
           </div>
         </section>
       ))}
@@ -293,7 +469,8 @@ function TimeSeriesChart({
   viz,
   data,
   series,
-}: Pivoted & { viz: "line" | "area" | "bar" }) {
+  registry,
+}: Pivoted & { viz: "line" | "area" | "bar"; registry: Registry }) {
   const config: ChartConfig = {}
   series.forEach((s, i) => {
     config[s.key] = { label: seriesLabel(s), color: chartColor(i) }
@@ -329,6 +506,22 @@ function TimeSeriesChart({
     </>
   )
   const tooltip = <ChartTooltip content={<MetricTooltip series={series} />} />
+  // A measure's thresholds (a network's dispute ratio limit) cross its line.
+  const thresholds = [...new Set(series.map((s) => s.measure))].flatMap(
+    (measure) =>
+      registry
+        .thresholds(measure)
+        .map((t) => (
+          <ReferenceLine
+            key={`${measure}:${t.value}`}
+            y={t.value}
+            stroke="var(--failed)"
+            strokeDasharray="4 4"
+            ifOverflow="extendDomain"
+            label={{ value: t.label, position: "insideTopRight", fontSize: 10 }}
+          />
+        ))
+  )
   const legend =
     series.length > 1 ? (
       <ChartLegend
@@ -342,6 +535,7 @@ function TimeSeriesChart({
           {axes}
           {tooltip}
           {legend}
+          {thresholds}
           {series.map((s, i) => (
             <Line
               key={s.key}
@@ -357,7 +551,8 @@ function TimeSeriesChart({
           ))}
         </LineChart>
       ) : viz === "area" ? (
-        <AreaChart {...chartProps}>
+        // Signed values stack apart: refunds below the axis, sales above.
+        <AreaChart {...chartProps} stackOffset="sign">
           {axes}
           {tooltip}
           {legend}
@@ -375,7 +570,7 @@ function TimeSeriesChart({
           ))}
         </AreaChart>
       ) : (
-        <BarChart {...chartProps}>
+        <BarChart {...chartProps} stackOffset="sign">
           {axes}
           {tooltip}
           {legend}
@@ -404,9 +599,11 @@ function DonutViz({
 }) {
   const { text: adminText } = useAdminUI()
 
-  const primary = indexColumns(result.columns).measures[0]
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  const pspKey = usePSPKeys(idx.dims.some((d) => d.name === "psp"))
   if (!primary) return <Empty label={adminText("no measure")} />
-  const slices = donutSlices(result, currency)
+  const slices = donutSlices(result, currency, pspKey)
   if (slices.length === 0)
     return <Empty label={adminText("no data in range")} />
   const groups = groupSeries(slices)
@@ -482,15 +679,8 @@ function TableViz({
   currency?: string
 }) {
   const { text: adminText } = useAdminUI()
-  const { adminQueries } = useAdminServices()
   // A PSP reads as its key, for those who may read the PSPs.
-  const config = useMerchantConfig()
-  const psps = useQuery({
-    ...adminQueries.psps(),
-    // Unread PSPs leave their ids showing; the widget raises no toast.
-    meta: undefined,
-    enabled: config && result.columns.some((c) => c.name === "psp"),
-  }).data?.data
+  const pspKey = usePSPKeys(result.columns.some((c) => c.name === "psp"))
 
   const idx = indexColumns(result.columns)
   if (result.rows.length === 0)
@@ -525,8 +715,7 @@ function TableViz({
                   const currency = rowCurrency(row, idx, fallback)
                   rendered = formatMeasure(cell, c.unit, currency)
                 } else if (c.name === "psp" && cell)
-                  rendered =
-                    psps?.find((p) => p.id === cell)?.key ?? String(cell)
+                  rendered = pspKey(String(cell))
                 else
                   rendered = cell === null || cell === "" ? "—" : String(cell)
                 return (

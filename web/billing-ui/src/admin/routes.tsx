@@ -132,6 +132,12 @@ const routes = [
     ),
   },
   {
+    path: "/ops/signals",
+    Component: lazy(() =>
+      import("./pages/ops/signals").then((m) => ({ default: m.SignalsPage }))
+    ),
+  },
+  {
     path: "/ops",
     Component: lazy(() =>
       import("./pages/ops").then((m) => ({ default: m.OpsPage }))

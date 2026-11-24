@@ -20,8 +20,9 @@ type Service struct{ db *db.DB }
 // NewService binds dashboard storage to database.
 func NewService(database *db.DB) *Service { return &Service{db: database} }
 
-// Get returns the merchant's saved dashboard, or the seeded default template
-// when none exists (usage widgets only if the merchant has usage activity).
+// Get returns the merchant's saved dashboard, or the health overview built
+// for its profile when none exists. Nothing is written until the merchant
+// saves.
 func (s *Service) Get(ctx context.Context) (*Dashboard, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -31,11 +32,12 @@ func (s *Service) Get(ctx context.Context) (*Dashboard, error) {
 	q := s.db.Gen(ctx)
 	row, err := q.GetDashboardConfig(ctx, queryMerchant.UUID())
 	if errors.Is(err, pgx.ErrNoRows) {
-		hasUsage, err := q.HasUsageActivity(ctx, queryMerchant.UUID())
+		found, err := q.GetDashboardProfile(ctx, queryMerchant.UUID())
 		if err != nil {
-			return nil, fmt.Errorf("dashboard: usage-activity probe: %w", err)
+			return nil, fmt.Errorf("dashboard: profile probe: %w", err)
 		}
-		return &Dashboard{Widgets: DefaultWidgets(hasUsage), IsDefault: true}, nil
+		profile := Profile{Subscriptions: found.HasSubscriptions, CardPayments: found.HasCardPayments, Usage: found.HasUsage, Credits: found.HasCredits}
+		return &Dashboard{Widgets: DefaultWidgets(profile), IsDefault: true, Profile: &profile}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("dashboard: load config: %w", err)
