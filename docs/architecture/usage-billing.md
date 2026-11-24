@@ -82,7 +82,7 @@ policy's `policy_currency`, as they do in admission (OR-J26-S61). A running char
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 
-**Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage order carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage order's payment owes again what it paid, billed at once on a usage order whatever its minimum or usage terms, and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
+**Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage order carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage order's payment owes again what it paid, billed at once on a usage order whatever its minimum or usage terms (in a currency whose terms are gone, that order bills all its pending owed, since nothing else would), and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
 
 ## Interfaces
 
