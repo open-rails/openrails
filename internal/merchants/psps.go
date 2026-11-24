@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -53,7 +54,7 @@ var (
 // providerCredentialError types a provider-side credential rejection; any
 // other probe outcome (transport, indeterminate) stays an internal failure.
 func providerCredentialError(err error) error {
-	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrEnvironmentMismatch) {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrEnvironmentMismatch) || errors.Is(err, ccbill.ErrDataLinkAuth) {
 		return fmt.Errorf("%w: %v", ErrPSPCredentialsRejected, err)
 	}
 	return err

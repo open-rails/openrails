@@ -671,14 +671,45 @@ func TestProviderTime(t *testing.T) {
 			return err
 		}
 		require.NoError(t, create(a.alphaRemote, "0001"), "alpha proves the account")
-		probed := len(dataLink.Requests())
-		require.Positive(t, probed)
+		probed := len(dataLink.Calls())
+		require.Positive(t, probed, "the probe is a status read")
 		// Another subaccount of alpha's CCBill account: DataLink's credentials
 		// and its hour are the account's, so beta's claim is refused unread.
 		status, code := refusalCode(t, create(a.betaRemote, "0002"))
 		require.Equal(t, http.StatusConflict, status)
 		require.Equal(t, billing.CodePSPExists, code)
-		require.Len(t, dataLink.Requests(), probed, "beta's claim reached no DataLink")
+		require.Len(t, dataLink.Calls(), probed, "beta's claim reached no CCBill")
+	})
+
+	t.Run("OR-J28-S14/a-ccbill-datalink-login-ccbill-refuses-is-not-declared", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
+		a, _ := newPSPWorld(t, func(w *world) {
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+		})
+		create := func(password string) error {
+			_, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
+				PSPAccount:  billing.PSPAccount{ClientAccnum: fmt.Sprintf("%06d", 100000+rand.IntN(900000)), ClientSubacc: "0001"},
+				Credentials: map[string]string{"salt": "critical-ccbill-salt", "datalink_username": "critical-datalink", "datalink_password": password}})
+			return err
+		}
+		// A status read of a subscription no account holds: -1 refuses the
+		// login, -3 (no record) proves it.
+		status, code := refusalCode(t, create("wrong"))
+		require.Equal(t, http.StatusBadRequest, status)
+		require.Equal(t, billing.CodePSPCredentialsRejected, code)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		for _, psp := range psps.Items {
+			require.NotEqual(t, billing.RailCCBill, psp.Rail, "a refused login declares nothing")
+		}
+		require.NoError(t, create("critical-datalink-password"))
+		calls := dataLink.Calls()
+		require.GreaterOrEqual(t, len(calls), 2)
+		for _, call := range calls[:2] {
+			require.Equal(t, "viewSubscriptionStatus", call.Form.Get("action"))
+		}
 	})
 
 	t.Run("OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant", func(t *testing.T) {

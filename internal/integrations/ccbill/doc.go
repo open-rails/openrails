@@ -7,9 +7,11 @@
 // range over 24 hours, so every export is read a day at a time, and answers a
 // live account once every 60 minutes: a live client takes the account's slot
 // (Pacing, kept in the abuse state) before each request or fails with
-// PacedError, which callers treat as "not yet". Test mode is not paced, so a
-// credential probe reads in test mode and never takes the slot; the
-// subscription-management actions are not DataLink exports.
+// PacedError, which callers treat as "not yet"; test mode is not paced. The
+// subscription-management actions are not DataLink exports: a credential
+// probe is a status read of a subscription no account holds, which CCBill
+// answers -3 or -4 only to a login it authenticated and -1 to one it refused,
+// so it never takes the slot.
 //
 // CCBill documents the shape of its times but not their zone. DataLink rows,
 // webhook timestamps and subscription-management dates are read as UTC

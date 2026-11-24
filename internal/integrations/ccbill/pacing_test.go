@@ -58,18 +58,23 @@ func TestLiveDataLinkTakesOneRequestAnHour(t *testing.T) {
 	if _, err := client(true).FetchActiveMembers(t.Context()); err != nil {
 		t.Fatalf("test mode is not paced: %v", err)
 	}
-	// Proving credentials reads in test mode: no slot taken, none refused.
+	// Proving credentials is a status read, no export: no slot taken, none
+	// refused, and a refused login is told apart from a missing record.
+	exports := len(dataLink.Requests())
 	if err := live.ProbeCredentials(t.Context()); err != nil {
 		t.Fatalf("a credential probe inside the hour: %v", err)
-	}
-	if last := dataLink.Requests()[len(dataLink.Requests())-1]; last.Live {
-		t.Fatal("the probe asked as a live account")
 	}
 	dataLink.RequireCredentials("u", "p", false)
 	stranger := client(false)
 	stranger.Password = "wrong"
 	if err := stranger.ProbeCredentials(t.Context()); !errors.Is(err, ccbill.ErrDataLinkAuth) {
 		t.Fatalf("wrong credentials probed = %v", err)
+	}
+	if got := len(dataLink.Requests()); got != exports {
+		t.Fatalf("the probes made %d DataLink exports", got-exports)
+	}
+	if calls := dataLink.Calls(); len(calls) != 2 || calls[0].Form.Get("action") != "viewSubscriptionStatus" {
+		t.Fatalf("the probes were %v", calls)
 	}
 	now = now.Add(time.Hour)
 	if _, err := live.FetchTransactionExport(t.Context(), now.Add(-time.Hour), now, ccbill.AllDataLinkTxnTypes); err != nil {

@@ -15,8 +15,9 @@
 // request has been made within the last 60 minutes." and listing it in
 // Unexpected; test mode is exempt.
 //
-// A status read answers 2 (rebilling) for a member with a rebill date, and 1
-// with its expirationDate for one with an expiry instead, or one canceled.
+// A status read answers 2 (rebilling) for a member with a rebill date, 1
+// with its expirationDate for one with an expiry instead, or one canceled,
+// and -3 (no record) for any other id; a refused login answers -1.
 //
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
@@ -154,8 +155,9 @@ func (m *Mock) AddCancellation(c Cancellation) {
 }
 
 // RequireCredentials makes DataLink answer only username and password. Any
-// other login is refused as CCBill refuses one: with a 401 when status is
-// set, else with an "Authentication failed" answer.
+// other login is refused as CCBill refuses one: an export with a 401 when
+// status is set, else with an "Authentication failed" answer; a
+// subscription-management action with -1.
 func (m *Mock) RequireCredentials(username, password string, status bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,10 +234,19 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/utils/subscriptionManagement.cgi":
 		m.calls = append(m.calls, Call{Path: r.URL.Path, Form: r.Form})
 		id := r.Form.Get("subscriptionId")
+		if a := m.auth; a != nil && (r.Form.Get("username") != a.username || r.Form.Get("password") != a.password) {
+			_, _ = io.WriteString(w, "<results>-1</results>")
+			return
+		}
 		switch r.Form.Get("action") {
 		case "viewSubscriptionStatus":
+			mem := m.member(id)
+			if mem == nil && m.cancels[id] == 0 {
+				_, _ = io.WriteString(w, "<results>-3</results>") // no record
+				return
+			}
 			status, dates := "2", "" // rebilling
-			if mem := m.member(id); mem != nil && mem.Rebill == nil && mem.Expiry != nil {
+			if mem != nil && mem.Rebill == nil && mem.Expiry != nil {
 				status, dates = "1", "<expirationDate>"+mem.Expiry.UTC().Format("20060102150405")+"</expirationDate>"
 			}
 			if m.cancels[id] > 0 {

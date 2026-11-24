@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -78,12 +77,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {
-			var paced *ccbill.PacedError
-			if errors.As(err, &paced) {
-				return false, apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable,
-					fmt.Sprintf("CCBill DataLink answers a live account once an hour; validate these credentials again after %s", paced.Until.UTC().Format(time.RFC3339)))
-			}
-			return false, fmt.Errorf("merchants: validate ccbill credentials: %w", err)
+			return false, providerCredentialError(fmt.Errorf("merchants: validate ccbill credentials: %w", err))
 		}
 		return true, nil
 	}

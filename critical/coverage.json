@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 472,
+  "scenario_count": 473,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2187,6 +2187,11 @@
       "id": "OR-J28-S13",
       "journey": "J28",
       "name": "A CCBill account another merchant archived, or holds only in the other money class, is declarable: only a current PSP of an unretired merchant in the same class holds it"
+    },
+    {
+      "id": "OR-J28-S14",
+      "journey": "J28",
+      "name": "A CCBill DataLink login CCBill refuses is psp_credentials_rejected and declares nothing; the probe is a subscription-management status read, which takes no DataLink hour"
     },
     {
       "id": "OR-J39-S01",
