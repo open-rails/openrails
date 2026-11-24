@@ -82,6 +82,56 @@ func TestPriceMigrationContracts(t *testing.T) {
 		require.True(t, migrationSettled(t, a.world, migration.ID), "the command settles with its last move")
 		p.money(t, 1, 1000)
 	})
+	t.Run("OR-J19-S08", func(t *testing.T) {
+		for _, c := range []struct {
+			name, reason string
+			schedule     func(*nmimock.Schedule)
+		}{
+			{"named-plan", "nmi_named_plan", func(*nmimock.Schedule) {}},
+			{"unstated-plan-payments", "nmi_plan_payments_unknown", func(s *nmimock.Schedule) { s.Plan, s.Custom, s.UnstatedPayments = "", true, true }},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				a, p, sub := nmiMembership(t, c.schedule)
+				target, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: sub.ProductID, Key: "unpushable-weekly", UnitAmount: 20_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
+				require.NoError(t, err)
+				migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+				require.NoError(t, err)
+				require.Equal(t, 1, migration.Scheduled)
+				fleet := manualFleet(t, a.world)
+				require.Eventually(t, func() bool {
+					wakeOperations(t, fleet)
+					result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+					return err == nil && result.Blocked == 1
+				}, 20*time.Second, 50*time.Millisecond, "a push NMI can never take blocks its move")
+				require.True(t, migrationSettled(t, a.world, migration.ID), "a blocked move is terminal")
+				findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.price_migration.blocked"})
+				require.NoError(t, err)
+				require.Len(t, findings.Items, 1)
+				finding := findings.Items[0]
+				require.Equal(t, migration.ID.String()+"/"+c.reason, finding.SubjectKey)
+				require.Equal(t, c.reason, finding.Evidence["reason"])
+				require.Equal(t, sub.ID.String(), finding.Evidence["subscription_id"])
+				require.NotNil(t, finding.RecommendedAction)
+				// Nothing retries it: time passes and the schedule is never written.
+				require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 50*time.Millisecond)
+				for range 3 {
+					a.clock.Advance(6 * time.Hour)
+					wakeOperations(t, fleet)
+					require.Eventually(t, func() bool { return operationsIdle(t, fleet) }, 20*time.Second, 50*time.Millisecond)
+				}
+				require.Empty(t, p.core.ScheduleUpdates(*sub.RailSubscriptionID))
+				require.Equal(t, "10.00", p.core.Schedule(*sub.RailSubscriptionID).Amount)
+				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+				require.NoError(t, err)
+				require.Equal(t, sub.PriceID, current.PriceID)
+				require.Nil(t, current.ScheduledChange)
+				result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+				require.NoError(t, err)
+				require.Equal(t, 1, result.Blocked)
+				require.Zero(t, result.Scheduled)
+			})
+		}
+	})
 	t.Run("OR-J19-S03", func(t *testing.T) {
 		for _, profile := range []string{"pending", "already-applied"} {
 			t.Run(profile, func(t *testing.T) {

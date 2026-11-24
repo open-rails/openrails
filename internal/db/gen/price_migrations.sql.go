@@ -57,8 +57,9 @@ type CreatePriceMigrationParams struct {
 }
 
 // billing.price_migrations: one move of subscribers to another price.
-// Matched and skipped are facts of creation; the per-status counts come from
-// the migration's scheduled changes on read.
+// Matched is counted at creation and skipped once every subscriber was
+// reached; the per-status counts come from the migration's scheduled changes
+// on read, and preparing from its admission, started until then.
 func (q *Queries) CreatePriceMigration(ctx context.Context, arg CreatePriceMigrationParams) (BillingPriceMigration, error) {
 	row := q.db.QueryRow(ctx, createPriceMigration,
 		arg.MerchantID,
@@ -91,11 +92,13 @@ func (q *Queries) CreatePriceMigration(ctx context.Context, arg CreatePriceMigra
 }
 
 const getPriceMigration = `-- name: GetPriceMigration :one
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
@@ -123,6 +126,7 @@ type GetPriceMigrationRow struct {
 	Canceled              int64
 	Blocked               int64
 	Skipped               int64
+	Preparing             bool
 }
 
 func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationParams) (GetPriceMigrationRow, error) {
@@ -150,6 +154,7 @@ func (q *Queries) GetPriceMigration(ctx context.Context, arg GetPriceMigrationPa
 		&i.Canceled,
 		&i.Blocked,
 		&i.Skipped,
+		&i.Preparing,
 	)
 	return i, err
 }
@@ -185,11 +190,13 @@ func (q *Queries) GetPriceMigrationByDestructiveAction(ctx context.Context, arg 
 }
 
 const listPriceMigrationsByIDs = `-- name: ListPriceMigrationsByIDs :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
@@ -218,6 +225,7 @@ type ListPriceMigrationsByIDsRow struct {
 	Canceled              int64
 	Blocked               int64
 	Skipped               int64
+	Preparing             bool
 }
 
 func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMigrationsByIDsParams) ([]ListPriceMigrationsByIDsRow, error) {
@@ -251,6 +259,7 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 			&i.Canceled,
 			&i.Blocked,
 			&i.Skipped,
+			&i.Preparing,
 		); err != nil {
 			return nil, err
 		}
@@ -263,11 +272,13 @@ func (q *Queries) ListPriceMigrationsByIDs(ctx context.Context, arg ListPriceMig
 }
 
 const listPriceMigrationsPage = `-- name: ListPriceMigrationsPage :many
-SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT m.merchant_id, m.id, m.from_price_id, m.from_product_id, m.from_price_key, m.to_price_id, m.effective_at, m.fallback_policy, m.subscriptions_matched, m.subscriptions_skipped, m.created_at, m.canceled_at, m.destructive_action_id, source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
@@ -303,6 +314,7 @@ type ListPriceMigrationsPageRow struct {
 	Canceled              int64
 	Blocked               int64
 	Skipped               int64
+	Preparing             bool
 }
 
 func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigrationsPageParams) ([]ListPriceMigrationsPageRow, error) {
@@ -343,6 +355,7 @@ func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigr
 			&i.Canceled,
 			&i.Blocked,
 			&i.Skipped,
+			&i.Preparing,
 		); err != nil {
 			return nil, err
 		}
@@ -354,19 +367,56 @@ func (q *Queries) ListPriceMigrationsPage(ctx context.Context, arg ListPriceMigr
 	return items, nil
 }
 
+const lockPriceMigration = `-- name: LockPriceMigration :one
+SELECT merchant_id, id, from_price_id, from_product_id, from_price_key, to_price_id, effective_at, fallback_policy, subscriptions_matched, subscriptions_skipped, created_at, canceled_at, destructive_action_id FROM billing.price_migrations
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+FOR UPDATE
+`
+
+type LockPriceMigrationParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// A page of a migration's walk holds its row: a cancel waits for the page,
+// and the next page sees the cancel.
+func (q *Queries) LockPriceMigration(ctx context.Context, arg LockPriceMigrationParams) (BillingPriceMigration, error) {
+	row := q.db.QueryRow(ctx, lockPriceMigration, arg.MerchantID, arg.ID)
+	var i BillingPriceMigration
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.FromPriceID,
+		&i.FromProductID,
+		&i.FromPriceKey,
+		&i.ToPriceID,
+		&i.EffectiveAt,
+		&i.FallbackPolicy,
+		&i.SubscriptionsMatched,
+		&i.SubscriptionsSkipped,
+		&i.CreatedAt,
+		&i.CanceledAt,
+		&i.DestructiveActionID,
+	)
+	return i, err
+}
+
 const setPriceMigrationSkipped = `-- name: SetPriceMigrationSkipped :execrows
-UPDATE billing.price_migrations SET subscriptions_skipped = $1::int
-WHERE merchant_id = $2::uuid AND id = $3::uuid
+UPDATE billing.price_migrations m
+SET subscriptions_skipped = GREATEST(0, m.subscriptions_matched - (
+    SELECT count(*) FROM billing.scheduled_changes sc WHERE sc.merchant_id = m.merchant_id AND sc.price_migration_id = m.id))
+WHERE m.merchant_id = $1::uuid AND m.id = $2::uuid
 `
 
 type SetPriceMigrationSkippedParams struct {
-	SubscriptionsSkipped int32
-	MerchantID           uuid.UUID
-	ID                   uuid.UUID
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
+// Once a migration has reached its subscribers: those it made no move for,
+// skipped or gone from its prices before it reached them.
 func (q *Queries) SetPriceMigrationSkipped(ctx context.Context, arg SetPriceMigrationSkippedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setPriceMigrationSkipped, arg.SubscriptionsSkipped, arg.MerchantID, arg.ID)
+	result, err := q.db.Exec(ctx, setPriceMigrationSkipped, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

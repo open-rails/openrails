@@ -306,6 +306,9 @@ func (m *Mock) schedule(s *Schedule) obj {
 	out := obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": condition, "paused_subscription": paused,
 		"amount": s.Amount, "next_billing_date": s.NextBilling.Format("2006-01-02"), "start_date": s.Created.UTC().Format("2006-01-02"),
 		"plan": obj{"id": s.Plan, "plan_name": name, "plan_amount": s.Amount, "day_frequency": itoa(days), "month_frequency": itoa(months), "plan_payments": "0"}}
+	if s.UnstatedPayments {
+		delete(out["plan"].(obj), "plan_payments")
+	}
 	if s.Book != "" {
 		out["merchant_defined_fields"] = obj{"field_20": s.Book}
 	}

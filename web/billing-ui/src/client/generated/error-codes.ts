@@ -133,6 +133,7 @@ export type OpenRailsErrorCode =
   | "price_increase_notice_too_short"
   | "price_key_cadence_conflict"
   | "price_key_not_found"
+  | "price_migration_in_progress"
   | "price_migration_not_found"
   | "price_not_found"
   | "price_not_sellable"
@@ -345,6 +346,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   price_increase_notice_too_short: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },
   price_key_cadence_conflict: { status: 409, type: "invalid_request_error", meaning: "The product's default price key is held by a price on another cadence." },
   price_key_not_found: { status: 404, type: "invalid_request_error", meaning: "No price holds this key." },
+  price_migration_in_progress: { status: 409, type: "invalid_request_error", meaning: "The same price migration is being created by another request; retry once it answers." },
   price_migration_not_found: { status: 404, type: "invalid_request_error", meaning: "The price migration does not exist." },
   price_not_found: { status: 404, type: "invalid_request_error", meaning: "The price does not exist." },
   price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "None of the price's methods can sell it." },

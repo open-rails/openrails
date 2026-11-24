@@ -87,6 +87,7 @@ const (
 const (
 	CodeScheduledChangeExists       ErrorCode = "scheduled_change_exists"
 	CodePriceMigrationNotFound      ErrorCode = "price_migration_not_found"
+	CodePriceMigrationInProgress    ErrorCode = "price_migration_in_progress"
 	CodePriceChangeCurrencyMismatch ErrorCode = "price_change_currency_mismatch"
 	CodePriceChangeTargetArchived   ErrorCode = "price_change_target_archived"
 	CodePriceIncreaseNoticeTooShort ErrorCode = "price_increase_notice_too_short"
@@ -449,6 +450,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeSolanaRPCUnavailable, 502, fault, "The Solana RPC endpoints did not answer; retry."},
 	{CodeScheduledChangeExists, 409, invalid, "The subscription already has a scheduled change."},
 	{CodePriceMigrationNotFound, 404, invalid, "The price migration does not exist."},
+	{CodePriceMigrationInProgress, 409, invalid, "The same price migration is being created by another request; retry once it answers."},
 	{CodePriceChangeCurrencyMismatch, 422, invalid, "The target price must be in the subscription's currency."},
 	{CodePriceChangeTargetArchived, 422, invalid, "The target price is archived."},
 	{CodePriceIncreaseNoticeTooShort, 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},
