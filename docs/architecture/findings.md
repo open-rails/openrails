@@ -4,7 +4,7 @@ The staff review queue and how merchants hear about it. Reconciliation, converge
 
 ## Concepts
 
-- **Finding**: a row of `reconciliation_findings`, one per merchant, type, PSP and subject (`subject_key`), so a re-detection updates it instead of adding one. Types are namespaced by plane (`pull`, from provider reads; `derive`, `life`, `consistency`, `notify`, `catalog`: `reconciliation_findings_type_check`); severity is `low` to `critical`; status is `reconcile_required`, `requires_review` (the queue), `auto_fixed`, `fixed` or `ignored`.
+- **Finding**: a row of `reconciliation_findings`, one per merchant, type, PSP and subject (`subject_key`), so a re-detection updates it instead of adding one. Types are namespaced by plane (`pull`, from provider reads; `derive`, `life`, `consistency`, `notify`, `catalog`, `books`, `mrr`: `reconciliation_findings_type_check`); severity is `low` to `critical`; status is `reconcile_required`, `requires_review` (the queue), `auto_fixed`, `fixed` or `ignored`.
 - **Proposal**: a `pull.*` finding carrying a `change` and the basis it was computed on; only `proposals.Executor` applies it.
 - **Approval run**: one approve call's applied changes, reversible by `openrails undo-run`.
 - **Park**: a `parked_provider_subscriptions` row: a live provider subscription converge cannot land (`billing.ParkReason`: `price_unmapped`, `customer_unlinked`, `product_held`).

@@ -74,9 +74,19 @@ Does not apply: MRR has no entry point of its own.
 ### 9. Destructive-action safeguards
 Does not apply: MRR records what the subscriptions did; a prune or an undo moves it as a `correction`, and supersedes what it scheduled.
 
+### 10. Consistent time
+Movements are dated by the writer's `updated_at`, in UTC, and rolled up into 15-minute UTC buckets (`billing.mrr_bucket`). Every UTC offset is a whole number of quarter hours, so a read groups buckets into the merchant's local days and months in its `accounting.timezone` (IANA, default UTC): month ends and daylight saving follow the zone, a change of zone needs no rebuild, and no SQL that writes MRR depends on a zone. A price on a calendar cadence divides by its months, never by days; any other window uses the average Gregorian month (730.485 hours).
+
+Checks:
+- OR-J42-S30 reads every MRR measure in UTC and in a non-UTC zone.
+- `billing.mrr_bucket` truncates to the quarter hour in UTC.
+
 ## Tests
 
 - OR-J42-S01–S10: MRR movements once per change and normalised per currency; scheduled churn, resume and end; scheduled contraction applied or reversed; a Stripe portal cancel and resume; a CCBill upgrade and an import; MRR at a past day; an engine upgrade; a prune and its undo; a bulk import; the backfill.
 - OR-J42-S11–S15: at-risk MRR as past due (recovered, then churned), needing a payment method then past due, a card expiring before its renewal, unverified, and usage delinquency.
 - OR-J42-S16–S19, S21: the risk drain and a decline for one customer both commit, the decline queued after the claim re-evaluated; a cancel at period end keeps the case open, a resume continues it, the end churns it once; a new default card puts a subscription following it at risk, never an NMI schedule; an upgrade supersedes the case; a restore carries the open case and re-evaluates every customer with MRR.
 - OR-J42-S22, S23: a customer whose evaluation fails alone is set aside with a finding while the rest drain, and a later evaluation takes its changes and closes the finding; canceled at period end, a card update clears `card_expiring` and recovers the case.
+- OR-J42-S30: every MRR measure, alone, by each dimension and filtered, in UTC and in another zone, plans on indexes.
+- OR-J42-S31: an archive from before the reporting rollups restores them rebuilt from its movements.
+- OR-J42-S32: MRR leaving a product, a currency and a customer settles, at once and at a period's end, the totals falling to none.
