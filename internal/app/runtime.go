@@ -250,6 +250,8 @@ type Runtime struct {
 	riverCompositionSealed bool
 	riverClosed            atomic.Bool
 	riverContributions     []riverhelpers.Contribution
+	// riverWorkers are the workers the composition registered.
+	riverWorkers           []any
 	riverCompositionFailed bool
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool

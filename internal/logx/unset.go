@@ -12,7 +12,8 @@ var loggerType = reflect.TypeFor[*slog.Logger]()
 
 // Unset is the path of every nil logger reachable from v: each Log or log
 // field of an OpenRails struct, through pointers, interfaces, slices, arrays
-// and maps of OpenRails' own types.
+// and maps of OpenRails' own types. It reads v without its locks, so nothing
+// may run on v meanwhile: walk an engine or server after Close.
 func Unset(v any) []string {
 	w := walker{seen: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), reflect.TypeOf(v).String())
