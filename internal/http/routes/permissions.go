@@ -13,6 +13,14 @@ import (
 // merchant names Root alone.
 type Pair struct{ Merchant, Root billing.Permission }
 
+// reads reports a pair whose action only reads.
+func (p Pair) reads() bool {
+	if p.Merchant != "" {
+		return p.Merchant.Action() == "read"
+	}
+	return p.Root.Action() == "read"
+}
+
 // Names are the pair's names, Merchant's first.
 func (p Pair) Names() []billing.Permission {
 	var out []billing.Permission
@@ -65,9 +73,13 @@ var (
 	needProvisioning     = Pair{billing.MerchantProvisioningManage, billing.RootProvisioningManage}
 )
 
-// Needs is the pair a route checks: a staff route's group's (and level's), a
-// programmatic or provisioning route's own, none for any other route.
+// Needs is the pair a route checks: a staff route's own, else its group's
+// (and level's); a programmatic or provisioning route's own; none for any
+// other route.
 func (r Route) Needs() Pair {
+	if r.Staff() && r.Permission != (Pair{}) {
+		return r.Permission
+	}
 	switch r.Group {
 	case CatalogAdmin:
 		if r.Level == LevelRead {

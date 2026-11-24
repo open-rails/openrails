@@ -116,7 +116,7 @@ its role's permissions. Grant only what the backend needs:
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
-| push the customer directory over SCIM | `merchant:provisioning:read`, `merchant:provisioning:manage` |
+| push the customer directory over SCIM, or mint its provisioning tokens | `merchant:provisioning:read`, `merchant:provisioning:manage` |
 
 Each permission also has a `root:` name, held in your auth's root scope for
 every merchant; `billing.Permissions()` lists them and roles should be built

@@ -215,7 +215,8 @@ type Route struct {
 	Level Level
 	// Permission is an application or provisioning route's: the pair its
 	// caller holds one of. A staff route's follows from its Group and Level
-	// (Needs). A tier that checks one never goes without (authority).
+	// (Needs) unless it names its own. A tier that checks one never goes
+	// without (authority).
 	Permission Pair
 	// Sensitive: a customer operation needs a recent sign-in. Only a
 	// customer route declares it.
@@ -392,13 +393,35 @@ func (r Route) authority() error {
 		return fmt.Errorf("a %s route checks no permission, so it cannot name one", r.Auth)
 	}
 	programmatic := r.Auth == AuthApplication || r.Auth == AuthProvisioning
-	if programmatic != (r.Permission != Pair{}) {
-		return fmt.Errorf("a programmatic route, and only one, names its permission")
-	}
-	if r.Sensitive && r.Auth != AuthCustomer {
+	switch {
+	case programmatic && r.Permission == (Pair{}):
+		return fmt.Errorf("a programmatic route names its permission")
+	case !programmatic && !r.Staff() && r.Permission != (Pair{}):
+		return fmt.Errorf("only a staff or programmatic route names its own permission")
+	case r.Sensitive && r.Auth != AuthCustomer:
 		return fmt.Errorf("only a customer operation asks for a recent sign-in")
+	case r.Sensitive && r.PayURL != "":
+		return fmt.Errorf("a pay URL proves no recent sign-in, so a sensitive route is not served under one")
+	case (r.Auth == AuthProvider) != (r.Group == Webhooks):
+		return fmt.Errorf("a provider callback, and only one, is checked by its signature")
+	}
+	if read := r.Needs().reads(); r.Method != GET && !free && read != queryRoutes[r.Key()] {
+		return fmt.Errorf("a route other than a GET writes, and needs a manage permission, unless queryRoutes lists it as a read")
 	}
 	return r.Needs().check()
+}
+
+// queryRoutes are the routes other than a GET that only read: previews,
+// checks and queries whose body is the question. Every other route other than
+// a GET writes.
+var queryRoutes = map[string]bool{
+	"POST /v1/admin/subscriptions/{id}/change/preview": true,
+	"POST /v1/console/catalog/ask":                     true,
+	"POST /v1/catalog/price-migrations/preview":        true,
+	"POST /v1/merchant/psps/routing-preview":           true,
+	"POST /v1/merchant/messages/preview":               true,
+	"POST /v1/metrics/query":                           true,
+	"POST /v1/app/entitlements/check":                  true,
 }
 
 // validate is every rule a catalog declaration keeps; the catalog refuses to

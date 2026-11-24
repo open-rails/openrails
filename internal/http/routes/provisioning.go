@@ -46,16 +46,18 @@ var provisioningRoutes = []Route{
 	{Method: POST, Path: "/v1/app/scim/v2/Bulk", Group: App, Auth: AuthProvisioning, Permission: needProvisioning, When: FeatureCustomerProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).Bulk)},
 
-	// The merchant's provisioning tokens.
-	{Method: GET, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelRead, Auth: AuthMerchant, Name: "ListProvisioningTokens",
+	// The merchant's provisioning tokens: each grants SCIM's routes, so
+	// minting or revoking one is the provisioning permission's, not merely the
+	// configuration's.
+	{Method: GET, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, Permission: needProvisioningRead, When: FeatureCustomerProvisioning, Level: LevelRead, Auth: AuthMerchant, Name: "ListProvisioningTokens",
 		Doc: "ListProvisioningTokens lists the merchant's provisioning tokens, oldest first; their secrets are " +
 			"never read back.",
 		Query: billing.ProvisioningTokenListParams{}, Responses: []Reply{{200, billing.ListPage[billing.ProvisioningToken]{}}}, Handler: h(handlers.ListProvisioningTokens)},
-	{Method: POST, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreateProvisioningToken",
+	{Method: POST, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, Permission: needProvisioning, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "CreateProvisioningToken",
 		Doc: "CreateProvisioningToken mints a token the merchant's directory presents at /scim/v2 as its bearer. " +
 			"The answer holds the token, which is never shown again.",
 		Request: billing.CreateProvisioningTokenParams{}, Responses: []Reply{{201, billing.CreatedProvisioningToken{}}}, Errors: codes("invalid_param"), Handler: h(handlers.CreateProvisioningToken)},
-	{Method: DELETE, Path: "/v1/merchant/provisioning-tokens/{id}", Group: MerchantConfig, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "DeleteProvisioningToken",
+	{Method: DELETE, Path: "/v1/merchant/provisioning-tokens/{id}", Group: MerchantConfig, Permission: needProvisioning, When: FeatureCustomerProvisioning, Level: LevelUpdate, Auth: AuthMerchant, Name: "DeleteProvisioningToken",
 		Args:      []any{billing.ProvisioningTokenID{}},
 		Doc:       "DeleteProvisioningToken revokes a provisioning token: the next request presenting it is refused.",
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.DeleteProvisioningToken)},

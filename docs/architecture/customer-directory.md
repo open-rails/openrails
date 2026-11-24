@@ -94,8 +94,7 @@ minute.
   `Contact`; `Client.CreateProvisioningToken`, `ListProvisioningTokens`,
   `DeleteProvisioningToken`.
 - HTTP: `{Prefix}/v1/app/scim/v2` (`/Users`, `/Users/{id}`, `/Bulk`, `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`; `merchant:provisioning:read`, `merchant:provisioning:manage`) and
-  `/v1/merchant/provisioning-tokens` (`merchant:config:read`,
-  `merchant:config:manage`). [Routes](../api/routes.md).
+  `/v1/merchant/provisioning-tokens` (`merchant:provisioning:read`, `merchant:provisioning:manage`: a token grants SCIM's routes, so it is the provisioning permission's to mint or revoke). [Routes](../api/routes.md).
 - Configuration: `secrets.scim_token` in a merchant declaration or Vault document
   ([merchant configuration](../client.md#merchant-configuration-and-psps)).
 

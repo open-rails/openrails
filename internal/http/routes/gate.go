@@ -415,7 +415,11 @@ func needs(route Route, a billingauth.Authenticator) Pair {
 	}
 	known := asked(a, pair)
 	if known == (Pair{}) {
-		panic(MountError{Route: route.Key(), Reason: fmt.Sprintf("Routes.Auth knows none of its permissions %q", pair.Names())})
+		reason := fmt.Sprintf("Routes.Auth knows none of its permissions %q", pair.Names())
+		if route.When == FeatureCustomerProvisioning {
+			reason += "; the SCIM routes and provisioning tokens are mounted because RouteGroups.Programmatic is on and Deps.UserInfo is unset: declare them, or set Deps.UserInfo"
+		}
+		panic(MountError{Route: route.Key(), Reason: reason})
 	}
 	return known
 }
@@ -657,9 +661,9 @@ func init() {
 }
 
 // recheck is each gated handler's own check, wrapped directly around it: a
-// customer route runs only with the customer scope the gate bound, a
-// merchant route only with the staff member it admitted for this route's
-// permission, at the merchant the request is pinned to. Whatever runs
+// customer route runs only with the customer scope the gate bound, a staff,
+// programmatic, provisioning or access route only with the caller it
+// admitted for this route, at the merchant the request is pinned to. Whatever runs
 // between the gate and the handler, a missing verdict is a 401.
 func recheck(route Route, h router.Handler) router.Handler {
 	switch route.Auth {
@@ -674,12 +678,12 @@ func recheck(route Route, h router.Handler) router.Handler {
 			}
 			h(r)
 		}
-	case AuthMerchant:
+	case AuthMerchant, AuthApplication, AuthProvisioning, AuthSignedIn:
 		return func(r *httprequest.Request) {
 			staff, ok := billingauth.StaffFromContext(r.Request.Context())
 			mid, pinned := merchant.FromContext(r.Request.Context())
 			if !ok || staff.Route != route.Key() || !pinned || mid != staff.Merchant {
-				refuseCode(r, route, nil, billing.CodeAuthenticationRequired, "a merchant handler ran without the route gate's staff member")
+				refuseCode(r, route, nil, billing.CodeAuthenticationRequired, "a staff or programmatic handler ran without the route gate's caller")
 				return
 			}
 			h(r)
@@ -775,6 +779,9 @@ func (e *Env) provisioningGate(route Route) router.Middleware {
 					return
 				}
 				pin(r, target)
+				if !expectedMerchant(r, target.MerchantID) {
+					return
+				}
 				bindStaff(r, provisioningActor(id), route, target)
 				admitted(r)
 			})

@@ -250,16 +250,36 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, status, "a refused write provisions no User: "+string(raw))
 
 		admitted := uuid.NewString()
+		// A create answers the User it made, as SCIM says, though the writer
+		// cannot read it back.
 		status, raw = a.request(t, "POST", scimUsers, writer, scimUser(admitted, "admitted"))
 		require.Equal(t, http.StatusCreated, status, string(raw))
+		require.Contains(t, string(raw), admitted)
 		status, raw = a.request(t, "GET", scimUsers+"/"+admitted, reader, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Contains(t, string(raw), "admitted")
-		// The provisioning token is the explicit exception: it is its own grant.
-		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
+		// A token grants SCIM's routes, so minting, listing or revoking one
+		// takes the provisioning pair, not merely the configuration's.
+		for _, request := range []struct{ method, path string }{{"POST", "/v1/merchant/provisioning-tokens"}, {"GET", "/v1/merchant/provisioning-tokens"}} {
+			status, raw := a.request(t, request.method, request.path, without, billing.CreateProvisioningTokenParams{Name: "escalation"})
+			require.Equal(t, http.StatusForbidden, status, string(raw))
+			require.Contains(t, string(raw), `"code":"permission_required"`)
+		}
+		tokens := a.remote(t, a.alpha.MerchantID(), roleKey(t, a, "token-minter", billing.MerchantProvisioningManage))
+		token, err := tokens.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
 		require.NoError(t, err)
+		// The provisioning token is the explicit exception: it is its own
+		// grant, bound to its merchant, and honors the expected-merchant check.
 		status, raw = a.request(t, "GET", scimUsers+"/"+admitted, token.Token, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
+		status, raw = a.request(t, "GET", scimUsers+"/"+admitted, token.Token, nil, map[string]string{"OpenRails-Expected-Merchant": a.beta.MerchantID().String()})
+		require.Equal(t, http.StatusPreconditionFailed, status, string(raw))
+		// An application's access read names the provisioning permissions it
+		// holds.
+		access, err := a.remote(t, a.alpha.MerchantID(), writer).GetAdminAccess(t.Context())
+		require.NoError(t, err)
+		require.Contains(t, access.ApplicationPermissions, billing.MerchantProvisioningManage)
+		require.NotContains(t, access.ApplicationPermissions, billing.MerchantProvisioningRead)
 		customer, err := a.alpha.GetCustomer(t.Context(), billing.CustomerID(uuid.MustParse(admitted)))
 		require.NoError(t, err)
 		require.NotNil(t, customer.Contact)

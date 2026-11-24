@@ -13515,8 +13515,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:read",
-          "root": "root:config:read"
+          "merchant": "merchant:provisioning:read",
+          "root": "root:provisioning:read"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
@@ -13573,8 +13573,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13627,8 +13627,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [

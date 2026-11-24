@@ -201,9 +201,9 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/proposals/approve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ApproveProposalsParams` | 200 `ProposalResults` | person; `Idempotency-Key` |
 | POST | `/v1/merchant/proposals/dismiss` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DismissProposalsParams` | 200 `ProposalResults` | person |
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProvisioningToken>` | when `customer_provisioning` |
-| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | when `customer_provisioning` |
-| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `customer_provisioning` |
+| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `ListPage<ProvisioningToken>` | when `customer_provisioning` |
+| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | when `customer_provisioning` |
+| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:provisioning:manage`<br>`root:provisioning:manage` | — | 204 — | when `customer_provisioning` |
 
 ## Business metrics
 
