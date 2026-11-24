@@ -208,6 +208,8 @@ func paymentBooksFrom(payment uuid.UUID, rows []gen.ListPaymentBooksLegsRow) pay
 			l.reopened += row.Amount
 		case typ == DisputeWon && (op == OpDisputeWonReopened || op == OpDisputeWonRevenue):
 			l.reopened -= row.Amount
+		case typ == DisputeWon && op == OpDisputeWonLoss:
+			// A usage chargeback's loss given back: no unapplied cash moves.
 		case typ == CashApplied && row.RevenueScheduleID == nil:
 			// A credit lot funded from what a usage order payment's won
 			// dispute returned to unapplied cash takes it from there again.

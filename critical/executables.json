@@ -2314,6 +2314,7 @@
     "OR-J40-S22": [
       "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/invoiced",
       "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/charged-back",
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/terms-withdrawn",
       "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path"
     ],
     "OR-J40-S27": [
@@ -2325,6 +2326,8 @@
     "OR-J40-S29": [
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refunds",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-then-chargeback",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-chargeback-then-won",
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-reserved-then-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
     ]
   }

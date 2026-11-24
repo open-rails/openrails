@@ -35,12 +35,13 @@ SELECT EXISTS (
       AND operation IN ('usage_collection', 'usage_collection_revenue')
 )::boolean AS posted;
 
--- name: PaymentReversalPosted :one
--- Whether the general ledger holds a posting of a payment's reversal.
+-- name: HasPendingReopenedOwed :one
+-- Whether owed a chargeback reopened waits for a usage order.
 SELECT EXISTS (
-    SELECT 1 FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment' AND source_id = sqlc.arg(reversal_id)::text
-)::boolean AS posted;
+    SELECT 1 FROM billing.owed_items
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
+      AND order_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
+)::boolean AS reopened;
 
 -- name: ListUsagePaymentReversals :many
 -- A usage order payment's settled reversals (refunds, chargebacks and won

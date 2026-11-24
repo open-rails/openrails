@@ -286,6 +286,18 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if cur == nil {
 			// A currency without usage billing is not checked again until its
 			// terms are; previously accepted payment operations still recover.
+			// Owed a chargeback reopened needs no terms: it is billed.
+			if reopened, err := q.HasPendingReopenedOwed(ctx, gen.HasPendingReopenedOwedParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
+				return err
+			} else if reopened {
+				owed, err := s.moneyLedger(q, mid.UUID()).OutstandingOwed(ctx, customer, currency)
+				if err != nil {
+					return err
+				}
+				if billed, err = s.billPendingUsage(ctx, s.db.NewWithPgxTx(tx), customer, currency, owed, usageTerms{}, now); err != nil {
+					return err
+				}
+			}
 			return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: now})
 		}
 		row, err := s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)

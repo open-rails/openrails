@@ -41,6 +41,9 @@ const (
 	// collects from the receivable is at OpDisputeWonReopened, the rest at
 	// OpDisputeWon.
 	OpDisputeWonRevenue Operation = "dispute_won_revenue"
+	// OpDisputeWonLoss gives back what a usage order payment's chargeback
+	// lost to chargebacks.
+	OpDisputeWonLoss Operation = "dispute_won_loss"
 )
 
 // Receivable is what the general ledger holds receivable from a customer in
@@ -217,54 +220,62 @@ type UsageReversal struct {
 	// Unapplied is what of the payment's cash unapplied cash still held
 	// before a chargeback.
 	Unapplied int64
+	// Loss is what the payment's chargebacks lost to chargebacks that no
+	// recovery has given back yet, before a recovery.
+	Loss int64
 }
 
 // ReopenUsage posts a chargeback of a usage order payment, all at
-// (chargeback, payment, its id): the owed it reopened is receivable again,
-// usage_reopened DR usage_receivable / CR the payment's cash account; the
-// rest of the cash leaves what the payment still has in unapplied cash
-// (cash_returned), and beyond that is a loss to chargebacks
+// (chargeback, payment, its id), and returns its loss: the owed it reopened
+// is receivable again, usage_reopened DR usage_receivable / CR the payment's
+// cash account; the rest of the cash leaves what the payment still holds in
+// unapplied cash (cash_returned), and beyond that is a loss to chargebacks
 // (chargeback_recognized): cash a credit lot already took, such as the
 // change of a card's rounding.
-func (b *Books) ReopenUsage(ctx context.Context, r UsageReversal) error {
+func (b *Books) ReopenUsage(ctx context.Context, r UsageReversal) (int64, error) {
 	amount := -r.Reversal.Amount
-	if amount <= 0 || CheckCurrency(r.Reversal.Currency) != nil {
-		return nil
-	}
-	customer := r.Reversal.CustomerID
-	reopened := min(r.Owed, amount)
-	returned := min(amount-reopened, max(r.Unapplied, 0))
-	cash := CashAccount(r.Original)
-	return b.reversalLegs(ctx, r.Reversal, []reversalLeg{
-		{Ref{Type: UsageReceivable, Customer: &customer}, cash, reopened, UsageReopened, OpChargeback},
-		{Ref{Type: UnappliedCash}, cash, returned, CashReturned, OpChargeback},
-		{Ref{Type: Chargebacks}, cash, amount - reopened - returned, ChargebackRecognized, OpChargeback},
-	})
-}
-
-// ResettleUsage posts a won dispute's recovery of a usage order payment and
-// returns what it brought beyond the owed it settled again: that owed leaves
-// the receivable as far as it holds it (dispute_won DR the cash account / CR
-// usage_receivable, at dispute_won_reopened), owed from before the books is
-// usage revenue (at dispute_won_revenue), and the rest is unapplied cash (at
-// dispute_won), the customer's, for the caller to credit.
-func (b *Books) ResettleUsage(ctx context.Context, r UsageReversal) (int64, error) {
-	amount := r.Reversal.Amount
 	if amount <= 0 || CheckCurrency(r.Reversal.Currency) != nil {
 		return 0, nil
 	}
 	customer := r.Reversal.CustomerID
+	reopened := min(r.Owed, amount)
+	returned := min(amount-reopened, max(r.Unapplied, 0))
+	loss := amount - reopened - returned
+	cash := CashAccount(r.Original)
+	return loss, b.reversalLegs(ctx, r.Reversal, []reversalLeg{
+		{Ref{Type: UsageReceivable, Customer: &customer}, cash, reopened, UsageReopened, OpChargeback},
+		{Ref{Type: UnappliedCash}, cash, returned, CashReturned, OpChargeback},
+		{Ref{Type: Chargebacks}, cash, loss, ChargebackRecognized, OpChargeback},
+	})
+}
+
+// ResettleUsage posts a won dispute's recovery of a usage order payment and
+// returns what it gave back of the chargebacks' loss and what it brought
+// beyond: the owed it settled again leaves the receivable as far as it holds
+// it (dispute_won DR the cash account / CR usage_receivable, at
+// dispute_won_reopened), owed from before the books is usage revenue (at
+// dispute_won_revenue), the chargebacks' loss comes back from chargebacks (at
+// dispute_won_loss), and the rest is unapplied cash (at dispute_won), the
+// customer's, for the caller to credit.
+func (b *Books) ResettleUsage(ctx context.Context, r UsageReversal) (reversed, excess int64, err error) {
+	amount := r.Reversal.Amount
+	if amount <= 0 || CheckCurrency(r.Reversal.Currency) != nil {
+		return 0, 0, nil
+	}
+	customer := r.Reversal.CustomerID
 	receivable, err := b.Receivable(ctx, customer, r.Reversal.Currency)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	owed := min(r.Owed, amount)
 	settled := min(owed, max(receivable, 0))
+	reversed = min(amount-owed, max(r.Loss, 0))
+	excess = amount - owed - reversed
 	cash := CashAccount(r.Original)
-	excess := amount - owed
-	return excess, b.reversalLegs(ctx, r.Reversal, []reversalLeg{
+	return reversed, excess, b.reversalLegs(ctx, r.Reversal, []reversalLeg{
 		{cash, Ref{Type: UsageReceivable, Customer: &customer}, settled, DisputeWon, OpDisputeWonReopened},
 		{cash, Ref{Type: UsageRevenue}, owed - settled, DisputeWon, OpDisputeWonRevenue},
+		{cash, Ref{Type: Chargebacks}, reversed, DisputeWon, OpDisputeWonLoss},
 		{cash, Ref{Type: UnappliedCash}, excess, DisputeWon, OpDisputeWon},
 	})
 }

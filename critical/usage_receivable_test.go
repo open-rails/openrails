@@ -187,6 +187,31 @@ func TestUsageReceivable(t *testing.T) {
 			owedIsReceivable(t, a, customer, 0)
 			receivableAudited(t, w, false)
 		})
+		t.Run("terms-withdrawn", func(t *testing.T) {
+			// The merchant stops billing usage in dollars; the reopened debt
+			// needs no usage terms and is billed still.
+			a, customer, payment, fleet := cardCollectedUsage(t)
+			w := a.world
+			ctx, service := paymentService(t, w)
+			_, err := service.Refund(ctx, payment.UUID(), "terms-chargeback", 500_000, payments.ReversalChargeback)
+			require.NoError(t, err)
+			_, err = a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{
+				UsageBilling: &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "EUR", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}}})
+			require.NoError(t, err)
+			runUsageDue(t, fleet)
+			require.Eventually(t, func() bool {
+				rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+				if err != nil || len(rows.Items) != 2 {
+					return false
+				}
+				for _, o := range rows.Items {
+					if o.Total == 500_000 {
+						return true
+					}
+				}
+				return false
+			}, 15*time.Second, 20*time.Millisecond, "the reopened debt is billed without usage terms")
+		})
 	})
 	t.Run("OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true)
@@ -250,8 +275,10 @@ func TestUsageReceivable(t *testing.T) {
 		}, 15*time.Second, 20*time.Millisecond)
 		owedIsReceivable(t, a, customer, 0)
 
-		// Then the dispute is won: the customer has paid twice, so all $14.33
-		// is theirs, a credit lot at face with a finding for the merchant.
+		// Then the dispute is won: the chargeback's $0.009 loss comes back
+		// first (the change lot is still the customer's), and the customer,
+		// having paid twice, is credited the other $14.321 at face, with a
+		// finding for the merchant.
 		original, err := service.GetByID(ctx, payment.UUID())
 		require.NoError(t, err)
 		kind := payments.ReversalDisputeReversal
@@ -263,9 +290,10 @@ func TestUsageReceivable(t *testing.T) {
 			PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 		}))
 		owedIsReceivable(t, a, customer, 0)
-		require.Equal(t, []int64{14_330_000}, glLegs(t, w, "dispute_won"))
+		require.Equal(t, []int64{9_000, 14_321_000}, glLegs(t, w, "dispute_won"))
+		require.Equal(t, [2]int64{9_000, 9_000}, booksTotal(t, w, "general", "chargebacks"), "the loss is reversed")
 		require.Zero(t, glBalance(t, w, "unapplied_cash"), "nothing is left unapplied")
-		balance(t, a.alpha, customer, 14_348_000, 0, 14_348_000)
+		balance(t, a.alpha, customer, 14_339_000, 0, 14_339_000)
 		lots, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer, Currency: "USD"})
 		require.NoError(t, err)
 		var credited int64
@@ -274,7 +302,7 @@ func TestUsageReceivable(t *testing.T) {
 				credited += lot.Amount
 			}
 		}
-		require.EqualValues(t, 14_330_000, credited)
+		require.EqualValues(t, 14_321_000, credited)
 		findings, err := a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: "books.dispute.customer_credit"})
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1)
@@ -313,6 +341,50 @@ func TestUsageReceivable(t *testing.T) {
 			require.Equal(t, []int64{9_321_000}, glLegs(t, w, "usage_reopened"))
 			require.Equal(t, [2]int64{0, 5_000_000}, booksTotal(t, w, "general", "refunds"))
 			require.Equal(t, [2]int64{0, 9_000}, booksTotal(t, w, "general", "chargebacks"))
+			require.Zero(t, glBalance(t, w, "unapplied_cash"))
+			receivableAudited(t, w, false)
+		})
+		t.Run("refund-chargeback-then-won", func(t *testing.T) {
+			// The dispute after the refund is won: it settles the reopened
+			// $9.321 again and gives back the $0.009 loss; nothing is left to
+			// credit.
+			a, customer, payment, _ := surplusCollectedUsage(t)
+			w := a.world
+			_, err := a.alpha.RefundPayment(t.Context(), "won-goodwill", payment, billing.RefundPaymentParams{Amount: 5_000_000, Reason: "Goodwill"})
+			require.NoError(t, err)
+			ctx, service := paymentService(t, w)
+			chargeback, err := service.Refund(ctx, payment.UUID(), "won-chargeback", 9_330_000, payments.ReversalChargeback)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 9_321_000)
+			win(t, w, service, payment, chargeback.ID, 9_330_000, "won-recovery")
+			owedIsReceivable(t, a, customer, 0)
+			require.Equal(t, [2]int64{9_000, 9_000}, booksTotal(t, w, "general", "chargebacks"))
+			require.Equal(t, [2]int64{0, 5_000_000}, booksTotal(t, w, "general", "refunds"))
+			require.Zero(t, glBalance(t, w, "unapplied_cash"))
+			balance(t, a.alpha, customer, 9_000, 0, 9_000)
+			findings, err := a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: "books.dispute.customer_credit"})
+			require.NoError(t, err)
+			require.Empty(t, findings.Items, "the customer is owed no credit")
+			receivableAudited(t, w, false)
+		})
+		t.Run("refund-reserved-then-chargeback-then-won", func(t *testing.T) {
+			// A refund reserved before the chargeback settles after it: the
+			// chargeback reopened what it reopened as it posted, so its won
+			// dispute settles all of it.
+			a, customer, payment, _ := surplusCollectedUsage(t)
+			w := a.world
+			ctx, service := paymentService(t, w)
+			reserved, err := service.ReserveRefund(ctx, payment.UUID(), "reserved-refund", 5_000_000, billing.RefundRequestedByCustomer, nil)
+			require.NoError(t, err)
+			chargeback, err := service.Refund(ctx, payment.UUID(), "reserved-chargeback", 9_330_000, payments.ReversalChargeback)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 9_330_000)
+			_, err = service.CompleteRefundReservation(ctx, reserved.ID, "reserved-refund-settled", nil)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 9_330_000)
+			win(t, w, service, payment, chargeback.ID, 9_330_000, "reserved-recovery")
+			owedIsReceivable(t, a, customer, 0)
+			require.Equal(t, [2]int64{0, 5_000_000}, booksTotal(t, w, "general", "refunds"))
 			require.Zero(t, glBalance(t, w, "unapplied_cash"))
 			receivableAudited(t, w, false)
 		})
@@ -422,6 +494,22 @@ func collected(t *testing.T, w *world, op string) []int64 {
 	out, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 	require.NoError(t, err)
 	return out
+}
+
+// win records a won dispute's recovery of amount of a chargeback, as the
+// Stripe webhook records one.
+func win(t *testing.T, w *world, service *payments.PaymentService, payment billing.PaymentID, chargeback uuid.UUID, amount int64, key string) {
+	t.Helper()
+	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+	original, err := service.GetByID(ctx, payment.UUID())
+	require.NoError(t, err)
+	kind := payments.ReversalDisputeReversal
+	require.NoError(t, service.Create(ctx, &models.Payment{
+		ID: uuid.New(), CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Rail: original.Rail, PspID: original.PspID,
+		TransactionID: key, Metadata: map[string]any{"reverses_payment_id": chargeback.String()}, Amount: amount, ListAmount: original.ListAmount,
+		Currency: original.Currency, ReversalKind: &kind, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
+		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
+	}))
 }
 
 // paymentService is the payments service a provider's notices record

@@ -88,6 +88,28 @@ func (q *Queries) GetUsageAllowance(ctx context.Context, arg GetUsageAllowancePa
 	return i, err
 }
 
+const hasPendingReopenedOwed = `-- name: HasPendingReopenedOwed :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.owed_items
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+      AND order_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
+)::boolean AS reopened
+`
+
+type HasPendingReopenedOwedParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Whether owed a chargeback reopened waits for a usage order.
+func (q *Queries) HasPendingReopenedOwed(ctx context.Context, arg HasPendingReopenedOwedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingReopenedOwed, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var reopened bool
+	err := row.Scan(&reopened)
+	return reopened, err
+}
+
 const listUsagePaymentReopenings = `-- name: ListUsagePaymentReopenings :many
 SELECT source_id, transfer_type, amount
 FROM billing.ledger_transfers
@@ -275,26 +297,6 @@ func (q *Queries) LockUsageReceivable(ctx context.Context, arg LockUsageReceivab
 	var receivable int64
 	err := row.Scan(&receivable)
 	return receivable, err
-}
-
-const paymentReversalPosted = `-- name: PaymentReversalPosted :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.ledger_transfers
-    WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment' AND source_id = $2::text
-)::boolean AS posted
-`
-
-type PaymentReversalPostedParams struct {
-	MerchantID uuid.UUID
-	ReversalID string
-}
-
-// Whether the general ledger holds a posting of a payment's reversal.
-func (q *Queries) PaymentReversalPosted(ctx context.Context, arg PaymentReversalPostedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, paymentReversalPosted, arg.MerchantID, arg.ReversalID)
-	var posted bool
-	err := row.Scan(&posted)
-	return posted, err
 }
 
 const usageCollectionPosted = `-- name: UsageCollectionPosted :one
