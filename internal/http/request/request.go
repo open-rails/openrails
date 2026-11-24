@@ -680,3 +680,33 @@ func setField(fv reflect.Value, raw string, tag reflect.StructTag) error {
 	}
 	return nil
 }
+
+// Record keeps a copy of the response r writes from now on, for a stored
+// replay; the returned func stops recording and answers its status and body.
+func (r *Request) Record() func() (int, []byte) {
+	rec := &recorder{ResponseWriter: r.w}
+	r.w = rec
+	return func() (int, []byte) {
+		r.w = rec.ResponseWriter
+		return rec.status, rec.body.Bytes()
+	}
+}
+
+type recorder struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (w *recorder) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *recorder) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
+}

@@ -2,6 +2,8 @@ module github.com/open-rails/openrails/examples
 
 go 1.26.10
 
+toolchain go1.26.11
+
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0

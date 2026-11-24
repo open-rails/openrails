@@ -2,6 +2,8 @@ module github.com/open-rails/openrails/server
 
 go 1.26.10
 
+toolchain go1.26.11
+
 // The root module at the same release; scripts/release pins it.
 require github.com/open-rails/openrails v0.282.0
 

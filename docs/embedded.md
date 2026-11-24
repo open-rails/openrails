@@ -349,8 +349,7 @@ runs no AuthKit ([`examples/own-auth`](../examples/own-auth/auth.go)):
 
 - `Authenticate(r)` reads the credential live: `auth.ErrUnauthenticated` for none
   or unknown, `auth.ErrUnavailable` when your store is down.
-- `Identity()` names your issuer, the user's UUID as subject (the customer id),
-  the user as its own invoker, and the credential.
+- `Identity()` names your issuer, the user's UUID as subject (the customer id), the user as its own invoker, and the credential. Only a `session`, `device_key` or `access_token` credential is the person in person, who pays and takes `Person` actions; any other kind (an API key, a personal access token) is refused there.
 - `RootScope` is your all-merchants staff scope; a merchant's scope is the same
   authority with the merchant's id. `BoundScope` is the merchant the credential
   acts at, zero for none (and for a single merchant that declares your issuer).

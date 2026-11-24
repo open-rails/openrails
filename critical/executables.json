@@ -25,6 +25,12 @@
     "OR-J01-S08": [
       "TestAuthorityBoundaries/OR-J01-S08/real-authority-storage-failure-denies-mutations"
     ],
+    "OR-J01-S18": [
+      "TestTenantBinding/OR-J01-S18/binding-adopts-once-and-never-changes"
+    ],
+    "OR-J01-S19": [
+      "TestTenantBinding/OR-J01-S19/a-customer-of-another-tenant-is-refused-at-me"
+    ],
     "OR-J03-S01": [
       "TestHostedCheckout/OR-J03-S01/capability-pays-only-its-order"
     ],
@@ -119,6 +125,9 @@
     "OR-J07-S04": [
       "TestCustomerDirectory/OR-J07-S04/live-host-directory-exposes-no-copied-write-authority"
     ],
+    "OR-J07-S06": [
+      "TestProvisioningTokenDeclaration/OR-J07-S06/a-shared-scim-token-provisions-only-its-holder"
+    ],
     "OR-J08-S01": [
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],
@@ -160,6 +169,9 @@
     ],
     "OR-J10-S04": [
       "TestPaymentReplay/OR-J10-S04/different-orders-remain-independent-obligations"
+    ],
+    "OR-J10-S06": [
+      "TestRequestIdempotency/OR-J10-S06/a-card-save-key-answers-one-saved-card"
     ],
     "OR-J11-S01": [
       "TestProviderRecovery/OR-J11-S01/accepted-payment-response-loss-recovers-without-new-debit"
@@ -374,6 +386,9 @@
     ],
     "OR-J21-S04": [
       "TestImportedReceipt/OR-J21-S04/import-preserves-receipt-refund-allowance-and-event-identity"
+    ],
+    "OR-J21-S61": [
+      "TestBillingImportBounds/OR-J21-S61/a-line-whose-list-total-overflows-is-refused"
     ],
     "OR-J22-S01": [
       "TestCredits/OR-J22-S01/reservation-capture-conserves-native-units"
@@ -649,6 +664,9 @@
     "OR-J27-S09": [
       "TestSubscriptionAccessRepairTerminated/OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation"
     ],
+    "OR-J27-S15": [
+      "TestRequestIdempotency/OR-J27-S15/a-grant-needs-its-key-and-replays-under-it"
+    ],
     "OR-J28-S01": [
       "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
     ],
@@ -814,6 +832,9 @@
     ],
     "OR-J01-S16": [
       "TestHostedOwnershipContracts/OR-J01-S16/host-admission-preserves-proof-and-billing-scope"
+    ],
+    "OR-J01-S17": [
+      "TestPersonalAccessTokens/OR-J01-S17/personal-access-token-never-acts-in-person"
     ],
     "OR-J22-S05": [
       "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"

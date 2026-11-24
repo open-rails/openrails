@@ -5289,7 +5289,7 @@
           "admin"
         ],
         "operationId": "CreateProductAccess",
-        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. A retry with idempotencyKey replays the first answer; with none, OpenRails names the batch itself.",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5345,6 +5345,7 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
+          "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
           "resource_not_found",
@@ -9209,6 +9210,8 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
+          "idempotency_key_in_use",
+          "idempotency_key_reused",
           "invalid_param",
           "payment_duplicate_refused",
           "payment_method_stale",

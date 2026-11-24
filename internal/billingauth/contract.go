@@ -51,19 +51,31 @@ type Credential = auth.Credential
 type CredentialKind = auth.CredentialKind
 
 const (
-	CredentialSession     = auth.CredentialSession
-	CredentialDeviceKey   = auth.CredentialDeviceKey
-	CredentialAPIKey      = auth.CredentialAPIKey
-	CredentialSignedToken = auth.CredentialSignedToken
-	CredentialAccessToken = auth.CredentialAccessToken
+	CredentialSession             = auth.CredentialSession
+	CredentialDeviceKey           = auth.CredentialDeviceKey
+	CredentialAPIKey              = auth.CredentialAPIKey
+	CredentialPersonalAccessToken = auth.CredentialPersonalAccessToken
+	CredentialSignedToken         = auth.CredentialSignedToken
+	CredentialAccessToken         = auth.CredentialAccessToken
+	// CredentialPayURL is a pay URL's secret: its order's customer at the
+	// checkout origin.
+	CredentialPayURL CredentialKind = "pay_url"
 )
 
-// Interactive reports a user acting in person: not an application, and not
-// a key or signed token automating the account. Only an interactive subject
-// starts a payment for itself.
+// Interactive reports a user acting itself in person: by a session, a device
+// key, an access token its issuer minted for it, or its order's pay URL. Any
+// other credential is not: an API key, a personal access token, a signed
+// token, or a kind this does not know. Only an interactive subject starts a
+// payment for itself or takes a Person action.
 func Interactive(who Identity) bool {
-	return who.SubjectKind == SubjectUser && SelfActing(who) &&
-		who.Credential.Kind != CredentialAPIKey && who.Credential.Kind != CredentialSignedToken
+	if who.SubjectKind != SubjectUser || !SelfActing(who) {
+		return false
+	}
+	switch who.Credential.Kind {
+	case CredentialSession, CredentialDeviceKey, CredentialAccessToken, CredentialPayURL:
+		return true
+	}
+	return false
 }
 
 // InvokerKey is the invoker as limits key it: the subject's own id when it

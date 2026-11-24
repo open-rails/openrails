@@ -3,7 +3,10 @@ users:
     username: operator
     email_verified: true
     password:
-      plaintext: "change-me"
+      # Required: a unique passphrase of your own. Empty is refused, so the
+      # example never seeds a known root password. A hash (hash, algo) or
+      # reset_required: true also works.
+      plaintext: ""
     root_role: root:owner
 
 remote_applications:

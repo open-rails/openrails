@@ -239,7 +239,9 @@ the deployment does not serve answers `404 route_not_found`.
 | Key | Default | Meaning |
 |---|---|---|
 | `db.url` | — | the connection string (`DB_URL`); overrides the parts below |
-| `db.host`, `db.port`, `db.database`, `db.username`, `db.password`, `db.sslmode` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.host`, `db.port`, `db.database`, `db.username`, `db.password` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
+| `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
 | `db.sql_trace` | `false` | log every query at debug level |
 | `db.lease_conns` | `4` | the separate pool for idempotency lease renewals; count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
@@ -281,7 +283,7 @@ boot. The ones a deployment sets:
 | `auth.registration.native_user_mode` | local enrollment: `invite_only` by default, `closed` turns it off; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
 | `auth.registration.allow_missing_senders` | run without an email or SMS sender |
 | `auth.sign_in.dpop` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | clients connect directly; behind a proxy set `trusted_proxies` instead (mutually exclusive) |
+| `auth.http.direct_peer_ip` | optional: AuthKit's client IP follows `trusted_proxies` and `cloudflare_proxies`, the socket peer when both are empty; `true` beside either refuses boot |
 | `auth.http.rate_limits` | AuthKit's own buckets |
 | `auth.database.schema` | AuthKit's tables, default `profiles` |
 | `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
@@ -711,12 +713,7 @@ console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks an
 the checkout origin. Give one public origin to `public_billing_base_url`,
 `auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists
-  the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted
-  hops. Without it rate limits, abuse tracking, request logs and webhook source
-  addresses all see the proxy. Use `auth.http.direct_peer_ip: true` only when
-  clients connect directly. Behind Cloudflare, list its ranges in
-  `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Behind Cloudflare, list its ranges in `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -1332,7 +1329,7 @@ ingress:
 | Value | Meaning |
 |---|---|
 | `replicaCount` | 1. More need Redis (`config.redis`) and `secrets.authKeys`: an ephemeral signing key is per pod |
-| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`), `digest` (pins over the tag), `pullPolicy` |
+| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
 | `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `private_port` are the chart's and refused here |
@@ -1340,7 +1337,7 @@ ingress:
 | `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
-| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), its Service port `metrics` and an optional Prometheus Operator `serviceMonitor` |
+| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is, and an optional Prometheus Operator `serviceMonitor` |
 | `service` | `type`, `port` (80), `annotations` |
 | `ingress` | `enabled`, `className`, `annotations`, `hosts` (every path to the server), `tls` |
 | `resources` | requests 100m and 256Mi, limits one CPU and 768Mi |
@@ -1355,6 +1352,12 @@ ingress:
 | `nameOverride`, `fullnameOverride` | resource names |
 
 A change to `config` or `files` rolls the pods.
+
+**Verifying the image.** Each release image carries a signed build-provenance attestation of its digest in both registries. Check it before pinning that digest in `image.digest`:
+
+```sh
+gh attestation verify oci://docker.io/openrails/openrails:vX.Y.Z --repo open-rails/openrails
+```
 
 **Secrets.** `secrets.env` takes CloudNativePG's app Secret directly
 (`DB_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator,

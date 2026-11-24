@@ -450,8 +450,8 @@ func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAc
 // CreateProductAccess grants 1 to billing.MaxBatchItems products free,
 // across any customers, all or none; the answer is in request order. Each
 // grant is a window of its product: the customer holds the product's current
-// keys while it is live. A retry with idempotencyKey replays the first
-// answer; with none, OpenRails names the batch itself.
+// keys while it is live. idempotencyKey is required: a retry with it replays
+// the first answer and grants nothing again.
 func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, items []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error) {
 	var out billing.CreateProductAccessBatchResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/product-access", idempotencyKey: idempotencyKey, body: billing.CreateProductAccessBatchParams{Items: items}}, &out); err != nil {

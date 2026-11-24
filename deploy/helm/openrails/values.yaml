@@ -10,7 +10,7 @@ replicaCount: 1
 
 image:
   repository: docker.io/openrails/openrails # or ghcr.io/open-rails/openrails
-  tag: "" # default: the chart's appVersion, vX.Y.Z
+  tag: "" # default: the chart's appVersion, vX.Y.Z; required from a checkout (appVersion latest)
   digest: "" # sha256:…; pins the image over the tag
   pullPolicy: IfNotPresent
 
@@ -87,7 +87,8 @@ envFrom: []
 ports:
   http: 3053
 
-# The private listener: GET /metrics, never routed by the ingress.
+# The private listener: GET /metrics, on its own ClusterIP Service
+# (<fullname>-metrics), never routed by the ingress.
 metrics:
   enabled: true
   port: 9090

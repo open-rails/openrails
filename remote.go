@@ -102,7 +102,8 @@ type RemoteOptions struct {
 	// success must name the merchant in OpenRails-Bound-Merchant.
 	Credentials map[billing.MerchantID]RemoteCredential
 	// HTTPClient is the transport (custom TLS or connection pooling). Nil
-	// uses Go's default.
+	// uses Go's default. The client never follows a redirect: a copy of it
+	// is used.
 	HTTPClient *http.Client
 	// Timeout bounds each call without extending the caller's deadline, also
 	// through HTTPClient. Zero leaves the caller's context and the transport
@@ -140,10 +141,7 @@ func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error) {
 	if len(opts.Credentials) == 0 {
 		return nil, fmt.Errorf("openrails: RemoteOptions.Credentials names no merchant")
 	}
-	r := &Remote{baseURL: baseURL, client: opts.HTTPClient, handles: make(map[billing.MerchantID]*Client, len(opts.Credentials))}
-	if r.client == nil {
-		r.client = &http.Client{}
-	}
+	r := &Remote{baseURL: baseURL, client: noRedirects(opts.HTTPClient), handles: make(map[billing.MerchantID]*Client, len(opts.Credentials))}
 	entitlementChecks, err := newEntitlementCheckCache(opts.EntitlementCheckCache)
 	if err != nil {
 		return nil, err
@@ -270,7 +268,19 @@ func (c *Client) checkBound(resp *http.Response) error {
 	return nil
 }
 
-// validateBaseURL is the I/O-free static check on the configured base URL.
+// noRedirects is a copy of client, Go's default when nil, that follows no
+// redirect: a credential is never replayed to another URL.
+func noRedirects(client *http.Client) *http.Client {
+	out := &http.Client{}
+	if client != nil {
+		*out = *client
+	}
+	out.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return out
+}
+
+// validateBaseURL is the I/O-free static check on the configured base URL:
+// https, or http on a loopback host.
 func validateBaseURL(baseURL string) error {
 	if baseURL == "" {
 		return fmt.Errorf("openrails: base URL is empty")
@@ -279,14 +289,11 @@ func validateBaseURL(baseURL string) error {
 	if err != nil {
 		return fmt.Errorf("openrails: invalid base URL %q: %w", baseURL, err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("openrails: invalid base URL %q: scheme must be http or https", baseURL)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("openrails: invalid base URL %q: missing host", baseURL)
-	}
-	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(baseURL, "#") {
+	if u.ForceQuery || strings.Contains(baseURL, "#") {
 		return fmt.Errorf("openrails: base URL must not contain credentials, query or fragment")
+	}
+	if err := config.ValidatePublicURL(baseURL, true, false); err != nil {
+		return fmt.Errorf("openrails: invalid base URL %q: %w", baseURL, err)
 	}
 	return nil
 }
