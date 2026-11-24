@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 538,
+  "scenario_count": 541,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -782,6 +782,21 @@
       "id": "OR-J24-S38",
       "journey": "J24",
       "name": "Usage counts in the spend windows of the invoker attributes it reports, batch usage with none in the customer's own"
+    },
+    {
+      "id": "OR-J24-S39",
+      "journey": "J24",
+      "name": "Without ClickHouse usage, admissions, limits, usage catalog declarations, usage settings and usage metrics answer event_store_required in process and over HTTP, a gate refuses for good, and subscriptions, credit packs, running charges and usage orders work"
+    },
+    {
+      "id": "OR-J24-S40",
+      "journey": "J24",
+      "name": "New applies the ClickHouse migrations once however often it starts, a checking start refuses an unmigrated store, and a store with another identity than the one the database recorded is refused"
+    },
+    {
+      "id": "OR-J24-S41",
+      "journey": "J24",
+      "name": "GET /v1/config reports usage true with ClickHouse and false without"
     },
     {
       "id": "OR-J25-S01",

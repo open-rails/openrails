@@ -10,6 +10,7 @@ var ownedTables = []string{
 	"user_destructive_reservations",
 	"balance_watches",
 	"book_identity",
+	"event_store",
 	"carts",
 	"catalog_applications",
 	"catalog_field_owners",

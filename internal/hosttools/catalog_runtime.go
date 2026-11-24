@@ -51,7 +51,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	}
 	// Mapping a provider price wakes the subscriptions parked on it.
 	bindParkWakes(ctx, cfg, database)
-	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: logger}
+	rt := &app.Runtime{DB: database, Config: cfg, EventStore: opts.EventStore, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: logger}
 	rt.StripeClients = stripeapi.ConfiguredFactory(cfg)
 	cleanup := func() {
 		cancel()

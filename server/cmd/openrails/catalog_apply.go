@@ -59,7 +59,12 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if err != nil {
 		return err
 	}
+	events, err := cliEventStore(cmd.Context())
+	if err != nil {
+		return err
+	}
 	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), slog.Default(), hosttools.CatalogApplyOptions{
+		EventStore:       events,
 		Config:           cfg,
 		PGXPool:          pool,
 		Vault:            vault,

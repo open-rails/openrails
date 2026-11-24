@@ -38,6 +38,15 @@ func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 
 func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
 	t.Helper()
+	a, p, customer := usageBillingAccount(t, enabled, manual, configure...)
+	usageMeter(t, a.alpha, 10_000_000)
+	return a, p, customer
+}
+
+// usageBillingAccount is alice with a saved card and a $30 USD credit line,
+// billed on the 25th.
+func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
+	t.Helper()
 	changes := append([]func(*world){func(w *world) {
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
 		w.cfg.UsageBillingEnabled = enabled
@@ -61,7 +70,6 @@ func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*wo
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice})})
 		require.NoError(t, err)
 	}
-	usageMeter(t, a.alpha, 10_000_000)
 	return a, p, customer
 }
 

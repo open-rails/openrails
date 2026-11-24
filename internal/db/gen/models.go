@@ -519,6 +519,13 @@ type BillingEventLogStream struct {
 	RecordedAt    time.Time
 }
 
+// Global by design, one row: the identity of the ClickHouse event store this database's usage lives in, recorded when one first attaches. New refuses a store with another identity: an empty or different ClickHouse.
+type BillingEventStore struct {
+	Singleton  bool
+	StoreID    uuid.UUID
+	AttachedAt time.Time
+}
+
 // Shared retained merchant facts. Retention: events expire after the configured event retention, independently of reader progress.
 type BillingEventlogEvent struct {
 	Source      string

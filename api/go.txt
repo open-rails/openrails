@@ -9,6 +9,7 @@ pkg openrails, const ReadMerchantConfiguration Read = "merchant_configuration"
 pkg openrails, const ReadMeters Read = "meters"
 pkg openrails, const ReadPublicConfig Read = "public_config"
 pkg openrails, func Migrate(context.Context, *pgxpool.Pool, DatabaseConfig) error
+pkg openrails, func MigrateClickHouse(context.Context, driver.Conn, ClickHouseConfig) error
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
 pkg openrails, func NewGate(*Client, GateDeps) (*Gate, error)
 pkg openrails, func NewRemote(string, RemoteOptions) (*Remote, error)
@@ -216,11 +217,14 @@ pkg openrails, type CardVaultConfig struct
 pkg openrails, type CardVaultConfig struct, KVMount string
 pkg openrails, type CardVaultConfig struct, Kind billing.CardVaultKind
 pkg openrails, type CardVaultConfig struct, TenantID string
+pkg openrails, type ClickHouseConfig struct
+pkg openrails, type ClickHouseConfig struct, Database string
 pkg openrails, type Client struct
 pkg openrails, type Config struct
 pkg openrails, type Config struct, Captcha *CaptchaConfig
 pkg openrails, type Config struct, CardVault *CardVaultConfig
 pkg openrails, type Config struct, CheckoutOrigin string
+pkg openrails, type Config struct, ClickHouse ClickHouseConfig
 pkg openrails, type Config struct, Database DatabaseConfig
 pkg openrails, type Config struct, DestructiveActionLimits DestructiveActionLimitsConfig
 pkg openrails, type Config struct, EngineAdmissionHold bool
@@ -259,6 +263,7 @@ pkg openrails, type DatabaseConfig struct, SkipMigrations bool
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, BasisTheoryTransport http.RoundTripper
 pkg openrails, type Deps struct, CheckoutAssets fs.FS
+pkg openrails, type Deps struct, ClickHouse driver.Conn
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, Email EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
@@ -538,6 +543,7 @@ pkg openrails/billing, const CodeDestructiveActionsHeld ErrorCode = "destructive
 pkg openrails/billing, const CodeEmbedOriginsRequired ErrorCode = "embed_origins_required"
 pkg openrails/billing, const CodeEntitlementRequired ErrorCode = "entitlement_required"
 pkg openrails/billing, const CodeEventCursorExpired ErrorCode = "event_cursor_expired"
+pkg openrails/billing, const CodeEventStoreRequired ErrorCode = "event_store_required"
 pkg openrails/billing, const CodeFindingActionFailed ErrorCode = "finding_action_failed"
 pkg openrails/billing, const CodeFindingNotActionable ErrorCode = "finding_not_actionable"
 pkg openrails/billing, const CodeFindingRequiresMerchantConfig ErrorCode = "finding_requires_merchant_config"
@@ -3730,6 +3736,7 @@ pkg openrails/billing, type PublicConfig struct, Capabilities Capabilities `json
 pkg openrails/billing, type PublicConfig struct, Captcha *CaptchaConfig `json:"captcha"`
 pkg openrails/billing, type PublicConfig struct, Currencies []catalog.CurrencyUnits `json:"currencies"`
 pkg openrails/billing, type PublicConfig struct, Rails []RailDefinition `json:"rails"`
+pkg openrails/billing, type PublicConfig struct, Usage bool `json:"usage"`
 pkg openrails/billing, type PublicMerchant struct
 pkg openrails/billing, type PublicMerchant struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type PublicMerchant struct, EmbedOrigins []string `json:"embed_origins"`
@@ -4313,6 +4320,7 @@ pkg openrails/billing, type WorkerHealth struct, TimeoutSeconds int64 `json:"tim
 pkg openrails/billing, var ErrCardDeclined error
 pkg openrails/billing, var ErrConflict error
 pkg openrails/billing, var ErrDenied error
+pkg openrails/billing, var ErrEventStoreRequired error
 pkg openrails/billing, var ErrIdempotencyKeyReused error
 pkg openrails/billing, var ErrInsufficientCredits error
 pkg openrails/billing, var ErrInternal error

@@ -14,6 +14,7 @@ func EngineConfig(c *config.Config) openrails.Config {
 		EngineAdmissionHold:     c.EngineAdmissionHold,
 		UsageBillingEnabled:     c.UsageBillingEnabled,
 		Database:                openrails.DatabaseConfig(c.Database),
+		ClickHouse:              openrails.ClickHouseConfig(c.ClickHouse),
 		Merchants:               c.Merchants,
 		PublicBillingBaseURL:    c.PublicBillingBaseURL,
 		ReturnOrigins:           c.ReturnOrigins,

@@ -41,6 +41,9 @@ func (s *Service) ApplyOperatorCatalog(ctx context.Context, document catalogwire
 }
 
 func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, origin string) (*billing.CatalogApplicationReceipt, error) {
+	if err := s.refuseUsageCatalog(params); err != nil {
+		return nil, err
+	}
 	if err := s.refuseCatalogUnits(ctx, params); err != nil {
 		return nil, err
 	}

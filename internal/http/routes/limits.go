@@ -24,19 +24,19 @@ var limitsRoutes = []Route{
 		Cache:     config.ReadMeters,
 		Doc:       "GetLimit reads one limit with the products that give it capacity.",
 		Responses: []Reply{{200, billing.Limit{}}}, Errors: codes(billing.CodeLimitNotFound), Handler: h(handlers.GetLimit)},
-	{Method: PUT, Path: "/v1/catalog/limits/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetLimit", Level: LevelUpdate,
+	{Method: PUT, Path: "/v1/catalog/limits/{key}", EventStore: true, Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetLimit", Level: LevelUpdate,
 		Args: []any{""},
 		Doc: "SetLimit declares the limit under key whole, creating it or changing it. A limit with windows keeps " +
 			"its unit (billing.ErrConflict).",
 		Request: billing.SetLimitParams{}, Responses: []Reply{{200, billing.Limit{}}}, Errors: codes(limitErrors...), Handler: h(handlers.SetLimit)},
 
-	{Method: GET, Path: "/v1/app/limits", Group: App, Auth: AuthApplication, Permission: needUsageRead, Name: "ListCustomerLimits",
+	{Method: GET, Path: "/v1/app/limits", EventStore: true, Group: App, Auth: AuthApplication, Permission: needUsageRead, Name: "ListCustomerLimits",
 		Doc: "ListCustomerLimits is where params.CustomerID stands on every limit in its current window, in one " +
 			"page.",
 		Query: billing.CustomerLimitListParams{}, Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Errors: withCustomer(), Handler: h(handlers.ListCustomerLimits)},
-	{Method: GET, Path: "/v1/me/limits", Group: Customer, Auth: AuthCustomer,
+	{Method: GET, Path: "/v1/me/limits", EventStore: true, Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
-	{Method: POST, Path: "/v1/app/leases/sync", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
+	{Method: POST, Path: "/v1/app/leases/sync", EventStore: true, Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
 		Doc: "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the " +
 			"lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request " +
 			"holds of the lease it releases and the customers whose views it asks for; it answers how far the " +
@@ -47,7 +47,7 @@ var limitsRoutes = []Route{
 			"usage posts as one deduction per customer and UTC day.",
 		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
 		Errors: codes("admission_not_found", "currency_unsupported", "idempotency_key_reused", "invalid_param", "resource_conflict", billing.CodeLeaseNotFound, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
-	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
+	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", EventStore: true, Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Args: []any{billing.CustomerID{}},
 		Doc: "AdjustCustomerLimit adds params.Amount to the capacity of the customer's current window of " +
 			"params.Limit only, and answers where it stands after. A retry with the same params.SourceID answers " +

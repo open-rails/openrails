@@ -29,6 +29,11 @@
 // reports, and limit_adjustments, 61 days after the last sync; usage_minutes 25 hours;
 // webhook_health_daily 13 months; periodic_leases after 30 days unscheduled.
 //
+// The event store's ClickHouse tables expire by their TTLs: usage_events 100
+// days after occurred_at, usage_quantities 100 days after the period start,
+// usage_minutes 2 days, usage_days 25 months, limit_usage 61 days after its
+// window ends (a window without an end stays).
+//
 // The cleanup job (openrails.cleanup_expired_data) creates partitions two
 // months ahead, drops expired ones (giving up after 2 s rather than queue
 // behind a long reader), then deletes 1,000 rows per statement and at most
