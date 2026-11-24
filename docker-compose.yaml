@@ -80,12 +80,8 @@ services:
       # Single public API surface. Server-to-server callers authenticate with
       # generated API keys or first-party service JWTs on this same port
       # (issue #222) — there is no separate private/mTLS service port.
-      - "127.0.0.1:${OPENRAILS_HOST_PORT:-3053}:3053"  # API (public + admin + service credential routes)
+      - "127.0.0.1:${PORT:-3053}:3053"  # API (public + admin + service credential routes)
     environment:
-      # Service runtime mode. ENV is REQUIRED by config.Load (SEC-18) — it has
-      # no default in the binary, because the permissive posture (plaintext
-      # merchant secrets) is the development one.
-
       # The zero-config Compose profile is an interactive sandbox, so provider
       # writes are enabled by default. Production still fail-closes to readonly
       # when this setting is omitted outside this local profile.
@@ -140,9 +136,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  go_mod_cache:
-    external: true
-    name: go_mod_cache_persistent
   openrails_auth_keys:
 
 networks:

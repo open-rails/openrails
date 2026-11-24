@@ -31,7 +31,8 @@ migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e5
 migration 0033_merchant_unit_spending.up.sql sha256:dd34eca4ad7958bbf2a0a3e51086d800637e7edccacbf7b416ffe37b1f1dcd93
 migration 0034_reporting_mrr.up.sql sha256:1ce46f787d8c7f33c7cf5c6d169911e87e22b135ea4ca9b15b1c295f0caba4d0
 migration 0035_dashboard_retired_mrr_measures.up.sql sha256:51fd4f28c5c9beb058121664bc24cb3738ea51761a3c87eaeafd9fec7c8fe7b3
-migration 0036_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
+migration 0036_books_reversals.up.sql sha256:390b570664add0417f7c4e3905dd0a71d520563b924aca5535256045ba8ca8d8
+migration 0037_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -71,6 +72,16 @@ table billing.book_identity
   constraint book_identity_singleton_check CHECK (singleton)
   index CREATE UNIQUE INDEX book_identity_pkey ON billing.book_identity USING btree (singleton)
   trigger CREATE TRIGGER book_identity_wake_dispute_responses AFTER INSERT OR UPDATE ON billing.book_identity FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+
+table billing.books_starts
+  column merchant_id uuid NOT NULL
+  column started_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint books_starts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint books_starts_pkey PRIMARY KEY (merchant_id)
+  index CREATE UNIQUE INDEX books_starts_pkey ON billing.books_starts USING btree (merchant_id)
+  trigger CREATE TRIGGER immutable_books_starts BEFORE DELETE OR UPDATE ON billing.books_starts FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_books_starts_truncate BEFORE TRUNCATE ON billing.books_starts FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.carts
   column merchant_id uuid NOT NULL
@@ -344,6 +355,26 @@ table billing.credit_grants
   trigger CREATE CONSTRAINT TRIGGER credit_grants_require_books AFTER INSERT ON billing.credit_grants DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.credit_grants_require_books()
   trigger CREATE TRIGGER guard_credit_grant_facts BEFORE INSERT OR DELETE OR UPDATE ON billing.credit_grants FOR EACH ROW EXECUTE FUNCTION billing.guard_credit_grant_facts()
   trigger CREATE TRIGGER immutable_credit_grants_truncate BEFORE TRUNCATE ON billing.credit_grants FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.credit_reversal_shares
+  column merchant_id uuid NOT NULL
+  column reversal_id uuid NOT NULL
+  column credit_grant_id uuid NOT NULL
+  column origin_id uuid NOT NULL
+  column cash bigint NOT NULL
+  column units bigint NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint credit_reversal_shares_cash_check CHECK ((cash >= 0))
+  constraint credit_reversal_shares_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants(merchant_id, id)
+  constraint credit_reversal_shares_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint credit_reversal_shares_origin_id_fkey FOREIGN KEY (merchant_id, origin_id) REFERENCES billing.payments(merchant_id, id)
+  constraint credit_reversal_shares_pkey PRIMARY KEY (merchant_id, reversal_id, credit_grant_id, origin_id)
+  constraint credit_reversal_shares_reversal_id_fkey FOREIGN KEY (merchant_id, reversal_id) REFERENCES billing.payments(merchant_id, id)
+  constraint credit_reversal_shares_units_check CHECK ((units >= 0))
+  index CREATE INDEX credit_reversal_shares_credit_grant_id_idx ON billing.credit_reversal_shares USING btree (merchant_id, credit_grant_id, origin_id)
+  index CREATE UNIQUE INDEX credit_reversal_shares_pkey ON billing.credit_reversal_shares USING btree (merchant_id, reversal_id, credit_grant_id, origin_id)
+  trigger CREATE TRIGGER immutable_credit_reversal_shares BEFORE DELETE OR UPDATE ON billing.credit_reversal_shares FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_credit_reversal_shares_truncate BEFORE TRUNCATE ON billing.credit_reversal_shares FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.custodians
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3195,8 +3226,10 @@ table billing.revenue_schedules
   column reinstatements integer NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column forfeited bigint NOT NULL
   constraint revenue_schedules_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint revenue_schedules_ended_check CHECK (((ended_at >= service_starts_at) AND (ended_at < service_ends_at)))
+  constraint revenue_schedules_forfeited_check CHECK ((forfeited >= 0))
   constraint revenue_schedules_funded_check CHECK (((0 <= recognized_net) AND (recognized_net <= funded)))
   constraint revenue_schedules_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint revenue_schedules_method_check CHECK ((method = ANY (ARRAY['ratable'::text, 'point_in_time'::text])))
@@ -3218,7 +3251,7 @@ table billing.revenue_schedules
   index CREATE UNIQUE INDEX revenue_schedules_pkey ON billing.revenue_schedules USING btree (merchant_id, id)
   index CREATE INDEX revenue_schedules_product_access_id_idx ON billing.revenue_schedules USING btree (merchant_id, product_access_id) WHERE (product_access_id IS NOT NULL)
   index CREATE INDEX revenue_schedules_subscription_id_idx ON billing.revenue_schedules USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
-  trigger CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'updated_at')
+  trigger CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'forfeited', 'updated_at')
   trigger CREATE TRIGGER immutable_revenue_schedules_truncate BEFORE TRUNCATE ON billing.revenue_schedules FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.running_charges
@@ -4287,16 +4320,9 @@ function billing.credit_grant_reservation(uuid,uuid)
           CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
               WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
                 AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
-          CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE
-                  WHEN t.book = 'units' AND t.transfer_type = 'credit_refund_cash' THEN t.amount
-                  WHEN t.book = 'units' AND t.transfer_type = 'credit_refund_cash_restore' THEN -t.amount
-                  WHEN t.book = 'general' AND c.account_type IN ('cash_clearing', 'external_receipts') THEN t.amount
-                  WHEN t.book = 'general' AND d.account_type IN ('cash_clearing', 'external_receipts') THEN -t.amount
-                  ELSE 0 END), 0)::numeric AS amount
-              FROM billing.ledger_transfers t
-              JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
-              JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
-              WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
+          CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE WHEN s.origin_id = s.reversal_id THEN s.cash ELSE -s.cash END), 0)::numeric AS amount
+              FROM billing.credit_reversal_shares s
+              WHERE s.merchant_id = g.merchant_id AND s.credit_grant_id = g.id) returned
           WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
             AND pending.amount > 0), 0)
   $function$
@@ -4812,6 +4838,7 @@ function billing.guard_billing_restore_receipt()
                 -- (former names, host claims); a test keeps this list complete.
                 AND c.relname = ANY(ARRAY[
                     'balance_watches',
+                    'books_starts',
                     'carts',
                     'catalog_applications',
                     'catalog_field_owners',
@@ -4822,6 +4849,7 @@ function billing.guard_billing_restore_receipt()
                     'catalog_restore_receipts',
                     'credit_grant_events',
                     'credit_grants',
+                    'credit_reversal_shares',
                     'custodians',
                     'customer_delinquency',
                     'customer_invoice_profiles',
@@ -6174,6 +6202,41 @@ function billing.scheduled_changes_track_mrr()
       END IF;
       RETURN NULL;
   END;
+  $function$
+
+function billing.seed_credit_reversal_shares(uuid)
+  CREATE OR REPLACE FUNCTION billing.seed_credit_reversal_shares(p_merchant uuid)
+   RETURNS void
+   LANGUAGE sql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+      WITH legs AS (
+          SELECT r.merchant_id, r.id AS reversal_id, g.id AS credit_grant_id,
+                 CASE WHEN r.amount > 0 THEN substring(lt.source FROM 'restore:([0-9a-f-]{36})$')::uuid ELSE r.id END AS origin_id,
+                 CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund_cash', 'credit_refund_cash_restore')
+                        OR lt.book = 'general' AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))
+                      THEN lt.amount ELSE 0 END AS cash,
+                 CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund', 'credit_refund_restore', 'credit_refund_funding') AND lt.source NOT IN ('promotion', 'revenue')
+                      THEN lt.amount ELSE 0 END AS units
+          FROM billing.payments r
+          JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
+          JOIN billing.ledger_transfers lt ON lt.merchant_id = r.merchant_id AND lt.credit_grant_id = g.id AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
+          JOIN billing.ledger_accounts d ON d.merchant_id = lt.merchant_id AND d.id = lt.debit_account_id
+          JOIN billing.ledger_accounts c ON c.merchant_id = lt.merchant_id AND c.id = lt.credit_account_id
+          WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
+      )
+      INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
+      SELECT merchant_id, reversal_id, credit_grant_id, origin_id, sum(cash)::bigint, sum(units)::bigint
+      FROM legs WHERE origin_id IS NOT NULL
+      GROUP BY merchant_id, reversal_id, credit_grant_id, origin_id;
+      INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
+      SELECT r.merchant_id, r.id, g.id, r.id, 0, 0
+      FROM billing.payments r
+      JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
+      WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
+        AND (g.deferred_credited > 0 OR g.paid_currency = g.unit);
   $function$
 
 function billing.seed_mrr(uuid,timestamp with time zone)

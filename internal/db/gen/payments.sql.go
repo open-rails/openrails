@@ -73,8 +73,8 @@ func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg Comple
 
 const completeRefundReservation = `-- name: CompleteRefundReservation :execrows
 UPDATE billing.payments
-SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
-WHERE payments.merchant_id = $4::uuid AND id = $1
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail', purchased_at = $4::timestamptz
+WHERE payments.merchant_id = $5::uuid AND id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
   AND status = 'pending'
@@ -85,16 +85,18 @@ type CompleteRefundReservationParams struct {
 	ID            uuid.UUID
 	TransactionID string
 	Metadata      []byte
+	SettledAt     time.Time
 	MerchantID    uuid.UUID
 }
 
 // The rail confirmed and named the reversal: the row records real (negative)
-// money movement.
+// money movement, settled when the rail confirmed it.
 func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRefundReservationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeRefundReservation,
 		arg.ID,
 		arg.TransactionID,
 		arg.Metadata,
+		arg.SettledAt,
 		arg.MerchantID,
 	)
 	if err != nil {

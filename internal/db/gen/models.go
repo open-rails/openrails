@@ -53,6 +53,14 @@ type BillingBookIdentity struct {
 	TaggingStartedAt time.Time
 }
 
+// One row per merchant: when its general ledger booked its first receipt, by the clock that stamps payments and orders. ledger-audit checks the postings of what was stored since; what came before waits for the books' rebuild. Retention: permanent, never pruned.
+type BillingBooksStart struct {
+	MerchantID uuid.UUID
+	// When the first receipt was booked, by the payment writer's clock.
+	StartedAt time.Time
+	CreatedAt time.Time
+}
+
 // A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
 type BillingCart struct {
 	MerchantID uuid.UUID
@@ -238,6 +246,20 @@ type BillingCreditGrantEvent struct {
 	CreatedAt   time.Time
 	// The Idempotency-Key the event was made under, if any: a retry under it replays the event.
 	RequestKey *string
+}
+
+// Each settled reversal's share of the paid credit lot its payment bought, decided when it first settled, zero included, and never changed: the record of the lot's returned money and units. A refund or chargeback has one row, its own (origin_id = reversal_id); a recovery has one per chargeback it restored, or one of its own, zero, when it restored none. Retention: permanent, never pruned.
+type BillingCreditReversalShare struct {
+	MerchantID    uuid.UUID
+	ReversalID    uuid.UUID
+	CreditGrantID uuid.UUID
+	// The reversal whose share this is: the row's own, or the chargeback a recovery restored.
+	OriginID uuid.UUID
+	// The lot's money it took, or restored of origin_id's, in the lot's paid_currency.
+	Cash int64
+	// The lot's units it took, or restored of origin_id's, in the lot's unit.
+	Units     int64
+	CreatedAt time.Time
 }
 
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
@@ -2284,6 +2306,8 @@ type BillingRevenueSchedule struct {
 	Reinstatements int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// What of recognized_net an early end forfeited and no undone end took back: the most an undone end reinstates.
+	Forfeited int64
 }
 
 // One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.

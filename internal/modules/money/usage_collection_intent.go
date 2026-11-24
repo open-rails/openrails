@@ -508,6 +508,9 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			PSP: &p.Instrument.PSPID, Amount: chargedAmount, Currency: currency, At: now}); err != nil {
 			return err
 		}
+		if err := books.Started(ctx, q, intent.MerchantID, currency, now); err != nil {
+			return err
+		}
 		coord := ledger.Coord{Operation: ledger.OpOrderPayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
 		transfer, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, Currency: currency,

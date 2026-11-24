@@ -189,7 +189,7 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 }
 
 // receive books the money a payment just stored brought, on the handle that
-// stored it: in its transaction.
+// stored it: in its transaction. The merchant's books start with the first.
 func (s *PaymentService) receive(ctx context.Context, merchantID, paymentID uuid.UUID) error {
 	q := s.db.Gen(ctx)
 	// Stored now() stands for an unset purchase instant: read the row back.
@@ -197,7 +197,13 @@ func (s *PaymentService) receive(ctx context.Context, merchantID, paymentID uuid
 	if err != nil {
 		return err
 	}
-	return books.ReceivePayment(ctx, q, row)
+	if err := books.ReceivePayment(ctx, q, row); err != nil {
+		return err
+	}
+	if _, ok := books.ReceiptOf(row); !ok {
+		return nil
+	}
+	return books.Started(ctx, q, row.MerchantID, row.Currency, s.now())
 }
 
 // queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a
@@ -481,6 +487,7 @@ func (s *PaymentService) completeRefundReservation(ctx context.Context, reservat
 		ID:            reservationID,
 		TransactionID: refundTransactionID,
 		Metadata:      meta,
+		SettledAt:     s.now(),
 	})
 	if err != nil {
 		return err

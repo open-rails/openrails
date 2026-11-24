@@ -14,10 +14,12 @@ var NeverRollbackableTables = map[string]string{
 	"ledger_daily":       "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"ledger_type_totals": "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"revenue_schedules":  "money: what each line funded and recognised, which its transfers posted; rewinding a row desynchronises it from them",
+	"books_starts":       "money: when the general ledger started, which its audit reads; rewinding it hides or flags payments wrongly",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
 	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",
 	"credit_grant_events":             "the revocations a lot's revoked_at follows; a reversal appends a reinstatement, never rewinds",
+	"credit_reversal_shares":          "money: each reversal's share of its lot, decided once and the record of its returned money; rewinding one lets a later pass split it again",
 	"ledger_units":                    "the scale a unit's stored amounts were written at; rewinding it would let a configuration rescale them",
 	"subscription_billing_changes":    "subscription billing audit; never rewound",
 	"subscription_status_transitions": "lifecycle audit trail; a reversal appends to it, never rewinds it",

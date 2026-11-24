@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -103,7 +104,8 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 		if payment.PurchasedAt.IsZero() {
 			payment.PurchasedAt = now
 		}
-		svc := payments.NewPaymentService(d)
+		// The bill's clock, so the books' start it may record is by it.
+		svc := payments.NewPaymentService(d, clockwork.NewFakeClockAt(now))
 		result.PaymentCreated, err = svc.CreateIfNotExists(db.WithPSPID(ctx, bill.PSPID), &payment)
 		if err != nil {
 			return result, fmt.Errorf("record observed payment: %w", err)
