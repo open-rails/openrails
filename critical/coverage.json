@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 474,
+  "scenario_count": 477,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1652,6 +1652,21 @@
       "id": "OR-J34-S35",
       "journey": "J34",
       "name": "A declined charge that spends dunning in a billing import is an admitted cancel, held while the switch is off"
+    },
+    {
+      "id": "OR-J34-S36",
+      "journey": "J34",
+      "name": "A lost admission answer leaves no action spending the budget"
+    },
+    {
+      "id": "OR-J34-S37",
+      "journey": "J34",
+      "name": "A merchant's books land one at a time"
+    },
+    {
+      "id": "OR-J34-S38",
+      "journey": "J34",
+      "name": "An abandon waiting on its actions stalls no other admission"
     },
     {
       "id": "OR-J16-S30",

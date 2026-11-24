@@ -122,6 +122,11 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 	opts.Book = book
 	// The book's cancels and provider stops are its admitted effects.
 	effects := reconcile.NewDeclaredBook(opts.Admissions, opts.Actor, asOf)
+	release, err := reconcile.LockDeclaredBooks(ctx, database, merchantID)
+	if err != nil {
+		return res, err
+	}
+	defer release()
 	var history *reconcile.DeclaredHistory
 	var plans []plannedPurchase
 	var historical []historicalPayment

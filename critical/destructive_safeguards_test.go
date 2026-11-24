@@ -10,6 +10,8 @@ import (
 	"hash/crc32"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,17 +128,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 
 			// Forty owed provider stops spend the merchant's budget, not the
 			// actor's.
-			owed := func(n int, prefix string) billing.DeclaredBilling {
-				out := billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "nmi"}}
-				for i := range n {
-					customer := billing.CustomerID(uuid.New())
-					out.Customers = append(out.Customers, billing.DeclaredCustomer{Customer: customer})
-					out.Subscriptions = append(out.Subscriptions, billing.DeclaredSubscription{SourceID: fmt.Sprintf("%s-%02d", prefix, i), Customer: customer, Price: b.price, Rail: "nmi",
-						RailSubscriptionID: fmt.Sprintf("%s-%02d", prefix, i), StartedAt: b.started, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: asOf.Add(-time.Hour), ScheduleLive: true}})
-				}
-				return out
-			}
-			forty := owed(40, "owed")
+			forty := b.owed(asOf, 40, "owed")
 			// A landing that fails after its admission leaves no action
 			// spending the budget.
 			lost := errors.New("landing lost before its commit")
@@ -161,13 +153,20 @@ func TestDestructiveSafeguards(t *testing.T) {
 				require.NotEqual(t, "openrails:host", got.issuer, "the application's own name")
 			}
 
-			// Ten more pass the merchant's hour: refused, nothing admitted.
-			_, err = b.a.alphaRemote.ImportBilling(t.Context(), owed(10, "late"))
+			// Ten more pass the merchant's hour: refused for later, nothing
+			// admitted, and no incident freezes the merchant.
+			_, err = b.a.alphaRemote.ImportBilling(t.Context(), b.owed(asOf, 10, "late"))
 			status, code := refusalCode(t, err)
 			require.Equal(t, http.StatusTooManyRequests, status)
 			require.Equal(t, billing.CodeRateLimitExceeded, code)
+			var refused *billing.StatusError
+			require.ErrorAs(t, err, &refused)
+			require.Equal(t, "3600", refused.RetryAfter, "it may be tried again within the hour")
 			require.Len(t, b.actions(t, ""), 81, "a refused book reserves nothing")
 			require.Len(t, b.stops(t), 41)
+			holds, err := b.a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
+			require.NoError(t, err)
+			require.Empty(t, holds.Items, "a book too large for the budget is no anomaly")
 		})
 	})
 
@@ -194,6 +193,161 @@ func TestDestructiveSafeguards(t *testing.T) {
 		started := b.actions(t, "started")
 		require.Len(t, started, 1)
 		require.True(t, strings.HasSuffix(started[0].target, "/nmi/ended-dunned"), started[0].target)
+	})
+
+	t.Run("OR-J34-S36/a-lost-admission-answer-leaves-no-action-spending-the-budget", func(t *testing.T) {
+		b := newNMIBook(t)
+		book := b.owed(b.started.Add(10*24*time.Hour), 3, "lost")
+		// The admission commits; its answer never reaches the import.
+		lost := errors.New("admission answer lost")
+		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+			if site.Point == failpoint.Committed && site.Kind == "destructive_admission" {
+				return lost
+			}
+			return nil
+		})
+		t.Cleanup(remove)
+		_, err := b.a.alphaRemote.ImportBilling(t.Context(), book)
+		require.Error(t, err)
+		remove()
+		require.Empty(t, b.actions(t, "started"), "an action whose admission answer was lost stays counted for nothing")
+		require.Len(t, b.actions(t, "no_effect"), 3)
+		require.Empty(t, b.stops(t))
+		b.land(b.a.alphaRemote, book)
+		require.Len(t, b.actions(t, "started"), 3)
+		require.Len(t, b.stops(t), 3)
+	})
+
+	t.Run("OR-J34-S37/a-merchants-books-land-one-at-a-time", func(t *testing.T) {
+		b := newNMIBook(t)
+		book := b.owed(b.started.Add(10*24*time.Hour), 3, "race")
+		type attempt struct{}
+		// A pauses between its admission and its landing; B lands the same
+		// book and loses its landing.
+		paused, resume := make(chan struct{}), make(chan struct{})
+		var pause sync.Once
+		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			who, _ := ctx.Value(attempt{}).(string)
+			switch {
+			case who == "A" && site.Point == failpoint.Committed && site.Kind == "destructive_admission":
+				pause.Do(func() {
+					close(paused)
+					<-resume
+				})
+			case who == "B" && site.Point == failpoint.BeforeComplete && site.Kind == "billing_import":
+				return errors.New("B's landing lost before its commit")
+			}
+			return nil
+		})
+		t.Cleanup(remove)
+		var once sync.Once
+		release := func() { once.Do(func() { close(resume) }) }
+		t.Cleanup(release)
+		errA, errB := make(chan error, 1), make(chan error, 1)
+		go func() {
+			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "A"), book)
+			errA <- err
+		}()
+		select {
+		case <-paused:
+		case <-time.After(30 * time.Second):
+			t.Fatal("A never reached its landing")
+		}
+		go func() {
+			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "B"), book)
+			errB <- err
+		}()
+		// B waits for A's book, or (unserialized) runs to its end first.
+		var bErr error
+		bDone := false
+		require.Eventually(t, func() bool {
+			select {
+			case bErr = <-errB:
+				bDone = true
+				return true
+			default:
+				return b.waitingOn("name: LockBillingImport")
+			}
+		}, 30*time.Second, 20*time.Millisecond)
+		release()
+		require.NoError(t, <-errA, "no other attempt's abandon finishes A's actions")
+		if !bDone {
+			bErr = <-errB
+		}
+		require.Error(t, bErr)
+		remove()
+		require.Len(t, b.actions(t, "started"), 3, "A's stops each wait for their provider effect")
+		require.Len(t, b.stops(t), 3)
+	})
+
+	t.Run("OR-J34-S38/an-abandon-waiting-on-its-actions-stalls-no-other-admission", func(t *testing.T) {
+		b := newNMIBook(t)
+		method := b.saveCard(t)
+		book := b.owed(b.started.Add(10*24*time.Hour), 1, "stalled")
+		// While the landing holds its action, another transaction queues for
+		// it; the landing is lost, and that transaction keeps the action from
+		// the import's abandon.
+		locked := make(chan pgx.Tx, 1)
+		var once sync.Once
+		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			if site.Point != failpoint.BeforeComplete || site.Kind != "billing_import" {
+				return nil
+			}
+			var hookErr error
+			once.Do(func() {
+				tx, err := b.a.pool.Begin(context.WithoutCancel(ctx))
+				if err != nil {
+					hookErr = err
+					return
+				}
+				go func() {
+					_, err := tx.Exec(context.WithoutCancel(ctx), "SELECT /* or-j34-s38 */ id FROM "+pgx.Identifier{b.a.schema, "destructive_actions"}.Sanitize()+
+						" WHERE merchant_id = $1 AND kind = 'cancel_subscription' AND state = 'started' FOR UPDATE", b.a.alpha.MerchantID().UUID())
+					if err != nil {
+						_ = tx.Rollback(context.Background())
+						tx = nil
+					}
+					locked <- tx
+				}()
+				deadline := time.Now().Add(20 * time.Second)
+				for !b.waitingOn("or-j34-s38") && time.Now().Before(deadline) {
+					time.Sleep(10 * time.Millisecond)
+				}
+				hookErr = errors.New("landing lost before its commit")
+			})
+			return hookErr
+		})
+		t.Cleanup(remove)
+		errA := make(chan error, 1)
+		go func() {
+			_, err := b.a.alpha.ImportBilling(t.Context(), book)
+			errA <- err
+		}()
+		var holder pgx.Tx
+		select {
+		case holder = <-locked:
+		case <-time.After(30 * time.Second):
+			t.Fatal("the landing never reached its commit")
+		}
+		require.NotNil(t, holder, "the action is held")
+		var stalled atomic.Bool
+		timer := time.AfterFunc(15*time.Second, func() {
+			stalled.Store(true)
+			_ = holder.Rollback(context.Background())
+		})
+		t.Cleanup(func() { timer.Stop(); _ = holder.Rollback(context.Background()) })
+		require.Eventually(t, func() bool { return b.waitingOn("name: LockDestructiveAction :one") }, 20*time.Second, 20*time.Millisecond,
+			"the abandon waits for its action")
+
+		// A staff card removal admits meanwhile.
+		status, raw := b.a.request(t, http.MethodDelete, "/v1/admin/customers/"+method.CustomerID.String()+"/payment-methods/"+method.ID.String(), b.a.alphaKey.Secret, nil)
+		require.False(t, stalled.Load(), "an admission waited for the abandon's row lock")
+		require.Equal(t, http.StatusNoContent, status, string(raw))
+		timer.Stop()
+		require.NoError(t, holder.Rollback(t.Context()))
+		require.Error(t, <-errA)
+		remove()
+		require.Len(t, b.actions(t, "no_effect"), 1, "the abandon finishes once its action is free")
 	})
 
 	t.Run("OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget", func(t *testing.T) {
@@ -234,6 +388,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 type nmiBook struct {
 	t       *testing.T
 	a       *authorityWorld
+	nmi     *nmiJournal
 	price   billing.PriceID
 	started time.Time
 	due     time.Time
@@ -248,7 +403,43 @@ func newNMIBook(t *testing.T, configure ...func(*world)) *nmiBook {
 	price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-weekly", PSP: "nmi", PlanID: "weekly", Currency: "USD"})
 	require.NoError(t, err)
 	started := a.clock.Now()
-	return &nmiBook{t: t, a: a, price: price.ID, started: started, due: started.Add(7 * 24 * time.Hour)}
+	return &nmiBook{t: t, a: a, nmi: p, price: price.ID, started: started, due: started.Add(7 * 24 * time.Hour)}
+}
+
+// owed declares n schedules canceled an hour before asOf whose NMI
+// schedules are still live: each owes a provider stop.
+func (b *nmiBook) owed(asOf time.Time, n int, prefix string) billing.DeclaredBilling {
+	out := billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "nmi"}}
+	for i := range n {
+		customer := billing.CustomerID(uuid.New())
+		ref := fmt.Sprintf("%s-%02d", prefix, i)
+		out.Customers = append(out.Customers, billing.DeclaredCustomer{Customer: customer})
+		out.Subscriptions = append(out.Subscriptions, billing.DeclaredSubscription{SourceID: ref, Customer: customer, Price: b.price, Rail: "nmi",
+			RailSubscriptionID: ref, StartedAt: b.started, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: asOf.Add(-time.Hour), ScheduleLive: true}})
+	}
+	return out
+}
+
+// saveCard saves a card for alice.
+func (b *nmiBook) saveCard(t *testing.T) billing.PaymentMethod {
+	t.Helper()
+	psps, err := b.a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+	require.NoError(t, err)
+	require.Len(t, psps.Items, 1)
+	status, raw := b.a.request(t, http.MethodPost, "/v1/me/payment-methods", b.a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID,
+		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var method billing.PaymentMethod
+	require.NoError(t, json.Unmarshal(raw, &method))
+	return method
+}
+
+// waitingOn reports a session of the test database waiting on a lock in a
+// statement containing marker. It runs off the test goroutine too.
+func (b *nmiBook) waitingOn(marker string) bool {
+	var n int
+	err := b.a.pool.QueryRow(context.Background(), "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%' || $1 || '%' AND pid <> pg_backend_pid()", marker).Scan(&n)
+	return err == nil && n > 0
 }
 
 // live is a schedule paid through the first week.

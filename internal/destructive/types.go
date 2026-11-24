@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
@@ -216,3 +217,20 @@ type HeldError struct{ Hold Hold }
 
 func (e *HeldError) Error() string        { return ErrHeld.Error() }
 func (e *HeldError) Is(target error) bool { return target == ErrHeld }
+
+// BudgetError refuses a merchant-level operation larger than what its
+// scope's budget has left: a temporary refusal, not an incident, and nothing
+// is held. HTTP maps it to 429 with Retry-After, the window's length.
+type BudgetError struct {
+	Scope             Scope
+	Window            string
+	Requested         int64
+	Remaining         int64
+	RetryAfterSeconds int64
+}
+
+func (e *BudgetError) Error() string {
+	return fmt.Sprintf("the %s destructive-action budget has %d of the %d actions this operation needs left this %s: try again later, in smaller parts, or with raised limits", e.Scope, e.Remaining, e.Requested, e.Window)
+}
+func (e *BudgetError) Is(target error) bool         { return target == billing.ErrDenied }
+func (e *BudgetError) ErrorCode() billing.ErrorCode { return billing.CodeRateLimitExceeded }

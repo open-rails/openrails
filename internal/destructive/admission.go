@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -238,34 +239,52 @@ func (a *Admissions) StartMerchantOperation(ctx context.Context, commands []Comm
 	if held != nil {
 		return nil, held
 	}
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.Committed, Kind: FailpointKind}); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
-// AbandonMerchantOperation records, in one transaction, that the actions of
-// an operation whose transaction did not commit had no effect. It waits for
-// a commit still in flight: an action that committed is final, or names its
-// pending provider effect, and is left as it is.
-func (a *Admissions) AbandonMerchantOperation(ctx context.Context, mid uuid.UUID, ids []uuid.UUID) error {
-	if len(ids) == 0 {
+// FailpointKind names a merchant-level admission at its failpoints.
+const FailpointKind = "destructive_admission"
+
+// AbandonMerchantOperation records, in one transaction, that the actions
+// admitted under keys for an operation whose transaction did not commit had
+// no effect. It waits for a commit still in flight, without the admission
+// lock: an action that committed is final, or names its pending provider
+// effect, and is left as it is.
+func (a *Admissions) AbandonMerchantOperation(ctx context.Context, mid uuid.UUID, keys []string) error {
+	if len(keys) == 0 {
 		return nil
 	}
-	return a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
-		for _, id := range ids {
-			row, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid, ID: id})
+	if a == nil || a.db == nil {
+		return errors.New("destructive admissions unavailable")
+	}
+	return a.db.DataPool().CommittedMerchantTx(ctx, billing.MerchantID(mid), func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		for _, key := range keys {
+			found, err := q.GetDestructiveActionByKey(ctx, gen.GetDestructiveActionByKeyParams{MerchantID: mid, ActionKey: key})
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			row, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid, ID: found.ID})
 			if err != nil {
 				return err
 			}
 			if row.State == string(StateSucceeded) || row.State == string(StateNoEffect) {
 				continue
 			}
-			provider, err := q.DestructiveActionProviderState(ctx, gen.DestructiveActionProviderStateParams{MerchantID: mid, ID: id})
+			provider, err := q.DestructiveActionProviderState(ctx, gen.DestructiveActionProviderStateParams{MerchantID: mid, ID: row.ID})
 			if err != nil {
 				return err
 			}
 			if provider.Pending || provider.Succeeded {
 				continue
 			}
-			if err := a.FinishTx(ctx, tx, mid, id, OutcomeNoEffect, ""); err != nil {
+			if err := a.FinishTx(ctx, tx, mid, row.ID, OutcomeNoEffect, ""); err != nil {
 				return err
 			}
 		}
@@ -362,6 +381,15 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 		}
 		if count+units <= limit {
 			continue
+		}
+		if c.merchantOperation {
+			// An operation too large for what is left is refused, not an
+			// incident: holds are for anomalies.
+			retry := int64(time.Hour / time.Second)
+			if window == "day" {
+				retry = int64(24 * time.Hour / time.Second)
+			}
+			return nil, &BudgetError{Scope: scope, Window: window, Requested: units, Remaining: max(limit-count, 0), RetryAfterSeconds: retry}
 		}
 		id, err := uuid.NewV7()
 		if err != nil {

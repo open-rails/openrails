@@ -1172,6 +1172,16 @@ func (q *Queries) ListPSPProviderPricesOfPSP(ctx context.Context, arg ListPSPPro
 	return items, nil
 }
 
+const lockBillingImport = `-- name: LockBillingImport :exec
+SELECT pg_advisory_lock(hashtextextended('openrails.billing_import:' || $1::uuid::text, 0))
+`
+
+// Session lock: one billing book of a merchant admits and lands at a time.
+func (q *Queries) LockBillingImport(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockBillingImport, merchantID)
+	return err
+}
+
 const lockPSPImport = `-- name: LockPSPImport :one
 SELECT merchant_id, id, psp_id, rail, status, history_since, history_through, pulled_at, applied_at, error, rules, created_at, updated_at, error_code, apply_requested_by FROM billing.psp_imports WHERE merchant_id = $1::uuid AND id = $2::uuid FOR UPDATE
 `
@@ -1596,6 +1606,15 @@ func (q *Queries) SetPSPImportStatus(ctx context.Context, arg SetPSPImportStatus
 		&i.ApplyRequestedBy,
 	)
 	return i, err
+}
+
+const unlockBillingImport = `-- name: UnlockBillingImport :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.billing_import:' || $1::uuid::text, 0))
+`
+
+func (q *Queries) UnlockBillingImport(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, unlockBillingImport, merchantID)
+	return err
 }
 
 const updatePSPImportRules = `-- name: UpdatePSPImportRules :one

@@ -322,3 +322,10 @@ SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'
     count(*) FILTER (WHERE resolution = 'superseded')::int AS superseded
 FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid;
+
+-- name: LockBillingImport :exec
+-- Session lock: one billing book of a merchant admits and lands at a time.
+SELECT pg_advisory_lock(hashtextextended('openrails.billing_import:' || sqlc.arg(merchant_id)::uuid::text, 0));
+
+-- name: UnlockBillingImport :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.billing_import:' || sqlc.arg(merchant_id)::uuid::text, 0));

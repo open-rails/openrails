@@ -27,8 +27,8 @@ import (
 // provider stop owed a canceled row. The admission spends the merchant's and
 // the deployment's budgets and records the actor. A cancel or terminal
 // decline of a row the book did not create also passes its PSP's cancel
-// budget, all or nothing per PSP; a cancel of such a row, and every terminal
-// decline, passes the destructive switch. A held cancel parks the row
+// budget, all or nothing per PSP; every cancel and terminal decline passes
+// the destructive switch. A held cancel parks the row
 // unverified with access kept. A book is landed, admitted, then landed again:
 // a landing that wants an effect it holds no admission for rolls back with
 // ErrDeclaredAdmission.
@@ -49,8 +49,10 @@ type DeclaredBook struct {
 	revs     map[declaredRef]int64
 	held     map[declaredRef]subscriptions.TerminalHold
 	// owned are the actions this book finishes: admitted for it, or replays
-	// an earlier attempt left unfinished.
+	// an earlier attempt left unfinished. keys are their admission keys,
+	// recorded before admission so a lost answer still finds them.
 	owned map[uuid.UUID]bool
+	keys  []string
 
 	// The current landing's.
 	wanted   map[declaredRef]declaredEffect
@@ -160,14 +162,12 @@ func (b *DeclaredBook) needsAdmission() bool { return !b.admitted && len(b.wante
 // want records an effect for admission.
 func (b *DeclaredBook) want(sub *models.Subscription, kind effectKind) {
 	ref := refOf(sub)
-	b.wanted[ref] = declaredEffect{existing: kind != stopEffect && !b.created[ref], gated: switchGated(kind, b.created[ref]), rev: sub.LifecycleRev}
+	b.wanted[ref] = declaredEffect{existing: kind != stopEffect && !b.created[ref], gated: switchGated(kind), rev: sub.LifecycleRev}
 }
 
-// switchGated reports an effect that waits for the destructive switch: a
-// cancel of a row the book did not create, and any terminal decline.
-func switchGated(kind effectKind, created bool) bool {
-	return kind == terminalEffect || kind == cancelEffect && !created
-}
+// switchGated reports an effect that waits for the destructive switch: every
+// cancel and terminal decline, the book's own rows' too.
+func switchGated(kind effectKind) bool { return kind != stopEffect }
 
 // effect returns the context an admitted effect on sub runs in, or why it is
 // held. Before admission it holds every effect.
@@ -186,7 +186,7 @@ func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.
 	case b.revs[ref] != sub.LifecycleRev:
 		return ctx, holdMoved
 	}
-	if switchGated(kind, b.created[ref]) {
+	if switchGated(kind) {
 		if v := destructive.New(database).Check(ctx, sub.MerchantID); !v.Allowed {
 			return ctx, switchHold(v.Reason)
 		}
@@ -288,10 +288,12 @@ func (b *DeclaredBook) end(ctx context.Context, database *db.DB) error {
 }
 
 // Admit admits what the last landing wanted, outside any transaction. A
-// denied admission is a destructive.HeldError and starts nothing.
+// denied admission starts nothing: a destructive.HeldError, or a
+// destructive.BudgetError for a book the merchant's remaining budget cannot
+// take.
 func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.MerchantID) error {
 	b.admitted, b.mid = true, mid.UUID()
-	b.actions, b.revs, b.held, b.owned = map[declaredRef]destructive.Action{}, map[declaredRef]int64{}, map[declaredRef]subscriptions.TerminalHold{}, map[uuid.UUID]bool{}
+	b.actions, b.revs, b.held, b.owned, b.keys = map[declaredRef]destructive.Action{}, map[declaredRef]int64{}, map[declaredRef]subscriptions.TerminalHold{}, map[uuid.UUID]bool{}, nil
 	refs := slices.SortedFunc(maps.Keys(b.wanted), declaredRef.compare)
 	var admit []declaredRef
 	byPSP := map[uuid.UUID][]declaredRef{}
@@ -359,6 +361,7 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 		digest := destructive.Digest([]any{"billing_import", target, rev, b.asOf})
 		commands[i] = destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CancelSubscription, Target: target,
 			Key: "billing-import:" + digest + ":actor:" + actorKey, Digest: digest, Units: 1, Actor: *actor}
+		b.keys = append(b.keys, commands[i].Key)
 	}
 	for from := 0; from < len(commands); from += admitBatch {
 		to := min(from+admitBatch, len(commands))
@@ -384,10 +387,31 @@ const admitBatch = 1000
 // landing that did not commit had none. A commit still in flight is waited
 // for; what it finished stays.
 func (b *DeclaredBook) Abandon(ctx context.Context) error {
-	if b.admissions == nil || len(b.owned) == 0 {
+	if b.admissions == nil || len(b.keys) == 0 {
 		return nil
 	}
 	ctx, cancel := db.DetachedWriteContext(ctx, 30*time.Second)
 	defer cancel()
-	return b.admissions.AbandonMerchantOperation(ctx, b.mid, slices.Collect(maps.Keys(b.owned)))
+	return b.admissions.AbandonMerchantOperation(ctx, b.mid, b.keys)
+}
+
+// LockDeclaredBooks takes the merchant's book lock on its own connection,
+// held across every landing of a book and its admission: one book lands at
+// a time, so no attempt's abandon finishes another's actions.
+func LockDeclaredBooks(ctx context.Context, database *db.DB, mid billing.MerchantID) (release func(), err error) {
+	conn, err := database.ConnectSession(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("declared book: lock: %w", err)
+	}
+	q := gen.New(conn)
+	if err := q.LockBillingImport(ctx, mid.UUID()); err != nil {
+		_ = conn.Close(context.WithoutCancel(ctx))
+		return nil, fmt.Errorf("declared book: lock: %w", err)
+	}
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = q.UnlockBillingImport(unlockCtx, mid.UUID())
+		_ = conn.Close(unlockCtx)
+	}, nil
 }

@@ -797,6 +797,15 @@
     "OR-J34-S35": [
       "TestDestructiveSafeguards/OR-J34-S35/a-declined-charge-that-spends-dunning-in-a-book-is-an-admitted-cancel"
     ],
+    "OR-J34-S36": [
+      "TestDestructiveSafeguards/OR-J34-S36/a-lost-admission-answer-leaves-no-action-spending-the-budget"
+    ],
+    "OR-J34-S37": [
+      "TestDestructiveSafeguards/OR-J34-S37/a-merchants-books-land-one-at-a-time"
+    ],
+    "OR-J34-S38": [
+      "TestDestructiveSafeguards/OR-J34-S38/an-abandon-waiting-on-its-actions-stalls-no-other-admission"
+    ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",
