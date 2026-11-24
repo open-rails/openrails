@@ -334,6 +334,10 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Equal(t, "provider", *after.CancelType)
 		require.False(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
 		require.EqualValues(t, 10_000_000, ccbillPayments(t, a.world, alice)["0912233445566778801"], "the charge is kept for refund review")
+		review, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "pull.charge.after_cancellation"})
+		require.NoError(t, err)
+		require.Len(t, review.Items, 1, "a charge after a final end is raised for review")
+		require.Equal(t, billing.FindingStatus("requires_review"), review.Items[0].Status)
 	})
 
 	t.Run("OR-J38-S76/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {

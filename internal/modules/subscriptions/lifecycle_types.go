@@ -232,11 +232,8 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription.Status != models.StatusCanceled {
 		return "", false
 	}
-	if subscription.CancelType != nil {
-		switch *subscription.CancelType {
-		case models.CancelTypeChargeback, models.CancelTypeUser, models.CancelTypeMerchant, models.CancelTypeProvider, models.CancelTypeAbandoned:
-			return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
-		}
+	if subscription.CancelType != nil && subscription.CancelType.Terminal() {
+		return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
 	}
 	return "", false
 }
