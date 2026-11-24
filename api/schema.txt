@@ -3090,7 +3090,7 @@ table billing.revenue_schedules
   constraint revenue_schedules_recognized_through_check CHECK (((recognized_through_at >= service_starts_at) AND (recognized_through_at <= service_ends_at)))
   constraint revenue_schedules_reinstatements_check CHECK ((reinstatements >= 0))
   constraint revenue_schedules_revenue_account_check CHECK ((revenue_account = ANY (ARRAY['subscription_revenue'::text, 'one_time_revenue'::text])))
-  constraint revenue_schedules_service_check CHECK (((((method = 'ratable'::text) AND (service_ends_at > service_starts_at)) OR ((method = 'point_in_time'::text) AND (service_ends_at = service_starts_at) AND (service_months IS NULL)))))
+  constraint revenue_schedules_service_check CHECK ((((method = 'ratable'::text) AND (service_ends_at > service_starts_at)) OR ((method = 'point_in_time'::text) AND (service_ends_at = service_starts_at) AND (service_months IS NULL))))
   constraint revenue_schedules_service_months_check CHECK (((service_months >= 1) AND (service_months <= 1200)))
   constraint revenue_schedules_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
   index CREATE INDEX revenue_schedules_due_idx ON billing.revenue_schedules USING btree (next_recognition_at, merchant_id, id) WHERE (next_recognition_at IS NOT NULL)
