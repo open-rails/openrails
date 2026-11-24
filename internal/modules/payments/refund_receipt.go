@@ -21,6 +21,10 @@ import (
 // is old news to the customer.
 const RefundReceiptWindow = 7 * 24 * time.Hour
 
+// recent reports whether a refund made at refundedAt, by the provider's
+// clock, is news at now: within RefundReceiptWindow.
+func recent(refundedAt, now time.Time) bool { return now.Sub(refundedAt) <= RefundReceiptWindow }
+
 // voidPrefix marks the reversal a void records: a void is a refund of the
 // whole charge before it settled.
 const voidPrefix = "void:"
@@ -36,7 +40,7 @@ func VoidTransactionID(transactionID string) string { return voidPrefix + transa
 // RefundReceiptWindow. A refund OpenRails completes always has one.
 func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.Payment, reported bool) error {
 	if refund.ReversalKind == nil || *refund.ReversalKind != ReversalRefund || refund.RefundedPaymentID == nil ||
-		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) || reported && s.now().Sub(refund.PurchasedAt) > RefundReceiptWindow {
+		refund.Amount >= 0 || !PaymentStatusSucceeded(refund.Status) || reported && !recent(refund.PurchasedAt, s.now()) {
 		return nil
 	}
 	mid, err := merchant.Require(ctx)

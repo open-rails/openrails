@@ -2176,7 +2176,7 @@
     {
       "id": "OR-J39-S22",
       "journey": "J39",
-      "name": "A refund a refresh finds more than a week after the provider made it records no receipt; one found minutes late sends one"
+      "name": "A refund the refresh finds more than a week after the provider made it, reading on from its last pass, records no receipt; one found minutes late sends one"
     },
     {
       "id": "OR-J39-S23",

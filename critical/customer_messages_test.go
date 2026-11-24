@@ -667,8 +667,9 @@ func TestCustomerMessages(t *testing.T) {
 		})
 	})
 	t.Run("OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt", func(t *testing.T) {
-		// refundFound is alice's sale refunded at the provider and found by a
-		// refresh late after it, with its messages sent.
+		// refundFound is alice's sale refunded at the provider and found late
+		// after it by the refresh, which reads on from where its last pass,
+		// at the sale, stopped; with its messages sent.
 		refundFound := func(t *testing.T, late time.Duration) (*authorityWorld, *alertMailbox) {
 			t.Helper()
 			mail := &alertMailbox{}
@@ -684,14 +685,23 @@ func TestCustomerMessages(t *testing.T) {
 				}
 			}
 			require.NotEmpty(t, charge)
+			merchant := a.alpha.MerchantID().UUID()
+			fleet := undispatchedFleet(t, a.world)
+			refreshMerchant(t, fleet, merchant)
+			var read int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "psp_refresh_watermarks"}.Sanitize()+" w JOIN "+
+				pgx.Identifier{a.schema, "psps"}.Sanitize()+" p ON p.merchant_id = w.merchant_id AND p.id = w.psp_id"+
+				" WHERE w.merchant_id = $1 AND w.event_domain = 'applied_events' AND p.rail = 'stripe'", merchant).Scan(&read))
+			require.Equal(t, 1, read, "the refresh has read the Stripe account up to the sale")
 			_, err := p.core.Refund(charge, 1000)
 			require.NoError(t, err)
+			// No pass runs until late after the refund; the next reads on
+			// from the last one's watermark, the refund's window included.
 			a.clock.Advance(late)
-			fleet := undispatchedFleet(t, a.world)
-			refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
-			read, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+			refreshMerchant(t, fleet, merchant)
+			paid, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
 			require.NoError(t, err)
-			require.Len(t, read.Refunds, 1, "the refresh records the refund")
+			require.Len(t, paid.Refunds, 1, "the refresh records the refund")
 			liveMoney(t, a.world)
 			dispatchMessages(t, fleet)
 			return a, mail
