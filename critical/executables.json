@@ -1588,6 +1588,18 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J43-S08": [
+      "TestOperationsHistory/OR-J43-S08/an-operation-is-recorded-before-its-provider-call-and-survives-a-crash"
+    ],
+    "OR-J43-S09": [
+      "TestOperationsHistory/OR-J43-S09/a-subscriptions-history-reads-its-operations-from-the-operations-history"
+    ],
+    "OR-J43-S10": [
+      "TestOperationsHistory/OR-J43-S10/a-price-keys-moves-are-configuration-history-with-their-revisions"
+    ],
+    "OR-J43-S11": [
+      "TestOperationsHistory/OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call"
     ]
   }
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 499,
+  "scenario_count": 503,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2497,6 +2497,26 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J43-S08",
+      "journey": "J43",
+      "name": "An operation's attempting entry is written before its provider call and outlives the process dying mid-call; recovery only appends"
+    },
+    {
+      "id": "OR-J43-S09",
+      "journey": "J43",
+      "name": "A subscription's history reads its provider operations from the operations history, each entry once with its phase, kind, attempt and attribution"
+    },
+    {
+      "id": "OR-J43-S10",
+      "journey": "J43",
+      "name": "A price key's moves to a new version, an archive and back are configuration history entries with the key's revision, and a price's history reads them"
+    },
+    {
+      "id": "OR-J43-S11",
+      "journey": "J43",
+      "name": "The breaker marks a destructive attempt sent before its provider call, and its phases are written ahead with their actor"
     }
   ]
 }
