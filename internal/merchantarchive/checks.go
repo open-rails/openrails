@@ -63,16 +63,14 @@ var excludedTables = map[string]string{
 	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
-	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
-	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
-	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
-	"balance_watches":                   "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
-	"psp_imports":                       "import working state: the destination pulls its PSPs again",
-	"psp_import_records":                "import working state: copies of provider objects, pulled again",
-	"psp_import_basis":                  "import working state: the row versions a pull read, read again",
-	"psp_import_mappings":               "the merchant's own identifiers; it maps them again for an import",
-	"provider_catalog_objects":          "provider observations; the destination observes again",
-	"parked_provider_subscriptions":     "converge working state: the next provider event parks again",
+	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
+	"psp_imports":                   "import working state: the destination pulls its PSPs again",
+	"psp_import_records":            "import working state: copies of provider objects, pulled again",
+	"psp_import_basis":              "import working state: the row versions a pull read, read again",
+	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
+	"provider_catalog_objects":      "provider observations; the destination observes again",
+	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -91,7 +89,7 @@ var excludedColumns = map[string]string{
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"periodic_leases":               "kind holder expires_at claimed_at",
 	"solana_crankers":               "name public_key pinned_at",
-	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
+	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
@@ -122,10 +120,8 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
-	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
-	"price_keys":                        "merchant_id product_id key revision created_at updated_at",
-	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"price_keys":      "merchant_id product_id key revision created_at updated_at",
+	"balance_watches": "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -139,7 +135,6 @@ var omittedColumns = map[string]string{
 	// live is generated from environment.
 	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
 	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
-	"customers":        "access_version",
 	"payments":         "destructive_run_class",
 	"order_attempts":   "destructive_run_class",
 	"product_access":   "destructive_run_class",

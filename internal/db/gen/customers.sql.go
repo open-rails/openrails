@@ -37,7 +37,7 @@ INSERT INTO billing.customers (id, merchant_id)
 VALUES ($1, $2)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy
+RETURNING id, merchant_id, issuer, created_at, last_seen_at, billing_policy
 `
 
 type EnsureCustomerParams struct {
@@ -59,7 +59,6 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.Issuer,
 		&i.CreatedAt,
 		&i.LastSeenAt,
-		&i.AccessVersion,
 		&i.BillingPolicy,
 	)
 	return i, err
@@ -84,7 +83,7 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 }
 
 const getCustomer = `-- name: GetCustomer :one
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, billing_policy FROM billing.customers
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -102,14 +101,13 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.Issuer,
 		&i.CreatedAt,
 		&i.LastSeenAt,
-		&i.AccessVersion,
 		&i.BillingPolicy,
 	)
 	return i, err
 }
 
 const listCustomers = `-- name: ListCustomers :many
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers c
+SELECT id, merchant_id, issuer, created_at, last_seen_at, billing_policy FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::timestamptz IS NULL
    OR (c.created_at, c.id) < ($2::timestamptz, $3::uuid))
@@ -145,7 +143,6 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 			&i.Issuer,
 			&i.CreatedAt,
 			&i.LastSeenAt,
-			&i.AccessVersion,
 			&i.BillingPolicy,
 		); err != nil {
 			return nil, err
@@ -159,7 +156,7 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 }
 
 const listCustomersByIDs = `-- name: ListCustomersByIDs :many
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, billing_policy FROM billing.customers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -184,7 +181,6 @@ func (q *Queries) ListCustomersByIDs(ctx context.Context, arg ListCustomersByIDs
 			&i.Issuer,
 			&i.CreatedAt,
 			&i.LastSeenAt,
-			&i.AccessVersion,
 			&i.BillingPolicy,
 		); err != nil {
 			return nil, err
