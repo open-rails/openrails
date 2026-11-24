@@ -1472,6 +1472,7 @@
     "OR-J46-S02": [
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/a-notice-releases-a-pulled-case",
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
     ],
     "OR-J46-S01": [
@@ -1498,6 +1499,7 @@
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
     ],

@@ -140,51 +140,69 @@ func disputeInquiry(t *testing.T) {
 	})
 
 	t.Run("reconcile-pull", func(t *testing.T) {
-		iw := newImportWorld(t, "stripe")
-		iw.stripe.AddProduct("prod_member", "Member")
-		iw.stripe.AddPrice(stripemock.Price{ID: "price_member", Product: "prod_member", Amount: 999, Interval: "month"})
-		product, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "member", DisplayName: "Member", Entitlements: []string{"member:paid"}})
-		require.NoError(t, err)
-		_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-member", PSP: "stripe", PriceID: "price_member"})
-		require.NoError(t, err)
-		start := iw.clock.Now().Add(-10 * 24 * time.Hour)
-		customer := iw.stripe.AddCustomer(iw.alice.Email, "Alice", nil)
-		sub := iw.stripe.AddSubscription(customer, "pm_alice", "price_member", 999, start, start.AddDate(0, 1, 0))
-		since := start.Add(-24 * time.Hour)
-		first := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
-		iw.apply(t, first.ID)
-		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"))
-
-		chargebackProposals := func(pull billing.PSPImportID) int {
-			n := 0
-			for _, f := range iw.proposals(t, pull) {
-				if f.Type == "pull.dispute.chargeback" {
-					n++
-				}
-			}
-			return n
-		}
-		iw.stripe.Dispute("dp_pulled", sub, "warning_needs_response", "inquiry", "general")
-		require.Zero(t, chargebackProposals(iw.manual(t, "stripe").ID), "an inquiry is no chargeback to propose")
-		recorded, err := iw.alpha.ListDisputes(t.Context(), billing.DisputeListParams{})
-		require.NoError(t, err)
-		require.Len(t, recorded.Items, 1, "a missed webhook's inquiry is recorded by the pull")
-		require.Equal(t, billing.DisputeInquiry, recorded.Items[0].Kind)
-		iw.stripe.Dispute("dp_pulled", sub, "needs_response", "chargeback", "fraudulent")
-		require.Equal(t, 1, chargebackProposals(iw.manual(t, "stripe").ID), "the escalated inquiry is")
-		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"), "a pull lands nothing")
-		responded := func() bool {
-			var at *time.Time
-			require.NoError(t, iw.pool.QueryRow(t.Context(), "SELECT responded_at FROM "+pgx.Identifier{iw.schema, "disputes"}.Sanitize()+
-				" WHERE merchant_id = $1 AND provider_ref = 'dp_pulled'", iw.alpha.MerchantID().UUID()).Scan(&at))
-			return at != nil
-		}
+		iw, _ := pulledChargeback(t)
 		require.Eventually(t, func() bool { return waiting(t, iw.authorityWorld) != nil }, 20*time.Second, 50*time.Millisecond,
 			"an advisory pull's chargeback waits for the merchant to be armed")
-		require.False(t, responded())
+		require.False(t, responded(t, iw.authorityWorld, "dp_pulled"))
 		armMerchant(t, iw.authorityWorld)
-		require.Eventually(t, responded, 20*time.Second, 50*time.Millisecond, "arming wakes it")
+		require.Eventually(t, func() bool { return responded(t, iw.authorityWorld, "dp_pulled") }, 20*time.Second, 50*time.Millisecond, "arming wakes it")
 	})
+	t.Run("a-notice-releases-a-pulled-case", func(t *testing.T) {
+		iw, sub := pulledChargeback(t)
+		require.Eventually(t, func() bool { return waiting(t, iw.authorityWorld) != nil }, 20*time.Second, 50*time.Millisecond)
+		trail(iw).send(t, "charge.dispute.updated", iw.stripe.Dispute("dp_pulled", sub, "under_review", "chargeback", "fraudulent"))
+		require.Eventually(t, func() bool { return responded(t, iw.authorityWorld, "dp_pulled") }, 20*time.Second, 50*time.Millisecond,
+			"a provider's notice is no advisory pull's: the response runs unarmed")
+	})
+}
+
+// pulledChargeback is a Stripe membership imported by an advisory pull whose
+// charge a later pull finds charged back, its webhook missed.
+func pulledChargeback(t *testing.T) (*importWorld, string) {
+	t.Helper()
+	iw := newImportWorld(t, "stripe")
+	iw.stripe.AddProduct("prod_member", "Member")
+	iw.stripe.AddPrice(stripemock.Price{ID: "price_member", Product: "prod_member", Amount: 999, Interval: "month"})
+	product, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "member", DisplayName: "Member", Entitlements: []string{"member:paid"}})
+	require.NoError(t, err)
+	_, err = iw.alphaRemote.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "stripe-member", PSP: "stripe", PriceID: "price_member"})
+	require.NoError(t, err)
+	start := iw.clock.Now().Add(-10 * 24 * time.Hour)
+	customer := iw.stripe.AddCustomer(iw.alice.Email, "Alice", nil)
+	sub := iw.stripe.AddSubscription(customer, "pm_alice", "price_member", 999, start, start.AddDate(0, 1, 0))
+	since := start.Add(-24 * time.Hour)
+	first := iw.pull(t, billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "stripe"}, HistorySince: &since})
+	iw.apply(t, first.ID)
+	require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"))
+
+	chargebackProposals := func(pull billing.PSPImportID) int {
+		n := 0
+		for _, f := range iw.proposals(t, pull) {
+			if f.Type == "pull.dispute.chargeback" {
+				n++
+			}
+		}
+		return n
+	}
+	iw.stripe.Dispute("dp_pulled", sub, "warning_needs_response", "inquiry", "general")
+	require.Zero(t, chargebackProposals(iw.manual(t, "stripe").ID), "an inquiry is no chargeback to propose")
+	recorded, err := iw.alpha.ListDisputes(t.Context(), billing.DisputeListParams{})
+	require.NoError(t, err)
+	require.Len(t, recorded.Items, 1, "a missed webhook's inquiry is recorded by the pull")
+	require.Equal(t, billing.DisputeInquiry, recorded.Items[0].Kind)
+	iw.stripe.Dispute("dp_pulled", sub, "needs_response", "chargeback", "fraudulent")
+	require.Equal(t, 1, chargebackProposals(iw.manual(t, "stripe").ID), "the escalated inquiry is")
+	require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"), "a pull lands nothing")
+	return iw, sub
+}
+
+// responded reports whether the dispute's response finished.
+func responded(t *testing.T, a *authorityWorld, dispute string) bool {
+	t.Helper()
+	var at *time.Time
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT responded_at FROM "+pgx.Identifier{a.schema, "disputes"}.Sanitize()+
+		" WHERE merchant_id = $1 AND provider_ref = $2", a.alpha.MerchantID().UUID(), dispute).Scan(&at))
+	return at != nil
 }
 
 // disputeOf is the one dispute recorded against payment.
@@ -502,6 +520,22 @@ func disputeFraudWarning(t *testing.T) {
 		}, 20*time.Second, 50*time.Millisecond, "a full posture wakes it")
 		require.False(t, m.entitled(t))
 		require.Eventually(t, func() bool { return waiting(t, m.a) == nil }, 20*time.Second, 50*time.Millisecond, "and resolves the finding")
+	})
+	t.Run("the-merchant-stop-holds-it", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		stopMerchant(t, m.a, true)
+		startFleet(t, m.a.world)
+		m.fraudWarning(t, "evt_efw_stopped", "radar.early_fraud_warning.created", "issfr_stopped", true)
+		require.Eventually(t, func() bool { return waiting(t, m.a) != nil }, 20*time.Second, 50*time.Millisecond,
+			"the merchant's own emergency stop holds even a protective refund")
+		waitDisputeJobs(t, m.a)
+		require.Empty(t, m.reversals(t))
+		require.True(t, m.entitled(t))
+		stopMerchant(t, m.a, false)
+		require.Eventually(t, func() bool {
+			reversals := m.reversals(t)
+			return len(reversals) == 1 && reversals[0].Status == billing.PaymentSucceeded
+		}, 20*time.Second, 50*time.Millisecond, "lifting it wakes the refund")
 	})
 	t.Run("nothing-to-refund-still-ends", func(t *testing.T) {
 		m := newDisputedMembership(t)
@@ -1019,4 +1053,14 @@ func absorbedRefund(t *testing.T, a *authorityWorld, dispute string) string {
 		return ""
 	}
 	return *ref
+}
+
+// stopMerchant sets the merchant's own destructive emergency stop as an
+// operator would.
+func stopMerchant(t *testing.T, a *authorityWorld, stopped bool) {
+	t.Helper()
+	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
+		" (merchant_id, destructive_actions_enabled, updated_by, reason) VALUES ($1, $2, 'critical fixture operator', 'incident')"+
+		" ON CONFLICT (merchant_id) DO UPDATE SET destructive_actions_enabled = EXCLUDED.destructive_actions_enabled", a.alpha.MerchantID().UUID(), !stopped)
+	require.NoError(t, err)
 }
