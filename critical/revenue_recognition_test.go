@@ -256,7 +256,7 @@ func TestRevenueRecognition(t *testing.T) {
 			if r.nonCash > 0 {
 				nonCash = []glRow{{Type: "revenue_adjusted", Operation: "application", Source: "order", SourceID: result.Order.ID.String(), Debit: "revenue_adjustments", Credit: "deferred_revenue", Amount: r.nonCash, At: now, OrderLine: &sched.OrderLine, Schedule: &sched.ID}}
 			}
-			require.Equal(t, nonCash, glFor(t, w, "order", result.Order.ID.String()), r.rail)
+			require.ElementsMatch(t, nonCash, glFor(t, w, "order", result.Order.ID.String()), r.rail)
 			require.Equal(t, []glRow{recognized(sched.ID, sched.OrderLine, "recognition", now, now, r.caughtUp)}, recognitions(t, w, sched.ID), "an hour of %s's period is earned at payment", r.rail)
 			var currency string
 			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT currency FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND book='general' AND operation='cash' AND source='payment' AND source_id=$2", mid, payment.String()).Scan(&currency))

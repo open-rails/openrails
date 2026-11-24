@@ -213,8 +213,7 @@ func TestRevenueReversals(t *testing.T) {
 
 		// The provider refunds the second capture: its money leaves from
 		// unapplied cash, where it waited.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
+		database := configuredDB(t, a.world)
 		ctx := db.WithPSPID(merchant.WithID(t.Context(), a.alpha.MerchantID()), psp)
 		refund, err := payments.NewPaymentService(database, a.clock).RefundObservedWithReason(ctx, again.Payment.ID, "re_twice_second", 10_000_000, billing.RefundDuplicate, now)
 		require.NoError(t, err)
@@ -229,19 +228,18 @@ func TestRevenueReversals(t *testing.T) {
 		customer := uuid.MustParse(a.alice.ID)
 		psp := worldStripePSP(t, a)
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
-		// A charge from before the books: no posting holds its money.
-		paid := uuid.New()
-		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "customers")+" (merchant_id, id) VALUES ($1, $2) ON CONFLICT DO NOTHING", a.alpha.MerchantID().UUID(), customer)
-		require.NoError(t, err)
-		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
-			" (merchant_id, id, customer_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, money_movement)"+
-			" VALUES ($1, $2, $3, 'rail', 'stripe', $4, 'ch_before_books', 10000000, 10000000, 'USD', 'succeeded', $5, 'rail')", a.alpha.MerchantID().UUID(), paid, customer, psp, now.Add(-24*time.Hour))
+		// A charge from before the books, for its order: no posting holds its
+		// money.
+		paid, yesterday := uuid.New(), now.Add(-24*time.Hour)
+		order, _ := rawOrder(t, a.world, customer, "USD", &yesterday, rawLine{amount: 10_000_000})
+		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
+			" (merchant_id, id, customer_id, order_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, money_movement)"+
+			" VALUES ($1, $2, $3, $4, 'rail', 'stripe', $5, 'ch_before_books', 10000000, 10000000, 'USD', 'succeeded', $6, 'rail')", a.alpha.MerchantID().UUID(), paid, customer, order, psp, yesterday)
 		require.NoError(t, err)
 
 		// Its refund posts: the money leaves unapplied cash, which goes below
 		// zero, and that is a finding, not a refusal.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
+		database := configuredDB(t, a.world)
 		ctx := db.WithPSPID(merchant.WithID(t.Context(), a.alpha.MerchantID()), psp)
 		refund, err := payments.NewPaymentService(database, a.clock).RefundObservedWithReason(ctx, paid, "re_before_books", 4_000_000, billing.RefundRequestedByCustomer, now)
 		require.NoError(t, err)
@@ -507,10 +505,9 @@ func TestRevenueReversals(t *testing.T) {
 
 		// Refunded whole before its access was granted: nothing is left for
 		// the line, so it is not missing a schedule.
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
+		database := configuredDB(t, a.world)
 		ctx := db.WithPSPID(merchant.WithID(t.Context(), a.alpha.MerchantID()), psp)
-		_, err = payments.NewPaymentService(database, a.clock).RefundObservedWithReason(ctx, paid.Payment.ID, "re_refunded_pass", 9_000_000, billing.RefundRequestedByCustomer, now)
+		_, err := payments.NewPaymentService(database, a.clock).RefundObservedWithReason(ctx, paid.Payment.ID, "re_refunded_pass", 9_000_000, billing.RefundRequestedByCustomer, now)
 		require.NoError(t, err)
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), paid.Order.ID, nil)
@@ -801,8 +798,8 @@ func TestRevenueReversals(t *testing.T) {
 		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" DISABLE TRIGGER credit_grants_require_books")
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at, payment_id)"+
-			" SELECT merchant_id, $3, customer_id, account_id, unit, 400, 'purchase', 20000000, 'USD', 'pack_purchase', $4::text, invoker, starts_at, $4 FROM "+table+" WHERE merchant_id = $1 AND id = $2",
-			w.alpha.MerchantID().UUID(), bought.ID.UUID(), lot, payment)
+			" SELECT merchant_id, $3, customer_id, account_id, unit, 400, 'purchase', 20000000, 'USD', 'pack_purchase', $5, invoker, starts_at, $4 FROM "+table+" WHERE merchant_id = $1 AND id = $2",
+			w.alpha.MerchantID().UUID(), bought.ID.UUID(), lot, payment, payment.String())
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" ENABLE TRIGGER credit_grants_require_books")
 		require.NoError(t, err)
@@ -816,10 +813,8 @@ func TestRevenueReversals(t *testing.T) {
 
 		// Refunded whole: its 400 GOLD leave at once, its share is recorded,
 		// and its $20 leaves the payment's unapplied cash.
-		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
-		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
-		refund, err := payments.NewPaymentService(database, w.clock).Refund(ctx, payment, "unbooked-gold-refund", 20_000_000, payments.ReversalRefund)
+		refund, err := payments.NewPaymentService(configuredDB(t, w), w.clock).Refund(ctx, payment, "unbooked-gold-refund", 20_000_000, payments.ReversalRefund)
 		require.NoError(t, err)
 		unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
 		require.Equal(t, [2]int64{20_000_000, 400}, lotShare(t, w, refund.ID))
@@ -866,6 +861,45 @@ func forfeited(t *testing.T, w *world, schedule uuid.UUID) int64 {
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT forfeited FROM "+booksTable(w, "revenue_schedules")+" WHERE merchant_id=$1 AND id=$2",
 		w.alpha.MerchantID().UUID(), schedule).Scan(&n))
 	return n
+}
+
+// configuredDB is a database a scenario opens itself, reading the world's
+// declared merchant configuration as the runtime binds it: a provider
+// refund's access policy is read there.
+func configuredDB(t *testing.T, w *world) *db.DB {
+	t.Helper()
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	require.NoError(t, err)
+	database.SetMerchantConfig(declaredConfig{w: w})
+	return database
+}
+
+// declaredConfig serves the world's merchant declarations.
+type declaredConfig struct{ w *world }
+
+func (c declaredConfig) declaration(id billing.MerchantID) billing.MerchantDeclaration {
+	for _, m := range c.w.cfg.Merchants {
+		if id == c.w.alpha.MerchantID() && m.Slug == "alpha" || c.w.beta != nil && id == c.w.beta.MerchantID() && m.Slug == "beta" {
+			return m
+		}
+	}
+	return billing.MerchantDeclaration{}
+}
+
+func (c declaredConfig) MerchantSettings(_ context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error) {
+	d := c.declaration(id)
+	return d.DisplayName, d.MerchantSettings, nil
+}
+
+func (c declaredConfig) MerchantMessages(_ context.Context, id billing.MerchantID) (billing.MessageSettings, error) {
+	if d := c.declaration(id); d.Messages != nil {
+		return *d.Messages, nil
+	}
+	return billing.MessageSettings{}, nil
+}
+
+func (c declaredConfig) StoredCurrencies(_ context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error) {
+	return c.declaration(id).Currencies, nil
 }
 
 // worldStripePSP is the payment world's Stripe PSP.
