@@ -610,7 +610,7 @@ type servicesInstances struct {
 func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
-	// Domain services publish immutable notification facts; applications consume them.
+	// Domain services record immutable notification facts; customer messages and applications read them.
 	notificationService := subscriptions.NewNotificationService(database)
 	paymentMethodService := paymentmethods.NewPaymentMethodService(database)
 	paymentService := payments.NewPaymentService(database, clock)

@@ -196,8 +196,10 @@ func (g *Gate) Flush(ctx context.Context) error {
 // Close sends pending usage and ends the gate's lease
 // (SyncLeasesParams.Close), which releases its request holds and clears its
 // in-flight report, then stops syncing, within ctx (or a bound when ctx has
-// no deadline). Close after the gate's tickets are captured or released: a
-// ticket captured after Close is refused.
+// no deadline). A sync that cannot reach OpenRails is retried until then;
+// usage still unsent at the end is named in the error, and without an Outbox
+// it is lost when the process exits. Close after the gate's tickets are
+// captured or released: a ticket captured after Close is refused.
 func (g *Gate) Close(ctx context.Context) error {
 	g.mu.Lock()
 	if g.closed {

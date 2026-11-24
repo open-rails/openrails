@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1218,7 +1219,7 @@ func (g *gateState) flush(ctx context.Context, closing bool) error {
 				done = done && !targets[e]
 			}
 		}
-		failure, attempted, ch := g.failure, g.attempts > start, g.synced
+		failure, down, attempted, ch := g.failure, g.unreachable, g.attempts > start, g.synced
 		var refused []error
 		if done {
 			refused, g.refused = g.refused, nil
@@ -1227,7 +1228,9 @@ func (g *gateState) flush(ctx context.Context, closing bool) error {
 		if done {
 			return errors.Join(refused...)
 		}
-		if attempted && failure != nil {
+		// Closing rides out OpenRails being unreachable until its bound:
+		// captured usage is never dropped for a transient failure.
+		if attempted && failure != nil && (!closing || !down) {
 			return failure
 		}
 		if time.Since(kicked) >= limits.SyncInterval {
@@ -1269,23 +1272,52 @@ func (g *gateState) close(ctx context.Context) error {
 	case <-ctx.Done():
 		err = errors.Join(err, waitErr(ctx))
 	}
-	return err
+	return g.unsent(err)
+}
+
+// unsent names the usage a closed gate still holds, wrapping why it was not
+// sent: the next process resends it from an outbox; without one it is lost.
+func (g *gateState) unsent(cause error) error {
+	g.mu.Lock()
+	if g.failure != nil && !errors.Is(cause, g.failure) {
+		// Why the last sync failed, beside why Close stopped waiting.
+		cause = errors.Join(g.failure, cause)
+	}
+	n := 0
+	var held []string
+	for lease, q := range g.queues {
+		if len(q.items) == 0 {
+			continue
+		}
+		n += len(q.items)
+		held = append(held, fmt.Sprintf("lease %s items %d to %d", lease, q.items[0].item.N, q.items[len(q.items)-1].item.N))
+	}
+	g.mu.Unlock()
+	if n == 0 {
+		return cause
+	}
+	if cause == nil {
+		cause = ErrUnavailable
+	}
+	slices.Sort(held)
+	return fmt.Errorf("openrails: gate: closed with %d usage items unsent (%s): %w", n, strings.Join(held, "; "), cause)
 }
 
 // closeLease waits for a sync built after Close began, which closes the
-// lease; one that fails ends the wait with its failure.
+// lease; one refused ends the wait with its failure, and one that could not
+// reach OpenRails is retried.
 func (g *gateState) closeLease(ctx context.Context) error {
 	g.mu.Lock()
 	start := g.attempts
 	g.mu.Unlock()
 	for {
 		g.mu.Lock()
-		closed, failure, tried, ch := g.leaseClosed, g.failure, g.attempts > start, g.synced
+		closed, failure, down, tried, ch := g.leaseClosed, g.failure, g.unreachable, g.attempts > start, g.synced
 		g.mu.Unlock()
 		switch {
 		case closed:
 			return nil
-		case tried && failure != nil:
+		case tried && failure != nil && !down:
 			return failure
 		}
 		g.poke()
