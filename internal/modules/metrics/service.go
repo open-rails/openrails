@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Service executes validated metrics plans. Merchant scoping is structural:
@@ -97,8 +98,7 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	if plan.Compare != "" {
 		prev := *plan
 		if plan.Compare == "previous_year" {
-			zone := plan.zone()
-			prev.From, prev.To = plan.From.In(zone).AddDate(-1, 0, 0).UTC(), plan.To.In(zone).AddDate(-1, 0, 0).UTC()
+			prev.From, prev.To = yearBefore(plan.From, plan.zone()), yearBefore(plan.To, plan.zone())
 		} else {
 			prev.From, prev.To = plan.From.Add(-plan.To.Sub(plan.From)), plan.From
 		}
@@ -114,6 +114,16 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 		res.CompareRows = prevRows
 	}
 	return res, nil
+}
+
+// yearBefore is t a year earlier on zone's calendar: a day's start is the
+// same date's start, by date rather than wall clock.
+func yearBefore(t time.Time, zone *time.Location) time.Time {
+	if t.Equal(calendarutil.DateStart(t, zone)) {
+		y, m, d := t.In(zone).Date()
+		return calendarutil.DayStart(y-1, m, d, zone).UTC()
+	}
+	return t.In(zone).AddDate(-1, 0, 0).UTC()
 }
 
 func columns(plan *Plan) []Column {

@@ -112,6 +112,9 @@ type MetricsMeasure struct {
 	Dims        []string            `json:"dims"`
 	DimValues   map[string][]string `json:"dim_values,omitempty"`
 	Money       bool                `json:"money,omitempty"`
+	// UTCDays: the measure reads a rollup kept per UTC date, so its days are
+	// UTC dates, grouped as the accounting timezone's days of the same date.
+	UTCDays bool `json:"utc_days,omitempty"`
 }
 
 // MetricsDimension is one axis to group or filter by.

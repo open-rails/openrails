@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Grains accepted for the time dimension; auto is day up to 45 days, week up
@@ -86,11 +87,12 @@ func decodeFieldError(err error) FieldError {
 // parseRangeTime parses a range endpoint: a date in zone or RFC3339, as a
 // UTC instant.
 func parseRangeTime(s string, dayEnd bool, zone *time.Location) (time.Time, bool) {
-	if t, err := time.ParseInLocation("2006-01-02", s, zone); err == nil {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		y, m, d := t.Date()
 		if dayEnd {
-			t = t.AddDate(0, 0, 1)
+			d++
 		}
-		return t.UTC(), true
+		return calendarutil.DayStart(y, m, d, zone).UTC(), true
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC(), true

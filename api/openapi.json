@@ -21299,6 +21299,9 @@
           },
           "money": {
             "type": "boolean"
+          },
+          "utc_days": {
+            "type": "boolean"
           }
         },
         "required": [

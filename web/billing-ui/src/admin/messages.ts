@@ -342,6 +342,7 @@ export const billingAdminMessages = {
   "Date range": "Date range",
   "Days are added after any access they already have.":
     "Days are added after any access they already have.",
+  "Days are UTC dates.": "Days are UTC dates.",
   "Decline reasons": "Decline reasons",
   Declined: "Declined",
   Declines: "Declines",

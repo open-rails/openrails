@@ -1582,6 +1582,7 @@ export type MetricsMeasure = {
   dims: string[]
   dim_values?: Record<string, string[]>
   money?: boolean
+  utc_days?: boolean
 }
 
 export type MetricsOrder = {

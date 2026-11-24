@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // FieldError is one corrective validation error: machine-readable code, the
@@ -355,18 +356,19 @@ func resolveLast(last string, now time.Time, zone *time.Location) (from, to time
 	if err != nil || n < 1 {
 		return time.Time{}, time.Time{}, false
 	}
-	now = now.In(zone)
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
-	to = today.AddDate(0, 0, 1) // inclusive of today
+	// Dates, not wall clocks: a day that starts at a transition stays whole.
+	y, mo, d := now.In(zone).Date()
+	d++ // inclusive of today
+	to = calendarutil.DayStart(y, mo, d, zone)
 	switch m[2] {
 	case "d":
-		from = to.AddDate(0, 0, -n)
+		from = calendarutil.DayStart(y, mo, d-n, zone)
 	case "w":
-		from = to.AddDate(0, 0, -7*n)
+		from = calendarutil.DayStart(y, mo, d-7*n, zone)
 	case "m":
-		from = to.AddDate(0, -n, 0)
+		from = calendarutil.DayStart(y, mo-time.Month(n), d, zone)
 	case "y":
-		from = to.AddDate(-n, 0, 0)
+		from = calendarutil.DayStart(y-n, mo, d, zone)
 	}
 	return from.UTC(), to.UTC(), true
 }
@@ -446,14 +448,16 @@ func contains(list []string, v string) bool {
 }
 
 // bucketLabels enumerates the calendar bucket starts in zone covering
-// [from, to), as UTC instants. Labels match Postgres date_trunc(grain, t,
-// zone) (weeks start Monday).
+// [from, to), as UTC instants: each its date's first instant, which is what
+// PostgreSQL's date_trunc(grain, t, zone) gives (weeks start Monday). Each
+// is computed from its date, never by moving a wall clock, so a day that
+// starts at a transition neither drifts nor repeats.
 func bucketLabels(from, to time.Time, grain string, zone *time.Location) []time.Time {
-	cur := truncGrain(from.In(zone), grain)
+	y, m, d := bucketDate(from.In(zone), grain)
 	var out []time.Time
-	for cur.Before(to) {
+	for cur := calendarutil.DayStart(y, m, d, zone); cur.Before(to); cur = calendarutil.DayStart(y, m, d, zone) {
 		out = append(out, cur.UTC())
-		cur = stepGrain(cur, grain)
+		y, m, d = nextBucketDate(y, m, d, grain)
 		if len(out) > MaxBuckets {
 			break // clamp check reports the error; avoid unbounded loops
 		}
@@ -461,41 +465,44 @@ func bucketLabels(from, to time.Time, grain string, zone *time.Location) []time.
 	return out
 }
 
-// truncGrain is the start of t's bucket in t's own location.
-func truncGrain(t time.Time, grain string) time.Time {
-	zone := t.Location()
-	switch grain {
-	case "day":
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, zone)
-	case "week":
-		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, zone)
-		offset := (int(d.Weekday()) + 6) % 7 // Monday start, like date_trunc
-		return d.AddDate(0, 0, -offset)
-	case "month":
-		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, zone)
-	case "quarter":
-		qm := time.Month(((int(t.Month())-1)/3)*3 + 1)
-		return time.Date(t.Year(), qm, 1, 0, 0, 0, 0, zone)
-	case "year":
-		return time.Date(t.Year(), 1, 1, 0, 0, 0, 0, zone)
-	}
-	return t
+// truncGrain is the start of t's bucket on zone's calendar.
+func truncGrain(t time.Time, grain string, zone *time.Location) time.Time {
+	y, m, d := bucketDate(t.In(zone), grain)
+	return calendarutil.DayStart(y, m, d, zone).UTC()
 }
 
-func stepGrain(t time.Time, grain string) time.Time {
+// bucketDate is the date t's bucket starts on, in t's location.
+func bucketDate(t time.Time, grain string) (int, time.Month, int) {
+	y, m, d := t.Date()
+	switch grain {
+	case "week":
+		d -= (int(t.Weekday()) + 6) % 7 // Monday start, like date_trunc
+	case "month":
+		d = 1
+	case "quarter":
+		m, d = ((m-1)/3)*3+1, 1
+	case "year":
+		m, d = 1, 1
+	}
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Date()
+}
+
+// nextBucketDate is the date the bucket after the one starting on y-m-d
+// starts on.
+func nextBucketDate(y int, m time.Month, d int, grain string) (int, time.Month, int) {
 	switch grain {
 	case "day":
-		return t.AddDate(0, 0, 1)
+		d++
 	case "week":
-		return t.AddDate(0, 0, 7)
+		d += 7
 	case "month":
-		return t.AddDate(0, 1, 0)
+		m++
 	case "quarter":
-		return t.AddDate(0, 3, 0)
+		m += 3
 	case "year":
-		return t.AddDate(1, 0, 0)
+		y++
 	}
-	return t
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Date()
 }
 
 // ReadsUsage reports a plan whose measures, or their components, read usage

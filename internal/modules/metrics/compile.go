@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // stmt is one compiled family statement.
@@ -230,12 +232,11 @@ func bucketExpr(spec familySpec, grain, zone string) string {
 // calendarBound is the UTC midnight of t's date in zone, the date after when
 // up and t is not that day's start: a calendar family's rows are keyed so.
 func calendarBound(t time.Time, zone *time.Location, up bool) time.Time {
-	local := t.In(zone)
-	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
-	if up && !local.Equal(time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, zone)) {
-		day = day.AddDate(0, 0, 1)
+	y, m, d := t.In(zone).Date()
+	if up && !t.Equal(calendarutil.DayStart(y, m, d, zone)) {
+		d++
 	}
-	return day
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // riskSpec reads the per-reason at-risk rows when the query groups or

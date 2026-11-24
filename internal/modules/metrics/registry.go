@@ -1325,6 +1325,17 @@ func (m *Measure) composite() bool {
 
 // components returns the leaf measures a measure needs computed (itself for
 // a leaf; its components' leaves for a ratio or a difference).
+// utcDays reports a measure any of whose components reads a rollup kept per
+// UTC date (a Calendar family).
+func (m *Measure) utcDays() bool {
+	for _, leaf := range m.components() {
+		if families[leaf.Family].Calendar {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Measure) components() []*Measure {
 	if !m.composite() {
 		return []*Measure{m}

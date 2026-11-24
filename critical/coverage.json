@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 584,
+  "scenario_count": 585,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2702,6 +2702,11 @@
       "id": "OR-J53-S04",
       "journey": "J53",
       "name": "A sale at 23:30 in a merchant's accounting timezone, ten hours behind UTC, counts on that local day: date ranges and day buckets start at its midnights and the result names the zone"
+    },
+    {
+      "id": "OR-J53-S05",
+      "journey": "J53",
+      "name": "A day chart across a midnight clock change has one row per local day, the changed day starting at its transition with the sale made on it; the catalogue marks measures read from rollups kept per UTC date"
     },
     {
       "id": "OR-J43-S01",

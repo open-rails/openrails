@@ -65,7 +65,7 @@ func Schema() SchemaDoc {
 			Name: m.Name, Class: m.Class, Unit: m.Unit,
 			Group: m.Group, Direction: m.Direction, Thresholds: thresholds,
 			Description: m.Description, Formula: m.Formula,
-			Dims: m.Dims, DimValues: dimValues, Money: m.Money,
+			Dims: m.Dims, DimValues: dimValues, Money: m.Money, UTCDays: m.utcDays(),
 		})
 	}
 	for i := range Dimensions {
