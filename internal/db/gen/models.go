@@ -450,7 +450,11 @@ type BillingDispute struct {
 	ReversalPaymentID *uuid.UUID
 	// The positive payments row that returned the money of a won dispute.
 	RecoveryPaymentID *uuid.UUID
-	// When the chargeback's automatic response finished: the customer's other provider-billed subscriptions on the charged card canceled at period end. NULL while it waits, held or parked.
+	// The provider refund an RDR resolution took as its own (Stripe's re_ id), so each refund is booked once.
+	AbsorbedRefundRef *string
+	// How OpenRails first learned of the case: notice (a provider's notice) or pull (a reconcile pull); a case a pull found is acted on only once the merchant is armed.
+	ObservedVia string
+	// When the chargeback's automatic response finished: the charged card blocked and the customer's other provider-billed subscriptions on it canceled at period end. NULL while it waits.
 	RespondedAt *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -565,13 +569,15 @@ type BillingFraudReport struct {
 	Amount     int64
 	Currency   string
 	ReportedAt time.Time
-	// What OpenRails decided: recorded (the report only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).
+	// What OpenRails decided: pending (an actionable report the merchant refunds, not yet answered), recorded (the report only: unactionable, or received while the merchant recorded reports only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).
 	Action          string
 	RefundPaymentID *uuid.UUID
-	// When what the charge paid for was ended and its card blocked, with its refund; NULL until then.
-	EndedAt   *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// When the charge was refunded, what it paid for ended and its card blocked; NULL until then.
+	EndedAt *time.Time
+	// When the response finished: with the end, the customer's other provider-billed subscriptions on the card canceled at period end. NULL while it waits.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.

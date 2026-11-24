@@ -395,6 +395,18 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
 					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
 					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
+				// The sale names its vault: the customer's one card in it is
+				// the card charged.
+				if t.CustomerRef != "" {
+					cards, err := d.Gen(ctx).ListCustomerCardsByRailCustomerRef(ctx, gen.ListCustomerCardsByRailCustomerRefParams{
+						MerchantID: sub.MerchantID, PspID: sub.PspID, CustomerID: sub.CustomerID, RailCustomerRef: t.CustomerRef})
+					if err != nil {
+						return err
+					}
+					if len(cards) == 1 {
+						bill.Payment.PaymentMethodID = &cards[0]
+					}
+				}
 				bill.Settled, bill.SettlementSource = true, "cash"
 			}
 			if result, err = observed.Record(ctx, d, bill, now); err != nil {

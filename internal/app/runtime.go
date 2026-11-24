@@ -498,9 +498,14 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		dispatchDone = make(chan struct{})
 		go func() { defer close(dispatchDone); r.Messages.Run(loopCtx) }()
 	}
+	var wakeDone chan struct{}
+	if r.Disputes != nil {
+		wakeDone = make(chan struct{})
+		go func() { defer close(wakeDone); r.Disputes.Run(loopCtx) }()
+	}
 	joinLoops := func() {
 		stopLoops()
-		for _, done := range []chan struct{}{pollerDone, dispatchDone} {
+		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone} {
 			if done != nil {
 				<-done
 			}

@@ -174,6 +174,7 @@ type stripeRefund struct {
 	Currency      string `json:"currency"`
 	Status        string `json:"status"`
 	Reason        string `json:"reason"`
+	Created       int64  `json:"created"`
 	// Metadata carries the billing book that created the refund (or, on a
 	// charge.refunded event, the charge).
 	Metadata map[string]string `json:"metadata"`
@@ -898,16 +899,29 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return err
 		}
-		amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(refund.Amount)))
-		// An RDR resolution already booked as its dispute is this refund.
-		resolved, err := s.sameRefund(ctx, original, amount, func(r *models.Payment) bool {
-			return r.RefundReason != nil && *r.RefundReason == string(billing.RefundDisputePrevention) && r.TransactionID != refundID
-		})
+		currency := strings.ToUpper(strings.TrimSpace(refund.Currency))
+		if currency == "" {
+			currency = original.Currency
+		}
+		amount, err := moneyutil.RailMinorToNative(currency, moneyutil.Cents(refund.Amount))
+		if err != nil {
+			return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund %s amount: %w", refundID, err))
+		}
+		var at time.Time
+		if refund.Created > 0 {
+			at = time.Unix(refund.Created, 0).UTC()
+		}
+		// An RDR resolution's refund a prevented case booked already is this
+		// refund: the case takes it once.
+		absorbed, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, refundID)
+		if err == nil && !absorbed {
+			absorbed, err = s.disputes().AbsorbByPrevention(ctx, s.DB, original.ID, refundID, amount, currency, s.atOrNow(at))
+		}
 		if err != nil {
 			return err
 		}
-		if resolved == nil {
-			if _, err := s.PaymentService.RefundWithReason(ctx, original.ID, refundID, amount, stripeRefundReason(refund.Reason)); err != nil {
+		if !absorbed {
+			if _, err := s.PaymentService.RefundObservedWithReason(ctx, original.ID, refundID, amount, stripeRefundReason(refund.Reason), at); err != nil {
 				return fmt.Errorf("record stripe refund: %w", err)
 			}
 		}
@@ -965,11 +979,10 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		if !disputerules.StripePreventionRefunds(dispute.PaymentMethodDetails.Card.CaseType) || rec.ReversalPaymentID != nil {
 			return nil
 		}
-		refund, err := s.preventionRefund(ctx, original, disputeID, report.Amount)
-		if err != nil {
+		if err := s.preventionRefund(ctx, original, rec, report.Amount, report.Currency); err != nil {
 			return fmt.Errorf("record stripe dispute resolution: %w", err)
 		}
-		return s.disputes().Link(ctx, s.DB, rec, &refund.ID, nil)
+		return nil
 	default:
 		s.Log.InfoContext(ctx, "Stripe dispute recorded; nothing reversed or ended", "dispute_id", disputeID, "event_type", eventType, "status", dispute.Status, "kind", report.Kind)
 		return nil
@@ -991,7 +1004,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 	}
 	cause := fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
-	if err := s.endDisputedCharge(ctx, original, rec, func(sub *models.Subscription) string {
+	if err := s.endDisputedCharge(ctx, original, func(sub *models.Subscription) string {
 		// A membership already canceled is not this dispute's cancellation to undo.
 		if sub.Status == models.StatusCanceled {
 			return fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
@@ -1022,32 +1035,44 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	return nil
 }
 
-// preventionRefund books an RDR resolution's refund once: a Stripe refund
-// already booked for the whole charge is the resolution's refund.
-func (s *StripeWebhookService) preventionRefund(ctx context.Context, original *models.Payment, disputeID string, amount int64) (*models.Payment, error) {
-	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, disputeID); err == nil && existing != nil {
-		return existing, nil
+// preventionRefund books an RDR resolution's refund once. A Stripe refund of
+// the whole charge made no earlier than the case, which no case took yet, is
+// the resolution's: the case absorbs it rather than booking another.
+func (s *StripeWebhookService) preventionRefund(ctx context.Context, original *models.Payment, rec disputes.Case, amount int64, currency string) error {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, rec.ProviderRef); err == nil && existing != nil {
+		return s.disputes().Link(ctx, s.DB, rec, &existing.ID, nil)
 	} else if err != nil && !db.IsNotFound(err) {
-		return nil, err
+		return err
 	}
-	if refund, err := s.sameRefund(ctx, original, amount, func(r *models.Payment) bool { return true }); err != nil || refund != nil {
-		return refund, err
-	}
-	return s.PaymentService.RefundWithReason(ctx, original.ID, disputeID, amount, billing.RefundDisputePrevention)
-}
-
-// sameRefund is a succeeded refund of original for amount that match admits.
-func (s *StripeWebhookService) sameRefund(ctx context.Context, original *models.Payment, amount int64, match func(*models.Payment) bool) (*models.Payment, error) {
 	_, refunds, err := s.PaymentService.GetByIDWithDetails(ctx, original.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, r := range refunds {
-		if r.ReversalKind != nil && *r.ReversalKind == payments.ReversalRefund && -r.Amount == amount && r.Status == payments.PaymentStatusSucceededValue && match(r) {
-			return r, nil
+		if r.ReversalKind == nil || *r.ReversalKind != payments.ReversalRefund || r.Status != payments.PaymentStatusSucceededValue ||
+			-r.Amount != amount || !strings.EqualFold(r.Currency, currency) || r.PurchasedAt.Before(rec.DisputedAt) || !strings.HasPrefix(r.TransactionID, "re_") {
+			continue
+		}
+		taken, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, r.TransactionID)
+		if err != nil {
+			return err
+		}
+		if !taken {
+			return s.disputes().AbsorbRefund(ctx, s.DB, rec, r)
 		}
 	}
-	return nil, nil
+	refund, err := s.PaymentService.RefundWithReason(ctx, original.ID, rec.ProviderRef, amount, billing.RefundDisputePrevention)
+	if err != nil {
+		return err
+	}
+	return s.disputes().Link(ctx, s.DB, rec, &refund.ID, nil)
+}
+
+func (s *StripeWebhookService) atOrNow(at time.Time) time.Time {
+	if at.IsZero() {
+		return s.now()
+	}
+	return at
 }
 
 type stripeEarlyFraudWarning struct {
@@ -1094,9 +1119,9 @@ func (s *StripeWebhookService) handleEarlyFraudWarning(ctx context.Context, obj 
 }
 
 // endDisputedCharge ends what a charged-back charge paid for: its
-// subscriptions at once with their access, a one-off's access, and its card
-// for good.
-func (s *StripeWebhookService) endDisputedCharge(ctx context.Context, original *models.Payment, rec disputes.Case, feedback func(*models.Subscription) string) error {
+// subscriptions at once with their access and a one-off's access. Its card is
+// blocked by the chargeback's response, under its gates.
+func (s *StripeWebhookService) endDisputedCharge(ctx context.Context, original *models.Payment, feedback func(*models.Subscription) string) error {
 	if s.SubscriptionLifecycleService != nil && s.DB != nil {
 		subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
 		if err != nil {
@@ -1114,10 +1139,7 @@ func (s *StripeWebhookService) endDisputedCharge(ctx context.Context, original *
 			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
 		}
 	}
-	if s.DB == nil {
-		return nil
-	}
-	return s.disputes().BlockCard(ctx, s.DB, original, &rec.BillingDispute)
+	return nil
 }
 
 func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispute disputes.StripeDispute, rec disputes.Case) error {

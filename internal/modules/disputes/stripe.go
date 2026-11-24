@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -119,6 +121,7 @@ func (s *Service) RecordPulledDisputes(ctx context.Context, psp uuid.UUID, provi
 			errs = append(errs, err)
 			continue
 		}
+		report.Pulled = true
 		if _, err := s.Record(ctx, s.DB, report); err != nil {
 			errs = append(errs, err)
 		}
@@ -139,4 +142,53 @@ func (s *Service) RaiseUnknownCharge(ctx context.Context, d *db.DB, psp uuid.UUI
 		return fmt.Errorf("raise unknown charge %s: %w", ref, err)
 	}
 	return nil
+}
+
+// RefundAbsorbed reports whether a case took the provider refund ref of
+// payment as its own.
+func (s *Service) RefundAbsorbed(ctx context.Context, d *db.DB, payment uuid.UUID, ref string) (bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	return d.Gen(ctx).DisputeRefundAbsorbed(ctx, gen.DisputeRefundAbsorbedParams{MerchantID: mid.UUID(), PaymentID: payment, RefundRef: ref})
+}
+
+// AbsorbRefund makes refund the RDR refund of a prevented case that has none
+// booked: the case links it and records its provider id, once.
+func (s *Service) AbsorbRefund(ctx context.Context, d *db.DB, c Case, refund *models.Payment) error {
+	n, err := d.Gen(ctx).AbsorbDisputeRefund(ctx, gen.AbsorbDisputeRefundParams{MerchantID: c.MerchantID, ID: c.BillingDispute.ID,
+		RefundRef: refund.TransactionID, ReversalPaymentID: &refund.ID})
+	if err != nil {
+		return fmt.Errorf("absorb refund %s into dispute %s: %w", refund.TransactionID, c.ProviderRef, err)
+	}
+	if n != 1 {
+		return fmt.Errorf("dispute %s absorbed another refund", c.ProviderRef)
+	}
+	return nil
+}
+
+// AbsorbByPrevention takes a provider refund ref of payment, made at at for
+// amount in currency, as the RDR refund a prevented case booked already;
+// absorbed is false when no case's refund it is.
+func (s *Service) AbsorbByPrevention(ctx context.Context, d *db.DB, payment uuid.UUID, ref string, amount int64, currency string, at time.Time) (absorbed bool, err error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := d.NewWithPgxTx(tx).Gen(ctx)
+		prevention, err := q.GetAbsorbingPrevention(ctx, gen.GetAbsorbingPreventionParams{MerchantID: mid.UUID(), PaymentID: payment,
+			Amount: amount, Currency: currency, RefundedAt: at})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		n, err := q.AbsorbDisputeRefund(ctx, gen.AbsorbDisputeRefundParams{MerchantID: mid.UUID(), ID: prevention.ID, RefundRef: ref})
+		absorbed = n == 1
+		return err
+	})
+	return absorbed, err
 }

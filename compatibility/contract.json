@@ -1592,7 +1592,7 @@
     ],
     "internal/disputejob": [
       "type MonitorArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}",
-      "type ResponseArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tSubject    Subject   `json:\"subject\" river:\"unique\"`\n\tID         uuid.UUID `json:\"id\" river:\"unique\"`\n}"
+      "type ResponseArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tSubject    Subject   `json:\"subject\" river:\"unique\"`\n\tID         uuid.UUID `json:\"id\" river:\"unique\"`\n\tAfter      int64     `json:\"after,omitempty\" river:\"unique\"`\n}"
     ],
     "internal/eventlog": [
       "type cursor struct {\n\tVersion  int       `json:\"v\"`\n\tEpoch    uuid.UUID `json:\"epoch\"`\n\tMerchant string    `json:\"merchant\"`\n\tTypes    []string  `json:\"types,omitempty\"`\n\tPosition int64     `json:\"position\"`\n\tBoundary string    `json:\"boundary,omitempty\"`\n}"
@@ -1922,7 +1922,7 @@
       "type stripeInvoiceLineItem struct {\n\tPeriod struct {\n\t\tStart int64 `json:\"start\"`\n\t\tEnd   int64 `json:\"end\"`\n\t} `json:\"period\"`\n\tPrice struct {\n\t\tID string `json:\"id\"`\n\t} `json:\"price\"`\n\n\tPricing struct {\n\t\tPriceDetails struct {\n\t\t\tPrice string `json:\"price\"`\n\t\t} `json:\"price_details\"`\n\t} `json:\"pricing\"`\n}",
       "type stripeInvoicePayment struct {\n\tID      string `json:\"id\"`\n\tInvoice string `json:\"invoice\"`\n\tPayment struct {\n\t\tType          string `json:\"type\"`\n\t\tCharge        string `json:\"charge\"`\n\t\tPaymentIntent string `json:\"payment_intent\"`\n\t} `json:\"payment\"`\n}",
       "type stripePaymentMethod struct {\n\tID       string `json:\"id\"`\n\tCustomer string `json:\"customer\"`\n}",
-      "type stripeRefund struct {\n\tID            string `json:\"id\"`\n\tCharge        string `json:\"charge\"`\n\tPaymentIntent string `json:\"payment_intent\"`\n\tAmount        int64  `json:\"amount\"`\n\tCurrency      string `json:\"currency\"`\n\tStatus        string `json:\"status\"`\n\tReason        string `json:\"reason\"`\n\n\tMetadata map[string]string `json:\"metadata\"`\n}"
+      "type stripeRefund struct {\n\tID            string `json:\"id\"`\n\tCharge        string `json:\"charge\"`\n\tPaymentIntent string `json:\"payment_intent\"`\n\tAmount        int64  `json:\"amount\"`\n\tCurrency      string `json:\"currency\"`\n\tStatus        string `json:\"status\"`\n\tReason        string `json:\"reason\"`\n\tCreated       int64  `json:\"created\"`\n\n\tMetadata map[string]string `json:\"metadata\"`\n}"
     ],
     "internal/nmimock": [
       "type paymentDetails struct {\n\tPaymentDetails struct {\n\t\tPaymentToken string `json:\"payment_token\"`\n\t\tCardExp      string `json:\"card_exp\"`\n\t} `json:\"payment_details\"`\n}"
@@ -2748,6 +2748,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
       "uuid": "github.com/google/uuid"
     },
     "internal/eventlog/log.go": {
@@ -3706,6 +3707,7 @@
       "disputerules": "github.com/open-rails/openrails/internal/disputerules",
       "errors": "errors",
       "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -3714,7 +3716,8 @@
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "strings": "strings",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/grants/grants.go": {
       "context": "context",

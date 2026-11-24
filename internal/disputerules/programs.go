@@ -2,9 +2,7 @@ package disputerules
 
 import (
 	"fmt"
-	"maps"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -282,27 +280,20 @@ func ParseRatioLimit(v any) (int64, error) {
 	return int64(math.Round(percent * 100)), nil
 }
 
-// ChargebackLines are the count programs' standing levels as lines a
-// chargeback ratio is drawn against, one per ratio: Visa's, Mastercard's and
-// Stripe's, as they stand from their latest change.
-func ChargebackLines() []billing.MetricsThreshold {
-	names := map[billing.DisputeProgram]string{billing.ProgramVisaVAMP: "Visa VAMP", billing.ProgramMastercardECP: "Mastercard", billing.ProgramStripe: "Stripe"}
-	levels := map[billing.DisputeLevel]string{billing.DisputeLevelWarning: "warning", billing.DisputeLevelExcessive: "excessive", billing.DisputeLevelHighExcessive: "high excessive"}
-	labels := map[int64][]string{}
+// ProgramLines are a program's levels as lines its ratio is drawn against,
+// as they stand from the program's latest change.
+func ProgramLines(id billing.DisputeProgram) []billing.MetricsThreshold {
+	names := map[billing.DisputeLevel]string{billing.DisputeLevelWarning: "warning", billing.DisputeLevelExcessive: "excessive", billing.DisputeLevelHighExcessive: "high excessive"}
+	var out []billing.MetricsThreshold
 	for _, p := range Programs {
-		name, ok := names[p.ID]
-		if !ok {
+		if p.ID != id {
 			continue
 		}
 		for _, l := range p.Levels {
 			if l.Until.IsZero() {
-				labels[l.RatioBPS] = append(labels[l.RatioBPS], name+" "+levels[l.Level])
+				out = append(out, billing.MetricsThreshold{Value: float64(l.RatioBPS) / 10_000, Label: names[l.Level]})
 			}
 		}
-	}
-	var out []billing.MetricsThreshold
-	for _, bps := range slices.Sorted(maps.Keys(labels)) {
-		out = append(out, billing.MetricsThreshold{Value: float64(bps) / 10_000, Label: strings.Join(labels[bps], " · ")})
 	}
 	return out
 }

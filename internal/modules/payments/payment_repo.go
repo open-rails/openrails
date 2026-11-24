@@ -176,7 +176,7 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	if err := queueSaleMonitor(ctx, s.db, params); err != nil {
+	if err := s.queueSaleMonitor(ctx, params); err != nil {
 		return err
 	}
 	return convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
@@ -184,11 +184,15 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 
 // queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a
 // sale settled on it.
-func queueSaleMonitor(ctx context.Context, d *db.DB, p gen.CreatePaymentParams) error {
+func (s *PaymentService) queueSaleMonitor(ctx context.Context, p gen.CreatePaymentParams) error {
 	if p.PspID == nil || p.Status != PaymentStatusSucceededValue || p.Amount <= 0 || p.RefundedPaymentID != nil || p.MoneyMovement != string(models.MoneyMovementRail) {
 		return nil
 	}
-	return disputejob.QueueMonitorIfFlagged(ctx, d, p.MerchantID, *p.PspID)
+	settled := p.PurchasedAt
+	if settled.IsZero() {
+		settled = s.now()
+	}
+	return disputejob.QueueMonitorIfFlagged(ctx, s.db, p.MerchantID, *p.PspID, settled)
 }
 
 func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
@@ -216,7 +220,7 @@ func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.
 	if err != nil || rows == 0 {
 		return false, err
 	}
-	if err := queueSaleMonitor(ctx, s.db, params); err != nil {
+	if err := s.queueSaleMonitor(ctx, params); err != nil {
 		return false, err
 	}
 	return true, convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
@@ -521,7 +525,15 @@ func (s *PaymentService) completeProviderAttempt(ctx context.Context, attemptID 
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	return nil
+	// The attempt settled at the rail: a sale on its PSP.
+	settled, err := s.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: attemptID})
+	if err != nil {
+		return err
+	}
+	if settled.PspID == nil || settled.Amount <= 0 || settled.RefundedPaymentID != nil {
+		return nil
+	}
+	return disputejob.QueueMonitorIfFlagged(ctx, s.db, queryMerchant.UUID(), *settled.PspID, settled.PurchasedAt)
 }
 
 func (s *PaymentService) completeProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {

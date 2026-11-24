@@ -77,7 +77,9 @@ func DefaultWidgets(p Profile) []Widget {
 	}
 	if p.CardPayments {
 		health = append(health,
-			chart("chargeback-rate", "Chargeback rate against the networks' levels", "line", series([]string{"chargeback_rate"})),
+			chart("network-ratios", "Visa VAMP and Mastercard ECM ratios against their levels", "line",
+				metrics.Query{Measures: []string{"vamp_ratio", "ecm_ratio"}, By: []string{"time"}, Grain: "month"}),
+			chart("chargeback-rate", "Chargeback rate", "line", series([]string{"chargeback_rate"})),
 			chart("refund-rate", "Refund rate", "line", series([]string{"refund_rate"})),
 			Widget{ID: "dispute-programs", Title: "Dispute programs by PSP and network", Viz: Programs},
 			chart("attempts-by-psp", "Attempts by PSP and outcome", "table", metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "outcome"}}),

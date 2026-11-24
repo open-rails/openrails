@@ -120,6 +120,15 @@ func (s *PaymentService) RefundWithReason(ctx context.Context, originalPaymentID
 	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, reason, time.Time{}, nil, true)
 }
 
+// RefundObservedWithReason records a provider refund with its reason at the
+// provider's occurrence time.
+func (s *PaymentService) RefundObservedWithReason(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reason billing.RefundReason, occurredAt time.Time) (*models.Payment, error) {
+	if occurredAt.IsZero() {
+		return s.RefundWithReason(ctx, originalPaymentID, refundTransactionID, amount, reason)
+	}
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, reason, occurredAt.UTC().Truncate(time.Microsecond), nil, true)
+}
+
 // RecordObservedRefund retains the provider's occurrence time and provenance.
 // Local accounting effects use the service clock; they are never backdated.
 // A replay returns the first accepted facts without rewriting their metadata.

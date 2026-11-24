@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
@@ -57,11 +58,14 @@ const (
 	SubjectFraudReport Subject = "fraud_report"
 )
 
-// ResponseArgs names one chargeback or fraud report.
+// ResponseArgs names one chargeback or fraud report. After is the job
+// already running when it was queued: it may have read before the change
+// that queued this one.
 type ResponseArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
 	Subject    Subject   `json:"subject" river:"unique"`
 	ID         uuid.UUID `json:"id" river:"unique"`
+	After      int64     `json:"after,omitempty" river:"unique"`
 }
 
 func (ResponseArgs) Kind() string { return ResponseKind }
@@ -97,12 +101,13 @@ func QueueMonitor(ctx context.Context, d *db.DB, merchant, psp uuid.UUID) error 
 }
 
 // QueueMonitorIfFlagged queues the PSP's evaluation when one of its threshold
-// findings is open: the sale that just settled may resolve it.
-func QueueMonitorIfFlagged(ctx context.Context, d *db.DB, merchant, psp uuid.UUID) error {
+// findings is open for the month the sale settled in: the sale may resolve
+// it. An ended month's finding is settled already.
+func QueueMonitorIfFlagged(ctx context.Context, d *db.DB, merchant, psp uuid.UUID, settled time.Time) error {
 	if d.Tx() == nil || merchant == uuid.Nil || psp == uuid.Nil {
 		return nil
 	}
-	open, err := d.Gen(ctx).PSPHasOpenThresholdFinding(ctx, gen.PSPHasOpenThresholdFindingParams{MerchantID: merchant, PspID: psp})
+	open, err := d.Gen(ctx).PSPHasOpenThresholdFinding(ctx, gen.PSPHasOpenThresholdFindingParams{MerchantID: merchant, PspID: psp, Month: settled.UTC().Format("2006-01")})
 	if err != nil || !open {
 		return err
 	}
@@ -117,8 +122,18 @@ func QueueResponse(ctx context.Context, d *db.DB, merchant uuid.UUID, subject Su
 	}
 	args := ResponseArgs{MerchantID: merchant, Subject: subject, ID: id}
 	opts := args.InsertOpts()
-	if _, err := d.InsertRiverJobTx(ctx, tx, args, &opts); err != nil && !errors.Is(err, db.ErrNoRiverProducer) {
-		return fmt.Errorf("queue dispute response: %w", err)
+	for range 4 {
+		res, err := d.InsertRiverJobTx(ctx, tx, args, &opts)
+		if errors.Is(err, db.ErrNoRiverProducer) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("queue dispute response: %w", err)
+		}
+		if res == nil || !res.UniqueSkippedAsDuplicate || res.Job == nil || res.Job.State != rivertype.JobStateRunning {
+			return nil
+		}
+		args.After = res.Job.ID
 	}
-	return nil
+	return fmt.Errorf("queue dispute response: jobs already running for %s %s", subject, id)
 }

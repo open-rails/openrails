@@ -157,16 +157,19 @@ func TestMinimumsAreActualCounts(t *testing.T) {
 	}
 }
 
-// A chargeback ratio is drawn against each network's levels, one line per
-// ratio.
-func TestChargebackLines(t *testing.T) {
-	got := map[float64]string{}
-	for _, l := range ChargebackLines() {
-		got[l.Value] = l.Label
+// A program's ratio is drawn against its levels as they stand.
+func TestProgramLines(t *testing.T) {
+	got := map[billing.DisputeProgram]map[float64]string{}
+	for _, id := range []billing.DisputeProgram{billing.ProgramVisaVAMP, billing.ProgramMastercardECP} {
+		got[id] = map[float64]string{}
+		for _, l := range ProgramLines(id) {
+			got[id][l.Value] = l.Label
+		}
 	}
-	want := map[float64]string{0.005: "Visa VAMP warning · Stripe warning", 0.0075: "Stripe excessive", 0.01: "Mastercard warning",
-		0.015: "Visa VAMP excessive · Mastercard excessive", 0.03: "Mastercard high excessive"}
-	if !maps.Equal(got, want) {
-		t.Fatalf("lines %v, want %v", got, want)
+	if !maps.Equal(got[billing.ProgramVisaVAMP], map[float64]string{0.005: "warning", 0.015: "excessive"}) {
+		t.Errorf("VAMP lines %v", got[billing.ProgramVisaVAMP])
+	}
+	if !maps.Equal(got[billing.ProgramMastercardECP], map[float64]string{0.01: "warning", 0.015: "excessive", 0.03: "high excessive"}) {
+		t.Errorf("ECM lines %v", got[billing.ProgramMastercardECP])
 	}
 }

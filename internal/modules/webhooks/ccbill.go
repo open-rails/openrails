@@ -1397,7 +1397,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 }
 
 // recordCCBillChargeback records the chargeback with its reason and card
-// network, and tells staff of it. CCBill reports no outcome.
+// network. CCBill reports no outcome.
 func (s *CCBillWebhookService) recordCCBillChargeback(ctx context.Context, d *db.DB, data CCBillChargebackEvent, original, reversal *models.Payment, amount int64, currency string) error {
 	psp, err := db.RequirePSPID(ctx)
 	if err != nil {
@@ -1421,13 +1421,10 @@ func (s *CCBillWebhookService) recordCCBillChargeback(ctx context.Context, d *db
 	if err != nil {
 		return err
 	}
-	if reversal != nil {
-		if err := service.Link(ctx, d, rec, &reversal.ID, nil); err != nil {
-			return err
-		}
+	if reversal == nil {
+		return nil
 	}
-	// CCBill holds the card: the review says none was blocked.
-	return service.BlockCard(ctx, d, original, &rec.BillingDispute)
+	return service.Link(ctx, d, rec, &reversal.ID, nil)
 }
 
 func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {

@@ -78,6 +78,8 @@ type Report struct {
 	DisputedAt    time.Time
 	At            time.Time
 	EvidenceDueAt *time.Time
+	// Pulled is a report a reconcile pull read, not a provider's notice.
+	Pulled bool
 }
 
 // Case is a dispute as recorded.
@@ -128,7 +130,7 @@ func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) 
 			MerchantID: mid.UUID(), PspID: r.PSPID, Rail: string(r.Rail), ProviderRef: strings.TrimSpace(r.ProviderRef),
 			Kind: string(r.Kind), Network: string(network), Reason: string(reason),
 			ReasonCode: nonEmpty(r.ReasonCode), ProviderReason: nonEmpty(r.ProviderReason),
-			Status: string(r.Status), DisputedAt: disputedAt, EvidenceDueAt: r.EvidenceDueAt,
+			Status: string(r.Status), DisputedAt: disputedAt, EvidenceDueAt: r.EvidenceDueAt, ObservedVia: observedVia(r),
 		}
 		if r.Payment != nil {
 			params.PaymentID, params.CustomerID = &r.Payment.ID, &r.Payment.CustomerID
@@ -182,10 +184,15 @@ func (s *Service) update(ctx context.Context, q *gen.Queries, existing gen.Billi
 		ReasonCode: existing.ReasonCode, ProviderReason: existing.ProviderReason, Amount: existing.Amount, Currency: existing.Currency,
 		Status: existing.Status, ChargebackAt: existing.ChargebackAt, EvidenceDueAt: existing.EvidenceDueAt, ClosedAt: existing.ClosedAt,
 		ReversalPaymentID: existing.ReversalPaymentID, RecoveryPaymentID: existing.RecoveryPaymentID,
+		ObservedVia: existing.ObservedVia,
+	}
+	// A notice of a case a pull found makes it a notice's.
+	if !r.Pulled {
+		next.ObservedVia = observedVia(r)
 	}
 	became, escalated := false, false
-	if existing.Kind != string(billing.DisputeChargeback) && r.Kind != "" && r.Kind != billing.DisputeUnknownKind {
-		escalated = existing.Kind != string(r.Kind)
+	if advances(billing.DisputeKind(existing.Kind), r.Kind) {
+		escalated = true
 		next.Kind = string(r.Kind)
 		if r.Kind == billing.DisputeChargeback {
 			next.ChargebackAt, became = &at, true
@@ -212,7 +219,7 @@ func (s *Service) update(ctx context.Context, q *gen.Queries, existing gen.Billi
 	// A decided case stays decided against a late notice from before the
 	// decision; only a new stage, an inquiry escalated, reopens it.
 	decided := closes(billing.DisputeStatus(existing.Status))
-	if r.Status != "" && r.Kind != billing.DisputeUnknownKind && (!decided || escalated) {
+	if r.Status != "" && string(r.Kind) == next.Kind && (!decided || escalated) {
 		if next.Kind == string(billing.DisputeChargeback) || (r.Status != billing.DisputeWon && r.Status != billing.DisputeLost && r.Status != billing.DisputeUnreported) {
 			next.Status = string(r.Status)
 		}
@@ -241,6 +248,29 @@ func (s *Service) Link(ctx context.Context, d *db.DB, c Case, reversal, recovery
 		return fmt.Errorf("link dispute %s: %w", c.ProviderRef, err)
 	}
 	return nil
+}
+
+// advances reports whether a report of kind moves a case of kind from on:
+// an unknown case takes any known kind, an inquiry escalates to a chargeback
+// or is prevented; a chargeback and a prevented case keep their kind against
+// a stale notice.
+func advances(from, kind billing.DisputeKind) bool {
+	switch {
+	case kind == "" || kind == billing.DisputeUnknownKind || kind == from:
+		return false
+	case from == billing.DisputeUnknownKind:
+		return true
+	case from == billing.DisputeInquiry:
+		return kind == billing.DisputeChargeback || kind == billing.DisputePrevented
+	}
+	return false
+}
+
+func observedVia(r Report) string {
+	if r.Pulled {
+		return "pull"
+	}
+	return "notice"
 }
 
 func closes(s billing.DisputeStatus) bool {

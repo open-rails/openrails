@@ -74,8 +74,10 @@ const (
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
-	FamDisputes       Family = "disputes"        // flow over disputes (disputed_at)
+	FamDisputes       Family = "disputes"        // flow over disputes (a chargeback when it became one, else disputed_at)
 	FamFraudReports   Family = "fraud_reports"   // flow over fraud_reports (reported_at)
+	FamNetwork        Family = "network"         // flow over network_activity_daily (day_at)
+	FamNetworkPrior   Family = "network_prior"   // flow over network_activity_daily, each day counted a month later
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -290,7 +292,7 @@ var families = map[Family]familySpec{
 	FamDisputes: {
 		Kind:     "flow",
 		From:     `billing.disputes d`,
-		TimeExpr: `d.disputed_at`,
+		TimeExpr: `COALESCE(d.chargeback_at, d.disputed_at)`,
 		DimJoins: map[string]string{
 			"kind": `LEFT JOIN billing.payments dp ON dp.merchant_id = d.merchant_id AND dp.id = d.payment_id`,
 		},
@@ -317,7 +319,27 @@ var families = map[Family]familySpec{
 			"network":  `fr.network`,
 			"outcome":  `fr.action`,
 		},
-		DimValues: map[string][]string{"outcome": {"recorded", "refunded", "nothing_to_refund", "disputed"}},
+		DimValues: map[string][]string{"outcome": {"pending", "recorded", "refunded", "nothing_to_refund", "disputed"}},
+	},
+	// What the monitoring programs divide, per card PSP, network and day.
+	FamNetwork: {
+		Kind:     "flow",
+		From:     `billing.network_activity_daily na`,
+		TimeExpr: `na.day_at`,
+		DimExprs: map[string]string{
+			"rail": `na.rail`,
+			"psp":  `'psp_' || na.psp_id::text`,
+		},
+	},
+	// The month before's, for a ratio over the previous month's sales.
+	FamNetworkPrior: {
+		Kind:     "flow",
+		From:     `billing.network_activity_daily nap`,
+		TimeExpr: `(nap.day_at + interval '1 month')`,
+		DimExprs: map[string]string{
+			"rail": `nap.rail`,
+			"psp":  `'psp_' || nap.psp_id::text`,
+		},
 	},
 	FamSubsNew: {
 		Kind:     "flow",
@@ -697,6 +719,7 @@ var (
 	nmiHistDims     = []string{"psp", "nmi_kind", "category", "reason"}
 	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}
 	disputeDims     = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
+	networkDims     = []string{"rail", "psp"}
 	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
 	creditDims      = []string{"currency", "product_id", "customer"}
 	webhookDims     = []string{"rail", "psp"}
@@ -775,10 +798,27 @@ var declared = []Measure{
 		Dims:        reversalRateDims},
 	{Name: "chargeback_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
 		Num: "payments", NumSlice: Slice{"payment_kind": {"chargeback"}}, Den: "payments", DenSlice: Slice{"payment_kind": {"sale"}},
-		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp and network for each PSP's on each network; its lines are the networks' monitoring levels",
+		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp and network for each PSP's on each network. The networks' programs divide otherwise: vamp_ratio and ecm_ratio",
 		Formula:     "payments(chargeback) / payments(sale)",
-		Thresholds:  disputerules.ChargebackLines(),
 		Dims:        reversalRateDims},
+	{Name: "vamp_count", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.chargebacks + na.fraud_reports) FILTER (WHERE na.network = 'visa'), 0)::bigint`, Dims: networkDims},
+	{Name: "vamp_sales", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.sales) FILTER (WHERE na.network = 'visa'), 0)::bigint`, Dims: networkDims},
+	{Name: "vamp_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "vamp_count", Den: "vamp_sales",
+		Description: "Visa's VAMP ratio as the dispute monitor counts it: Visa chargebacks and fraud reports / settled Visa sales, in the same bucket (use grain month); its lines are VAMP's levels",
+		Formula:     "(visa chargebacks + visa fraud reports) / visa sales",
+		Thresholds:  disputerules.ProgramLines(billing.ProgramVisaVAMP),
+		Dims:        networkDims},
+	{Name: "ecm_count", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.chargebacks) FILTER (WHERE na.network = 'mastercard'), 0)::bigint`, Dims: networkDims},
+	{Name: "ecm_prior_sales", Class: ClassAdditive, Family: FamNetworkPrior, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(nap.sales) FILTER (WHERE nap.network = 'mastercard'), 0)::bigint`, Dims: networkDims},
+	{Name: "ecm_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "ecm_count", Den: "ecm_prior_sales",
+		Description: "Mastercard's excessive chargeback ratio as the dispute monitor counts it: Mastercard chargebacks / settled Mastercard sales of the month before (use grain month); its lines are its levels",
+		Formula:     "mastercard chargebacks / mastercard sales a month earlier",
+		Thresholds:  disputerules.ProgramLines(billing.ProgramMastercardECP),
+		Dims:        networkDims},
 	{Name: "disputes", Class: ClassAdditive, Family: FamDisputes, Unit: "count", Direction: DownIsGood,
 		Description: "provider dispute cases opened in the bucket, by dispute_kind (inquiry, chargeback, prevented), dispute_reason, outcome and kind (the disputed charge: initial or renewal)",
 		Formula:     "COUNT(disputes opened in the bucket)",

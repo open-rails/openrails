@@ -27,8 +27,9 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `disputes`, `dispute_win_rate`, `fraud_reports`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
 
 - `cash` is signed money by `cash_kind`: a payment and a won dispute add, a refund and a chargeback subtract; its total is net cash, gross of processor fees.
-- `payments` counts settled sales and reversals by `payment_kind`, a refund also by `refund_reason`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket, by `network` (`billing.card_network` of the card brand) among others. `chargeback_rate`'s thresholds are the Visa, Mastercard and Stripe monitoring levels (`disputerules.ChargebackLines`).
-- `disputes` counts dispute cases by when they opened, by `dispute_kind` (inquiry, chargeback, prevented, unknown), `dispute_reason`, `outcome` (open, won, lost, closed, unreported), `network` and `kind` (the disputed charge: initial or renewal); `dispute_win_rate` is won over won and lost. `fraud_reports` counts issuer fraud reports by `outcome`: what OpenRails did. A program's standing, which divides by the month's sales or the month before's, is the `programs` widget's (`GET /v1/metrics/dispute-programs`), not a measure.
+- `payments` counts settled sales and reversals by `payment_kind`, a refund also by `refund_reason`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket, by `network` (`billing.card_network` of the card brand) among others.
+- `vamp_ratio` and `ecm_ratio` are the monitor's own ratios over `network_activity_daily`: Visa chargebacks and fraud reports over Visa sales in the bucket, and Mastercard chargebacks over Mastercard sales a month earlier (`network_prior`); use grain month. Their thresholds are the programs' levels (`disputerules.ProgramLines`).
+- `disputes` counts dispute cases by when they became chargebacks, else opened, by `dispute_kind` (inquiry, chargeback, prevented, unknown), `dispute_reason`, `outcome` (open, won, lost, closed, unreported), `network` and `kind` (the disputed charge: initial or renewal); `dispute_win_rate` is won over won and lost. `fraud_reports` counts issuer fraud reports by `outcome`: what OpenRails did. A program's standing, which divides by the month's sales or the month before's, is the `programs` widget's (`GET /v1/metrics/dispute-programs`), not a measure.
 - `purchases` and `rebills` take their outcome as of the range end: a purchase quiet for an hour without an approval has failed, a renewal past its 15-day dunning window uncollected is lost. `rebill_rate` is collected over closed renewals; `dunning_recovery_rate` is recovered over closed renewals whose first try failed or was missed.
 - `usage_charged` is priced usage by `charge`: charged, or forgiven by the customer's grace.
 
@@ -66,7 +67,7 @@ The engine owns no table and runs no job. It reads `payments`, `order_lines`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
 `psps`, `custodians`, `payment_attempts`, `payment_method_versions`,
 `provider_intents`, `rebill_cycles`, `nmi_history_months`,
-`reconciliation_findings`, `disputes` and `fraud_reports`. A measure sees only what those tables still retain:
+`reconciliation_findings`, `disputes`, `fraud_reports` and `network_activity_daily`. A measure sees only what those tables still retain:
 payment attempts, status transitions, rebill cycles and NMI history 25 months;
 daily usage 24 months after billing; webhook health days 13 months; resolved
 findings 12 months.

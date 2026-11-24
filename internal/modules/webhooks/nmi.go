@@ -72,13 +72,13 @@ func (s *NMIWebhookService) disputes() *disputes.Service {
 
 // recordNMIChargeback records one batch entry, matched to its charge or not,
 // with its reason code and text. NMI reports no outcome.
-func (s *NMIWebhookService) recordNMIChargeback(ctx context.Context, rail string, cb NMIChargebackEntry, match *nmiChargebackMatch, reasonCode, reasonText string) (*disputes.Case, *models.Payment, error) {
+func (s *NMIWebhookService) recordNMIChargeback(ctx context.Context, rail string, cb NMIChargebackEntry, match *nmiChargebackMatch, reasonCode, reasonText string) (*disputes.Case, error) {
 	if s.DB == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	psp, err := db.RequirePSPID(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("record NMI chargeback: %w", err)
+		return nil, fmt.Errorf("record NMI chargeback: %w", err)
 	}
 	ref := cb.ID.Trimmed()
 	report := disputes.Report{PSPID: psp, Rail: models.Rail(rail), Kind: billing.DisputeChargeback, Status: billing.DisputeUnreported,
@@ -86,10 +86,10 @@ func (s *NMIWebhookService) recordNMIChargeback(ctx context.Context, rail string
 	var original *models.Payment
 	if match != nil {
 		if s.PaymentService == nil {
-			return nil, nil, errors.New("payment service unavailable for NMI chargeback")
+			return nil, errors.New("payment service unavailable for NMI chargeback")
 		}
 		if original, err = s.PaymentService.GetByID(ctx, match.PaymentID); err != nil {
-			return nil, nil, fmt.Errorf("load NMI charged-back payment: %w", err)
+			return nil, fmt.Errorf("load NMI charged-back payment: %w", err)
 		}
 		report.Payment, report.Amount, report.Currency = original, match.Amount, match.Currency
 		if ref == "" {
@@ -99,14 +99,14 @@ func (s *NMIWebhookService) recordNMIChargeback(ctx context.Context, rail string
 		report.Network = disputerules.Network(nmi.CardBrandFromMaskedPAN(cb.CCNumber))
 	}
 	if ref == "" {
-		return nil, original, nil
+		return nil, nil
 	}
 	report.ProviderRef = ref
 	rec, err := s.disputes().Record(ctx, s.DB, report)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return &rec, original, nil
+	return &rec, nil
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -662,13 +662,10 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				cbMetadata[key] = value
 			}
 		}
-		var (
-			recorded *disputes.Case
-			disputed *models.Payment
-		)
+		var recorded *disputes.Case
 		if reconcileErr == nil {
 			var err error
-			if recorded, disputed, err = s.recordNMIChargeback(ctx, rail, cb, match, reasonCode, reasonText); err != nil {
+			if recorded, err = s.recordNMIChargeback(ctx, rail, cb, match, reasonCode, reasonText); err != nil {
 				return fmt.Errorf("record NMI chargeback %s: %w", cb.ID.Trimmed(), err)
 			}
 		}
@@ -829,17 +826,6 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							}
 						}
 					}
-				}
-			}
-			// The charged-back card is never charged again.
-			if disputed != nil {
-				var review *gen.BillingDispute
-				if recorded != nil {
-					review = &recorded.BillingDispute
-				}
-				if err := s.disputes().BlockCard(ctx, s.DB, disputed, review); err != nil {
-					reconcileErrors++
-					rememberTerminationError(fmt.Errorf("block the charged-back card: %w", err))
 				}
 			}
 

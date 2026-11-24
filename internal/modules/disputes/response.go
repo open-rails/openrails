@@ -20,107 +20,159 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // responseSource is the autonomous budget responses draw on.
 const responseSource = "dispute_response"
 
-// WaitError is a response the destructive gates hold: the job waits and
-// tries again, so it is never dropped.
+// FindingResponseWaiting is a merchant's dispute responses held by a gate:
+// raised once with its alert, resolved when none waits.
+const FindingResponseWaiting reconcile.FindingType = "life.disputes.response_waiting"
+
+// WaitError is a response a gate holds. The response is left waiting; a
+// change of what holds it wakes it.
 type WaitError struct{ Reason string }
 
 func (e *WaitError) Error() string { return "dispute response waits: " + e.Reason }
 
-// Respond carries out what a chargeback or fraud report calls for, all of it
-// in one transaction once the kill switch, the merchant's write posture and
-// the automation budget admit it.
+// gates are what a step of a response waits for. Every step waits for a full
+// write posture and the merchant's automation allowance; a case a pull found
+// for the merchant to be armed; a destructive step for the switch.
+type gates struct {
+	destructive bool
+	pulled      bool
+}
+
+// Respond carries out what a chargeback or fraud report calls for. A held
+// step raises the merchant's waiting finding and ends the job.
 func (s *Service) Respond(ctx context.Context, args disputejob.ResponseArgs) error {
+	var err error
 	switch args.Subject {
 	case disputejob.SubjectDispute:
-		return s.respondChargeback(ctx, args.ID)
+		err = s.respondChargeback(ctx, args.ID)
 	case disputejob.SubjectFraudReport:
-		return s.respondFraudReport(ctx, args.ID)
+		err = s.respondFraudReport(ctx, args.ID)
+	default:
+		return fmt.Errorf("dispute response: unknown subject %q", args.Subject)
 	}
-	return fmt.Errorf("dispute response: unknown subject %q", args.Subject)
+	var wait *WaitError
+	if errors.As(err, &wait) {
+		return s.raiseWaiting(ctx, wait.Reason)
+	}
+	if err != nil {
+		return err
+	}
+	return s.resolveWaiting(ctx)
 }
 
 // respondFraudReport refunds a fraud-reported charge in full, ends what it
-// paid for and blocks its card. A charge a dispute decides is left to it.
+// paid for and blocks its card: protective, so it does not wait for the
+// destructive switch. Canceling the customer's other provider-billed
+// subscriptions on the card at period end is destructive and does.
 func (s *Service) respondFraudReport(ctx context.Context, id uuid.UUID) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	q := s.DB.Gen(ctx)
-	report, err := q.GetFraudReport(ctx, gen.GetFraudReportParams{MerchantID: mid.UUID(), ID: id})
+	report, err := s.DB.Gen(ctx).GetFraudReport(ctx, gen.GetFraudReportParams{MerchantID: mid.UUID(), ID: id})
 	if err != nil {
 		return fmt.Errorf("load fraud report: %w", err)
 	}
-	if !report.Actionable || report.EndedAt != nil || report.Action == fraudDisputed {
+	if !waitingReport(report) {
 		return nil
-	}
-	if report.Action == fraudRecorded {
-		refunds, err := merchantconfig.FraudWarningRefunds(ctx, s.DB)
-		if err != nil || !refunds {
-			return err
-		}
-		disputed, err := q.PaymentDisputeDecides(ctx, gen.PaymentDisputeDecidesParams{MerchantID: mid.UUID(), PaymentID: report.PaymentID})
-		if err != nil {
-			return fmt.Errorf("check the charge's disputes: %w", err)
-		}
-		if disputed {
-			_, err := q.DecideFraudReport(ctx, gen.DecideFraudReportParams{MerchantID: mid.UUID(), ID: report.ID, Action: fraudDisputed})
-			return err
-		}
 	}
 	payment, err := payments.NewPaymentService(s.DB, s.Clock).GetByID(ctx, report.PaymentID)
 	if err != nil {
 		return fmt.Errorf("load the reported charge: %w", err)
 	}
-	own, err := ChargeSubscriptions(ctx, s.DB, payment)
-	if err != nil {
-		return err
-	}
-	others, err := providerBilledOnCard(ctx, s.DB, payment)
-	if err != nil {
-		return err
-	}
 	cause := fmt.Sprintf("FRAUD REPORT %s: %s", report.ProviderRef, report.FraudType)
-	command := destructive.Command{MerchantID: mid.UUID(), Kind: destructive.Refund, Target: billing.PaymentID(payment.ID).String(),
-		Key: "fraud_report:" + report.ID.String(), Digest: destructive.Digest([]string{report.ID.String(), payment.ID.String()}),
-		Units: int64(1 + len(own) + len(others))}
-	return s.admitted(ctx, command, func(ctx context.Context, d *db.DB) error {
-		q := d.Gen(ctx)
-		locked, err := q.GetFraudReportForUpdate(ctx, gen.GetFraudReportForUpdateParams{MerchantID: mid.UUID(), PspID: report.PspID, ProviderRef: report.ProviderRef})
-		if err != nil {
-			return fmt.Errorf("lock fraud report: %w", err)
-		}
-		if locked.EndedAt != nil {
-			return nil
-		}
-		if locked.Action == fraudRecorded {
-			reservation, err := intents.QueueFraudWarningRefund(ctx, d, payment, s.Clock)
+	if report.EndedAt == nil {
+		if report.Action == fraudPending {
+			refunds, err := merchantconfig.FraudWarningRefunds(ctx, s.DB)
 			if err != nil {
 				return err
 			}
-			decision := gen.DecideFraudReportParams{MerchantID: mid.UUID(), ID: locked.ID, Action: fraudNothingToRefund}
-			if reservation != nil {
-				decision.Action, decision.RefundPaymentID = fraudRefunded, reservation
-			}
-			if _, err := q.DecideFraudReport(ctx, decision); err != nil {
-				return fmt.Errorf("decide fraud report: %w", err)
+			if !refunds {
+				_, err := s.DB.Gen(ctx).DecideFraudReport(ctx, gen.DecideFraudReportParams{MerchantID: mid.UUID(), ID: id, Action: fraudRecorded, Now: s.now()})
+				return err
 			}
 		}
-		if err := s.endCharge(ctx, d, payment, own, others, models.CancelTypeMerchant, models.AccessRevokeFraud, cause, nil); err != nil {
+		step := s.command(mid.UUID(), destructive.Refund, billing.PaymentID(payment.ID).String(), "fraud_report:"+id.String())
+		err := s.admitted(ctx, step, gates{}, func(ctx context.Context, d *db.DB) error {
+			q := d.Gen(ctx)
+			locked, err := q.GetFraudReportForUpdate(ctx, gen.GetFraudReportForUpdateParams{MerchantID: mid.UUID(), PspID: report.PspID, ProviderRef: report.ProviderRef})
+			if err != nil {
+				return fmt.Errorf("lock fraud report: %w", err)
+			}
+			if !locked.Actionable || !waitingReport(locked) || locked.EndedAt != nil {
+				return nil
+			}
+			if locked.Action == fraudPending {
+				disputed, err := q.PaymentDisputeDecides(ctx, gen.PaymentDisputeDecidesParams{MerchantID: mid.UUID(), PaymentID: locked.PaymentID})
+				if err != nil {
+					return fmt.Errorf("check the charge's disputes: %w", err)
+				}
+				decision := gen.DecideFraudReportParams{MerchantID: mid.UUID(), ID: id, Action: fraudDisputed, Now: s.now()}
+				if !disputed {
+					reservation, err := intents.QueueFraudWarningRefund(ctx, d, payment, s.Clock)
+					if err != nil {
+						return err
+					}
+					decision.Action = fraudNothingToRefund
+					if reservation != nil {
+						decision.Action, decision.RefundPaymentID = fraudRefunded, reservation
+					}
+				}
+				if _, err := q.DecideFraudReport(ctx, decision); err != nil {
+					return fmt.Errorf("decide fraud report: %w", err)
+				}
+				if disputed {
+					return nil
+				}
+			}
+			own, err := ChargeSubscriptions(ctx, d, payment)
+			if err != nil {
+				return err
+			}
+			for _, sub := range own {
+				if err := endSubscription(ctx, d, s.Lifecycle, sub, models.CancelTypeMerchant, true, cause); err != nil {
+					return err
+				}
+			}
+			if payment.SubscriptionID == nil {
+				if err := entitlements.NewEntitlementService(d, s.Clock).EndActiveByPayment(ctx, payment.ID, models.AccessRevokeFraud); err != nil {
+					return fmt.Errorf("end the charge's access: %w", err)
+				}
+			}
+			if err := s.BlockCard(ctx, d, payment, nil); err != nil {
+				return err
+			}
+			if err := q.MarkFraudReportEnded(ctx, gen.MarkFraudReportEndedParams{MerchantID: mid.UUID(), ID: id, EndedAt: s.now()}); err != nil {
+				return err
+			}
+			return s.respondedIfAlone(ctx, d, payment, func() error {
+				return q.MarkFraudReportResponded(ctx, gen.MarkFraudReportRespondedParams{MerchantID: mid.UUID(), ID: id, RespondedAt: s.now()})
+			})
+		})
+		if err != nil {
 			return err
 		}
-		return q.MarkFraudReportEnded(ctx, gen.MarkFraudReportEndedParams{MerchantID: mid.UUID(), ID: locked.ID, EndedAt: s.now()})
+		if report, err = s.DB.Gen(ctx).GetFraudReport(ctx, gen.GetFraudReportParams{MerchantID: mid.UUID(), ID: id}); err != nil || !waitingReport(report) {
+			return err
+		}
+	}
+	step := s.command(mid.UUID(), destructive.CancelSubscription, billing.PaymentID(payment.ID).String(), "fraud_report:"+id.String()+":cancel")
+	return s.admitted(ctx, step, gates{destructive: true}, func(ctx context.Context, d *db.DB) error {
+		return s.cancelOthers(ctx, d, payment, cause, func() error {
+			return d.Gen(ctx).MarkFraudReportResponded(ctx, gen.MarkFraudReportRespondedParams{MerchantID: mid.UUID(), ID: id, RespondedAt: s.now()})
+		})
 	})
 }
 
-// respondChargeback blocks the charged-back card and cancels, at period end,
-// the customer's other subscriptions a provider bills on it: OpenRails cannot
-// keep a provider from charging it again.
+// respondChargeback blocks the charged-back card, protective, and cancels at
+// period end the customer's other subscriptions a provider bills on it,
+// destructive: OpenRails cannot keep a provider from charging it again.
 func (s *Service) respondChargeback(ctx context.Context, id uuid.UUID) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -144,64 +196,76 @@ func (s *Service) respondChargeback(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("load the disputed charge: %w", err)
 	}
-	// Blocking the card only protects it; a pulled chargeback has had none.
-	if err := s.BlockCard(ctx, s.DB, payment, &dispute); err != nil {
-		return err
-	}
-	others, err := providerBilledOnCard(ctx, s.DB, payment)
-	if err != nil {
-		return err
-	}
-	if len(others) == 0 {
-		return done(ctx, s.DB)
-	}
-	cause := fmt.Sprintf("CHARGEBACK %s on the card", billing.DisputeID(id))
-	command := destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CancelSubscription, Target: billing.DisputeID(id).String(),
-		Key: "dispute:" + id.String(), Digest: destructive.Digest(others), Units: int64(len(others))}
-	return s.admitted(ctx, command, func(ctx context.Context, d *db.DB) error {
-		for _, sub := range others {
-			if err := endSubscription(ctx, d, s.Lifecycle, sub, models.CancelTypeChargeback, false, cause); err != nil {
-				return err
-			}
+	g := gates{pulled: dispute.ObservedVia == "pull"}
+	block := s.command(mid.UUID(), destructive.DeletePaymentMethod, billing.DisputeID(id).String(), "dispute:"+id.String()+":block")
+	if err := s.admitted(ctx, block, g, func(ctx context.Context, d *db.DB) error {
+		if err := s.BlockCard(ctx, d, payment, &dispute); err != nil {
+			return err
 		}
-		return done(ctx, d)
+		return s.respondedIfAlone(ctx, d, payment, func() error { return done(ctx, d) })
+	}); err != nil {
+		return err
+	}
+	if dispute, err = q.GetDispute(ctx, gen.GetDisputeParams{MerchantID: mid.UUID(), ID: id}); err != nil || dispute.RespondedAt != nil {
+		return err
+	}
+	g.destructive = true
+	cause := fmt.Sprintf("CHARGEBACK %s on the card", billing.DisputeID(id))
+	cancel := s.command(mid.UUID(), destructive.CancelSubscription, billing.DisputeID(id).String(), "dispute:"+id.String()+":cancel")
+	return s.admitted(ctx, cancel, g, func(ctx context.Context, d *db.DB) error {
+		return s.cancelOthers(ctx, d, payment, cause, func() error { return done(ctx, d) })
 	})
 }
 
-// endCharge ends what a charge paid for, at once with its access, blocks its
-// card and cancels at period end the subscriptions a provider bills on it.
-func (s *Service) endCharge(ctx context.Context, d *db.DB, payment *models.Payment, own, others []uuid.UUID, cancelType models.CancelType, revoke models.AccessRevokeReason, cause string, review *gen.BillingDispute) error {
-	for _, sub := range own {
-		if err := endSubscription(ctx, d, s.Lifecycle, sub, cancelType, true, cause); err != nil {
-			return err
-		}
+// respondedIfAlone finishes the response when no other subscription is
+// billed on the card: nothing destructive remains.
+func (s *Service) respondedIfAlone(ctx context.Context, d *db.DB, payment *models.Payment, finish func() error) error {
+	others, err := providerBilledOnCard(ctx, d, payment)
+	if err != nil || len(others) > 0 {
+		return err
 	}
-	if payment.SubscriptionID == nil {
-		if err := entitlements.NewEntitlementService(d, s.Clock).EndActiveByPayment(ctx, payment.ID, revoke); err != nil {
-			return fmt.Errorf("end the charge's access: %w", err)
-		}
-	}
-	if err := s.BlockCard(ctx, d, payment, review); err != nil {
+	return finish()
+}
+
+// cancelOthers cancels at period end the customer's other subscriptions a
+// provider bills on the charge's card, then finishes the response.
+func (s *Service) cancelOthers(ctx context.Context, d *db.DB, payment *models.Payment, cause string, finish func() error) error {
+	others, err := providerBilledOnCard(ctx, d, payment)
+	if err != nil {
 		return err
 	}
 	for _, sub := range others {
-		if err := endSubscription(ctx, d, s.Lifecycle, sub, cancelType, false, cause); err != nil {
+		if err := endSubscription(ctx, d, s.Lifecycle, sub, models.CancelTypeChargeback, false, cause); err != nil {
 			return err
 		}
 	}
-	return nil
+	return finish()
 }
 
-// admitted runs effect in one transaction with the command's outcome, once
-// the kill switch, a full write posture and the automation budget admit it;
-// otherwise it answers a WaitError. An effect that rolled back changed
-// nothing and releases its units.
-func (s *Service) admitted(ctx context.Context, command destructive.Command, effect func(context.Context, *db.DB) error) error {
+// command is one step of a response: keyed and digested on its subject and
+// step alone, so a retry after the world changed admits the same command.
+func (s *Service) command(mid uuid.UUID, kind destructive.Kind, target, key string) destructive.Command {
+	return destructive.Command{MerchantID: mid, Kind: kind, Target: target, Key: key, Digest: destructive.Digest([]string{key}), Units: 1}
+}
+
+// admitted runs effect in one transaction with the command's outcome once
+// its gates admit it; otherwise it answers a WaitError. An effect that rolled
+// back changed nothing and releases its unit.
+func (s *Service) admitted(ctx context.Context, command destructive.Command, g gates, effect func(context.Context, *db.DB) error) error {
 	if s.Admissions == nil || s.Postures == nil || s.Lifecycle == nil {
 		return &WaitError{Reason: "responses are not wired"}
 	}
-	if v := destructive.New(s.DB).CheckMerchant(ctx, command.MerchantID); !v.Allowed {
-		return &WaitError{Reason: v.Reason}
+	policy, err := s.DB.Gen(ctx).GetDestructivePolicy(ctx, command.MerchantID)
+	if err != nil {
+		return fmt.Errorf("read the destructive policy: %w", err)
+	}
+	switch {
+	case g.pulled && policy.EnforceArmedAt == nil:
+		return &WaitError{Reason: "a case a pull found waits for the merchant to be armed for enforcing pulls"}
+	case g.destructive && !policy.SwitchEnabled:
+		return &WaitError{Reason: "the destructive switch is off: canceling the customer's other subscriptions on the card waits for it"}
+	case g.destructive && !policy.MerchantEnabled:
+		return &WaitError{Reason: "the merchant's destructive actions are disabled"}
 	}
 	if p := s.Postures.Posture(ctx, command.MerchantID); p.Limited() {
 		return &WaitError{Reason: p.Reason}
@@ -237,4 +301,28 @@ func (s *Service) admitted(ctx context.Context, command destructive.Command, eff
 	finish, cancel := db.DetachedWriteContext(ctx, 10*time.Second)
 	defer cancel()
 	return errors.Join(err, s.Admissions.Finish(finish, command.MerchantID, action.ID, destructive.OutcomeNoEffect, ""))
+}
+
+// raiseWaiting records that the merchant's responses wait, alerting once.
+func (s *Service) raiseWaiting(ctx context.Context, reason string) error {
+	rec, err := (&reconcile.PGStore{DB: s.DB}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: FindingResponseWaiting, SubjectKey: "responses",
+		Severity: reconcile.SeverityHigh, RecommendedAction: "Dispute responses wait: " + reason + ". They run when it changes.",
+		Evidence: map[string]any{"reason": reason}})
+	if err != nil {
+		return fmt.Errorf("raise waiting dispute responses: %w", err)
+	}
+	return s.notify(ctx, rec)
+}
+
+// resolveWaiting resolves the waiting finding once no response waits.
+func (s *Service) resolveWaiting(ctx context.Context) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	waiting, err := s.DB.Gen(ctx).MerchantHasWaitingDisputeResponses(ctx, mid.UUID())
+	if err != nil || waiting {
+		return err
+	}
+	return (&reconcile.PGStore{DB: s.DB}).ResolveRaisedFinding(ctx, FindingResponseWaiting, "responses")
 }

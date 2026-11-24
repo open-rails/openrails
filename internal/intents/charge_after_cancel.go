@@ -121,6 +121,25 @@ func QueueFraudWarningRefund(ctx context.Context, d *db.DB, payment *models.Paym
 	if err != nil {
 		return nil, err
 	}
+	// A charge no refund can reach (no money moved at the rail, a usage
+	// order's settlement, a rail that refunds nothing, no provider target)
+	// has nothing to refund; what it paid for still ends.
+	svc := payments.NewPaymentService(d, clock)
+	refunded, err := svc.GetRefundTotalByPaymentID(ctx, payment.ID)
+	if err != nil {
+		return nil, err
+	}
+	if remaining := payment.Amount - refunded; remaining <= 0 || svc.ValidateRefund(ctx, payment, remaining) != nil {
+		return nil, nil
+	}
+	if _, _, _, err := RefundIntentFor(payment, fraudWarningRefundKey); err != nil {
+		return nil, nil
+	}
+	if payment.Rail == models.RailStripe {
+		if _, err := subscriptions.ResolveStripeRefundTarget(payment); err != nil {
+			return nil, nil
+		}
+	}
 	key := RefundIdempotencyKey(payment.ID, fraudWarningRefundKey)
 	queued, reservation, err := queueFullRefund(ctx, d, mid.UUID(), payment, key, fraudWarningRefundKey, "the issuer reported fraud", billing.RefundFraudWarning,
 		map[string]any{"fraud_warning": true}, timeutil.FirstClock(clock))

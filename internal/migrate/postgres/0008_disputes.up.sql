@@ -46,6 +46,8 @@ CREATE TABLE billing.disputes (
     closed_at timestamptz,
     reversal_payment_id uuid,
     recovery_payment_id uuid,
+    absorbed_refund_ref text CHECK (absorbed_refund_ref <> ''),
+    observed_via text NOT NULL CHECK (observed_via IN ('notice', 'pull')),
     responded_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -76,7 +78,9 @@ COMMENT ON COLUMN billing.disputes.status IS 'open (awaiting the decision), won,
 COMMENT ON COLUMN billing.disputes.chargeback_at IS 'When the case became a chargeback: when it opened, or when the issuer escalated its inquiry. It dates the chargeback in the network ratios.';
 COMMENT ON COLUMN billing.disputes.reversal_payment_id IS 'The negative payments row that reversed the charge.';
 COMMENT ON COLUMN billing.disputes.recovery_payment_id IS 'The positive payments row that returned the money of a won dispute.';
-COMMENT ON COLUMN billing.disputes.responded_at IS 'When the chargeback''s automatic response finished: the customer''s other provider-billed subscriptions on the charged card canceled at period end. NULL while it waits, held or parked.';
+COMMENT ON COLUMN billing.disputes.absorbed_refund_ref IS 'The provider refund an RDR resolution took as its own (Stripe''s re_ id), so each refund is booked once.';
+COMMENT ON COLUMN billing.disputes.observed_via IS 'How OpenRails first learned of the case: notice (a provider''s notice) or pull (a reconcile pull); a case a pull found is acted on only once the merchant is armed.';
+COMMENT ON COLUMN billing.disputes.responded_at IS 'When the chargeback''s automatic response finished: the charged card blocked and the customer''s other provider-billed subscriptions on it canceled at period end. NULL while it waits.';
 
 CREATE INDEX disputes_disputed_at_id_idx ON billing.disputes (merchant_id, disputed_at DESC, id DESC);
 CREATE INDEX disputes_customer_id_disputed_at_idx ON billing.disputes (merchant_id, customer_id, disputed_at DESC)
@@ -84,6 +88,7 @@ CREATE INDEX disputes_customer_id_disputed_at_idx ON billing.disputes (merchant_
 CREATE INDEX disputes_payment_id_idx ON billing.disputes (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
 CREATE INDEX disputes_chargeback_at_idx ON billing.disputes (merchant_id, chargeback_at) WHERE chargeback_at IS NOT NULL;
 CREATE INDEX disputes_closed_at_idx ON billing.disputes (merchant_id, closed_at) WHERE closed_at IS NOT NULL;
+CREATE INDEX disputes_waiting_idx ON billing.disputes (merchant_id, id) WHERE kind = 'chargeback' AND responded_at IS NULL;
 
 CREATE TABLE billing.fraud_reports (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
@@ -99,9 +104,10 @@ CREATE TABLE billing.fraud_reports (
     amount bigint NOT NULL CHECK (amount > 0),
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     reported_at timestamptz NOT NULL,
-    action text NOT NULL CHECK (action IN ('recorded', 'refunded', 'nothing_to_refund', 'disputed')),
+    action text NOT NULL CHECK (action IN ('pending', 'recorded', 'refunded', 'nothing_to_refund', 'disputed')),
     refund_payment_id uuid,
     ended_at timestamptz,
+    responded_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
@@ -117,11 +123,14 @@ COMMENT ON COLUMN billing.fraud_reports.provider_ref IS 'The report as its rail 
 COMMENT ON COLUMN billing.fraud_reports.fraud_type IS 'The kind of fraud the issuer reported, as Stripe names it.';
 COMMENT ON COLUMN billing.fraud_reports.actionable IS 'Whether the charge could still be refunded to head off a dispute when the report arrived.';
 COMMENT ON COLUMN billing.fraud_reports.amount IS 'The reported charge''s amount, in native units of currency.';
-COMMENT ON COLUMN billing.fraud_reports.action IS 'What OpenRails decided: recorded (the report only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).';
-COMMENT ON COLUMN billing.fraud_reports.ended_at IS 'When what the charge paid for was ended and its card blocked, with its refund; NULL until then.';
+COMMENT ON COLUMN billing.fraud_reports.action IS 'What OpenRails decided: pending (an actionable report the merchant refunds, not yet answered), recorded (the report only: unactionable, or received while the merchant recorded reports only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).';
+COMMENT ON COLUMN billing.fraud_reports.ended_at IS 'When the charge was refunded, what it paid for ended and its card blocked; NULL until then.';
+COMMENT ON COLUMN billing.fraud_reports.responded_at IS 'When the response finished: with the end, the customer''s other provider-billed subscriptions on the card canceled at period end. NULL while it waits.';
 
 CREATE INDEX fraud_reports_payment_id_idx ON billing.fraud_reports (merchant_id, payment_id);
 CREATE INDEX fraud_reports_reported_at_idx ON billing.fraud_reports (merchant_id, reported_at);
+CREATE INDEX fraud_reports_waiting_idx ON billing.fraud_reports (merchant_id, id)
+    WHERE responded_at IS NULL AND action IN ('pending', 'refunded', 'nothing_to_refund');
 
 -- A refund's reason. Refunds before it are unknown, but for OpenRails' own
 -- refunds of a charge taken after cancellation or of a second payment.
@@ -285,18 +294,40 @@ CREATE TRIGGER fraud_reports_network_activity AFTER INSERT OR DELETE OR UPDATE O
     FOR EACH ROW EXECUTE FUNCTION billing.fraud_report_network_activity();
 
 -- The chargebacks booked so far: their reason is unknown; a won one has its
--- recovery, and Stripe's others may still be open.
+-- recovery, and Stripe's others may still be open. History is answered
+-- already: no response runs for it.
 INSERT INTO billing.disputes (merchant_id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, amount, currency, status,
-    disputed_at, chargeback_at, closed_at, reversal_payment_id, recovery_payment_id)
+    disputed_at, chargeback_at, closed_at, reversal_payment_id, recovery_payment_id, observed_via, responded_at)
 SELECT c.merchant_id, c.psp_id, c.rail,
     CASE WHEN c.rail IN ('nmi', 'ccbill') THEN regexp_replace(c.transaction_id, '^chargeback:', '') ELSE c.transaction_id END, c.customer_id, c.refunded_payment_id, 'chargeback', billing.card_network(o.card_brand), 'unknown', -c.amount, c.currency,
     CASE WHEN w.id IS NOT NULL THEN 'won' WHEN c.rail = 'stripe' THEN 'open' ELSE 'unreported' END,
-    c.purchased_at, c.purchased_at, w.purchased_at, c.id, w.id
+    c.purchased_at, c.purchased_at, w.purchased_at, c.id, w.id, 'notice', now()
 FROM billing.payments c
 JOIN billing.payments o ON o.merchant_id = c.merchant_id AND o.id = c.refunded_payment_id
 LEFT JOIN billing.payments w ON w.merchant_id = c.merchant_id AND w.reversal_kind = 'dispute_reversal' AND w.metadata ->> 'reverses_payment_id' = c.id::text
     AND w.deleted_at IS NULL
 WHERE c.reversal_kind = 'chargeback' AND c.psp_id IS NOT NULL AND c.amount < 0 AND c.deleted_at IS NULL;
+
+-- What a dispute response waits for changing wakes the waiting responses:
+-- the destructive switch, a merchant's policy or write posture, the book
+-- armed, a hold cleared. The payload is the schema.
+CREATE FUNCTION billing.wake_dispute_responses() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    PERFORM pg_notify('openrails_dispute_responses', TG_TABLE_SCHEMA);
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER destructive_action_switch_wake_dispute_responses AFTER UPDATE OF enabled ON billing.destructive_action_switch
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses();
+CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses();
+CREATE TRIGGER merchant_write_posture_wake_dispute_responses AFTER INSERT OR UPDATE OF mode ON billing.merchant_write_posture
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses();
+CREATE TRIGGER book_identity_wake_dispute_responses AFTER INSERT OR UPDATE ON billing.book_identity
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses();
+CREATE TRIGGER destructive_holds_wake_dispute_responses AFTER UPDATE OF cleared_at ON billing.destructive_holds
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses();
 
 -- The restore guard names the new tables.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger

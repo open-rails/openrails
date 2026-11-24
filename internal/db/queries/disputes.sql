@@ -5,13 +5,13 @@
 -- same case inserts nothing and reads it with GetDisputeForUpdate.
 INSERT INTO billing.disputes (
     merchant_id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason,
-    amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at
+    amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, observed_via
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(provider_ref)::text,
     sqlc.narg(customer_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.arg(kind)::text, sqlc.arg(network)::text, sqlc.arg(reason)::text,
     sqlc.narg(reason_code)::text, sqlc.narg(provider_reason)::text, sqlc.narg(amount)::bigint, sqlc.narg(currency)::text,
     sqlc.arg(status)::text, sqlc.arg(disputed_at)::timestamptz, sqlc.narg(chargeback_at)::timestamptz,
-    sqlc.narg(evidence_due_at)::timestamptz, sqlc.narg(closed_at)::timestamptz
+    sqlc.narg(evidence_due_at)::timestamptz, sqlc.narg(closed_at)::timestamptz, sqlc.arg(observed_via)::text
 )
 ON CONFLICT (merchant_id, psp_id, provider_ref) DO NOTHING
 RETURNING *;
@@ -52,13 +52,54 @@ SELECT EXISTS (
 )::boolean;
 
 -- name: PSPHasOpenThresholdFinding :one
--- Whether a dispute threshold finding of the PSP is open: its sales then
--- re-evaluate it.
+-- Whether a dispute threshold finding of the PSP is open for the month a sale
+-- settled in: its sales re-evaluate it. An ended month's is settled already.
 SELECT EXISTS (
     SELECT 1 FROM billing.reconciliation_findings
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'life.disputes.threshold' AND psp_id = sqlc.arg(psp_id)::uuid
-      AND status IN ('reconcile_required', 'requires_review')
+      AND status IN ('reconcile_required', 'requires_review') AND subject_key LIKE '%:' || sqlc.arg(month)::text
 )::boolean;
+
+-- name: GetAbsorbingPrevention :one
+-- The prevented case whose RDR refund a Stripe refund of the charge for the
+-- same amount, made no earlier than the case, is: one that absorbed none yet.
+SELECT d.* FROM billing.disputes d
+JOIN billing.payments r ON r.merchant_id = d.merchant_id AND r.id = d.reversal_payment_id
+WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND d.payment_id = sqlc.arg(payment_id)::uuid
+  AND d.kind = 'prevented' AND d.absorbed_refund_ref IS NULL AND d.disputed_at <= sqlc.arg(refunded_at)::timestamptz
+  AND r.refund_reason = 'dispute_prevention' AND r.amount = -sqlc.arg(amount)::bigint AND r.currency = sqlc.arg(currency)::text
+ORDER BY d.disputed_at
+LIMIT 1
+FOR UPDATE OF d;
+
+-- name: AbsorbDisputeRefund :execrows
+-- The case takes a provider refund as its RDR refund, once.
+UPDATE billing.disputes SET absorbed_refund_ref = sqlc.arg(refund_ref)::text,
+    reversal_payment_id = COALESCE(reversal_payment_id, sqlc.narg(reversal_payment_id)::uuid), updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND absorbed_refund_ref IS NULL;
+
+-- name: DisputeRefundAbsorbed :one
+-- Whether a case already took this provider refund as its own.
+SELECT EXISTS (
+    SELECT 1 FROM billing.disputes
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid AND absorbed_refund_ref = sqlc.arg(refund_ref)::text
+)::boolean;
+
+-- name: ListWaitingDisputeResponses :many
+-- Every response not yet finished, across merchants: a wake queues them.
+SELECT merchant_id, 'dispute'::text AS subject, id FROM billing.disputes
+WHERE kind = 'chargeback' AND responded_at IS NULL
+UNION ALL
+SELECT merchant_id, 'fraud_report'::text AS subject, id FROM billing.fraud_reports
+WHERE responded_at IS NULL AND action IN ('pending', 'refunded', 'nothing_to_refund');
+
+-- name: MerchantHasWaitingDisputeResponses :one
+SELECT (EXISTS (
+    SELECT 1 FROM billing.disputes WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'chargeback' AND responded_at IS NULL
+) OR EXISTS (
+    SELECT 1 FROM billing.fraud_reports WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND responded_at IS NULL
+      AND action IN ('pending', 'refunded', 'nothing_to_refund')
+))::boolean;
 
 -- name: ListOpenThresholdFindings :many
 -- The PSP's open dispute threshold findings: a past month's is finalized.
@@ -83,6 +124,7 @@ UPDATE billing.disputes SET
     closed_at = sqlc.narg(closed_at)::timestamptz,
     reversal_payment_id = sqlc.narg(reversal_payment_id)::uuid,
     recovery_payment_id = sqlc.narg(recovery_payment_id)::uuid,
+    observed_via = sqlc.arg(observed_via)::text,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;
@@ -117,7 +159,7 @@ INSERT INTO billing.fraud_reports (
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(provider_ref)::text,
     sqlc.arg(customer_id)::uuid, sqlc.arg(payment_id)::uuid, sqlc.arg(network)::text, sqlc.arg(fraud_type)::text,
-    sqlc.arg(actionable)::boolean, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(reported_at)::timestamptz, 'recorded'
+    sqlc.arg(actionable)::boolean, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(reported_at)::timestamptz, sqlc.arg(action)::text
 )
 ON CONFLICT (merchant_id, psp_id, provider_ref) DO NOTHING
 RETURNING *;
@@ -128,15 +170,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 FOR UPDATE;
 
 -- name: NoteFraudReportActionable :one
--- A report stays actionable only while every report of it says so.
-UPDATE billing.fraud_reports SET actionable = actionable AND sqlc.arg(actionable)::boolean, updated_at = now()
+-- A report stays actionable only while every report of it says so; one no
+-- longer actionable before it was answered is recorded only.
+UPDATE billing.fraud_reports SET actionable = actionable AND sqlc.arg(actionable)::boolean,
+    action = CASE WHEN action = 'pending' AND NOT sqlc.arg(actionable)::boolean THEN 'recorded' ELSE action END,
+    updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
 -- name: DecideFraudReport :execrows
--- What OpenRails does about a report, decided once.
-UPDATE billing.fraud_reports SET action = sqlc.arg(action)::text, refund_payment_id = sqlc.narg(refund_payment_id)::uuid, updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND action = 'recorded';
+-- What OpenRails does about a pending report, decided once.
+UPDATE billing.fraud_reports SET action = sqlc.arg(action)::text, refund_payment_id = sqlc.narg(refund_payment_id)::uuid,
+    responded_at = CASE WHEN sqlc.arg(action)::text = 'disputed' THEN sqlc.arg(now)::timestamptz END, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND action = 'pending';
+
+-- name: MarkFraudReportResponded :exec
+UPDATE billing.fraud_reports SET responded_at = sqlc.arg(responded_at)::timestamptz, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND responded_at IS NULL;
 
 -- name: MarkFraudReportEnded :exec
 UPDATE billing.fraud_reports SET ended_at = sqlc.arg(ended_at)::timestamptz, updated_at = now()
@@ -186,3 +236,11 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(c
   AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = sqlc.arg(payment_method_id)::uuid
 ORDER BY s.id;
+
+-- name: ListCustomerCardsByRailCustomerRef :many
+-- The customer's saved cards a provider vault holds: an NMI schedule's sale
+-- names its vault, and one card in it is the card charged.
+SELECT id FROM billing.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
+LIMIT 2;

@@ -12,6 +12,33 @@ import (
 	"github.com/google/uuid"
 )
 
+const absorbDisputeRefund = `-- name: AbsorbDisputeRefund :execrows
+UPDATE billing.disputes SET absorbed_refund_ref = $1::text,
+    reversal_payment_id = COALESCE(reversal_payment_id, $2::uuid), updated_at = now()
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND absorbed_refund_ref IS NULL
+`
+
+type AbsorbDisputeRefundParams struct {
+	RefundRef         string
+	ReversalPaymentID *uuid.UUID
+	MerchantID        uuid.UUID
+	ID                uuid.UUID
+}
+
+// The case takes a provider refund as its RDR refund, once.
+func (q *Queries) AbsorbDisputeRefund(ctx context.Context, arg AbsorbDisputeRefundParams) (int64, error) {
+	result, err := q.db.Exec(ctx, absorbDisputeRefund,
+		arg.RefundRef,
+		arg.ReversalPaymentID,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countCustomerChargebacks = `-- name: CountCustomerChargebacks :one
 SELECT count(*)::bigint FROM billing.disputes
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND kind = 'chargeback'
@@ -30,22 +57,25 @@ func (q *Queries) CountCustomerChargebacks(ctx context.Context, arg CountCustome
 }
 
 const decideFraudReport = `-- name: DecideFraudReport :execrows
-UPDATE billing.fraud_reports SET action = $1::text, refund_payment_id = $2::uuid, updated_at = now()
-WHERE merchant_id = $3::uuid AND id = $4::uuid AND action = 'recorded'
+UPDATE billing.fraud_reports SET action = $1::text, refund_payment_id = $2::uuid,
+    responded_at = CASE WHEN $1::text = 'disputed' THEN $3::timestamptz END, updated_at = now()
+WHERE merchant_id = $4::uuid AND id = $5::uuid AND action = 'pending'
 `
 
 type DecideFraudReportParams struct {
 	Action          string
 	RefundPaymentID *uuid.UUID
+	Now             time.Time
 	MerchantID      uuid.UUID
 	ID              uuid.UUID
 }
 
-// What OpenRails does about a report, decided once.
+// What OpenRails does about a pending report, decided once.
 func (q *Queries) DecideFraudReport(ctx context.Context, arg DecideFraudReportParams) (int64, error) {
 	result, err := q.db.Exec(ctx, decideFraudReport,
 		arg.Action,
 		arg.RefundPaymentID,
+		arg.Now,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -55,8 +85,90 @@ func (q *Queries) DecideFraudReport(ctx context.Context, arg DecideFraudReportPa
 	return result.RowsAffected(), nil
 }
 
+const disputeRefundAbsorbed = `-- name: DisputeRefundAbsorbed :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.disputes
+    WHERE merchant_id = $1::uuid AND payment_id = $2::uuid AND absorbed_refund_ref = $3::text
+)::boolean
+`
+
+type DisputeRefundAbsorbedParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+	RefundRef  string
+}
+
+// Whether a case already took this provider refund as its own.
+func (q *Queries) DisputeRefundAbsorbed(ctx context.Context, arg DisputeRefundAbsorbedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, disputeRefundAbsorbed, arg.MerchantID, arg.PaymentID, arg.RefundRef)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const getAbsorbingPrevention = `-- name: GetAbsorbingPrevention :one
+SELECT d.merchant_id, d.id, d.psp_id, d.rail, d.provider_ref, d.customer_id, d.payment_id, d.kind, d.network, d.reason, d.reason_code, d.provider_reason, d.amount, d.currency, d.status, d.disputed_at, d.chargeback_at, d.evidence_due_at, d.closed_at, d.reversal_payment_id, d.recovery_payment_id, d.absorbed_refund_ref, d.observed_via, d.responded_at, d.created_at, d.updated_at FROM billing.disputes d
+JOIN billing.payments r ON r.merchant_id = d.merchant_id AND r.id = d.reversal_payment_id
+WHERE d.merchant_id = $1::uuid AND d.payment_id = $2::uuid
+  AND d.kind = 'prevented' AND d.absorbed_refund_ref IS NULL AND d.disputed_at <= $3::timestamptz
+  AND r.refund_reason = 'dispute_prevention' AND r.amount = -$4::bigint AND r.currency = $5::text
+ORDER BY d.disputed_at
+LIMIT 1
+FOR UPDATE OF d
+`
+
+type GetAbsorbingPreventionParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+	RefundedAt time.Time
+	Amount     int64
+	Currency   string
+}
+
+// The prevented case whose RDR refund a Stripe refund of the charge for the
+// same amount, made no earlier than the case, is: one that absorbed none yet.
+func (q *Queries) GetAbsorbingPrevention(ctx context.Context, arg GetAbsorbingPreventionParams) (BillingDispute, error) {
+	row := q.db.QueryRow(ctx, getAbsorbingPrevention,
+		arg.MerchantID,
+		arg.PaymentID,
+		arg.RefundedAt,
+		arg.Amount,
+		arg.Currency,
+	)
+	var i BillingDispute
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.PspID,
+		&i.Rail,
+		&i.ProviderRef,
+		&i.CustomerID,
+		&i.PaymentID,
+		&i.Kind,
+		&i.Network,
+		&i.Reason,
+		&i.ReasonCode,
+		&i.ProviderReason,
+		&i.Amount,
+		&i.Currency,
+		&i.Status,
+		&i.DisputedAt,
+		&i.ChargebackAt,
+		&i.EvidenceDueAt,
+		&i.ClosedAt,
+		&i.ReversalPaymentID,
+		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
+		&i.RespondedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDispute = `-- name: GetDispute :one
-SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, responded_at, created_at, updated_at FROM billing.disputes
+SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at FROM billing.disputes
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -90,6 +202,8 @@ func (q *Queries) GetDispute(ctx context.Context, arg GetDisputeParams) (Billing
 		&i.ClosedAt,
 		&i.ReversalPaymentID,
 		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
 		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -98,7 +212,7 @@ func (q *Queries) GetDispute(ctx context.Context, arg GetDisputeParams) (Billing
 }
 
 const getDisputeForUpdate = `-- name: GetDisputeForUpdate :one
-SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, responded_at, created_at, updated_at FROM billing.disputes
+SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at FROM billing.disputes
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND provider_ref = $3::text
 FOR UPDATE
 `
@@ -134,6 +248,8 @@ func (q *Queries) GetDisputeForUpdate(ctx context.Context, arg GetDisputeForUpda
 		&i.ClosedAt,
 		&i.ReversalPaymentID,
 		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
 		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -142,7 +258,7 @@ func (q *Queries) GetDisputeForUpdate(ctx context.Context, arg GetDisputeForUpda
 }
 
 const getFraudReport = `-- name: GetFraudReport :one
-SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, created_at, updated_at FROM billing.fraud_reports WHERE merchant_id = $1::uuid AND id = $2::uuid
+SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, responded_at, created_at, updated_at FROM billing.fraud_reports WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
 type GetFraudReportParams struct {
@@ -170,6 +286,7 @@ func (q *Queries) GetFraudReport(ctx context.Context, arg GetFraudReportParams) 
 		&i.Action,
 		&i.RefundPaymentID,
 		&i.EndedAt,
+		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -177,7 +294,7 @@ func (q *Queries) GetFraudReport(ctx context.Context, arg GetFraudReportParams) 
 }
 
 const getFraudReportForUpdate = `-- name: GetFraudReportForUpdate :one
-SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, created_at, updated_at FROM billing.fraud_reports
+SELECT merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, responded_at, created_at, updated_at FROM billing.fraud_reports
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND provider_ref = $3::text
 FOR UPDATE
 `
@@ -208,6 +325,7 @@ func (q *Queries) GetFraudReportForUpdate(ctx context.Context, arg GetFraudRepor
 		&i.Action,
 		&i.RefundPaymentID,
 		&i.EndedAt,
+		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -218,16 +336,16 @@ const insertDispute = `-- name: InsertDispute :one
 
 INSERT INTO billing.disputes (
     merchant_id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason,
-    amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at
+    amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, observed_via
 ) VALUES (
     $1::uuid, $2::uuid, $3::text, $4::text,
     $5::uuid, $6::uuid, $7::text, $8::text, $9::text,
     $10::text, $11::text, $12::bigint, $13::text,
     $14::text, $15::timestamptz, $16::timestamptz,
-    $17::timestamptz, $18::timestamptz
+    $17::timestamptz, $18::timestamptz, $19::text
 )
 ON CONFLICT (merchant_id, psp_id, provider_ref) DO NOTHING
-RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, responded_at, created_at, updated_at
+RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at
 `
 
 type InsertDisputeParams struct {
@@ -249,6 +367,7 @@ type InsertDisputeParams struct {
 	ChargebackAt   *time.Time
 	EvidenceDueAt  *time.Time
 	ClosedAt       *time.Time
+	ObservedVia    string
 }
 
 // billing.disputes, billing.fraud_reports and billing.network_activity_daily.
@@ -274,6 +393,7 @@ func (q *Queries) InsertDispute(ctx context.Context, arg InsertDisputeParams) (B
 		arg.ChargebackAt,
 		arg.EvidenceDueAt,
 		arg.ClosedAt,
+		arg.ObservedVia,
 	)
 	var i BillingDispute
 	err := row.Scan(
@@ -298,6 +418,8 @@ func (q *Queries) InsertDispute(ctx context.Context, arg InsertDisputeParams) (B
 		&i.ClosedAt,
 		&i.ReversalPaymentID,
 		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
 		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -311,10 +433,10 @@ INSERT INTO billing.fraud_reports (
 ) VALUES (
     $1::uuid, $2::uuid, $3::text, $4::text,
     $5::uuid, $6::uuid, $7::text, $8::text,
-    $9::boolean, $10::bigint, $11::text, $12::timestamptz, 'recorded'
+    $9::boolean, $10::bigint, $11::text, $12::timestamptz, $13::text
 )
 ON CONFLICT (merchant_id, psp_id, provider_ref) DO NOTHING
-RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, created_at, updated_at
+RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, responded_at, created_at, updated_at
 `
 
 type InsertFraudReportParams struct {
@@ -330,6 +452,7 @@ type InsertFraudReportParams struct {
 	Amount      int64
 	Currency    string
 	ReportedAt  time.Time
+	Action      string
 }
 
 func (q *Queries) InsertFraudReport(ctx context.Context, arg InsertFraudReportParams) (BillingFraudReport, error) {
@@ -346,6 +469,7 @@ func (q *Queries) InsertFraudReport(ctx context.Context, arg InsertFraudReportPa
 		arg.Amount,
 		arg.Currency,
 		arg.ReportedAt,
+		arg.Action,
 	)
 	var i BillingFraudReport
 	err := row.Scan(
@@ -365,6 +489,7 @@ func (q *Queries) InsertFraudReport(ctx context.Context, arg InsertFraudReportPa
 		&i.Action,
 		&i.RefundPaymentID,
 		&i.EndedAt,
+		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -398,8 +523,49 @@ func (q *Queries) LinkDisputePayments(ctx context.Context, arg LinkDisputePaymen
 	return err
 }
 
+const listCustomerCardsByRailCustomerRef = `-- name: ListCustomerCardsByRailCustomerRef :many
+SELECT id FROM billing.payment_methods
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND customer_id = $3::uuid
+  AND rail_customer_ref = $4::text
+LIMIT 2
+`
+
+type ListCustomerCardsByRailCustomerRefParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	CustomerID      uuid.UUID
+	RailCustomerRef string
+}
+
+// The customer's saved cards a provider vault holds: an NMI schedule's sale
+// names its vault, and one card in it is the card charged.
+func (q *Queries) ListCustomerCardsByRailCustomerRef(ctx context.Context, arg ListCustomerCardsByRailCustomerRefParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCustomerCardsByRailCustomerRef,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustomerID,
+		arg.RailCustomerRef,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDisputes = `-- name: ListDisputes :many
-SELECT d.merchant_id, d.id, d.psp_id, d.rail, d.provider_ref, d.customer_id, d.payment_id, d.kind, d.network, d.reason, d.reason_code, d.provider_reason, d.amount, d.currency, d.status, d.disputed_at, d.chargeback_at, d.evidence_due_at, d.closed_at, d.reversal_payment_id, d.recovery_payment_id, d.responded_at, d.created_at, d.updated_at
+SELECT d.merchant_id, d.id, d.psp_id, d.rail, d.provider_ref, d.customer_id, d.payment_id, d.kind, d.network, d.reason, d.reason_code, d.provider_reason, d.amount, d.currency, d.status, d.disputed_at, d.chargeback_at, d.evidence_due_at, d.closed_at, d.reversal_payment_id, d.recovery_payment_id, d.absorbed_refund_ref, d.observed_via, d.responded_at, d.created_at, d.updated_at
 FROM billing.disputes d
 WHERE d.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR d.kind = ANY($2::text[]))
@@ -480,6 +646,8 @@ func (q *Queries) ListDisputes(ctx context.Context, arg ListDisputesParams) ([]B
 			&i.ClosedAt,
 			&i.ReversalPaymentID,
 			&i.RecoveryPaymentID,
+			&i.AbsorbedRefundRef,
+			&i.ObservedVia,
 			&i.RespondedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -734,6 +902,41 @@ func (q *Queries) ListUnnotifiedFindings(ctx context.Context, arg ListUnnotified
 	return items, nil
 }
 
+const listWaitingDisputeResponses = `-- name: ListWaitingDisputeResponses :many
+SELECT merchant_id, 'dispute'::text AS subject, id FROM billing.disputes
+WHERE kind = 'chargeback' AND responded_at IS NULL
+UNION ALL
+SELECT merchant_id, 'fraud_report'::text AS subject, id FROM billing.fraud_reports
+WHERE responded_at IS NULL AND action IN ('pending', 'refunded', 'nothing_to_refund')
+`
+
+type ListWaitingDisputeResponsesRow struct {
+	MerchantID uuid.UUID
+	Subject    string
+	ID         uuid.UUID
+}
+
+// Every response not yet finished, across merchants: a wake queues them.
+func (q *Queries) ListWaitingDisputeResponses(ctx context.Context) ([]ListWaitingDisputeResponsesRow, error) {
+	rows, err := q.db.Query(ctx, listWaitingDisputeResponses)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWaitingDisputeResponsesRow
+	for rows.Next() {
+		var i ListWaitingDisputeResponsesRow
+		if err := rows.Scan(&i.MerchantID, &i.Subject, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDisputeResponded = `-- name: MarkDisputeResponded :exec
 UPDATE billing.disputes SET responded_at = $1::timestamptz, updated_at = now()
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND responded_at IS NULL
@@ -766,6 +969,22 @@ func (q *Queries) MarkFraudReportEnded(ctx context.Context, arg MarkFraudReportE
 	return err
 }
 
+const markFraudReportResponded = `-- name: MarkFraudReportResponded :exec
+UPDATE billing.fraud_reports SET responded_at = $1::timestamptz, updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid AND responded_at IS NULL
+`
+
+type MarkFraudReportRespondedParams struct {
+	RespondedAt time.Time
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+}
+
+func (q *Queries) MarkFraudReportResponded(ctx context.Context, arg MarkFraudReportRespondedParams) error {
+	_, err := q.db.Exec(ctx, markFraudReportResponded, arg.RespondedAt, arg.MerchantID, arg.ID)
+	return err
+}
+
 const markPaymentMethodDisputed = `-- name: MarkPaymentMethodDisputed :execrows
 UPDATE billing.payment_methods SET status = 'disputed', updated_at = now()
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND status = 'active'
@@ -785,10 +1004,28 @@ func (q *Queries) MarkPaymentMethodDisputed(ctx context.Context, arg MarkPayment
 	return result.RowsAffected(), nil
 }
 
+const merchantHasWaitingDisputeResponses = `-- name: MerchantHasWaitingDisputeResponses :one
+SELECT (EXISTS (
+    SELECT 1 FROM billing.disputes WHERE merchant_id = $1::uuid AND kind = 'chargeback' AND responded_at IS NULL
+) OR EXISTS (
+    SELECT 1 FROM billing.fraud_reports WHERE merchant_id = $1::uuid AND responded_at IS NULL
+      AND action IN ('pending', 'refunded', 'nothing_to_refund')
+))::boolean
+`
+
+func (q *Queries) MerchantHasWaitingDisputeResponses(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, merchantHasWaitingDisputeResponses, merchantID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const noteFraudReportActionable = `-- name: NoteFraudReportActionable :one
-UPDATE billing.fraud_reports SET actionable = actionable AND $1::boolean, updated_at = now()
+UPDATE billing.fraud_reports SET actionable = actionable AND $1::boolean,
+    action = CASE WHEN action = 'pending' AND NOT $1::boolean THEN 'recorded' ELSE action END,
+    updated_at = now()
 WHERE merchant_id = $2::uuid AND id = $3::uuid
-RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, created_at, updated_at
+RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, network, fraud_type, actionable, amount, currency, reported_at, action, refund_payment_id, ended_at, responded_at, created_at, updated_at
 `
 
 type NoteFraudReportActionableParams struct {
@@ -797,7 +1034,8 @@ type NoteFraudReportActionableParams struct {
 	ID         uuid.UUID
 }
 
-// A report stays actionable only while every report of it says so.
+// A report stays actionable only while every report of it says so; one no
+// longer actionable before it was answered is recorded only.
 func (q *Queries) NoteFraudReportActionable(ctx context.Context, arg NoteFraudReportActionableParams) (BillingFraudReport, error) {
 	row := q.db.QueryRow(ctx, noteFraudReportActionable, arg.Actionable, arg.MerchantID, arg.ID)
 	var i BillingFraudReport
@@ -818,6 +1056,7 @@ func (q *Queries) NoteFraudReportActionable(ctx context.Context, arg NoteFraudRe
 		&i.Action,
 		&i.RefundPaymentID,
 		&i.EndedAt,
+		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -828,19 +1067,20 @@ const pSPHasOpenThresholdFinding = `-- name: PSPHasOpenThresholdFinding :one
 SELECT EXISTS (
     SELECT 1 FROM billing.reconciliation_findings
     WHERE merchant_id = $1::uuid AND finding_type = 'life.disputes.threshold' AND psp_id = $2::uuid
-      AND status IN ('reconcile_required', 'requires_review')
+      AND status IN ('reconcile_required', 'requires_review') AND subject_key LIKE '%:' || $3::text
 )::boolean
 `
 
 type PSPHasOpenThresholdFindingParams struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
+	Month      string
 }
 
-// Whether a dispute threshold finding of the PSP is open: its sales then
-// re-evaluate it.
+// Whether a dispute threshold finding of the PSP is open for the month a sale
+// settled in: its sales re-evaluate it. An ended month's is settled already.
 func (q *Queries) PSPHasOpenThresholdFinding(ctx context.Context, arg PSPHasOpenThresholdFindingParams) (bool, error) {
-	row := q.db.QueryRow(ctx, pSPHasOpenThresholdFinding, arg.MerchantID, arg.PspID)
+	row := q.db.QueryRow(ctx, pSPHasOpenThresholdFinding, arg.MerchantID, arg.PspID, arg.Month)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -904,9 +1144,10 @@ UPDATE billing.disputes SET
     closed_at = $11::timestamptz,
     reversal_payment_id = $12::uuid,
     recovery_payment_id = $13::uuid,
+    observed_via = $14::text,
     updated_at = now()
-WHERE merchant_id = $14::uuid AND id = $15::uuid
-RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, responded_at, created_at, updated_at
+WHERE merchant_id = $15::uuid AND id = $16::uuid
+RETURNING merchant_id, id, psp_id, rail, provider_ref, customer_id, payment_id, kind, network, reason, reason_code, provider_reason, amount, currency, status, disputed_at, chargeback_at, evidence_due_at, closed_at, reversal_payment_id, recovery_payment_id, absorbed_refund_ref, observed_via, responded_at, created_at, updated_at
 `
 
 type UpdateDisputeParams struct {
@@ -923,6 +1164,7 @@ type UpdateDisputeParams struct {
 	ClosedAt          *time.Time
 	ReversalPaymentID *uuid.UUID
 	RecoveryPaymentID *uuid.UUID
+	ObservedVia       string
 	MerchantID        uuid.UUID
 	ID                uuid.UUID
 }
@@ -943,6 +1185,7 @@ func (q *Queries) UpdateDispute(ctx context.Context, arg UpdateDisputeParams) (B
 		arg.ClosedAt,
 		arg.ReversalPaymentID,
 		arg.RecoveryPaymentID,
+		arg.ObservedVia,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -969,6 +1212,8 @@ func (q *Queries) UpdateDispute(ctx context.Context, arg UpdateDisputeParams) (B
 		&i.ClosedAt,
 		&i.ReversalPaymentID,
 		&i.RecoveryPaymentID,
+		&i.AbsorbedRefundRef,
+		&i.ObservedVia,
 		&i.RespondedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
