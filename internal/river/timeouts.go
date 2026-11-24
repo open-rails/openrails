@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/usageerasure"
 )
@@ -50,6 +51,7 @@ var kinds = map[string]time.Duration{
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
 	merchants.UsagePurgeArgs{}.Kind():    DefaultTimeout,
 	destructive.DrainErasuresKind:        DefaultTimeout,
+	subscriptions.KindPriceMigration:     DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
 	KindPacedProviderRefresh:             time.Hour,

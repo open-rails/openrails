@@ -31,6 +31,9 @@ type catalogAdmission struct {
 	targets  map[catalogObject]bool
 	action   *destructive.Action
 	finished bool
+	// outer: action is the command the edit is part of (a price migration's
+	// archive), which finishes it itself.
+	outer bool
 }
 
 type catalogClassification func(context.Context, *Service, catalogState) ([]catalogObject, error)

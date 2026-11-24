@@ -36,16 +36,14 @@ func NewNMIPlanPusher(resolver railresolve.NMIClientResolver) *NMIPlanPusher {
 
 // CanPush reports whether sub is an addressable gateway-native NMI recurring
 // record: the merchant declares an armable NMI account for it and the
-// subscription carries a rail reference.
-func (p *NMIPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) bool {
-	if p == nil || p.resolver == nil || sub == nil {
-		return false
-	}
-	if strings.TrimSpace(sub.RailSubscriptionID) == "" {
-		return false
+// subscription carries a rail reference. An error is a read that failed,
+// which says nothing either way.
+func (p *NMIPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) (bool, error) {
+	if p == nil || p.resolver == nil || sub == nil || strings.TrimSpace(sub.RailSubscriptionID) == "" {
+		return false, nil
 	}
 	_, _, ok, err := NMIClientForExistingSubscription(ctx, p.resolver, sub)
-	return err == nil && ok
+	return ok, err
 }
 
 // PushPlanAmount sets the remote record's plan_amount to amountNative
@@ -59,11 +57,11 @@ func (p *NMIPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 		return fmt.Errorf("nmi push: resolve client: %w", err)
 	}
 	if !ok || client == nil {
-		return fmt.Errorf("nmi push: merchant declares no armable nmi account")
+		return refusePush(migrationBlockedRailUserAction, "the merchant declares no armable nmi account")
 	}
 	accountMerchant, accountPSP := client.AccountIdentity()
 	if accountMerchant != sub.MerchantID || accountPSP != sub.PspID {
-		return fmt.Errorf("nmi push: reader is armed for another provider account")
+		return refusePush(migrationBlockedRailUserAction, "the nmi reader is armed for another account")
 	}
 	railID := strings.TrimSpace(sub.RailSubscriptionID)
 	if railID == "" {
@@ -84,21 +82,23 @@ func (p *NMIPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 		return fmt.Errorf("nmi push: read %s: %w", railID, err)
 	}
 	if !found || remote.ID != railID {
-		return fmt.Errorf("nmi push: exact subscription %s not found at nmi", railID)
+		return refusePush(migrationBlockedNMIScheduleMissing, "nmi has no schedule %s", railID)
 	}
 	// NMI ignores plan_amount on a schedule attached to a named plan; moving
 	// one requires a plan swap, which a price migration does not name.
 	if remote.NamedPlan() {
-		return fmt.Errorf("nmi push: %s is on named plan %q; NMI changes its amount only by switching plans — migrate it by tier change to a linked plan", railID, remote.Plan.ID)
+		return refusePush(migrationBlockedNMINamedPlan, "schedule %s is on plan %q", railID, remote.Plan.ID)
 	}
 	// update_subscription always writes the total installment count. Freeze an
 	// explicit provider value; missing facts cannot silently become bill forever.
-	if remote.Plan == nil || strings.TrimSpace(remote.Plan.PlanPayments) == "" {
-		return fmt.Errorf("nmi push: %s has no qualified plan_payments", railID)
+	planPayments := -1
+	if remote.Plan != nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(remote.Plan.PlanPayments)); err == nil {
+			planPayments = n
+		}
 	}
-	planPayments, err := strconv.Atoi(strings.TrimSpace(remote.Plan.PlanPayments))
-	if err != nil || planPayments < 0 {
-		return fmt.Errorf("nmi push: %s has unparseable plan_payments", railID)
+	if planPayments < 0 {
+		return refusePush(migrationBlockedNMIPaymentsUnknown, "schedule %s", railID)
 	}
 
 	wireAmount, err := nmi.WireAmount(cents, currency)

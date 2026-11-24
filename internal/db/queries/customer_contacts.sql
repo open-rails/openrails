@@ -14,6 +14,17 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY (lower(c.user_name) = lower(sqlc.arg(query)::text)) DESC NULLS LAST, (lower(c.email) = lower(sqlc.arg(query)::text)) DESC NULLS LAST, c.customer_id
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: SearchCustomerContactsOfCustomers :many
+-- SearchCustomerContacts kept to the merchant's customers: an exact username
+-- or email first, then the newest customers.
+SELECT * FROM billing.customer_contacts c
+WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND EXISTS (SELECT 1 FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id)
+  AND (c.email ILIKE sqlc.arg(pattern)::text OR c.user_name ILIKE sqlc.arg(pattern)::text OR c.display_name ILIKE sqlc.arg(pattern)::text)
+ORDER BY (lower(c.user_name) = lower(sqlc.arg(query)::text) OR lower(c.email) = lower(sqlc.arg(query)::text)) DESC NULLS LAST,
+  (SELECT cu.created_at FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id) DESC, c.customer_id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: GetCustomerContactForUpdate :one
 SELECT * FROM billing.customer_contacts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid

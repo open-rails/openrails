@@ -74,6 +74,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_migration_id = sqlc.ar
   AND status = 'scheduled'
 ORDER BY id;
 
+-- name: ListMigrationMoves :many
+-- The subscriptions among ids a migration already made a move for, of any
+-- status: a walk reaches each once.
+SELECT subscription_id FROM billing.scheduled_changes
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_migration_id = sqlc.arg(price_migration_id)::uuid
+  AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
+
 -- A resolved move's push still waiting is no longer needed; one in flight
 -- finds its move resolved.
 -- name: SupersedeMovePushes :exec

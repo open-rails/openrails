@@ -131,7 +131,7 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		if err := refuseNewBenefitOverlap(ctx, q, mid.UUID(), before); err != nil {
 			return err
 		}
-		if admission != nil && admission.action != nil {
+		if admission != nil && admission.action != nil && !admission.outer {
 			outcome := destructive.OutcomeSucceeded
 			if len(affected) == 0 {
 				outcome = destructive.OutcomeNoEffect

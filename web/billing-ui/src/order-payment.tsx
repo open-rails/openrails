@@ -14,8 +14,13 @@ import {
   type BillingAppearance,
 } from "./appearance"
 import type { BillingClient, OrderResult } from "./client/client"
-import { isBillingError } from "./client/errors"
-import type { Order, OrderPaymentInput, PaymentMethod } from "./client/types"
+import { BillingError, isBillingError } from "./client/errors"
+import type {
+  Order,
+  OrderPaymentAttempt,
+  OrderPaymentInput,
+  PaymentMethod,
+} from "./client/types"
 import { PayButton, TrustLine } from "./components/pay-button"
 import { Button } from "./components/ui/button"
 import { SolanaBody } from "./components/qr"
@@ -84,8 +89,18 @@ const settled = (order: Order) =>
 // without its query or fragment, which may hold what a URL must not carry.
 const pageURL = () => window.location.origin + window.location.pathname
 
-// How often a Solana order awaiting its wallet is read again.
-const SOLANA_POLL_MS = 3000
+// A Solana order awaiting its wallet is read every SOLANA_READ_MS: OpenRails
+// watches the chain itself. Confirm, a purchase request limited per minute,
+// asks it to read the chain at once, only every SOLANA_CONFIRM_MS.
+const SOLANA_READ_MS = 3000
+const SOLANA_CONFIRM_MS = 30000
+// A pay whose answer never arrived may still have been taken: these answers
+// and a lost one are read back under the same key.
+const UNANSWERED = new Set(["idempotency_key_in_use", "idempotency_key_reused", "order_payment_in_progress"])
+const unanswered = (cause: unknown) =>
+  !isBillingError(cause) || cause.type === "local" || cause.status >= 500 || UNANSWERED.has(cause.code)
+// An attempt that ended without the payment: the next one takes a new key.
+const ENDED = new Set(["failed", "expired", "canceled"])
 // How often an order whose payment OpenRails is still confirming is read
 // again; a lost card answer takes minutes to settle from the provider.
 const PROCESSING_POLL_MS = 10000
@@ -121,8 +136,10 @@ export function OrderPayment({
   const [busy, setBusy] = React.useState(false)
   const [pendingSaved, setPendingSaved] = React.useState<string>()
   const [walletShown, setWalletShown] = React.useState(false)
-  // One key per pay attempt, minted at render: a retry of the same request
-  // answers what the first did. A failed answer mints the next.
+  // One key per payment, minted at render. It is kept until the payment it
+  // names has an answer: a retry after a lost answer is answered as the
+  // first request was, never charged twice. A decline or a refusal mints
+  // the next.
   const [key, setKey] = React.useState(() => crypto.randomUUID())
   const stripeCard = React.useRef<StripeCardHandle>(null)
   const settledRef = React.useRef(onSettled)
@@ -152,22 +169,41 @@ export function OrderPayment({
     if (order && settled(order)) settledRef.current?.(order)
   }, [order])
 
-  // A Solana order awaits its wallet: confirm asks OpenRails to read the
-  // chain, until the transfer lands.
+  // A Solana order awaits its wallet until the transfer lands: read it, and
+  // now and then ask OpenRails to confirm it.
   const awaitingWallet =
     order?.collection_owner === "engine" &&
     order?.payment.status === "requires_action" &&
     order.payment.next_action?.type === "solana_pay"
+  const awaitedOrder = awaitingWallet ? order?.id : undefined
   React.useEffect(() => {
-    if (!awaitingWallet || !order) return
+    if (!awaitedOrder) return
+    const abort = new AbortController()
+    const confirmEvery = SOLANA_CONFIRM_MS / SOLANA_READ_MS
+    // A slow answer never replaces a newer one. Each tab reads on its own:
+    // two tabs confirm four times a minute, still under the limit.
+    let reads = 0
+    let shown = 0
     const timer = window.setInterval(() => {
-      client.confirmOrder(order.id).then(
-        (result) => setOrder(result.order),
+      const read = ++reads
+      const next =
+        read % confirmEvery === 0
+          ? client.confirmOrder(awaitedOrder).then((result) => result.order)
+          : client.getOrder(awaitedOrder, abort.signal)
+      next.then(
+        (current) => {
+          if (abort.signal.aborted || read < shown) return
+          shown = read
+          setOrder(current)
+        },
         () => undefined
       )
-    }, SOLANA_POLL_MS)
-    return () => window.clearInterval(timer)
-  }, [awaitingWallet, client, order])
+    }, SOLANA_READ_MS)
+    return () => {
+      window.clearInterval(timer)
+      abort.abort()
+    }
+  }, [awaitedOrder, client])
 
   // A processing order is confirmed later: show the decline or the receipt
   // once OpenRails has it.
@@ -318,6 +354,8 @@ export function OrderPayment({
     }
     const next = result.order.payment.next_action
     if (result.order.collection_owner !== "engine" || result.order.payment.status !== "requires_action" || !next) return true
+    // The page shows the wallet's request and reads the order until it lands.
+    if (next.type === "solana_pay") return true
     if (next.type === "redirect_to_url" && next.url) {
       window.location.assign(next.url)
       return true
@@ -338,7 +376,41 @@ export function OrderPayment({
       const answered = await stripe.handleNextAction({ clientSecret: secret })
       if (answered.error) throw new Error(answered.error.message)
     }
-    return answer(await client.confirmOrder(order.id))
+    let confirmed: OrderResult
+    try {
+      confirmed = await client.confirmOrder(order.id)
+    } catch (cause) {
+      // The challenge passed and only its confirmation was lost: the same
+      // payment, under the same key, read again.
+      const current = await client.getOrder(order.id).catch(() => undefined)
+      if (current) setOrder(current)
+      setError(message(cause))
+      return false
+    }
+    return answer(confirmed)
+  }
+
+  const message = (cause: unknown) =>
+    !isBillingError(cause) && cause instanceof Error && cause.message
+      ? cause.message
+      : m.error(cause)
+
+  // recover reads back what a pay under key did when its answer was lost:
+  // the order as the pay would have answered it, or undefined when nothing
+  // was taken under the key or it cannot be read now, and the key stays for
+  // the retry.
+  const recover = async (): Promise<OrderResult | undefined> => {
+    let attempt: OrderPaymentAttempt
+    let current: Order
+    try {
+      attempt = await client.getOrderPaymentAttempt(order.id, key)
+      current = await client.getOrder(order.id)
+    } catch {
+      return undefined
+    }
+    if (!ENDED.has(attempt.state)) return { order: current }
+    const failure = current.payment.last_payment_error?.message ?? m.t("errors.generic")
+    return { order: current, error: new BillingError(402, { type: "card_error", code: "payment_failed", message: failure }) }
   }
 
   // pay answers whether the payment went through (or awaits its rail).
@@ -356,27 +428,38 @@ export function OrderPayment({
     setBusy(true)
     setError(undefined)
     try {
-      return await answer(
-        await client.payOrder(order.id, {
-          payment: await payment(),
+      let result: OrderResult | undefined
+      try {
+        const input = await payment()
+        result = await client.payOrder(order.id, {
+          payment: input,
           expectedTotal: order.total,
           idempotencyKey: key,
           ...(reusable === undefined ? {} : { reusable }),
         })
-      )
-    } catch (cause) {
-      setError(
-        !isBillingError(cause) && cause instanceof Error && cause.message
-          ? cause.message
-          : m.error(cause)
-      )
-      // Validation rejected the request before a charge; let the customer
-      // correct it. Network, server and in-flight errors keep the same attempt.
-      const rejected = isBillingError(cause) && cause.status === 400 &&
-        cause.type === "invalid_request_error"
-      if (preserveUnconfirmed && !rejected) throw cause
-      setKey(crypto.randomUUID())
-      return false
+      } catch (cause) {
+        if (isBillingError(cause) && !unanswered(cause)) {
+          // Refused before any attempt: corrected, it is a new payment.
+          setError(message(cause))
+          setKey(crypto.randomUUID())
+          return false
+        }
+        // Lost, or never sent: read back what the key took, if anything.
+        result = await recover()
+        if (!result) {
+          setError(message(cause))
+          if (preserveUnconfirmed) throw cause
+          return false
+        }
+      }
+      try {
+        return await answer(result)
+      } catch (cause) {
+        // The bank's challenge failed: pay again, as a new payment.
+        setError(message(cause))
+        setKey(crypto.randomUUID())
+        return false
+      }
     } finally {
       setBusy(false)
     }

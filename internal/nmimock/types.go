@@ -81,6 +81,8 @@ type Schedule struct {
 	Deleted, Paused bool
 	// Custom is a custom-amount schedule: its plan shows an empty plan_name.
 	Custom bool
+	// UnstatedPayments is a schedule whose plan states no plan_payments.
+	UnstatedPayments bool
 }
 
 // Sale is a sale NMI processed, approved or declined.

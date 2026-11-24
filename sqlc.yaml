@@ -37,6 +37,7 @@ sql:
       - "internal/migrate/postgres/0037_unit_order_revenue.up.sql"
       - "internal/migrate/postgres/0038_write_posture_comments.up.sql"
       - "internal/migrate/postgres/0039_lease_in_flight_off_customers.up.sql"
+      - "internal/migrate/postgres/0040_migration_cohort_order.up.sql"
       - "internal/migrate/postgres/0041_checkout_analytics.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

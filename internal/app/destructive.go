@@ -73,7 +73,7 @@ func (r *Runtime) projectDestructiveHold(ctx context.Context, tx pgx.Tx, hold de
 			return err
 		}
 		if hold.Scope == destructive.ScopeErasure {
-			if err := r.DB.QueueRiverJobNowTx(ctx, tx, destructive.DrainErasuresArgs{MerchantID: hold.MerchantID}, nil); err != nil {
+			if err := destructive.QueueDrain(ctx, r.DB, tx, hold.MerchantID); err != nil {
 				return fmt.Errorf("queue the erasure drain: %w", err)
 			}
 		}
