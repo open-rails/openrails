@@ -399,7 +399,12 @@ func (s *Server) createUser(ctx context.Context, mid billing.MerchantID, in user
 		case row.ProvisionedAt != nil:
 			return errorf(http.StatusConflict, "uniqueness", "the User %s exists", id)
 		}
-		// Claims or an erasure came first: the newer report wins.
+		// An erasure dated after this report wins: the User stays deleted.
+		erased := row.Email == nil && row.DisplayName == nil && row.UserName == nil && row.DirectoryUpdatedAt != nil
+		if erased && !newer(at, row.DirectoryUpdatedAt) {
+			return errorf(http.StatusConflict, "", "the User %s was deleted after this report", id)
+		}
+		// Claims came first: the newer report wins.
 		c := in.contact
 		if !newer(at, row.DirectoryUpdatedAt) {
 			c = contactOf(row)

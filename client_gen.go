@@ -1188,13 +1188,24 @@ func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.Destru
 // ClearDestructiveHold clears an incident after review, recording who and
 // why. It needs a person other than the one whose action opened it, holding
 // merchant configuration authority and root:admin-rate-limits:unlock, or for
-// the merchant's contact-erasure hold merchant:provisioning:manage, whose
-// waiting erasures then run: over HTTP a self-acting human's own credential;
-// in process the handle ActingFor names them, once the host has
-// authenticated them.
+// the merchant's contact-erasure hold merchant:provisioning:manage: over
+// HTTP a self-acting human's own credential; in process the handle ActingFor
+// names them, once the host has authenticated them.
 func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
 	var out billing.DestructiveHold
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/destructive-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearErasureHold clears the merchant's contact-erasure hold after review,
+// recording who and why; its waiting erasures then run. It needs a person
+// holding merchant:provisioning:manage: over HTTP a self-acting human's own
+// credential; in process the handle ActingFor names them.
+func (c *Client) ClearErasureHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
+	var out billing.DestructiveHold
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/erasure-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

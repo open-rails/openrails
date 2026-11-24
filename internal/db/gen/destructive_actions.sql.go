@@ -997,6 +997,16 @@ func (q *Queries) LockDestructiveAdmissions(ctx context.Context) error {
 	return err
 }
 
+const lockErasureAdmissions = `-- name: LockErasureAdmissions :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails:erasure-admissions:' || $1::uuid::text,0))
+`
+
+// Erasures admit under their merchant's lock alone: they share no budget.
+func (q *Queries) LockErasureAdmissions(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockErasureAdmissions, merchantID)
+	return err
+}
+
 const resolveDestructiveHoldFinding = `-- name: ResolveDestructiveHoldFinding :exec
 UPDATE billing.reconciliation_findings SET status='auto_fixed',resolution='admin_fixed',resolved_at=$1::timestamptz,resolved_by=$2::text,operator_notes=$3::text,updated_at=$1::timestamptz
 WHERE merchant_id=$4::uuid AND finding_type='life.destructive.hold' AND subject_key=$5::text AND status IN ('requires_review','reconcile_required','ignored')

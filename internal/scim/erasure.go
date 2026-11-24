@@ -21,10 +21,12 @@ import (
 
 // An erasure (DELETE /Users/{id}, alone or in a Bulk) is a destructive
 // command, destructive.EraseContact, admitted to the merchant's erasure scope
-// (destructive.AdmitErasure): it names the token or application that asked
-// and runs at once within the scope's budget. Otherwise it waits and is never
-// lost: the User leaves the directory at once (SCIM answers 204, then 404 for
-// it), and its values stay until the queue drains (DrainErasures).
+// (destructive.AdmitErasure): it names the token or application that asked.
+// The contact's values go at once either way: the directory can push them
+// again, so that part is reversible. What cannot be undone, the customer's
+// notification events and message log, runs at once within the scope's
+// budget, and otherwise waits for the queue (DrainErasures). SCIM answers 204
+// and then 404 for the User; a report older than the erasure loses to it.
 
 var errNoAdmissions = errorf(http.StatusServiceUnavailable, "", "erasure is not available")
 
@@ -81,8 +83,8 @@ func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id stri
 	return s.erasureError(ctx, err)
 }
 
-// withdraw takes a waiting erasure's User out of the directory at once,
-// keeping its values until the erasure runs, and queues the drain.
+// withdraw does a waiting erasure's reversible part at once: the User leaves
+// the directory and its contact's values go.
 func withdraw(ctx context.Context, d *db.DB, action destructive.Action) error {
 	user, episode, ok := erasureTarget(action)
 	if !ok {
@@ -93,22 +95,30 @@ func withdraw(ctx context.Context, d *db.DB, action destructive.Action) error {
 		row, err := q.GetCustomerContactForUpdate(ctx, gen.GetCustomerContactForUpdateParams{MerchantID: action.MerchantID, CustomerID: user})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
+			return nil
 		case err != nil:
 			return err
-		case row.ProvisionedAt != nil && row.ProvisionedAt.Equal(episode):
-			if _, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
-				MerchantID: row.MerchantID, CustomerID: row.CustomerID, Email: row.Email, DisplayName: row.DisplayName, UserName: row.UserName,
-				Active: row.Active, DirectoryUpdatedAt: latest(action.AdmittedAt, row.DirectoryUpdatedAt),
-			}); err != nil {
-				return err
-			}
 		}
-		return d.QueueRiverJobNowTx(ctx, tx, destructive.DrainErasuresArgs{MerchantID: action.MerchantID}, nil)
+		return clearContact(ctx, q, row, episode, action.AdmittedAt)
 	})
 }
 
-// RunErasure runs a started erasure and records its outcome with it: no
-// effect when the User was provisioned again since.
+// clearContact empties the contact of the User provisioned at episode, dated
+// by the erasure's arrival so an older report cannot restore it. A User
+// provisioned again since is a newer report and keeps its contact.
+func clearContact(ctx context.Context, q *gen.Queries, row gen.BillingCustomerContact, episode, at time.Time) error {
+	if row.ProvisionedAt != nil && !row.ProvisionedAt.Equal(episode) {
+		return nil
+	}
+	_, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
+		MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(at, row.DirectoryUpdatedAt),
+	})
+	return err
+}
+
+// RunErasure runs a started erasure and records its outcome with it: the
+// contact as withdraw clears it, and the customer's notification events and
+// message log, which a later provisioning does not take back.
 func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action destructive.Action) error {
 	user, episode, ok := erasureTarget(action)
 	if !ok {
@@ -117,27 +127,23 @@ func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action
 	ctx = merchant.WithID(ctx, billing.MerchantID(action.MerchantID))
 	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		outcome := destructive.OutcomeNoEffect
 		row, err := q.GetCustomerContactForUpdate(ctx, gen.GetCustomerContactForUpdateParams{MerchantID: action.MerchantID, CustomerID: user})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return err
-		case row.ProvisionedAt == nil || row.ProvisionedAt.Equal(episode):
-			if _, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
-				MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(action.AdmittedAt, row.DirectoryUpdatedAt),
-			}); err != nil {
+		default:
+			if err := clearContact(ctx, q, row, episode, action.AdmittedAt); err != nil {
 				return err
 			}
-			if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
-				return err
-			}
-			if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
-				return err
-			}
-			outcome = destructive.OutcomeSucceeded
 		}
-		return a.FinishTx(ctx, tx, action.MerchantID, action.ID, outcome, "")
+		if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
+			return err
+		}
+		if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
+			return err
+		}
+		return a.FinishTx(ctx, tx, action.MerchantID, action.ID, destructive.OutcomeSucceeded, "")
 	})
 }
 

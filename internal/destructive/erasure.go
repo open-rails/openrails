@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -39,11 +40,31 @@ const (
 
 func erasureKey(mid uuid.UUID) string { return "erasure:" + mid.String() }
 
+// erasureTransaction runs f under the merchant's erasure lock alone: erasures
+// share no budget with any other command or merchant.
+func (a *Admissions) erasureTransaction(ctx context.Context, mid uuid.UUID, f func(context.Context, *gen.Queries, pgx.Tx) error) error {
+	if a == nil || a.db == nil || a.project == nil {
+		return errors.New("destructive admission and incident projector must be configured")
+	}
+	if a.policyErr != nil {
+		return a.policyErr
+	}
+	return a.db.DataPool().CommittedMerchantTx(ctx, billing.MerchantID(mid), func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := q.LockErasureAdmissions(ctx, mid); err != nil {
+			return err
+		}
+		return f(ctx, q, tx)
+	})
+}
+
 // AdmitErasure records erasure c and starts it when nothing waits before it,
 // its scope is unheld and its budget has room; otherwise it waits reserved. A
 // replay answers the recorded admission. The in-process host's own erasure
 // starts at once, uncounted. The caller runs an erasure that answers started
-// or uncertain.
+// or uncertain. Either way the drain is queued with it: at once for one that
+// waits, past StuckErasure for one that started, to run it again should its
+// run not finish.
 func (a *Admissions) AdmitErasure(ctx context.Context, c Command) (Action, error) {
 	if c.Kind != EraseContact {
 		return Action{}, errors.New("AdmitErasure admits erasures only")
@@ -52,7 +73,7 @@ func (a *Admissions) AdmitErasure(ctx context.Context, c Command) (Action, error
 		return Action{}, err
 	}
 	var out Action
-	err := a.transaction(ctx, c.MerchantID, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
+	err := a.erasureTransaction(ctx, c.MerchantID, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
 		old, err := q.GetDestructiveActionByKey(ctx, gen.GetDestructiveActionByKeyParams{MerchantID: c.MerchantID, ActionKey: c.Key})
 		switch {
 		case err == nil && old.State != string(StateNoEffect):
@@ -81,13 +102,17 @@ func (a *Admissions) AdmitErasure(ctx context.Context, c Command) (Action, error
 				return err
 			}
 		}
+		args := DrainErasuresArgs{MerchantID: c.MerchantID}
 		if !start {
-			return nil
+			return a.db.QueueRiverJobNowTx(ctx, tx, args, nil)
 		}
-		row, err = q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Now: now})
-		if err == nil {
-			out = actionOf(row)
+		if row, err = q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Now: now}); err != nil {
+			return err
 		}
+		out = actionOf(row)
+		later := args.InsertOpts()
+		later.ScheduledAt = now.Add(StuckErasure + time.Minute)
+		_, err = a.db.InsertRiverJobTx(ctx, tx, args, &later)
 		return err
 	})
 	return out, err
@@ -149,8 +174,18 @@ func (a *Admissions) erasureBudget(ctx context.Context, q *gen.Queries, mid uuid
 		return erasureBudget{}, err
 	}
 	hourLimit, dayLimit := a.policy.ErasurePerHour, a.policy.ErasurePerDay
-	if n.Hourly >= hourLimit || n.Daily >= dayLimit {
-		contacts, err := q.ProvisionedContactsAtLeast(ctx, gen.ProvisionedContactsAtLeastParams{MerchantID: mid, Required: max(n.Hourly*erasureHourShare, n.Daily*erasureDayShare) + 1})
+	// Within its floors a scope reads no directory. Past one it counts only
+	// the provisioned contacts that would lift the exceeded window by one,
+	// an index-only read (customer_contacts_provisioned_idx) that stops there.
+	var required int64
+	if n.Hourly >= hourLimit {
+		required = n.Hourly*erasureHourShare + 1
+	}
+	if n.Daily >= dayLimit {
+		required = max(required, n.Daily*erasureDayShare+1)
+	}
+	if required > 0 {
+		contacts, err := q.ProvisionedContactsAtLeast(ctx, gen.ProvisionedContactsAtLeastParams{MerchantID: mid, Required: required})
 		if err != nil {
 			return erasureBudget{}, err
 		}
@@ -169,7 +204,7 @@ func (a *Admissions) StartErasures(ctx context.Context, mid uuid.UUID, limit int
 	if limit < 1 || limit > 1000 {
 		return nil, false, errors.New("start 1 to 1000 erasures")
 	}
-	err = a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
+	err = a.erasureTransaction(ctx, mid, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
 		now := a.clock.Now().UTC()
 		rows, err := q.ListErasureQueue(ctx, gen.ListErasureQueueParams{MerchantID: mid, StuckBefore: now.Add(-StuckErasure), RowLimit: limit + 1})
 		if err != nil {

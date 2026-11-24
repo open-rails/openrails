@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (189), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (190), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.
 
@@ -194,6 +194,7 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/messages/test` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateTestMessageParams` | 200 `TestMessage` |  |
 | GET | `/v1/merchant/destructive-holds` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<DestructiveHold>` |  |
 | POST | `/v1/merchant/destructive-holds/{id}/clear` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ClearDestructiveHoldParams` | 200 `DestructiveHold` |  |
+| POST | `/v1/merchant/erasure-holds/{id}/clear` | merchant | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `ClearDestructiveHoldParams` | 200 `DestructiveHold` | person |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
 | GET | `/v1/merchant/findings` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `Finding` |  |
@@ -226,7 +227,7 @@ The caller's none/read/update access to staff areas and effective application pe
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group. An application needs `merchant:provisioning:read` for their reads and `merchant:provisioning:manage` for their writes; a provisioning token is its own grant. An erasure (`DELETE /Users/{id}`, alone or in a Bulk) is admitted to the merchant's own erasure budget: past it the erasure waits rather than fails, the User leaving the directory at once, until a person holding `merchant:provisioning:manage` clears the erasure hold.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group. An application needs `merchant:provisioning:read` for their reads and `merchant:provisioning:manage` for their writes; a provisioning token is its own grant. An erasure (`DELETE /Users/{id}`, alone or in a Bulk) takes the User out of the directory and empties its contact at once; the erasure of its message log and notifications is admitted to the merchant's own erasure budget, past which it waits rather than fails until a person holding `merchant:provisioning:manage` (or a root operator holding the unlock) clears the erasure hold. A create dated before an erasure loses to it.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|

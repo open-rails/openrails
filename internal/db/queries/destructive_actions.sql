@@ -2,6 +2,10 @@
 -- name: LockDestructiveAdmissions :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails:destructive-admissions:' || 'billing.destructive_actions'::regclass::oid::text,0));
 
+-- Erasures admit under their merchant's lock alone: they share no budget.
+-- name: LockErasureAdmissions :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails:erasure-admissions:' || sqlc.arg(merchant_id)::uuid::text,0));
+
 -- name: GetDestructiveActionByKey :one
 SELECT * FROM billing.destructive_actions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND action_key=sqlc.arg(action_key)::text

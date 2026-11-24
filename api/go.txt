@@ -28,6 +28,7 @@ pkg openrails, method (*Client) CaptureAdmissions(context.Context, []billing.Cap
 pkg openrails, method (*Client) ChangeSubscription(context.Context, string, billing.SubscriptionID, billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)
 pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)
 pkg openrails, method (*Client) ClearDestructiveHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)
+pkg openrails, method (*Client) ClearErasureHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)
 pkg openrails, method (*Client) CreateCustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
