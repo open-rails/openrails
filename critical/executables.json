@@ -331,6 +331,24 @@
     "OR-J17-S06": [
       "TestCancellationRecoveryContracts/OR-J17-S06/resume-inside-the-paid-period-never-extends-access-past-it"
     ],
+    "OR-J17-S07": [
+      "TestCancellationRecoveryContracts/OR-J17-S07/a-stripe-resume-is-a-provider-operation"
+    ],
+    "OR-J17-S08": [
+      "TestCancellationRecoveryContracts/OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off"
+    ],
+    "OR-J17-S09": [
+      "TestCancellationRecoveryContracts/OR-J17-S09/a-stripe-resume-waits-for-the-cancel-in-flight-before-it"
+    ],
+    "OR-J17-S10": [
+      "TestCancellationRecoveryContracts/OR-J17-S10/a-cancel-after-a-waiting-resume-supersedes-it"
+    ],
+    "OR-J17-S11": [
+      "TestCancellationRecoveryContracts/OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it"
+    ],
+    "OR-J17-S12": [
+      "TestCancellationRecoveryContracts/OR-J17-S12/a-resume-whose-transaction-began-first-still-follows-the-cancel-it-resumes"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -496,6 +514,12 @@
     "OR-J23-S32": [
       "TestGate/OR-J23-S32/a-redis-gates-commitment-keeps-its-microsecond-window-across-a-rollover"
     ],
+    "OR-J23-S33": [
+      "TestLimitHolds/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
+    ],
+    "OR-J23-S34": [
+      "TestLimitHolds/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -600,6 +624,9 @@
     ],
     "OR-J24-S35": [
       "TestLeaseVersions/OR-J24-S35/a-hold-another-lease-waits-for-shrinks-while-its-customer-is-busy"
+    ],
+    "OR-J24-S36": [
+      "TestUsageContracts/OR-J24-S36/a-meter-correction-holds-only-its-own-merchants-usage"
     ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
@@ -732,6 +759,16 @@
     "OR-J31-S40": [
       "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
     ],
+    "OR-J31-S15": [
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-termination-that-is-not-a-revocation",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-paid-amount-without-a-payment",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-an-amount-on-a-grant-that-is-not-a-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
@@ -844,6 +881,9 @@
     ],
     "OR-J10-S05": [
       "TestOrderPaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
+    ],
+    "OR-J10-S07": [
+      "TestPaymentReplay/OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer"
     ],
     "OR-J12-S06": [
       "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/merchant-owned-vault",
@@ -1093,6 +1133,18 @@
     "OR-J26-S58": [
       "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
     ],
+    "OR-J26-S59": [
+      "TestUsageBillingContracts/OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy"
+    ],
+    "OR-J26-S60": [
+      "TestUsageBillingContracts/OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency"
+    ],
+    "OR-J26-S61": [
+      "TestUsageBillingContracts/OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money"
+    ],
+    "OR-J26-S62": [
+      "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
@@ -1149,6 +1201,12 @@
     ],
     "OR-J16-S71": [
       "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
+    ],
+    "OR-J16-S54": [
+      "TestDunningSchedule/OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning"
+    ],
+    "OR-J16-S55": [
+      "TestDunningSchedule/OR-J16-S55/a-declared-failure-past-its-own-cycles-window-is-not-dunned"
     ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
@@ -1209,6 +1267,18 @@
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ],
+    "OR-J38-S75": [
+      "TestCCBillIdentity/OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
+    ],
+    "OR-J38-S79": [
+      "TestCCBillIdentity/OR-J38-S79/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill"
+    ],
+    "OR-J38-S80": [
+      "TestCCBillIdentity/OR-J38-S80/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill"
+    ],
+    "OR-J38-S81": [
+      "TestCCBillIdentity/OR-J38-S81/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided"
+    ],
     "OR-J27-S10": [
       "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"
     ],
@@ -1223,6 +1293,9 @@
     ],
     "OR-J27-S14": [
       "TestRemoteEntitlementCache/OR-J27-S14/a-purchase-after-a-cached-check-is-visible-on-the-next-check"
+    ],
+    "OR-J27-S16": [
+      "TestEntitlementReadPlans/OR-J27-S16/exact-checks-and-prefix-pages-stay-on-their-indexes"
     ],
     "OR-J04-S42": [
       "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
@@ -1287,6 +1360,21 @@
     "OR-J22-S09": [
       "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
     ],
+    "OR-J22-S12": [
+      "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
+    ],
+    "OR-J22-S10": [
+      "TestCreditLotCounters/OR-J22-S10/lot-view-equals-ledger-counters"
+    ],
+    "OR-J22-S11": [
+      "TestCreditLotCounters/OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding"
+    ],
+    "OR-J22-S13": [
+      "TestCreditLotCounters/OR-J22-S13/lapsed-lots-expire-only-what-they-hold"
+    ],
+    "OR-J40-S04": [
+      "TestCreditLotCounters/OR-J40-S04/unposted-deposit-is-not-spendable"
+    ],
     "OR-J37-S10": [
       "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
     ],
@@ -1314,6 +1402,9 @@
     "OR-J25-S37": [
       "TestBalanceLooks/OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved"
     ],
+    "OR-J25-S05": [
+      "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ],
@@ -1325,6 +1416,9 @@
     ],
     "OR-J20-S70": [
       "TestRefundRecovery/OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read"
+    ],
+    "OR-J20-S06": [
+      "TestRefunds/OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took"
     ],
     "OR-J04-S71": [
       "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
@@ -1345,11 +1439,59 @@
       "TestLogging/OR-J04-S76/every-logger-the-engine-reaches-is-the-hosts",
       "TestLogging/OR-J04-S76/the-standalone-server-boots-with-every-logger-set"
     ],
+    "OR-J04-S77": [
+      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement"
+    ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
     ],
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
+    ],
+    "OR-J28-S09": [
+      "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
+    ],
+    "OR-J15-S73": [
+      "TestProviderTime/OR-J15-S73/prune-keeps-an-nmi-sale-settled-refunded-or-voided-after-its-window"
+    ],
+    "OR-J38-S44": [
+      "TestProviderTime/OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing"
+    ],
+    "OR-J38-S45": [
+      "TestProviderTime/OR-J38-S45/a-live-ccbill-refresh-reads-a-day-an-hour-and-records-every-rebill"
+    ],
+    "OR-J38-S46": [
+      "TestProviderTime/OR-J38-S46/a-live-ccbill-import-reads-a-day-an-hour-and-resumes-each-time"
+    ],
+    "OR-J38-S47": [
+      "TestProviderTime/OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period"
+    ],
+    "OR-J28-S11": [
+      "TestProviderTime/OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe"
+    ],
+    "OR-J28-S10": [
+      "TestProviderTime/OR-J28-S10/an-nmi-delivery-dated-before-its-replay-record-is-kept-applies-nothing"
+    ],
+    "OR-J28-S12": [
+      "TestProviderTime/OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied"
+    ],
+    "OR-J38-S73": [
+      "TestProviderTime/OR-J38-S73/a-ccbill-status-read-answering-1-keeps-access-to-ccbills-expiry"
+    ],
+    "OR-J38-S74": [
+      "TestProviderTime/OR-J38-S74/a-ccbill-rebill-and-cancellation-read-together-keep-the-rebilled-period"
+    ],
+    "OR-J15-S74": [
+      "TestProviderTime/OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change"
+    ],
+    "OR-J28-S13": [
+      "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"
+    ],
+    "OR-J28-S14": [
+      "TestProviderTime/OR-J28-S14/a-ccbill-datalink-login-ccbill-refuses-is-not-declared"
+    ],
+    "OR-J28-S15": [
+      "TestProviderTime/OR-J28-S15/a-strangers-refused-ccbill-logins-hold-only-their-own-login"
     ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
@@ -1436,6 +1578,9 @@
     ],
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
+    ],
+    "OR-J28-S16": [
+      "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
     "OR-J53-S01": [
       "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"

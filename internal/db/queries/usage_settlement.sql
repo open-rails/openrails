@@ -150,8 +150,18 @@ WHERE sqlc.narg(after_amount)::bigint IS NULL
 ORDER BY g.total_amount DESC, g.key COLLATE "C"
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: LockUsageDailyForMeterCorrection :exec
-LOCK TABLE billing.usage_daily IN SHARE ROW EXCLUSIVE MODE;
+-- name: LockUsageEventTypes :exec
+-- A meter correction's fence on its merchant's usage of event types: held
+-- exclusively against ShareUsageEventTypes, which every settlement takes
+-- before it adds rollups. No other merchant or event type waits.
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.usage_activity:' || sqlc.arg(merchant_id)::uuid::text || ':' || e.event_type, 0))
+FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER BY 1) e;
+
+-- name: ShareUsageEventTypes :exec
+-- A settlement's fence on the event types it adds rollups for, in the order
+-- LockUsageEventTypes takes them.
+SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.usage_activity:' || sqlc.arg(merchant_id)::uuid::text || ':' || e.event_type, 0))
+FROM (SELECT DISTINCT unnest(sqlc.arg(event_types)::text[]) AS event_type ORDER BY 1) e;
 
 -- name: UsageDailyExistsForTypes :one
 SELECT EXISTS (

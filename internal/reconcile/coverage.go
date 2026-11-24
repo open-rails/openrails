@@ -69,8 +69,10 @@ const (
 
 // AppliedEventCoverage judges the financial part of an observed provider
 // window. Policy-held lifecycle transitions do not prevent receipt recovery;
-// this does not authorize those transitions or prove provider finality.
-func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Time) AppliedCoverage {
+// this does not authorize those transitions or prove provider finality. A
+// chain link that lists what changed in it is complete when read in full:
+// the watermark it advances is a cursor.
+func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Time, chain Chain) AppliedCoverage {
 	if r == nil || r.Mode != ModeEnforce || r.Summary == nil {
 		return CoverageIncomplete
 	}
@@ -79,7 +81,7 @@ func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Ti
 		return CoverageIncomplete
 	}
 	cov := rep.Coverage
-	if !cov.TransactionsExhaustive || !cov.TransactionsPaginatedComplete ||
+	if !(cov.TransactionsExhaustive || chain == ChainLink) || !cov.TransactionsPaginatedComplete ||
 		cov.TransactionWindowSince == nil || cov.TransactionWindowSince.After(since) ||
 		cov.TransactionWindowUntil == nil || cov.TransactionWindowUntil.Before(until) {
 		return CoverageIncomplete

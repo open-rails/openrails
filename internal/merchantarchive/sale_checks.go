@@ -113,13 +113,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if err != nil {
 		return err
 	}
-	access := original[:0]
-	for _, event := range original {
-		if event.Kind != string(grants.Credit) {
-			access = append(access, event)
-		}
-	}
-	recorded, err := grants.RecordedPurchaseAccess(op.MerchantID, customer, p.ProductID, paymentID, access)
+	recorded, err := grants.RecordedPurchaseAccess(op.MerchantID, customer, p.ProductID, paymentID, original)
 	if err != nil {
 		return err
 	}

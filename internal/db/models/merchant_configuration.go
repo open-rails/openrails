@@ -12,19 +12,12 @@ type MerchantConfiguration struct {
 
 	// Usage billing settings: the billing period and collection knobs.
 	// Missing values use money service defaults.
-	CollectionThreshold   *int64 `json:"collection_threshold,omitempty"`
-	MonthlyFloor          *int64 `json:"monthly_floor,omitempty"`
 	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
 	// ArrearsGraceDays is how many days past a usage order's due_at a payer keeps
 	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
 	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
-
-	// ArrearsDelinquencyFloor (micros) is the smallest overdue balance that can
-	// make a payer delinquent. Nil ⇒ derived from MonthlyFloor, else
-	// delinquency.DefaultAmountFloor.
-	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
 
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers. Missing or empty windows use the service default.

@@ -482,45 +482,6 @@ func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID stri
 	return nil
 }
 
-func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
-	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
-	if err != nil {
-		return err
-	}
-	subscriptionID = strings.TrimSpace(subscriptionID)
-	if subscriptionID == "" {
-		return errors.New("subscription_id is required")
-	}
-	values := url.Values{}
-	values.Set("cancel_at_period_end", "false")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/subscriptions/"+subscriptionID, strings.NewReader(values.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+secretKey)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := s.StripeClients.Client(s.Config, 0)
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("stripe subscription resume failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read stripe subscription resume response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		msg := ParseStripeAPIError(body)
-		if msg == "" {
-			msg = fmt.Sprintf("stripe subscription resume failed (%d)", resp.StatusCode)
-		}
-		return errors.New(msg)
-	}
-	return nil
-}
-
 // NewAccountStripeService binds a resolved account and its credentials together.
 // Receipt reads use the captured credentials, even if the general Rails view is
 // changed by a host after construction.

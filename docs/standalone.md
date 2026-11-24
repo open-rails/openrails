@@ -256,7 +256,7 @@ own schema (`auth.database.schema`, default `profiles`).
 
 | Key | Meaning |
 |---|---|
-| `redis.addr` | `host:port` |
+| `redis.addr` | `host:port`. While a declared Redis does not answer, a DPoP proof or a JWT-bearer or client assertion is refused (503): another replica could not see it spent |
 | `redis.url` | instead of `addr`: `redis://` or `rediss://` with user, password and database |
 | `redis.username`, `redis.password`, `redis.db` | ACL user, password, database number |
 | `redis.tls`, `redis.ca_cert` | TLS against the system roots, or this PEM bundle (which implies TLS) |
@@ -273,9 +273,10 @@ boot. The ones a deployment sets:
 | Key | Meaning |
 |---|---|
 | `auth.default_tenant_id` | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
-| `auth.token.issuer` | required; the server's own issuer. No billing URL stands in for it |
+| `auth.token.issuer` | required; the server's own issuer, https (http only on a loopback host). No billing URL stands in for it |
+| `auth.token.refresh_token_duration` | how long a session lasts from its sign-in: 30 days when unset; negative lasts until revoked |
 | `auth.token.allow_private_network_jwks` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`); file-watched |
+| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 | `auth.keys.allow_ephemeral_dev_keys` | generate keys under `auth.keys.path`; one instance, local only |
 | `auth.keys.verify_only` | verify tokens, mint none |
 | `auth.resource.id` | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
@@ -672,9 +673,7 @@ refused on `/v1/app` (`403 application_required`).
 `local_sign_in`, with the server's own accounts. The console exchanges the
 person's token for one bound to the chosen merchant (RFC 8693 through the
 server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie
-(`__Host-authkit_rt` on HTTPS); a revoked session answers
-`401 credential_revoked` at once. `admin_console.disabled` omits it.
+session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
 
 ### Customer contacts
 
@@ -1075,12 +1074,24 @@ It answers `job_id`, `merchant_id`, `river_schema` and `queue`; `already_queued`
 is true when a refresh for that merchant is outstanding. Track the job with
 `openrails workers` or in `river_job` ([River jobs](river-jobs.md#inspect-a-running-deployment)).
 The job reads each PSP in bounded windows from its watermark
-(`billing.psp_refresh_watermarks`) to five minutes ago, NMI and Stripe with a
+(`billing.psp_refresh_watermarks`) to five minutes ago (NMI's by last change,
+the last reading through now), NMI and Stripe with a
 24-hour overlap for late indexing, and retries incomplete reads up to five
 attempts; a later request resumes from the saved watermarks. A watermark
 advances only after a complete read. Before each Stripe window a separate read
 records refunds and disputes that match existing payments, up to eight days
 back, even when the full read fails.
+
+CCBill's DataLink answers a live account once every 60 minutes. A live CCBill
+PSP's refresh is its own job, `openrails.paced_provider_refresh`, which the
+merchant's queues and which makes one DataLink request per hour: a day of transactions, advancing the watermark day by day,
+then the roster once the days are read to within two hours. A backlog catches
+up a day an hour; 90 days take about four days. A PSP import of a live account
+reads its history a day an hour the same way, its `history_through` showing how
+far it got. A request waiting for its hour, or one CCBill refuses for coming
+within it, waits and resumes; it never fails the job. The hour is kept per
+CCBill account in the abuse state (Redis), so every instance shares it; a
+sandbox account is not paced.
 
 Refresh reads run in every write mode. Overwrites and lifecycle repairs need an
 armed merchant, the kill switch on and a posture above `readonly`. Unverified
@@ -1275,7 +1286,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation and counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |

@@ -47,6 +47,7 @@ var kinds = map[string]time.Duration{
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
+	KindPacedProviderRefresh:             time.Hour,
 	KindMerchantHealth:                   time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,

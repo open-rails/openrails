@@ -77,9 +77,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 FOR UPDATE;
 
 -- name: GetOrderByIdempotencyKey :one
+-- The order a scoped create key made: unique per merchant, whichever customer
+-- it was for.
 SELECT * FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND idempotency_key = sqlc.arg(idempotency_key)::text;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
 
 -- name: ListOrdersPage :many
 -- One page of orders, newest first; every filter is optional. status reads an

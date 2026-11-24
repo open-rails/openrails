@@ -92,17 +92,19 @@ func (s *Service) now() time.Time {
 	return s.clock.Now().UTC()
 }
 
-// PolicyFromConfig resolves a policy from a merchant configuration document.
-func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
-	p := Policy{GraceDays: DefaultGraceDays, AmountFloor: DefaultAmountFloor}
+// PolicyFromConfig resolves the policy for debt in a currency from a merchant
+// configuration document: its arrears grace and that currency's floor.
+func PolicyFromConfig(cfg models.MerchantConfiguration, code string) (Policy, error) {
+	p := Policy{GraceDays: DefaultGraceDays, AmountFloor: DefaultAmountFloor(code)}
 	if cfg.ArrearsGraceDays != nil {
 		p.GraceDays = *cfg.ArrearsGraceDays
 	}
-	switch {
-	case cfg.ArrearsDelinquencyFloor != nil:
-		p.AmountFloor = *cfg.ArrearsDelinquencyFloor
-	case cfg.MonthlyFloor != nil:
-		p.AmountFloor = *cfg.MonthlyFloor
+	if cfg.UsageBilling != nil {
+		for _, c := range cfg.UsageBilling.Currencies {
+			if string(c.Currency) == code && c.DelinquencyFloor != nil {
+				p.AmountFloor = *c.DelinquencyFloor
+			}
+		}
 	}
 	if err := p.Validate(); err != nil {
 		return Policy{}, err
@@ -244,7 +246,7 @@ func readExposure(ctx context.Context, d *db.DB, q *gen.Queries, tid billing.Mer
 	if err != nil {
 		return Policy{}, Exposure{}, liveExposure{}, fmt.Errorf("%w: %w", errPolicyUnavailable, err)
 	}
-	merchantPolicy, err := PolicyFromConfig(settings.Config)
+	merchantPolicy, err := PolicyFromConfig(settings.Config, currency)
 	if err != nil {
 		return Policy{}, Exposure{}, liveExposure{}, fmt.Errorf("%w: %w", errPolicyUnavailable, err)
 	}

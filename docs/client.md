@@ -359,17 +359,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile`
-(`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`,
-`terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault`
-and `charge_psps` (where new cards are saved and which PSPs take new charges),
-`psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their
-bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
-`monthly_floor`, `collection_threshold`, `billing_period_boundary`),
-`reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access`, `fraud_warning_refund`, `usage_gate_safe_spend` and `currencies`. `from_email` and
-`alert_email` are each one mailbox, bare or named. Beside the settings, the
-merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -745,8 +735,8 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
-| `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
+| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
+| `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
 ```go guide:credit-grant
@@ -923,14 +913,7 @@ own row.
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
-**Spend limits.** A billing policy (merchant settings) caps unpaid arrears
-(`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate
-(`accrual_rate_cap`, admission takes your `AccrualRateDeltaPerHour`); bindings
-choose the merchant default or a trust tier, and a customer's own
-`billing_policy` wins. **Delinquency**: an unpaid usage order past
-`arrears_grace_days` and above the floor refuses admissions; OpenRails never
-revokes access or cancels for it. Act on the `delinquency.grace`,
-`delinquency.entered` and `delinquency.cleared` events.
+**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges; admission takes your `AccrualRateDeltaPerHour`). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in admission and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage order past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses admissions; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
 
 ## Usage and running charges
 

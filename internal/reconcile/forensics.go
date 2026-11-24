@@ -239,7 +239,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
-		examined := s.Status == "past_due" || (s.Status == "canceled" && s.CancelType == "expired")
+		examined := s.Status == "past_due" || (s.Status == "canceled" && (s.CancelType == "expired" || s.CancelType == "provider"))
 		if !examined {
 			continue
 		}

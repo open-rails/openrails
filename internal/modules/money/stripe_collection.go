@@ -101,5 +101,6 @@ func stripeDefinitiveRefusal(err error) (ChargeResult, bool) {
 	}
 	code := apiErr.FailureCode()
 	message := apiErr.Error()
-	return ChargeResult{Rail: string(models.RailStripe), Declined: true, FailureCode: &code, FailureMessage: &message}, true
+	return ChargeResult{Rail: string(models.RailStripe), Declined: true, FailureCode: &code, FailureMessage: &message,
+		Advice: apiErr.AdviceCode, NetworkAdvice: apiErr.NetworkAdviceCode, IssuerCode: apiErr.NetworkDeclineCode}, true
 }

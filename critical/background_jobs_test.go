@@ -403,7 +403,7 @@ func TestBackgroundJobs(t *testing.T) {
 	})
 	t.Run("OR-J21-S05", func(t *testing.T) {
 		t.Run("attribution-no-pull-reads-becomes-a-finding", func(t *testing.T) {
-			w := newWorld(t, func(w *world) { declareCCBill(w, nil) })
+			w := newWorld(t, func(w *world) { declareCCBill(w, "") })
 			customer := importCCBillAttribution(t, w)
 			startFleet(t, w)
 			require.Eventually(t, func() bool { return len(unverifiedTransactions(t, w)) > 0 }, 20*time.Second, 20*time.Millisecond)
@@ -416,7 +416,7 @@ func TestBackgroundJobs(t *testing.T) {
 			var feed *httptest.Server
 			w := newWorld(t, func(w *world) {
 				feed = dataLinkFeed(t, w.clock.Now().Truncate(time.Second).Add(-24*time.Hour))
-				declareCCBill(w, feed)
+				declareCCBill(w, feed.URL)
 			})
 			customer := importCCBillAttribution(t, w)
 			fleet := hostFleet(t, w)
@@ -439,7 +439,7 @@ func TestBackgroundJobs(t *testing.T) {
 		})
 	})
 	t.Run("OR-J21-S60/an-import-queues-the-read-of-the-charges-it-attributed", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { declareCCBill(w, nil) })
+		w := newWorld(t, func(w *world) { declareCCBill(w, "") })
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
 		customer := importCCBillAttribution(t, w)
@@ -516,12 +516,16 @@ func TestBackgroundJobs(t *testing.T) {
 
 // declareCCBill gives alpha a CCBill PSP, read by a DataLink pull when feed
 // is set.
-func declareCCBill(w *world, feed *httptest.Server) {
+func declareCCBill(w *world, dataLink string) { declareCCBillAccount(w, "945280", dataLink) }
+
+// declareCCBillAccount declares alpha's sandbox CCBill PSP on account
+// accnum-0001, with DataLink at dataLink when set.
+func declareCCBillAccount(w *world, accnum, dataLink string) {
 	m := cfgMerchant(w.cfg, "alpha")
-	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
-	if feed != nil {
+	psp := openrails.CCBillPSP{ClientAccnum: accnum, ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
+	if dataLink != "" {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: feed.URL}
+		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink}
 	}
 	m.PSPs = billing.PSPs{"ccbill": psp.PSPConfig()}
 	setCfgMerchant(&w.cfg, "alpha", m)

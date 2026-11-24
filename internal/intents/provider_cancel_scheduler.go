@@ -87,6 +87,10 @@ func (s *ProviderCancelScheduler) ScheduleProviderCancel(ctx context.Context, su
 		return s.enqueue(ctx, sub, TypeCCBillCancelSubscription, CCBillCancelIdempotencyKey(sub.ID),
 			CCBillCancelPayload{UserID: sub.CustomerID.String(), RailSubscriptionID: sub.RailSubscriptionID}, now)
 	default:
+		// A resume that never reached Stripe is undone before it is sent.
+		if _, err := s.store.SupersedeBySubject(ctx, TypeStripeResumeSubscription, sub.ID, "a later cancel undoes it"); err != nil {
+			return err
+		}
 		return s.enqueue(ctx, sub, TypeStripeCancelSubscription, StripeCancelIdempotencyKey(sub.ID, sub.CanceledAt),
 			StripeCancelPayload{RailSubscriptionID: sub.RailSubscriptionID}, now)
 	}

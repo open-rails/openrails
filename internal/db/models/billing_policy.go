@@ -57,7 +57,7 @@ type BillingPolicy struct {
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 
 	// CollectionThresholdAmount (micros) is when this payer's accrued arrears is
-	// invoiced. Overrides the merchant-wide invoice.collection_threshold for payers
+	// invoiced. Overrides its currency's usage_billing collection_threshold for payers
 	// bound to this policy; unset defers to it. Orthogonal to Kind.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
 
@@ -68,14 +68,15 @@ type BillingPolicy struct {
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 
 	// DelinquencyGraceDays / DelinquencyAmountFloor override the merchant's
-	// arrears_grace_days / arrears_delinquency_floor for bound payers; unset
-	// defers to them. Allowed with any Kind: debt ages even where it never
+	// arrears_grace_days / its currency's delinquency_floor for bound payers;
+	// unset defers to them. DelinquencyAmountFloor is in PolicyCurrency and
+	// applies to debt in it. Allowed with any Kind: debt ages even where it never
 	// gates admission.
 	DelinquencyGraceDays   *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty"`
 
-	// PolicyCurrency is the currency for checks whose window carries none. Blank
-	// means the request's currency.
+	// PolicyCurrency is the currency of the policy's amounts and of a window
+	// that carries none. Blank means the request's currency.
 	PolicyCurrency string `json:"policy_currency,omitempty"`
 }
 

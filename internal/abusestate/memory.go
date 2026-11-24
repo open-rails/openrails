@@ -107,6 +107,36 @@ func (t *table) take(key string, now time.Time) ([]byte, bool) {
 	return e.blob, true
 }
 
+// held is the instant key's slot opens when that is after at; ok=false when
+// it is open.
+func (t *table) held(key string, at int64, now time.Time) (int64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	if e, ok := t.entries[key]; ok && e.value > at {
+		return e.value, true
+	}
+	return 0, false
+}
+
+// claim takes key's slot when it is open at at, storing next until expires;
+// otherwise it answers when the slot opens, ok=true.
+func (t *table) claim(key string, at, next int64, expires, now time.Time) (int64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	if e, ok := t.entries[key]; ok {
+		if e.value > at {
+			return e.value, true
+		}
+		e.value, e.expires = next, expires
+		heap.Fix(&t.expiry, e.index)
+		return 0, false
+	}
+	t.insert(key, "", next, expires)
+	return 0, false
+}
+
 // members is how many live members set holds.
 func (t *table) members(set string, now time.Time) int {
 	t.mu.Lock()

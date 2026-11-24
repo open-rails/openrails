@@ -299,7 +299,9 @@
       "const (\n\tCodeSubscriptionResumable ErrorCode = \"subscription_resumable\"\n\n\tCodeSubscriptionPaidThrough ErrorCode = \"subscription_paid_through\"\n)",
       "const (\n\tCodeUnknownField ErrorCode = \"unknown_field\"\n\n\tCodeInvalidQuery ErrorCode = \"invalid_query\"\n\n\tCodeInvalidCursor        ErrorCode = \"invalid_cursor\"\n\tCodeUnsupportedMediaType ErrorCode = \"unsupported_media_type\"\n\tCodeRouteNotFound        ErrorCode = \"route_not_found\"\n\tCodeMethodNotAllowed     ErrorCode = \"method_not_allowed\"\n\n\tCodeMerchantMismatch ErrorCode = \"merchant_mismatch\"\n)",
       "const (\n\tCollectChargeAutomatically InvoiceCollectionMethod = \"charge_automatically\"\n\tCollectSendInvoice         InvoiceCollectionMethod = \"send_invoice\"\n)",
-      "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\n\tCreditGrantTerminated CreditGrantState = \"terminated\"\n)",
+      "const (\n\tCreditFundingPurchase  CreditFundingSource = \"purchase\"\n\tCreditFundingRecurring CreditFundingSource = \"recurring\"\n\tCreditFundingGrant     CreditFundingSource = \"grant\"\n\tCreditFundingPromotion CreditFundingSource = \"promotion\"\n\tCreditFundingImport    CreditFundingSource = \"import\"\n)",
+      "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantPending   CreditGrantState = \"pending\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\tCreditGrantRefunded  CreditGrantState = \"refunded\"\n)",
+      "const (\n\tCreditGrantFundingGrant     CreditGrantFunding = \"grant\"\n\tCreditGrantFundingPromotion CreditGrantFunding = \"promotion\"\n\tCreditGrantFundingImport    CreditGrantFunding = \"import\"\n)",
       "const (\n\tDeclineGeneric           DeclineReason = \"generic_decline\"\n\tDeclineDoNotHonor        DeclineReason = \"do_not_honor\"\n\tDeclineInsufficientFunds DeclineReason = \"insufficient_funds\"\n\tDeclineOverLimit         DeclineReason = \"over_limit\"\n\tDeclineCallIssuer        DeclineReason = \"call_issuer\"\n\tDeclineRetryLater        DeclineReason = \"retry_later\"\n\tDeclineTryAgainLater     DeclineReason = \"try_again_later\"\n\tDeclineSecurityViolation DeclineReason = \"security_violation\"\n\tDeclineRestrictedCard    DeclineReason = \"restricted_card\"\n\n\tDeclineIncorrectNumber      DeclineReason = \"incorrect_number\"\n\tDeclineNoSuchIssuer         DeclineReason = \"no_such_issuer\"\n\tDeclineInvalidAccount       DeclineReason = \"invalid_account\"\n\tDeclineExpiredCard          DeclineReason = \"expired_card\"\n\tDeclineInvalidExpiry        DeclineReason = \"invalid_expiry\"\n\tDeclineIncorrectCVC         DeclineReason = \"incorrect_cvc\"\n\tDeclineIncorrectZip         DeclineReason = \"incorrect_zip\"\n\tDeclineIncorrectAddress     DeclineReason = \"incorrect_address\"\n\tDeclineInvalidPIN           DeclineReason = \"invalid_pin\"\n\tDeclineUpdateCardholderData DeclineReason = \"update_cardholder_data\"\n\n\tDeclineTransactionNotAllowed  DeclineReason = \"transaction_not_allowed\"\n\tDeclineCardNotSupported       DeclineReason = \"card_not_supported\"\n\tDeclineCurrencyNotSupported   DeclineReason = \"currency_not_supported\"\n\tDeclineAuthenticationRequired DeclineReason = \"authentication_required\"\n\tDeclinePickupCard             DeclineReason = \"pickup_card\"\n\tDeclineLostCard               DeclineReason = \"lost_card\"\n\tDeclineStolenCard             DeclineReason = \"stolen_card\"\n\tDeclineFraudulent             DeclineReason = \"fraudulent\"\n\tDeclineStopRecurring          DeclineReason = \"stop_recurring\"\n\n\tDeclineGatewayRejected DeclineReason = \"gateway_rejected\"\n\tDeclineBlockedByPSP    DeclineReason = \"blocked_by_psp\"\n\n\tDeclineProcessingError      DeclineReason = \"processing_error\"\n\tDeclineCommunicationError   DeclineReason = \"communication_error\"\n\tDeclineIssuerUnavailable    DeclineReason = \"issuer_unavailable\"\n\tDeclineInvalidRequest       DeclineReason = \"invalid_request\"\n\tDeclineMerchantConfig       DeclineReason = \"merchant_config\"\n\tDeclineDuplicateTransaction DeclineReason = \"duplicate_transaction\"\n\n\tDeclineUnknown DeclineReason = \"unknown\"\n\n\tDeclinePaymentPageExpired       DeclineReason = \"payment_page_expired\"\n\tDeclineStoredCredentialRequired DeclineReason = \"stored_credential_required\"\n)",
       "const (\n\tDefaultPageLimit = 50\n\tMaxPageLimit     = 500\n)",
       "const (\n\tDefaultUsagePageLimit = 100\n\tMaxUsagePageLimit     = 1000\n)",
@@ -375,6 +377,7 @@
       "const CodeEventCursorExpired ErrorCode = \"event_cursor_expired\"",
       "const CodeLimitNotFound ErrorCode = \"limit_not_found\"",
       "const CodePSPImportInProgress ErrorCode = \"psp_import_in_progress\"",
+      "const CodePSPProbeLimited ErrorCode = \"psp_probe_limited\"",
       "const CodePaymentMethodPSPMismatch ErrorCode = \"payment_method_psp_mismatch\"",
       "const CodeProductInUse ErrorCode = \"product_in_use\"",
       "const CodeRevisionMismatch ErrorCode = \"revision_mismatch\"",
@@ -691,7 +694,7 @@
       "type BillingDetails struct {\n\tName    *string         `json:\"name\"`\n\tEmail   *string         `json:\"email\"`\n\tPhone   *string         `json:\"phone\"`\n\tAddress *BillingAddress `json:\"address\"`\n}",
       "type BillingImportResult struct {\n\tImported []string          `json:\"imported\"`\n\tSkipped  []string          `json:\"skipped\"`\n\tBlocked  []string          `json:\"blocked\"`\n\tReasons  map[string]string `json:\"reasons\"`\n}",
       "type BillingMode string",
-      "type BillingPolicy struct {\n\tName string `json:\"name\"`\n\n\tKind string `json:\"kind\"`\n\n\tOutstandingCapAmount int64 `json:\"outstanding_cap_amount,omitempty,string\"`\n\n\tSpendWindows []BudgetWindow `json:\"spend_windows,omitempty\"`\n\n\tAccrualRateCapPerHour    int64 `json:\"accrual_rate_cap_per_hour,omitempty,string\"`\n\tAccrualRateWindowSeconds int64 `json:\"accrual_rate_window_seconds,omitempty\"`\n\n\tCollectionThresholdAmount *int64 `json:\"collection_threshold_amount,omitempty,string\"`\n\tDelinquencyGraceDays      *int   `json:\"delinquency_grace_days,omitempty\"`\n\tDelinquencyAmountFloor    *int64 `json:\"delinquency_amount_floor,omitempty,string\"`\n\n\tCollectionCycleBoundary string `json:\"collection_cycle_boundary,omitempty\"`\n\n\tBadSpendWindows []BudgetWindow   `json:\"bad_spend_windows,omitempty\"`\n\tPolicyCurrency  catalog.Currency `json:\"policy_currency,omitempty\"`\n}",
+      "type BillingPolicy struct {\n\tName string `json:\"name\"`\n\n\tKind string `json:\"kind\"`\n\n\tOutstandingCapAmount int64 `json:\"outstanding_cap_amount,omitempty,string\"`\n\n\tSpendWindows []BudgetWindow `json:\"spend_windows,omitempty\"`\n\n\tAccrualRateCapPerHour    int64 `json:\"accrual_rate_cap_per_hour,omitempty,string\"`\n\tAccrualRateWindowSeconds int64 `json:\"accrual_rate_window_seconds,omitempty\"`\n\n\tCollectionThresholdAmount *int64 `json:\"collection_threshold_amount,omitempty,string\"`\n\tDelinquencyGraceDays      *int   `json:\"delinquency_grace_days,omitempty\"`\n\tDelinquencyAmountFloor    *int64 `json:\"delinquency_amount_floor,omitempty,string\"`\n\n\tCollectionCycleBoundary string `json:\"collection_cycle_boundary,omitempty\"`\n\n\tBadSpendWindows []BudgetWindow `json:\"bad_spend_windows,omitempty\"`\n\n\tPolicyCurrency catalog.Currency `json:\"policy_currency,omitempty\"`\n}",
       "type BillingPolicyBinding struct {\n\tPolicyName string `json:\"policy\"`\n\tTier       string `json:\"tier,omitempty\"`\n}",
       "type BudgetWindow struct {\n\tKey           string           `json:\"key\"`\n\tWindowSeconds int64            `json:\"window_seconds\"`\n\tLimit         int64            `json:\"limit,string\"`\n\tCurrency      catalog.Currency `json:\"currency,omitempty\"`\n}",
       "type CancelEvidence struct {\n\tKind string    `json:\"kind,omitempty\"`\n\tAt   time.Time `json:\"at,omitempty\"`\n\n\tScheduleLive bool `json:\"schedule_live,omitempty\"`\n}",
@@ -736,7 +739,7 @@
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
       "type CreateCreditGrantBatchParams struct {\n\tItems []CreateCreditGrantParams `json:\"items\"`\n}",
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
-      "type CreateCreditGrantParams struct {\n\tCustomerID  CustomerID       `json:\"customer_id\"`\n\tCurrency    catalog.Currency `json:\"currency\"`\n\tAmount      int64            `json:\"amount,string\"`\n\tSourceID    string           `json:\"source_id\"`\n\tSource      string           `json:\"source\"`\n\tInvoker     string           `json:\"invoker,omitempty\"`\n\tExpiresAt   *time.Time       `json:\"expires_at,omitempty\"`\n\tDescription *string          `json:\"description,omitempty\"`\n}",
+      "type CreateCreditGrantParams struct {\n\tCustomerID    CustomerID         `json:\"customer_id\"`\n\tCurrency      catalog.Currency   `json:\"currency\"`\n\tAmount        int64              `json:\"amount,string\"`\n\tSourceID      string             `json:\"source_id\"`\n\tSource        string             `json:\"source\"`\n\tFundingSource CreditGrantFunding `json:\"funding_source,omitempty\"`\n\tInvoker       string             `json:\"invoker,omitempty\"`\n\tExpiresAt     *time.Time         `json:\"expires_at,omitempty\"`\n\tDescription   *string            `json:\"description,omitempty\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
       "type CreateMyOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines,omitempty\"`\n\tCart          bool                `json:\"cart,omitempty\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n\n\tPayURL *MyOrderPayURLParams `json:\"pay_url,omitempty\"`\n}",
       "type CreateOrderParams struct {\n\tCustomerID CustomerID        `json:\"customer_id\"`\n\tLines      []OrderLineParams `json:\"lines\"`\n\tExpiresAt  *time.Time        `json:\"expires_at,omitempty\"`\n\n\tPayURL *OrderPayURLParams `json:\"pay_url,omitempty\"`\n}",
@@ -754,7 +757,9 @@
       "type CreateProvisioningTokenParams struct {\n\tName string `json:\"name\"`\n}",
       "type CreateTestMessageParams struct {\n\tEventType string           `json:\"event_type\"`\n\tLanguage  string           `json:\"language\"`\n\tTemplate  *MessageTemplate `json:\"template\"`\n}",
       "type CreatedProvisioningToken struct {\n\tProvisioningToken\n\tToken string `json:\"token\"`\n}",
-      "type CreditGrant struct {\n\tID                CreditGrantID    `json:\"id\"`\n\tCustomerID        CustomerID       `json:\"customer_id\"`\n\tCurrency          catalog.Currency `json:\"currency\"`\n\tAmount            int64            `json:\"amount,string\"`\n\tSpentAmount       int64            `json:\"spent_amount,string\"`\n\tRemainingAmount   int64            `json:\"remaining_amount,string\"`\n\tRevokedAmount     int64            `json:\"revoked_amount,string\"`\n\tExpiredAmount     int64            `json:\"expired_amount,string\"`\n\tState             CreditGrantState `json:\"state\"`\n\tSourceType        string           `json:\"source_type\"`\n\tSourceID          *string          `json:\"source_id\"`\n\tDescription       *string          `json:\"description\"`\n\tStartsAt          time.Time        `json:\"starts_at\"`\n\tExpiresAt         *time.Time       `json:\"expires_at\"`\n\tCreatedAt         time.Time        `json:\"created_at\"`\n\tTerminatedAt      *time.Time       `json:\"terminated_at\"`\n\tTerminationReason *string          `json:\"termination_reason\"`\n\tReplayed          bool             `json:\"replayed\"`\n}",
+      "type CreditFundingSource string",
+      "type CreditGrant struct {\n\tID              CreditGrantID       `json:\"id\"`\n\tCustomerID      CustomerID          `json:\"customer_id\"`\n\tCurrency        catalog.Currency    `json:\"currency\"`\n\tAmount          int64               `json:\"amount,string\"`\n\tSpentAmount     int64               `json:\"spent_amount,string\"`\n\tRemainingAmount int64               `json:\"remaining_amount,string\"`\n\tRevokedAmount   int64               `json:\"revoked_amount,string\"`\n\tExpiredAmount   int64               `json:\"expired_amount,string\"`\n\tRefundedAmount  int64               `json:\"refunded_amount,string\"`\n\tState           CreditGrantState    `json:\"state\"`\n\tFundingSource   CreditFundingSource `json:\"funding_source\"`\n\tPaidAmount      *int64              `json:\"paid_amount,string\"`\n\tPaidCurrency    *catalog.Currency   `json:\"paid_currency\"`\n\tSourceID        *string             `json:\"source_id\"`\n\tDescription     *string             `json:\"description\"`\n\tStartsAt        time.Time           `json:\"starts_at\"`\n\tExpiresAt       *time.Time          `json:\"expires_at\"`\n\tCreatedAt       time.Time           `json:\"created_at\"`\n\tRevokedAt       *time.Time          `json:\"revoked_at\"`\n\tRevokeReason    *string             `json:\"revoke_reason\"`\n\tReplayed        bool                `json:\"replayed\"`\n}",
+      "type CreditGrantFunding string",
       "type CreditGrantID uuid.UUID",
       "type CreditGrantListParams struct {\n\tCustomerID CustomerID       `form:\"customer_id\"`\n\tCurrency   catalog.Currency `form:\"currency\"`\n\tSourceID   string           `form:\"source_id\"`\n\n\tIDs []CreditGrantID `form:\"ids,comma\"`\n\tPageRequest\n}",
       "type CreditGrantState string",
@@ -929,7 +934,7 @@
       "type MerchantRetirementCursor struct {\n\tCreatedAt  time.Time\n\tMerchantID MerchantID\n}",
       "type MerchantRetirementRefusal string",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
-      "type MerchantSettings struct {\n\tUsageBilling            *UsageBillingSettings `json:\"usage_billing,omitempty\"`\n\tProfile                 *MerchantProfile      `json:\"profile,omitempty\"`\n\tCollectionThreshold     *int64                `json:\"collection_threshold,omitempty,string\"`\n\tMonthlyFloor            *int64                `json:\"monthly_floor,omitempty,string\"`\n\tBillingPeriodBoundary   string                `json:\"billing_period_boundary,omitempty\"`\n\tAlertEmail              *string               `json:\"alert_email,omitempty\"`\n\tRepriceNoticeWindowDays *int                  `json:\"reprice_notice_window_days,omitempty\"`\n\n\tProviderRefundAccess *ProviderRefundAccess `json:\"provider_refund_access,omitempty\"`\n\n\tFraudWarningRefund      *FraudWarningRefund `json:\"fraud_warning_refund,omitempty\"`\n\tArrearsGraceDays        *int                `json:\"arrears_grace_days,omitempty\"`\n\tArrearsDelinquencyFloor *int64              `json:\"arrears_delinquency_floor,omitempty,string\"`\n\tPSPRouting              *[]PSPRoutingRule   `json:\"psp_routing,omitempty\"`\n\n\tDunningPolicy *DunningPolicy `json:\"dunning_policy,omitempty\"`\n\n\tCheckout *MerchantCheckoutSettings `json:\"checkout,omitempty\"`\n\n\tBalanceNotices *BalanceNoticeSettings `json:\"balance_notices,omitempty\"`\n\n\tUsageGateSafeSpend *bool `json:\"usage_gate_safe_spend,omitempty\"`\n\n\tCardVault string `json:\"card_vault,omitempty\"`\n\n\tChargePSPs                        []string               `json:\"charge_psps,omitempty\"`\n\tBillingPolicies                   []BillingPolicy        `json:\"billing_policies,omitempty\"`\n\tBillingPolicyBindings             []BillingPolicyBinding `json:\"billing_policy_bindings,omitempty\"`\n\tDelegatedInvokerWastedSpendLimits []BudgetWindow         `json:\"delegated_invoker_wasted_spend_limits,omitempty\"`\n\n\tCurrencies []MerchantCurrency `json:\"currencies,omitempty\"`\n}",
+      "type MerchantSettings struct {\n\tUsageBilling            *UsageBillingSettings `json:\"usage_billing,omitempty\"`\n\tProfile                 *MerchantProfile      `json:\"profile,omitempty\"`\n\tBillingPeriodBoundary   string                `json:\"billing_period_boundary,omitempty\"`\n\tAlertEmail              *string               `json:\"alert_email,omitempty\"`\n\tRepriceNoticeWindowDays *int                  `json:\"reprice_notice_window_days,omitempty\"`\n\n\tProviderRefundAccess *ProviderRefundAccess `json:\"provider_refund_access,omitempty\"`\n\n\tFraudWarningRefund *FraudWarningRefund `json:\"fraud_warning_refund,omitempty\"`\n\tArrearsGraceDays   *int                `json:\"arrears_grace_days,omitempty\"`\n\tPSPRouting         *[]PSPRoutingRule   `json:\"psp_routing,omitempty\"`\n\n\tDunningPolicy *DunningPolicy `json:\"dunning_policy,omitempty\"`\n\n\tCheckout *MerchantCheckoutSettings `json:\"checkout,omitempty\"`\n\n\tBalanceNotices *BalanceNoticeSettings `json:\"balance_notices,omitempty\"`\n\n\tUsageGateSafeSpend *bool `json:\"usage_gate_safe_spend,omitempty\"`\n\n\tCardVault string `json:\"card_vault,omitempty\"`\n\n\tChargePSPs                        []string               `json:\"charge_psps,omitempty\"`\n\tBillingPolicies                   []BillingPolicy        `json:\"billing_policies,omitempty\"`\n\tBillingPolicyBindings             []BillingPolicyBinding `json:\"billing_policy_bindings,omitempty\"`\n\tDelegatedInvokerWastedSpendLimits []BudgetWindow         `json:\"delegated_invoker_wasted_spend_limits,omitempty\"`\n\n\tCurrencies []MerchantCurrency `json:\"currencies,omitempty\"`\n}",
       "type MerchantStatus string",
       "type MessageChannel string",
       "type MessageContent struct {\n\tSubject string\n\tText    string\n\tHTML    string\n}",
@@ -1181,7 +1186,7 @@
       "type Usage struct {\n\tCustomerID CustomerID       `json:\"customer_id\"`\n\tCurrency   catalog.Currency `json:\"currency\"`\n\tFrom       time.Time        `json:\"from\"`\n\tTo         time.Time        `json:\"to\"`\n\tGroupBy    UsageGroupBy     `json:\"group_by\"`\n\tRows       []UsageRow       `json:\"rows\"`\n\tNextCursor *string          `json:\"next_cursor\"`\n}",
       "type UsageBillingAccount struct {\n\tCurrency             catalog.Currency `json:\"currency\"`\n\tBillingAnchor        *time.Time       `json:\"billing_anchor\"`\n\tNextBillAt           *time.Time       `json:\"next_bill_at\"`\n\tMinimumInvoiceAmount *int64           `json:\"minimum_invoice_amount,string\"`\n}",
       "type UsageBillingAccountUpdate struct {\n\tCurrency             catalog.Currency         `json:\"currency\"`\n\tBillingAnchor        catalog.Field[time.Time] `json:\"billing_anchor,omitzero\"`\n\tMinimumInvoiceAmount catalog.Field[int64]     `json:\"minimum_invoice_amount,omitzero\"`\n}",
-      "type UsageBillingCurrency struct {\n\tCurrency             catalog.Currency `json:\"currency\"`\n\tCreditLimit          int64            `json:\"credit_limit,string\"`\n\tMinimumInvoiceAmount int64            `json:\"minimum_invoice_amount,string\"`\n}",
+      "type UsageBillingCurrency struct {\n\tCurrency             catalog.Currency `json:\"currency\"`\n\tCreditLimit          int64            `json:\"credit_limit,string\"`\n\tMinimumInvoiceAmount int64            `json:\"minimum_invoice_amount,string\"`\n\n\tCollectionThreshold *int64 `json:\"collection_threshold,string\"`\n\n\tDelinquencyFloor *int64 `json:\"delinquency_floor,string\"`\n}",
       "type UsageBillingSettings struct {\n\tBillingDay int                    `json:\"billing_day\"`\n\tCurrencies []UsageBillingCurrency `json:\"currencies\"`\n}",
       "type UsageCharge struct {\n\tMeterKey string        `json:\"meter_key\"`\n\tModel    catalog.Model `json:\"model\"`\n\tCell     *string       `json:\"cell\"`\n\tQuantity int64         `json:\"quantity\"`\n\tAmount   int64         `json:\"amount,string\"`\n}",
       "type UsageDeduction struct {\n\tDay    string               `json:\"day\"`\n\tAmount int64                `json:\"amount,string\"`\n\tLines  []UsageDeductionLine `json:\"lines\"`\n}",
@@ -1572,7 +1577,7 @@
       "type CardCapture struct {\n\tRequestFingerprint string    `json:\"request_fingerprint,omitempty\"`\n\tMerchantID         uuid.UUID `json:\"merchant_id\"`\n\tCustomerID         uuid.UUID `json:\"customer_id\"`\n\tPSPID              uuid.UUID `json:\"psp_id\"`\n\tCustodianID        uuid.UUID `json:\"custodian_id\"`\n\tEnvironment        string    `json:\"environment\"`\n\tAccountID          string    `json:\"account_id\"`\n\tProfileID          string    `json:\"profile_id\"`\n\tPublicAPIKey       string    `json:\"public_api_key\"`\n\tAPIBaseURL         string    `json:\"api_base_url\"`\n\tSDKURL             string    `json:\"sdk_url\"`\n\tVendorCustomerID   string    `json:\"vendor_customer_id,omitempty\"`\n\tVendorSessionID    string    `json:\"vendor_session_id,omitempty\"`\n\tExpiresAt          time.Time `json:\"expires_at\"`\n\tSecretCiphertext   string    `json:\"secret_ciphertext,omitempty\"`\n\tPaymentMethodID    uuid.UUID `json:\"payment_method_id,omitzero\"`\n\tVendorMethodID     string    `json:\"vendor_method_id,omitempty\"`\n\tAcceptedTokenHash  string    `json:\"accepted_token_hash,omitempty\"`\n}",
       "type CreditGrantSnapshot struct {\n\tAmount           int64      `json:\"amount,string\"`\n\tCurrency         string     `json:\"currency\"`\n\tExpiresAfterDays int        `json:\"expires_after_days\"`\n\tStartsAt         time.Time  `json:\"starts_at,omitzero\"`\n\tExpiresAt        *time.Time `json:\"expires_at,omitempty\"`\n}",
       "type InvoiceContact struct {\n\tName  string `json:\"name,omitempty\"`\n\tEmail string `json:\"email\"`\n}",
-      "type MerchantConfiguration struct {\n\tUsageBilling *billing.UsageBillingSettings `json:\"usage_billing,omitempty\"`\n\tProfile      MerchantProfileConfiguration  `json:\"profile,omitempty\"`\n\n\tCollectionThreshold   *int64 `json:\"collection_threshold,omitempty\"`\n\tMonthlyFloor          *int64 `json:\"monthly_floor,omitempty\"`\n\tBillingPeriodBoundary string `json:\"billing_period_boundary,omitempty\"`\n\n\tArrearsGraceDays *int `json:\"arrears_grace_days,omitempty\"`\n\n\tArrearsDelinquencyFloor *int64 `json:\"arrears_delinquency_floor,omitempty\"`\n\n\tDelegatedInvokerWastedSpendWindows []BudgetWindowPolicy `json:\"delegated_invoker_wasted_spend_windows,omitempty\"`\n\n\tAlertEmail string `json:\"alert_email,omitempty\"`\n\n\tRepriceNoticeWindowDays *int `json:\"reprice_notice_window_days,omitempty\"`\n\n\tChargePSPs []string `json:\"charge_psps,omitempty\"`\n\n\tProviderRefundAccess billing.ProviderRefundAccess `json:\"provider_refund_access,omitempty\"`\n\n\tFraudWarningRefund billing.FraudWarningRefund `json:\"fraud_warning_refund,omitempty\"`\n\n\tDunningPolicy *billing.DunningPolicy `json:\"dunning_policy,omitempty\"`\n\n\tPSPRouting []PSPRoutingRule `json:\"psp_routing,omitempty\"`\n\n\tBalanceNotices BalanceNoticeConfiguration `json:\"balance_notices,omitempty\"`\n\n\tUsageGateSafeSpend bool `json:\"usage_gate_safe_spend,omitempty\"`\n}",
+      "type MerchantConfiguration struct {\n\tUsageBilling *billing.UsageBillingSettings `json:\"usage_billing,omitempty\"`\n\tProfile      MerchantProfileConfiguration  `json:\"profile,omitempty\"`\n\n\tBillingPeriodBoundary string `json:\"billing_period_boundary,omitempty\"`\n\n\tArrearsGraceDays *int `json:\"arrears_grace_days,omitempty\"`\n\n\tDelegatedInvokerWastedSpendWindows []BudgetWindowPolicy `json:\"delegated_invoker_wasted_spend_windows,omitempty\"`\n\n\tAlertEmail string `json:\"alert_email,omitempty\"`\n\n\tRepriceNoticeWindowDays *int `json:\"reprice_notice_window_days,omitempty\"`\n\n\tChargePSPs []string `json:\"charge_psps,omitempty\"`\n\n\tProviderRefundAccess billing.ProviderRefundAccess `json:\"provider_refund_access,omitempty\"`\n\n\tFraudWarningRefund billing.FraudWarningRefund `json:\"fraud_warning_refund,omitempty\"`\n\n\tDunningPolicy *billing.DunningPolicy `json:\"dunning_policy,omitempty\"`\n\n\tPSPRouting []PSPRoutingRule `json:\"psp_routing,omitempty\"`\n\n\tBalanceNotices BalanceNoticeConfiguration `json:\"balance_notices,omitempty\"`\n\n\tUsageGateSafeSpend bool `json:\"usage_gate_safe_spend,omitempty\"`\n}",
       "type MerchantProfileConfiguration struct {\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tLogoURL     string `json:\"logo_url,omitempty\"`\n\tFromEmail   string `json:\"from_email,omitempty\"`\n\tSupportURL  string `json:\"support_url,omitempty\"`\n\n\tSubscribeURL string `json:\"subscribe_url,omitempty\"`\n\n\tBillingURL          string `json:\"billing_url,omitempty\"`\n\tTermsURL            string `json:\"terms_url,omitempty\"`\n\tPrivacyURL          string `json:\"privacy_url,omitempty\"`\n\tStatementDescriptor string `json:\"statement_descriptor,omitempty\"`\n}",
       "type MoneyAccount struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n\n\tBillingMode          string     `json:\"billing_mode\"`\n\tDefaultPaymentMethod *uuid.UUID `json:\"default_payment_method_id,omitempty\"`\n\n\tCreditLimitAmount int64 `json:\"credit_limit_amount\"`\n\n\tTrustLevel *string `json:\"trust_level,omitempty\"`\n\n\tCollectionRevokedAt *time.Time `json:\"collection_revoked_at,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
       "type MoneyBalance struct {\n\tID          uuid.UUID `json:\"id\"`\n\tMerchantID  uuid.UUID `json:\"merchant_id\"`\n\tCustomerID  uuid.UUID `json:\"customer_id\"`\n\tCurrency    string    `json:\"currency\"`\n\tBalance     int64     `json:\"balance\"`\n\tHeldBalance int64     `json:\"held_balance\"`\n\n\tAccrued   int64     `json:\"accrued\"`\n\tAsOf      time.Time `json:\"as_of\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
@@ -1699,6 +1704,7 @@
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents moneyutil.Cents `json:\"amount_cents\"`\n\tCurrency    string          `json:\"currency\"`\n\tReason      string          `json:\"reason,omitempty\"`\n\n\tRefundReason billing.RefundReason `json:\"refund_reason,omitempty\"`\n\tRevokeAccess bool                 `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
       "type StripeCancelPayload struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type StripePaymentMethodDomainPayload struct {\n\tDomainName string `json:\"domain_name\"`\n}",
+      "type StripeResumePayload struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type collectedReceipt struct {\n\tVersion      int                                    `json:\"version\"`\n\tFamily       string                                 `json:\"family\"`\n\tBinding      receiptBinding                         `json:\"binding\"`\n\tNMI          *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe       *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n\tStripeEngine *subscriptions.StripeEngineReceipt     `json:\"stripe_engine,omitempty\"`\n}",
       "type collectionNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type confirmationTerms struct {\n\tSubscriptionID  uuid.UUID               `json:\"subscription_id\"`\n\tCustomerID      uuid.UUID               `json:\"customer_id\"`\n\tPaymentMethodID uuid.UUID               `json:\"payment_method_id\"`\n\tFollowsDefault  bool                    `json:\"follows_default\"`\n\tVersionID       uuid.UUID               `json:\"version_id\"`\n\tMandateID       uuid.UUID               `json:\"mandate_id\"`\n\tInstrument      charge.FrozenInstrument `json:\"instrument\"`\n\tRail            string                  `json:\"rail\"`\n\tSchedule        string                  `json:\"schedule\"`\n\tPeriodEnd       time.Time               `json:\"period_end\"`\n}",
@@ -1777,10 +1783,6 @@
     "internal/modules/disputes": [
       "type StripeDispute struct {\n\tID                   string `json:\"id\"`\n\tCharge               string `json:\"charge\"`\n\tPaymentIntent        string `json:\"payment_intent\"`\n\tAmount               int64  `json:\"amount\"`\n\tCurrency             string `json:\"currency\"`\n\tStatus               string `json:\"status\"`\n\tReason               string `json:\"reason\"`\n\tCreated              int64  `json:\"created\"`\n\tPaymentMethodDetails struct {\n\t\tCard struct {\n\t\t\tBrand             string `json:\"brand\"`\n\t\t\tCaseType          string `json:\"case_type\"`\n\t\t\tNetworkReasonCode string `json:\"network_reason_code\"`\n\t\t} `json:\"card\"`\n\t} `json:\"payment_method_details\"`\n\tEvidenceDetails struct {\n\t\tDueBy int64 `json:\"due_by\"`\n\t} `json:\"evidence_details\"`\n}"
     ],
-    "internal/modules/grants": [
-      "type DepositProvenance struct {\n\tSource  string `json:\"source\"`\n\tInvoker string `json:\"invoker\"`\n\n\tPaidAmount *int64 `json:\"paid_amount,string,omitempty\"`\n}",
-      "type Spec struct {\n\tEntitlements []string           `json:\"entitlements,omitempty\"`\n\tDeposit      *DepositProvenance `json:\"deposit,omitempty\"`\n}"
-    ],
     "internal/modules/leases": [
       "type holdTerms struct {\n\tInvoker     string      `json:\"invoker\"`\n\tInvokerType string      `json:\"invoker_type\"`\n\tTrustLevel  string      `json:\"trust_level\"`\n\tRoles       []uuid.UUID `json:\"roles\"`\n\tResource    string      `json:\"resource\"`\n\tEventType   string      `json:\"event_type\"`\n}",
       "type receipt struct {\n\tFromN    int64          `json:\"from_n\"`\n\tThroughN int64          `json:\"through_n\"`\n\tDigest   string         `json:\"digest\"`\n\tRefused  []refusedEntry `json:\"refused\"`\n}",
@@ -1809,7 +1811,8 @@
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n}"
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n}",
+      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n}"
     ],
     "internal/modules/orders": [
       "type cartLine struct {\n\tPriceID  uuid.UUID `json:\"price_id\"`\n\tQuantity *int      `json:\"quantity,omitempty\"`\n\tAmount   *int64    `json:\"amount,omitempty,string\"`\n}"
@@ -1994,6 +1997,7 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
+      "type PacedProviderRefreshArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
       "type StripeWebhookReconcileArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n\tAccountID  string    `json:\"account_id,omitempty\"`\n}",
@@ -2935,12 +2939,14 @@
     },
     "internal/http/handlers/subscription_lifecycle.go": {
       "api": "github.com/open-rails/openrails/internal/api",
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
       "billingservice": "github.com/open-rails/openrails/internal/service",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
+      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "intents": "github.com/open-rails/openrails/internal/intents",
       "logx": "github.com/open-rails/openrails/internal/logx",
@@ -2951,8 +2957,11 @@
       "solanasubs": "github.com/open-rails/openrails/internal/modules/solana/solanasubs",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
       "utf8": "unicode/utf8",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/http/handlers/webhook.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3479,6 +3488,26 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
+    "internal/intents/stripe_resume.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "providerposture": "github.com/open-rails/openrails/internal/providerposture",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/intents/wake/wake.go": {
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -3719,18 +3748,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/modules/grants/grants.go": {
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "math": "math",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/modules/leases/sync.go": {
       "admission": "github.com/open-rails/openrails/internal/modules/admission",
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3809,6 +3826,7 @@
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
+      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
@@ -3852,6 +3870,7 @@
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "context": "context",
       "errors": "errors",
+      "failpoint": "github.com/open-rails/openrails/internal/failpoint",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
@@ -4459,7 +4478,6 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
-      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
@@ -4594,6 +4612,7 @@
     "internal/pspimport/importer.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4680,6 +4699,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "context": "context",
+      "credits": "github.com/open-rails/openrails/internal/modules/money/credits",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -4722,6 +4742,7 @@
     "internal/reconcile/diff.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "cadence": "github.com/open-rails/openrails/internal/shared/cadence",
+      "collection": "github.com/open-rails/openrails/internal/modules/collection",
       "fmt": "fmt",
       "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -4736,6 +4757,7 @@
     "internal/reconcile/engine.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "clockwork": "github.com/jonboulle/clockwork",
+      "collection": "github.com/open-rails/openrails/internal/modules/collection",
       "context": "context",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
@@ -4910,6 +4932,7 @@
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 // State is the delinquency level for one (merchant, payer, currency).
@@ -56,18 +58,29 @@ func ParseState(v string) State {
 // was going to pay.
 const DefaultGraceDays = 14
 
-// DefaultAmountFloor is the smallest overdue balance (micros) that can make a
-// payer delinquent when the merchant declared neither a delinquency nor a
-// monthly floor: one currency unit.
-const DefaultAmountFloor int64 = 1_000_000
+// DefaultAmountFloor is the smallest overdue balance that can make a payer
+// delinquent in a currency whose floor the merchant did not declare: one unit
+// of it, in its native units.
+func DefaultAmountFloor(code string) int64 {
+	units, ok := currency.Lookup(code)
+	if !ok {
+		units.Decimals = 6
+	}
+	floor := int64(1)
+	for range units.Decimals {
+		floor *= 10
+	}
+	return floor
+}
 
 // Policy is the merchant's declared delinquency policy.
 type Policy struct {
 	// GraceDays is how long past a usage order's due_at the payer keeps grace.
 	// Zero is a valid explicit choice: delinquent the moment it is overdue.
 	GraceDays int
-	// AmountFloor (micros) is the smallest overdue balance that can escalate to
-	// delinquent; below it the payer stays in grace.
+	// AmountFloor (native units of the debt's currency) is the smallest
+	// overdue balance that can escalate to delinquent; below it the payer
+	// stays in grace.
 	AmountFloor int64
 }
 
@@ -81,7 +94,7 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("delinquency: arrears_grace_days must be >= 0, got %d", p.GraceDays)
 	}
 	if p.AmountFloor < 0 {
-		return fmt.Errorf("delinquency: arrears_delinquency_floor must be >= 0, got %d", p.AmountFloor)
+		return fmt.Errorf("delinquency: delinquency_floor must be >= 0, got %d", p.AmountFloor)
 	}
 	return nil
 }

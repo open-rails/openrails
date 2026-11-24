@@ -120,13 +120,7 @@ never refundable through OpenRails.
 
 ## Interfaces
 
-- Go: `Client.RefundPayment` (`billing.RefundPaymentParams`), `Client.GetPayment`,
-  `Client.ListPayments`, `Client.ListDisputes`, `Client.GetDispute`,
-  `Client.ListDisputePrograms`, `Client.RecordExternalPayment`
-  (`billing.RecordExternalPaymentParams`). `billing.PaymentKind` is `charge`,
-  `refund`, `chargeback` or `dispute_reversal`; a charge with reversals reads
-  `refunded` or `partially_refunded`. Sentinels: `billing.ErrRefundUnsupported`,
-  `billing.ErrRefundRailUnavailable`.
+- Go: `Client.RefundPayment` (`billing.RefundPaymentParams`), `Client.GetPayment`, `Client.ListPayments`, `Client.ListDisputes`, `Client.GetDispute`, `Client.ListDisputePrograms`, `Client.RecordExternalPayment` (`billing.RecordExternalPaymentParams`). `billing.PaymentKind` is `charge`, `refund`, `chargeback` or `dispute_reversal`; a charge with reversals reads `refunded` or `partially_refunded` by their net, so a won dispute gives back what its chargeback took. Sentinels: `billing.ErrRefundUnsupported`, `billing.ErrRefundRailUnavailable`.
 - HTTP: `POST /v1/admin/payments/{id}/refunds` and `POST /v1/admin/payments`
   (`merchant:customer:manage`); `GET /v1/admin/payments` and
   `GET /v1/admin/payments/{id}`, `GET /v1/admin/disputes` and
@@ -262,11 +256,7 @@ Checks:
 
 ## Tests
 
-- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent
-  refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing
-  read (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds
-  (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds
-  (`TestCCBillRefunds`).
+- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing read (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds (`TestCCBillRefunds`); OR-J20-S06 a won dispute nets against its chargeback (`TestRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
 - J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S05 an NMI batch; S12 the dispute metrics; S13 the rollup across a restore; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
@@ -282,4 +272,3 @@ Gaps:
   execute, verify and resolve paths are untested end to end.
 - No scenario ingests an NMI chargeback.
 - No scenario sets `provider_refund_access`: `ApplyRefundAccessPolicy` is untested.
-- No scenario reads `AmountRefunded` or the charge's status after a won dispute.

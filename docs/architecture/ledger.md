@@ -25,8 +25,7 @@ reversals post to it; card charges for products and their refunds are
   (`ledger.TransferType`).
 - **Coordinate** (`ledger.Coord`): operation, source and source id. With customer,
   currency, type and lot it is the transfer's once-only identity.
-- **Lot**: a credit grant (`grants`, kind `credit`); a transfer that funds or draws
-  it carries its `grant_id`.
+- **Lot**: a credit grant (`credit_grants`); a transfer that funds or draws it names it in `credit_grant_id` (a foreign key), and the legs on its balance account keep its `units_credited` and `units_debited`.
 - **Balance**: an account's `credits_posted - debits_posted`, kept by trigger.
 - **Held / available**: holds, pending refunds, unposted usage and running-charge
   accrual live outside the ledger (`GetFinancialHeldAmount`); available is balance
@@ -58,17 +57,16 @@ TRUNCATE; `guard_ledger_account_facts` lets only the nested counter trigger touc
 `credits_posted` and `debits_posted`. Accounts are created on first write
 (`EnsureSystemAccount`, `EnsureCustomerBalance`, `EnsureCustomerArrears`); reads
 never create one, so an unknown customer reads zero. Writers serialize on the
-customer row (`LockCustomerForSpend`, taken by `MoneyService.lockBalance` and
-`grants.Ledger.LockCustomer`) before any read-then-write of a balance.
+customer row (`LockCustomerForSpend`, taken by `MoneyService.lockBalance` and `credits.Lots.LockCustomer`) before any read-then-write of a balance.
 
 | Movement | Debit → credit | Type | Posted by |
 |---|---|---|---|
-| Lot funded | `processor_clearing` → `customer_balance` | `deposit` | `grants.Ledger.MaterializeGrant` |
+| Lot funded | `processor_clearing` → `customer_balance` | `deposit` | `credits.Lots.Materialize` |
 | Purchased lot worth more than paid | `promotional_funding` → `customer_balance` | `deposit_bonus` | `Ledger.PurchasedDeposit` |
 | Paid more than the lot's face | `processor_clearing` → `platform_revenue` | `credit_purchase_revenue` | `Ledger.PurchasedDeposit` |
-| Spend, one leg per lot | `customer_balance` → `platform_revenue` | `credit_spend` | `grants.Ledger.CreditSpend` |
-| Lot lapsed | `customer_balance` → `expired_credits` | `credit_expire` | `grants.Ledger.ExpireLapsedBy` |
-| Lot revoked | `customer_balance` → `revoked_credits` | `credit_revoke` | `clawbackRevokedCredit` |
+| Spend, one leg per lot | `customer_balance` → `platform_revenue` | `credit_spend` | `credits.Lots.Spend` |
+| Lot lapsed | `customer_balance` → `expired_credits` | `credit_expire` | `credits.Lots.ExpireLapsedBy` |
+| Lot revoked | `customer_balance` → `revoked_credits` | `credit_revoke` | `credits.Lots.Revoke` |
 | Spend past the balance | `arrears_liability` → `platform_revenue` | `owed_accrual` | `Ledger.AccrueOwedIdempotent` |
 | Owed paid by a rail or remittance | `processor_clearing` → `arrears_liability` | `owed_payment` | `Ledger.PayOwed` |
 | Owed paid from a new lot | `customer_balance` → `arrears_liability` | `owed_repayment` | `owed.Repay` |
@@ -86,12 +84,7 @@ No FX: a transfer's currency must equal both accounts'. Rates
 (`internal/integrations/fx`) only price a Solana quote and convert a spend cap at
 admission (`fx.ConvertAmount`); no ledger, grants or money code imports them.
 
-Integrity is checked on demand. `ledger.CheckIntegrity` runs conservation (each
-currency's balances sum to zero) and counter drift (counters against the transfer
-log) for one merchant; `openrails ledger-audit` runs it per merchant and exits
-non-zero on a finding. A merchant restore skips the counter trigger
-(`billing_restore_active`), and `check_billing_restore_ledger` verifies counters,
-conservation, currencies and customer agreement before the restore commits.
+Integrity is checked on demand. `ledger.CheckIntegrity` runs conservation (each currency's balances sum to zero), counter drift (account counters against the transfer log) and lot drift (each credit lot's `units_credited` and `units_debited` against the legs on its balance account, `CheckLotDrift`) for one merchant; `openrails ledger-audit` runs it per merchant and exits non-zero on a finding. A merchant restore skips the counter triggers (`billing_restore_active`), and `check_billing_restore_ledger` verifies counters, conservation, currencies and customer agreement, and `check_billing_restore_credit_grants` the lots' counters, before the restore commits.
 
 ## Interfaces
 
@@ -180,8 +173,7 @@ Checks:
 
 ### 7. Work scales with activity
 A balance or owed read is one counter row (`LedgerAccountBalance`); an insert
-locks two accounts. Lot remainders read by `grant_id`
-(`ledger_transfers_grant_id_idx`). No job scans the ledger: daily usage postings
+locks two accounts and, for a lot's leg, its lot. A lot's remainder is its counters. No job scans the ledger: daily usage postings
 are found by `usage_accruals_due_idx`, balance looks are queued by crossings.
 `ledger-audit` reads a merchant's whole log, on demand only.
 

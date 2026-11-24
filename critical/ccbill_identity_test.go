@@ -93,13 +93,19 @@ func importLegacyCCBill(t *testing.T, client *openrails.Client, asOf time.Time) 
 // status and body.
 func ccbillNotice(t *testing.T, a *authorityWorld, eventType string, fields map[string]any) (int, string) {
 	t.Helper()
-	body := map[string]any{"clientAccnum": "999999", "clientSubacc": "0000", "timestamp": a.clock.Now().UTC().Format(time.DateTime)}
+	return ccbillNoticeTo(t, a, "999999", "0000", eventType, fields)
+}
+
+// ccbillNoticeTo is ccbillNotice for the CCBill account accnum-subacc.
+func ccbillNoticeTo(t *testing.T, a *authorityWorld, accnum, subacc, eventType string, fields map[string]any) (int, string) {
+	t.Helper()
+	body := map[string]any{"clientAccnum": accnum, "clientSubacc": subacc, "timestamp": a.clock.Now().UTC().Format(time.DateTime)}
 	for k, v := range fields {
 		body[k] = v
 	}
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
-	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/ccbill/999999-0000?eventType="+eventType, bytes.NewReader(raw))
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/ccbill/"+accnum+"-"+subacc+"?eventType="+eventType, bytes.NewReader(raw))
 	require.NoError(t, err)
 	r.Header.Set("Content-Type", "application/json")
 	response, err := a.server.Client().Do(r)
@@ -304,6 +310,149 @@ func TestCCBillIdentity(t *testing.T) {
 		})
 	})
 
+	t.Run("OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		alice := customerOf(a.alice)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		due := now.Add(-time.Hour)
+		sub, sale := legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due)
+		sub.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: due}
+		importLegacyCCBill(t, a.alpha, now)(sub, sale)
+		ended := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), ended.Status)
+		require.NotNil(t, ended.CancelType)
+		require.Equal(t, "provider", *ended.CancelType, "read back, the end is still the provider's")
+		// A renewal read from the stored row afterwards cannot reopen it.
+		next := due.Add(720 * time.Hour)
+		status, body := ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": ccbillProvider, "transactionId": "0912233445566778801",
+			"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+			"cardType": "VISA", "last4": "1111"})
+		require.Equal(t, http.StatusOK, status, body)
+		after := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), after.Status, "the end the provider confirmed stands")
+		require.Equal(t, "provider", *after.CancelType)
+		require.False(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
+		require.EqualValues(t, 10_000_000, ccbillPayments(t, a.world, alice)["0912233445566778801"], "the charge is kept for refund review")
+		review, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "pull.charge.after_cancellation"})
+		require.NoError(t, err)
+		require.Len(t, review.Items, 1, "a charge after a final end is raised for review")
+		require.Equal(t, billing.FindingStatus("requires_review"), review.Items[0].Status)
+	})
+
+	t.Run("OR-J38-S79/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {
+		// The Cancellation webhook never came; DataLink reports it, with the
+		// time paid for ending two days ago.
+		var feed *httptest.Server
+		var canceled, due time.Time
+		a := ccbillWebhookWorld(t, func(w *world) {
+			canceled = w.clock.Now().UTC().Truncate(time.Second).Add(-30 * time.Minute)
+			due = w.clock.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled, due)
+			declareCCBill(w, feed.URL)
+			w.cfg.ProviderSandbox.CCBillWebhookSources = []string{"127.0.0.1/32"}
+		})
+		price := ccbillMemberPrice(t, a.alpha)
+		alice := customerOf(a.alice)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due))
+		armDestructive(t, a, true)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
+		ended := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), ended.Status, "the pull lands the cancel")
+		require.NotNil(t, ended.CancelType)
+		require.Equal(t, "expired", *ended.CancelType, "CCBill's own end is a lapse")
+		require.False(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
+
+		// The member reactivates at CCBill and is rebilled.
+		status, body := ccbillNoticeTo(t, a, "945280", "0001", "UserReactivation", map[string]any{"subscriptionId": ccbillProvider, "transactionId": "0912233445566778800"})
+		require.Equal(t, http.StatusOK, status, body)
+		next := due.Add(720 * time.Hour)
+		status, body = ccbillNoticeTo(t, a, "945280", "0001", "RenewalSuccess", map[string]any{"subscriptionId": ccbillProvider, "transactionId": "0912233445566778801",
+			"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+			"cardType": "VISA", "last4": "1111"})
+		require.Equal(t, http.StatusOK, status, body)
+		restored := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionActive, restored.Status, "the rebill restores the lapsed membership")
+		require.True(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
+	})
+
+	t.Run("OR-J38-S80/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		bob, carol := customerOf(a.bob), customerOf(authtest.NewUser(t, a.auth))
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		paid, due := now.Add(5*24*time.Hour), now.Add(-time.Hour)
+		land := importLegacyCCBill(t, a.alpha, now)
+		land(legacyCCBillMember(bob, price, "223344556677889900", "0812233445566778802", paid))
+		land(legacyCCBillMember(carol, price, "334455667788990011", "0812233445566778803", due))
+		cancel := func(sub string) {
+			t.Helper()
+			status, body := ccbillNotice(t, a, "Cancellation", map[string]any{"subscriptionId": sub, "reason": "user", "source": "webAdmin"})
+			require.Equal(t, http.StatusOK, status, body)
+		}
+		// Inside its paid period, a reactivation resumes it.
+		cancel("0223344556677889900")
+		canceled := onlySubscription(t, a.alpha, bob)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), canceled.Status)
+		require.Equal(t, "expired", *canceled.CancelType)
+		status, body := ccbillNotice(t, a, "UserReactivation", map[string]any{"subscriptionId": "0223344556677889900", "transactionId": "0912233445566778802"})
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, billing.SubscriptionActive, onlySubscription(t, a.alpha, bob).Status, "the reactivation resumes it")
+		require.True(t, entitledTo(t, a.alpha, bob, "ccbill:member"))
+		// Past it, CCBill's late rebill restores it.
+		cancel("0334455667788990011")
+		require.Equal(t, billing.SubscriptionStatus("canceled"), onlySubscription(t, a.alpha, carol).Status)
+		next := due.Add(720 * time.Hour)
+		status, body = ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": "0334455667788990011", "transactionId": "0912233445566778803",
+			"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+			"cardType": "VISA", "last4": "1111"})
+		require.Equal(t, http.StatusOK, status, body)
+		require.Equal(t, billing.SubscriptionActive, onlySubscription(t, a.alpha, carol).Status, "the late rebill restores it")
+		require.True(t, entitledTo(t, a.alpha, carol, "ccbill:member"))
+	})
+
+	t.Run("OR-J38-S81/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		alice, carol := customerOf(a.alice), customerOf(a.bob)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		due := now.Add(-time.Hour)
+		// Alice's end the provider confirmed; Carol's is a chargeback.
+		provided, sale := legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due)
+		provided.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: due}
+		land := importLegacyCCBill(t, a.alpha, now)
+		land(provided, sale)
+		land(legacyCCBillMember(carol, price, "334455667788990011", "0812233445566778803", due))
+		status, body := ccbillNotice(t, a, "Chargeback", map[string]any{"subscriptionId": "0334455667788990011", "transactionId": "0812233445566778803",
+			"amount": "10.00", "currencyCode": "840", "reason": "fraud"})
+		require.Equal(t, http.StatusOK, status, body)
+		for _, member := range []struct {
+			customer    billing.CustomerID
+			sub, rebill string
+			kind        string
+		}{{alice, ccbillProvider, "0912233445566778801", "provider"}, {carol, "0334455667788990011", "0912233445566778803", "chargeback"}} {
+			require.Equal(t, member.kind, *onlySubscription(t, a.alpha, member.customer).CancelType)
+			// CCBill then reports a failed-rebill cancel, and bills again.
+			status, body := ccbillNotice(t, a, "Cancellation", map[string]any{"subscriptionId": member.sub, "reason": "failedRB", "source": "failedRB"})
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, member.kind, *onlySubscription(t, a.alpha, member.customer).CancelType, "a lapse never replaces a decided end")
+			next := due.Add(720 * time.Hour)
+			status, body = ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": member.sub, "transactionId": member.rebill,
+				"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+				"cardType": "VISA", "last4": "1111"})
+			require.Equal(t, http.StatusOK, status, body)
+			after := onlySubscription(t, a.alpha, member.customer)
+			require.Equal(t, billing.SubscriptionStatus("canceled"), after.Status, "%s stays ended", member.kind)
+			require.Equal(t, member.kind, *after.CancelType)
+			require.False(t, entitledTo(t, a.alpha, member.customer, "ccbill:member"))
+		}
+	})
+
 	t.Run("OR-J38-S38/datalink-import-matches-a-zero-dropped-legacy-id", func(t *testing.T) {
 		iw := newImportWorld(t, "ccbill")
 		price := ccbillMemberPrice(t, iw.alphaRemote)
@@ -351,7 +500,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -386,7 +535,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-10 * 24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -556,6 +705,38 @@ func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, 
 	return res
 }
 
+// dataLinkCancellationFeed is CCBill's DataLink after sub was canceled at
+// canceled, paid through expires: no active member, and the cancellation in
+// its export.
+func dataLinkCancellationFeed(t *testing.T, sub string, canceled, expires time.Time) *httptest.Server {
+	t.Helper()
+	mst := time.FixedZone("MST", -7*60*60)
+	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
+		if r.ParseForm() != nil || r.URL.Path != "/data/main.cgi" {
+			http.Error(out, "unexpected DataLink request", http.StatusBadRequest)
+			return
+		}
+		if r.Form.Get("transactionTypes") == "ACTIVEMEMBERS" {
+			return
+		}
+		from, errFrom := time.ParseInLocation("20060102150405", r.Form.Get("startTime"), mst)
+		until, errUntil := time.ParseInLocation("20060102150405", r.Form.Get("endTime"), mst)
+		if errFrom != nil || errUntil != nil {
+			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
+			return
+		}
+		if until.Sub(from) > 24*time.Hour {
+			fmt.Fprint(out, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		if !canceled.Before(from) && !canceled.After(until) {
+			fmt.Fprintf(out, "\"CANCELLATION\",\"945280\",\"0001\",\"%s\",\"%s\",\"%s\",\"N\"\n", sub, expires.UTC().Format(time.DateOnly), canceled.UTC().Format(time.DateOnly))
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 // dataLinkFeedFor is CCBill's DataLink holding one active membership sub,
 // rebilled by txn at rebill.
 func dataLinkFeedFor(t *testing.T, sub, txn string, rebill time.Time) *httptest.Server {
@@ -577,7 +758,11 @@ func dataLinkFeedFor(t *testing.T, sub, txn string, rebill time.Time) *httptest.
 			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
 			return
 		}
-		if !rebill.Before(from) && rebill.Before(until) {
+		if until.Sub(from) > 24*time.Hour {
+			fmt.Fprint(out, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		if !rebill.Before(from) && !rebill.After(until) {
 			fmt.Fprintf(out, "REBILL,945280,0001,%s,%s,%s,10.00\n", sub, rebill.UTC().Format("2006-01-02 15:04:05"), txn)
 		}
 	}))

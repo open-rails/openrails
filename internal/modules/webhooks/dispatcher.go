@@ -17,12 +17,15 @@ import (
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.
@@ -159,6 +162,17 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	var payload NMIWebhookEvent
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("parse nmi webhook payload: %w", err)
+	}
+	// NMI's signature has no time, so a captured delivery verifies forever;
+	// its event_id is deduplicated only while webhook_events keeps it. One
+	// dated before that is a replay, applied never, and a person is told.
+	now := timeutil.FirstClock(d.Clock).Now()
+	if at, dated := nmiEventDate(payload.EventBody); dated && at.Before(now.Add(-WebhookEventRetention)) {
+		logx.Or(h.Log).WarnContext(ctx, "NMI webhook refused as a replay", "event_id", payload.EventID, "event_type", payload.EventType, "dated_at", at)
+		if err := alerting.RecordWebhookReplay(ctx, d.DB, now, alerting.WebhookReplay{Provider: string(models.RailNMI), EventID: payload.EventID, EventType: string(payload.EventType), DatedAt: at}); err != nil {
+			return fmt.Errorf("record refused nmi replay %s: %w", payload.EventID, err)
+		}
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi webhook %s is dated %s, before its replay record would be kept: refused as a replay", payload.EventID, at.Format(time.RFC3339)))
 	}
 
 	service := NMIWebhookService{

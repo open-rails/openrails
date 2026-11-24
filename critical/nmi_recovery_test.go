@@ -134,6 +134,12 @@ func nmiMembership(t *testing.T, configure ...func(*nmimock.Schedule)) (*authori
 func nmiMembershipWithAccess(t *testing.T, access catalog.Field[int], configure ...func(*nmimock.Schedule)) (*authorityWorld, *nmiJournal, *billing.Subscription) {
 	t.Helper()
 	a, p := newNMIWorld(t)
+	return a, p, nmiMembershipOn(t, a, p, access, configure...)
+}
+
+// nmiMembershipOn imports alice's weekly NMI membership into a world.
+func nmiMembershipOn(t *testing.T, a *authorityWorld, p *nmiJournal, access catalog.Field[int], configure ...func(*nmimock.Schedule)) *billing.Subscription {
+	t.Helper()
 	p.core.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
 	require.NoError(t, err)
@@ -182,7 +188,7 @@ func nmiMembershipWithAccess(t *testing.T, access catalog.Field[int], configure 
 	require.EqualValues(t, 10_000_000, payments.Items[0].Amount)
 	require.Equal(t, initial.TransactionID, payments.Items[0].TransactionID)
 	p.money(t, 1, 1000)
-	return a, p, sub
+	return sub
 }
 
 func nmiRenewalReadback(t *testing.T, a *authorityWorld, p *nmiJournal, sub *billing.Subscription) {

@@ -61,3 +61,11 @@ WHERE w.merchant_id = sqlc.arg(merchant_id)::uuid AND w.depletes_at <= sqlc.arg(
   AND (sqlc.narg(after_id)::uuid IS NULL OR c.id < sqlc.narg(after_id)::uuid)
 ORDER BY c.id DESC
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: SumRunningChargeRates :one
+-- What a customer's running charges in a currency accrue per hour now: the
+-- running part of its accrual rate (accrual_rate_cap).
+SELECT COALESCE(SUM(rate_per_hour), 0)::bigint AS rate_per_hour
+FROM billing.running_charges
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text AND stopped_at IS NULL;

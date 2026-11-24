@@ -490,7 +490,7 @@ INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id,
-    lease_expires_at
+    lease_expires_at, created_at
 ) VALUES (
     COALESCE($1::uuid, uuidv7()), $2, $3, $4,
     $5, $6, $7,
@@ -498,7 +498,7 @@ INSERT INTO billing.provider_intents (
     $10::timestamptz, $11,
     $12, $13, $14, $15, $16,
     $17::uuid, $18::uuid, $19::uuid,
-    $20::timestamptz
+    $20::timestamptz, clock_timestamp()
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -593,7 +593,9 @@ type EnqueueProviderIntentParams struct {
 // untouched. Frozen operations (tier changes, collections, manual rebills,
 // sales, initial membership) are never refreshed or revived: a same-key race
 // must not replace a frozen commercial decision. lease_expires_at, when set,
-// is the producer's hold on the first attempt it runs inline.
+// is the producer's hold on the first attempt it runs inline. created_at is
+// the insert's own instant, not its transaction's start: an operation inserted
+// under a row lock is later than every one committed before it took the lock.
 func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
 		arg.ID,
@@ -1253,6 +1255,63 @@ func (q *Queries) GetUnresolvedSubscriptionCollection(ctx context.Context, arg G
 		&i.DestructiveActionID,
 	)
 	return i, err
+}
+
+const hasEarlierStripeScheduleWrite = `-- name: HasEarlierStripeScheduleWrite :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+      AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription')
+      AND (created_at, id) < ($3::timestamptz, $4::uuid)
+      AND status IN ('in_flight', 'unknown_needs_verify')
+)
+`
+
+type HasEarlierStripeScheduleWriteParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CreatedAt      time.Time
+	ID             uuid.UUID
+}
+
+// Another Stripe cancel or resume of the subscription, committed before this
+// one, whose write is in flight or unresolved: this one waits for it, so they
+// reach Stripe in the order they were committed. Each is inserted under the
+// subscription's row lock, so created_at orders them by commit.
+func (q *Queries) HasEarlierStripeScheduleWrite(ctx context.Context, arg HasEarlierStripeScheduleWriteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasEarlierStripeScheduleWrite,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.CreatedAt,
+		arg.ID,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const hasOpenStripeOperation = `-- name: HasOpenStripeOperation :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+      AND intent_type = $3::text
+      AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+)
+`
+
+type HasOpenStripeOperationParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	IntentType     string
+}
+
+// A Stripe cancel or resume of the subscription not settled yet: until it is,
+// Stripe's cancel_at_period_end is what it changes, not a portal change.
+func (q *Queries) HasOpenStripeOperation(ctx context.Context, arg HasOpenStripeOperationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenStripeOperation, arg.MerchantID, arg.SubscriptionID, arg.IntentType)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const hasSubmittedSolanaPull = `-- name: HasSubmittedSolanaPull :one

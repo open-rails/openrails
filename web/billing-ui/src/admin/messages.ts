@@ -1004,9 +1004,11 @@ export const billingAdminMessages = {
     "End access now instead (no refund is made)",
   "By the customer": "By the customer",
   "By staff": "By staff",
-  "Renewal payment failed": "Renewal payment failed",
+  "Not renewed": "Not renewed",
   "After a chargeback": "After a chargeback",
   "Replaced by an upgrade": "Replaced by an upgrade",
+  "Ended by the provider": "Ended by the provider",
+  "First payment never completed": "First payment never completed",
   "This page couldn't be loaded": "This page couldn't be loaded",
   "It may have been removed, or the link may be wrong.":
     "It may have been removed, or the link may be wrong.",

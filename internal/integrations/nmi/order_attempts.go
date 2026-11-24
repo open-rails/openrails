@@ -180,6 +180,7 @@ func (c *NMIClient) ReadVaultTransactions(ctx context.Context, vaultID string, s
 		return nil, errors.New("vault and start time are required")
 	}
 	var out []VaultTransaction
+	since = since.Truncate(time.Second) // NMI dates whole seconds
 	for page := 0; page < vaultMaxPages; page++ {
 		report, err := c.TransactionReport(ctx, QueryFilter{CustomerVaultID: vaultID, StartDate: since.UTC().Format(QueryTimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
 		if err != nil {

@@ -134,16 +134,18 @@ type SaleAction struct {
 	Evidence decline.Evidence
 }
 
-// saleActions is the transaction's sale actions on or after since. An action
-// with an unparseable date still counts: the server already filtered by date.
+// saleActions is the transaction's sale actions on or after since, to NMI's
+// whole second. An action with an unparseable date still counts: the server
+// already filtered by date.
 func saleActions(txn QueryTransaction, since time.Time) []SaleAction {
 	var out []SaleAction
+	since = since.Truncate(time.Second)
 	for _, action := range txn.Actions {
 		if !action.Is("sale") {
 			continue
 		}
 		at, _ := action.At()
-		if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
+		if !since.IsZero() && !at.IsZero() && at.Before(since) {
 			continue
 		}
 		out = append(out, SaleAction{
@@ -215,6 +217,7 @@ func (c *NMIClient) ReadCycleTransactions(ctx context.Context, scope CycleScope,
 	}
 	seen := map[string]bool{}
 	var out []CycleTransaction
+	since = since.Truncate(time.Second) // NMI dates whole seconds
 	for _, filter := range filters {
 		if !since.IsZero() {
 			filter.StartDate = since.UTC().Format(QueryTimeFormat)

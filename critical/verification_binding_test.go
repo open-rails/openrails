@@ -84,6 +84,12 @@ func stripePSP(account, secret string, archived bool) billing.PSPConfig {
 // switch and arms one merchant for enforcing convergence.
 func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 	t.Helper()
+	armWorldDestructive(t, a.world, on)
+}
+
+// armWorldDestructive is armDestructive for w.
+func armWorldDestructive(t *testing.T, a *world, on bool) {
+	t.Helper()
 	_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "destructive_action_switch"}.Sanitize()+" SET enabled=$1, updated_by='critical fixture operator', reason='owned disposable verification test'", on)
 	require.NoError(t, err)
 	_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
@@ -93,8 +99,8 @@ func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 }
 
 // stripeMembership imports a provider-owned Stripe subscription on account
-// "old", the merchant's only Stripe PSP.
-func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
+// "old", the merchant's only Stripe PSP; configure changes the world after.
+func stripeMembership(t *testing.T, configure ...func(*world)) (*authorityWorld, *stripeAccounts, *billing.Subscription) {
 	t.Helper()
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
@@ -103,6 +109,9 @@ func stripeMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *billing.
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
+		for _, change := range configure {
+			change(w)
+		}
 	})
 	old := accounts.accounts["sk_test_old"].core
 	old.AddProduct("prod_legacy", "Legacy membership")
