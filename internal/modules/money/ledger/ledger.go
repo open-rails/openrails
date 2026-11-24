@@ -26,18 +26,18 @@ type AccountType = books.AccountType
 
 // The units book's accounts.
 const (
-	CustomerBalance  = books.CustomerUnits
-	PlatformRevenue  = books.UnitsRedeemed
-	RailClearing     = books.UnitsSold
-	ArrearsLiability = books.CustomerOwed
-	ExpiredCredits   = books.UnitsExpired
-	// RevokedCredits holds the unspent remainder clawed back when a credit grant
-	// is revoked (ExpiredCredits is time-lapse): frozen and reversible, not
-	// refunded; a refund moves it out to RailClearing.
-	RevokedCredits       = books.UnitsRevoked
-	PromotionalFunding   = books.UnitsGranted
-	CreditRefundClearing = books.UnitsRefundClearing
-	CreditRefundLoss     = books.UnitsRefundLoss
+	CustomerUnits = books.CustomerUnits
+	UnitsRedeemed = books.UnitsRedeemed
+	UnitsSold     = books.UnitsSold
+	CustomerOwed  = books.CustomerOwed
+	UnitsExpired  = books.UnitsExpired
+	// UnitsRevoked holds the unspent remainder clawed back when a credit grant
+	// is revoked (UnitsExpired is time-lapse): frozen and reversible, not
+	// refunded; a refund moves it out to UnitsSold.
+	UnitsRevoked        = books.UnitsRevoked
+	UnitsGranted        = books.UnitsGranted
+	UnitsRefundClearing = books.UnitsRefundClearing
+	UnitsRefundLoss     = books.UnitsRefundLoss
 )
 
 // TransferType is ledger_transfers.transfer_type; these are the units book's,
@@ -168,7 +168,7 @@ func (l *Ledger) EnsureSystemAccount(ctx context.Context, t AccountType, currenc
 // arrears is watched.
 func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	id, created, err := l.ensureAccount(ctx, CustomerBalance, currency, &c)
+	id, created, err := l.ensureAccount(ctx, CustomerUnits, currency, &c)
 	if err != nil || !created {
 		return id, err
 	}
@@ -183,7 +183,7 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 // debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	id, _, err := l.ensureAccount(ctx, ArrearsLiability, currency, &c)
+	id, _, err := l.ensureAccount(ctx, CustomerOwed, currency, &c)
 	return id, err
 }
 
@@ -192,7 +192,7 @@ func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, 
 func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
-		MerchantID: l.merchant, AccountType: string(ArrearsLiability), Currency: currency, CustomerID: &c,
+		MerchantID: l.merchant, AccountType: string(CustomerOwed), Currency: currency, CustomerID: &c,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -228,13 +228,13 @@ func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, curren
 func (l *Ledger) CustomerBalanceAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
-		MerchantID: l.merchant, AccountType: string(CustomerBalance), Currency: currency, CustomerID: &c,
+		MerchantID: l.merchant, AccountType: string(CustomerUnits), Currency: currency, CustomerID: &c,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, false, nil
 		}
-		return uuid.Nil, false, fmt.Errorf("ledger: get %s account: %w", CustomerBalance, err)
+		return uuid.Nil, false, fmt.Errorf("ledger: get %s account: %w", CustomerUnits, err)
 	}
 	return acc.ID, true, nil
 }
@@ -365,7 +365,7 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 // (DR units_sold / CR customer_units). grantID attributes the deposit
 // to its credit lot (uuid.Nil for a non-lot deposit).
 func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
+	clearing, err := l.EnsureSystemAccount(ctx, UnitsSold, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -386,9 +386,9 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 }
 
 // ReverseUsage credits a customer's lot with what its usage posted beyond a
-// period's price (DR platform_revenue / CR customer_balance).
+// period's price (DR units_redeemed / CR customer_units).
 func (l *Ledger) ReverseUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -416,7 +416,7 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, false, err
 	}
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, false, err
 	}
@@ -431,7 +431,7 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 // units_redeemed / CR customer_owed), the inverse of AccrueOwed. Posted
 // when a usage order is voided, so the ledger stops counting it as owed.
 func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -449,7 +449,7 @@ func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency 
 // PayOwed settles accrued arrears via an external charge (DR units_sold /
 // CR customer_owed), bringing the liability account back toward zero.
 func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
+	clearing, err := l.EnsureSystemAccount(ctx, UnitsSold, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}

@@ -263,7 +263,7 @@ func TestBooks(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			redeemed, err := l.EnsureSystemAccount(ctx, ledger.PlatformRevenue, "USD")
+			redeemed, err := l.EnsureSystemAccount(ctx, ledger.UnitsRedeemed, "USD")
 			if err != nil {
 				return err
 			}

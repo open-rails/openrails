@@ -72,7 +72,7 @@ func (s *MoneyService) PricingPeriod(ctx context.Context, q *gen.Queries, mercha
 // first activity in the currency, else its creation.
 func (s *MoneyService) periodAnchor(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (time.Time, error) {
 	if currency != "" {
-		_, err := q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{MerchantID: merchantID, AccountType: string(ledger.CustomerBalance), Currency: currency, CustomerID: &customerID})
+		_, err := q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{MerchantID: merchantID, AccountType: string(ledger.CustomerUnits), Currency: currency, CustomerID: &customerID})
 		switch {
 		case err == nil:
 			return q.GetCustomerPeriodAnchor(ctx, gen.GetCustomerPeriodAnchorParams{MerchantID: merchantID, CustomerID: customerID, Currency: currency})

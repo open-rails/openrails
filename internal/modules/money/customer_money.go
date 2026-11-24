@@ -61,9 +61,9 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 		for _, a := range accounts {
 			k := key{a.CustomerID, a.Currency}
 			switch ledger.AccountType(a.AccountType) {
-			case ledger.CustomerBalance:
+			case ledger.CustomerUnits:
 				balance[k], hasBalance[k] = a.Balance, true
-			case ledger.ArrearsLiability:
+			case ledger.CustomerOwed:
 				if a.Balance < 0 {
 					owed[k] = -a.Balance
 				}
@@ -124,7 +124,7 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 	now := s.now()
 	out := []billing.CustomerLimit{}
 	for _, a := range accounts {
-		if ledger.AccountType(a.AccountType) != ledger.CustomerBalance {
+		if ledger.AccountType(a.AccountType) != ledger.CustomerUnits {
 			continue
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
