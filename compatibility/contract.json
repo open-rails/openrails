@@ -1953,6 +1953,7 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
+      "type PacedProviderRefreshArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
       "type StripeWebhookReconcileArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n\tAccountID  string    `json:\"account_id,omitempty\"`\n}",
@@ -4508,6 +4509,7 @@
     "internal/pspimport/importer.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4822,6 +4824,7 @@
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",

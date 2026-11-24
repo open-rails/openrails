@@ -1,7 +1,10 @@
 package app
 
 import (
+	"time"
+
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/pspimport"
@@ -23,5 +26,26 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 		return nil
 	}
 	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
-		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), Directory: r.Contacts, Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock, Log: r.Log}
+		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), DataLinkPacing: r.DataLinkPacing(), Directory: r.Contacts,
+		Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock, Log: r.Log}
+}
+
+// DataLinkPacing keeps live CCBill accounts' DataLink slots in the abuse
+// state, which every instance shares through Redis, on the runtime's clock.
+// A slot lost with Redis costs one request CCBill refuses, which waits like
+// any other.
+func (r *Runtime) DataLinkPacing() ccbill.Pacing {
+	var pacing ccbill.Pacing
+	if r == nil {
+		return pacing
+	}
+	if r.AbuseState != nil {
+		pacing.Slots = r.AbuseState
+	}
+	if r.Clock != nil {
+		pacing.Now = r.Clock.Now
+	} else {
+		pacing.Now = time.Now
+	}
+	return pacing
 }

@@ -1,5 +1,7 @@
 // Package abusestate keeps abuse state: rate-limit windows, admin lockouts,
-// captcha challenges, card-testing declines and one-time challenges. It lives in Redis when one is configured, which
+// captcha challenges, card-testing declines and one-time challenges, and the
+// request slots a provider paces (CCBill DataLink's hour per account). It
+// lives in Redis when one is configured, which
 // every instance shares, and otherwise in this process's memory, which serves
 // one instance only. A configured Redis that stops answering is left for
 // memory until it answers again. Never PostgreSQL.
@@ -31,7 +33,7 @@ type Store struct {
 	rdb redis.UniversalClient
 	now func() time.Time
 
-	counts, holds, marks, values *table
+	counts, holds, marks, values, slots *table
 
 	mu       sync.Mutex
 	observed bool
@@ -46,7 +48,7 @@ type Store struct {
 func New(logger *slog.Logger, rdb redis.UniversalClient) *Store {
 	return &Store{
 		rdb: rdb, now: time.Now,
-		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit), values: newTable(tableLimit),
+		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit), values: newTable(tableLimit), slots: newTable(tableLimit),
 		Log: logger,
 	}
 }
@@ -116,6 +118,39 @@ func (s *Store) Held(ctx context.Context, key string) time.Duration {
 // configured Redis that did not.
 func (s *Store) Release(ctx context.Context, keys ...string) error {
 	return s.release(ctx, s.holds, keys)
+}
+
+// claimSlot is Claim in Redis: the slot opens at the stored instant; one
+// caller at a time takes an open one and stores when it opens again.
+var claimSlot = redis.NewScript(`
+local held = tonumber(redis.call('GET', KEYS[1]))
+if held and held > tonumber(ARGV[1]) then return held end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+return 0`)
+
+// Claim takes key's slot when it is open at now, the caller's clock, and
+// keeps it until next; otherwise it answers when the slot opens. One caller
+// takes a slot, across instances with Redis. A slot memory took while Redis
+// was down still holds once it answers again.
+func (s *Store) Claim(ctx context.Context, key string, now, next time.Time) (time.Time, bool) {
+	keep := 2 * next.Sub(now) // the record outlives its slot; the instant decides
+	if held, ok := s.slots.held(key, now.UnixMilli(), s.now()); ok {
+		return time.UnixMilli(held).UTC(), false
+	}
+	if s.redis() {
+		held, err := claimSlot.Run(ctx, s.rdb, []string{key}, now.UnixMilli(), next.UnixMilli(), keep.Milliseconds()).Int64()
+		if err == nil {
+			if held != 0 {
+				return time.UnixMilli(held).UTC(), false
+			}
+			return next, true
+		}
+		s.fail(ctx, err)
+	}
+	if held, ok := s.slots.claim(key, now.UnixMilli(), next.UnixMilli(), s.now().Add(keep), s.now()); ok {
+		return time.UnixMilli(held).UTC(), false
+	}
+	return next, true
 }
 
 // Put keeps value under key for ttl, until Take spends it.

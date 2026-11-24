@@ -394,6 +394,7 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service) {
 		return
 	}
 	svc.StripeClients = r.StripeClients
+	svc.DataLinkPacing = r.DataLinkPacing()
 	svc.Changed = r.MerchantChanged
 	r.Merchants = svc
 	store := svc.Secrets()

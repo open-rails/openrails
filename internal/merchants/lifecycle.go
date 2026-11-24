@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -77,6 +78,9 @@ type Service struct {
 	// nmiWire points credential probes at the runtime's NMI gateway and
 	// transport, as every NMI client it builds.
 	nmiWire func(*nmi.NMIClient)
+	// DataLinkPacing paces the DataLink credential probe of a live CCBill
+	// account with the account's other requests.
+	DataLinkPacing ccbill.Pacing
 	// destructive gates the merchant purge; nil denies (the gate fails closed).
 	destructive *destructive.Gate
 	// jobs queues a purge's secret cleanup with the purge.

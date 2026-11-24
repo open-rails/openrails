@@ -1360,6 +1360,12 @@
     "OR-J38-S44": [
       "TestProviderTime/OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing"
     ],
+    "OR-J38-S45": [
+      "TestProviderTime/OR-J38-S45/a-live-ccbill-refresh-reads-a-day-an-hour-and-records-every-rebill"
+    ],
+    "OR-J38-S46": [
+      "TestProviderTime/OR-J38-S46/a-live-ccbill-import-reads-a-day-an-hour-and-resumes-each-time"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

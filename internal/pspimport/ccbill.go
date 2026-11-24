@@ -54,6 +54,10 @@ func (s *ccbillSource) roster(ctx context.Context) ([]staged, error) {
 	return out, nil
 }
 
+// window is one DataLink export's day: a live account answers one an hour,
+// so each day commits apart and a pull waiting for its slot resumes there.
+func (s *ccbillSource) window() time.Duration { return 24 * time.Hour }
+
 func (s *ccbillSource) history(ctx context.Context, since, until time.Time, _ bool) ([]staged, error) {
 	rows, err := s.dl.FetchTransactionExport(ctx, since, until, []ccbill.DataLinkTxnType{ccbill.DataLinkTxnRebill})
 	if err != nil {

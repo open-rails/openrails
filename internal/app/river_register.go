@@ -52,24 +52,25 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, Log: r.Log},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
 	}
 	// An operator request runs bounded window pulls, CCBill DataLink and
 	// reconciliation for the merchant.
-	if err := addWorker(workers, &riverjobs.ProviderRefreshWorker{
-		StripeClients: r.StripeClients,
-		DB:            r.DB,
-		Config:        r.Config,
-		Clock:         clock,
-		Merchants:     r.Merchants, // per-merchant store-armed pulls
-		DeferDelete:   r.DeferredDeletes,
-		Contacts:      r.Contacts,
-		Alerts:        r.AlertService, // requires_review findings -> operator notifications
-		NMIClients:    r.NMIClients,
-		Verifier:      r.Verifier,
+	refresh := &riverjobs.ProviderRefreshWorker{
+		StripeClients:  r.StripeClients,
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Merchants:      r.Merchants, // per-merchant store-armed pulls
+		DeferDelete:    r.DeferredDeletes,
+		Contacts:       r.Contacts,
+		Alerts:         r.AlertService, // requires_review findings -> operator notifications
+		NMIClients:     r.NMIClients,
+		DataLinkPacing: r.DataLinkPacing(),
+		Verifier:       r.Verifier,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
 			if err != nil {
@@ -89,8 +90,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 			return err
 		},
 		Log: r.Log,
-	}); err != nil {
+	}
+	if err := addWorker(workers, refresh); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
+	}
+	// A paced PSP's refresh (a live CCBill account) reads a request per slot.
+	if err := addWorker(workers, &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}); err != nil {
+		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
 	eventRetention, err := config.EventRetentionDuration(r.Config)

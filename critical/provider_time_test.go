@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,13 +16,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/pspimport"
 	"github.com/open-rails/openrails/internal/reconcile"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -50,6 +55,57 @@ func nmiPrune(t *testing.T, a *authorityWorld, since, until time.Time, expect *i
 		return err
 	}))
 	return res
+}
+
+// ccbillRebills lists a member in dataLink for each time, rebilled then, and
+// imports alpha's book of them with each rebill declared without its amount,
+// which the provider pull records. It answers each rebill's customer and time
+// by transaction id.
+func ccbillRebills(t *testing.T, w *world, dataLink *ccbillmock.Mock, times []time.Time) (map[string]billing.CustomerID, map[string]time.Time) {
+	t.Helper()
+	price := ccbillMemberPrice(t, w.alpha)
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"}}
+	members, rebills := map[string]billing.CustomerID{}, map[string]time.Time{}
+	for i, rebill := range times {
+		sub, initial, txn := fmt.Sprintf("0223344556600000%03d", i), fmt.Sprintf("0812233445500000%03d", i), fmt.Sprintf("0912233445500000%03d", i)
+		start, next := rebill.Add(-720*time.Hour), rebill.Add(720*time.Hour)
+		customer := billing.CustomerID(uuid.New())
+		rebills[txn], members[txn] = rebill, customer
+		dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member-" + sub, Email: "member-" + sub + "@critical.invalid", Signup: start, Rebill: &next})
+		dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, TransactionID: txn, At: rebill, Amount: "10.00"})
+		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
+		book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: "ccbill-member-" + sub, Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: sub,
+			StartedAt: start, PaidThrough: &rebill,
+			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: sub, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: rebill}})
+		book.Transactions = append(book.Transactions,
+			billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: initial, Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
+			billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: txn, Type: "sale", Success: true, Currency: "USD", OccurredAt: rebill})
+	}
+	res, err := w.alpha.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Empty(t, res.Blocked, "%+v", res.Reasons)
+	return members, rebills
+}
+
+// liveDataLink makes a sandbox CCBill PSP's DataLink clients ask as a live
+// account's do: no live PSP is declared beside a fake DataLink.
+func liveDataLink(dl *ccbill.DataLinkClient) { dl.DevMode = false }
+
+// liveRequestsAnHourApart requires the live requests DataLink answered an
+// hour apart, and answers them.
+func liveRequestsAnHourApart(t *testing.T, dataLink *ccbillmock.Mock) []ccbillmock.Request {
+	t.Helper()
+	var live []ccbillmock.Request
+	for _, r := range dataLink.Requests() {
+		if !r.Live || r.Refused {
+			continue
+		}
+		if n := len(live); n > 0 {
+			require.GreaterOrEqual(t, r.At.Sub(live[n-1].At), time.Hour, "live requests at %s and %s", live[n-1].At, r.At)
+		}
+		live = append(live, r)
+	}
+	return live
 }
 
 // Provider times are read as each provider states them.
@@ -123,32 +179,14 @@ func TestProviderTime(t *testing.T) {
 		dataLink := ccbillmock.New()
 		t.Cleanup(dataLink.Close)
 		w := newWorld(t, func(w *world) { declareCCBill(w, dataLink.URL()) })
-		price := ccbillMemberPrice(t, w.alpha)
 		now := w.clock.Now().Truncate(time.Second)
 		// Nine members, each rebilled once, over nine days at drifting
 		// times of day.
-		book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"}}
-		rebills := map[string]time.Time{}
-		members := map[string]billing.CustomerID{}
+		var times []time.Time
 		for i := range 9 {
-			sub, initial, txn := fmt.Sprintf("0223344556600000%03d", i), fmt.Sprintf("0812233445500000%03d", i), fmt.Sprintf("0912233445500000%03d", i)
-			rebill := now.Add(-time.Hour - time.Duration(i)*(26*time.Hour+37*time.Minute+13*time.Second))
-			start, next := rebill.Add(-720*time.Hour), rebill.Add(720*time.Hour)
-			customer := billing.CustomerID(uuid.New())
-			rebills[txn], members[txn] = rebill, customer
-			dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member-" + sub, Email: "member-" + sub + "@critical.invalid", Signup: start, Rebill: &next})
-			dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, TransactionID: txn, At: rebill, Amount: "10.00"})
-			book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
-			book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: "ccbill-member-" + sub, Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: sub,
-				StartedAt: start, PaidThrough: &rebill,
-				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: sub, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: rebill}})
-			book.Transactions = append(book.Transactions,
-				billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: initial, Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
-				billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: txn, Type: "sale", Success: true, Currency: "USD", OccurredAt: rebill})
+			times = append(times, now.Add(-time.Hour-time.Duration(i)*(26*time.Hour+37*time.Minute+13*time.Second)))
 		}
-		res, err := w.alpha.ImportBilling(t.Context(), book)
-		require.NoError(t, err)
-		require.Empty(t, res.Blocked, "%+v", res.Reasons)
+		members, rebills := ccbillRebills(t, w, dataLink, times)
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
@@ -163,15 +201,16 @@ func TestProviderTime(t *testing.T) {
 		}
 		require.Empty(t, dataLink.Unexpected(), "no export spans more than 24 hours")
 		// The pull's exports (every type) cover the nine days without a gap.
-		var exports []ccbillmock.Export
-		for _, e := range dataLink.Exports() {
-			require.LessOrEqual(t, e.End.Sub(e.Start), 24*time.Hour-time.Second)
+		var exports []ccbillmock.Request
+		for _, e := range dataLink.Requests() {
+			if !e.Start.IsZero() {
+				require.LessOrEqual(t, e.End.Sub(e.Start), 24*time.Hour-time.Second)
+			}
 			if strings.Contains(e.Types, "CHARGEBACK") {
 				exports = append(exports, e)
 			}
 		}
-		slices.SortFunc(exports, func(a, b ccbillmock.Export) int { return a.Start.Compare(b.Start) })
-		times := slices.Collect(maps.Values(rebills))
+		slices.SortFunc(exports, func(a, b ccbillmock.Request) int { return a.Start.Compare(b.Start) })
 		first, last := slices.MinFunc(times, time.Time.Compare), slices.MaxFunc(times, time.Time.Compare)
 		var reach time.Time // the end of the run of exports holding first
 		for _, e := range exports {
@@ -186,5 +225,118 @@ func TestProviderTime(t *testing.T) {
 			}
 		}
 		require.False(t, reach.Before(last), "the exports holding %s end at %s, before %s", first, reach, last)
+	})
+
+	t.Run("OR-J38-S45/a-live-ccbill-refresh-reads-a-day-an-hour-and-records-every-rebill", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		// Its own account: DataLink's hour is the account's, kept in Redis.
+		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
+		w := newWorld(t, func(w *world) { declareCCBillAccount(w, account, dataLink.URL()) })
+		dataLink.SetClock(w.clock.Now)
+		now := w.clock.Now().Truncate(time.Second)
+		times := []time.Time{now.Add(-50 * time.Hour), now.Add(-27 * time.Hour), now.Add(-3 * time.Hour)}
+		members, _ := ccbillRebills(t, w, dataLink, times)
+		rt := embedded.Graph(w.engine).Runtime
+		refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
+			StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, DataLinkPacing: rt.DataLinkPacing(), WireDataLink: liveDataLink, Log: slog.Default()}
+		psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		psp := psps.Items[0].ID.UUID()
+		mid := w.alpha.MerchantID().UUID()
+		paced := &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}
+		run := func() error {
+			return paced.Work(t.Context(), &river.Job[riverjobs.PacedProviderRefreshArgs]{JobRow: &rivertype.JobRow{},
+				Args: riverjobs.PacedProviderRefreshArgs{MerchantID: mid, PSPID: psp}})
+		}
+		// The merchant's refresh hands the live account to a refresh of its
+		// own, which reads DataLink a request per hour.
+		require.NoError(t, refresh.Work(t.Context(), &river.Job[riverjobs.ProviderRefreshRequestArgs]{JobRow: &rivertype.JobRow{},
+			Args: riverjobs.ProviderRefreshRequestArgs{MerchantID: mid}}))
+		require.Empty(t, liveRequestsAnHourApart(t, dataLink), "the merchant's refresh reads no DataLink")
+		jobs, err := hostFleet(t, w).JobList(t.Context(), river.NewJobListParams().Kinds(riverjobs.KindPacedProviderRefresh))
+		require.NoError(t, err)
+		require.Len(t, jobs.Jobs, 1)
+		require.Contains(t, string(jobs.Jobs[0].EncodedArgs), psp.String())
+
+		// Another system's request makes CCBill refuse the next within the
+		// hour: the refresh waits for the hour and reads nothing.
+		other := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: account, ClientSubAcc: "0001", DataLinkUsername: "other", DataLinkPassword: "other"})
+		other.BaseURL, other.Pacing = dataLink.URL(), ccbill.Pacing{Slots: abusestate.New(slog.Default(), nil), Now: w.clock.Now}
+		_, err = other.FetchActiveMembers(t.Context())
+		require.NoError(t, err)
+		var snooze *rivertype.JobSnoozeError
+		require.ErrorAs(t, run(), &snooze)
+		require.Equal(t, time.Hour, snooze.Duration)
+		require.Equal(t, []string{"live DataLink request within 60 minutes of the last"}, dataLink.Unexpected())
+		for txn, customer := range members {
+			require.Zero(t, ccbillPayments(t, w, customer)[txn], "nothing is read yet")
+		}
+		w.clock.Advance(snooze.Duration)
+
+		// A day of transactions an hour, from 90 days back, then the roster.
+		passes := 0
+		for err := run(); err != nil; err = run() {
+			require.ErrorAs(t, err, &snooze)
+			require.Equal(t, ccbill.DataLinkInterval, snooze.Duration)
+			passes++
+			require.Less(t, passes, 200, "the backlog catches up")
+			w.clock.Advance(snooze.Duration)
+		}
+		for txn, customer := range members {
+			require.EqualValues(t, 10_000_000, ccbillPayments(t, w, customer)[txn], "the paced refresh records rebill %s", txn)
+		}
+		live := liveRequestsAnHourApart(t, dataLink)
+		require.Equal(t, "ACTIVEMEMBERS", live[len(live)-1].Types, "the roster is read once the days are")
+		require.Len(t, live, passes+2, "one request a pass, the other system's first")
+		require.Equal(t, []string{"live DataLink request within 60 minutes of the last"}, dataLink.Unexpected())
+	})
+
+	t.Run("OR-J38-S46/a-live-ccbill-import-reads-a-day-an-hour-and-resumes-each-time", func(t *testing.T) {
+		iw := bootImportWorld(t, "ccbill")
+		iw.ccbill.SetClock(iw.clock.Now)
+		now := iw.clock.Now().Truncate(time.Second)
+		var txns []string
+		for i, at := range []time.Time{now.Add(-70 * time.Hour), now.Add(-40 * time.Hour), now.Add(-2 * time.Hour)} {
+			next := at.Add(720 * time.Hour)
+			sub := iw.ccbill.AddMember(ccbillmock.Member{Username: fmt.Sprintf("member-%d", i), Email: fmt.Sprintf("member-%d@critical.invalid", i), Signup: at.Add(-720 * time.Hour), Rebill: &next})
+			txns = append(txns, iw.ccbill.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, At: at, Amount: "10.00"}))
+		}
+		since := now.Add(-4 * 24 * time.Hour)
+		// No fleet runs: the pull's job is run here, as a live account's.
+		imp, err := iw.api.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "ccbill"}, HistorySince: &since})
+		require.NoError(t, err)
+		im := embedded.Graph(iw.engine).Runtime.PSPImporter()
+		im.WireDataLink = liveDataLink
+		pull := &riverjobs.PSPImportWorker{Importer: func() *pspimport.Importer { return im }}
+		job := &river.Job[pspimport.JobArgs]{JobRow: &rivertype.JobRow{Attempt: 1, MaxAttempts: pspimport.JobAttempts},
+			Args: pspimport.JobArgs{MerchantID: iw.alpha.MerchantID().UUID(), ImportID: imp.ID.UUID(), Step: pspimport.StepPull}}
+		through := since
+		passes := 0
+		for err := pull.Work(t.Context(), job); err != nil; err = pull.Work(t.Context(), job) {
+			var snooze *rivertype.JobSnoozeError
+			require.ErrorAs(t, err, &snooze, "a paced pull waits; it does not fail")
+			view, err := iw.alpha.GetPSPImport(t.Context(), imp.ID)
+			require.NoError(t, err)
+			require.Equal(t, billing.PSPImportPulling, view.Status)
+			if view.HistoryThrough != nil {
+				require.LessOrEqual(t, view.HistoryThrough.Sub(through), 24*time.Hour, "one day a request")
+				through = *view.HistoryThrough
+			}
+			passes++
+			require.Less(t, passes, 20)
+			iw.clock.Advance(snooze.Duration)
+		}
+		view, err := iw.alpha.GetPSPImport(t.Context(), imp.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.PSPImportPulled, view.Status)
+		require.True(t, view.PulledAt.Equal(*view.HistoryThrough), "the history is read through the pull")
+		records := iw.records(t, imp.ID)
+		for _, txn := range txns {
+			require.Contains(t, records, txn, "the paced pull stages rebill %s", txn)
+		}
+		require.GreaterOrEqual(t, passes, 4, "the roster, then each day, an hour apart")
+		liveRequestsAnHourApart(t, iw.ccbill)
 	})
 }

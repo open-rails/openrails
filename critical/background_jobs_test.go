@@ -516,9 +516,13 @@ func TestBackgroundJobs(t *testing.T) {
 
 // declareCCBill gives alpha a CCBill PSP, read by a DataLink pull when feed
 // is set.
-func declareCCBill(w *world, dataLink string) {
+func declareCCBill(w *world, dataLink string) { declareCCBillAccount(w, "945280", dataLink) }
+
+// declareCCBillAccount declares alpha's sandbox CCBill PSP on account
+// accnum-0001, with DataLink at dataLink when set.
+func declareCCBillAccount(w *world, accnum, dataLink string) {
 	m := cfgMerchant(w.cfg, "alpha")
-	psp := openrails.CCBillPSP{ClientAccnum: "945280", ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
+	psp := openrails.CCBillPSP{ClientAccnum: accnum, ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
 	if dataLink != "" {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
 		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink}

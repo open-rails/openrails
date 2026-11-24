@@ -276,6 +276,9 @@ type FetchParams struct {
 	// SkipSolanaPlanDiscovery skips per-plan subscription enumeration when a
 	// read is catching up transaction windows or comparing known subscriptions.
 	SkipSolanaPlanDiscovery bool
+	// TransactionsOnly reads only the window's transactions, not the roster:
+	// a paced read (Paced) takes them a request at a time.
+	TransactionsOnly bool
 }
 
 // isReversal is a refund, void or dispute: money going back, which no
@@ -307,6 +310,17 @@ type RailFetcher interface {
 type keyedFetcher struct {
 	RailFetcher
 	key string
+}
+
+func (k keyedFetcher) Paced() bool { return Paced(k.RailFetcher) }
+
+// Paced reports whether f's provider answers its account one request at a
+// time (a live CCBill account's DataLink, an hour apart): its roster and
+// each day of transactions are separate reads, and a read that waits for its
+// slot fails with ccbill.PacedError.
+func Paced(f RailFetcher) bool {
+	p, ok := f.(interface{ Paced() bool })
+	return ok && p.Paced()
 }
 
 // rawJSON marshals v into a json.RawMessage for the Raw forensics fields,

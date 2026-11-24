@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 462,
+  "scenario_count": 464,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2137,6 +2137,16 @@
       "id": "OR-J38-S44",
       "journey": "J38",
       "name": "A CCBill provider refresh reads DataLink in exports of at most 24 hours, which CCBill requires, and records every rebill of its eight-day windows"
+    },
+    {
+      "id": "OR-J38-S45",
+      "journey": "J38",
+      "name": "A live CCBill PSP refreshes in a job of its own, one DataLink request an hour: a day of transactions each, then the roster; a request CCBill refuses within the hour waits, and every rebill is recorded"
+    },
+    {
+      "id": "OR-J38-S46",
+      "journey": "J38",
+      "name": "A live CCBill PSP import reads its roster, then a day of history an hour, waiting between requests and resuming where it stopped until it is pulled"
     },
     {
       "id": "OR-J39-S01",

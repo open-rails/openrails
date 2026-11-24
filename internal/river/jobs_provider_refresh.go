@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -34,6 +35,7 @@ import (
 
 const (
 	KindProviderRefreshRequested = "openrails.provider_refresh_requested"
+	KindPacedProviderRefresh     = "openrails.paced_provider_refresh"
 
 	// QueueProviderRefresh bounds provider reads independently of billing work.
 	QueueProviderRefresh = "provider_refresh"
@@ -41,6 +43,10 @@ const (
 	defaultRefreshOverlap   = 24 * time.Hour
 	defaultRefreshSafetyLag = 5 * time.Minute
 	defaultRefreshBatch     = 8 * 24 * time.Hour
+
+	// pacedRefreshWindow is a paced account's read per request: the day one
+	// DataLink export answers.
+	pacedRefreshWindow = 24 * time.Hour
 )
 
 // ProviderRefreshRequestArgs is an operator's request to refresh one merchant.
@@ -96,6 +102,10 @@ type ProviderRefreshWorker struct {
 	Alerts *alerting.Service
 
 	NMIClients *railresolve.NMIFactory
+	// DataLinkPacing paces live CCBill accounts' DataLink requests;
+	// WireDataLink adjusts each DataLink client a pass arms (test seam).
+	DataLinkPacing ccbill.Pacing
+	WireDataLink   func(*ccbill.DataLinkClient)
 	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
@@ -119,16 +129,58 @@ func (w *ProviderRefreshWorker) now() time.Time {
 	return time.Now().UTC()
 }
 
+// PacedProviderRefreshArgs continues a merchant's refresh for one PSP whose
+// provider paces its reads (a live CCBill account): the merchant's refresh
+// queues it, and it makes one request per slot from the PSP's watermark until
+// the PSP is read, so the merchant's other PSPs are not read again each slot.
+type PacedProviderRefreshArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+	PSPID      uuid.UUID `json:"psp_id" river:"unique"`
+}
+
+func (PacedProviderRefreshArgs) Kind() string { return KindPacedProviderRefresh }
+
+func (PacedProviderRefreshArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       QueueProviderRefresh,
+		MaxAttempts: 5,
+		UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: outstanding},
+	}
+}
+
+// PacedProviderRefreshWorker runs a paced PSP's refresh with the merchant
+// refresh's reads.
+type PacedProviderRefreshWorker struct {
+	WorkerDefaults[PacedProviderRefreshArgs]
+	Refresh *ProviderRefreshWorker
+}
+
+func (PacedProviderRefreshWorker) Kind() string { return KindPacedProviderRefresh }
+
+func (w *PacedProviderRefreshWorker) Work(ctx context.Context, job *river.Job[PacedProviderRefreshArgs]) error {
+	if job.Args.PSPID == uuid.Nil {
+		return fmt.Errorf("paced provider refresh: psp_id required")
+	}
+	return w.Refresh.work(ctx, job.Args.MerchantID, job.Args.PSPID)
+}
+
 func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshRequestArgs]) error {
+	return w.work(ctx, job.Args.MerchantID, uuid.Nil)
+}
+
+// work refreshes the merchant, or only its paced PSP psp.
+func (w *ProviderRefreshWorker) work(ctx context.Context, mid, psp uuid.UUID) error {
 	if w.DB == nil {
 		return fmt.Errorf("provider refresh: db not configured")
 	}
-	mid := job.Args.MerchantID
 	if mid == uuid.Nil {
 		return fmt.Errorf("provider refresh: merchant_id required")
 	}
 
 	logger := w.Log.With("worker", KindProviderRefreshRequested, "merchant_id", mid)
+	if psp != uuid.Nil {
+		logger = w.Log.With("worker", KindPacedProviderRefresh, "merchant_id", mid, "psp_id", psp)
+	}
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
@@ -145,15 +197,17 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	// A rail that cannot arm is absent for that merchant (its WARN names
 	// merchant/rail/secret); the other rails keep pulling.
 	builder := reconcile.MerchantFetcherBuilder{
-		StripeClients: w.StripeClients,
-		Config:        w.Config,
-		Merchants:     w.Merchants,
-		DB:            w.DB,
-		NMIClients:    w.NMIClients,
-		Log:           w.Log,
+		StripeClients:  w.StripeClients,
+		Config:         w.Config,
+		Merchants:      w.Merchants,
+		DB:             w.DB,
+		NMIClients:     w.NMIClients,
+		DataLinkPacing: w.DataLinkPacing,
+		WireDataLink:   w.WireDataLink,
+		Log:            w.Log,
 	}
 
-	err = w.refreshMerchant(ctx, mid, builder, &stats, logger)
+	err = w.refreshMerchant(ctx, mid, psp, builder, &stats, logger)
 
 	logger.InfoContext(ctx, "Provider Refresh: pass completed", "merchants", stats.Merchants, "windows", stats.Windows, "providers", stats.Providers, "applied_changes", stats.AppliedChanges, "new_findings", stats.NewFindings, "updated_findings", stats.UpdatedFindings, "watermark_errors", stats.WatermarkErrors, "provider_errors", stats.ProviderErrors, "converge_errors", stats.ConvergeErrors, "lane_errors", stats.LaneErrors, "gated", stats.Gated, "held", stats.Held, "unarmed", stats.Unarmed)
 	if err != nil {
@@ -162,6 +216,9 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors > 0 {
 		return fmt.Errorf("provider refresh for %s incomplete: provider errors %d, watermark errors %d, verification errors %d, convergence errors %d",
 			mid, stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors, stats.ConvergeErrors)
+	}
+	if stats.Wait > 0 {
+		return river.JobSnooze(stats.Wait)
 	}
 	if stats.More {
 		return river.JobSnooze(time.Second)
@@ -182,7 +239,9 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 
 // refreshMerchant reads and repairs each account's financial mirror first.
 // Policy-held lifecycle repairs remain separate from that observation phase.
-func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *slog.Logger) error {
+// A paced account is read by its own request (psp); the merchant's hands it
+// on, so its other accounts are not read again each slot.
+func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid, psp uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *slog.Logger) error {
 	gate := destructive.New(w.DB)
 	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
@@ -200,6 +259,9 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		}
 		var res providerRefreshMerchantResult
 		for _, account := range accounts {
+			if psp != uuid.Nil && account.ID != psp {
+				continue
+			}
 			provider := reconcile.Provider(account.Rail)
 			accountBuilder := builder
 			accountBuilder.AccountIDs = map[reconcile.Provider]string{provider: account.AccountID}
@@ -222,7 +284,21 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			}
 			accountOverwrite := overwrite
 			mutations := &reconcile.LocalMutationPolicy{Insert: true, Overwrite: accountOverwrite}
-			accountResult := w.runEventRefresh(tctx, mid, reconcile.ModeEnforce, mutations, armed.Coverage, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher})
+			var accountResult providerRefreshMerchantResult
+			switch {
+			case reconcile.Paced(fetcher) && psp == uuid.Nil:
+				if err := w.continuePaced(tctx, mid, account.ID); err != nil {
+					stats.LaneErrors++
+					logger.WarnContext(ctx, "Provider Refresh: queue a paced PSP's refresh failed", logx.Err(err), "psp_id", account.ID)
+				}
+				continue
+			case reconcile.Paced(fetcher):
+				var wait time.Duration
+				accountResult.providerRefreshProviderResult, wait = w.runPacedWindow(tctx, mid, provider, mutations, armed.Coverage, armed.Coverage[provider].Binding, fetcher)
+				stats.Wait = max(stats.Wait, wait)
+			default:
+				accountResult = w.runEventRefresh(tctx, mid, reconcile.ModeEnforce, mutations, armed.Coverage, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher})
+			}
 			res.add(accountResult.providerRefreshProviderResult)
 			stats.add(accountResult)
 			if accountResult.Windows > 0 {
@@ -232,6 +308,17 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			}
 		}
 		if !overwrite {
+			return nil
+		}
+		if psp != uuid.Nil {
+			// One paced PSP: the merchant's own refresh proves domains and
+			// reads the unknown cohort.
+			if res.Changed {
+				if err := w.runConvergence(tctx, mid); err != nil {
+					stats.ConvergeErrors++
+					logger.WarnContext(ctx, "Provider Refresh: scoped convergence failed", logx.Err(err), "merchant_id", mid)
+				}
+			}
 			return nil
 		}
 
@@ -486,6 +573,79 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
+// continuePaced queues the paced PSP's own refresh, unless one is waiting.
+func (w *ProviderRefreshWorker) continuePaced(ctx context.Context, mid, psp uuid.UUID) error {
+	return w.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := w.DB.InsertRiverJobTx(ctx, tx, PacedProviderRefreshArgs{MerchantID: mid, PSPID: psp}, nil)
+		return err
+	})
+}
+
+// runPacedWindow makes the one request a paced account's slot allows: its
+// next day of transactions, or the roster once they are read to within two
+// slots of the horizon. It answers how long until the next request: the
+// slot it took, or the one it waits for; zero once the roster is read. A
+// request waiting for its slot reads nothing and moves no watermark.
+func (w *ProviderRefreshWorker) runPacedWindow(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mutations *reconcile.LocalMutationPolicy, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetcher reconcile.RailFetcher) (providerRefreshProviderResult, time.Duration) {
+	out := providerRefreshProviderResult{Providers: 1}
+	now := w.now()
+	horizon := now.Add(-w.safetyLag())
+	since, err := w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, PspID: binding.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		since, err = horizon.Add(-90*24*time.Hour), nil
+	}
+	if err != nil {
+		out.WatermarkErrors++
+		w.Log.WarnContext(ctx, "Provider Refresh: load watermark failed", logx.Err(err), "provider", provider)
+		return out, 0
+	}
+	params := reconcile.RunParams{Mode: reconcile.ModeEnforce, Mutations: mutations, Providers: []reconcile.Provider{provider},
+		PSPs: map[reconcile.Provider]reconcile.PSPBinding{provider: binding}, PSPCoverage: coverage, Since: since, Until: since}
+	if horizon.Sub(since) > 2*ccbill.DataLinkInterval {
+		params.Until, params.TransactionsOnly = since.Add(min(pacedRefreshWindow, horizon.Sub(since))), true
+	}
+	engine := reconcile.NewEngine(w.DB, w.Config, w.Contacts, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher}, w.DeferDelete)
+	engine.RecoverUsagePayment = w.RecoverUsagePayment
+	engine.Now = func() time.Time { return now }
+	if w.Alerts != nil {
+		engine.Notifier = w.Alerts
+	}
+	res, err := engine.Run(ctx, params)
+	if wait, paced := ccbill.PacedFor(err); paced {
+		w.Log.InfoContext(ctx, "Provider Refresh: paced account waits for its next request", "provider", provider, "psp_id", binding.ID, "wait", wait)
+		return out, wait
+	}
+	if err != nil {
+		out.ProviderErrors++
+		w.Log.WarnContext(ctx, "Provider Refresh: paced window failed; watermark unchanged", logx.Err(err), "provider", provider, "since", params.Since, "until", params.Until)
+		return out, 0
+	}
+	out.Windows++
+	if rep := res.Summary.Providers[string(provider)]; rep != nil {
+		out.NewFindings += rep.NewFindings
+		out.UpdatedFindings += rep.UpdatedFindings
+	}
+	out.AppliedChanges += len(res.AppliedChanges)
+	out.Changed = len(res.AppliedChanges) > 0
+	if n := len(res.AppliedChanges); n > 0 {
+		if _, derr := webhookhealth.Drift(ctx, w.DB, binding.ID, now, n); derr != nil {
+			w.Log.WarnContext(ctx, "Provider Refresh: record webhook drift failed", logx.Err(derr), "provider", provider)
+		}
+	}
+	if err := webhookhealth.StampPull(ctx, w.DB, binding.ID, now); err != nil {
+		w.Log.WarnContext(ctx, "Provider Refresh: stamp webhook pull watermark failed", logx.Err(err), "provider", provider)
+	}
+	if !params.TransactionsOnly {
+		return out, 0
+	}
+	if err := w.recordWatermarkSuccess(ctx, mid, provider, binding.ID, params.Until); err != nil {
+		out.WatermarkErrors++
+		w.Log.WarnContext(ctx, "Provider Refresh: advance watermark failed", logx.Err(err), "provider", provider)
+		return out, 0
+	}
+	return out, ccbill.DataLinkInterval
+}
+
 // runReversals reads the PSP's refunds and disputes before its full read, which
 // a large book may never finish. It moves no watermark: while the full read
 // is stuck, every pass re-reads the last batch up to the horizon.
@@ -559,7 +719,9 @@ func (w *ProviderRefreshWorker) batch() time.Duration {
 }
 
 type providerRefreshStats struct {
-	More            bool
+	More bool
+	// Wait is how long a paced PSP's request waits for its next slot.
+	Wait            time.Duration
 	Merchants       int
 	Providers       int
 	Windows         int

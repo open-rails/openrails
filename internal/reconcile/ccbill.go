@@ -12,7 +12,8 @@ import (
 
 // CCBillFetcher pulls CCBill via DataLink batch exports: the ACTIVEMEMBERS
 // roster, and REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over [Since,Until),
-// a day per export.
+// a day per export. A live account is Paced: one read is the roster (an empty
+// window) or one day of transactions (TransactionsOnly).
 // It has no vault read. A termination appears only inside its window, so
 // absence means inactive-or-out-of-window, never unknown-to-CCBill. Rows carry
 // no currency: the matched local record denominates them, never a default. The
@@ -27,6 +28,9 @@ func NewCCBillFetcher(dl *ccbill.DataLinkClient) *CCBillFetcher {
 }
 
 func (f *CCBillFetcher) Name() string { return string(ProviderCCBill) }
+
+// Paced reports whether the account's DataLink answers once an hour.
+func (f *CCBillFetcher) Paced() bool { return f.DataLink.Paced() }
 
 func (f *CCBillFetcher) Capabilities() Capabilities {
 	return Capabilities{
@@ -46,17 +50,6 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		Capabilities: f.Capabilities(),
 	}
 
-	active, err := f.DataLink.FetchActiveMembers(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ccbill activemembers export: %w", err)
-	}
-	for _, rec := range active {
-		if params.SubscriptionID != "" && !rails.SameSubscription(string(ProviderCCBill), rec.SubscriptionID, params.SubscriptionID) {
-			continue
-		}
-		snap.Subscriptions = append(snap.Subscriptions, CCBillRemoteSubscription(rec))
-	}
-
 	// Transaction-type exports need a window; default to the trailing 30 days
 	// when the caller didn't bound the fetch.
 	until := params.Until
@@ -66,6 +59,22 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	since := params.Since
 	if since.IsZero() {
 		since = until.Add(-30 * 24 * time.Hour)
+	}
+	if f.Paced() && !params.TransactionsOnly && since.Before(until) {
+		return nil, fmt.Errorf("ccbill: a live account's DataLink answers once an hour, so its roster and its transactions are separate reads")
+	}
+
+	if !params.TransactionsOnly {
+		active, err := f.DataLink.FetchActiveMembers(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("ccbill activemembers export: %w", err)
+		}
+		for _, rec := range active {
+			if params.SubscriptionID != "" && !rails.SameSubscription(string(ProviderCCBill), rec.SubscriptionID, params.SubscriptionID) {
+				continue
+			}
+			snap.Subscriptions = append(snap.Subscriptions, CCBillRemoteSubscription(rec))
+		}
 	}
 
 	rows, err := f.DataLink.FetchTransactionExport(ctx, since, until, ccbill.AllDataLinkTxnTypes)

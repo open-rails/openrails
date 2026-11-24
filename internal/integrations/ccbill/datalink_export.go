@@ -112,8 +112,8 @@ func (r DataLinkExportRow) Amount() string {
 
 // FetchTransactionExport pulls the requested transaction-type batches over
 // [start, end), one request per day at most (dataLinkWindows), in CCBill's
-// MST clock. Rows of unrequested types are returned too, so nothing in the
-// export is dropped.
+// MST clock; a live account's range is one day at most. Rows of unrequested
+// types are returned too, so nothing in the export is dropped.
 func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end time.Time, types []DataLinkTxnType) ([]DataLinkExportRow, error) {
 	if len(types) == 0 {
 		return nil, fmt.Errorf("at least one transaction type is required")
@@ -130,8 +130,12 @@ func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end 
 		names = append(names, string(t))
 	}
 
+	windows := dataLinkWindows(start, end)
+	if c.Paced() && len(windows) > 1 {
+		return nil, fmt.Errorf("ccbill datalink: a live account answers one day an hour; read [%s, %s) a day at a time", start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
+	}
 	var rows []DataLinkExportRow
-	for _, window := range dataLinkWindows(start, end) {
+	for _, window := range windows {
 		formData := url.Values{}
 		formData.Set("transactionTypes", strings.Join(names, ","))
 		formData.Set("startTime", window[0].In(dataLinkLocation).Format(dataLinkTimeFormat))
