@@ -484,12 +484,12 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		engine.Notifier = w.Alerts // nil-check: see runConvergence
 	}
 	// A run reads the account's whole roster, so one run covers the batch: a
-	// run per day would read the roster once per day of backlog. NMI selects
-	// transactions by last change, so any window's read reaches now: one run
-	// reads its backlog to the horizon once.
-	until := since.Add(w.batch())
-	if provider == reconcile.ProviderNMI || until.After(horizon) {
-		until = horizon
+	// run per day would read the roster once per day of backlog. Each run is
+	// a link of the chain to the horizon, its watermark advanced once read:
+	// NMI lists the transactions last changed in a link (reconcile.Chain).
+	until, chain := since.Add(w.batch()), reconcile.ChainLink
+	if !until.Before(horizon) {
+		until, chain = horizon, reconcile.ChainEnd
 	}
 	params := reconcile.RunParams{
 		Mode:                    mode,
@@ -499,6 +499,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		PSPCoverage:             coverage,
 		Since:                   since,
 		Until:                   until,
+		Chain:                   chain,
 		SkipSolanaPlanDiscovery: provider == reconcile.ProviderSolana && until.Before(horizon),
 	}
 	if provider == reconcile.ProviderStripe {
@@ -536,7 +537,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			return false
 		}
 		if qualifiedRecovery {
-			switch res.AppliedEventCoverage(provider, since, until) {
+			switch res.AppliedEventCoverage(provider, since, until, chain) {
 			case reconcile.CoverageApplied:
 			case reconcile.CoverageHeld:
 				out.Held++

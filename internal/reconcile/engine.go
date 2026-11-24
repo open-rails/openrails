@@ -120,6 +120,8 @@ type RunParams struct {
 	// TransactionsOnly reads the window's transactions without the roster
 	// (FetchParams.TransactionsOnly).
 	TransactionsOnly bool
+	// Chain places the window in a refresh's chain of windows to its horizon.
+	Chain Chain
 }
 
 // LocalMutationPolicy limits a pull's local mirror writes by mutation class.
@@ -436,6 +438,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		Reversals:               params.Reversals,
 		SkipSolanaPlanDiscovery: params.SkipSolanaPlanDiscovery,
 		TransactionsOnly:        params.TransactionsOnly,
+		Chain:                   params.Chain,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)

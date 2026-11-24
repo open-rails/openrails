@@ -279,7 +279,28 @@ type FetchParams struct {
 	// TransactionsOnly reads only the window's transactions, not the roster:
 	// a paced read (Paced) takes them a request at a time.
 	TransactionsOnly bool
+	// Chain places the window in a refresh's chain of windows to its horizon.
+	Chain Chain
 }
+
+// Chain places a window in the chain of windows a refresh reads to its
+// horizon, one job run each, its watermark advanced as each completes. NMI
+// selects transactions by last change, so a link lists the transactions last
+// changed in it, each with every action: a cursor, never an absence proof. A
+// transaction is listed by the link holding its last change when that link
+// is read; one changed after is read by a later link or the end.
+type Chain int
+
+const (
+	// Unchained is a window read alone (prune, a probe): the actions dated
+	// in it.
+	Unchained Chain = iota
+	// ChainLink ends before the horizon, at Until.
+	ChainLink
+	// ChainEnd reaches the horizon. NMI reads it through now, keeping every
+	// action dated up to Until, so it also holds every action dated in it.
+	ChainEnd
+)
 
 // isReversal is a refund, void or dispute: money going back, which no
 // deadline probe backstops.

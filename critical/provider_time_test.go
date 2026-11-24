@@ -299,6 +299,90 @@ func TestProviderTime(t *testing.T) {
 		}
 	})
 
+	t.Run("OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		start := *sub.CurrentPeriodStartsAt
+		sales := p.core.Sales()
+		require.Len(t, sales, 1)
+		// Four days unread; the sale settles on the second, moving its last
+		// change there.
+		a.clock.Advance(36 * time.Hour)
+		p.core.Settle(sales[0].TransactionID)
+		a.clock.Advance(60 * time.Hour)
+		rt := embedded.Graph(a.engine).Runtime
+		refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: a.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
+			StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, Batch: 24 * time.Hour, Overlap: time.Hour, Log: slog.Default()}
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		psp, mid := psps.Items[0].ID.UUID(), a.alpha.MerchantID().UUID()
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		scoped := func(fn func(context.Context, *gen.Queries) error) {
+			t.Helper()
+			require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error { return fn(ctx, database.Gen(ctx)) }))
+		}
+		scoped(func(ctx context.Context, q *gen.Queries) error {
+			return q.UpsertPSPAppliedRefreshWatermark(ctx, gen.UpsertPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: start})
+		})
+		applied := func() (at time.Time) {
+			scoped(func(ctx context.Context, q *gen.Queries) (err error) {
+				at, err = q.GetPSPAppliedRefreshWatermark(ctx, gen.GetPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
+				return err
+			})
+			return at.UTC()
+		}
+		run := func() error {
+			return refresh.Work(t.Context(), &river.Job[riverjobs.ProviderRefreshRequestArgs]{JobRow: &rivertype.JobRow{}, Args: riverjobs.ProviderRefreshRequestArgs{MerchantID: mid}})
+		}
+		// The refresh's window reads: those ending at a link's end, and
+		// those through now.
+		reads := func(from int) (bounded, open []string) {
+			for _, q := range p.core.Searches()[from:] {
+				if q.Get("start_date") == "" || q.Get("subscription_id") != "" || q.Get("transaction_id") != "" || q.Get("order_id") != "" {
+					continue
+				}
+				if q.Get("end_date") != "" {
+					bounded = append(bounded, q.Get("end_date"))
+				} else {
+					open = append(open, q.Get("start_date"))
+				}
+			}
+			return bounded, open
+		}
+		seen := len(p.core.Searches())
+
+		// A run reads one link, to its end, and keeps its progress.
+		var snooze *rivertype.JobSnoozeError
+		require.ErrorAs(t, run(), &snooze, "a backlog is read a link a run")
+		require.Equal(t, time.Second, snooze.Duration)
+		first := start.Add(23 * time.Hour)
+		require.True(t, applied().Equal(first), "applied through %s, want the first link's end %s", applied(), first)
+		bounded, open := reads(seen)
+		require.Equal(t, []string{first.Add(-time.Second).UTC().Format(nmi.QueryTimeFormat)}, bounded)
+		require.Empty(t, open)
+
+		runs := 1
+		for {
+			err := run()
+			runs++
+			if err == nil {
+				break
+			}
+			require.ErrorAs(t, err, &snooze)
+			require.Equal(t, time.Second, snooze.Duration)
+			require.Less(t, runs, 10)
+		}
+		require.GreaterOrEqual(t, runs, 4, "four days of day-long links")
+		require.WithinDuration(t, a.clock.Now().Add(-5*time.Minute), applied(), time.Second, "the chain reaches the horizon")
+		bounded, open = reads(seen)
+		require.Len(t, bounded, runs-1, "each link but the last ends at its end")
+		require.Len(t, open, 1, "the chain's end reads through now")
+		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, receipts.Items, 1, "the settled sale, read in the link of its last change, is booked once")
+	})
+
 	t.Run("OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing", func(t *testing.T) {
 		dataLink := ccbillmock.New()
 		t.Cleanup(dataLink.Close)

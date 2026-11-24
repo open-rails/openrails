@@ -2,6 +2,7 @@ package reconcile_test
 
 import (
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -52,5 +53,46 @@ func TestNMIWindowReadsAVoidByItsOwnDate(t *testing.T) {
 	}
 	if voidedIn(read(sold.Add(2*time.Hour), sold.Add(24*time.Hour))) {
 		t.Fatal("a window holding neither the sale nor the void read it")
+	}
+}
+
+// A transaction a page shift lists twice is read once.
+func TestNMIPagesReadAShiftedTransactionOnce(t *testing.T) {
+	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	gateway := nmimock.NewUnstarted(nmimock.Options{Clock: func() time.Time { return at.Add(time.Hour) }})
+	vault := gateway.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+	gateway.AddSale(nmimock.Sale{Vault: vault, Amount: "1.00", At: at, Hidden: true})
+	for range 1000 {
+		gateway.AddSale(nmimock.Sale{Vault: vault, Amount: "1.00", At: at})
+	}
+	// NMI indexes the first sale between the two pages: the second page
+	// starts one transaction earlier.
+	gateway.Intercept(func(r *http.Request) bool {
+		_ = r.ParseForm()
+		return r.Form.Get("page_number") == "1"
+	}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		gateway.Reveal()
+		return serve(), nil
+	})
+	client, err := nmi.NewAccountClient(slog.New(slog.DiscardHandler), uuid.New(), uuid.New(), "gateway", &config.NMIProviderSettings{SecurityKey: "key", Environment: config.EnvironmentTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.UseTransport(gateway.Transport())
+	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Hour), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, txn := range txns {
+		seen[txn.TransactionID]++
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("transaction %s read %d times", id, n)
+		}
+	}
+	if len(seen) != 1000 {
+		t.Fatalf("read %d transactions, want the 1000 the first page listed", len(seen))
 	}
 }

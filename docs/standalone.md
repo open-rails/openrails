@@ -1076,8 +1076,8 @@ It answers `job_id`, `merchant_id`, `river_schema` and `queue`; `already_queued`
 is true when a refresh for that merchant is outstanding. Track the job with
 `openrails workers` or in `river_job` ([River jobs](river-jobs.md#inspect-a-running-deployment)).
 The job reads each PSP in bounded windows from its watermark
-(`billing.psp_refresh_watermarks`) to five minutes ago (NMI in one window: its
-reads select by last change, so each reaches now anyway), NMI and Stripe with a
+(`billing.psp_refresh_watermarks`) to five minutes ago (NMI's by last change,
+the last reading through now), NMI and Stripe with a
 24-hour overlap for late indexing, and retries incomplete reads up to five
 attempts; a later request resumes from the saved watermarks. A watermark
 advances only after a complete read. Before each Stripe window a separate read

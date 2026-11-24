@@ -55,6 +55,7 @@ type Mock struct {
 	validations []*Validation
 	calls       []Call
 	reads       map[string]int
+	searches    []url.Values
 	odd         []string
 	recent      []recentCharge
 	partials    map[string]string
@@ -252,6 +253,9 @@ func (m *Mock) serve(r *http.Request, body []byte) *httptest.ResponseRecorder {
 		_, _ = rec.WriteString(m.directPost(form))
 	case routeQuery:
 		m.reads["query:"+form.Get("report_type")]++
+		if t := form.Get("report_type"); t == "" || t == "transaction" {
+			m.searches = append(m.searches, form)
+		}
 		m.query(rec, form)
 	default:
 		m.odd = append(m.odd, r.Method+" "+r.URL.Path)

@@ -85,8 +85,9 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		return nil, fmt.Errorf("nmi transaction query: %w", err)
 	}
 	snap.Transactions = txns
-	// Exhaustive for the window: its read has no end (fetchTransactions).
-	snap.Coverage.TransactionsExhaustive = true
+	// Exhaustive for the window when its read has no end (fetchTransactions);
+	// a chain link lists what changed in it.
+	snap.Coverage.TransactionsExhaustive = params.Chain != ChainLink
 	snap.Coverage.TransactionsPaginatedComplete = true
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
 	snap.Coverage.TransactionWindowUntil = timePtrIfSet(params.Until)
@@ -230,15 +231,24 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 // [Since, Until], and the voids made in it. NMI's start_date and end_date
 // select a transaction by its last change, which a later action (settlement,
 // refund, void) moves past any window: the read has no end and keeps, page by
-// page, the actions dated inside the window. No condition or action_type is
-// sent, so declines are included.
+// page, the actions dated inside the window. A chain link instead ends at
+// Until and keeps every action; the chain's end keeps every action dated up
+// to Until, whatever a link before it could not list (Chain). No condition or
+// action_type is sent, so declines are included.
 func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
 	if !params.Since.IsZero() {
 		filter.StartDate = params.Since.UTC().Format(nmi.QueryTimeFormat)
 	}
+	if params.Chain == ChainLink {
+		filter.EndDate = params.Until.UTC().Add(-time.Second).Format(nmi.QueryTimeFormat) // end_date is inclusive
+		return f.readTransactions(ctx, filter, nil)
+	}
 	since, until := params.Since.Truncate(time.Second), params.Until
+	if params.Chain == ChainEnd {
+		since = time.Time{}
+	}
 	in := func(at time.Time) bool {
-		return !at.IsZero() && (params.Since.IsZero() || !at.Before(since)) && (until.IsZero() || !at.After(until))
+		return !at.IsZero() && (since.IsZero() || !at.Before(since)) && (until.IsZero() || !at.After(until))
 	}
 	return f.readTransactions(ctx, filter, func(t nmi.QueryTransaction, txn RemoteTransaction) bool {
 		return in(txn.OccurredAt) || txn.Type == TransactionTypeVoid && in(nmiVoidedAt(t))
@@ -270,13 +280,15 @@ func nmiVoidedAt(t nmi.QueryTransaction) time.Time {
 
 // readTransactions pages the transaction report filter selects, each
 // transaction's actions normalized, keeping those keep accepts (nil keeps
-// every one) as each page arrives.
+// every one) as each page arrives. A transaction a page shift lists twice is
+// kept once, as the later page reports it.
 func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilter, keep func(nmi.QueryTransaction, RemoteTransaction) bool) ([]RemoteTransaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	filter.ResultLimit = nmiQueryPageLimit
-	var out []RemoteTransaction
+	var order []string
+	byID := map[string][]RemoteTransaction{}
 	seenFirst := map[string]bool{}
 	// Query API pages are zero-based; omitted page_number is the first page.
 	for page := 0; ; page++ {
@@ -301,15 +313,25 @@ func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilte
 			if err := qualifyNMITransaction(t); err != nil {
 				return nil, err
 			}
+			id := strings.TrimSpace(t.TransactionID)
+			if _, seen := byID[id]; !seen {
+				order = append(order, id)
+			}
+			kept := []RemoteTransaction{}
 			for _, txn := range normalizeNMITransaction(t) {
 				if keep == nil || keep(t, txn) {
-					out = append(out, txn)
+					kept = append(kept, txn)
 				}
 			}
+			byID[id] = kept
 		}
 		if len(parsed.Transactions) < nmiQueryPageLimit {
 			break
 		}
+	}
+	var out []RemoteTransaction
+	for _, id := range order {
+		out = append(out, byID[id]...)
 	}
 	return out, nil
 }

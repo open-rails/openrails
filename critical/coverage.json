@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 470,
+  "scenario_count": 471,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2177,6 +2177,11 @@
       "id": "OR-J38-S74",
       "journey": "J38",
       "name": "A CCBill rebill and the member's cancellation read in one export book the rebill, cancel, and keep access through the rebilled period's end"
+    },
+    {
+      "id": "OR-J15-S74",
+      "journey": "J15",
+      "name": "An NMI refresh backlog is read a link a run by last change, each ending at its end and advancing the applied watermark, the last through now; a sale settled in it is read in the link of its last change and booked once"
     },
     {
       "id": "OR-J39-S01",
