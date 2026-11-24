@@ -15,7 +15,7 @@ import (
 const getCreditGrant = `-- name: GetCreditGrant :one
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -58,6 +58,7 @@ type GetCreditGrantRow struct {
 	ExpiresAt     *time.Time
 	RevokedAt     *time.Time
 	CreatedAt     time.Time
+	Credited      int64
 	Remaining     int64
 	RevokeReason  *string
 	Spent         int64
@@ -83,6 +84,7 @@ func (q *Queries) GetCreditGrant(ctx context.Context, arg GetCreditGrantParams) 
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.CreatedAt,
+		&i.Credited,
 		&i.Remaining,
 		&i.RevokeReason,
 		&i.Spent,
@@ -350,7 +352,7 @@ func (q *Queries) InsertCreditGrantEvent(ctx context.Context, arg InsertCreditGr
 const listCreditGrantsByIDs = `-- name: ListCreditGrantsByIDs :many
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -394,6 +396,7 @@ type ListCreditGrantsByIDsRow struct {
 	ExpiresAt     *time.Time
 	RevokedAt     *time.Time
 	CreatedAt     time.Time
+	Credited      int64
 	Remaining     int64
 	RevokeReason  *string
 	Spent         int64
@@ -426,6 +429,7 @@ func (q *Queries) ListCreditGrantsByIDs(ctx context.Context, arg ListCreditGrant
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.CreatedAt,
+			&i.Credited,
 			&i.Remaining,
 			&i.RevokeReason,
 			&i.Spent,
@@ -455,26 +459,32 @@ WITH logged AS (
 )
 SELECT g.id AS credit_grant_id, g.merchant_id, g.customer_id, g.unit,
        g.units_credited AS stored_credited, COALESCE(l.credited, 0)::bigint AS logged_credited,
-       g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited
+       g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited,
+       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved
 FROM billing.credit_grants g
 LEFT JOIN logged l ON l.id = g.id
+CROSS JOIN LATERAL (SELECT billing.credit_grant_reservation(g.merchant_id, g.id) AS reserved) r
 WHERE g.merchant_id = $1::uuid
-  AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0))
+  AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0)
+       OR g.units_reserved <> r.reserved)
 ORDER BY g.unit, g.id
 `
 
 type ListCreditLotDriftsRow struct {
-	CreditGrantID  uuid.UUID
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Unit           string
-	StoredCredited int64
-	LoggedCredited int64
-	StoredDebited  int64
-	LoggedDebited  int64
+	CreditGrantID    uuid.UUID
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	Unit             string
+	StoredCredited   int64
+	LoggedCredited   int64
+	StoredDebited    int64
+	LoggedDebited    int64
+	StoredReserved   int64
+	ExpectedReserved int64
 }
 
-// Lots whose counters disagree with the legs on their balance account.
+// Lots whose counters disagree with the legs on their balance account, or
+// whose reservation with their payment's pending refunds.
 func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID) ([]ListCreditLotDriftsRow, error) {
 	rows, err := q.db.Query(ctx, listCreditLotDrifts, merchantID)
 	if err != nil {
@@ -493,6 +503,8 @@ func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID)
 			&i.LoggedCredited,
 			&i.StoredDebited,
 			&i.LoggedDebited,
+			&i.StoredReserved,
+			&i.ExpectedReserved,
 		); err != nil {
 			return nil, err
 		}
@@ -565,6 +577,68 @@ func (q *Queries) ListCreditLotsMissingDeposit(ctx context.Context, arg ListCred
 	return items, nil
 }
 
+const listCreditReservationDrifts = `-- name: ListCreditReservationDrifts :many
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants g
+WHERE g.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
+  AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+  AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
+ORDER BY g.created_at, g.id
+LIMIT $3::int
+`
+
+type ListCreditReservationDriftsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	RowLimit   int32
+}
+
+// Purchased lots whose reservation disagrees with their payment's pending
+// refunds. NULL customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
+func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCreditReservationDriftsParams) ([]BillingCreditGrant, error) {
+	rows, err := q.db.Query(ctx, listCreditReservationDrifts, arg.MerchantID, arg.CustomerID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCreditGrant
+	for rows.Next() {
+		var i BillingCreditGrant
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.CustomerID,
+			&i.AccountID,
+			&i.Unit,
+			&i.Units,
+			&i.FundingSource,
+			&i.PaidAmount,
+			&i.PaidCurrency,
+			&i.Source,
+			&i.SourceID,
+			&i.Invoker,
+			&i.ProductID,
+			&i.OrderLineID,
+			&i.PaymentID,
+			&i.Description,
+			&i.StartsAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.UnitsCredited,
+			&i.UnitsDebited,
+			&i.UnitsReserved,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCustomerCreditGrants = `-- name: ListCustomerCreditGrants :many
 
 WITH page AS (
@@ -580,7 +654,7 @@ WITH page AS (
 )
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -628,6 +702,7 @@ type ListCustomerCreditGrantsRow struct {
 	ExpiresAt     *time.Time
 	RevokedAt     *time.Time
 	CreatedAt     time.Time
+	Credited      int64
 	Remaining     int64
 	RevokeReason  *string
 	Spent         int64
@@ -670,6 +745,7 @@ func (q *Queries) ListCustomerCreditGrants(ctx context.Context, arg ListCustomer
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.CreatedAt,
+			&i.Credited,
 			&i.Remaining,
 			&i.RevokeReason,
 			&i.Spent,
@@ -861,16 +937,7 @@ func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendable
 
 const syncCreditGrantReservation = `-- name: SyncCreditGrantReservation :exec
 UPDATE billing.credit_grants g
-SET units_reserved = COALESCE((
-    SELECT LEAST(g.units, ceil(g.units::numeric
-        * GREATEST(LEAST(pending.amount, g.paid_amount - returned.amount), 0) / g.paid_amount))::bigint
-    FROM (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
-        WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
-          AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending,
-         (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
-        FROM billing.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
-    WHERE pending.amount > 0), 0)
+SET units_reserved = billing.credit_grant_reservation(g.merchant_id, g.id)
 WHERE g.merchant_id = $1::uuid AND g.payment_id = $2::uuid
   AND g.paid_amount IS NOT NULL
 `
@@ -880,9 +947,8 @@ type SyncCreditGrantReservationParams struct {
 	PaymentID  uuid.UUID
 }
 
-// What the pending refunds of a purchased lot's payment will withdraw: their
-// share of its paid amount, up to what no reversal returned, rounded up.
-// Written whenever a refund of the payment is reserved, released or settled.
+// Written whenever a refund of the lot's payment is reserved, released or
+// settled (billing.credit_grant_reservation).
 func (q *Queries) SyncCreditGrantReservation(ctx context.Context, arg SyncCreditGrantReservationParams) error {
 	_, err := q.db.Exec(ctx, syncCreditGrantReservation, arg.MerchantID, arg.PaymentID)
 	return err

@@ -19,6 +19,7 @@ import (
 //     conservation still holds; recomputing from ledger_transfers catches it.
 //  3. Lot drift: a credit lot's units_credited and units_debited are the legs
 //     on its balance account, kept by their own trigger; recomputed likewise.
+//     Its units_reserved is what its payment's pending refunds reserve.
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -56,22 +57,26 @@ func (d CounterDrift) String() string {
 		moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
 }
 
-// LotDrift is one credit lot whose counters disagree with its logged legs.
+// LotDrift is one credit lot whose counters disagree with its logged legs, or
+// whose reservation with its payment's pending refunds.
 type LotDrift struct {
-	CreditGrantID  uuid.UUID `json:"credit_grant_id"`
-	MerchantID     uuid.UUID `json:"merchant_id"`
-	CustomerID     uuid.UUID `json:"customer_id"`
-	Unit           string    `json:"unit"`
-	StoredCredited int64     `json:"stored_credited"`
-	LoggedCredited int64     `json:"logged_credited"`
-	StoredDebited  int64     `json:"stored_debited"`
-	LoggedDebited  int64     `json:"logged_debited"`
+	CreditGrantID    uuid.UUID `json:"credit_grant_id"`
+	MerchantID       uuid.UUID `json:"merchant_id"`
+	CustomerID       uuid.UUID `json:"customer_id"`
+	Unit             string    `json:"unit"`
+	StoredCredited   int64     `json:"stored_credited"`
+	LoggedCredited   int64     `json:"logged_credited"`
+	StoredDebited    int64     `json:"stored_debited"`
+	LoggedDebited    int64     `json:"logged_debited"`
+	StoredReserved   int64     `json:"stored_reserved"`
+	ExpectedReserved int64     `json:"expected_reserved"`
 }
 
 func (d LotDrift) String() string {
-	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%s logged=%s, debited stored=%s logged=%s",
+	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%s logged=%s, debited stored=%s logged=%s, reserved stored=%s expected=%s",
 		d.CreditGrantID, moneyutil.FormatAmount(d.StoredCredited, d.Unit), moneyutil.FormatAmount(d.LoggedCredited, d.Unit),
-		moneyutil.FormatAmount(d.StoredDebited, d.Unit), moneyutil.FormatAmount(d.LoggedDebited, d.Unit))
+		moneyutil.FormatAmount(d.StoredDebited, d.Unit), moneyutil.FormatAmount(d.LoggedDebited, d.Unit),
+		moneyutil.FormatAmount(d.StoredReserved, d.Unit), moneyutil.FormatAmount(d.ExpectedReserved, d.Unit))
 }
 
 // IntegrityReport is the combined result. Empty means every invariant holds.
@@ -103,8 +108,9 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 }
 
 // CheckLotDrift recomputes every credit lot's counters from the legs on its
-// balance account and returns the lots whose stored counters disagree. An
-// empty slice is the healthy answer.
+// balance account, and its reservation from its payment's pending refunds,
+// and returns the lots whose stored values disagree. An empty slice is the
+// healthy answer; convergence repairs a reservation.
 func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDrift, error) {
 	if merchant == uuid.Nil {
 		return nil, fmt.Errorf("ledger: merchant is required")
@@ -119,6 +125,7 @@ func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDr
 			CreditGrantID: row.CreditGrantID, MerchantID: row.MerchantID, CustomerID: row.CustomerID, Unit: row.Unit,
 			StoredCredited: row.StoredCredited, LoggedCredited: row.LoggedCredited,
 			StoredDebited: row.StoredDebited, LoggedDebited: row.LoggedDebited,
+			StoredReserved: row.StoredReserved, ExpectedReserved: row.ExpectedReserved,
 		})
 	}
 	return out, nil

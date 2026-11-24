@@ -26,6 +26,8 @@ func TestCreditLotCounters(t *testing.T) {
 	t.Run("OR-J22-S10/lot-view-equals-ledger-counters", lotViewEqualsLedger)
 	t.Run("OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding", refundedPackRaisesNoGrantFinding)
 	t.Run("OR-J40-S04/unposted-deposit-is-not-spendable", unpostedDepositNotSpendable)
+	t.Run("OR-J22-S13/lapsed-lots-expire-only-what-they-hold", lapsedLotsExpireWhatTheyHold)
+	t.Run("OR-J26-S61/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot", usageOrderChangeIsBought)
 }
 
 // lotMatchesLedger reads a lot and checks its counters against its legs on
@@ -46,6 +48,12 @@ func lotMatchesLedger(t *testing.T, w *world, id billing.CreditGrantID) billing.
 	require.Equal(t, loggedDebited, debited, "units_debited is the legs debiting the lot's balance")
 	require.Equal(t, units, lot.Amount)
 	require.Equal(t, credited-debited, lot.RemainingAmount)
+	require.LessOrEqual(t, debited, credited, "a lot never gives more than it holds")
+	if credited == 0 {
+		require.Equal(t, billing.CreditGrantPending, lot.State, "a lot none of whose units posted is pending")
+		require.Zero(t, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RemainingAmount)
+		return *lot
+	}
 	require.Equal(t, lot.Amount, lot.SpentAmount+lot.ExpiredAmount+lot.RevokedAmount+lot.RefundedAmount+lot.RemainingAmount,
 		"what left the lot and what is left make up what it delivered")
 	return *lot
@@ -70,7 +78,7 @@ func lotViewEqualsLedger(t *testing.T) {
 		Source: "critical", SourceID: "expiring", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}})
 	require.NoError(t, err)
 	revocable, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 4_000_000,
-		Source: "critical", SourceID: "revocable", FundingSource: billing.CreditFundingPromotion}})
+		Source: "critical", SourceID: "revocable", FundingSource: billing.CreditGrantFundingPromotion}})
 	require.NoError(t, err)
 	require.Equal(t, billing.CreditFundingPromotion, revocable[0].FundingSource)
 	require.Nil(t, revocable[0].PaidAmount, "a gift records no payment")
@@ -230,25 +238,25 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	require.Zero(t, lot.RemainingAmount, "no unit of the lot posted")
 	balance(t, w.alpha, customer, 1000, 0, 1000)
 
-	denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "beyond-posted", 1500)})
-	require.NoError(t, err)
-	require.False(t, denied[0].Allowed(), "the unposted lot funds nothing")
-	admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "spend", 400)})
+	// The whole posted balance is spent. Read from its face, the unposted lot
+	// would pay it first (it lapses first) and leave the posted lot claiming
+	// 1000 the balance no longer holds.
+	admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "spend", 1000)})
 	require.NoError(t, err)
 	require.True(t, admitted[0].Allowed())
-	spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("spend", 400)})
+	spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("spend", 1000)})
 	require.NoError(t, err)
 	require.NoError(t, spent[0].Err())
 	fleet := startFleet(t, w)
 	nextDay(w)
 	postDays(t, fleet)
-	balance(t, w.alpha, customer, 600, 0, 600)
+	balance(t, w.alpha, customer, 0, 0, 0)
 	lot = lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.SpentAmount, "the spend never draws a lot with no units")
-	require.Zero(t, lot.RemainingAmount)
 	paid := lotMatchesLedger(t, w, posted[0].ID)
-	require.EqualValues(t, 400, paid.SpentAmount)
-	require.EqualValues(t, 600, paid.RemainingAmount)
+	require.EqualValues(t, 1000, paid.SpentAmount, "the posted lot paid the spend")
+	require.Zero(t, paid.RemainingAmount)
+	require.Equal(t, billing.CreditGrantSpent, paid.State)
 
 	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
 	require.NoError(t, err)
@@ -260,5 +268,86 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	}
 	lot = lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.EqualValues(t, 5000, lot.RemainingAmount, "convergence posts the missing deposit, once")
-	balance(t, w.alpha, customer, 5600, 0, 5600)
+	require.Equal(t, billing.CreditGrantActive, lot.State)
+	balance(t, w.alpha, customer, 5000, 0, 5000)
+}
+
+// Two lots lapse before their expiry runs. Usage settled at the first lapse
+// is drawn from the lots live then, the second among them; the second then
+// expires only what is left of it.
+func lapsedLotsExpireWhatTheyHold(t *testing.T) {
+	w := newWorld(t)
+	meterForCapture(t, w)
+	customer := billing.CustomerID(uuid.New())
+	grant := func(id string, amount int64, expires *time.Time) billing.CreditGrantID {
+		lots, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: amount, Source: "critical", SourceID: id, ExpiresAt: expires}})
+		require.NoError(t, err)
+		return lots[0].ID
+	}
+	first := grant("first", 1000, ptr(w.clock.Now().Add(time.Hour)))
+	second := grant("second", 1000, ptr(w.clock.Now().Add(2*time.Hour)))
+	lasting := grant("lasting", 5000, nil)
+	admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "used", 1500)})
+	require.NoError(t, err)
+	require.True(t, admitted[0].Allowed())
+	captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("used", 1500)})
+	require.NoError(t, err)
+	require.NoError(t, captured[0].Err())
+	balance(t, w.alpha, customer, 5500, 1500, 7000)
+
+	// Both lapse with the usage unposted; the next admission expires them.
+	w.clock.Advance(3 * time.Hour)
+	next, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "after-both-lapsed", 1)})
+	require.NoError(t, err)
+	require.True(t, next[0].Allowed(), "%+v", next[0])
+	_, err = w.alpha.ReleaseAdmissions(t.Context(), []string{"after-both-lapsed"})
+	require.NoError(t, err)
+
+	early := lotMatchesLedger(t, w, first)
+	require.EqualValues(t, 1000, early.ExpiredAmount, "the first lot lapsed before the usage posted")
+	late := lotMatchesLedger(t, w, second)
+	require.EqualValues(t, 1000, late.SpentAmount, "the usage drew the second lot, live at the first lapse")
+	require.Zero(t, late.ExpiredAmount, "nothing was left of it to expire")
+	rest := lotMatchesLedger(t, w, lasting)
+	require.EqualValues(t, 500, rest.SpentAmount)
+	require.EqualValues(t, 4500, rest.RemainingAmount)
+	balance(t, w.alpha, customer, 4500, 0, 4500)
+	require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
+}
+
+// A usage order whose total is not a whole cent is charged the next cent up.
+// The order is paid, and the change is a lot bought at face.
+func usageOrderChangeIsBought(t *testing.T) {
+	a, p, customer := usageBillingWorld(t, true, false)
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "fractional-compute", DisplayName: "Fractional compute"})
+	require.NoError(t, err)
+	_, err = a.alpha.SetMeter(t.Context(), "fraction", billing.SetMeterParams{EventType: "fraction", ValueProperty: "units", Aggregation: catalog.AggregationSum,
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD",
+			PerUnit: &catalog.PerUnitPrice{UnitAmount: 1_234_567, DivideBy: 1}}})})
+	require.NoError(t, err)
+	input := usageInput(customer, "fractional-work", 3)
+	input.EventType = "fraction"
+	oneUsage(t, a.alpha, input)
+	fleet := startFleet(t, a.world)
+	runUsageDue(t, fleet)
+	a.clock.Advance(12 * time.Hour)
+	runUsageDue(t, fleet)
+	require.Eventually(t, func() bool {
+		rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+	}, 15*time.Second, 20*time.Millisecond)
+	order := oneUsageOrder(t, a, customer)
+	require.EqualValues(t, 3_703_701, order.Total)
+	require.Zero(t, order.Usage.AmountDue)
+	p.money(t, 1, 371)
+	lots, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer, Currency: "USD"})
+	require.NoError(t, err)
+	require.Len(t, lots.Items, 1)
+	change := lots.Items[0]
+	require.Equal(t, billing.CreditFundingPurchase, change.FundingSource)
+	require.EqualValues(t, 6_299, change.Amount, "$3.71 less the order's $3.703701")
+	require.NotNil(t, change.PaidAmount)
+	require.EqualValues(t, 6_299, *change.PaidAmount, "bought at face")
+	lotMatchesLedger(t, a.world, change.ID)
+	balance(t, a.alpha, customer, 6_299, 0, 6_299)
 }

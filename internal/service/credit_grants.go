@@ -22,8 +22,12 @@ var (
 	ErrCreditGrantHeld        = money.ErrCreditGrantHeld
 )
 
-// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do.
-const maxSourceIDBytes = 255
+// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do;
+// maxInvokerBytes its invoker, as credit_grants does.
+const (
+	maxSourceIDBytes = 255
+	maxInvokerBytes  = 512
+)
 
 // CreateCreditGrants grants 1 to billing.MaxBatchItems customers prepaid
 // credit, all or none, in one transaction; the answer is in request order.
@@ -57,8 +61,8 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		}
 		funding := credits.Grant
 		switch item.FundingSource {
-		case "", billing.CreditFundingGrant:
-		case billing.CreditFundingPromotion, billing.CreditFundingImport:
+		case "", billing.CreditGrantFundingGrant:
+		case billing.CreditGrantFundingPromotion, billing.CreditGrantFundingImport:
 			funding = credits.FundingSource(item.FundingSource)
 		default:
 			return nil, apperr.Invalidf("funding_source must be grant, promotion or import").WithParam(param("funding_source"))
@@ -80,6 +84,9 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		invoker := strings.TrimSpace(item.Invoker)
 		if invoker == "" {
 			invoker = customer.String()
+		}
+		if len(invoker) > maxInvokerBytes {
+			return nil, apperr.Invalidf("invoker must contain at most %d bytes", maxInvokerBytes).WithParam(param("invoker"))
 		}
 		var expiresAt *time.Time
 		if item.ExpiresAt != nil {

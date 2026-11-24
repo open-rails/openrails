@@ -29,17 +29,19 @@ var (
 	ErrCreditGrantHeld        = errors.New("credit_grant_held")
 )
 
-// creditGrantFromRow reads a lot's state from its columns: a lot with nothing
-// left ended by a refund when one withdrew from it, else by spending.
+// creditGrantFromRow reads a lot's state from its columns, in
+// billing.CreditGrantState's order.
 func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.CreditGrant {
 	state := billing.CreditGrantActive
 	switch {
 	case row.RevokedAt != nil:
 		state = billing.CreditGrantRevoked
+	case row.Credited == 0:
+		state = billing.CreditGrantPending
+	case row.Remaining <= 0 && row.Refunded > 0 && row.Spent == 0 && row.Expired == 0:
+		state = billing.CreditGrantRefunded
 	case row.ExpiresAt != nil && !row.ExpiresAt.After(now):
 		state = billing.CreditGrantExpired
-	case row.Remaining <= 0 && row.Refunded > 0:
-		state = billing.CreditGrantRefunded
 	case row.Remaining <= 0:
 		state = billing.CreditGrantSpent
 	case row.StartsAt.After(now):

@@ -61,22 +61,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 ORDER BY expires_at ASC, id ASC;
 
 -- name: SyncCreditGrantReservation :exec
--- What the pending refunds of a purchased lot's payment will withdraw: their
--- share of its paid amount, up to what no reversal returned, rounded up.
--- Written whenever a refund of the payment is reserved, released or settled.
+-- Written whenever a refund of the lot's payment is reserved, released or
+-- settled (billing.credit_grant_reservation).
 UPDATE billing.credit_grants g
-SET units_reserved = COALESCE((
-    SELECT LEAST(g.units, ceil(g.units::numeric
-        * GREATEST(LEAST(pending.amount, g.paid_amount - returned.amount), 0) / g.paid_amount))::bigint
-    FROM (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
-        WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
-          AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending,
-         (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
-        FROM billing.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
-    WHERE pending.amount > 0), 0)
+SET units_reserved = billing.credit_grant_reservation(g.merchant_id, g.id)
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.payment_id = sqlc.arg(payment_id)::uuid
   AND g.paid_amount IS NOT NULL;
+
+-- name: ListCreditReservationDrifts :many
+-- Purchased lots whose reservation disagrees with their payment's pending
+-- refunds. NULL customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
+SELECT * FROM billing.credit_grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
+  AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+  AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
+ORDER BY g.created_at, g.id
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCreditLotsMissingDeposit :many
 -- derive.grant_effect.missing for lots: no unit of the lot ever posted.
@@ -99,7 +100,8 @@ ORDER BY created_at, id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCreditLotDrifts :many
--- Lots whose counters disagree with the legs on their balance account.
+-- Lots whose counters disagree with the legs on their balance account, or
+-- whose reservation with their payment's pending refunds.
 WITH logged AS (
     SELECT t.credit_grant_id AS id,
            COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = g.account_id), 0)::bigint AS credited,
@@ -111,11 +113,14 @@ WITH logged AS (
 )
 SELECT g.id AS credit_grant_id, g.merchant_id, g.customer_id, g.unit,
        g.units_credited AS stored_credited, COALESCE(l.credited, 0)::bigint AS logged_credited,
-       g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited
+       g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited,
+       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved
 FROM billing.credit_grants g
 LEFT JOIN logged l ON l.id = g.id
+CROSS JOIN LATERAL (SELECT billing.credit_grant_reservation(g.merchant_id, g.id) AS reserved) r
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0))
+  AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0)
+       OR g.units_reserved <> r.reserved)
 ORDER BY g.unit, g.id;
 
 -- Customer support reads: the lot, its latest revocation, and what its legs
@@ -136,7 +141,7 @@ WITH page AS (
 )
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -163,7 +168,7 @@ ORDER BY g.created_at DESC, g.id DESC;
 -- The merchant's named credit grants, newest first.
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded
@@ -190,7 +195,7 @@ ORDER BY g.created_at DESC, g.id DESC;
 -- name: GetCreditGrant :one
 SELECT g.id, g.customer_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency,
        g.source_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.created_at,
-       (g.units_credited - g.units_debited)::bigint AS remaining,
+       g.units_credited AS credited, (g.units_credited - g.units_debited)::bigint AS remaining,
        revocation.reason AS revoke_reason,
        COALESCE(t.spent, 0)::bigint AS spent, COALESCE(t.expired, 0)::bigint AS expired,
        COALESCE(t.revoked, 0)::bigint AS revoked, COALESCE(t.refunded, 0)::bigint AS refunded

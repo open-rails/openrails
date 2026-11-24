@@ -559,9 +559,13 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 	if !funding.Valid() || funding == credits.Recurring {
 		return nil, fmt.Errorf("a deposit is a grant, a promotion, an import or change from a charge")
 	}
+	invoker := params.Invoker
+	if invoker == "" {
+		invoker = payerID.String() // the customer funded its own balance
+	}
 	issue := credits.Issue{
 		Customer: payerID, Unit: cur, Units: params.Amount, Funding: funding,
-		Source: params.Source, SourceID: derefStr(params.SourceID), Invoker: params.Invoker,
+		Source: params.Source, SourceID: derefStr(params.SourceID), Invoker: invoker,
 		Description: params.Description, StartsAt: now, ExpiresAt: expiresAt,
 	}
 	if funding.Paid() {

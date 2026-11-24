@@ -57,18 +57,29 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 // retry returns the existing grant (Replayed), one whose amount, currency,
 // expiry or funding source differs is ErrIdempotencyKeyReused. Source labels
 // where the credit came from; Invoker records who granted it (default: the
-// customer). FundingSource is grant (the default), promotion or import.
+// customer), at most 512 bytes.
 type CreateCreditGrantParams struct {
-	CustomerID    CustomerID          `json:"customer_id"`
-	Currency      catalog.Currency    `json:"currency"`
-	Amount        int64               `json:"amount,string"`
-	SourceID      string              `json:"source_id"`
-	Source        string              `json:"source"`
-	FundingSource CreditFundingSource `json:"funding_source,omitempty"`
-	Invoker       string              `json:"invoker,omitempty"`
-	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
-	Description   *string             `json:"description,omitempty"`
+	CustomerID    CustomerID         `json:"customer_id"`
+	Currency      catalog.Currency   `json:"currency"`
+	Amount        int64              `json:"amount,string"`
+	SourceID      string             `json:"source_id"`
+	Source        string             `json:"source"`
+	FundingSource CreditGrantFunding `json:"funding_source,omitempty"`
+	Invoker       string             `json:"invoker,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
+	Description   *string            `json:"description,omitempty"`
 }
+
+// CreditGrantFunding is where a granted lot's units came from: given by the
+// merchant (grant, the default; promotion) or brought from another system
+// (import). Bought lots come from orders.
+type CreditGrantFunding string
+
+const (
+	CreditGrantFundingGrant     CreditGrantFunding = "grant"
+	CreditGrantFundingPromotion CreditGrantFunding = "promotion"
+	CreditGrantFundingImport    CreditGrantFunding = "import"
+)
 
 // CreditFundingSource is where a credit grant's units came from: bought
 // (purchase, or recurring for a recurring price's cycle), given (grant,
@@ -83,18 +94,21 @@ const (
 	CreditFundingImport    CreditFundingSource = "import"
 )
 
-// CreditGrantState is where a credit grant stands.
+// CreditGrantState is where a credit grant stands. The first that holds
+// wins: revoked; pending, when none of its units has posted; refunded, when
+// refunds or chargebacks of its payment took all of it, whatever its expiry;
+// expired, past its expiry; spent, when nothing is left (what refunds took is
+// in RefundedAmount); scheduled, before it starts; else active.
 type CreditGrantState string
 
 const (
 	CreditGrantActive    CreditGrantState = "active"
 	CreditGrantScheduled CreditGrantState = "scheduled"
+	CreditGrantPending   CreditGrantState = "pending"
 	CreditGrantSpent     CreditGrantState = "spent"
 	CreditGrantExpired   CreditGrantState = "expired"
 	CreditGrantRevoked   CreditGrantState = "revoked"
-	// CreditGrantRefunded has nothing left because a refund or chargeback of
-	// its payment withdrew it.
-	CreditGrantRefunded CreditGrantState = "refunded"
+	CreditGrantRefunded  CreditGrantState = "refunded"
 )
 
 // CreditGrant is one lot of prepaid credit on a customer's balance, spent

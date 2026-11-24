@@ -124,6 +124,9 @@ func (l *Lots) Issue(ctx context.Context, in Issue) (gen.BillingCreditGrant, err
 	if in.SourceID != "" {
 		sourceID = &in.SourceID
 	}
+	if in.Description != nil && *in.Description == "" {
+		in.Description = nil
+	}
 	lot, err := l.q.InsertCreditGrant(ctx, gen.InsertCreditGrantParams{
 		MerchantID: l.merchant, CustomerID: in.Customer, AccountID: account, Unit: in.Unit, Units: in.Units,
 		FundingSource: string(in.Funding), PaidAmount: in.PaidAmount, PaidCurrency: in.PaidCurrency,
@@ -253,4 +256,11 @@ func (l *Lots) MissingDeposits(ctx context.Context, customer *uuid.UUID, limit i
 // (derive.grant_effect.excess). Repair = Materialize.
 func (l *Lots) UnretractedRevocations(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingCreditGrant, error) {
 	return l.q.ListRevokedCreditLotsWithUnits(ctx, gen.ListRevokedCreditLotsWithUnitsParams{MerchantID: l.merchant, CustomerID: customer, RowLimit: limit})
+}
+
+// ReservationDrifts are purchased lots whose reservation disagrees with their
+// payment's pending refunds (derive.credit_reservation.mismatch). Repair =
+// SyncReservation.
+func (l *Lots) ReservationDrifts(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingCreditGrant, error) {
+	return l.q.ListCreditReservationDrifts(ctx, gen.ListCreditReservationDriftsParams{MerchantID: l.merchant, CustomerID: customer, RowLimit: limit})
 }

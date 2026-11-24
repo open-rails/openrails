@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -510,9 +511,10 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
+			// Change the card paid beyond the order is credit bought at face.
 			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
-				CustomerID: &payer, Currency: currency, Amount: excess,
-				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason,
+				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
+				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
 			})
 			if err != nil {
 				return fmt.Errorf("credit collection rounding surplus: %w", err)

@@ -27,6 +27,24 @@ BEGIN
     IF n > 0 THEN
         RAISE EXCEPTION 'credit grants: % ledger transfers name a lot that is not theirs', n;
     END IF;
+    -- A lot drawn beyond what it credited (revoked or spent before its
+    -- deposit posted) breaks units_debited <= units_credited; nothing repairs it.
+    SELECT count(*) INTO n FROM billing.grants g
+    JOIN billing.ledger_accounts a ON a.merchant_id = g.merchant_id AND a.customer_id = g.customer_id
+        AND a.account_type = 'customer_balance' AND a.currency = g.currency
+    CROSS JOIN LATERAL (SELECT COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0) AS credited,
+                               COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0) AS debited
+        FROM billing.ledger_transfers t WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id) l
+    WHERE g.kind = 'credit' AND g.event = 'grant' AND l.debited > l.credited;
+    IF n > 0 THEN
+        RAISE EXCEPTION 'credit grants: % credit lots were drawn beyond what they credited (revoked or spent before their deposit posted); resolve them before this migration', n;
+    END IF;
+    SELECT count(*) INTO n FROM billing.grants
+    WHERE kind = 'credit' AND event = 'grant'
+      AND (octet_length(spec_snapshot -> 'deposit' ->> 'invoker') > 512 OR octet_length(spec_snapshot -> 'deposit' ->> 'source') > 512);
+    IF n > 0 THEN
+        RAISE EXCEPTION 'credit grants: % credit lots name an invoker or source longer than 512 bytes', n;
+    END IF;
 END;
 $$;
 
@@ -50,7 +68,7 @@ CREATE TABLE billing.credit_grants (
     starts_at timestamptz NOT NULL,
     expires_at timestamptz,
     revoked_at timestamptz,
-    units_credited bigint NOT NULL DEFAULT 0 CHECK (units_credited >= 0),
+    units_credited bigint NOT NULL DEFAULT 0,
     units_debited bigint NOT NULL DEFAULT 0 CHECK (units_debited >= 0),
     units_reserved bigint NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -62,6 +80,7 @@ CREATE TABLE billing.credit_grants (
     CONSTRAINT credit_grants_order_line_id_fkey FOREIGN KEY (merchant_id, order_line_id) REFERENCES billing.order_lines (merchant_id, id),
     CONSTRAINT credit_grants_paid_check CHECK ((paid_amount IS NULL) = (paid_currency IS NULL)),
     CONSTRAINT credit_grants_funding_check CHECK ((funding_source IN ('purchase', 'recurring')) = (paid_amount IS NOT NULL) OR funding_source = 'import'),
+    CONSTRAINT credit_grants_units_posted_check CHECK (units_debited <= units_credited),
     CONSTRAINT credit_grants_units_reserved_check CHECK (units_reserved BETWEEN 0 AND units),
     CONSTRAINT credit_grants_valid_window_check CHECK (expires_at IS NULL OR starts_at < expires_at)
 );
@@ -108,7 +127,7 @@ WHERE g.kind = 'credit' AND g.event = 'grant'
 
 INSERT INTO billing.credit_grants (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency,
     source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at,
-    units_credited, units_debited, units_reserved, created_at)
+    units_credited, units_debited, created_at)
 SELECT g.merchant_id, g.id, g.customer_id, a.id, g.currency, g.amount,
        CASE WHEN paid.amount IS NULL THEN 'grant'
             WHEN line.billing_interval_hours IS NOT NULL OR line.billing_interval_months IS NOT NULL THEN 'recurring'
@@ -118,13 +137,14 @@ SELECT g.merchant_id, g.id, g.customer_id, a.id, g.currency, g.amount,
        g.source_id,
        COALESCE(NULLIF(g.spec_snapshot -> 'deposit' ->> 'invoker', ''), g.customer_id::text),
        g.product_id, line.id, g.payment_id, NULLIF(g.reason, ''), g.starts_at, g.ends_at, revoke.starts_at,
-       COALESCE(legs.credited, 0), COALESCE(legs.debited, 0), COALESCE(reserved.units, 0), g.created_at
+       COALESCE(legs.credited, 0), COALESCE(legs.debited, 0), g.created_at
 FROM billing.grants g
 JOIN billing.ledger_accounts a ON a.merchant_id = g.merchant_id AND a.customer_id = g.customer_id
     AND a.account_type = 'customer_balance' AND a.currency = g.currency
--- A rounding credit is change from a charge: paid at face.
+-- A deposit labelled a purchase (a charge's change among them) was paid at
+-- face; credits_sold counted it so.
 CROSS JOIN LATERAL (SELECT COALESCE((g.spec_snapshot -> 'deposit' ->> 'paid_amount')::bigint,
-    CASE WHEN g.spec_snapshot -> 'deposit' ->> 'source' = 'invoice_rounding_purchase' THEN g.amount END) AS amount) paid
+    CASE WHEN g.source_type = 'purchase' THEN g.amount END) AS amount) paid
 LEFT JOIN LATERAL (SELECT l.id, l.billing_interval_hours, l.billing_interval_months
     FROM billing.payments p JOIN billing.order_lines l ON l.merchant_id = p.merchant_id AND l.order_id = p.order_id
     WHERE p.merchant_id = g.merchant_id AND p.id = g.payment_id AND l.product_id = g.product_id AND l.credit_grant IS NOT NULL
@@ -133,17 +153,6 @@ LEFT JOIN billing.grants revoke ON revoke.merchant_id = g.merchant_id AND revoke
 LEFT JOIN LATERAL (SELECT sum(t.amount) FILTER (WHERE t.credit_account_id = a.id) AS credited,
                           sum(t.amount) FILTER (WHERE t.debit_account_id = a.id) AS debited
     FROM billing.ledger_transfers t WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id) legs ON true
--- SyncCreditGrantReservation's share: the pending refunds' cash, up to what
--- of the lot's paid amount no reversal returned.
-LEFT JOIN LATERAL (SELECT LEAST(g.amount, ceil(g.amount::numeric
-        * GREATEST(LEAST(pending.amount, paid.amount - returned.amount), 0) / paid.amount))::bigint AS units
-    FROM (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
-        WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.currency
-          AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending,
-         (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
-        FROM billing.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
-    WHERE g.payment_id IS NOT NULL AND pending.amount > 0) reserved ON true
 WHERE g.kind = 'credit' AND g.event = 'grant';
 
 CREATE TABLE billing.credit_grant_events (
@@ -173,6 +182,25 @@ ALTER INDEX billing.ledger_transfers_grant_id_transfer_type_key RENAME TO ledger
 ALTER TABLE billing.ledger_transfers ADD CONSTRAINT ledger_transfers_credit_grant_id_fkey
     FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants (merchant_id, id);
 COMMENT ON COLUMN billing.ledger_transfers.credit_grant_id IS 'The credit lot the leg moves units of, or attributes money to. order_id and customer_id carry no foreign keys: the append-only ledger never blocks or cascades on business rows.';
+-- What the pending refunds of a purchased lot's payment will withdraw of it:
+-- their share of its paid amount, up to what no reversal returned, rounded up.
+CREATE FUNCTION billing.credit_grant_reservation(p_merchant uuid, p_lot uuid) RETURNS bigint
+LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+    SELECT COALESCE((
+        SELECT LEAST(g.units, ceil(g.units::numeric * GREATEST(LEAST(pending.amount, g.paid_amount - returned.amount), 0) / g.paid_amount))::bigint
+        FROM billing.credit_grants g
+        CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
+            WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
+              AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
+        CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
+            FROM billing.ledger_transfers t
+            WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
+        WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+          AND pending.amount > 0), 0)
+$$;
+UPDATE billing.credit_grants SET units_reserved = billing.credit_grant_reservation(merchant_id, id)
+WHERE payment_id IS NOT NULL AND paid_amount IS NOT NULL;
+
 COMMENT ON INDEX billing.ledger_transfers_operation_once_key IS 'The structural once-only key for EVERY transfer type. ledger.ApplyIdempotent inserts ON CONFLICT DO NOTHING against this index, so a replay is refused by the database rather than by a check-then-insert in Go. credit_grant_id is part of the identity (one debit per operation per FIFO lot); NULLS NOT DISTINCT because the owed/payment legs carry no lot and system transfers carry no customer.';
 
 -- The lots and their revocations moved; grants keeps access and history.

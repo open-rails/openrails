@@ -1093,6 +1093,9 @@
     "OR-J26-S58": [
       "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
     ],
+    "OR-J26-S61": [
+      "TestCreditLotCounters/OR-J26-S61/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
@@ -1295,6 +1298,9 @@
     ],
     "OR-J22-S11": [
       "TestCreditLotCounters/OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding"
+    ],
+    "OR-J22-S13": [
+      "TestCreditLotCounters/OR-J22-S13/lapsed-lots-expire-only-what-they-hold"
     ],
     "OR-J40-S04": [
       "TestCreditLotCounters/OR-J40-S04/unposted-deposit-is-not-spendable"

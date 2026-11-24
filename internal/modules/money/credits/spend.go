@@ -140,18 +140,15 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 	}
 	var expired int64
 	for _, lot := range lapsed {
-		remaining := lot.Remaining
-		posted, err := l.SettleRunningCharges(ctx, customer, unit, lot.ExpiresAt)
-		if err != nil {
+		if _, err := l.SettleRunningCharges(ctx, customer, unit, lot.ExpiresAt); err != nil {
 			return expired, fmt.Errorf("credits: settle running charges at lot %s: %w", lot.ID, err)
 		}
-		if posted {
-			current, err := l.Get(ctx, lot.ID)
-			if err != nil {
-				return expired, fmt.Errorf("credits: reload lot %s: %w", lot.ID, err)
-			}
-			remaining = Remaining(current)
+		// What settled at an earlier lot's lapse may have drawn this one.
+		current, err := l.Get(ctx, lot.ID)
+		if err != nil {
+			return expired, fmt.Errorf("credits: reload lot %s: %w", lot.ID, err)
 		}
+		remaining := Remaining(current)
 		if remaining <= 0 {
 			continue
 		}

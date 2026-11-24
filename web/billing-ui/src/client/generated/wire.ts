@@ -538,7 +538,7 @@ export type CreateCreditGrantParams = {
   amount?: string
   source_id?: string
   source?: string
-  funding_source?: "grant" | "import" | "promotion" | "purchase" | "recurring"
+  funding_source?: "grant" | "import" | "promotion"
   invoker?: string
   expires_at?: string
   description?: string
@@ -702,7 +702,7 @@ export type CreditGrant = {
   revoked_amount: string
   expired_amount: string
   refunded_amount: string
-  state: "active" | "expired" | "refunded" | "revoked" | "scheduled" | "spent"
+  state: "active" | "expired" | "pending" | "refunded" | "revoked" | "scheduled" | "spent"
   funding_source: "grant" | "import" | "promotion" | "purchase" | "recurring"
   paid_amount: string | null
   paid_currency: string | null

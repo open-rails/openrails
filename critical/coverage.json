@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 479,
+  "scenario_count": 481,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1784,6 +1784,11 @@
       "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
+      "id": "OR-J26-S61",
+      "journey": "J26",
+      "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
+    },
+    {
       "id": "OR-J37-S60",
       "journey": "J37",
       "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
@@ -2137,6 +2142,11 @@
       "id": "OR-J22-S11",
       "journey": "J22",
       "name": "A refunded credit pack's lot reads refunded and raises no refunded-source grant finding"
+    },
+    {
+      "id": "OR-J22-S13",
+      "journey": "J22",
+      "name": "Two credit lots that lapsed before their expiry ran expire only what each still holds after the usage settled at the first lapse"
     },
     {
       "id": "OR-J40-S04",

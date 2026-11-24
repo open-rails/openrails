@@ -692,6 +692,10 @@ pkg openrails/billing, const CreditFundingPurchase CreditFundingSource = "purcha
 pkg openrails/billing, const CreditFundingRecurring CreditFundingSource = "recurring"
 pkg openrails/billing, const CreditGrantActive CreditGrantState = "active"
 pkg openrails/billing, const CreditGrantExpired CreditGrantState = "expired"
+pkg openrails/billing, const CreditGrantFundingGrant CreditGrantFunding = "grant"
+pkg openrails/billing, const CreditGrantFundingImport CreditGrantFunding = "import"
+pkg openrails/billing, const CreditGrantFundingPromotion CreditGrantFunding = "promotion"
+pkg openrails/billing, const CreditGrantPending CreditGrantState = "pending"
 pkg openrails/billing, const CreditGrantRefunded CreditGrantState = "refunded"
 pkg openrails/billing, const CreditGrantRevoked CreditGrantState = "revoked"
 pkg openrails/billing, const CreditGrantScheduled CreditGrantState = "scheduled"
@@ -1655,7 +1659,7 @@ pkg openrails/billing, type CreateCreditGrantParams struct, Currency catalog.Cur
 pkg openrails/billing, type CreateCreditGrantParams struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type CreateCreditGrantParams struct, Description *string `json:"description,omitempty"`
 pkg openrails/billing, type CreateCreditGrantParams struct, ExpiresAt *time.Time `json:"expires_at,omitempty"`
-pkg openrails/billing, type CreateCreditGrantParams struct, FundingSource CreditFundingSource `json:"funding_source,omitempty"`
+pkg openrails/billing, type CreateCreditGrantParams struct, FundingSource CreditGrantFunding `json:"funding_source,omitempty"`
 pkg openrails/billing, type CreateCreditGrantParams struct, Invoker string `json:"invoker,omitempty"`
 pkg openrails/billing, type CreateCreditGrantParams struct, Source string `json:"source"`
 pkg openrails/billing, type CreateCreditGrantParams struct, SourceID string `json:"source_id"`
@@ -1793,6 +1797,7 @@ pkg openrails/billing, type CreditGrant struct, SourceID *string `json:"source_i
 pkg openrails/billing, type CreditGrant struct, SpentAmount int64 `json:"spent_amount,string"`
 pkg openrails/billing, type CreditGrant struct, StartsAt time.Time `json:"starts_at"`
 pkg openrails/billing, type CreditGrant struct, State CreditGrantState `json:"state"`
+pkg openrails/billing, type CreditGrantFunding string
 pkg openrails/billing, type CreditGrantID [16]byte
 pkg openrails/billing, type CreditGrantListParams struct
 pkg openrails/billing, type CreditGrantListParams struct, Currency catalog.Currency `form:"currency"`

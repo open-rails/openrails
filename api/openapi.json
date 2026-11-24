@@ -15970,9 +15970,7 @@
             "enum": [
               "grant",
               "import",
-              "promotion",
-              "purchase",
-              "recurring"
+              "promotion"
             ]
           },
           "invoker": {
@@ -16547,6 +16545,7 @@
             "enum": [
               "active",
               "expired",
+              "pending",
               "refunded",
               "revoked",
               "scheduled",
