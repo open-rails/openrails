@@ -353,7 +353,8 @@ func (g *gateState) capture(ctx context.Context, t *Ticket, u billing.CaptureUsa
 	actual := make([]take, len(t.takes))
 	t.view.mu.Lock()
 	for i, tk := range t.takes {
-		actual[i] = take{line: tk.line, span: tk.span, cost: costs[i]}
+		actual[i] = tk
+		actual[i].cost = costs[i]
 		tk.span.open = satAdd(tk.span.open, -tk.cost)
 		tk.span.unsent = satAdd(tk.span.unsent, costs[i])
 	}
@@ -403,7 +404,7 @@ func (g *gateState) record(ctx context.Context, item billing.LeaseUsage) error {
 				v.mu.Lock()
 				for i, l := range lines {
 					if s, ok := l.spanAt(now); ok {
-						takes = append(takes, take{line: l, span: s, cost: costs[i]})
+						takes = append(takes, takeOf(l, s, costs[i]))
 						s.unsent = satAdd(s.unsent, costs[i])
 					}
 				}
@@ -673,8 +674,7 @@ func (g *gateState) inFlightLocked(carried map[*queued]bool, prev int64) []billi
 			return
 		}
 		for _, t := range takes {
-			unit := t.line.line.Unit
-			k := key{v.key.customer, t.line.line.Limit, unit}
+			k := key{v.key.customer, t.limit, t.unit}
 			if _, ok := sum[k]; !ok {
 				order = append(order, k)
 			}

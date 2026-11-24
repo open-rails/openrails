@@ -84,11 +84,17 @@ type span struct {
 
 func (s *span) inFlight() int64 { return s.open + s.unsent + s.pinned }
 
-// take is what a decision took from one window of one limit.
+// take is what a decision took from one window of one limit; limit and
+// unit name it without the view's lock.
 type take struct {
-	line *lineState
-	span *span
-	cost int64
+	line        *lineState
+	span        *span
+	cost        int64
+	limit, unit string
+}
+
+func takeOf(l *lineState, s *span, cost int64) take {
+	return take{line: l, span: s, cost: cost, limit: l.line.Limit, unit: l.line.Unit}
 }
 
 // pinnedTake is a server-decided request's take, counted until a view from
@@ -254,7 +260,7 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, of
 		}
 		c := costs[i]
 		awp := l.line.Overrun == catalog.OverrunAdmitWhilePositive
-		takes[i] = take{line: l, span: s, cost: c}
+		takes[i] = takeOf(l, s, c)
 		r := l.room(s, now, set.CreditLine, capacityOf(set, l.line.Limit))
 		if awp && r <= 0 || !awp && r < c {
 			if out.verdict != verdictRefuse {
@@ -377,6 +383,9 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 	}
 	v.pinned = kept
 	v.probing = false
+	if v.used.IsZero() {
+		v.used = sent
+	}
 	for _, nl := range view.Limits {
 		l := v.lines[nl.Limit]
 		if l == nil {
