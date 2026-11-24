@@ -32,8 +32,8 @@ func UsageEstimate(est billing.UsageEstimate) ([]byte, error) {
 }
 
 // PinnedCards are the rate cards in force for an event type in a currency,
-// as a hold pins them; nil when none prices it. The cards of a lease's hold
-// are compared with these: a hold whose cards changed is issued again.
+// as a hold pins them and a gate's view prices with them; nil when none
+// prices it.
 func (s *MoneyService) PinnedCards(ctx context.Context, q *gen.Queries, eventType, currency string) ([]byte, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

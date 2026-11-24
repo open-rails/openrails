@@ -483,9 +483,8 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 }
 
 // SettleUsageTx settles a priced batch in the caller's transaction: the
-// accruals, rollups and per-minute spend take its amounts, live lease holds
-// give up what their usage took, and the limits take it in full, never
-// clamped.
+// accruals, rollups and per-minute spend take its amounts, and the limits
+// take it in full, never clamped.
 func (s *MoneyService) SettleUsageTx(ctx context.Context, q *gen.Queries, b *UsageBatch) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

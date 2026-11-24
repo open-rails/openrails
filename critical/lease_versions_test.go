@@ -441,7 +441,7 @@ func TestLeaseVersions(t *testing.T) {
 				lease := newLease()
 				for round := range 5 {
 					// Each gate settles, reports and asks for its customers in its
-					// own order, while lease holds and admissions lock them.
+					// own order, while lease-owned admissions lock them.
 					params := billing.SyncLeasesParams{LeaseID: lease}
 					for i := range customers {
 						c := customers[(g+i+round)%len(customers)]
