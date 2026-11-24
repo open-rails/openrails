@@ -943,45 +943,91 @@ func TestGate(t *testing.T) {
 		applyLimits(t, a.alpha, anchoredPlan)
 		sub := buyAnchoredMembership(t, a, provider)
 		customer := sub.CustomerID
-		client, wire := gateRemote(t, a)
-		var mu sync.Mutex
-		var commitments []billing.LimitCommitment
-		wire.watch = func(p billing.SyncLeasesParams, _ *billing.SyncLeasesResult) bool {
-			mu.Lock()
-			defer mu.Unlock()
-			for _, c := range p.Committed {
-				for _, l := range c.Limits {
-					if c.CustomerID == customer && l.Limit == "tick" {
-						commitments = append(commitments, l)
-					}
-				}
-			}
-			return false
-		}
-		g := newGate(t, client, openrails.GateDeps{Redis: criticalRedis(t)})
-		open := gateAdmit(t, g, gateWork(customer, "open", 30))
 		tick := customerLimit(t, a.alpha, customer, "tick")
 		require.NotNil(t, tick.WindowStartsAt)
 		start := *tick.WindowStartsAt
 		require.True(t, start.Equal(sub.StartedAt), "the window %s tiles from the subscription's start %s", start, sub.StartedAt)
 		require.NotZero(t, start.Nanosecond(), "the window starts within a second")
 		end := start.Add(3 * time.Minute)
+		// The server's clock moves to the window's last seconds before the
+		// gate's lease exists; the gate's own clock stays early in it.
+		a.clock.Advance(end.Add(-8 * time.Second).Sub(a.clock.Now()))
 
-		// The server's clock walks to the window's last second, the lease
-		// syncing on the way, then past its end; the gate's clock stays in
-		// it, and the ticket stays open across the rollover.
-		for last := end.Add(-time.Second); a.clock.Now().Before(last); {
-			a.clock.Advance(min(8*time.Second, last.Sub(a.clock.Now())))
-			gateFlush(t, g)
+		client, wire := gateRemote(t, a)
+		var mu sync.Mutex
+		var lease billing.LeaseID
+		live, dead, others := 0, 0, 0
+		var commitments []billing.LimitCommitment
+		wire.watch = func(p billing.SyncLeasesParams, out *billing.SyncLeasesResult) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			if lease.IsZero() {
+				lease = p.LeaseID
+			}
+			switch {
+			case p.LeaseID != lease:
+				others++
+			case !out.Lease.Live:
+				dead++
+			default:
+				live++
+				for _, c := range p.Committed {
+					for _, l := range c.Limits {
+						if c.CustomerID == customer && l.Limit == "tick" {
+							commitments = append(commitments, l)
+						}
+					}
+				}
+			}
+			return false
 		}
+		// syncs waits for n more live syncs of the lease; the first may have
+		// read the server's clock before the caller moved it.
+		syncs := func(n int, why string) {
+			t.Helper()
+			mu.Lock()
+			want := live + n
+			mu.Unlock()
+			require.Eventually(t, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return live >= want
+			}, 20*time.Second, 20*time.Millisecond, why)
+		}
+		g := newGate(t, client, openrails.GateDeps{Redis: criticalRedis(t)})
+		open := gateAdmit(t, g, gateWork(customer, "open", 30))
+		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return len(commitments) > 0
+		}, 20*time.Second, 20*time.Millisecond, "a sync carries the open ticket's commitment")
+		mu.Lock()
+		id := lease
+		mu.Unlock()
+
+		// Each step stays inside the lease's life.
+		a.clock.Advance(7 * time.Second)
+		syncs(2, "the lease syncs at the window's last second")
 		a.clock.Advance(2 * time.Second)
-		for i := range 3 {
-			gateFlush(t, g)
-			require.GreaterOrEqual(t, windowHeld(t, a, customer, "tick", start), int64(30),
-				"sync %d past the window's end: the open ticket's take stays held in its own window", i+1)
+		// Past the end, one sync issues the next window's hold and answers
+		// this one empty; the next reports it applied, and the server keeps
+		// of it what the commitment it places there holds.
+		syncs(3, "the lease syncs past the window's end and applies the answer")
+		require.NotEmpty(t, leaseWindowHeld(t, a, id, customer, "tick", end), "the server issued the next window's hold, which a misplaced commitment lands on")
+		for i := range 2 {
+			if i > 0 {
+				syncs(1, "the lease syncs again")
+			}
+			held := leaseWindowHeld(t, a, id, customer, "tick", start)
+			total := int64(0)
+			for _, h := range held {
+				total += h
+			}
+			require.GreaterOrEqual(t, total, int64(30), "the open ticket's take stays held in its own window, by the lease's holds %v", held)
 		}
 		mu.Lock()
-		require.NotEmpty(t, commitments)
+		require.Zero(t, others, "the gate kept one lease")
+		require.Zero(t, dead, "the lease lived throughout")
 		for _, c := range commitments {
 			require.NotNil(t, c.WindowStartsAt)
 			require.True(t, c.WindowStartsAt.Equal(start), "a commitment names %s; its window starts %s", c.WindowStartsAt, start)
@@ -1018,15 +1064,23 @@ func buyAnchoredMembership(t *testing.T, a *authorityWorld, provider *providerLe
 	return sub
 }
 
-// windowHeld is what the customer's open holds set aside of the limit in
-// the window that starts at start.
-func windowHeld(t *testing.T, a *authorityWorld, customer billing.CustomerID, limit string, start time.Time) int64 {
+// leaseWindowHeld is what each open hold of the lease sets aside of the
+// customer's limit in the window that starts at start.
+func leaseWindowHeld(t *testing.T, a *authorityWorld, lease billing.LeaseID, customer billing.CustomerID, limit string, start time.Time) map[uuid.UUID]int64 {
 	t.Helper()
-	var held int64
-	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT coalesce(sum(p.held), 0)::bigint FROM "+pgx.Identifier{a.schema, "limit_hold_parts"}.Sanitize()+" p JOIN "+
+	rows, err := a.pool.Query(t.Context(), "SELECT h.id, p.held FROM "+pgx.Identifier{a.schema, "limit_hold_parts"}.Sanitize()+" p JOIN "+
 		pgx.Identifier{a.schema, "limit_holds"}.Sanitize()+" h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at"+
-		" WHERE p.merchant_id = $1 AND p.customer_id = $2 AND p.limit_key = $3 AND p.window_starts_at = $4 AND h.state = 'open'",
-		a.alpha.MerchantID().UUID(), customer.UUID(), limit, start).Scan(&held))
+		" WHERE p.merchant_id = $1 AND h.lease_id = $2 AND p.customer_id = $3 AND p.limit_key = $4 AND p.window_starts_at = $5 AND h.state = 'open'",
+		a.alpha.MerchantID().UUID(), lease.UUID(), customer.UUID(), limit, start)
+	require.NoError(t, err)
+	held := map[uuid.UUID]int64{}
+	for rows.Next() {
+		var id uuid.UUID
+		var n int64
+		require.NoError(t, rows.Scan(&id, &n))
+		held[id] = n
+	}
+	require.NoError(t, rows.Err())
 	return held
 }
 
