@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -110,27 +111,42 @@ func TestEveryFamilyNamesItsMerchant(t *testing.T) {
 	}
 }
 
-// Every public measure compiles, each statement scoped to the merchant.
+// Every public measure compiles, over time and not, each statement scoped to
+// the merchant and naming every placeholder it binds: PostgreSQL cannot type
+// one it does not.
 func TestEveryMeasureCompiles(t *testing.T) {
 	now := time.Date(2026, time.November, 15, 12, 0, 0, 0, time.UTC)
 	for _, m := range Measures {
 		if m.Internal {
 			continue
 		}
-		q := Query{Measures: []string{m.Name}, Range: &QueryRange{Last: "7d"}}
-		plan, verr := ValidateAt(&q, now)
-		if verr != nil {
-			t.Errorf("%s: %v", m.Name, verr)
-			continue
-		}
-		stmts, err := compile(plan, uuid.New(), nil)
-		if err != nil {
-			t.Errorf("%s: %v", m.Name, err)
-			continue
-		}
-		for _, st := range stmts {
-			if !regexp.MustCompile(`[a-z]+\.merchant_id = \$\d`).MatchString(st.sql) {
-				t.Errorf("%s: statement over %s is not scoped to its merchant:\n%s", m.Name, st.family, st.sql)
+		for _, timed := range []bool{false, true} {
+			q := Query{Measures: []string{m.Name}, Range: &QueryRange{Last: "7d"}}
+			if timed {
+				if m.Name == "cohort_retention" {
+					continue
+				}
+				q.By, q.Grain = []string{"time"}, "day"
+			}
+			plan, verr := ValidateAt(&q, now)
+			if verr != nil {
+				t.Errorf("%s (timed %v): %v", m.Name, timed, verr)
+				continue
+			}
+			stmts, err := compile(plan, uuid.New(), nil)
+			if err != nil {
+				t.Errorf("%s (timed %v): %v", m.Name, timed, err)
+				continue
+			}
+			for _, st := range stmts {
+				if !regexp.MustCompile(`[a-z]+\.merchant_id = \$\d`).MatchString(st.sql) {
+					t.Errorf("%s: statement over %s is not scoped to its merchant:\n%s", m.Name, st.family, st.sql)
+				}
+				for i := range st.args {
+					if !regexp.MustCompile(fmt.Sprintf(`\$%d\b`, i+1)).MatchString(st.sql) {
+						t.Errorf("%s (timed %v): statement over %s binds $%d and never names it:\n%s", m.Name, timed, st.family, i+1, st.sql)
+					}
+				}
 			}
 		}
 	}
