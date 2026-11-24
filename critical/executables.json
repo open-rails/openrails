@@ -1314,6 +1314,15 @@
     ],
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
+    ],
+    "OR-J01-S20": [
+      "TestRoutePermissions/OR-J01-S20/every-route-refuses-a-credential-without-its-permission"
+    ],
+    "OR-J07-S07": [
+      "TestDirectoryAuthority/OR-J07-S07/an-application-without-the-provisioning-permission-is-refused"
+    ],
+    "OR-J07-S08": [
+      "TestDirectoryAuthority/OR-J07-S08/erasures-spend-the-destructive-budget-and-name-their-actor"
     ]
   }
 }

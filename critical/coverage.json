@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 412,
+  "scenario_count": 415,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1054,6 +1054,16 @@
       "name": "Merchant customer reads retain billing state without hosted account-link storage"
     },
     {
+      "id": "OR-J07-S07",
+      "journey": "J07",
+      "name": "An application without the provisioning permission neither reads nor writes the directory"
+    },
+    {
+      "id": "OR-J07-S08",
+      "journey": "J07",
+      "name": "Directory erasures spend the destructive budget and name their actor"
+    },
+    {
       "id": "OR-J01-S12",
       "journey": "J01",
       "name": "Existing customer proof is read-only and never enrolls or requires recent sign-in"
@@ -1077,6 +1087,11 @@
       "id": "OR-J01-S16",
       "journey": "J01",
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
+    },
+    {
+      "id": "OR-J01-S20",
+      "journey": "J01",
+      "name": "Every catalog route refuses a bound credential without its permission and admits its root twin"
     },
     {
       "id": "OR-J22-S05",
