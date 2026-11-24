@@ -77,9 +77,10 @@ func (u UnscheduledLine) String() string {
 }
 
 // CheckSchedules returns the merchant's completed revenue lines without a
-// schedule: those that fail the books, then the warnings. An order in a
-// currency the books do not keep (a merchant's own unit) is never applied
-// and is not listed.
+// schedule: those that fail the books, then the warnings. A line priced in a
+// merchant's own unit has a schedule for each currency its lots' money
+// released into it; one with a release and no schedule fails, one paid only
+// with given units has nothing to schedule.
 func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failing, warnings []UnscheduledLine, err error) {
 	if merchant == uuid.Nil {
 		return nil, nil, fmt.Errorf("books: merchant is required")
@@ -93,6 +94,7 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 	// lines nothing more.
 	spent := map[uuid.UUID]bool{}
 	for _, r := range rows {
+		// A unit line is checked by its releases, below.
 		if CheckCurrency(r.Currency) != nil {
 			continue
 		}
@@ -116,6 +118,13 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 			continue
 		}
 		warnings = append(warnings, line)
+	}
+	released, err := gen.New(q).ListUnscheduledCreditReleases(ctx, merchant)
+	if err != nil {
+		return nil, nil, fmt.Errorf("books: schedule check: %w", err)
+	}
+	for _, r := range released {
+		failing = append(failing, UnscheduledLine{OrderID: r.OrderID, OrderLineID: r.OrderLineID, Currency: r.Currency, Amount: r.Amount, Reason: LineUnscheduled})
 	}
 	return failing, warnings, nil
 }
