@@ -82,5 +82,14 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	if n := len(receipt.Conflicts); n > 0 {
 		return fmt.Errorf("catalog document skipped %d object(s) an edit changed; --force-conflicts overwrites them", n)
 	}
+	var refused int
+	for _, w := range receipt.Warnings {
+		if w.Refused {
+			refused++
+		}
+	}
+	if refused > 0 {
+		return fmt.Errorf("catalog document refused %d price(s); fix them and apply again", refused)
+	}
 	return nil
 }

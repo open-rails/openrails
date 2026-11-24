@@ -58,8 +58,21 @@ func (r *CatalogApplicationReceipt) String() string {
 	for _, c := range r.Conflicts {
 		fmt.Fprintf(&b, "  %s\n", c)
 	}
+	var refused int
+	for _, w := range r.Warnings {
+		name := catalogObjectName(CatalogObjectPrice, w.Key, &w.ProductKey)
+		if w.Refused {
+			refused++
+			fmt.Fprintf(&b, "  refused %s: %s\n", name, w.Message)
+		} else {
+			fmt.Fprintf(&b, "  applied %s with warning: %s\n", name, w.Message)
+		}
+	}
 	if len(r.Conflicts) > 0 {
 		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.\n", len(r.Conflicts))
+	}
+	if refused > 0 {
+		fmt.Fprintf(&b, "%d price(s) refused: document not recorded as applied. Fix the file and apply again.\n", refused)
 	}
 	return b.String()
 }
