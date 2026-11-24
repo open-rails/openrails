@@ -174,7 +174,7 @@ Without ClickHouse every usage route stays mounted and answers 409 `event_store_
 
 `New` creates or upgrades the ClickHouse database as it does PostgreSQL's schemas, and records the store's identity in PostgreSQL when one first attaches. It refuses a ClickHouse with another identity, an empty or different one, under a database that has used one, and refuses to start without ClickHouse while PostgreSQL holds usage the ledger has not taken (`billing.ErrEventStoreRequired`, naming the merchants): only the store can post it. You open and close the connection.
 
-Usage posts to the ledger at each UTC month's end, in the billing pass, and before any other movement of a customer's balance ([usage](client.md#usage-and-running-charges)), so up to a month of usage lives only in ClickHouse: back it up nightly as you back up PostgreSQL ([backups](standalone.md#backup-and-restore)). While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
+Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass, and before any other movement of a customer's balance ([usage](client.md#usage-and-running-charges)), so up to a month of usage lives only in ClickHouse: back it up nightly as you back up PostgreSQL ([backups](standalone.md#backup-and-restore)). While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Merchants
 
