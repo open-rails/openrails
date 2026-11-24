@@ -316,3 +316,4 @@ is the delivery log, kept two years and with no body. Embedded,
 - Generated references: [routes](api/routes.md), [error codes](api/error-codes.md),
   [`api/openapi.json`](../api/openapi.json).
 - Runnable examples: [`examples/`](../examples/README.md).
+- [Architecture](architecture/README.md): how each system works and keeps its guarantees, for people changing or reviewing OpenRails.
