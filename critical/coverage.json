@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 456,
+  "scenario_count": 459,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2247,6 +2247,21 @@
       "id": "OR-J39-S25",
       "journey": "J39",
       "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
+    },
+    {
+      "id": "OR-J53-S01",
+      "journey": "J53",
+      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
+    },
+    {
+      "id": "OR-J53-S02",
+      "journey": "J53",
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+    },
+    {
+      "id": "OR-J53-S03",
+      "journey": "J53",
+      "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
     },
     {
       "id": "OR-J43-S01",

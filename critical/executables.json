@@ -1437,6 +1437,15 @@
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ],
+    "OR-J53-S01": [
+      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
+    ],
+    "OR-J53-S02": [
+      "TestReporting/OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency"
+    ],
+    "OR-J53-S03": [
+      "TestReporting/OR-J53-S03/money-never-sums-across-currencies"
+    ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
     ],
