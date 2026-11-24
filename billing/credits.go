@@ -54,56 +54,92 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 
 // CreateCreditGrantParams grants a customer prepaid credit. SourceID identifies the
 // grant per customer and must be reproducible across retries: an identical
-// retry returns the existing grant (Replayed), one whose amount, currency or
-// expiry differs is ErrIdempotencyKeyReused. Source labels where the money
-// came from; Invoker records who granted it (default: the customer).
+// retry returns the existing grant (Replayed), one whose amount, currency,
+// expiry or named funding source differs is ErrIdempotencyKeyReused; a retry
+// that names no funding source matches the grant's. Source labels
+// where the credit came from; Invoker records who granted it (default: the
+// customer), at most 512 bytes.
 type CreateCreditGrantParams struct {
-	CustomerID  CustomerID       `json:"customer_id"`
-	Currency    catalog.Currency `json:"currency"`
-	Amount      int64            `json:"amount,string"`
-	SourceID    string           `json:"source_id"`
-	Source      string           `json:"source"`
-	Invoker     string           `json:"invoker,omitempty"`
-	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-	Description *string          `json:"description,omitempty"`
+	CustomerID    CustomerID         `json:"customer_id"`
+	Currency      catalog.Currency   `json:"currency"`
+	Amount        int64              `json:"amount,string"`
+	SourceID      string             `json:"source_id"`
+	Source        string             `json:"source"`
+	FundingSource CreditGrantFunding `json:"funding_source,omitempty"`
+	Invoker       string             `json:"invoker,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
+	Description   *string            `json:"description,omitempty"`
 }
 
-// CreditGrantState is where a credit grant stands.
+// CreditGrantFunding is where a granted lot's units came from: given by the
+// merchant (grant, the default; promotion) or brought from another system
+// (import). Bought lots come from orders.
+type CreditGrantFunding string
+
+const (
+	CreditGrantFundingGrant     CreditGrantFunding = "grant"
+	CreditGrantFundingPromotion CreditGrantFunding = "promotion"
+	CreditGrantFundingImport    CreditGrantFunding = "import"
+)
+
+// CreditFundingSource is where a credit grant's units came from: bought
+// (purchase, or recurring for a recurring price's cycle), given (grant,
+// promotion) or brought from another system (import).
+type CreditFundingSource string
+
+const (
+	CreditFundingPurchase  CreditFundingSource = "purchase"
+	CreditFundingRecurring CreditFundingSource = "recurring"
+	CreditFundingGrant     CreditFundingSource = "grant"
+	CreditFundingPromotion CreditFundingSource = "promotion"
+	CreditFundingImport    CreditFundingSource = "import"
+)
+
+// CreditGrantState is where a credit grant stands. The first that holds
+// wins: revoked; pending, when none of its units has posted; refunded, when
+// refunds or chargebacks of its payment took all of it, whatever its expiry;
+// expired, past its expiry; spent, when nothing is left (what refunds took is
+// in RefundedAmount); scheduled, before it starts; else active.
 type CreditGrantState string
 
 const (
 	CreditGrantActive    CreditGrantState = "active"
 	CreditGrantScheduled CreditGrantState = "scheduled"
+	CreditGrantPending   CreditGrantState = "pending"
 	CreditGrantSpent     CreditGrantState = "spent"
 	CreditGrantExpired   CreditGrantState = "expired"
 	CreditGrantRevoked   CreditGrantState = "revoked"
-	// CreditGrantTerminated was superseded by a later grant.
-	CreditGrantTerminated CreditGrantState = "terminated"
+	CreditGrantRefunded  CreditGrantState = "refunded"
 )
 
 // CreditGrant is one lot of prepaid credit on a customer's balance, spent
-// first-in first-out. SourceType says what created it (admin for a merchant
-// grant, purchase, subscription); SourceID is that source's id. Replayed: a
-// create that found the grant already made.
+// soonest expiry first. Amount is what it delivered; RemainingAmount what is
+// left, and the spent, expired, revoked and refunded amounts what left it.
+// PaidAmount and PaidCurrency are what was paid for it, null for a gift.
+// SourceID is the funding's id: the payment that bought it, or the caller's
+// key. Replayed: a create that found the grant already made.
 type CreditGrant struct {
-	ID                CreditGrantID    `json:"id"`
-	CustomerID        CustomerID       `json:"customer_id"`
-	Currency          catalog.Currency `json:"currency"`
-	Amount            int64            `json:"amount,string"`
-	SpentAmount       int64            `json:"spent_amount,string"`
-	RemainingAmount   int64            `json:"remaining_amount,string"`
-	RevokedAmount     int64            `json:"revoked_amount,string"`
-	ExpiredAmount     int64            `json:"expired_amount,string"`
-	State             CreditGrantState `json:"state"`
-	SourceType        string           `json:"source_type"`
-	SourceID          *string          `json:"source_id"`
-	Description       *string          `json:"description"`
-	StartsAt          time.Time        `json:"starts_at"`
-	ExpiresAt         *time.Time       `json:"expires_at"`
-	CreatedAt         time.Time        `json:"created_at"`
-	TerminatedAt      *time.Time       `json:"terminated_at"`
-	TerminationReason *string          `json:"termination_reason"`
-	Replayed          bool             `json:"replayed"`
+	ID              CreditGrantID       `json:"id"`
+	CustomerID      CustomerID          `json:"customer_id"`
+	Currency        catalog.Currency    `json:"currency"`
+	Amount          int64               `json:"amount,string"`
+	SpentAmount     int64               `json:"spent_amount,string"`
+	RemainingAmount int64               `json:"remaining_amount,string"`
+	RevokedAmount   int64               `json:"revoked_amount,string"`
+	ExpiredAmount   int64               `json:"expired_amount,string"`
+	RefundedAmount  int64               `json:"refunded_amount,string"`
+	State           CreditGrantState    `json:"state"`
+	FundingSource   CreditFundingSource `json:"funding_source"`
+	PaidAmount      *int64              `json:"paid_amount,string"`
+	PaidCurrency    *catalog.Currency   `json:"paid_currency"`
+	SourceID        *string             `json:"source_id"`
+	Description     *string             `json:"description"`
+	StartsAt        time.Time           `json:"starts_at"`
+	ExpiresAt       *time.Time          `json:"expires_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	RevokedAt       *time.Time          `json:"revoked_at"`
+	RevokeReason    *string             `json:"revoke_reason"`
+	Replayed        bool                `json:"replayed"`
 }
 
 // CreditGrantListParams filters a customer's credit grants, newest first.
@@ -309,18 +345,16 @@ const CardVaultPlatform = "platform"
 // terms and privacy) and sender details; notices pick a URL by purpose
 // (MerchantProfile.NotificationURL), else support_url. AlertEmail receives
 // high and critical findings. UsageBilling is the default billing day (it
-// seeds new accounts only) and per-currency credit limits and minimum
-// invoices; CollectionThreshold, MonthlyFloor, BillingPeriodBoundary,
-// ArrearsGraceDays and ArrearsDelinquencyFloor govern when usage arrears are
-// billed and become delinquent. BillingPolicies are named spend policies and
+// seeds new accounts only) and per-currency credit limits, minimum invoices,
+// collection thresholds and delinquency floors; BillingPeriodBoundary and
+// ArrearsGraceDays govern when usage arrears are billed and become
+// delinquent. BillingPolicies are named spend policies and
 // BillingPolicyBindings decide which customers get which.
 // RepriceNoticeWindowDays is the notice before a price migration takes
 // effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
 	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
 	Profile                 *MerchantProfile      `json:"profile,omitempty"`
-	CollectionThreshold     *int64                `json:"collection_threshold,omitempty,string"`
-	MonthlyFloor            *int64                `json:"monthly_floor,omitempty,string"`
 	BillingPeriodBoundary   string                `json:"billing_period_boundary,omitempty"`
 	AlertEmail              *string               `json:"alert_email,omitempty"`
 	RepriceNoticeWindowDays *int                  `json:"reprice_notice_window_days,omitempty"`
@@ -328,10 +362,9 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int                  `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64                `json:"arrears_delinquency_floor,omitempty,string"`
-	PSPRouting              *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays     *int                  `json:"arrears_grace_days,omitempty"`
+	PSPRouting           *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -397,7 +430,8 @@ type BillingPolicy struct {
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
 	// override the merchant-wide invoice policy for payers bound here; nil defers
-	// to it. All three ride on any kind.
+	// to it. All three ride on any kind. DelinquencyAmountFloor is in
+	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
@@ -408,8 +442,13 @@ type BillingPolicy struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []BudgetWindow   `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  catalog.Currency `json:"policy_currency,omitempty"`
+	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
+	// PolicyCurrency is the currency of the policy's amounts and of a spend or
+	// bad-spend window that names none; absent, the request's. The outstanding
+	// cap and collection threshold bind only money in it, in admission and
+	// usage billing; windows and the accrual-rate cap are converted to the
+	// request's currency.
+	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
@@ -431,7 +470,8 @@ type BillingPolicyBinding struct {
 //
 // It governs renewals OpenRails collects: engine memberships on Stripe and
 // NMI, Solana pulls and NMI schedules; provider-owned Stripe and CCBill
-// subscriptions use the provider's dunning. The built-in tiers end inside one
+// subscriptions use the provider's dunning. Usage orders retry on its tiers
+// too, under the policy in force at each decline. The built-in tiers end inside one
 // cycle: under 4 days no retry; 4 to 27 days +1 and +2 days; 28 days and
 // longer +2, +4, +6 and +9 days, the fifth failure terminal. A failure older
 // than its last offset plus min(24h, cycle/2) is never charged: it parks

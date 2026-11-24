@@ -58,7 +58,7 @@ SELECT CASE p_cancel_type
     ELSE 'expired'
 END
 $$;
-COMMENT ON FUNCTION billing.mrr_cancel_cause(p_cancel_type text) IS 'The MRR cause of a cancellation by its cancel_type: expired covers dunning, a non-recoverable decline and a provider''s end.';
+COMMENT ON FUNCTION billing.mrr_cancel_cause(p_cancel_type text) IS 'The MRR cause of a cancellation by its cancel_type: expired covers dunning, a non-recoverable decline, a provider''s end and an abandoned first payment.';
 
 CREATE TABLE billing.subscription_mrr (
     merchant_id uuid NOT NULL,
@@ -724,6 +724,7 @@ BEGIN
             RAISE EXCEPTION 'unfinished billing restore receipts cannot commit' USING ERRCODE='23514';
         END IF;
         PERFORM billing.check_billing_restore_ledger(NEW.merchant_id);
+        PERFORM billing.check_billing_restore_credit_grants(NEW.merchant_id);
         PERFORM billing.check_billing_restore_mrr(NEW.merchant_id);
     END IF;
     RETURN NULL;
@@ -769,6 +770,8 @@ BEGIN
                   'catalog_product_limits',
                   'catalog_rate_cards',
                   'catalog_restore_receipts',
+                  'credit_grant_events',
+                  'credit_grants',
                   'custodians',
                   'customer_delinquency',
                   'customer_invoice_profiles',
@@ -844,9 +847,9 @@ BEGIN
                   'solana_pay_references',
                   'solana_subscriptions',
                   'stored_card_checks',
+                  'subscription_billing_changes',
                   'subscription_mrr',
                   'subscription_status_transitions',
-                  'subscription_billing_changes',
                   'subscription_verifications',
                   'subscriptions',
                   'usage_accruals',

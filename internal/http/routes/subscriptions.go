@@ -34,7 +34,7 @@ var subscriptionsRoutes = []Route{
 		Args: []any{billing.SubscriptionID{}},
 		Doc: "ResumeSubscription undoes a scheduled cancel before the paid period ends and returns the " +
 			"subscription.",
-		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("default_payment_method_required", "invalid_param", "payment_method_stale", "service_unavailable", "solana_rpc_unavailable", "subscription_not_found"), Handler: h(handlers.AdminResumeSubscription)},
+		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("default_payment_method_required", "invalid_param", "payment_method_stale", "provider_writes_disabled", "service_unavailable", "solana_rpc_unavailable", "subscription_not_found"), Handler: h(handlers.AdminResumeSubscription)},
 	{Method: POST, Path: "/v1/admin/subscriptions/{id}/change", Group: Admin, Auth: AuthMerchant, Name: "ChangeSubscription", Level: LevelUpdate, Limit: middleware.AdminOperationOffChannel, IdempotencyKey: true,
 		Args: []any{billing.SubscriptionID{}},
 		Doc: "ChangeSubscription moves a subscription to another price of its tier group, to other seats of a " +
@@ -80,7 +80,7 @@ var subscriptionsRoutes = []Route{
 	{Method: POST, Path: "/v1/me/subscriptions/{id}/cancel", Group: Customer, Auth: AuthCustomer,
 		Request: handlers.CustomerCancelSubscriptionParams{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "cancel_unsupported_on_rail", "invalid_param", "payment_in_progress", "provider_cancel_held", "service_unavailable", "solana_rpc_unavailable", "solana_transaction_refused", "subscription_not_active", "subscription_not_found"), Handler: h(handlers.CancelSubscription)},
 	{Method: POST, Path: "/v1/me/subscriptions/{id}/resume", Group: Customer, Auth: AuthCustomer,
-		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "default_payment_method_required", "invalid_param", "payment_method_stale", "service_unavailable", "solana_rpc_unavailable", "subscription_not_found"), Handler: h(handlers.ResumeSubscription)},
+		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "default_payment_method_required", "invalid_param", "payment_method_stale", "provider_writes_disabled", "service_unavailable", "solana_rpc_unavailable", "subscription_not_found"), Handler: h(handlers.ResumeSubscription)},
 	{Method: PUT, Path: "/v1/me/subscriptions/{id}/payment-method", Group: Customer, Auth: AuthCustomer,
 		Request: handlers.UpdateSubscriptionPaymentMethodBody{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "card_declined", "default_payment_method_required", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_method_stale", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.SetSubscriptionPaymentMethod)},
 	{Method: GET, Path: "/v1/me/subscriptions", Group: Customer, Auth: AuthCustomer,

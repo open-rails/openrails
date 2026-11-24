@@ -108,8 +108,8 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 	if r.CustomerID != nil {
 		out.CustomerID = billing.CustomerID(*r.CustomerID)
 	}
-	if r.GrantID != nil {
-		grant := billing.CreditGrantID(*r.GrantID)
+	if r.CreditGrantID != nil {
+		grant := billing.CreditGrantID(*r.CreditGrantID)
 		out.CreditGrantID = &grant
 	}
 	return out

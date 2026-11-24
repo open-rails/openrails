@@ -610,7 +610,7 @@ func TestMRR(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-10 * 24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		kept, gone := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())

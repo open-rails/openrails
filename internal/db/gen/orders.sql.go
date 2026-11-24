@@ -537,18 +537,18 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 
 const getOrderByIdempotencyKey = `-- name: GetOrderByIdempotencyKey :one
 SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded FROM billing.orders
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND idempotency_key = $3::text
+WHERE merchant_id = $1::uuid AND idempotency_key = $2::text
 `
 
 type GetOrderByIdempotencyKeyParams struct {
 	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
 	IdempotencyKey string
 }
 
+// The order a scoped create key made: unique per merchant, whichever customer
+// it was for.
 func (q *Queries) GetOrderByIdempotencyKey(ctx context.Context, arg GetOrderByIdempotencyKeyParams) (BillingOrder, error) {
-	row := q.db.QueryRow(ctx, getOrderByIdempotencyKey, arg.MerchantID, arg.CustomerID, arg.IdempotencyKey)
+	row := q.db.QueryRow(ctx, getOrderByIdempotencyKey, arg.MerchantID, arg.IdempotencyKey)
 	var i BillingOrder
 	err := row.Scan(
 		&i.MerchantID,

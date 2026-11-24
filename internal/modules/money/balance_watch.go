@@ -204,7 +204,7 @@ func (s *MoneyService) viewBalance(ctx context.Context, q *gen.Queries, bal *mod
 	}
 	v.lots = make([]creditLot, len(rows))
 	for i, row := range rows {
-		v.lots[i] = creditLot{remaining: row.Remaining, endsAt: row.EndsAt}
+		v.lots[i] = creditLot{remaining: row.Available, endsAt: row.ExpiresAt}
 	}
 	if v.lapsed, err = lapsedUnspent(ctx, q, bal, charges); err != nil {
 		return v, err
@@ -372,7 +372,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	}
 	// Lots that lapsed are settled in the order they lapsed; each posting
 	// stops at every 00:00 UTC on its way.
-	if _, err := txSvc.grantLedger(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now); err != nil {
+	if _, err := txSvc.creditLots(q, key.MerchantID).ExpireLapsedBy(ctx, key.CustomerID, currency, now); err != nil {
 		return err
 	}
 	charges, err := q.ListRunningChargesByCustomer(ctx, gen.ListRunningChargesByCustomerParams{MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: currency})

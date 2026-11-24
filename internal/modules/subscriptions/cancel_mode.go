@@ -120,6 +120,10 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if sub.CancelType != nil && *sub.CancelType == models.CancelTypeMerchant {
 		return false
 	}
+	// The provider ended it, or it never started: nothing is left to resume.
+	if sub.CancelType != nil && (*sub.CancelType == models.CancelTypeProvider || *sub.CancelType == models.CancelTypeAbandoned) {
+		return false
+	}
 	// A renewal OpenRails collects (engine, Solana pulls) resumes only from an
 	// ordinary user cancellation. Terminal failures, merchant revocation and
 	// chargebacks require a new decision.

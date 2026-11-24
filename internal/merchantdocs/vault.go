@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 )
 
@@ -68,7 +69,9 @@ func (v *VaultSource) Load(ctx context.Context, id billing.MerchantID) (Set, err
 	}
 	if doc.Found {
 		var m Merchant
-		if err := decodeStrict(doc.Data, &m); err != nil {
+		if retired, ok := retiredKey(doc.Data); ok {
+			set.Rejected[merchantDoc] = retired
+		} else if err := decodeStrict(doc.Data, &m); err != nil {
 			set.Rejected[merchantDoc] = err.Error()
 		} else {
 			set.Merchant, set.HasMerchant = Doc[Merchant]{Value: m, Revision: doc.Version, UpdatedAt: doc.Updated}, true
@@ -254,6 +257,16 @@ func unavailable(err error) error {
 
 // decodeStrict refuses an unknown field: a misspelled key would otherwise be
 // stored inert.
+// retiredKey names a key a merchant document no longer takes, with what
+// became of it: the strict decoder would refuse it as a typo.
+func retiredKey(data []byte) (string, bool) {
+	var probe map[string]any
+	if json.Unmarshal(data, &probe) != nil {
+		return "", false
+	}
+	return config.RetiredDeclarationKey(probe)
+}
+
 func decodeStrict(data []byte, into any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

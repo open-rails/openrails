@@ -1282,7 +1282,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation and counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |

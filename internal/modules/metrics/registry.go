@@ -319,14 +319,14 @@ var families = map[Family]familySpec{
 	},
 	FamGrants: {
 		Kind:     "flow",
-		From:     `billing.grants g`,
+		From:     `billing.credit_grants g`,
 		TimeExpr: `g.created_at`,
 		DimExprs: map[string]string{
-			"currency":   `g.currency`,
+			"currency":   `g.unit`,
 			"product_id": `COALESCE('prod_' || g.product_id::text, '')`,
 			"customer":   `g.customer_id::text`,
 		},
-		BaseWhere: `g.kind = 'credit' AND g.event = 'grant' AND g.source_type = 'purchase'`,
+		BaseWhere: `g.funding_source IN ('purchase', 'recurring')`,
 	},
 	FamUsage: {
 		Kind:     "flow",
@@ -812,16 +812,16 @@ var declared = []Measure{
 	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: UnitMoney, Direction: UpIsGood,
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
-		Expr:        `COALESCE(SUM(g.amount), 0)::bigint`,
+		Expr:        `COALESCE(SUM(g.units), 0)::bigint`,
 		Dims:        creditDims},
 	{Name: "credit_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COUNT(*)`,
 		Dims: creditDims},
 	{Name: "repeat_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(CASE WHEN EXISTS (
-			SELECT 1 FROM billing.grants g2
+			SELECT 1 FROM billing.credit_grants g2
 			WHERE g2.merchant_id = g.merchant_id AND g2.customer_id = g.customer_id
-			  AND g2.kind = 'credit' AND g2.event = 'grant' AND g2.source_type = 'purchase'
+			  AND g2.funding_source IN ('purchase', 'recurring')
 			  AND g2.created_at < g.created_at
 		) THEN 1 ELSE 0 END), 0)::bigint`,
 		Dims: creditDims},

@@ -378,14 +378,14 @@ func (s *Service) GetForCustomer(ctx context.Context, customerID, id uuid.UUID) 
 	return order, nil
 }
 
-// ByIdempotencyKey is customer's order a scoped create key made, nil when
-// none.
-func (s *Service) ByIdempotencyKey(ctx context.Context, customerID uuid.UUID, key string) (*Order, error) {
+// ByIdempotencyKey is the order a scoped create key made, for any customer;
+// nil when none.
+func (s *Service) ByIdempotencyKey(ctx context.Context, key string) (*Order, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.DB.Gen(ctx).GetOrderByIdempotencyKey(ctx, gen.GetOrderByIdempotencyKeyParams{MerchantID: mid.UUID(), CustomerID: customerID, IdempotencyKey: key})
+	row, err := s.DB.Gen(ctx).GetOrderByIdempotencyKey(ctx, gen.GetOrderByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
 	if db.IsNotFound(err) {
 		return nil, nil
 	}

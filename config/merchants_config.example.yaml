@@ -36,10 +36,10 @@ merchants:
     usage_billing:
       billing_day: 13
       currencies:
-        - {currency: USD, credit_limit: 100000000, minimum_invoice_amount: 1000000}
+        - {currency: USD, credit_limit: 100000000, minimum_invoice_amount: 1000000, delinquency_floor: 5000000}
     # Arrears delinquency: days past due_at before new spend is refused
     # and the host is signalled to shut off. Default 14; the amount floor
-    # (arrears_delinquency_floor) defaults to monthly_floor. See
+    # is each currency's delinquency_floor (default one unit of it). See
     # docs/client.md.
     arrears_grace_days: 7
 
