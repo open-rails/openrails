@@ -74,9 +74,10 @@ func CustomerNotificationOptional(kind string, data NotificationData) bool {
 // timestamps are RFC3339 instants — the same rules as every other wire shape,
 // so the JSONB round-trip never touches a float.
 type NotificationData struct {
-	// Reason qualifies premium_ended (user_cancel, admin, expired, refund,
-	// chargeback, non_recoverable, access_ended) and
-	// order_collection_stopped (schedule_exhausted, non_recoverable).
+	// Reason qualifies premium_ended and subscription_canceled (user_cancel,
+	// admin, expired, non_recoverable, refund, chargeback, rail_cancel,
+	// access_ended, unknown) and order_collection_stopped
+	// (schedule_exhausted, non_recoverable).
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself
@@ -104,7 +105,8 @@ type NotificationData struct {
 	EffectiveAt      *time.Time       `json:"effective_at,omitempty"`
 
 	// Renewal receipt (premium_renewed): the renewed period, and whether it
-	// applied a scheduled downgrade.
+	// applied a scheduled downgrade. A start (premium_started) has its first
+	// period and, when it was charged, Amount.
 	PeriodStartsAt   *time.Time `json:"period_starts_at,omitempty"`
 	PeriodEndsAt     *time.Time `json:"period_ends_at,omitempty"`
 	DowngradeApplied bool       `json:"downgrade_applied,omitempty"`
@@ -140,7 +142,10 @@ type NotificationData struct {
 	LowBalanceAmount *int64     `json:"low_balance_amount,omitempty,string"`
 	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
 
-	// Rail context on payment_method_failed.
+	// Rail context on payment_method_failed. PSPID is the account a decline
+	// came from when the fact names no payment, order or subscription that
+	// does (a declined checkout).
+	PSPID              PSPID  `json:"psp_id,omitzero"`
 	Rail               Rail   `json:"rail,omitempty"`
 	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 	TransactionID      string `json:"transaction_id,omitempty"`
@@ -151,11 +156,17 @@ type NotificationData struct {
 
 	// One-off purchase receipt (one_off_purchase_completed): what was bought,
 	// the amount paid, the payment and, for an order, the order and its
-	// number. Delivery addresses belong to the consuming application.
-	Amount        *int64    `json:"amount,omitempty,string"`
-	ProductName   string    `json:"product_name,omitempty"`
-	PaymentMethod string    `json:"payment_method,omitempty"`
-	PaymentID     PaymentID `json:"payment_id,omitzero"`
-	OrderID       OrderID   `json:"order_id,omitzero"`
-	OrderNumber   int64     `json:"order_number,omitempty"`
+	// number. A refund receipt (refund_completed) has the same fields:
+	// Amount is what was refunded, PaymentID the refund and
+	// RefundedPaymentID the charge it reverses; Voided is a charge canceled
+	// before it settled, so the customer was not charged. Delivery addresses
+	// belong to the consuming application.
+	Amount            *int64    `json:"amount,omitempty,string"`
+	ProductName       string    `json:"product_name,omitempty"`
+	PaymentMethod     string    `json:"payment_method,omitempty"`
+	PaymentID         PaymentID `json:"payment_id,omitzero"`
+	RefundedPaymentID PaymentID `json:"refunded_payment_id,omitzero"`
+	Voided            bool      `json:"voided,omitempty"`
+	OrderID           OrderID   `json:"order_id,omitzero"`
+	OrderNumber       int64     `json:"order_number,omitempty"`
 }

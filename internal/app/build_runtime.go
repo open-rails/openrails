@@ -26,6 +26,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
@@ -45,6 +46,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
@@ -87,6 +89,7 @@ type runtimeOverrides struct {
 	Redis                redis.UniversalClient
 	Clock                clockwork.Clock
 	EmailSender          config.EmailSender
+	MessageRenderer      func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
 	UserInfo             userinfo.Lookup
 	Notifications        *config.NotificationChannel
 	Migrations           fs.FS
@@ -276,8 +279,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// One sender for all of OpenRails' email: the host's.
 	var sender config.EmailSender
+	var renderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
 	if overrides != nil {
-		sender = overrides.EmailSender
+		sender, renderer = overrides.EmailSender, overrides.MessageRenderer
 	}
 	// Operator alerts and AuthKit still use the deployment's sender.
 	alertEmailSender := alerting.NewMailSender(sender, merchantconfig.NewStore(database))
@@ -506,6 +510,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
+	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
+		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock, Log: logger}
 
 	return runtime, nil
 }

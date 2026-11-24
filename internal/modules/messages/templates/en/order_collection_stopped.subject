@@ -1,0 +1,1 @@
+We stopped charging your card{{with .Merchant.Name}} for {{.}}{{end}}

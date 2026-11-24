@@ -158,6 +158,15 @@ func (s *Service) MerchantSettings(ctx context.Context, id billing.MerchantID) (
 	return s.config.MerchantSettings(ctx, id)
 }
 
+// MerchantMessages is the messages document the merchant serves
+// (db.MerchantConfig).
+func (s *Service) MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error) {
+	if s == nil || s.config == nil {
+		return billing.MessageSettings{}, errors.New("merchants: merchant configuration unavailable")
+	}
+	return s.config.MerchantMessages(ctx, id)
+}
+
 // Of is the merchants service bound to d as its merchant configuration; nil
 // when none is.
 func Of(d *db.DB) *Service {

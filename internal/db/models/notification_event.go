@@ -30,6 +30,11 @@ const (
 	// One-off payment notifications
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // a one-off purchase's receipt
 
+	// A refund of the customer's payment settled: its receipt (data.amount
+	// refunded, payment_id the refund, refunded_payment_id the charge, the
+	// order and what it bought). One per refund.
+	NotificationRefundCompleted NotificationEventType = "refund_completed"
+
 	// A usage order's collection stopped: nothing is canceled and the debt
 	// stands. data.reason is schedule_exhausted (we gave up) or non_recoverable
 	// (the issuer withdrew the mandate).

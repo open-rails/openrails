@@ -229,6 +229,83 @@ its paid access, and the keys follow the product's current entitlements.
 - `ProviderWritesFull` charges; `ProviderWritesReadOnly` writes nothing to any provider.
 - Register `Ready` and `Probes()` with your supervisor ([embedded](embedded.md#health)).
 
+## Customer messages
+
+OpenRails emails customers their billing messages through `Deps.Email` (the
+server's `email_smtp`), from the profile's `from_email`, to the address in your
+directory. A message is a notification [event](client.md#events) whose type is
+on; it is queued with its fact, so a replayed fact sends once.
+
+**On by default:** receipts (`one_off_purchase_completed`, `premium_started`,
+`refund_completed`), payment problems (`payment_method_failed`,
+`payment_method_update_required`, `payment_authentication_required`), the
+cancellation confirmations (`subscription_canceled`; `premium_ended` when the
+customer, staff or failed payments ended it; `order_collection_stopped`) and the
+price-change notice (`subscription_reprice_scheduled`). Every other notification
+type has a built-in English message and is off. A declined checkout, the failure
+that ended a subscription and a refund the provider reports more than seven days late send none.
+
+A message ends in the log as `sent` or why not: `disabled`, `test_environment`
+(its PSP is a test or sandbox account), `no_contact`, `rate_limited` (ten an
+hour per customer, with a `life.customer.messages_rate_limited` finding) or
+`failed`. A send is retried, ten attempts in all; only a mail server's refusal of
+the recipient is final, and a refused sender opens
+`life.customer.messages_sender_refused` until one is accepted.
+
+**The `messages` document** turns types on or off and replaces any message. It
+sits beside the merchant document (`MerchantDocument.Messages`; in Vault,
+`<scope_prefix>/merchants/<merchant-id>/messages`):
+
+```yaml guide:messages
+messages:
+  default_language: en
+  events:
+    premium_renewed:
+      enabled: true # on, with its built-in message
+    one_off_purchase_completed:
+      templates:
+        en:
+          subject: "Your {{.Merchant.Name}} receipt"
+          text: "You paid {{.Event.Amount}} for {{.Event.ProductName}}."
+          html: "<p>You paid <strong>{{.Event.Amount}}</strong> for {{.Event.ProductName}}.</p>"
+  layouts:
+    en:
+      text: |
+        {{template "body" .}}
+        -- {{.Merchant.Name}}
+```
+
+A template is a `subject` and a `text` or `html` body, Go `text/template` and
+`html/template` over `billing.MessageData` (version 1), whose fields are text
+formatted for the customer and empty when absent (test them with `with`):
+
+| Field | |
+|---|---|
+| `.Customer` | `ID`, `Name` (the directory's name, else username) |
+| `.Merchant` | the profile: `Name`, `LogoURL`, `SupportURL`, `BillingURL`, `SubscribeURL`, `TermsURL`, `PrivacyURL`, `StatementDescriptor` |
+| `.Event` | the fact's fields: amounts with their currency (`12.50 USD`), UTC dates (`January 2, 2006`), `Reason`, `ProductName`, `Voided`, ids |
+| `.Links` | `ManageBilling`, `UpdatePaymentMethod`, `Pay` (`billing_url`), `Resubscribe` (`subscribe_url`), each falling back to `support_url` |
+
+A layout wraps every body where it runs `{{template "body" .}}`; a part you leave
+out is the built-in one. Templates may call `and`, `or`, `not`, `eq`, `ne`, `lt`,
+`le`, `gt`, `ge`, `len`, `default`, `upper` and `lower`, but not `range`,
+`define`, `template` or a variable; each part is at most 64 KiB. Messages are
+written in `default_language`, else `en`.
+
+**Validation.** The document is checked as it loads: every field a template
+names, in any branch, must exist, and every message must render against sample
+data. A refused document is not served (the previous one keeps serving) and a
+`consistency.merchant_config.not_served` finding names the event type and error.
+
+**Preview, test and the log** ([client](client.md#customer-messages)):
+`PreviewMessage` (`POST /v1/merchant/messages/preview`) renders a type, or a
+candidate template, over sample data and your profile; `CreateTestMessage`
+(`POST /v1/merchant/messages/test`) sends that rendering to `alert_email` only,
+ten an hour; `ListCustomerMessages` (`GET /v1/admin/customers/{customer_id}/messages`)
+is the delivery log, kept two years and with no body. Embedded,
+`Deps.MessageRenderer` renders any message in your code instead
+([embedded](embedded.md#deps)).
+
 ## Where next
 
 - [Embedded](embedded.md): `Config` and `Deps`, River, several instances,

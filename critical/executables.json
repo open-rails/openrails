@@ -1260,6 +1260,9 @@
     "OR-J18-S06": [
       "TestSubscriptionChangeContracts/OR-J18-S06/stripe-downgrade-keeps-the-subscriptions-seats"
     ],
+    "OR-J18-S07": [
+      "TestSubscriptionChangeContracts/OR-J18-S07/an-upgrade-in-the-microsecond-the-membership-started-ends-its-period-validly"
+    ],
     "OR-J19-S07": [
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ],
@@ -1314,6 +1317,92 @@
     ],
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
+    ],
+    "OR-J39-S01": [
+      "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
+    ],
+    "OR-J39-S02": [
+      "TestCustomerMessages/OR-J39-S02/a-fact-a-billing-restore-writes-queues-no-message"
+    ],
+    "OR-J39-S03": [
+      "TestCustomerMessages/OR-J39-S03/a-customer-without-an-address-is-no-contact-and-the-fact-is-emitted"
+    ],
+    "OR-J39-S04": [
+      "TestCustomerMessages/OR-J39-S04/a-fact-on-a-test-psp-is-test-environment-and-the-fact-is-emitted"
+    ],
+    "OR-J39-S05": [
+      "TestCustomerMessages/OR-J39-S05/messages-past-the-hourly-cap-are-rate-limited-with-a-finding"
+    ],
+    "OR-J39-S06": [
+      "TestCustomerMessages/OR-J39-S06/erasing-a-customer-erases-its-message-log"
+    ],
+    "OR-J39-S07": [
+      "TestCustomerMessages/OR-J39-S07/a-merchant-template-replaces-the-built-in-message"
+    ],
+    "OR-J39-S08": [
+      "TestCustomerMessages/OR-J39-S08/a-messages-document-whose-template-does-not-render-is-refused-on-load"
+    ],
+    "OR-J39-S09": [
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/the-customer-canceled",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/staff-canceled",
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/a-usage-orders-collection-stopped-after-failed-payments"
+    ],
+    "OR-J39-S10": [
+      "TestCustomerMessages/OR-J39-S10/a-scheduled-price-change-sends-its-notice"
+    ],
+    "OR-J39-S11": [
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt",
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt/staff-refund",
+      "TestCustomerMessages/OR-J39-S11/a-refund-sends-one-refund-receipt/provider-reported-refund"
+    ],
+    "OR-J39-S12": [
+      "TestCustomerMessages/OR-J39-S12/the-host-renderer-takes-precedence-for-the-messages-it-renders"
+    ],
+    "OR-J39-S13": [
+      "TestCustomerMessages/OR-J39-S13/a-subscription-ended-by-failed-payments-sends-one-confirmation"
+    ],
+    "OR-J39-S14": [
+      "TestCustomerMessages/OR-J39-S14/a-staff-cancel-that-ends-access-now-sends-one-confirmation"
+    ],
+    "OR-J39-S15": [
+      "TestCustomerMessages/OR-J39-S15/an-access-end-a-refund-caused-sends-no-confirmation-by-default"
+    ],
+    "OR-J39-S16": [
+      "TestCustomerMessages/OR-J39-S16/the-log-route-lists-a-customers-messages-with-their-statuses"
+    ],
+    "OR-J39-S17": [
+      "TestCustomerMessages/OR-J39-S17/a-preview-renders-a-candidate-template-and-refuses-an-invalid-one"
+    ],
+    "OR-J39-S18": [
+      "TestCustomerMessages/OR-J39-S18/a-test-message-goes-only-to-the-alert-address"
+    ],
+    "OR-J39-S19": [
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding",
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding/recipient-refused",
+      "TestCustomerMessages/OR-J39-S19/only-a-refused-recipient-is-final-a-refused-sender-retries-with-a-finding/sender-refused"
+    ],
+    "OR-J39-S20": [
+      "TestCustomerMessages/OR-J39-S20/a-last-attempt-whose-job-ends-mid-send-settles-failed"
+    ],
+    "OR-J39-S21": [
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp",
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/off-by-default",
+      "TestCustomerMessages/OR-J39-S21/a-declined-checkout-sends-nothing-by-default-and-names-its-psp/turned-on-on-a-sandbox-psp"
+    ],
+    "OR-J39-S22": [
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt",
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt/minutes-late",
+      "TestCustomerMessages/OR-J39-S22/a-refund-found-more-than-a-week-late-sends-no-receipt/eight-days-late"
+    ],
+    "OR-J39-S23": [
+      "TestCustomerMessages/OR-J39-S23/a-void-is-confirmed-as-a-canceled-charge"
+    ],
+    "OR-J39-S24": [
+      "TestCustomerMessages/OR-J39-S24/a-subscriptions-first-payment-sends-its-receipt"
+    ],
+    "OR-J39-S25": [
+      "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ]
   }
 }

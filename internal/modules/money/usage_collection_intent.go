@@ -608,7 +608,8 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
 			return err
 		}
-		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), row, action, failureCode, now); err != nil {
+		// The collection attempt names its outcome: a replay records it once.
+		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuid.NewSHA1(intent.ID, []byte("collection_outcome")), row, action, failureCode, now); err != nil {
 			return err
 		}
 		return complete()
@@ -705,9 +706,9 @@ func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid
 	}
 }
 
-// queueCollectionOutcome records the customer's notice in the same domain
-// transaction; no external message is sent here.
-func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
+// queueCollectionOutcome records the customer's notice, id, in the same
+// domain transaction; no external message is sent here.
+func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := usage.Due(order)
 	data := billing.NotificationData{
 		OrderID: billing.OrderID(order.ID), Currency: catalog.Currency(order.Currency), AmountDue: &amountDue,
@@ -732,8 +733,8 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.Bill
 		data.NextAttemptAt = &next
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryScheduled, billing.NotificationRecoveryUpdatePaymentMethod
 	}
-	notification := &models.NotificationEvent{ID: uuidutil.NewV7(), CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
-	return subscriptions.NewNotificationService(database).Create(ctx, notification)
+	notification := &models.NotificationEvent{ID: id, CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
+	return subscriptions.NewNotificationService(database).CreateIfAbsent(ctx, notification)
 }
 
 func (h *OrderCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {

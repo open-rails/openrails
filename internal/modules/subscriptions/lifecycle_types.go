@@ -45,6 +45,15 @@ type CreateMembershipParams struct {
 	// records now() (no provider timestamp).
 	PurchasedAt     *time.Time
 	PaymentMetadata map[string]any
+	// Paid is what an order's charge took for this membership, for its
+	// premium_started receipt only: the order records the payment.
+	Paid *Paid
+}
+
+// Paid is an amount a charge took, in micros of Currency.
+type Paid struct {
+	Amount   int64
+	Currency string
 }
 
 type RenewMembershipParams struct {
@@ -132,6 +141,8 @@ type CancelMembershipParams struct {
 	CancelType         models.CancelType
 	CancelFeedback     *string
 	RevokeAccess       bool
+	// EndedReason is the premium_ended fact's reason; empty is CancelType's.
+	EndedReason PremiumEndReason
 	// RefuseOwnedRenewal refuses a customer or merchant cancel of an engine
 	// membership while an accepted renewal payment is unresolved.
 	RefuseOwnedRenewal bool
@@ -139,6 +150,16 @@ type CancelMembershipParams struct {
 	// their decision, not one drawn from provider evidence, so neither
 	// provider recovery nor a readonly posture holds it.
 	Requested bool
+}
+
+// RenewalFailureID is the FailureID of a renewal that failed for cause
+// before any provider attempt: one per subscription, cause and period.
+func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
+	key := "renewal_failure:" + cause
+	if sub.CurrentPeriodEndsAt != nil {
+		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuid.NewSHA1(sub.ID, []byte(key))
 }
 
 type FailMembershipParams struct {
@@ -151,8 +172,9 @@ type FailMembershipParams struct {
 	SubscriptionID    *uuid.UUID
 	FailureReason     *string
 	FailureCode       *string
-	// FailureID is the durable identity of the provider attempt or intent. A
-	// replay keeps the same notification; distinct retries use distinct IDs.
+	// FailureID is the durable identity of the provider attempt, intent or
+	// decline, required: a replay keeps the same notification; distinct
+	// retries use distinct IDs.
 	FailureID uuid.UUID
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.

@@ -8,6 +8,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 |---|---|---|---|
 | `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
 | `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
+| `alert_email_required` | 409 | `invalid_request_error` | The merchant has no alert_email to send a test message to. |
 | `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
 | `application_required` | 403 | `authorization_error` | The route is your backend's: it takes an application's credential, never a person's. |
 | `as_of_required` | 400 | `invalid_request_error` | The import needs as_of, its RFC 3339 evidence horizon. |
@@ -85,6 +86,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
 | `merchant_mismatch` | 412 | `invalid_request_error` | The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed. |
 | `merchant_unresolved` | 403 | `authorization_error` | The credential is bound to no merchant here. |
+| `message_send_failed` | 502 | `api_error` | The email sender did not accept the message. |
+| `message_template_invalid` | 400 | `invalid_request_error` | The message template does not render against its event type's sample data; the message says why. |
 | `meter_in_use` | 409 | `invalid_request_error` | The meter is referenced and cannot change this way. |
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |

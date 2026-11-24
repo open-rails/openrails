@@ -5,6 +5,7 @@ migration 0001_schema.up.sql sha256:54136f8943858a1d4152fb7be438fd900006135352ca
 migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd75da8b681934264c1cc9c8de82f6ec6bbc32bba9
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
+migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -344,6 +345,38 @@ table billing.customer_low_balance_lines
   constraint customer_low_balance_lines_runway_hours_check CHECK (((runway_hours >= 0) AND (runway_hours <= 8760)))
   constraint customer_low_balance_lines_set_check CHECK (((amount IS NOT NULL) OR (runway_hours IS NOT NULL)))
   index CREATE UNIQUE INDEX customer_low_balance_lines_pkey ON billing.customer_low_balance_lines USING btree (merchant_id, customer_id, currency)
+
+table billing.customer_messages
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column customer_id uuid NOT NULL
+  column event_id uuid NOT NULL
+  column event_type text NOT NULL
+  column channel text NOT NULL
+  column status text NOT NULL
+  column attempts integer NOT NULL
+  column last_error_code text
+  column recipient text
+  column sent_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint customer_messages_addressed_check CHECK (((status <> ALL (ARRAY['sending'::text, 'sent'::text])) OR (recipient IS NOT NULL)))
+  constraint customer_messages_attempts_check CHECK ((attempts >= 0))
+  constraint customer_messages_channel_check CHECK ((channel = 'email'::text))
+  constraint customer_messages_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint customer_messages_event_id_channel_key UNIQUE (merchant_id, event_id, channel)
+  constraint customer_messages_event_type_check CHECK (((octet_length(event_type) >= 1) AND (octet_length(event_type) <= 255)))
+  constraint customer_messages_last_error_code_check CHECK ((last_error_code ~ '^[a-z][a-z0-9_]{0,63}$'::text))
+  constraint customer_messages_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint customer_messages_pkey PRIMARY KEY (merchant_id, id)
+  constraint customer_messages_recipient_check CHECK (((octet_length(recipient) >= 3) AND (octet_length(recipient) <= 320)))
+  constraint customer_messages_sent_check CHECK (((status = 'sent'::text) = (sent_at IS NOT NULL)))
+  constraint customer_messages_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'queued'::text, 'sending'::text, 'sent'::text, 'disabled'::text, 'test_environment'::text, 'no_contact'::text, 'rate_limited'::text, 'failed'::text])))
+  index CREATE INDEX customer_messages_created_at_idx ON billing.customer_messages USING btree (merchant_id, created_at, id)
+  index CREATE INDEX customer_messages_customer_idx ON billing.customer_messages USING btree (merchant_id, customer_id, created_at, id)
+  index CREATE UNIQUE INDEX customer_messages_event_id_channel_key ON billing.customer_messages USING btree (merchant_id, event_id, channel)
+  index CREATE INDEX customer_messages_pending_idx ON billing.customer_messages USING btree (created_at, merchant_id, id) WHERE (status = 'pending'::text)
+  index CREATE UNIQUE INDEX customer_messages_pkey ON billing.customer_messages USING btree (merchant_id, id)
 
 table billing.customers
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1158,6 +1191,7 @@ table billing.notification_events
   index CREATE INDEX notification_events_delivery_idx ON billing.notification_events USING btree (inserted_at, merchant_id, id)
   index CREATE INDEX notification_events_ended_idx ON billing.notification_events USING btree (merchant_id, customer_id, created_at) WHERE (event_type = 'premium_ended'::text)
   index CREATE UNIQUE INDEX notification_events_pkey ON billing.notification_events USING btree (merchant_id, id)
+  trigger CREATE TRIGGER notification_event_customer_message AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.queue_customer_message()
   trigger CREATE TRIGGER notification_event_immutable BEFORE UPDATE ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.guard_notification_event()
   trigger CREATE TRIGGER notification_event_log_capture AFTER INSERT ON billing.notification_events FOR EACH ROW EXECUTE FUNCTION billing.capture_notification_event_log()
 
@@ -3636,6 +3670,7 @@ function billing.guard_billing_restore_receipt()
                     'customer_invoice_profiles',
                     'customer_limit_overrides',
                     'customer_low_balance_lines',
+                    'customer_messages',
                     'customers',
                     'dashboard_configs',
                     'destructive_actions',
@@ -4227,6 +4262,24 @@ function billing.products_propagate_tier_group()
           WHERE merchant_id = NEW.merchant_id AND product_id = NEW.id AND deleted_at IS NULL;
       END IF;
       RETURN NULL;
+  END;
+  $function$
+
+function billing.queue_customer_message()
+  CREATE OR REPLACE FUNCTION billing.queue_customer_message()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+      INSERT INTO billing.customer_messages (merchant_id, customer_id, event_id, event_type, channel, status, attempts)
+      VALUES (NEW.merchant_id, NEW.customer_id, NEW.id, NEW.event_type, 'email', 'pending', 0)
+      ON CONFLICT (merchant_id, event_id, channel) DO NOTHING;
+      IF FOUND THEN
+          PERFORM pg_notify('openrails_customer_messages', TG_TABLE_SCHEMA);
+      END IF;
+      RETURN NEW;
   END;
   $function$
 

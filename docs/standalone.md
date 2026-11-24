@@ -482,6 +482,7 @@ startup, naming what it declares; it names the merchant only (its slug and
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/merchant
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/psps/<key>
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/custodians/<key>
+<kv_mount>/<scope_prefix>/merchants/<merchant-id>/messages
 <kv_mount>/<scope_prefix>/credential_fingerprint_key
 <card_vault.kv_mount>/<scope_prefix>/platform_vault/<tenant_id>
 ```
@@ -1170,6 +1171,7 @@ destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
 | `carts` | 30 days after `last_changed_at` |
 | `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` |
 | `webhook_events` | 90 days after completion |
+| `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
 | `failed_usage_windows` | when the window ends |

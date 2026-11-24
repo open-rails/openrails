@@ -547,9 +547,10 @@ const accessLapseLookback = 25 * time.Hour
 
 // notifyPass is the NOTIFY plane: whatever plane closed a customer's last
 // entitlement window (dunning, reconcile-driven cancel, grant lapse), the
-// customer is told exactly once. It only records premium_ended notification
-// events; the host's applications deliver them. Dedupe: any premium_ended
-// event at or after the close means a transition site already told them.
+// customer is told exactly once. It only records premium_ended facts
+// (reason access_ended, whose customer message is off by default). Dedupe:
+// any premium_ended event at or after the close means a transition site
+// already told them.
 type notifyPass struct {
 	e        *ConvergeEngine
 	lookback time.Duration

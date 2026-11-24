@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -187,17 +187,7 @@ func (o *Order) HasOneOff() bool {
 }
 
 // Items names what the order bought, as its receipt does.
-func (o *Order) Items() string {
-	names := make([]string, 0, len(o.Lines))
-	for _, l := range o.Lines {
-		if l.Quantity != nil && *l.Quantity > 1 {
-			names = append(names, fmt.Sprintf("%s × %d", l.Description, *l.Quantity))
-			continue
-		}
-		names = append(names, l.Description)
-	}
-	return strings.Join(names, ", ")
-}
+func (o *Order) Items() string { return payments.OrderItems(o.Lines) }
 
 // View is the order as its customer reads it. nextAction and options are
 // the caller's: they come from the live attempt and the routing.

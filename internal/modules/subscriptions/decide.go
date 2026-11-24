@@ -18,9 +18,9 @@ type Premise func(ctx context.Context, d *db.DB, sub *models.Subscription) (bool
 
 // Decide applies one lifecycle event to a subscription under its row lock,
 // only while premise holds on the locked row, and carries out the effects in
-// the same transaction. A row whose premise no longer holds, or that moved,
-// is left alone and reports false: the next pass decides again.
-func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id uuid.UUID, ev lifecycle.Event, premise Premise) (bool, error) {
+// the same transaction under opts. A row whose premise no longer holds, or
+// that moved, is left alone and reports false: the next pass decides again.
+func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id uuid.UUID, ev lifecycle.Event, opts EffectOptions, premise Premise) (bool, error) {
 	now := s.now()
 	applied := false
 	err := d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -40,7 +40,7 @@ func (s *SubscriptionLifecycleService) Decide(ctx context.Context, d *db.DB, id 
 		if !sub.LifecycleChanged() && len(effects) == 0 {
 			return nil
 		}
-		if _, err = s.ApplyEffects(ctx, txdb, sub, effects, now, EffectOptions{}); err != nil {
+		if _, err = s.ApplyEffects(ctx, txdb, sub, effects, now, opts); err != nil {
 			return err
 		}
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {

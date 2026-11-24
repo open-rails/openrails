@@ -290,6 +290,29 @@ type BillingCustomerLowBalanceLine struct {
 	UpdatedAt   time.Time
 }
 
+// One message to a customer about one billing fact (a notification_events row) on one channel, and what became of it. No body is kept: it is the delivery log a dispute response cites. A fact sends at most one message per channel. Retention: rows are deleted two years (731 days) after created_at.
+type BillingCustomerMessage struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	// The notification_events id of the fact; kept after the event itself is pruned.
+	EventID   uuid.UUID
+	EventType string
+	Channel   string
+	// pending until a dispatcher queues its send job, queued until the job settles it, sending while the job hands it to the sender; then sent, or why not: disabled (the merchant does not send this event type), test_environment (its PSP moves no real money), no_contact (no address), rate_limited (the customer's hourly cap) or failed.
+	Status string
+	// Send attempts the job has made.
+	Attempts int32
+	// Why the last attempt did not send; NULL after a send.
+	LastErrorCode *string
+	// The address the message was handed to.
+	Recipient *string
+	// When the sender accepted the message.
+	SentAt    *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // Per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query, grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID

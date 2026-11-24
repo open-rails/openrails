@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -38,6 +39,21 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	return Normalize(name, settings)
+}
+
+// Messages is the messages document the merchant in context serves: the
+// zero settings, its defaults, when it serves none or no configuration is
+// bound.
+func (s *Store) Messages(ctx context.Context) (billing.MessageSettings, error) {
+	id, err := merchant.Require(ctx)
+	if err != nil {
+		return billing.MessageSettings{}, err
+	}
+	reader := s.db.MerchantConfig()
+	if reader == nil {
+		return billing.MessageSettings{}, nil
+	}
+	return reader.MerchantMessages(ctx, id)
 }
 
 // Get is the configuration of the merchant in context.

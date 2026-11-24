@@ -618,6 +618,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_checkout", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
@@ -975,6 +976,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_subscription_change", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
@@ -1214,7 +1216,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
-			reversalID := "void:" + voidTransactionID
+			reversalID := payments.VoidTransactionID(voidTransactionID)
 			if existingVoid, lookupErr := paymentService.GetByPSPTransactionID(ctx, models.RailCCBill, reversalID); lookupErr == nil && existingVoid != nil {
 				s.Log.InfoContext(ctx, "Void reversal already recorded", "void_transaction_id", reversalID)
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
@@ -1630,7 +1632,8 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 // handleExpiration mirrors CCBill expiring a membership. Under the row lock, a
 // period a renewal already extended cannot expire; a renewal that lands after
-// the expiry restores it through RenewalSuccess.
+// the expiry restores it through RenewalSuccess. An expiry names no cause, so
+// its notice is access_ended: a failed rebill is the earlier failedRB cancel.
 func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	var data CCBillExpirationEvent
 	if err := json.Unmarshal(s.Data.EventBody, &data); err != nil {
@@ -1643,5 +1646,5 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			return nil
 		}
 		return lifecycle.ProviderCanceled{At: now}
-	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
+	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonAccessEnded})
 }

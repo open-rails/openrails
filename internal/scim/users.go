@@ -481,8 +481,9 @@ func (s *Server) patchUser(ctx context.Context, mid billing.MerchantID, id strin
 	return out, e
 }
 
-// deleteUser erases the User's contact and keeps the customer's billing. The
-// row stays, without values, so an older report cannot restore them.
+// deleteUser erases the User's contact, notifications and message log, and
+// keeps the customer's billing. The contact row stays, without values, so an
+// older report cannot restore them.
 func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string) *Error {
 	now := s.now()
 	return s.tx(ctx, func(q *gen.Queries) error {
@@ -496,7 +497,10 @@ func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id stri
 		if err != nil {
 			return err
 		}
-		return q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID})
+		if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
+			return err
+		}
+		return q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID})
 	})
 }
 

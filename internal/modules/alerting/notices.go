@@ -22,6 +22,12 @@ const (
 	// FindingSolanaCrankerLowGas is a Solana cranker wallet low on the SOL its
 	// pulls pay fees with. It resolves itself once a pull pass finds it funded.
 	FindingSolanaCrankerLowGas reconcile.FindingType = "life.solana.cranker_low_gas"
+	// FindingCustomerMessagesRateLimited is a customer whose messages reached
+	// the hourly cap: something sends them far more than billing should.
+	FindingCustomerMessagesRateLimited reconcile.FindingType = "life.customer.messages_rate_limited"
+	// FindingCustomerMessagesSenderRefused is a mail server that refused the
+	// merchant's sender, so its customer messages wait for it.
+	FindingCustomerMessagesSenderRefused reconcile.FindingType = "life.customer.messages_sender_refused"
 )
 
 // LedgerRepair is a provider event OpenRails could not book, which the
@@ -131,6 +137,90 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	})
 	if err != nil {
 		return fmt.Errorf("cranker gas: %w", err)
+	}
+	return nil
+}
+
+// MessageRateLimit is a customer message held back by the hourly cap.
+type MessageRateLimit struct {
+	CustomerID uuid.UUID
+	MessageID  uuid.UUID
+	EventType  string
+	Cap        int
+	Window     time.Duration
+}
+
+// RecordMessageRateLimit raises the customer's rate-limited finding; a later
+// message held back observes it again.
+func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time, limit MessageRateLimit) error {
+	if database == nil {
+		return fmt.Errorf("message rate limit: database is required")
+	}
+	customer := billing.CustomerID(limit.CustomerID).String()
+	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingCustomerMessagesRateLimited, SubjectKey: customer, Severity: reconcile.SeverityMedium,
+		RecommendedAction: fmt.Sprintf("Customer %s reached %d messages in %s, so a %s message was not sent. Find what records so many billing facts for them.",
+			customer, limit.Cap, limit.Window, limit.EventType),
+		Evidence: map[string]any{"customer_id": customer, "message_id": limit.MessageID.String(), "event_type": limit.EventType,
+			"cap": limit.Cap, "window_seconds": int64(limit.Window / time.Second), "observed_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("message rate limit: %w", err)
+	}
+	return nil
+}
+
+// MessageSenderRefusal is a mail server's refusal of the sender of a
+// customer message: its credentials (AUTH) or its from address (MAIL FROM).
+type MessageSenderRefusal struct {
+	// From is the merchant's from address; empty is the sender's own.
+	From      string
+	Step      string
+	Code      int
+	Reply     string
+	MessageID uuid.UUID
+	EventType string
+}
+
+// senderSubject is the sender-refused finding's subject for from, the
+// merchant's from address; empty is the deployment's sender.
+func senderSubject(from string) string {
+	if from == "" {
+		return "deployment_sender"
+	}
+	return from
+}
+
+// RecordMessageSenderRefused raises the merchant's sender-refused finding,
+// one per from address; a later refusal observes it again. Its alert email
+// goes through the sender that refused, so it may not arrive; the console
+// and webhooks show it.
+func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.Time, r MessageSenderRefusal) error {
+	if database == nil {
+		return fmt.Errorf("message sender refused: database is required")
+	}
+	subject, sender := senderSubject(r.From), "from_email "+r.From
+	if r.From == "" {
+		sender = "the deployment's sender"
+	}
+	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingCustomerMessagesSenderRefused, SubjectKey: subject, Severity: reconcile.SeverityHigh,
+		RecommendedAction: fmt.Sprintf("The mail server refused %s at %s (%d %s), so customer messages are not sent; each is retried. Fix the sender's credentials or let it send as this address.",
+			sender, r.Step, r.Code, r.Reply),
+		Evidence: map[string]any{"from_email": r.From, "step": r.Step, "reply_code": r.Code, "reply": r.Reply,
+			"message_id": r.MessageID.String(), "event_type": r.EventType, "observed_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("message sender refused: %w", err)
+	}
+	return nil
+}
+
+// ResolveMessageSenderRefused closes the sender-refused finding of from once
+// the sender accepts a message from it.
+func ResolveMessageSenderRefused(ctx context.Context, database *db.DB, from string) error {
+	if err := (&reconcile.PGStore{DB: database}).ResolveRaisedFinding(ctx, FindingCustomerMessagesSenderRefused, senderSubject(from)); err != nil {
+		return fmt.Errorf("message sender recovered: %w", err)
 	}
 	return nil
 }

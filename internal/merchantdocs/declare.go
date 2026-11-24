@@ -37,6 +37,9 @@ func Declared(id billing.MerchantID, m billing.MerchantDocument, loaded time.Tim
 		})
 	}
 	set.Merchant, set.HasMerchant = Doc[Merchant]{Value: merchant, UpdatedAt: loaded}, true
+	if m.Messages != nil {
+		set.Messages, set.HasMessages = Doc[billing.MessageSettings]{Value: *m.Messages, UpdatedAt: loaded}, true
+	}
 	for key, p := range m.PSPs {
 		key = strings.ToLower(strings.TrimSpace(key))
 		account := strings.TrimSpace(p.AccountID)

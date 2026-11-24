@@ -1,0 +1,4 @@
+Your bank sent us your card's new details, so your payments carry on as before. There's nothing you need to do.
+{{with .Links.ManageBilling}}
+Review your payment methods: {{.}}
+{{end}}

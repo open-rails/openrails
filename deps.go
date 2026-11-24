@@ -45,9 +45,15 @@ type Deps struct {
 	// Config.Vault names its mounts. The host keeps it logged in.
 	Vault *vaultapi.Client
 
-	// Email delivers OpenRails' email: billing receipts and alerts. Nil
-	// sends none.
+	// Email delivers OpenRails' email: customers' billing messages
+	// (receipts, payment problems, cancellations, price changes) and the
+	// merchant's alerts. Nil sends none.
 	Email EmailSender
+	// MessageRenderer renders customer messages in the host's code. For each
+	// message it returns true for, its content is sent instead of the
+	// merchant's templates; an error is retried. Nil renders every message
+	// from the templates.
+	MessageRenderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
 
 	// Logger receives everything OpenRails logs. Nil is slog.Default(), read
 	// once by New; OpenRails never changes the default.
@@ -81,8 +87,9 @@ type Deps struct {
 	Clock                clockwork.Clock
 }
 
-// EmailSender is Deps.Email: it delivers OpenRails' rendered email and
-// reports whether it can.
+// EmailSender is Deps.Email: it delivers OpenRails' rendered email (the
+// customers' billing messages and the merchant's alerts) and reports whether
+// it can.
 type EmailSender interface {
 	Send(context.Context, Email) error
 	CheckHealth(context.Context) error
@@ -139,6 +146,7 @@ func engineDeps(deps Deps) engine.Deps {
 			NMITransport:         deps.NMITransport,
 			FXTransport:          deps.FXTransport,
 			Clock:                deps.Clock,
+			MessageRenderer:      deps.MessageRenderer,
 		},
 		MerchantGroups: deps.MerchantGroups,
 		CheckoutAssets: deps.CheckoutAssets,

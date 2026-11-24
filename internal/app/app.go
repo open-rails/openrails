@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 )
@@ -52,6 +53,8 @@ type BootstrapOptions struct {
 	Clock           clockwork.Clock
 	// EmailSender delivers OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
+	// MessageRenderer is Deps.MessageRenderer.
+	MessageRenderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)
 	// UserInfo is the host's directory (Deps.UserInfo); nil keeps a copy.
 	UserInfo      userinfo.Lookup
 	Notifications *config.NotificationChannel
@@ -108,6 +111,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		Redis:                opts.Redis,
 		Clock:                opts.Clock,
 		EmailSender:          opts.EmailSender,
+		MessageRenderer:      opts.MessageRenderer,
 		UserInfo:             opts.UserInfo,
 		Notifications:        opts.Notifications,
 		Migrations:           opts.Migrations,

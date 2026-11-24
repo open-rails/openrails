@@ -1,0 +1,3 @@
+{{if eq .Event.Reason "non_recoverable"}}Your bank told us your card can no longer be charged{{else}}Your payments failed several times{{end}}, so we have stopped trying to collect{{with .Event.AmountDue}} the {{.}} you owe{{end}}.
+
+The amount is still owed, and you can settle it yourself. {{with .Links.Pay}}Pay it or add another payment method: {{.}}{{else}}Pay it or add another payment method in your account.{{end}}

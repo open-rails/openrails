@@ -125,10 +125,13 @@ type Doc[T any] struct {
 }
 
 // Set is one merchant's configuration. A merchant with no merchant document
-// has HasMerchant false.
+// has HasMerchant false, and one with no messages document HasMessages
+// false.
 type Set struct {
 	Merchant    Doc[Merchant]
 	HasMerchant bool
+	Messages    Doc[billing.MessageSettings]
+	HasMessages bool
 	PSPs        map[string]Doc[PSP]
 	Custodians  map[string]Doc[Custodian]
 	// Rejected names each document that loaded but is not served, with why.
@@ -180,6 +183,9 @@ func (s Set) Revisions() map[string]int64 {
 	if s.HasMerchant {
 		out[merchantDoc] = s.Merchant.Revision
 	}
+	if s.HasMessages {
+		out[messagesDoc] = s.Messages.Revision
+	}
 	for key, doc := range s.PSPs {
 		out[pspDir+key] = doc.Revision
 	}
@@ -191,12 +197,16 @@ func (s Set) Revisions() map[string]int64 {
 
 const (
 	merchantDoc  = "merchant"
+	messagesDoc  = "messages"
 	pspDir       = "psps/"
 	custodianDir = "custodians/"
 )
 
 // MerchantDoc names the merchant document within a merchant's set.
 const MerchantDoc = merchantDoc
+
+// MessagesDoc names the messages document within a merchant's set.
+const MessagesDoc = messagesDoc
 
 // PSPDoc names the PSP document under key within a merchant's set.
 func PSPDoc(key string) string { return pspDir + key }

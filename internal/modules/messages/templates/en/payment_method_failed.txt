@@ -1,0 +1,3 @@
+We couldn't take your payment{{with .Event.Amount}} of {{.}}{{else}}{{with .Event.AmountDue}} of {{.}}{{end}}{{end}}{{with .Event.ProductName}} for {{.}}{{end}}.{{with .Event.NextAttemptAt}} We'll try again on {{.}}.{{end}}
+
+{{with .Links.UpdatePaymentMethod}}To keep your access, update your payment method: {{.}}{{else}}To keep your access, update your payment method in your account.{{end}}

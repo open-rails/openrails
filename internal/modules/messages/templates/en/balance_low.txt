@@ -1,0 +1,3 @@
+Your balance is down to {{default "a little" .Event.AvailableAmount}}{{with .Event.RunwayEndsAt}}. At your current usage it runs out around {{.}}{{end}}.
+
+{{with .Links.ManageBilling}}Add funds to keep going: {{.}}{{else}}Add funds in your account to keep going.{{end}}

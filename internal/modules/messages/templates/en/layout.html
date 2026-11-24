@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="{{.Language}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Merchant.Name}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#1f2933;">
+<tr><td style="padding:24px 32px 0;">
+{{if .Merchant.LogoURL}}<img src="{{.Merchant.LogoURL}}" alt="{{.Merchant.Name}}" height="40" style="height:40px;border:0;display:block;">{{else if .Merchant.Name}}<strong style="font-size:18px;">{{.Merchant.Name}}</strong>{{end}}
+</td></tr>
+<tr><td style="padding:16px 32px 8px;">
+<p style="margin:0 0 16px;">{{if .Customer.Name}}Hi {{.Customer.Name}},{{else}}Hello,{{end}}</p>
+{{template "body" .}}
+</td></tr>
+<tr><td style="padding:16px 32px 24px;border-top:1px solid #e4e7eb;font-size:13px;line-height:1.5;color:#616e7c;">
+{{with .Merchant.SupportURL}}<p style="margin:0 0 8px;">Questions? <a href="{{.}}" style="color:#616e7c;">We're here to help</a>.</p>{{end}}
+<p style="margin:0;">{{.Merchant.Name}}{{with .Merchant.TermsURL}} · <a href="{{.}}" style="color:#616e7c;">Terms</a>{{end}}{{with .Merchant.PrivacyURL}} · <a href="{{.}}" style="color:#616e7c;">Privacy</a>{{end}}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
