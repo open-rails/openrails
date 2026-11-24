@@ -19,15 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
-// EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
-//
-// Embedded hosts typically mount billing under "/billing", so the stable
-// contract becomes "/billing/v1/*".
-const EmbeddedV1Prefix = embeddedMount + "/v1"
-
-// embeddedMount is where an embedded host mounts the API root.
-const embeddedMount = "/billing"
-
 // Options is what the handler mounts beside the public and webhook routes.
 type Options struct {
 	// Groups are the staff groups that are on and, with Programmatic, the
@@ -84,14 +75,14 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	// the permissive-CORS browser tier.
 	browserRoutes := make(map[string]bool)
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
-	httproutes.RegisterMetaRoutes(s.Log, router.NewMuxRecorded(mux, embeddedMount, s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
+	httproutes.RegisterMetaRoutes(s.Log, router.NewMuxRecorded(mux, "", s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
 
-	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
+	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, "/v1", s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 		Auth:           s.Auth,
 		ProviderRoutes: &providerRoutes,
 	})
 	if httproutes.StaffGroups(opts.Groups) || opts.Groups.Programmatic {
-		httproutes.RegisterStaffRoutes(s.Log, router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+		httproutes.RegisterStaffRoutes(s.Log, router.NewMux(mux, "/v1", s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			AdminLimiter: s.AdminLimiter,
 			Groups:       opts.Groups,
@@ -99,10 +90,10 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		})
 	}
 	if providerRoutes.Webhooks {
-		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
+		httproutes.RegisterWebhookRoutes(router.NewMux(mux, "/v1/webhooks", s.Runtime), s.Runtime)
 	}
 	if opts.Groups.Programmatic {
-		httproutes.RegisterAppRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+		httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			Groups:       opts.Groups,
 			Capabilities: &capabilities,

@@ -10,11 +10,11 @@ import (
 
 type routePathKey struct{}
 
-// WithRoutePath pins the registered canonical path for rate-limit and captcha
-// policy when a host mounts billing under its own prefix. The request URL is
-// preserved for authentication, sender proofs, and host permission checks.
-// canonicalPath is a path template, without its HTTP method. The route and
-// the request's id label what it logs.
+// WithRoutePath pins the route catalog's path, without the host's mount
+// prefix, for rate-limit and captcha policy; the request URL is preserved for
+// authentication, sender proofs, and host permission checks. canonicalPath is
+// a path template, without its HTTP method. The route and the request's id
+// label what it logs.
 func WithRoutePath(canonicalPath string) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

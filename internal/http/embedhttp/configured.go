@@ -34,7 +34,8 @@ func ValidateRoutes(sel config.Routes) error {
 	return nil
 }
 
-// ConfiguredRoutes is the embedded HTTP surface sel selects, under /billing.
+// ConfiguredRoutes is the embedded HTTP surface sel selects, at the route
+// catalog's paths; the engine mounts it under sel.Prefix.
 func ConfiguredRoutes(logger *slog.Logger, a *app.App, sel config.Routes) (*router.Table, error) {
 	if a == nil || a.Runtime == nil || a.Config == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
@@ -53,10 +54,7 @@ func ConfiguredRoutes(logger *slog.Logger, a *app.App, sel config.Routes) (*rout
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range extra.Entries {
-		entry.Path = "/billing" + entry.Path
-		table.Entries = append(table.Entries, entry)
-	}
+	table.Entries = append(table.Entries, extra.Entries...)
 	return table, nil
 }
 
