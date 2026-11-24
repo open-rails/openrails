@@ -40,11 +40,9 @@ var excludedTables = map[string]string{
 	"event_store":                   "the deployment's event store identity",
 	"merchant_write_posture":        "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":                "telemetry", "webhook_health_daily": "telemetry",
-	"failed_usage_windows":          "live grace and cutoff windows; the destination counts afresh",
 	"limit_hold_parts":              "what holds set aside of each limit: open holds refuse the archive, and the destination counts windows afresh",
 	"leases":                        "gate leases: a live one refuses the archive, and gates sync new ones at the destination",
 	"lease_in_flight":               "what live gates report in flight: a live lease refuses the archive, and gates report afresh at the destination",
-	"usage_minutes":                 "per-minute spend the rate measures read, kept a day; the destination measures afresh",
 	"payment_attempts":              "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":                 "rebill analytics: expected rebills, derived from subscriptions",
 	"idempotency_keys":              "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and provider_intents; money is provider_intents and webhook_events",
@@ -97,11 +95,9 @@ var excludedColumns = map[string]string{
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
-	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
 	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held",
 	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
 	"lease_in_flight":               "merchant_id lease_id customer_id limit_key unit amount updated_at",
-	"usage_minutes":                 "merchant_id customer_id currency minute_at amount",
 	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id outcome decline_cause advice_code network_advice_code",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity probe_failed_at next_probe_at",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
@@ -403,7 +399,8 @@ var referenceChecks = []rowCheck{
 	{"subscriptions", `deleted_at IS NULL
 	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
-	{"meter_period_quantities", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=meter_period_quantities.customer_id)`},
+	{"usage_unposted", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_unposted.customer_id)`},
+	{"usage_postings", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=usage_postings.customer_id)`},
 	{"ledger_transfers", `source_id LIKE 'order_collection:%' AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
 	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1

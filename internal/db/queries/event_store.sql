@@ -24,3 +24,45 @@ FROM (
 ) o
 GROUP BY o.merchant_id, o.kind
 ORDER BY o.merchant_id, o.kind;
+
+-- name: LockEventStore :one
+-- The attached store's identity, locked against another attach.
+SELECT store_id FROM billing.event_store WHERE singleton FOR UPDATE;
+
+-- name: ReattachEventStore :exec
+-- An operator attaches another store: its identity replaces the recorded one.
+UPDATE billing.event_store SET store_id = sqlc.arg(store_id)::uuid, attached_at = sqlc.arg(now)::timestamptz WHERE singleton;
+
+-- Without an event store, applying a document that declares no usage removes
+-- the merchant's dormant usage catalog, dependents first.
+
+-- name: DeleteDormantRateCards :exec
+DELETE FROM billing.catalog_rate_cards WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantProductLimits :exec
+DELETE FROM billing.catalog_product_limits WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantLimitOverrides :exec
+DELETE FROM billing.customer_limit_overrides WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantLimitAdjustments :exec
+DELETE FROM billing.limit_adjustments WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantLimitWindows :exec
+DELETE FROM billing.limit_windows WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantLimits :exec
+DELETE FROM billing.catalog_limits WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantMeters :exec
+DELETE FROM billing.catalog_meters WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- name: DeleteDormantUsageOwners :exec
+DELETE FROM billing.catalog_field_owners
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (object IN ('meter', 'limit') OR (object = 'product' AND field IN ('rate_cards', 'limits')));
+
+-- name: CountMerchantUsageCatalog :one
+-- One merchant's dormant usage catalog.
+SELECT (SELECT count(*) FROM billing.catalog_meters m WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid)::bigint AS meters,
+       (SELECT count(*) FROM billing.catalog_limits l WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid)::bigint AS limits;

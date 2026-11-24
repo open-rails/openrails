@@ -81,20 +81,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text;
 
 -- name: ListUsageMetersWithCatalog :many
-WITH activity AS (
-    -- Each meter's latest settled usage: the newest day of its event type's
-    -- rollups, by a backward index probe, and that day's last settlement.
-    SELECT m.key AS meter_key,
-           (SELECT max(ud.updated_at)
-              FROM billing.usage_daily ud
-             WHERE ud.merchant_id = m.merchant_id
-               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
-               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
-                                 WHERE last.merchant_id = m.merchant_id
-                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
-    FROM billing.catalog_meters m
-    WHERE m.merchant_id = sqlc.arg(merchant_id)
-)
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
        COALESCE(NULLIF(meter.event_type, ''), meter.key) AS effective_event_type,
@@ -105,8 +91,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
-       activity.last_event_at,
        card.id AS card_id,
        card.product_id,
        product.key AS product_key,
@@ -116,8 +100,6 @@ SELECT meter.key,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
-LEFT JOIN activity
-  ON activity.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
@@ -130,20 +112,6 @@ ORDER BY meter.key
 LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetUsageMeterWithCatalog :one
-WITH activity AS (
-    -- Each meter's latest settled usage: the newest day of its event type's
-    -- rollups, by a backward index probe, and that day's last settlement.
-    SELECT m.key AS meter_key,
-           (SELECT max(ud.updated_at)
-              FROM billing.usage_daily ud
-             WHERE ud.merchant_id = m.merchant_id
-               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
-               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
-                                 WHERE last.merchant_id = m.merchant_id
-                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
-    FROM billing.catalog_meters m
-    WHERE m.merchant_id = sqlc.arg(merchant_id)
-)
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
        COALESCE(NULLIF(meter.event_type, ''), meter.key) AS effective_event_type,
@@ -154,8 +122,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
-       activity.last_event_at,
        card.id AS card_id,
        card.product_id,
        product.key AS product_key,
@@ -165,8 +131,6 @@ SELECT meter.key,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
-LEFT JOIN activity
-  ON activity.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key

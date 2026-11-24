@@ -95,7 +95,25 @@ func availableNow(ctx context.Context, q *gen.Queries, merchant, customer uuid.U
 	if err != nil {
 		return 0, fmt.Errorf("ledger: held amount: %w", err)
 	}
-	return balance - held.Held, nil
+	unposted, err := UnpostedUsage(ctx, q, merchant, customer, currency)
+	return balance - held.Held - unposted, err
+}
+
+// UnpostedUsage is what a customer's usage in a currency costs beyond what
+// posted, through the usage ledger bound to q's transaction. Without one, a
+// customer with unposted usage is an error.
+func UnpostedUsage(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string) (int64, error) {
+	if usage := db.UsageLedgerOf(q); usage != nil {
+		return usage.UnpostedUsage(ctx, q, merchant, customer, currency)
+	}
+	_, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: merchant, CustomerID: customer, Currency: currency})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("ledger: customer %s has unposted usage, and no usage ledger is bound", customer)
 }
 
 // WatchCustomerBalance marks the customer's watch due after a change to its

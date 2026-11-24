@@ -77,11 +77,10 @@ SELECT (COALESCE((SELECT SUM(p.held)
       AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0) ELSE 0 END)::bigint AS held;
 
 -- name: GetFinancialHeldAmount :one
--- The one financial hold total: live holds' balance parts, what gates have
--- in flight, pending refunds,
--- unposted usage accruals, and what the customer's running charges have
--- accrued and not posted
--- (accrued, also answered apart). GetAdmissionCapacity computes the same sum.
+-- The one financial hold total in PostgreSQL: live holds' balance parts,
+-- what gates have in flight, pending refunds, and what the customer's
+-- running charges have accrued and not posted (accrued, also answered
+-- apart); unposted usage is the event store's, added by the caller. GetAdmissionCapacity computes the same sum.
 -- A live hold was created within the hold lifetime, which is held_since. A
 -- posting through an instant holds the accrual as of it (accrued_as_of);
 -- every other read, as of as_of.
@@ -109,12 +108,7 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
          THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
        FROM billing.credit_grants g
        WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.customer_id = sqlc.arg(customer_id)::uuid AND g.unit = sqlc.arg(currency)::text
-         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     -- What the customer's usage accrued and the ledger has not taken.
-     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
-              FROM billing.usage_accruals ua
-             WHERE ua.merchant_id = sqlc.arg(merchant_id)::uuid AND ua.customer_id = sqlc.arg(customer_id)::uuid
-               AND ua.currency = sqlc.arg(currency)::text AND ua.amount > ua.posted_amount), 0)) AS claims,
+         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)) AS claims,
      COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE(sqlc.narg(accrued_as_of)::timestamptz, sqlc.arg(as_of)::timestamptz)) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = sqlc.arg(customer_id)::uuid AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0) AS accrued) h;

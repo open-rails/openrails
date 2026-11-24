@@ -121,13 +121,17 @@ type Usage struct {
 	NextCursor *string          `json:"next_cursor"`
 }
 
-// UsageDeduction is what one posting of a customer's day of usage was for:
-// the UTC Day, Amount the day's usage charged, and per meter and cell its
-// requests, quantity and amount.
+// UsageDeduction is what one posting of a customer's usage was for: the
+// pricing period, the instant usage before which it took (Through), Amount
+// the period's price less what earlier postings took, and per meter and cell
+// what it added: requests, quantity and amount. A volume tier whose price
+// fell credits a negative Amount.
 type UsageDeduction struct {
-	Day    string               `json:"day"`
-	Amount int64                `json:"amount,string"`
-	Lines  []UsageDeductionLine `json:"lines"`
+	PeriodStartsAt time.Time            `json:"period_starts_at"`
+	PeriodEndsAt   time.Time            `json:"period_ends_at"`
+	Through        time.Time            `json:"through"`
+	Amount         int64                `json:"amount,string"`
+	Lines          []UsageDeductionLine `json:"lines"`
 }
 
 // UsageDeductionLine is one meter cell of a usage deduction; Cell is null

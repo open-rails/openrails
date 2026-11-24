@@ -202,6 +202,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		if events, err = attachEventStore(ctx, cfg, database, overrides.ClickHouse, logger); err != nil {
 			return nil, err
 		}
+		database.SetEventStore(events)
+	} else if err := refuseUnpostedUsage(ctx, database); err != nil {
+		return nil, err
 	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
@@ -291,6 +294,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if err != nil {
 		return nil, err
 	}
+	database.SetUsageLedger(serviceInstances.MoneyService)
 
 	// One sender for all of OpenRails' email: the host's.
 	var sender config.EmailSender

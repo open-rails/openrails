@@ -28589,8 +28589,17 @@
       "UsageDeduction": {
         "type": "object",
         "properties": {
-          "day": {
-            "type": "string"
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "through": {
+            "type": "string",
+            "format": "date-time"
           },
           "amount": {
             "type": "string",
@@ -28604,7 +28613,9 @@
           }
         },
         "required": [
-          "day",
+          "period_starts_at",
+          "period_ends_at",
+          "through",
           "amount",
           "lines"
         ]

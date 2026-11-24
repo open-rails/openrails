@@ -21,7 +21,9 @@ type stmt struct {
 
 // compile builds one parameterized statement per source family involved.
 // Every SQL fragment comes from the registry; client values ride in args.
-func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
+// Usage families are the event store's (usage.go) and compile to none;
+// burns are the usage the depletion measure reads.
+func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 	// Group leaf components by family, preserving first-seen order. Snapshot
 	// leaves with different edge semantics (period-start components like churn's
 	// denominator) get their own statement in the non-time case.
@@ -50,6 +52,9 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 	for _, k := range famOrder {
 		fam := k.fam
 		leaves := famLeaves[k]
+		if storeFamily(fam) {
+			continue
+		}
 		spec := families[fam]
 		var st stmt
 		var err error
@@ -61,7 +66,7 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
-			st, err = compileDepletion(plan, merchantID, leaves)
+			st, err = compileDepletion(plan, merchantID, leaves, burns)
 		default:
 			err = fmt.Errorf("metrics: family %s has no skeleton", fam)
 		}
@@ -80,8 +85,6 @@ var merchantCols = map[Family]string{
 	FamSubsNew:        "s.merchant_id",
 	FamSubsCanceled:   "s.merchant_id",
 	FamGrants:         "g.merchant_id",
-	FamUsage:          "ud.merchant_id",
-	FamUsageCharged:   "ud.merchant_id",
 	FamTransitions:    "st.merchant_id",
 	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
@@ -260,9 +263,14 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 }
 
 // compileDepletion: customers whose prepaid balance at the edge covers <= N days
-// of their trailing-7d burn, in any currency. Bounded: edges x customers.
-func compileDepletion(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
+// of their trailing-7d burn, in any currency. Bounded: edges x customers. The
+// burns are read from the event store before.
+func compileDepletion(plan *Plan, merchantID uuid.UUID, leaves []*Measure, burns []burn) (stmt, error) {
 	edges := snapshotEdges(plan, leaves)
+	burnEdges, burnCustomers, burnCurrencies, burnAmounts := make([]time.Time, 0, len(burns)), make([]uuid.UUID, 0, len(burns)), make([]string, 0, len(burns)), make([]int64, 0, len(burns))
+	for _, b := range burns {
+		burnEdges, burnCustomers, burnCurrencies, burnAmounts = append(burnEdges, b.edge), append(burnCustomers, b.customer), append(burnCurrencies, b.currency), append(burnAmounts, b.amount)
+	}
 	sql := fmt.Sprintf(`SELECT edge.bucket AS bucket, COUNT(DISTINCT x.customer_id) AS m_customers_at_depletion_risk
 FROM unnest($2::timestamptz[]) AS edge(bucket)
 LEFT JOIN LATERAL (
@@ -278,17 +286,13 @@ LEFT JOIN LATERAL (
     WHERE la.merchant_id = $1 AND la.account_type = 'customer_balance' AND la.customer_id IS NOT NULL
     GROUP BY la.customer_id, la.currency
   ) bal
-  JOIN (
-    SELECT ud.customer_id, ud.currency, SUM(ud.amount) AS burn
-    FROM billing.usage_daily ud
-    WHERE ud.merchant_id = $1 AND ud.day_at >= edge.bucket - interval '7 days' AND ud.day_at < edge.bucket
-    GROUP BY ud.customer_id, ud.currency
-  ) burn ON burn.customer_id = bal.customer_id AND burn.currency = bal.currency
+  JOIN unnest($3::timestamptz[], $4::uuid[], $5::text[], $6::bigint[]) AS burn(edge, customer_id, currency, burn)
+    ON burn.edge = edge.bucket AND burn.customer_id = bal.customer_id AND burn.currency = bal.currency
   WHERE burn.burn > 0 AND bal.balance <= (burn.burn / 7.0) * %d
 ) x ON TRUE
 GROUP BY edge.bucket`, depletionRiskDays)
 	return stmt{
-		family: FamDepletion, sql: sql, args: []any{merchantID, edges},
+		family: FamDepletion, sql: sql, args: []any{merchantID, edges, burnEdges, burnCustomers, burnCurrencies, burnAmounts},
 		leaves: leaves, hasTime: true, snapshot: true,
 	}, nil
 }

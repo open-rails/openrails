@@ -380,32 +380,6 @@ func (q *Queries) RenewLease(ctx context.Context, arg RenewLeaseParams) error {
 	return err
 }
 
-const sumCustomerRecentSpend = `-- name: SumCustomerRecentSpend :one
-SELECT COALESCE(SUM(amount), 0)::bigint AS amount FROM billing.usage_minutes
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND currency = $3::text AND minute_at >= $4::timestamptz
-`
-
-type SumCustomerRecentSpendParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Since      time.Time
-}
-
-// What a customer's usage charged in a currency since an instant.
-func (q *Queries) SumCustomerRecentSpend(ctx context.Context, arg SumCustomerRecentSpendParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumCustomerRecentSpend,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.Since,
-	)
-	var amount int64
-	err := row.Scan(&amount)
-	return amount, err
-}
-
 const syncElapsed = `-- name: SyncElapsed :one
 SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 1000000)::bigint AS elapsed_micros
 `

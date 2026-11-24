@@ -35,19 +35,19 @@ func init() { credits.PostRunningCharges = postRunningChargesThrough }
 
 // runningChargePosting is what a posting's ledger write runs under: accrual is
 // held as of through, the lots that had not lapsed just before it are drawn,
-// and the balance legs carry the charge's resource. A usage accrual's posting
-// runs under it too.
+// and the balance legs carry the charge's resource. A usage posting runs
+// under it too.
 type runningChargePosting struct {
 	through  time.Time
 	resource string
-	// owed splits what an accrual's posting leaves owed by meter.
+	// owed splits what a usage posting leaves owed by meter.
 	owed []owedShare
-	// owedAt dates what an accrual's posting leaves owed: when its usage
+	// owedAt dates what a usage posting leaves owed: when its usage
 	// occurred. Zero dates it at the posting.
 	owedAt time.Time
 }
 
-// owedShare is one meter's weight in an accrual posting's owed remainder.
+// owedShare is one meter's weight in a usage posting's owed remainder.
 type owedShare struct {
 	meter  string
 	weight int64
@@ -175,6 +175,6 @@ func (s *MoneyService) settleRunningCharges(ctx context.Context, q *gen.Queries,
 	if _, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now); err != nil {
 		return err
 	}
-	_, err := s.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, nil, nil, now)
+	_, err := s.postUsageTx(ctx, q, merchantID, customer, currency, now, usagePostingMovement)
 	return err
 }

@@ -89,6 +89,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// A balance's look, queued by the change that crossed one of its lines
 	// and for the instant its last look named.
+	if err := addWorker(workers, &riverjobs.UsageErasureWorker{DB: r.DB}); err != nil {
+		return fmt.Errorf("add usage erasure worker: %w", err)
+	}
 	if err := addWorker(workers, &riverjobs.BalanceLookWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance look worker: %w", err)
 	}
@@ -206,10 +209,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
-	accruals := &riverjobs.UsageAccrualWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
+	closing := &riverjobs.UsageCloseWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	scans := []riverjobs.Scan{
-		// A day's usage posts once its day ends, before anything bills it.
-		{Kind: riverjobs.KindUsageAccruals, Run: accruals.Pass, DueBy: accruals.DueBy},
+		// A month's usage posts once its month ends, before anything bills it.
+		{Kind: riverjobs.KindUsageClose, Run: closing.Pass, DueBy: closing.DueBy},
 		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},

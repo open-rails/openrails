@@ -28,6 +28,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -648,16 +649,13 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 		var index []int
 		for i := end; i < stop; i++ {
 			u := r.p.Usage[i]
+			var item money.UsageItem
+			var err error
 			if u.RequestID != nil {
-				if err := r.capture(u); err != nil {
-					if _, coded := asCoded(err); !coded {
-						return 0, nil, err
-					}
-					refuseNew(i, prefixParam(err, fmt.Sprintf("usage[%d]", i)))
-				}
-				continue
+				item, err = r.capture(u)
+			} else {
+				item, err = r.usageItem(u)
 			}
-			item, err := r.usageItem(u)
 			if err != nil {
 				if _, coded := asCoded(err); !coded {
 					return 0, nil, err
@@ -665,18 +663,16 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 				refuseNew(i, prefixParam(err, fmt.Sprintf("usage[%d]", i)))
 				continue
 			}
+			r.identify(&item, u)
 			items = append(items, item)
 			index = append(index, i)
 		}
 		if len(items) > 0 {
-			batch, err := r.money.PriceUsageTx(r.ctx, r.q, items)
+			results, err := r.intake(items)
 			if err != nil {
 				return 0, nil, err
 			}
-			if err := r.money.SettleUsageTx(r.ctx, r.q, batch); err != nil {
-				return 0, nil, err
-			}
-			for j, res := range batch.Results {
+			for j, res := range results {
 				i := index[j]
 				if res.Err != nil {
 					if _, coded := asCoded(res.Err); !coded {
@@ -722,12 +718,16 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 }
 
 // count adds what one settled item took from each limit to the sync's
-// settled totals.
+// settled totals. A capture's hold already held its estimate: it moves
+// balance by the difference.
 func (r *syncRun) count(item money.UsageItem, units map[string]int64) {
 	customer := item.Customer.UUID()
 	for key, n := range units {
 		if key == catalog.BalanceLimit {
 			key = balanceKey(money.NormalizeCurrency(item.Currency))
+			if item.Capture != nil {
+				n = satAdd(n, -item.Capture.Row.EstimatedAmount)
+			}
 		}
 		k := settledKey{customer, key}
 		r.settled[k] = satAdd(r.settled[k], n)
@@ -776,7 +776,7 @@ func request(u billing.LeaseUsage, currency string) admission.AdmitRequest {
 		Roles: u.Roles, Resource: strings.TrimSpace(deref(u.Resource)), Currency: currency}
 }
 
-// usageItem is a lease's usage report as settlement takes it, priced by the
+// usageItem is a lease's usage report as intake takes it, priced by the
 // cards in force and counted in the spend windows its attributes resolve to.
 func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 	if err := r.checkItem(u); err != nil {
@@ -785,7 +785,7 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 	currency := money.NormalizeCurrency(string(u.Currency))
 	item := money.UsageItem{Customer: identity.CustomerID(u.CustomerID), Invoker: u.Invoker, Delegated: u.InvokerType == billing.InvokerTypeDelegated,
 		Currency: string(u.Currency), EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: u.Amount,
-		Failed: u.Outcome == billing.UsageFailed, OccurredAt: u.OccurredAt, AdmittedAt: u.AdmittedAt}
+		Failed: u.Outcome == billing.UsageFailed, OccurredAt: u.OccurredAt, AdmittedAt: u.AdmittedAt, Source: u.Source, SourceID: u.SourceID}
 	if item.Failed {
 		item.FailedWindows = r.failed(u)
 		if strings.TrimSpace(u.EventType) != "" {
@@ -836,39 +836,32 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 }
 
 // isolated reports an error that concerns one customer alone: not one of
-// the transaction (a database error aborts it) or of the request's context.
+// the transaction (a database error aborts it), of the event store (out of
+// reach, the whole sync answers 503) or of the request's context.
 func isolated(err error) bool {
 	var pg *pgconn.PgError
-	return !errors.As(err, &pg) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, pgx.ErrTxClosed)
+	return !errors.As(err, &pg) && !errors.Is(err, eventstore.ErrUnavailable) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, pgx.ErrTxClosed)
 }
 
-// capture settles an item that captures one of the lease's request holds:
-// by its pinned cards, in its windows.
-func (r *syncRun) capture(u billing.LeaseUsage) error {
+// capture is an item that captures one of the lease's request holds: priced
+// by its pinned cards, counted in its windows.
+func (r *syncRun) capture(u billing.LeaseUsage) (money.UsageItem, error) {
 	if err := r.checkItem(u); err != nil {
-		return err
+		return money.UsageItem{}, err
 	}
 	requestID := strings.TrimSpace(*u.RequestID)
 	row, err := r.q.GetRequestHold(r.ctx, gen.GetRequestHoldParams{MerchantID: r.merchant, RequestID: requestID, CreatedSince: limits.HeldSince(r.now)})
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (row.LeaseID == nil || *row.LeaseID != r.lease.ID || row.CustomerID != u.CustomerID.UUID()) {
-		return apperr.New(http.StatusNotFound, billing.CodeAdmissionNotFound, "no request hold of the lease and customer has this request id").WithParam("request_id")
+		return money.UsageItem{}, apperr.New(http.StatusNotFound, billing.CodeAdmissionNotFound, "no request hold of the lease and customer has this request id").WithParam("request_id")
 	}
 	if err != nil {
-		return err
+		return money.UsageItem{}, err
 	}
 	if row, err = r.q.LockHold(r.ctx, gen.LockHoldParams{MerchantID: r.merchant, ID: row.ID, CreatedAt: row.CreatedAt}); err != nil {
-		return err
+		return money.UsageItem{}, err
 	}
-	receipt, err := r.money.CaptureHoldTx(r.ctx, r.q, row, billing.CaptureUsage{EventType: u.EventType, Resource: deref(u.Resource), Metadata: u.Metadata,
+	return r.money.CaptureItem(r.ctx, r.q, row, billing.CaptureUsage{EventType: u.EventType, Resource: deref(u.Resource), Metadata: u.Metadata,
 		Source: u.Source, SourceID: u.SourceID, Dimensions: u.Dimensions}, u.Amount)
-	if err != nil {
-		return err
-	}
-	// The hold already held its estimate: the capture moves balance by the
-	// difference.
-	k := settledKey{row.CustomerID, balanceKey(row.Currency)}
-	r.settled[k] = satAdd(r.settled[k], satAdd(receipt.Amount, -row.EstimatedAmount))
-	return nil
 }
 
 // Details is an item or view refusal on the wire.

@@ -101,10 +101,10 @@ func TestDimensionNamesAreUnique(t *testing.T) {
 }
 
 // Every family a statement reads names its merchant: the predicate is the
-// merchant scope.
+// merchant scope. The event store's read the context's merchant.
 func TestEveryFamilyNamesItsMerchant(t *testing.T) {
 	for fam, spec := range families {
-		if spec.Kind != "depletion" && merchantCols[fam] == "" {
+		if spec.Kind != "depletion" && spec.Kind != "store" && merchantCols[fam] == "" {
 			t.Errorf("family %s names no merchant column", fam)
 		}
 	}
@@ -123,7 +123,7 @@ func TestEveryMeasureCompiles(t *testing.T) {
 			t.Errorf("%s: %v", m.Name, verr)
 			continue
 		}
-		stmts, err := compile(plan, uuid.New())
+		stmts, err := compile(plan, uuid.New(), nil)
 		if err != nil {
 			t.Errorf("%s: %v", m.Name, err)
 			continue

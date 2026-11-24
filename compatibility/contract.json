@@ -1198,7 +1198,7 @@
       "type UsageBillingCurrency struct {\n\tCurrency             catalog.Currency `json:\"currency\"`\n\tCreditLimit          int64            `json:\"credit_limit,string\"`\n\tMinimumInvoiceAmount int64            `json:\"minimum_invoice_amount,string\"`\n\n\tCollectionThreshold *int64 `json:\"collection_threshold,string\"`\n\n\tDelinquencyFloor *int64 `json:\"delinquency_floor,string\"`\n}",
       "type UsageBillingSettings struct {\n\tBillingDay int                    `json:\"billing_day\"`\n\tCurrencies []UsageBillingCurrency `json:\"currencies\"`\n}",
       "type UsageCharge struct {\n\tMeterKey string        `json:\"meter_key\"`\n\tModel    catalog.Model `json:\"model\"`\n\tCell     *string       `json:\"cell\"`\n\tQuantity int64         `json:\"quantity\"`\n\tAmount   int64         `json:\"amount,string\"`\n}",
-      "type UsageDeduction struct {\n\tDay    string               `json:\"day\"`\n\tAmount int64                `json:\"amount,string\"`\n\tLines  []UsageDeductionLine `json:\"lines\"`\n}",
+      "type UsageDeduction struct {\n\tPeriodStartsAt time.Time            `json:\"period_starts_at\"`\n\tPeriodEndsAt   time.Time            `json:\"period_ends_at\"`\n\tThrough        time.Time            `json:\"through\"`\n\tAmount         int64                `json:\"amount,string\"`\n\tLines          []UsageDeductionLine `json:\"lines\"`\n}",
       "type UsageDeductionLine struct {\n\tMeterKey string  `json:\"meter_key\"`\n\tCell     *string `json:\"cell\"`\n\tRequests int64   `json:\"requests\"`\n\tQuantity int64   `json:\"quantity\"`\n\tAmount   int64   `json:\"amount,string\"`\n}",
       "type UsageEstimate struct {\n\tAmount     *int64           `json:\"amount,omitempty,string\"`\n\tEventType  string           `json:\"event_type\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n}",
       "type UsageGroupBy string",
@@ -1560,6 +1560,9 @@
     "internal/api": [
       "type ErrorResponse struct {\n\tError ErrorDetails `json:\"error\"`\n}"
     ],
+    "internal/app": [
+      "type UsageDiscard struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tRunID      uuid.UUID `json:\"run_id\"`\n\tCustomers  int       `json:\"customers\"`\n}"
+    ],
     "internal/archivewire": [
       "type Header struct {\n\tTenantID                 string `json:\"tenant_id,omitempty\"`\n\tCatalogRevision          int64  `json:\"catalog_revision\"`\n\tKind                     string `json:\"kind\"`\n\tVersion                  int    `json:\"version\"`\n\tMerchantID               string `json:\"merchant_id\"`\n\tConsistency              string `json:\"consistency\"`\n\tRequiredCutoverCondition string `json:\"required_cutover_condition\"`\n}",
       "type Info struct {\n\tTenantID   string `json:\"tenant_id,omitempty\"`\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n}",
@@ -1620,6 +1623,11 @@
     ],
     "internal/eventlog": [
       "type cursor struct {\n\tVersion  int       `json:\"v\"`\n\tEpoch    uuid.UUID `json:\"epoch\"`\n\tMerchant string    `json:\"merchant\"`\n\tTypes    []string  `json:\"types,omitempty\"`\n\tPosition int64     `json:\"position\"`\n\tBoundary string    `json:\"boundary,omitempty\"`\n}"
+    ],
+    "internal/eventstore": [
+      "type UsageCharge struct {\n\tMeter    string `json:\"meter\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n}",
+      "type UsageEvent struct {\n\tEventID     uuid.UUID          `json:\"event_id\"`\n\tCustomerID  billing.CustomerID `json:\"customer_id\"`\n\tCurrency    string             `json:\"currency\"`\n\tEventType   string             `json:\"event_type\"`\n\tInvoker     string             `json:\"invoker\"`\n\tInvokerType string             `json:\"invoker_type\"`\n\tOutcome     UsageOutcome       `json:\"outcome\"`\n\tSource      string             `json:\"source\"`\n\tSourceID    string             `json:\"source_id\"`\n\n\tLeaseID        uuid.UUID        `json:\"lease_id\"`\n\tN              uint64           `json:\"n\"`\n\tOccurredAt     time.Time        `json:\"occurred_at\"`\n\tAdmittedAt     time.Time        `json:\"admitted_at\"`\n\tIngestedAt     time.Time        `json:\"ingested_at\"`\n\tPeriodStartsAt time.Time        `json:\"period_starts_at\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tMetadata       string           `json:\"metadata\"`\n\n\tAmount int64 `json:\"amount\"`\n\n\tStated   *int64        `json:\"stated\"`\n\tCharged  int64         `json:\"charged\"`\n\tForgiven int64         `json:\"forgiven\"`\n\tCharges  []UsageCharge `json:\"charges\"`\n\tLimits   []UsageLimit  `json:\"limits\"`\n}",
+      "type UsageLimit struct {\n\tKey            string     `json:\"key\"`\n\tWindowStartsAt time.Time  `json:\"window_starts_at\"`\n\tWindowEndsAt   *time.Time `json:\"window_ends_at\"`\n\tUnits          int64      `json:\"units\"`\n}"
     ],
     "internal/history": [
       "func (f *FieldChange) UnmarshalJSON(raw []byte) error {\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(changed)) {\n\t\t*f = Changed()\n\t\treturn nil\n\t}\n\tvar sides struct {\n\t\tBefore json.RawMessage `json:\"before\"`\n\t\tAfter  json.RawMessage `json:\"after\"`\n\t}\n\tif err := json.Unmarshal(raw, \u0026sides); err != nil {\n\t\treturn fmt.Errorf(\"history: field change: %w\", err)\n\t}\n\t*f = FieldChange{Before: sides.Before, After: sides.After}\n\treturn nil\n}",
@@ -1820,8 +1828,8 @@
       "type ValidationError struct {\n\tErrors []FieldError `json:\"errors\"`\n}"
     ],
     "internal/modules/money": [
-      "type AccrualLine struct {\n\tMeterKey     string `json:\"meter_key\"`\n\tCell         string `json:\"cell\"`\n\tRequests     int64  `json:\"requests\"`\n\tQuantity     int64  `json:\"quantity\"`\n\tAmount       int64  `json:\"amount\"`\n\tPostedAmount int64  `json:\"posted_amount\"`\n}",
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
+      "type PostingLine struct {\n\tMeterKey string `json:\"meter_key\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tRequests int64  `json:\"requests\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type UsageAccountKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n}",
       "type UsageOrderArgs struct {\n\tBill    *UsageAccountKey `json:\"bill,omitempty\"`\n\tCollect *UsageOrderKey   `json:\"collect,omitempty\"`\n}",
       "type UsageOrderKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tOrderID    uuid.UUID `json:\"order_id\"`\n}",
@@ -2044,6 +2052,9 @@
       "type orderKeyResult struct {\n\tOrderID uuid.UUID         `json:\"order_id\"`\n\tDigest  []byte            `json:\"digest\"`\n\tStatus  int               `json:\"status,omitempty\"`\n\tCode    billing.ErrorCode `json:\"code,omitempty\"`\n\tOrder   *billing.Order    `json:\"order,omitempty\"`\n}",
       "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
       "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
+    ],
+    "internal/usageerasure": [
+      "type Args struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tCustomerID uuid.UUID `json:\"customer_id\" river:\"unique\"`\n}"
     ],
     "internal/wakejobs": [
       "type ProviderObjectObserveArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\n\tObjectKind string `json:\"kind\" river:\"unique\"`\n\tRef        string `json:\"ref\" river:\"unique\"`\n\tAfter      int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType  string `json:\"event_type,omitempty\"`\n}",
@@ -2581,6 +2592,25 @@
       "fmt": "fmt",
       "http": "net/http"
     },
+    "internal/app/event_store.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "driver": "github.com/ClickHouse/clickhouse-go/v2/lib/driver",
+      "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "slices": "slices",
+      "slog": "log/slog",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/archivewire/wire.go": {
       "bufio": "bufio",
       "bytes": "bytes",
@@ -2809,6 +2839,17 @@
       "uuid": "github.com/google/uuid",
       "v2": "github.com/ccoveille/go-safecast/v2",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/eventstore/usage.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "fmt": "fmt",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "strconv": "strconv",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v2": "github.com/ClickHouse/clickhouse-go/v2"
     },
     "internal/history/attribution.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
@@ -3874,6 +3915,7 @@
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "http": "net/http",
@@ -3881,7 +3923,8 @@
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "spendgate": "github.com/open-rails/openrails/internal/modules/admission/spendgate",
-      "strings": "strings"
+      "strings": "strings",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/money/invoice_profile.go": {
       "context": "context",
@@ -3906,6 +3949,7 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "failpoint": "github.com/open-rails/openrails/internal/failpoint",
       "fmt": "fmt",
@@ -3959,33 +4003,18 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/modules/money/settlement.go": {
-      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
-      "big": "math/big",
-      "billing": "github.com/open-rails/openrails/billing",
+    "internal/modules/money/usage_price.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
       "cmp": "cmp",
       "context": "context",
-      "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "hex": "encoding/hex",
-      "http": "net/http",
-      "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "limits": "github.com/open-rails/openrails/internal/modules/limits",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "retention": "github.com/open-rails/openrails/internal/retention",
-      "sha256": "crypto/sha256",
       "slices": "slices",
       "strings": "strings",
-      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/orders/cart.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -5107,6 +5136,7 @@
       "logx": "github.com/open-rails/openrails/internal/logx",
       "strings": "strings",
       "time": "time",
+      "usageerasure": "github.com/open-rails/openrails/internal/usageerasure",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
@@ -5208,16 +5238,20 @@
       "catalog": "github.com/open-rails/openrails/catalog",
       "cmp": "cmp",
       "context": "context",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "http": "net/http",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "slices": "slices",
       "strings": "strings",
-      "time": "time",
+      "time": "time"
+    },
+    "internal/usageerasure/usageerasure.go": {
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
       "uuid": "github.com/google/uuid"
     },
     "internal/wakejobs/wakejobs.go": {

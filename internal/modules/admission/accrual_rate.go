@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -50,19 +51,14 @@ func (m *AccrualRateMeter) MeasuredRatePerHour(ctx context.Context, payer identi
 	}
 	since := m.clock().Add(-window)
 	var total, running int64
-	err = m.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := m.db.Gen(ctx)
-		var qerr error
-		total, qerr = q.SumUsageMinutesSince(ctx, gen.SumUsageMinutesSinceParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			Currency:   currency,
-			Since:      since,
-		})
-		if qerr != nil {
-			return qerr
+	if store := m.db.EventStore(); store != nil {
+		if total, err = store.MinuteAmount(ctx, billing.CustomerID(payer.UUID()), currency, since, time.Time{}); err != nil {
+			return 0, err
 		}
-		running, qerr = q.SumRunningChargeRates(ctx, gen.SumRunningChargeRatesParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency})
+	}
+	err = m.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var qerr error
+		running, qerr = m.db.Gen(ctx).SumRunningChargeRates(ctx, gen.SumRunningChargeRatesParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency})
 		return qerr
 	})
 	if err != nil {

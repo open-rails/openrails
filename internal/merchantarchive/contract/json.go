@@ -395,10 +395,12 @@ var jsonRules = map[string]jsonRule{
 	// An order line's credit benefit per unit, frozen when the order was made.
 	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
-	"usage_accruals.lines":       array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "requests": integerValue, "quantity": integerValue, "amount": integerValue, "posted_amount": integerValue})),
-	"order_attempts.metadata":    metadataJSON,
-	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
+	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
+	"usage_postings.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
+	"usage_card_prints.card":         metadataJSON,
+	"event_store.usage_events.event": metadataJSON,
+	"order_attempts.metadata":        metadataJSON,
+	"order_attempts.rail_fields":     nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"order_attempts.rail_state": nullable(object(map[string]jsonRule{
 		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,

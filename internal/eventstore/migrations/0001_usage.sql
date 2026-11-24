@@ -100,7 +100,8 @@ SELECT merchant_id, customer_id, currency, toStartOfMinute(toDateTime(occurred_a
 FROM {database}.usage_events;
 
 -- Usage history per day: each event once with meter '', and each of its
--- charges under its meter and cell.
+-- charges under its meter, cell and card print in its pricing period, which
+-- price the day's share of the period's total at read.
 CREATE TABLE IF NOT EXISTS {database}.usage_days (
     merchant_id UUID,
     customer_id UUID,
@@ -109,6 +110,8 @@ CREATE TABLE IF NOT EXISTS {database}.usage_days (
     event_type LowCardinality(String),
     meter LowCardinality(String),
     cell String,
+    print LowCardinality(String),
+    period_starts_at DateTime64(6, 'UTC'),
     invoker String,
     outcome Enum8('succeeded' = 1, 'failed' = 2),
     requests UInt64,
@@ -117,18 +120,19 @@ CREATE TABLE IF NOT EXISTS {database}.usage_days (
     charged Int64,
     forgiven Int64
 ) ENGINE = SummingMergeTree((requests, quantity, stated, charged, forgiven))
-ORDER BY (merchant_id, customer_id, day, currency, event_type, meter, cell, invoker, outcome)
+ORDER BY (merchant_id, customer_id, day, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome)
 TTL day + INTERVAL 25 MONTH
 SETTINGS index_granularity = 1024;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_days_events_mv TO {database}.usage_days AS
 SELECT merchant_id, customer_id, toDate(occurred_at, 'UTC') AS day, currency, event_type, '' AS meter, '' AS cell,
-       invoker, outcome, toUInt64(1) AS requests, toInt64(0) AS quantity, ifNull(stated, 0) AS stated, charged, forgiven
+       '' AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests, toInt64(0) AS quantity,
+       ifNull(stated, 0) AS stated, charged, forgiven
 FROM {database}.usage_events;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_days_charges_mv TO {database}.usage_days AS
 SELECT merchant_id, customer_id, toDate(occurred_at, 'UTC') AS day, currency, event_type, charges.meter AS meter,
-       charges.cell AS cell, invoker, outcome, toUInt64(1) AS requests, charges.quantity AS quantity,
-       charges.stated AS stated, toInt64(0) AS charged, toInt64(0) AS forgiven
+       charges.cell AS cell, charges.print AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests,
+       charges.quantity AS quantity, charges.stated AS stated, toInt64(0) AS charged, toInt64(0) AS forgiven
 FROM {database}.usage_events
 ARRAY JOIN charges;

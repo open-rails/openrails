@@ -132,8 +132,11 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 		if err != nil {
 			return nil, err
 		}
-		capacity, err := s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, admissionCapacityFromRow(row))
+		capacity, err := s.withUnposted(ctx, q, mid.UUID(), customer, a.Currency, admissionCapacityFromRow(row))
 		if err != nil {
+			return nil, err
+		}
+		if capacity, err = s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, capacity); err != nil {
 			return nil, err
 		}
 		line := billing.CustomerLimit{CustomerID: billing.CustomerID(customer), Limit: catalog.BalanceLimit, Unit: a.Currency,

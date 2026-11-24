@@ -41,11 +41,6 @@ SELECT
        FROM billing.credit_grants g
        WHERE g.merchant_id = a.merchant_id AND g.customer_id = a.customer_id AND g.unit = a.currency
          AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     -- What the customer's usage accrued and the ledger has not taken.
-     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
-              FROM billing.usage_accruals ua
-             WHERE ua.merchant_id = a.merchant_id AND ua.customer_id = a.customer_id AND ua.currency = a.currency
-               AND ua.amount > ua.posted_amount), 0)
      -- What the customer's running charges have accrued and not posted.
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $2::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc

@@ -12,47 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const addMeterPeriodQuantity = `-- name: AddMeterPeriodQuantity :one
-INSERT INTO billing.meter_period_quantities (
-    merchant_id, customer_id, currency, meter_key, cell, period_starts_at, quantity, created_at, updated_at
-) VALUES (
-    $1::uuid, $2::uuid, $3::text, $4::text,
-    $5::text, $6::timestamptz, $7::bigint,
-    $8::timestamptz, $8::timestamptz
-)
-ON CONFLICT (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
-DO UPDATE SET quantity = billing.meter_period_quantities.quantity + EXCLUDED.quantity, updated_at = EXCLUDED.updated_at
-RETURNING quantity
-`
-
-type AddMeterPeriodQuantityParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	MeterKey       string
-	Cell           string
-	PeriodStartsAt time.Time
-	Quantity       int64
-	Now            time.Time
-}
-
-// Adds quantity to a meter's period quantity and answers the new total.
-func (q *Queries) AddMeterPeriodQuantity(ctx context.Context, arg AddMeterPeriodQuantityParams) (int64, error) {
-	row := q.db.QueryRow(ctx, addMeterPeriodQuantity,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.MeterKey,
-		arg.Cell,
-		arg.PeriodStartsAt,
-		arg.Quantity,
-		arg.Now,
-	)
-	var quantity int64
-	err := row.Scan(&quantity)
-	return quantity, err
-}
-
 const getCustomerPeriodAnchor = `-- name: GetCustomerPeriodAnchor :one
 SELECT LEAST(
     (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
@@ -76,38 +35,6 @@ func (q *Queries) GetCustomerPeriodAnchor(ctx context.Context, arg GetCustomerPe
 	var period_anchor time.Time
 	err := row.Scan(&period_anchor)
 	return period_anchor, err
-}
-
-const getMeterPeriodQuantity = `-- name: GetMeterPeriodQuantity :one
-SELECT COALESCE((
-    SELECT quantity FROM billing.meter_period_quantities
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND currency = $3::text AND meter_key = $4::text
-      AND cell = $5::text AND period_starts_at = $6::timestamptz
-), 0)::bigint AS quantity
-`
-
-type GetMeterPeriodQuantityParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	MeterKey       string
-	Cell           string
-	PeriodStartsAt time.Time
-}
-
-func (q *Queries) GetMeterPeriodQuantity(ctx context.Context, arg GetMeterPeriodQuantityParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getMeterPeriodQuantity,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.MeterKey,
-		arg.Cell,
-		arg.PeriodStartsAt,
-	)
-	var quantity int64
-	err := row.Scan(&quantity)
-	return quantity, err
 }
 
 const listUsageRatingCards = `-- name: ListUsageRatingCards :many
@@ -142,8 +69,8 @@ type ListUsageRatingCardsRow struct {
 	Price         []byte
 }
 
-// Rating at ingest: the rate cards an event type is priced by, each
-// customer's per-period meter quantities, and the period anchor.
+// Rating at intake: the rate cards an event type is priced by, and the
+// period anchor.
 // Every meter of an event type that has a rate card, with the card.
 func (q *Queries) ListUsageRatingCards(ctx context.Context, arg ListUsageRatingCardsParams) ([]ListUsageRatingCardsRow, error) {
 	rows, err := q.db.Query(ctx, listUsageRatingCards, arg.MerchantID, arg.EventType)

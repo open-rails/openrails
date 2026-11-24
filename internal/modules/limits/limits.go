@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -101,10 +102,14 @@ func Get(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, key string) 
 // named unit's merchant boundary) at an instant.
 type PeriodFunc func(ctx context.Context, unit string, at time.Time) (start, end time.Time, err error)
 
-// Customer reads one customer's limits. ExceptLease leaves one lease's
+// Customer reads one customer's limits: what usage took of them from the
+// event store (Events, else the one bound to Q's transaction; Loaded when
+// already read), the rest from PostgreSQL. ExceptLease leaves one lease's
 // in-flight report out of what it reads as held.
 type Customer struct {
 	Q           *gen.Queries
+	Events      *eventstore.Store
+	Loaded      []eventstore.LimitRow
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	Period      PeriodFunc
@@ -155,7 +160,7 @@ func (c Customer) latest(ctx context.Context) (map[string]Stored, error) {
 	}
 	out := make(map[string]Stored, len(rows))
 	for _, r := range rows {
-		out[r.LimitKey] = Stored{StartsAt: r.WindowStartsAt.UTC(), EndsAt: r.WindowEndsAt, Settled: r.Settled, Adjusted: r.Adjusted, UpdatedAt: r.UpdatedAt}
+		out[r.LimitKey] = Stored{StartsAt: r.WindowStartsAt.UTC(), EndsAt: r.WindowEndsAt, Adjusted: r.Adjusted, ReachedAt: r.ReachedAt, UpdatedAt: r.UpdatedAt}
 	}
 	return out, nil
 }
@@ -250,73 +255,50 @@ func (c Customer) stored(ctx context.Context, key string, w Window, newest *Stor
 	if err != nil {
 		return nil, err
 	}
-	return &Stored{StartsAt: r.WindowStartsAt.UTC(), EndsAt: r.WindowEndsAt, Settled: r.Settled, Adjusted: r.Adjusted, UpdatedAt: r.UpdatedAt}, nil
+	return &Stored{StartsAt: r.WindowStartsAt.UTC(), EndsAt: r.WindowEndsAt, Adjusted: r.Adjusted, ReachedAt: r.ReachedAt, UpdatedAt: r.UpdatedAt}, nil
 }
 
 // standing is the customer's line for one limit: base capacity plus the
-// window's adjustments, settled usage and held units.
+// window's adjustments, the units usage took and what is held.
 func (c Customer) standing(ctx context.Context, def Definition, base int64, newest *Stored) (billing.CustomerLimit, error) {
 	line := billing.CustomerLimit{CustomerID: billing.CustomerID(c.CustomerID), Limit: def.Key, Unit: def.Unit, Capacity: base}
 	w, err := c.window(ctx, def, newest)
 	if err != nil {
 		return line, err
 	}
+	if !w.Open && def.Reset.Kind != catalog.ResetRolling {
+		line.Remaining = base
+		return line, nil
+	}
+	claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: base, Overrun: def.Overrun}
+	var row *gen.GetLimitWindowForUpdateRow
+	if stored, err := c.stored(ctx, def.Key, w, newest); err != nil {
+		return line, err
+	} else if stored != nil {
+		row = &gen.GetLimitWindowForUpdateRow{LimitKey: def.Key, WindowStartsAt: stored.StartsAt, WindowEndsAt: stored.EndsAt, Adjusted: stored.Adjusted, ReachedAt: stored.ReachedAt}
+	}
+	h := c.holder()
+	s, err := h.standing(ctx, claim, row)
+	if err != nil {
+		return line, err
+	}
+	line.Capacity, line.Used, line.Held = s.Capacity, s.Settled, s.Held
 	switch def.Reset.Kind {
 	case catalog.ResetRolling:
-		from := RollingFrom(def.Reset.WindowSeconds, c.Now)
-		rows, err := c.Q.ListLimitWindowsFrom(ctx, gen.ListLimitWindowsFromParams{MerchantID: c.MerchantID, CustomerID: c.CustomerID, LimitKey: def.Key, WindowStartsAt: from})
-		if err != nil {
-			return line, err
-		}
-		line.WindowStartsAt = ptr(from)
-		bucket := BucketWidth(def.Reset.WindowSeconds)
-		for _, r := range rows {
-			line.Capacity += r.Adjusted
-			line.Used += r.Settled
-			if r.Settled != 0 && line.ResetsAt == nil {
-				line.ResetsAt = ptr(r.WindowStartsAt.UTC().Add(bucket + time.Duration(def.Reset.WindowSeconds)*time.Second))
-			}
-		}
+		line.WindowStartsAt = ptr(RollingFrom(def.Reset.WindowSeconds, c.Now))
+		line.ResetsAt = h.rollingResetsAt(ctx, def.Key, def.Reset)
 	case catalog.ResetRate:
-		row, err := c.stored(ctx, def.Key, w, newest)
-		if err != nil {
-			return line, err
-		}
-		if row != nil {
-			line.Used = RateLevel(row.Settled, base, def.Reset.WindowSeconds, row.UpdatedAt, c.Now)
-		}
 		line.ResetsAt = RateRefilledAt(line.Used, base, def.Reset.WindowSeconds, c.Now)
+	case catalog.ResetLifetime:
 	default:
-		if !w.Open {
-			break
-		}
-		row, err := c.stored(ctx, def.Key, w, newest)
-		if err != nil {
-			return line, err
-		}
-		if row != nil {
-			line.Capacity += row.Adjusted
-			line.Used = row.Settled
-		}
-		if def.Reset.Kind != catalog.ResetLifetime {
-			line.WindowStartsAt, line.ResetsAt = ptr(w.StartsAt), w.EndsAt
-		}
-	}
-	if w.Open || def.Reset.Kind == catalog.ResetRolling {
-		from := w.StartsAt
-		if def.Reset.Kind == catalog.ResetRolling {
-			from = *line.WindowStartsAt
-		}
-		if line.Held, err = c.holder().Held(ctx, def.Key, from, w.StartsAt, w.EndsAt != nil, true); err != nil {
-			return line, err
-		}
+		line.WindowStartsAt, line.ResetsAt = ptr(w.StartsAt), w.EndsAt
 	}
 	line.Remaining = subSat(subSat(line.Capacity, line.Used), line.Held)
 	return line, nil
 }
 
 func (c Customer) holder() Holder {
-	return Holder{Q: c.Q, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now, ExceptLease: c.ExceptLease}
+	return Holder{Q: c.Q, Events: c.Events, Loaded: c.Loaded, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now, ExceptLease: c.ExceptLease}
 }
 
 // Applies reports whether def counts a request in currency of eventType

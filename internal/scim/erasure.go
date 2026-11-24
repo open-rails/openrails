@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/usageerasure"
 )
 
 // An erasure (DELETE /Users/{id}, alone or in a Bulk) is a destructive
@@ -143,6 +144,9 @@ func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action
 		if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
 			return err
 		}
+		if err := eraseUsage(ctx, q, action.MerchantID, user); err != nil {
+			return err
+		}
 		return a.FinishTx(ctx, tx, action.MerchantID, action.ID, destructive.OutcomeSucceeded, "")
 	})
 }
@@ -178,4 +182,20 @@ func (s *Server) erasureError(ctx context.Context, err error) *Error {
 	}
 	s.Log.ErrorContext(ctx, "scim: erasure failed", logx.Err(err))
 	return errInternal
+}
+
+// eraseUsage queues the erasure of the customer's usage from the event
+// store with the rest: its events keep their quantities and money, and lose
+// who invoked them and what they carried. Without a River producer it runs
+// at once.
+func eraseUsage(ctx context.Context, q *gen.Queries, mid, customer uuid.UUID) error {
+	store := db.EventStoreOf(q)
+	if store == nil {
+		return nil
+	}
+	_, err := db.InsertRiverJobWith(ctx, q, usageerasure.Args{MerchantID: mid, CustomerID: customer}, nil)
+	if errors.Is(err, db.ErrNoRiverProducer) {
+		return store.EraseCustomer(ctx, billing.CustomerID(customer))
+	}
+	return err
 }
