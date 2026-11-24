@@ -14,6 +14,7 @@ var NeverRollbackableTables = map[string]string{
 	"ledger_daily":       "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"ledger_type_totals": "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"revenue_schedules":  "money: what each line funded and recognised, which its transfers posted; rewinding a row desynchronises it from them",
+	"books_starts":       "money: when the general ledger started, which its audit reads; rewinding it hides or flags payments wrongly",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
 	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",

@@ -88,6 +88,10 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 	if err != nil {
 		return nil, nil, fmt.Errorf("books: schedule check: %w", err)
 	}
+	// An order whose receipts have nothing left unapplied, its money
+	// applied or returned (a refund before a timed line's access), owes its
+	// lines nothing more.
+	spent := map[uuid.UUID]bool{}
 	for _, r := range rows {
 		if CheckCurrency(r.Currency) != nil {
 			continue
@@ -99,12 +103,43 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 		case r.BeforeBooks:
 			line.Reason = LineBeforeBooks
 		default:
-			failing = append(failing, line)
+			done, known := spent[r.OrderID]
+			if !known {
+				if done, err = orderSpent(ctx, gen.New(q), merchant, r.OrderID); err != nil {
+					return nil, nil, err
+				}
+				spent[r.OrderID] = done
+			}
+			if !done {
+				failing = append(failing, line)
+			}
 			continue
 		}
 		warnings = append(warnings, line)
 	}
 	return failing, warnings, nil
+}
+
+// orderSpent reports whether every receipt of an order has nothing left
+// unapplied in the books: none of its money waits for a line.
+func orderSpent(ctx context.Context, q *gen.Queries, merchant, order uuid.UUID) (bool, error) {
+	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: merchant, OrderID: order})
+	if err != nil {
+		return false, err
+	}
+	if len(receipts) == 0 {
+		return false, nil
+	}
+	for _, p := range receipts {
+		pb, err := paymentBooksOf(ctx, q, merchant, p.ID)
+		if err != nil {
+			return false, err
+		}
+		if pb.received == 0 || pb.unapplied() > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // UnpostedFindingType is the finding ledger-audit raises for a payment the
@@ -151,19 +186,26 @@ func CheckPostings(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]Unpos
 	return out, nil
 }
 
-// RaiseUnposted raises a finding for each payment the general ledger holds
-// no posting of. The gap is recorded, never refused.
-func RaiseUnposted(ctx context.Context, q *gen.Queries, merchant uuid.UUID, unposted []UnpostedPayment) error {
+// SyncUnposted raises a finding for each payment the general ledger holds
+// no posting of, and closes those of payments posted since. The gap is
+// recorded, never refused.
+func SyncUnposted(ctx context.Context, q *gen.Queries, merchant uuid.UUID, unposted []UnpostedPayment) error {
+	missing := make([]string, 0, len(unposted))
 	for _, u := range unposted {
+		subject := "payment:" + u.PaymentID.String()
+		missing = append(missing, subject)
 		evidence, err := json.Marshal(map[string]string{"payment_id": u.PaymentID.String(), "kind": u.Kind, "currency": u.Currency, "amount": strconv.FormatInt(u.Amount, 10)})
 		if err != nil {
 			return err
 		}
 		action := "The payment was stored without its general-ledger posting. Find the writer that skipped the poster; the books' rebuild posts the payment."
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: merchant, FindingType: UnpostedFindingType,
-			SubjectKey: "payment:" + u.PaymentID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+			SubjectKey: subject, Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return fmt.Errorf("books: raise %s: %w", UnpostedFindingType, err)
 		}
+	}
+	if _, err := q.ResolvePostedPaymentFindings(ctx, gen.ResolvePostedPaymentFindingsParams{MerchantID: merchant, Missing: missing}); err != nil {
+		return fmt.Errorf("books: close %s: %w", UnpostedFindingType, err)
 	}
 	return nil
 }

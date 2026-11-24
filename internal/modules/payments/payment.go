@@ -134,8 +134,9 @@ func (s *PaymentService) RefundObservedWithReason(ctx context.Context, originalP
 }
 
 // RecordObservedRefund retains the provider's occurrence time and provenance.
-// Local accounting effects use the service clock; they are never backdated.
-// A replay returns the first accepted facts without rewriting their metadata.
+// The general ledger dates the reversal's legs at that time, when it settled;
+// access and other local effects use the service clock. A replay returns the
+// first accepted facts without rewriting their metadata.
 func (s *PaymentService) RecordObservedRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
 	if occurredAt.IsZero() {
 		return nil, errors.New("observed refund requires its provider occurrence time")

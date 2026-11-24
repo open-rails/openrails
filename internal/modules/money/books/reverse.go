@@ -76,6 +76,20 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	if err != nil || posted {
 		return err
 	}
+	// The credit lot the payment bought is first: its poster has moved its
+	// share already (books.ReverseCredit, books.RecoverCredit). The rest is
+	// this one's.
+	lot, err := q.GetLotReversalCash(ctx, gen.GetLotReversalCashParams{MerchantID: mid.UUID(), CustomerID: r.CustomerID, Currency: r.Currency, ReversalID: r.ID.String()})
+	if err != nil {
+		return err
+	}
+	amount := -r.Amount - lot.Returned
+	if r.Amount > 0 {
+		amount = r.Amount - lot.Restored
+	}
+	if amount <= 0 {
+		return nil
+	}
 	usage := false
 	if p.OrderID != nil {
 		order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: *p.OrderID})
@@ -88,25 +102,39 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	if err != nil {
 		return err
 	}
-	w := reverser{b: New(q, mid.UUID()), q: q, d: d, merchant: mid.UUID(), reversal: r, cash: CashAccount(p),
-		at: r.PurchasedAt.UTC().Truncate(time.Microsecond), now: now.UTC().Truncate(time.Microsecond)}
+	w := reverser{b: New(q, mid.UUID()), q: q, d: d, merchant: mid.UUID(), reversal: r, cash: CashAccount(p), at: SettledAt(r), now: now.UTC().Truncate(time.Microsecond)}
 	switch {
 	case *r.ReversalKind == "refund" && r.Amount < 0 && usage:
-		// A merchant's refund of usage it delivered reopens nothing owed: it
-		// is the usage's contra revenue.
-		return w.post(ctx, Ref{Type: Refunds}, w.cash, RefundRecognized, OpRefund, -r.Amount, nil)
+		// A merchant's refund of usage it delivered reopens nothing owed:
+		// beyond what the payment left unapplied it is the usage's contra.
+		fromUnapplied := min(amount, max(pb.unapplied(), 0))
+		if fromUnapplied > 0 {
+			if err := w.post(ctx, Ref{Type: UnappliedCash}, w.cash, CashReturned, OpRefund, fromUnapplied, nil); err != nil {
+				return err
+			}
+		}
+		if contra := amount - fromUnapplied; contra > 0 {
+			return w.post(ctx, Ref{Type: Refunds}, w.cash, RefundRecognized, OpRefund, contra, nil)
+		}
+		return nil
 	case *r.ReversalKind == "refund" && r.Amount < 0:
-		return w.reverse(ctx, refundReversal, -r.Amount, pb)
+		return w.reverse(ctx, refundReversal, amount, pb)
 	case *r.ReversalKind == "chargeback" && r.Amount < 0:
 		// A usage order's chargeback reopens what the customer owes: the
 		// receivable's usage_reopened at this coordinate is its cash side,
 		// with no contra; until the receivable is booked its money leaves
 		// unapplied cash.
-		return w.reverse(ctx, chargebackReversal, -r.Amount, pb)
+		return w.reverse(ctx, chargebackReversal, amount, pb)
 	case *r.ReversalKind == "dispute_reversal" && r.Amount > 0:
-		return w.restore(ctx, r.Amount, pb)
+		return w.restore(ctx, amount, pb)
 	}
 	return nil
+}
+
+// SettledAt is when a reversal settled, the date of its legs: the rail's
+// confirmation, or the provider's occurrence time when that is what is known.
+func SettledAt(r gen.BillingPayment) time.Time {
+	return r.PurchasedAt.UTC().Truncate(time.Microsecond)
 }
 
 // taken is what a reversal took from one schedule: from its deferred
@@ -282,17 +310,16 @@ func (w *reverser) reverse(ctx context.Context, k reversal, amount int64, pb pay
 // took: to unapplied cash and to each schedule. A recovery its chargeback
 // accounts for none of (one the books never held) stays in unapplied cash.
 func (w *reverser) restore(ctx context.Context, amount int64, pb paymentBooks) error {
-	c := pb.legs[w.chargeback(pb)]
-	if c == nil {
+	var c *reversalLegs
+	switch named := w.chargeback(); {
+	case named == "":
+		c = pb.chargebacksLeft()
+	case pb.legs[named] != nil:
+		c = pb.legs[named]
+	default:
 		c = &reversalLegs{schedules: map[uuid.UUID]taken{}}
 	}
-	totals := map[uuid.UUID]int64{}
-	for id, t := range c.schedules {
-		if t.total() > 0 {
-			totals[id] = t.total()
-		}
-	}
-	ids, shares := bySchedule(totals)
+	ids, shares := bySchedule(c.totals())
 	legs := append([]int64{max(c.returned, 0), max(c.reopened, 0)}, shares...)
 	parts := spread(min(amount, sum(legs)), legs)
 	if parts[1] > 0 {
@@ -321,25 +348,75 @@ func (w *reverser) restore(ctx context.Context, amount int64, pb paymentBooks) e
 	return nil
 }
 
-// chargeback is the chargeback a won dispute reverses: the one its row
-// names, else the payment's one chargeback.
-func (w *reverser) chargeback(pb paymentBooks) string {
+// chargeback is the chargeback a won dispute's recovery names, if any.
+func (w *reverser) chargeback() string {
 	var meta struct {
 		Reverses string `json:"reverses_payment_id"`
 	}
-	if len(w.reversal.Metadata) > 0 && json.Unmarshal(w.reversal.Metadata, &meta) == nil && meta.Reverses != "" {
+	if len(w.reversal.Metadata) > 0 && json.Unmarshal(w.reversal.Metadata, &meta) == nil {
 		return meta.Reverses
 	}
-	var only string
+	return ""
+}
+
+// chargebacksLeft is what the payment's chargebacks took that no recovery
+// has brought back, for a recovery that names none: earlier recoveries
+// restore the oldest chargebacks first, and what is left of each, oldest
+// first, is restored in its own proportions.
+func (pb paymentBooks) chargebacksLeft() *reversalLegs {
+	out := &reversalLegs{schedules: map[uuid.UUID]taken{}}
+	var ids []string
+	var restored int64
 	for id, l := range pb.legs {
 		if l.chargeback {
-			if only != "" {
-				return ""
-			}
-			only = id
+			ids = append(ids, id)
+		} else if t := l.total(); t < 0 {
+			restored -= t
 		}
 	}
-	return only
+	slices.Sort(ids)
+	for _, id := range ids {
+		l := pb.legs[id]
+		total := l.total()
+		left := total - min(restored, total)
+		restored -= total - left
+		if left <= 0 {
+			continue
+		}
+		sched, shares := bySchedule(l.totals())
+		parts := spread(left, append([]int64{max(l.returned, 0), max(l.reopened, 0)}, shares...))
+		out.returned += parts[0]
+		out.reopened += parts[1]
+		for k, s := range sched {
+			t := l.schedules[s]
+			contra := spread(parts[k+2], []int64{max(t.contra, 0), max(t.deferred, 0)})[0]
+			sum := out.schedules[s]
+			sum.contra += contra
+			sum.deferred += parts[k+2] - contra
+			out.schedules[s] = sum
+		}
+	}
+	return out
+}
+
+// totals is what a reversal took from each schedule.
+func (l *reversalLegs) totals() map[uuid.UUID]int64 {
+	out := map[uuid.UUID]int64{}
+	for id, t := range l.schedules {
+		if t.total() > 0 {
+			out[id] = t.total()
+		}
+	}
+	return out
+}
+
+// total is all a reversal took (negative: all a recovery restored).
+func (l *reversalLegs) total() int64 {
+	t := l.returned + l.reopened
+	for _, s := range l.schedules {
+		t += s.total()
+	}
+	return t
 }
 
 // adjust moves one schedule's funding by delta: a reversal's share

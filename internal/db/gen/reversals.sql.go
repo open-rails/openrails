@@ -54,6 +54,43 @@ func (q *Queries) AdjustRevenueSchedule(ctx context.Context, arg AdjustRevenueSc
 	return result.RowsAffected(), nil
 }
 
+const getLotReversalCash = `-- name: GetLotReversalCash :one
+SELECT COALESCE(sum(t.amount) FILTER (WHERE c.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS returned,
+       COALESCE(sum(t.amount) FILTER (WHERE d.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS restored
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = $1::uuid AND t.customer_id = $2::uuid AND t.currency = $3::text
+  AND t.book = 'general' AND t.operation = 'purchased_credit_refund' AND t.source_id = $4::text
+`
+
+type GetLotReversalCashParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	ReversalID string
+}
+
+type GetLotReversalCashRow struct {
+	Returned int64
+	Restored int64
+}
+
+// The cash a credit lot's poster moved for a reversal or a recovery, at
+// (purchased_credit_refund, …, its id): returned to, or restored from, the
+// payment's cash account.
+func (q *Queries) GetLotReversalCash(ctx context.Context, arg GetLotReversalCashParams) (GetLotReversalCashRow, error) {
+	row := q.db.QueryRow(ctx, getLotReversalCash,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.ReversalID,
+	)
+	var i GetLotReversalCashRow
+	err := row.Scan(&i.Returned, &i.Restored)
+	return i, err
+}
+
 const listPaymentBooksLegs = `-- name: ListPaymentBooksLegs :many
 SELECT t.source_id, t.operation, t.transfer_type, t.revenue_schedule_id, sum(t.amount)::bigint AS amount
 FROM billing.ledger_transfers t
@@ -123,6 +160,10 @@ WHERE p.merchant_id = $1::uuid AND p.deleted_at IS NULL AND p.created_at >= s.at
   AND NOT EXISTS (
       SELECT 1 FROM billing.ledger_transfers t
       WHERE t.merchant_id = p.merchant_id AND t.book = 'general' AND t.source = 'payment' AND t.source_id = p.id::text)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.ledger_transfers t
+      WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency AND t.book = 'general'
+        AND t.operation = 'purchased_credit_refund' AND t.source_id = p.id::text)
 ORDER BY p.created_at, p.id
 `
 
@@ -135,7 +176,8 @@ type ListUnpostedPaymentsRow struct {
 }
 
 // A receipt, or a settled reversal of one, that the general ledger holds no
-// posting of, stored since the merchant's books started.
+// posting of, stored since the merchant's books started: none at the
+// payment's coordinates, and none its credit lot's poster made.
 func (q *Queries) ListUnpostedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListUnpostedPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listUnpostedPayments, merchantID)
 	if err != nil {
@@ -242,4 +284,27 @@ type RecordBooksStartParams struct {
 func (q *Queries) RecordBooksStart(ctx context.Context, arg RecordBooksStartParams) error {
 	_, err := q.db.Exec(ctx, recordBooksStart, arg.MerchantID, arg.StartedAt)
 	return err
+}
+
+const resolvePostedPaymentFindings = `-- name: ResolvePostedPaymentFindings :execrows
+UPDATE billing.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = 'books.entry.missing'
+  AND status IN ('reconcile_required', 'requires_review')
+  AND NOT (subject_key = ANY($2::text[]))
+`
+
+type ResolvePostedPaymentFindingsParams struct {
+	MerchantID uuid.UUID
+	Missing    []string
+}
+
+// A books.entry.missing finding whose payment is no longer missing its
+// posting closes.
+func (q *Queries) ResolvePostedPaymentFindings(ctx context.Context, arg ResolvePostedPaymentFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolvePostedPaymentFindings, arg.MerchantID, arg.Missing)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

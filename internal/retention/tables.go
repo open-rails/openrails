@@ -41,6 +41,7 @@ var Tables = map[string]Table{
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
 	"revenue_schedules":             {Permanent, permanent},
+	"books_starts":                  {Permanent, permanent},
 	"ledger_daily":                  {Permanent, permanent},
 	"ledger_type_totals":            {Class: State},
 	"ledger_rollup_pending":         {Class: State},

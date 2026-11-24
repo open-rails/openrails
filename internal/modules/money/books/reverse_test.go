@@ -1,6 +1,7 @@
 package books
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -96,4 +97,44 @@ func TestPaymentBooksFromLegs(t *testing.T) {
 	require.EqualValues(t, 500_000, pb.legs[chargeback].reopened)
 	require.EqualValues(t, -500_000, pb.legs[won].reopened)
 	require.Equal(t, taken{deferred: 3_000_000, contra: 1_000_000}, pb.legs[chargeback].schedules[schedule])
+}
+
+// An undone end takes back what the end forfeited, never what a refund
+// took before it.
+func TestUndoneEndReinstatesOnlyItsForfeit(t *testing.T) {
+	start := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
+	service := Service{Starts: start, Ends: start.Add(720 * time.Hour)}
+	ended := start.Add(120 * time.Hour)
+	// A refund on the ended schedule took 3.00 of its deferral: 1.50 earned,
+	// 6.00 funded, nothing forfeited. The end is then undone.
+	s := schedule{service: service, funded: 6_000_000, recognized: 1_500_000, through: ended}
+	steps, _, err := s.advance(context.Background(), time.UTC, ended.Add(24*time.Hour))
+	require.NoError(t, err)
+	require.Empty(t, steps)
+	require.EqualValues(t, 1_500_000, s.recognized)
+
+	// A forfeit of 7.50, then 4.00 of the contra reversed by a refund: an
+	// undone end takes back what is left of the forfeit above what 5.00
+	// earned by then.
+	s = schedule{service: service, funded: 5_000_000, recognized: 5_000_000, through: ended, forfeited: 7_500_000}
+	steps, _, err = s.advance(context.Background(), time.UTC, ended.Add(24*time.Hour))
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	require.Equal(t, OpReinstatement, steps[0].op)
+	require.EqualValues(t, 5_000_000-833_333, steps[0].amount)
+	require.EqualValues(t, 7_500_000-(5_000_000-833_333), s.forfeited)
+}
+
+func TestRecoveryNamingNoChargebackRestoresTheOldestFirst(t *testing.T) {
+	one := uuid.New()
+	first, second := "0190a000-0000-7000-8000-000000000001", "0190a000-0000-7000-8000-000000000002"
+	pb := paymentBooks{legs: map[string]*reversalLegs{
+		first:  {chargeback: true, returned: 2_000_000},
+		second: {chargeback: true, schedules: map[uuid.UUID]taken{one: {deferred: 3_000_000, contra: 1_000_000}}},
+		// An earlier recovery brought 1.50 back: of the oldest chargeback.
+		"won": {returned: -1_500_000},
+	}}
+	left := pb.chargebacksLeft()
+	require.EqualValues(t, 500_000, left.returned)
+	require.Equal(t, taken{deferred: 3_000_000, contra: 1_000_000}, left.schedules[one])
 }

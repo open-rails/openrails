@@ -2186,7 +2186,25 @@
       "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
     ],
     "OR-J41-S24": [
-      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-is-contra-revenue-and-its-chargeback-the-cash-side-alone"
+      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-takes-what-it-left-unapplied-and-its-chargeback-the-cash-side-alone"
+    ],
+    "OR-J41-S25": [
+      "TestRevenueReversals/OR-J41-S25/refunds-in-pieces-each-reduce-the-price-from-where-the-last-left-it"
+    ],
+    "OR-J41-S26": [
+      "TestRevenueReversals/OR-J41-S26/a-refund-of-a-two-line-bill-takes-each-line-pro-rata"
+    ],
+    "OR-J41-S27": [
+      "TestRevenueReversals/OR-J41-S27/a-mixed-credit-orders-reversals-move-each-dollar-once"
+    ],
+    "OR-J41-S28": [
+      "TestRevenueReversals/OR-J41-S28/an-end-undone-after-a-refund-reinstates-no-forfeit-it-never-made"
+    ],
+    "OR-J41-S29": [
+      "TestRevenueReversals/OR-J41-S29/a-refund-the-rail-confirms-later-is-dated-when-it-settled"
+    ],
+    "OR-J41-S30": [
+      "TestRevenueReversals/OR-J41-S30/a-timed-line-refunded-before-its-access-is-not-unscheduled"
     ]
   }
 }

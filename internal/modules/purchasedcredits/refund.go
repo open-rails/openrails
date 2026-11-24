@@ -263,7 +263,8 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return postUnits(ctx, l, g, reversalID, from, to, amount, kind, label)
 		}
 		gl := books.New(q, mid.UUID())
-		at := s.now()
+		// Dated when the reversal settled, as its other legs are.
+		at := books.SettledAt(reversal)
 		// The cash returns to, and is recovered into, where the lot's
 		// payment brought it.
 		bought, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: paymentID})

@@ -97,7 +97,14 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			unbooked += l.Amount
 			continue
 		}
-		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
+		// A credit line is its lot's to apply (books.Books.IssueCredit): it
+		// takes nothing here, and what its lot applied of a payment counts
+		// as used.
+		credit, err := creditLine(ctx, q, l)
+		if err != nil {
+			return err
+		}
+		amounts[i], done[i] = l.Amount, credit || slices.Contains(scheduled, l.ID)
 	}
 	// What each payment's earlier applications and reversals took of it.
 	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
@@ -136,13 +143,6 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			funded += a.cash[r][i]
 		}
 		if funded <= 0 {
-			continue
-		}
-		credit, err := creditLine(ctx, q, line)
-		if err != nil {
-			return err
-		}
-		if credit {
 			continue
 		}
 		plan, ready, err := planLine(ctx, q, order, line, services, at)

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 673,
+  "scenario_count": 679,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3306,7 +3306,37 @@
     {
       "id": "OR-J41-S24",
       "journey": "J41",
-      "name": "A usage order's refund is contra revenue; its chargeback posts the cash side alone"
+      "name": "A usage order's refund takes what its payment left unapplied first, contra beyond; its chargeback posts the cash side alone"
+    },
+    {
+      "id": "OR-J41-S25",
+      "journey": "J41",
+      "name": "Refunds in pieces each reduce the price from where the last left it"
+    },
+    {
+      "id": "OR-J41-S26",
+      "journey": "J41",
+      "name": "A refund of a two-line bill takes each line pro rata"
+    },
+    {
+      "id": "OR-J41-S27",
+      "journey": "J41",
+      "name": "A mixed credit order's refund, chargeback and won dispute move each dollar once: the lot's share first"
+    },
+    {
+      "id": "OR-J41-S28",
+      "journey": "J41",
+      "name": "An end undone after a refund reinstates no forfeit it never made"
+    },
+    {
+      "id": "OR-J41-S29",
+      "journey": "J41",
+      "name": "A refund the rail confirms later is dated when it settled"
+    },
+    {
+      "id": "OR-J41-S30",
+      "journey": "J41",
+      "name": "A timed line refunded before its access is granted is not unscheduled"
     },
     {
       "id": "OR-J40-S10",

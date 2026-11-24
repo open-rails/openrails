@@ -484,6 +484,7 @@ func (s *PaymentService) completeRefundReservation(ctx context.Context, reservat
 		ID:            reservationID,
 		TransactionID: refundTransactionID,
 		Metadata:      meta,
+		SettledAt:     s.now(),
 	})
 	if err != nil {
 		return err

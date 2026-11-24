@@ -75,8 +75,9 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 			if err != nil {
 				return err
 			}
-			// A payment stored past its poster is recorded as a finding.
-			return books.RaiseUnposted(ctx, gen.New(database.Qx(ctx)), target.id.UUID(), rep.Unposted)
+			// A payment stored past its poster is recorded as a finding, closed
+			// once it is posted.
+			return books.SyncUnposted(ctx, gen.New(database.Qx(ctx)), target.id.UUID(), rep.Unposted)
 		})
 		if runErr != nil {
 			res.Err = runErr.Error()

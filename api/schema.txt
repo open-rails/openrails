@@ -27,6 +27,7 @@ migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
 migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
+migration 0032_books_reversals.up.sql sha256:036195784d398ec24b6867f0c6969ba7101f464374ab8b47bfe4a9cfe6577077
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -66,6 +67,16 @@ table billing.book_identity
   constraint book_identity_singleton_check CHECK (singleton)
   index CREATE UNIQUE INDEX book_identity_pkey ON billing.book_identity USING btree (singleton)
   trigger CREATE TRIGGER book_identity_wake_dispute_responses AFTER INSERT OR UPDATE ON billing.book_identity FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+
+table billing.books_starts
+  column merchant_id uuid NOT NULL
+  column started_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint books_starts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint books_starts_pkey PRIMARY KEY (merchant_id)
+  index CREATE UNIQUE INDEX books_starts_pkey ON billing.books_starts USING btree (merchant_id)
+  trigger CREATE TRIGGER immutable_books_starts BEFORE DELETE OR UPDATE ON billing.books_starts FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_books_starts_truncate BEFORE TRUNCATE ON billing.books_starts FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.carts
   column merchant_id uuid NOT NULL
@@ -3089,8 +3100,10 @@ table billing.revenue_schedules
   column reinstatements integer NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column forfeited bigint NOT NULL
   constraint revenue_schedules_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint revenue_schedules_ended_check CHECK (((ended_at >= service_starts_at) AND (ended_at < service_ends_at)))
+  constraint revenue_schedules_forfeited_check CHECK ((forfeited >= 0))
   constraint revenue_schedules_funded_check CHECK (((0 <= recognized_net) AND (recognized_net <= funded)))
   constraint revenue_schedules_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint revenue_schedules_method_check CHECK ((method = ANY (ARRAY['ratable'::text, 'point_in_time'::text])))
@@ -3112,7 +3125,7 @@ table billing.revenue_schedules
   index CREATE UNIQUE INDEX revenue_schedules_pkey ON billing.revenue_schedules USING btree (merchant_id, id)
   index CREATE INDEX revenue_schedules_product_access_id_idx ON billing.revenue_schedules USING btree (merchant_id, product_access_id) WHERE (product_access_id IS NOT NULL)
   index CREATE INDEX revenue_schedules_subscription_id_idx ON billing.revenue_schedules USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
-  trigger CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'updated_at')
+  trigger CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'forfeited', 'updated_at')
   trigger CREATE TRIGGER immutable_revenue_schedules_truncate BEFORE TRUNCATE ON billing.revenue_schedules FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.running_charges
@@ -4631,6 +4644,7 @@ function billing.guard_billing_restore_receipt()
                 -- (former names, host claims); a test keeps this list complete.
                 AND c.relname = ANY(ARRAY[
                     'balance_watches',
+                    'books_starts',
                     'carts',
                     'catalog_applications',
                     'catalog_field_owners',

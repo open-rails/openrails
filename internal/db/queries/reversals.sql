@@ -38,7 +38,8 @@ SELECT EXISTS (
 
 -- name: ListUnpostedPayments :many
 -- A receipt, or a settled reversal of one, that the general ledger holds no
--- posting of, stored since the merchant's books started.
+-- posting of, stored since the merchant's books started: none at the
+-- payment's coordinates, and none its credit lot's poster made.
 WITH started AS (
     SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = sqlc.arg(merchant_id)::uuid) AS at
 )
@@ -55,6 +56,10 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.deleted_at IS NULL AND p
   AND NOT EXISTS (
       SELECT 1 FROM billing.ledger_transfers t
       WHERE t.merchant_id = p.merchant_id AND t.book = 'general' AND t.source = 'payment' AND t.source_id = p.id::text)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.ledger_transfers t
+      WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency AND t.book = 'general'
+        AND t.operation = 'purchased_credit_refund' AND t.source_id = p.id::text)
 ORDER BY p.created_at, p.id;
 
 -- name: RecordBooksStart :exec
@@ -63,3 +68,24 @@ ORDER BY p.created_at, p.id;
 INSERT INTO billing.books_starts (merchant_id, started_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(started_at)::timestamptz)
 ON CONFLICT (merchant_id) DO NOTHING;
+
+-- name: GetLotReversalCash :one
+-- The cash a credit lot's poster moved for a reversal or a recovery, at
+-- (purchased_credit_refund, …, its id): returned to, or restored from, the
+-- payment's cash account.
+SELECT COALESCE(sum(t.amount) FILTER (WHERE c.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS returned,
+       COALESCE(sum(t.amount) FILTER (WHERE d.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS restored
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.customer_id = sqlc.arg(customer_id)::uuid AND t.currency = sqlc.arg(currency)::text
+  AND t.book = 'general' AND t.operation = 'purchased_credit_refund' AND t.source_id = sqlc.arg(reversal_id)::text;
+
+-- name: ResolvePostedPaymentFindings :execrows
+-- A books.entry.missing finding whose payment is no longer missing its
+-- posting closes.
+UPDATE billing.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = 'books.entry.missing'
+  AND status IN ('reconcile_required', 'requires_review')
+  AND NOT (subject_key = ANY(sqlc.arg(missing)::text[]));
