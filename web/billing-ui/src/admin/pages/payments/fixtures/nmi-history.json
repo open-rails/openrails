@@ -518,17 +518,14 @@
       "query": {
         "by": [
           "nmi_kind",
-          "category",
+          "decline_cause",
           "reason"
         ],
         "filters": {
-          "category": [
-            "card_data",
-            "issuer_soft",
-            "issuer_hard",
-            "gateway_rule",
-            "system_error",
-            "unknown"
+          "outcome": [
+            "declined",
+            "refused",
+            "error"
           ]
         },
         "measures": [
@@ -547,7 +544,7 @@
           },
           {
             "kind": "dimension",
-            "name": "category"
+            "name": "decline_cause"
           },
           {
             "kind": "dimension",
@@ -566,13 +563,13 @@
         "rows": [
           [
             "one_off_sale",
-            "issuer_soft",
+            "customer",
             "insufficient_funds",
             1
           ],
           [
             "scheduled_rebill",
-            "issuer_soft",
+            "issuer",
             "do_not_honor",
             1
           ]

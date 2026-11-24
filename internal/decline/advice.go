@@ -80,9 +80,9 @@ func (r Result) advised(e Evidence) Result {
 	}
 	switch {
 	case r.NoReattempt || cardWontRecur(e):
-		r.Action, r.Category, r.Transient = FixPaymentMethod, IssuerHard, false
+		r.Action, r.Transient = FixPaymentMethod, false
 	case needsNewData(e):
-		r.Action, r.Category, r.Transient = FixPaymentMethod, CardData, false
+		r.Action, r.Transient = FixPaymentMethod, false
 	}
 	return r
 }

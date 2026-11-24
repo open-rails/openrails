@@ -1,6 +1,7 @@
 // Package decline is the one table for payment refusals: every rail code maps
-// to one billing.DeclineReason, and this package fixes each reason's category
-// and dunning action. Nothing else in OpenRails maps a decline code.
+// to one billing.DeclineReason, and this package fixes each reason's cause
+// (and so its outcome) and dunning action. Nothing else in OpenRails maps a
+// decline code.
 package decline
 
 import (
@@ -10,26 +11,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
-)
-
-// Category is what failed.
-type Category string
-
-const (
-	// Approved is not a refusal; attempts use it for approvals.
-	Approved Category = "approved"
-	// CardData: the details don't match an open, valid account (typo, expired,
-	// closed or reissued card).
-	CardData Category = "card_data"
-	// IssuerSoft: the issuer declined a well-formed request that may pass later.
-	IssuerSoft Category = "issuer_soft"
-	// IssuerHard: the issuer will not approve this card for this purchase.
-	IssuerHard Category = "issuer_hard"
-	// GatewayRule: the PSP's own rule refused it; the issuer never saw it.
-	GatewayRule Category = "gateway_rule"
-	// SystemError: gateway, processor, configuration or comms failure.
-	SystemError Category = "system_error"
-	Unknown     Category = "unknown"
 )
 
 // Action is the dunning decision. The zero value retries: missing evidence
@@ -77,7 +58,7 @@ type Result struct {
 	// response_code).
 	Code      string
 	Reason    billing.DeclineReason
-	Category  Category
+	Cause     billing.DeclineCause
 	Action    Action
 	Transient bool
 	Coverage  Coverage
@@ -88,6 +69,9 @@ type Result struct {
 	// (Mastercard's MAC 24 to 30); zero for none.
 	RetryAfter time.Duration
 }
+
+// Outcome is the refusal's outcome, by its cause.
+func (r Result) Outcome() billing.AttemptOutcome { return r.Cause.Outcome() }
 
 // NeedsMapping reports a code the rail's table does not know.
 func (r Result) NeedsMapping() bool { return r.Coverage == Unmapped }
@@ -156,7 +140,7 @@ func ClassifyEvidence(e Evidence) Result {
 
 func (r Result) with(reason billing.DeclineReason) Result {
 	spec := reasons[reason]
-	r.Reason, r.Category, r.Action, r.Transient = reason, spec.category, spec.action, spec.transient
+	r.Reason, r.Cause, r.Action, r.Transient = reason, spec.cause, spec.action, spec.transient
 	return r
 }
 

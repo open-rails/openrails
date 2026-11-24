@@ -35,7 +35,7 @@ WITH transitions AS (
            a.kind, COALESCE(a.reason, '')::text AS reason,
            ''::text AS from_status, ''::text AS to_status, ''::text AS cancel_type,
            NULL::timestamptz AS from_period_end, NULL::timestamptz AS to_period_end,
-           a.category, COALESCE(a.action, '')::text AS action, a.observed_via, a.source AS origin,
+           a.outcome AS category, COALESCE(a.action, '')::text AS action, a.observed_via, a.source AS origin,
            a.provider_intent_id AS operation_id, a.order_id, a.payment_id, a.cycle_id, a.payment_method_id,
            a.psp_id, a.amount, COALESCE(a.currency, '')::text AS currency, 0::int AS attempt,
            ''::text AS attribution_origin, ''::text AS actor, ''::text AS executor,

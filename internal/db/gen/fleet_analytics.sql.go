@@ -99,8 +99,8 @@ func (q *Queries) FleetMerchantFunnel(ctx context.Context, arg FleetMerchantFunn
 const fleetRailHealth = `-- name: FleetRailHealth :many
 WITH charges AS (
     SELECT a.rail AS r,
-           count(*) FILTER (WHERE a.category = 'approved') AS ok,
-           count(*) FILTER (WHERE a.category <> 'approved') AS refused
+           count(*) FILTER (WHERE a.outcome = 'approved') AS ok,
+           count(*) FILTER (WHERE a.outcome <> 'approved') AS refused
       FROM billing.payment_attempts a
      WHERE a.attempted_at >= $1::timestamptz AND a.kind <> 'verify'
        AND ($2::uuid IS NULL OR a.merchant_id <> $2::uuid)

@@ -135,9 +135,9 @@ func (w *NMIHistoryWorker) read(ctx context.Context, mid, psp uuid.UUID, last *t
 		w.Log.WarnContext(ctx, "nmi history: authorizations with no readable date are in no month", "merchant_id", mid, "psp_id", psp, "undated", history.Undated)
 	}
 	n := len(history.Counts)
-	months, kinds, categories, reasons, counts := make([]time.Time, n), make([]string, n), make([]string, n), make([]string, n), make([]int64, n)
+	months, kinds, reasons, counts, outcomes, causes := make([]time.Time, n), make([]string, n), make([]string, n), make([]int64, n), make([]string, n), make([]string, n)
 	for i, c := range history.Counts {
-		months[i], kinds[i], categories[i], reasons[i], counts[i] = c.Month, c.Kind, c.Category, c.Reason, int64(c.Count)
+		months[i], kinds[i], reasons[i], counts[i], outcomes[i], causes[i] = c.Month, c.Kind, c.Reason, int64(c.Count), string(c.Outcome), string(c.Cause)
 	}
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -145,7 +145,7 @@ func (w *NMIHistoryWorker) read(ctx context.Context, mid, psp uuid.UUID, last *t
 			return err
 		}
 		if err := q.InsertNMIHistoryMonths(ctx, gen.InsertNMIHistoryMonthsParams{
-			MerchantID: mid, PspID: psp, Months: months, Kinds: kinds, Categories: categories, Reasons: reasons, Counts: counts,
+			MerchantID: mid, PspID: psp, Months: months, Kinds: kinds, Reasons: reasons, Counts: counts, Outcomes: outcomes, DeclineCauses: causes,
 		}); err != nil {
 			return err
 		}

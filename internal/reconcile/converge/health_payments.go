@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
@@ -196,7 +197,7 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 // 20), or any answer about our own credentials, which is critical.
 func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	from := now.Add(-systemErrorWindow)
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "category"}}, from, now, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "reason"}}, from, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +206,7 @@ func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]Converg
 		k := healthKey{str(r["psp"]), str(r["owner"])}
 		s := errs[k]
 		s.total += count(r["attempts"])
-		if r["category"] == string(decline.SystemError) {
+		if systemError(billing.DeclineReason(str(r["reason"]))) {
 			s.failed += count(r["attempts"])
 		}
 		errs[k] = s
@@ -372,4 +373,14 @@ func count(v any) int64 {
 		return n
 	}
 	return 0
+}
+
+// systemError: a refusal of ours or our processor's, not the card's: a
+// processing failure, our configuration, a malformed or duplicate request.
+func systemError(reason billing.DeclineReason) bool {
+	switch reason {
+	case billing.DeclineMerchantConfig, billing.DeclineInvalidRequest, billing.DeclineDuplicateTransaction:
+		return true
+	}
+	return decline.CauseOf(reason) == billing.DeclineCauseProcessing
 }

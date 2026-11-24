@@ -20,7 +20,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
@@ -124,10 +123,10 @@ type declineMonth struct {
 }
 
 type declineRefusal struct {
-	Kind     string `json:"kind"`
-	Category string `json:"category"`
-	Reason   string `json:"reason"`
-	Count    int    `json:"count"`
+	Kind   string               `json:"kind"`
+	Cause  billing.DeclineCause `json:"decline_cause"`
+	Reason string               `json:"reason"`
+	Count  int                  `json:"count"`
 }
 
 // newDeclineReport lays the history out as the report prints it: rates by
@@ -144,12 +143,12 @@ func newDeclineReport(h nmi.DeclineHistory) declineReport {
 			months[key] = m
 		}
 		m.Attempts += c.Count
-		if c.Category == string(decline.Approved) {
+		if c.Outcome == billing.AttemptApproved {
 			m.Approved += c.Count
 			continue
 		}
 		m.Refused += c.Count
-		refusals[declineRefusal{Kind: c.Kind, Category: c.Category, Reason: c.Reason}] += c.Count
+		refusals[declineRefusal{Kind: c.Kind, Cause: c.Cause, Reason: c.Reason}] += c.Count
 	}
 	order := map[string]int{nmi.HistoryVerification: 0, nmi.HistoryOneOffSale: 1, nmi.HistoryScheduledRebill: 2}
 	for _, m := range months {
@@ -186,9 +185,9 @@ func (r declineReport) render(out io.Writer, format string) error {
 	}
 	fmt.Fprintln(out, "\nRefusals by reason")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "kind\tcategory\treason\tcount")
+	fmt.Fprintln(tw, "kind\tcause\treason\tcount")
 	for _, x := range r.Refusals {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", x.Kind, x.Category, x.Reason, x.Count)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", x.Kind, x.Cause, x.Reason, x.Count)
 	}
 	if err := tw.Flush(); err != nil {
 		return err

@@ -50,7 +50,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		return
 	}
 	params := gen.ListPaymentAttemptsParams{
-		MerchantID: mid, Kinds: filled(query.Kind), Owners: filled(query.Owner), Categories: filled(query.Category), Reasons: filled(query.Reason),
+		MerchantID: mid, Kinds: filled(query.Kind), Owners: filled(query.Owner), Outcomes: filled(query.Outcome), DeclineCauses: filled(query.DeclineCause), Reasons: filled(query.Reason),
 		ResponseCodes: filled(query.ResponseCode), CardEntries: filled(query.CardEntry), Sources: filled(query.Source), ObservedVias: filled(query.ObservedVia),
 		AvsResults: filled(query.AVSResult), CvvResults: filled(query.CVVResult), PspID: idOf(query.PSPID), CustomerID: idOf(query.CustomerID),
 		PaymentID: idOf(query.PaymentID), OrderID: idOf(query.OrderID), SubscriptionID: idOf(query.SubscriptionID), CycleID: idOf(query.CycleID),
@@ -215,9 +215,9 @@ func readScope(r *httprequest.Request) (uuid.UUID, bool) {
 func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 	out := billing.PaymentAttempt{
 		ID: billing.PaymentAttemptID(a.ID), Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
-		Source: a.Source, ObservedVia: a.ObservedVia, Category: a.Category, Reason: billing.DeclineReason(normalize.FromPtr(a.Reason)),
+		Source: a.Source, ObservedVia: a.ObservedVia, Outcome: billing.AttemptOutcome(a.Outcome), DeclineCause: billing.DeclineCause(normalize.FromPtr(a.DeclineCause)), Reason: billing.DeclineReason(normalize.FromPtr(a.Reason)),
 		Action: normalize.FromPtr(a.Action), ResponseCode: normalize.FromPtr(a.ResponseCode), ResponseText: normalize.FromPtr(a.ResponseText),
-		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AVSResult: normalize.FromPtr(a.AvsResult),
+		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AdviceCode: normalize.FromPtr(a.AdviceCode), NetworkAdviceCode: normalize.FromPtr(a.NetworkAdviceCode), AVSResult: normalize.FromPtr(a.AvsResult),
 		CVVResult: normalize.FromPtr(a.CvvResult), Card: models.CardFromColumns(a.CardBrand, a.CardLast4, nil, nil).Details(),
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
 		Rail: billing.Rail(a.Rail), PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: catalog.Currency(normalize.FromPtr(a.Currency)),
@@ -271,11 +271,11 @@ func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.Renewal 
 
 // filled is a comma-separated filter's values without empty ones; nil
 // when none.
-func filled(values []string) []string {
+func filled[T ~string](values []T) []string {
 	var out []string
 	for _, v := range values {
 		if v != "" {
-			out = append(out, v)
+			out = append(out, string(v))
 		}
 	}
 	return out

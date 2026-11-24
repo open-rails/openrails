@@ -1577,7 +1577,7 @@ SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::time
        COALESCE(currency, '')::text, COALESCE(response_code, '')::text
 FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])
-  AND attempted_at >= $3::timestamptz AND category <> 'approved' AND transaction_id IS NOT NULL
+  AND attempted_at >= $3::timestamptz AND outcome <> 'approved' AND transaction_id IS NOT NULL
 `
 
 type ListRecordedSubscriptionChargesParams struct {

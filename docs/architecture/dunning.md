@@ -12,7 +12,9 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
 ## Concepts
 
 - **Decline table:** `internal/decline`: rail code to `billing.DeclineReason`,
-  `Category` and `Action` (`Retry`, `FixPaymentMethod`, `NonRecoverable`).
+  its `billing.DeclineCause` (customer, issuer, fraud, merchant, processing or
+  unknown, which fixes the `billing.AttemptOutcome`: declined, refused or
+  error) and `Action` (`Retry`, `FixPaymentMethod`, `NonRecoverable`).
 - **Dunning policy:** the `dunning_policy` setting (`billing.DunningPolicy`),
   resolved into a `collection.Policy`.
 - **Case:** a `past_due` or `awaiting_method` membership, run under the policy
@@ -25,13 +27,20 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
 
 ## How it works
 
-**Classifying.** `decline.ClassifyEvidence` looks up the code. A CVV mismatch
-overrides it, and a ZIP mismatch replaces a generic decline. Network advice
-turns a retry into `FixPaymentMethod` but never makes it terminal. The advice
-is Stripe `do_not_try_again` or `confirm_card_data`, Mastercard 03, 21 or 01, or
-an issuer code in `decline.IssuerForbidsReattempt`. An `Unmapped` code still
-retries. `decline.AlertUnmapped` logs it, and the hourly health pass raises
-`life.decline.unmapped`. Each answer is a `payment_attempts` row.
+**Classifying.** `decline.ClassifyEvidence` looks up the code. The issuer's own
+code (NMI's `processor_response_code`, which a subscription collection's
+decline reads from the Query API, or Stripe's `network_decline_code`) names the
+cause of a generic decline, but never makes it terminal. A CVV mismatch
+overrides the code, and a ZIP mismatch replaces a generic decline. A Stripe
+charge Radar blocked is classified by its block reason (`blocked_by_psp`), not
+the fraudulent decline it reads as. Network advice turns a retry into
+`FixPaymentMethod` but never makes it terminal: Stripe `do_not_try_again` or
+`confirm_card_data`, Mastercard 03, 21, 01, 40 or 41, or an issuer code in
+`decline.IssuerForbidsReattempt`. Mastercard 24 to 30 set `Result.RetryAfter`.
+An `Unmapped` code still retries. `decline.AlertUnmapped` logs it, and the
+hourly health pass raises `life.decline.unmapped`. Each answer is a
+`payment_attempts` row with its outcome, cause, reason, action and the PSP's
+and network's advice codes.
 
 **Schedule.** `collection.DefaultPolicy` retries nothing under 4 days, +1 d and
 +2 d under 28 days, and +2, +4, +6 and +9 d beyond; transient answers first get
@@ -49,7 +58,10 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
 - The first decline opens the case (`openCase`). It stores the policy in full
   (`collection.DeclaredOf`) in `subscriptions.dunning_policy`.
 - `Retry` bumps `transient_retries` or `retry_attempts` and sets
-  `next_retry_at`. A spent schedule is `lifecycle.DunningExhausted`.
+  `next_retry_at`, no sooner than the network advised
+  (`FailMembershipParams.RetryNotBefore`). Advice past the window waits for a
+  new card, as `FixPaymentMethod` does. A spent schedule is
+  `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;

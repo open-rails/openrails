@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -198,13 +199,14 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		row.TokenType = &a.TokenType
 	}
 	if a.Approved {
-		row.Category = string(decline.Approved)
+		row.Outcome = string(billing.AttemptApproved)
 		row.ResponseCode = optional(a.Answer.Code)
 	} else {
 		verdict := decline.ClassifyEvidence(a.Answer)
-		reason, action := string(verdict.Reason), verdict.Action.String()
-		row.Category, row.Reason, row.Action = string(verdict.Category), &reason, &action
+		reason, action, cause := string(verdict.Reason), verdict.Action.String(), string(verdict.Cause)
+		row.Outcome, row.DeclineCause, row.Reason, row.Action = string(verdict.Outcome()), &cause, &reason, &action
 		row.ResponseCode = optional(verdict.Code)
+		row.AdviceCode, row.NetworkAdviceCode = optional(truncate(a.Answer.Advice, 32)), optional(truncate(a.Answer.NetworkAdvice, 8))
 	}
 	if a.Cycle != nil {
 		if row.Currency == nil || row.Owner == string(OwnerNone) || a.Cycle.Quantity != nil && (*a.Cycle.Quantity < 1 || *a.Cycle.Quantity > math.MaxInt32) {
@@ -306,7 +308,7 @@ func purchaseFor(ctx context.Context, q *gen.Queries, a Attempt) (uuid.UUID, err
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if last.Category == string(decline.Approved) && closes(Kind(last.Kind), a.Target) {
+	if last.Outcome == string(billing.AttemptApproved) && closes(Kind(last.Kind), a.Target) {
 		return uuidutil.NewV7(), nil
 	}
 	return last.PurchaseID, nil

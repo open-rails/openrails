@@ -362,7 +362,7 @@ var jsonRules = map[string]jsonRule{
 	}),
 	"provider_intents.initial_membership.result_evidence": nullable(object(map[string]jsonRule{
 		"stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
-		"qualified_initial_refusal": object(map[string]jsonRule{"binding": receiptBindingJSON, "kind": textValue, "response_code": integerValue, "localization_id": textValue, "stripe_payment_intent_id": textValue, "stripe_failure_code": textValue, "stripe_decline_code": textValue}),
+		"qualified_initial_refusal": object(map[string]jsonRule{"binding": receiptBindingJSON, "kind": textValue, "response_code": integerValue, "localization_id": textValue, "stripe_payment_intent_id": textValue, "stripe_failure_code": textValue, "stripe_decline_code": textValue, "advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue}),
 		"qualified_receipt":         collectedReceiptJSON, "initial_submitted": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "operator_resolution": operatorResolutionJSON,
 		"qualified_enrollment": object(map[string]jsonRule{"binding": receiptBindingJSON, "facts": object(map[string]jsonRule{
 			"vault_billing_id": textValue, "order_reference": textValue, "po_number": textValue, "next_charge_date": textValue,

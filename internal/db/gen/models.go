@@ -866,15 +866,16 @@ type BillingNmiBulkCheckpoint struct {
 	StartedAt      time.Time
 }
 
-// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
+// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and answer: a refusal's reason from the one classifier, with its outcome and decline_cause, or an approval (reason empty). A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
 type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
 	MonthAt        time.Time
 	Kind           string
-	Category       string
 	Reason         string
 	Authorizations int64
+	Outcome        string
+	DeclineCause   *string
 }
 
 // When each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
@@ -1156,7 +1157,6 @@ type BillingPaymentAttempt struct {
 	CardEntry      string
 	Source         string
 	ObservedVia    string
-	Category       string
 	Reason         *string
 	Action         *string
 	ResponseCode   *string
@@ -1189,6 +1189,14 @@ type BillingPaymentAttempt struct {
 	// The initial transaction id the attempt sent the provider, verbatim.
 	SentInitialTransactionID *string
 	OrderID                  *uuid.UUID
+	// approved; declined (the issuer said no); refused (the merchant or its gateway refused it before the issuer); error (it did not complete).
+	Outcome string
+	// Who or what refused it: customer, issuer (discretion), fraud, merchant (or its gateway), processing or unknown. Follows the reason; null on approvals.
+	DeclineCause *string
+	// The PSP's advice on the refusal, verbatim (Stripe advice_code).
+	AdviceCode *string
+	// The card network's advice, verbatim (Mastercard's Merchant Advice Code).
+	NetworkAdviceCode *string
 }
 
 // The card account a customer chose, held at one PSP or custodian. Its card is the latest of its payment_method_versions; its issuer may reissue it under the same method.

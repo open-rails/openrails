@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 481,
+  "scenario_count": 483,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2384,6 +2384,11 @@
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
     },
     {
+      "id": "OR-J45-S01",
+      "journey": "J45",
+      "name": "Each refusal is stored with its outcome, cause and the PSP's and network's advice, approvals with neither, and the attempt list filters by outcome and cause"
+    },
+    {
       "id": "OR-J45-S02",
       "journey": "J45",
       "name": "An NMI catch-all decline is classified by the issuer's code the Query API reports: a never-retry code waits for a new card and never cancels, a retryable one keeps the schedule"
@@ -2407,6 +2412,11 @@
       "id": "OR-J45-S06",
       "journey": "J45",
       "name": "New card data (MAC 01, confirm_card_data) is update_cardholder_data, and cards that won't recur (MAC 40, 41) wait for a new card"
+    },
+    {
+      "id": "OR-J45-S09",
+      "journey": "J45",
+      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, and keeps each attempt's action"
     }
   ]
 }

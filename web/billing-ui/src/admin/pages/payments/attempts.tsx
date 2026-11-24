@@ -42,9 +42,9 @@ import {
   shortId,
 } from "#orck/admin/lib/format"
 
-export function Outcome({ category }: { category: string }) {
+export function Outcome({ outcome }: { outcome: string }) {
   return (
-    <StatusBadge status={category === "approved" ? "approved" : "declined"} />
+    <StatusBadge status={outcome === "approved" ? "approved" : "declined"} />
   )
 }
 
@@ -60,16 +60,16 @@ const attemptColumns: ColumnDef<PaymentAttempt, unknown>[] = [
   { header: "Kind", cell: ({ row }) => row.original.kind },
   {
     header: "Outcome",
-    cell: ({ row }) => <Outcome category={row.original.category} />,
+    cell: ({ row }) => <Outcome outcome={row.original.outcome} />,
   },
   {
     header: "Reason",
     cell: ({ row }) =>
-      row.original.category === "approved" ? (
+      row.original.outcome === "approved" ? (
         <span className="text-muted-foreground">—</span>
       ) : (
         <span>
-          {row.original.reason || row.original.category}
+          {row.original.reason || row.original.decline_cause}
           {row.original.response_code ? (
             <span className="ml-1 font-mono text-xs text-muted-foreground">
               {row.original.response_code}
@@ -224,7 +224,7 @@ export function AttemptDetailPage() {
         <Back />
         <div>
           <h2 className="flex items-center gap-2 text-sm">
-            {a.id} <Outcome category={a.category} />
+            {a.id} <Outcome outcome={a.outcome} />
           </h2>
           <p className="text-xs text-muted-foreground">
             {a.kind} · {a.owner} · {a.rail} · {formatDate(a.attempted_at)}
@@ -233,9 +233,9 @@ export function AttemptDetailPage() {
       </div>
       <div className={FACT_TILES}>
         <Fact label={adminText("Outcome")}>
-          {a.category === "approved"
+          {a.outcome === "approved"
             ? "approved"
-            : `${a.category}${a.reason ? ` · ${a.reason}` : ""}`}
+            : `${a.outcome} · ${a.decline_cause}${a.reason ? ` · ${a.reason}` : ""}`}
         </Fact>
         <Fact label={adminText("Amount")}>
           {a.currency ? formatNativeAmount(a.amount, a.currency) : "—"}

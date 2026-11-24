@@ -24,7 +24,7 @@ FROM (
     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
       AND a.rail = ANY(sqlc.arg(rails)::text[])
       AND a.subscription_id IS NOT NULL
-      AND a.category <> 'approved'
+      AND a.outcome <> 'approved'
 ) ev
 WHERE (sqlc.narg(since)::timestamptz IS NULL OR ev.occurred_at >= sqlc.narg(since)::timestamptz)
   AND (sqlc.narg(until)::timestamptz IS NULL OR ev.occurred_at <= sqlc.narg(until)::timestamptz)

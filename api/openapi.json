@@ -8189,19 +8189,6 @@
             }
           },
           {
-            "name": "category",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -8233,6 +8220,27 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "decline_cause",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "customer",
+                  "fraud",
+                  "issuer",
+                  "merchant",
+                  "processing",
+                  "unknown"
+                ]
+              },
+              "maxItems": 100
             }
           },
           {
@@ -8287,6 +8295,25 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "approved",
+                  "declined",
+                  "error",
+                  "refused"
+                ]
+              },
+              "maxItems": 100
             }
           },
           {
@@ -22934,14 +22961,32 @@
           "observed_via": {
             "type": "string"
           },
-          "category": {
-            "type": "string"
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "declined",
+              "error",
+              "refused"
+            ]
+          },
+          "decline_cause": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "fraud",
+              "issuer",
+              "merchant",
+              "processing",
+              "unknown"
+            ]
           },
           "reason": {
             "type": "string",
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -22975,6 +23020,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -22994,6 +23040,12 @@
             "type": "string"
           },
           "issuer_text": {
+            "type": "string"
+          },
+          "advice_code": {
+            "type": "string"
+          },
+          "network_advice_code": {
             "type": "string"
           },
           "avs_result": {
@@ -23118,13 +23170,16 @@
           "card_entry",
           "source",
           "observed_via",
-          "category",
+          "outcome",
+          "decline_cause",
           "reason",
           "action",
           "response_code",
           "response_text",
           "issuer_code",
           "issuer_text",
+          "advice_code",
+          "network_advice_code",
           "avs_result",
           "cvv_result",
           "card",
@@ -23179,6 +23234,7 @@
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -23212,6 +23268,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -23475,6 +23532,7 @@
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -23508,6 +23566,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -26634,6 +26693,7 @@
                 "enum": [
                   "authentication_required",
                   "blocked_by_psp",
+                  "brand_not_accepted",
                   "call_issuer",
                   "card_not_supported",
                   "communication_error",
@@ -26667,6 +26727,7 @@
                   "stolen_card",
                   "stop_recurring",
                   "stored_credential_required",
+                  "suspected_fraud",
                   "transaction_not_allowed",
                   "try_again_later",
                   "unknown",
@@ -26731,8 +26792,25 @@
           "kind": {
             "type": "string"
           },
-          "category": {
-            "type": "string"
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "declined",
+              "error",
+              "refused"
+            ]
+          },
+          "decline_cause": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "fraud",
+              "issuer",
+              "merchant",
+              "processing",
+              "unknown"
+            ]
           },
           "reason": {
             "type": "string"
@@ -26775,7 +26853,7 @@
         "required": [
           "id",
           "kind",
-          "category",
+          "outcome",
           "source",
           "observed_via",
           "amount",
