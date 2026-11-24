@@ -181,11 +181,12 @@ func planPurchase(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID
 			return plan, fmt.Sprintf("line %d: access_ends_at must be after paid_at", i), nil
 		}
 		amount := l.UnitAmount * seats
-		if total > math.MaxInt64-amount || plan.listAmount > math.MaxInt64-price.Amount*seats {
-			return plan, "line total overflows", nil
+		next, paid := mulAdd(total, l.UnitAmount, seats)
+		list, listed := mulAdd(plan.listAmount, price.Amount, seats)
+		if !paid || !listed {
+			return plan, fmt.Sprintf("line %d: the line total overflows", i), nil
 		}
-		total += amount
-		plan.listAmount += price.Amount * seats
+		total, plan.listAmount = next, list
 		description := strings.TrimSpace(l.Description)
 		plan.lines = append(plan.lines, plannedLine{price: price, product: product, quantity: l.Quantity, unit: l.UnitAmount, amount: amount, description: description, accessEnds: l.AccessEndsAt})
 	}
@@ -193,6 +194,17 @@ func planPurchase(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UUID
 		return plan, fmt.Sprintf("amount %s differs from the line total %s", moneyutil.FormatAmount(p.Amount, plan.currency), moneyutil.FormatAmount(total, plan.currency)), nil
 	}
 	return plan, "", nil
+}
+
+// mulAdd is sum + a*b for nonnegative operands, false when it leaves int64.
+func mulAdd(sum, a, b int64) (int64, bool) {
+	if sum < 0 || a < 0 || b < 0 || b != 0 && a > math.MaxInt64/b {
+		return 0, false
+	}
+	if p := a * b; sum <= math.MaxInt64-p {
+		return sum + p, true
+	}
+	return 0, false
 }
 
 func digits(s string) bool {

@@ -369,6 +369,9 @@
     "OR-J21-S04": [
       "TestImportedReceipt/OR-J21-S04/import-preserves-receipt-refund-allowance-and-event-identity"
     ],
+    "OR-J21-S61": [
+      "TestBillingImportBounds/OR-J21-S61/a-line-whose-list-total-overflows-is-refused"
+    ],
     "OR-J22-S01": [
       "TestCredits/OR-J22-S01/reservation-capture-conserves-native-units"
     ],

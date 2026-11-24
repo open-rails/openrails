@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 416,
+  "scenario_count": 417,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1802,6 +1802,11 @@
       "id": "OR-J21-S60",
       "journey": "J21",
       "name": "An import queues, with its own commit, the one read of the charges it attributed"
+    },
+    {
+      "id": "OR-J21-S61",
+      "journey": "J21",
+      "name": "An imported purchase line whose list total leaves int64 is refused without a payment"
     },
     {
       "id": "OR-J06-S60",
