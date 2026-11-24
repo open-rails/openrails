@@ -3,6 +3,7 @@ package reconcile_test
 import (
 	"log/slog"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,5 +95,46 @@ func TestNMIPagesReadAShiftedTransactionOnce(t *testing.T) {
 	}
 	if len(seen) != 1000 {
 		t.Fatalf("read %d transactions, want the 1000 the first page listed", len(seen))
+	}
+}
+
+// A transaction that leaves a window while it is read skips no other at a
+// page boundary.
+func TestNMIPagesSkipNothingWhenATransactionLeaves(t *testing.T) {
+	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	now := at.Add(time.Hour)
+	gateway := nmimock.NewUnstarted(nmimock.Options{Clock: func() time.Time { return now }})
+	vault := gateway.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+	var sales []string
+	for range 1001 {
+		sales = append(sales, gateway.AddSale(nmimock.Sale{Vault: vault, Amount: "1.00", At: at}).TransactionID)
+	}
+	// The first sale settles once the first page is read: its last change
+	// moves past the window, and each sale after it a place earlier.
+	var settled sync.Once
+	gateway.Intercept(func(r *http.Request) bool {
+		_ = r.ParseForm()
+		return r.Form.Get("page_number") != "" && r.Form.Get("page_number") != "0"
+	}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		settled.Do(func() { gateway.Settle(sales[0]) })
+		return serve(), nil
+	})
+	client, err := nmi.NewAccountClient(slog.New(slog.DiscardHandler), uuid.New(), uuid.New(), "gateway", &config.NMIProviderSettings{SecurityKey: "key", Environment: config.EnvironmentTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.UseTransport(gateway.Transport())
+	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Minute), at.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := map[string]bool{}
+	for _, txn := range txns {
+		read[txn.TransactionID] = true
+	}
+	for _, id := range sales[1:] {
+		if !read[id] {
+			t.Fatalf("sale %s, in the window throughout, was not read", id)
+		}
 	}
 }

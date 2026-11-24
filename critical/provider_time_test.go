@@ -337,8 +337,8 @@ func TestProviderTime(t *testing.T) {
 		run := func() error {
 			return refresh.Work(t.Context(), &river.Job[riverjobs.ProviderRefreshRequestArgs]{JobRow: &rivertype.JobRow{}, Args: riverjobs.ProviderRefreshRequestArgs{MerchantID: mid}})
 		}
-		// The refresh's window reads: those ending at a link's end, and
-		// those through now.
+		// The refresh's window reads: those with an end, and those through
+		// now.
 		reads := func(from int) (bounded, open []string) {
 			for _, q := range p.core.Searches()[from:] {
 				if q.Get("start_date") == "" || q.Get("subscription_id") != "" || q.Get("transaction_id") != "" || q.Get("order_id") != "" {
@@ -376,10 +376,12 @@ func TestProviderTime(t *testing.T) {
 			require.Less(t, runs, 10)
 		}
 		require.GreaterOrEqual(t, runs, 4, "four days of day-long links")
-		require.WithinDuration(t, a.clock.Now().Add(-5*time.Minute), applied(), time.Second, "the chain reaches the horizon")
+		horizon := applied()
+		require.WithinDuration(t, a.clock.Now().Add(-5*time.Minute), horizon, time.Second, "the chain reaches the horizon")
 		bounded, open = reads(seen)
-		require.Len(t, bounded, runs-1, "each link but the last ends at its end")
-		require.Len(t, open, 1, "the chain's end reads through now")
+		require.Len(t, bounded, runs, "each link ends at its end, and the chain's end at the horizon")
+		require.Equal(t, horizon.Truncate(time.Second).Format(nmi.QueryTimeFormat), bounded[len(bounded)-1])
+		require.Equal(t, []string{horizon.Truncate(time.Second).Add(time.Second).Format(nmi.QueryTimeFormat)}, open, "then the rest through now")
 		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
 		require.Len(t, receipts.Items, 1, "the settled sale, read in the link of its last change, is booked once")

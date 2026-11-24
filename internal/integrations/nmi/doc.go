@@ -57,7 +57,10 @@
 // and keeps the actions dated in the window; reads of consecutive windows (a
 // refresh's backlog, an import's history, the decline history) read each by
 // last change, the last through now, and a refresh's watermark advances as
-// each completes.
+// each completes. A read with an end loses transactions as they change, so
+// its pages are read last to first; one with none gains them, so first to
+// last (PageTransactions): none that stays in a window is skipped at a page
+// boundary.
 //
 // Tests use openrailstest/nmimock. Its package comment has the wiring.
 package nmi

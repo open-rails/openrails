@@ -46,8 +46,6 @@ func (f *NMIFetcher) Capabilities() Capabilities {
 	}
 }
 
-const nmiQueryPageLimit = 1000
-
 // nmiV5PageLimit is the per_page for v5 cursor pagination.
 const nmiV5PageLimit = 100
 
@@ -241,7 +239,7 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, 
 	}
 	if params.Chain == ChainLink {
 		filter.EndDate = params.Until.UTC().Add(-time.Second).Format(nmi.QueryTimeFormat) // end_date is inclusive
-		return f.readTransactions(ctx, filter, nil)
+		return f.readTransactions(ctx, []nmi.QueryFilter{filter}, nil)
 	}
 	since, until := params.Since.Truncate(time.Second), params.Until
 	if params.Chain == ChainEnd {
@@ -250,7 +248,16 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, 
 	in := func(at time.Time) bool {
 		return !at.IsZero() && (since.IsZero() || !at.Before(since)) && (until.IsZero() || !at.After(until))
 	}
-	return f.readTransactions(ctx, filter, func(t nmi.QueryTransaction, txn RemoteTransaction) bool {
+	reads := []nmi.QueryFilter{filter}
+	if !until.IsZero() {
+		// Through Until, then the rest through now: what changes while the
+		// first read is read leaves it for the second (PageTransactions).
+		bounded, rest := filter, filter
+		bounded.EndDate = until.UTC().Truncate(time.Second).Format(nmi.QueryTimeFormat)
+		rest.StartDate = until.UTC().Truncate(time.Second).Add(time.Second).Format(nmi.QueryTimeFormat)
+		reads = []nmi.QueryFilter{bounded, rest}
+	}
+	return f.readTransactions(ctx, reads, func(t nmi.QueryTransaction, txn RemoteTransaction) bool {
 		return in(txn.OccurredAt) || txn.Type == TransactionTypeVoid && in(nmiVoidedAt(t))
 	})
 }
@@ -278,55 +285,37 @@ func nmiVoidedAt(t nmi.QueryTransaction) time.Time {
 	return voided
 }
 
-// readTransactions pages the transaction report filter selects, each
-// transaction's actions normalized, keeping those keep accepts (nil keeps
-// every one) as each page arrives. A transaction a page shift lists twice is
-// kept once, as the later page reports it.
-func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilter, keep func(nmi.QueryTransaction, RemoteTransaction) bool) ([]RemoteTransaction, error) {
+// readTransactions reads the transaction reports filters select, in order
+// (nmi.PageTransactions), each transaction's actions normalized, keeping
+// those keep accepts (nil keeps every one) as each page arrives. A
+// transaction read twice is kept once, as it was read last.
+func (f *NMIFetcher) readTransactions(ctx context.Context, filters []nmi.QueryFilter, keep func(nmi.QueryTransaction, RemoteTransaction) bool) ([]RemoteTransaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	filter.ResultLimit = nmiQueryPageLimit
 	var order []string
 	byID := map[string][]RemoteTransaction{}
-	seenFirst := map[string]bool{}
-	// Query API pages are zero-based; omitted page_number is the first page.
-	for page := 0; ; page++ {
-		filter.PageNumber = page
-		raw, err := f.Client.SearchTransactions(ctx, filter)
-		if err != nil {
-			return nil, err
-		}
-		parsed, err := nmi.ParseTransactionReport(raw)
-		if err != nil {
-			return nil, err
-		}
-		if len(parsed.Transactions) == 0 {
-			break
-		}
-		first := strings.TrimSpace(parsed.Transactions[0].TransactionID)
-		if seenFirst[first] {
-			return nil, fmt.Errorf("nmi transaction pagination repeated page starting at transaction_id=%s; refusing incomplete snapshot", first)
-		}
-		seenFirst[first] = true
-		for _, t := range parsed.Transactions {
-			if err := qualifyNMITransaction(t); err != nil {
-				return nil, err
-			}
-			id := strings.TrimSpace(t.TransactionID)
-			if _, seen := byID[id]; !seen {
-				order = append(order, id)
-			}
-			kept := []RemoteTransaction{}
-			for _, txn := range normalizeNMITransaction(t) {
-				if keep == nil || keep(t, txn) {
-					kept = append(kept, txn)
+	for _, filter := range filters {
+		if err := f.Client.PageTransactions(ctx, filter, func(page []nmi.QueryTransaction) error {
+			for _, t := range page {
+				if err := qualifyNMITransaction(t); err != nil {
+					return err
 				}
+				id := strings.TrimSpace(t.TransactionID)
+				if _, seen := byID[id]; !seen {
+					order = append(order, id)
+				}
+				kept := []RemoteTransaction{}
+				for _, txn := range normalizeNMITransaction(t) {
+					if keep == nil || keep(t, txn) {
+						kept = append(kept, txn)
+					}
+				}
+				byID[id] = kept
 			}
-			byID[id] = kept
-		}
-		if len(parsed.Transactions) < nmiQueryPageLimit {
-			break
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 	var out []RemoteTransaction
@@ -348,7 +337,7 @@ func NMIChangedTransactions(ctx context.Context, client *nmi.NMIClient, since, u
 	if !until.IsZero() {
 		filter.EndDate = until.UTC().Add(-time.Second).Format(nmi.QueryTimeFormat) // end_date is inclusive
 	}
-	return NewNMIFetcher(client).readTransactions(ctx, filter, nil)
+	return NewNMIFetcher(client).readTransactions(ctx, []nmi.QueryFilter{filter}, nil)
 }
 
 // NMISubscriptionTransactions reads one subscription's transactions dated
