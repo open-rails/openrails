@@ -171,7 +171,7 @@ func (s *nmiSource) history(ctx context.Context, since, until time.Time, last bo
 	if last {
 		through = time.Time{}
 	}
-	txns, err := reconcile.NMIChangedTransactions(ctx, s.client, since, through)
+	txns, err := reconcile.NMIChangedTransactions(ctx, s.client, since, through, until)
 	if err != nil {
 		return nil, fmt.Errorf("nmi transactions: %w", err)
 	}

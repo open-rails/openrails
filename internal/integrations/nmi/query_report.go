@@ -108,12 +108,26 @@ func ParseTransactionReport(raw string) (TransactionReport, error) {
 // moves later. A report with an end_date only loses transactions while it is
 // read, and those after a lost one shift a place toward the first page: its
 // pages are read last to first, the ones still to read below, so a
-// transaction that stays is never skipped at a page boundary. One with no
-// end only gains them, each at its own place, so its pages are read first to
-// last. UNCONFIRMED: NMI's guide orders a report "oldest to newest" without
-// naming the date; the transaction's own, which a change does not move, is
-// assumed for a report with no end.
-func (c *NMIClient) PageTransactions(ctx context.Context, filter QueryFilter, page func([]QueryTransaction) error) error {
+// transaction that stays is never skipped at a page boundary. One with no end
+// is read so through asOf, the read's own start on NMI's clock, then the
+// short tail after it first to last, which only gains transactions, each at
+// its own place. UNCONFIRMED: NMI's guide orders a report "oldest to newest"
+// without naming the date; for the tail, the transaction's own, which a
+// change does not move, is assumed. A zero asOf reads all of an open report
+// first to last.
+func (c *NMIClient) PageTransactions(ctx context.Context, filter QueryFilter, asOf time.Time, page func([]QueryTransaction) error) error {
+	if filter.EndDate == "" && !asOf.IsZero() {
+		end := asOf.UTC().Truncate(time.Second)
+		bounded, tail := filter, filter
+		bounded.EndDate = end.Format(QueryTimeFormat)
+		tail.StartDate = end.Add(time.Second).Format(QueryTimeFormat)
+		if start, err := time.Parse(QueryTimeFormat, filter.StartDate); err != nil || !start.After(end) {
+			if err := c.PageTransactions(ctx, bounded, time.Time{}, page); err != nil {
+				return err
+			}
+		}
+		return c.PageTransactions(ctx, tail, time.Time{}, page)
+	}
 	filter.ResultLimit, filter.ResultOrder = QueryPageLimit, "standard"
 	firsts := map[string]int{}
 	read := func(n int) (int, error) {

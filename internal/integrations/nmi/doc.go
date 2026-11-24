@@ -58,9 +58,9 @@
 // refresh's backlog, an import's history, the decline history) read each by
 // last change, the last through now, and a refresh's watermark advances as
 // each completes. A read with an end loses transactions as they change, so
-// its pages are read last to first; one with none gains them, so first to
-// last (PageTransactions): none that stays in a window is skipped at a page
-// boundary.
+// its pages are read last to first; one with none is read so through its own
+// start, then the short tail after it first to last (PageTransactions): none
+// that stays in a window is skipped at a page boundary.
 //
 // Tests use openrailstest/nmimock. Its package comment has the wiring.
 package nmi

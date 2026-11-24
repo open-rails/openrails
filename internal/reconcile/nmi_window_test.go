@@ -80,7 +80,7 @@ func TestNMIPagesReadAShiftedTransactionOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.UseTransport(gateway.Transport())
-	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Hour), time.Time{})
+	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Hour), time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestNMIPagesSkipNothingWhenATransactionLeaves(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.UseTransport(gateway.Transport())
-	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Minute), at.Add(time.Minute))
+	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Minute), at.Add(time.Minute), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +135,53 @@ func TestNMIPagesSkipNothingWhenATransactionLeaves(t *testing.T) {
 	for _, id := range sales[1:] {
 		if !read[id] {
 			t.Fatalf("sale %s, in the window throughout, was not read", id)
+		}
+	}
+}
+
+// A read through now is read through its own start, last page first, then
+// the tail after it: a gateway that lists by last change, moving a changed
+// transaction to the end, skips no other.
+func TestNMIOpenReadSkipsNothingWhateverTheOrder(t *testing.T) {
+	at := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	now := at.Add(time.Hour)
+	var mu sync.Mutex
+	gateway := nmimock.NewUnstarted(nmimock.Options{OrderByChange: true, Clock: func() time.Time { mu.Lock(); defer mu.Unlock(); return now }})
+	vault := gateway.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+	var sales []string
+	for range 1001 {
+		sales = append(sales, gateway.AddSale(nmimock.Sale{Vault: vault, Amount: "1.00", At: at}).TransactionID)
+	}
+	// Once the first page is read, the first sale settles a minute on.
+	var settled sync.Once
+	gateway.Intercept(func(r *http.Request) bool {
+		_ = r.ParseForm()
+		return r.Form.Get("page_number") != "" && r.Form.Get("page_number") != "0"
+	}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+		settled.Do(func() {
+			mu.Lock()
+			now = now.Add(time.Minute)
+			mu.Unlock()
+			gateway.Settle(sales[0])
+		})
+		return serve(), nil
+	})
+	client, err := nmi.NewAccountClient(slog.New(slog.DiscardHandler), uuid.New(), uuid.New(), "gateway", &config.NMIProviderSettings{SecurityKey: "key", Environment: config.EnvironmentTest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.UseTransport(gateway.Transport())
+	txns, err := reconcile.NMIChangedTransactions(t.Context(), client, at.Add(-time.Minute), time.Time{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := map[string]bool{}
+	for _, txn := range txns {
+		read[txn.TransactionID] = true
+	}
+	for _, id := range sales {
+		if !read[id] {
+			t.Fatalf("sale %s was not read", id)
 		}
 	}
 }

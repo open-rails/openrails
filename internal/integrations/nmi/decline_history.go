@@ -78,11 +78,11 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 // readHistoryWindow pages the transactions last changed in [from, to), or
 // since from when last.
 func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, last bool, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
-	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat)}
+	filter, asOf := QueryFilter{StartDate: from.Format(QueryTimeFormat)}, to
 	if !last {
-		filter.EndDate = to.Add(-time.Second).Format(QueryTimeFormat) // end_date is inclusive
+		filter.EndDate, asOf = to.Add(-time.Second).Format(QueryTimeFormat), time.Time{} // end_date is inclusive
 	}
-	if err := c.PageTransactions(ctx, filter, func(page []QueryTransaction) error {
+	if err := c.PageTransactions(ctx, filter, asOf, func(page []QueryTransaction) error {
 		for _, t := range page {
 			h.count(t, counts, seen)
 		}

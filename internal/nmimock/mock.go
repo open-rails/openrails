@@ -31,6 +31,10 @@ type Options struct {
 	// PlanFallback answers reads of plans the account has but the mock was
 	// never given (plans a legacy system created long ago).
 	PlanFallback func(id string) (Plan, bool)
+	// OrderByChange lists a transaction report by last change, oldest first,
+	// as NMI might (its guide names no date), so a change moves a
+	// transaction to the end.
+	OrderByChange bool
 }
 
 // Mock is a stateful NMI gateway. It is an http.Handler (for a listener) and
