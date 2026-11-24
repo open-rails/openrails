@@ -121,11 +121,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return err
 			}
 		}
-		// Holds before batch settlement kept no captured charges, and before
-		// versioned answers no versions: a request's hold has neither.
-		if p.Name == "limit_holds" && len(r.Values) < len(p.Columns) && len(r.Values) >= len(p.Columns)-3 {
-			r.Values = append(r.Values, make([]*string, len(p.Columns)-len(r.Values))...)
-		}
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
 		}
@@ -262,7 +257,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 			updated = t
 		}
 	}
-	return []*string{v[0], &id, v[9], v[2], v[3], nil, nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
+	return []*string{v[0], &id, v[9], v[2], v[3], nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
 }
 
 // addedTables are tables an archive from before them lacks; it holds none
@@ -289,6 +284,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
 	case p.Name == "grants" && len(*values) == len(p.Columns)+2:
 		empty = map[int]*string{13: nil, 14: nil} // amount, currency
+	case p.Name == "limit_holds" && len(*values) == len(p.Columns)+3:
+		empty = map[int]*string{6: nil, 22: nil, 23: nil} // limit_set, version, applied_version
 	default:
 		return nil
 	}

@@ -25,8 +25,8 @@
 // solana_pay_references at expiry (after the 7-day watch);
 // user_destructive_reservations 24 hours; failed_usage_windows when the window
 // ends; meter_period_quantities 100 days; limit_windows 61 days after
-// window_ends_at (lifetime and rate limits stay); leases with their holds and
-// limit_adjustments 61 days after the last sync; usage_minutes 25 hours;
+// window_ends_at (lifetime and rate limits stay); leases with their in-flight
+// reports, and limit_adjustments, 61 days after the last sync; usage_minutes 25 hours;
 // webhook_health_daily 13 months; periodic_leases after 30 days unscheduled.
 //
 // The cleanup job (openrails.cleanup_expired_data) creates partitions two

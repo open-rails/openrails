@@ -156,9 +156,6 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			cfg.AlertEmail = address
 		}
 	}
-	if in.UsageGateSafeSpend != nil {
-		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend
-	}
 	if in.ProviderRefundAccess != nil {
 		policy, err := NormalizeProviderRefundAccess(billing.ProviderRefundAccess(strings.TrimSpace(string(*in.ProviderRefundAccess))))
 		if err != nil {

@@ -476,43 +476,22 @@
       "TestGate/OR-J23-S19/remote-and-embedded-gates-decide-warm-without-openrails"
     ],
     "OR-J23-S20": [
-      "TestGate/OR-J23-S20/racing-requests-on-two-limits-never-take-more-than-either-hold"
+      "TestGate/OR-J23-S20/racing-requests-on-two-limits-never-take-more-than-either-limit"
     ],
     "OR-J23-S21": [
-      "TestGate/OR-J23-S21/restarts-lost-replies-and-dead-leases-converge-once"
+      "TestGate/OR-J23-S21/restarts-and-lost-replies-converge-once"
     ],
     "OR-J23-S22": [
       "TestGate/OR-J23-S22/a-ticket-lives-across-syncs-and-captures-across-a-session-reset"
     ],
-    "OR-J23-S23": [
-      "TestGate/OR-J23-S23/processes-sharing-redis-form-one-gate"
-    ],
     "OR-J23-S24": [
       "TestGate/OR-J23-S24/refusals-are-verdicts-and-openrails-down-is-unavailable"
     ],
-    "OR-J23-S25": [
-      "TestGate/OR-J23-S25/safe-spend-names-each-holds-money-size-and-never-spends-units"
-    ],
     "OR-J23-S26": [
-      "TestLimitHolds/OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back"
+      "TestLimitHolds/OR-J23-S26/a-gates-in-flight-report-counts-as-held-for-admissions-while-its-lease-lives"
     ],
     "OR-J23-S27": [
-      "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-a-shared-lease-ends-with-its-last-process"
-    ],
-    "OR-J23-S28": [
-      "TestGate/OR-J23-S28/a-units-only-plan-takes-zero-money-through-redis-and-gives-every-unit-back"
-    ],
-    "OR-J23-S29": [
-      "TestGate/OR-J23-S29/a-lost-reply-after-a-shrink-keeps-the-capacity-until-the-gate-applies-it"
-    ],
-    "OR-J23-S30": [
-      "TestGate/OR-J23-S30/a-lease-answered-dead-is-closed-and-its-holds-free-at-once"
-    ],
-    "OR-J23-S31": [
-      "TestGate/OR-J23-S31/a-redis-usage-write-whose-reply-was-lost-posts-once-when-retried"
-    ],
-    "OR-J23-S32": [
-      "TestGate/OR-J23-S32/a-redis-gates-commitment-keeps-its-microsecond-window-across-a-rollover"
+      "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-releases-what-it-had"
     ],
     "OR-J23-S33": [
       "TestLimitHolds/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
@@ -559,32 +538,20 @@
     "OR-J24-S11": [
       "TestLeaseSyncs/OR-J24-S11/a-day-posts-once-and-once-more-before-a-top-up"
     ],
-    "OR-J24-S12": [
-      "TestLeaseSyncs/OR-J24-S12/two-leases-drain-one-customer-within-its-balance"
-    ],
-    "OR-J24-S13": [
-      "TestLeaseSyncs/OR-J24-S13/capacity-another-lease-holds-is-capacity-held-not-limit-reached"
-    ],
     "OR-J24-S14": [
-      "TestLeaseSyncs/OR-J24-S14/an-occasional-customer-is-decided-locally-and-its-idle-holds-come-back"
-    ],
-    "OR-J24-S15": [
-      "TestLeaseSyncs/OR-J24-S15/a-hold-grows-with-its-traffic"
+      "TestLeaseSyncs/OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled"
     ],
     "OR-J24-S16": [
-      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-returns-its-holds-and-takes-no-want"
-    ],
-    "OR-J24-S17": [
-      "TestLeaseVersions/OR-J24-S17/a-smaller-size-is-released-once-its-gate-applies-it-and-never-below-its-tickets"
+      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-releases-its-holds-and-clears-its-report"
     ],
     "OR-J24-S18": [
-      "TestLeaseVersions/OR-J24-S18/a-sync-past-its-leases-lifetime-renews-nothing-and-its-holds-count-through-the-grace"
+      "TestLeaseVersions/OR-J24-S18/a-lapsed-leases-report-and-holds-count-nowhere-until-it-syncs-again"
     ],
     "OR-J24-S19": [
       "TestLeaseVersions/OR-J24-S19/lease-ids-are-uuidv7-an-id-past-the-replay-horizon-is-not-found-and-a-usage-only-close-ends-an-earlier-lease"
     ],
     "OR-J24-S20": [
-      "TestLeaseVersions/OR-J24-S20/a-renewed-hold-reads-the-rate-cards-in-force"
+      "TestLeaseVersions/OR-J24-S20/views-price-with-the-cards-in-force-and-gate-usage-settles-at-them"
     ],
     "OR-J24-S21": [
       "TestLeaseVersions/OR-J24-S21/what-a-days-usage-leaves-owed-is-dated-on-its-day"
@@ -596,16 +563,16 @@
       "TestLeaseVersions/OR-J24-S23/a-lease-keeps-refused-items-numbers-and-codes-within-its-bound"
     ],
     "OR-J24-S24": [
-      "TestLeaseVersions/OR-J24-S24/wants-answer-per-customer-and-a-host-stated-want-holds-its-estimate"
+      "TestLeaseVersions/OR-J24-S24/views-answer-per-customer-and-a-host-stated-set-claims-only-money"
     ],
     "OR-J24-S25": [
-      "TestLeaseVersions/OR-J24-S25/a-trust-levels-policy-is-its-own-limit-set-and-its-hold-renews-as-its-invoker"
+      "TestLeaseVersions/OR-J24-S25/a-trust-levels-policy-is-its-own-limit-set-and-usage-counts-in-its-window"
     ],
     "OR-J24-S26": [
-      "TestLeaseVersions/OR-J24-S26/a-renewal-never-opens-a-session"
+      "TestLeaseVersions/OR-J24-S26/a-view-never-opens-a-session-and-the-first-use-opens-it-at-its-admission"
     ],
     "OR-J24-S27": [
-      "TestLeaseVersions/OR-J24-S27/admit-while-positive-wants-only-capacity-free-beyond-their-tickets"
+      "TestLeaseVersions/OR-J24-S27/admit-while-positive-admits-the-crossing-request-once-on-the-server"
     ],
     "OR-J24-S28": [
       "TestLeaseVersions/OR-J24-S28/no-hold-holds-past-the-30-day-hold-lifetime"
@@ -613,23 +580,17 @@
     "OR-J24-S29": [
       "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
     ],
-    "OR-J24-S30": [
-      "TestLeaseVersions/OR-J24-S30/a-window-closing-for-every-customer-renews-a-bounded-few-holds-per-sync"
-    ],
     "OR-J24-S31": [
       "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
     ],
     "OR-J24-S32": [
-      "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-hold-apart"
+      "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-decide-apart"
     ],
     "OR-J24-S33": [
       "TestLeaseVersions/OR-J24-S33/usage-without-a-grant-opens-no-window-and-a-lapsed-grants-windows-keep-counting"
     ],
     "OR-J24-S34": [
       "TestLeaseVersions/OR-J24-S34/a-backlog-across-a-thousand-customers-settles-a-bounded-prefix-per-sync"
-    ],
-    "OR-J24-S35": [
-      "TestLeaseVersions/OR-J24-S35/a-hold-another-lease-waits-for-shrinks-while-its-customer-is-busy"
     ],
     "OR-J24-S36": [
       "TestUsageContracts/OR-J24-S36/a-meter-correction-holds-only-its-own-merchants-usage"
@@ -1748,6 +1709,27 @@
     ],
     "OR-J43-S13": [
       "TestOperationsHistory/OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent"
+    ],
+    "OR-J23-S37": [
+      "TestGate/OR-J23-S37/four-gates-racing-a-small-balance-overshoot-at-most-the-bound"
+    ],
+    "OR-J23-S38": [
+      "TestGate/OR-J23-S38/two-gates-and-an-unreachable-openrails-spend-at-most-the-remaining"
+    ],
+    "OR-J23-S39": [
+      "TestGate/OR-J23-S39/near-zero-is-decided-on-the-server-exactly"
+    ],
+    "OR-J23-S40": [
+      "TestGate/OR-J23-S40/an-idle-gate-stops-syncing-and-decides-one-request-on-its-stale-view"
+    ],
+    "OR-J23-S41": [
+      "TestGate/OR-J23-S41/a-window-that-resets-between-syncs-is-decided-from-the-next-window"
+    ],
+    "OR-J24-S37": [
+      "TestLeaseSyncs/OR-J24-S37/a-batch-reporters-usage-only-sync-answers-as-before"
+    ],
+    "OR-J24-S38": [
+      "TestLeaseSyncs/OR-J24-S38/usage-counts-in-the-spend-windows-of-the-attributes-it-reports"
     ]
   }
 }

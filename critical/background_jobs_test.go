@@ -284,7 +284,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
 		// A gate lease that stopped syncing; it is kept 61 days past its last sync.
 		leases := pgx.Identifier{w.schema, "leases"}.Sanitize()
-		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts, hold_version) VALUES ($1, $2, $3, $3, 0, '[]', 0)",
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts) VALUES ($1, $2, $3, $3, 0, '[]')",
 			w.alpha.MerchantID().UUID(), uuid.New(), w.clock.Now())
 		require.NoError(t, err)
 		leaseCount := func() int {

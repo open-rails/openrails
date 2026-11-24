@@ -239,6 +239,30 @@ func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, 
 	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
 }
 
+// ViewCapacityTx reads the customer's admission capacity in the caller's
+// transaction without its money lock, leaving out one lease's in-flight
+// report: what a gate's view starts from.
+func (s *MoneyService) ViewCapacityTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, except uuid.UUID) (AdmissionCapacity, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	tenantID, payerID, cur := tid.UUID(), payer.UUID(), normalizeCurrency(currency)
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	now := s.now()
+	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+		AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), ExceptLease: &except})
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+}
+
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
 // customer_balance counters, optional money_settings, and the payer's arrears
 // account. Arrears debt never shows as a negative balance, so the credit line

@@ -265,9 +265,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices
 	}
-	if patch.UsageGateSafeSpend != nil {
-		current.UsageGateSafeSpend = patch.UsageGateSafeSpend
-	}
 	if patch.BillingPolicies != nil {
 		current.BillingPolicies = patch.BillingPolicies
 	}

@@ -117,6 +117,13 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 //
 // The policy's declared OutstandingCapAmount wins when set; zero defers to the
 // payer's own arrears credit limit, which stays the per-account lever.
+// Available is what the customer may spend before any credit line: its
+// balance after every hold, less what it owes when it prepays.
+func Available(capacity money.AdmissionCapacity) int64 {
+	available, _, _ := payerCapacity(capacity, ResolvedPolicy{})
+	return available
+}
+
 func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (available, creditLine, outstanding int64) {
 	available = capacity.Balance - capacity.Held
 	outstanding = capacity.OutstandingOwed

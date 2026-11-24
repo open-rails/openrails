@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/stretchr/testify/require"
 )
 
@@ -465,7 +466,7 @@ func TestLimitHolds(t *testing.T) {
 		balance(t, w.alpha, customer, 8400, 1600, 10_000)
 	})
 
-	t.Run("OR-J23-S26/an-admission-that-fits-but-for-gate-holds-is-capacity-held-and-takes-them-back", func(t *testing.T) {
+	t.Run("OR-J23-S26/a-gates-in-flight-report-counts-as-held-for-admissions-while-its-lease-lives", func(t *testing.T) {
 		w := newWorld(t)
 		applyLimits(t, w.alpha, unitPlan)
 		customer := billing.CustomerID(uuid.New())
@@ -475,57 +476,42 @@ func TestLimitHolds(t *testing.T) {
 		work := func(id string, units int64) billing.AdmitParams {
 			return usageAdmission(w, customer, id, "work", map[string]int64{"units": units}, nil)
 		}
+		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "opens", 1))...)
 		lease := newLease()
-		set, refusal := wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{workWant(customer, 4)}}))
-		require.Nil(t, refusal)
-		held := customerLimit(t, w.alpha, customer, "quota").Held
-		require.Positive(t, held)
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "quota", Unit: "units", Amount: 6}}})
+		require.EqualValues(t, 6, customerLimit(t, w.alpha, customer, "quota").Held)
 
-		// One unit more than is free fits only were the gate's hold returned:
-		// capacity_held, in the host's own transaction too.
+		// What the gate has in flight leaves 3: an admission of 4 is refused,
+		// in the host's own transaction too.
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback(context.Background()) //nolint:errcheck
-		verdicts, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{work("fits-if-returned", 10-held+1)})
+		verdicts, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{work("past-the-report", 4)})
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(t.Context()))
 		require.Len(t, verdicts, 1)
-		v := verdicts[0]
-		requireDenied(t, v, billing.DenyCapacityHeld)
-		require.Equal(t, http.StatusTooManyRequests, v.Status)
-		require.Equal(t, billing.AdmissionBlockedByLimit, *v.Admission.BlockedBy)
-		require.NotNil(t, v.Admission.RetryAfterSeconds)
-		require.EqualValues(t, 1, *v.Admission.RetryAfterSeconds)
-		require.Nil(t, v.Admission.Limit)
-		// More than the capacity would not fit even then.
-		tooBig := admitOne(t, w.alpha, work("too-big", 11))
-		requireDenied(t, tooBig, billing.DenyLimitReached)
-		require.Equal(t, "quota", *tooBig.Admission.Limit)
+		requireDenied(t, verdicts[0], billing.DenyLimitReached)
+		require.Equal(t, http.StatusTooManyRequests, verdicts[0].Status)
+		require.Equal(t, "quota", *verdicts[0].Admission.Limit)
+		require.True(t, admitOne(t, w.alpha, work("fits", 3)).Allowed())
+		released, err := w.alpha.ReleaseAdmissions(t.Context(), []string{"fits"})
+		require.NoError(t, err)
+		require.NoError(t, released[0].Err())
 
-		// The refusal takes the hold back as a competing want does: the gate's
-		// next sync tells it the smaller size, the one after releases it, and
-		// the admission fits.
-		h, listed := heldIn(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}), customer, set, "quota")
-		require.True(t, listed)
-		require.Zero(t, h)
+		// A report replaces the last; an empty one clears it.
 		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
 		require.Zero(t, customerLimit(t, w.alpha, customer, "quota").Held)
-		require.True(t, admitOne(t, w.alpha, work("fits-now", 10-held+1)).Allowed())
 
-		// The balance the same way.
-		usageMeter(t, w.alpha, 100)
+		// The balance the same way, while the lease lives.
 		payer := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, payer, "funded", 1000)
-		set, refusal = wanted(t, syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Wants: []billing.LeaseWant{computeWant(payer, 1)}}))
-		require.Nil(t, refusal)
-		b, err := w.alpha.GetBalance(t.Context(), payer, billing.GetBalanceParams{Currency: "USD"})
-		require.NoError(t, err)
-		require.Positive(t, b.HeldAmount)
-		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "money-if-returned", b.AvailableAmount+1)), billing.DenyCapacityHeld)
-		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "past-the-balance", b.AvailableAmount+b.HeldAmount+1)), "insufficient_balance")
-		h, listed = heldIn(syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease}), payer, set, "balance")
-		require.True(t, listed)
-		require.Zero(t, h)
+		report := []billing.InFlight{{CustomerID: payer, Limit: "balance", Unit: "USD", Amount: 700}}
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: report})
+		balance(t, w.alpha, payer, 300, 700, 1000)
+		requireDenied(t, admitOne(t, w.alpha, reservation(w, payer, "past-the-balance", 301)), "insufficient_balance")
+		w.clock.Advance(limits.LeaseLifetime + time.Second)
+		balance(t, w.alpha, payer, 1000, 0, 1000)
+		require.True(t, admitOne(t, w.alpha, reservation(w, payer, "once-it-lapsed", 301)).Allowed())
 	})
 	t.Run("OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency", func(t *testing.T) {
 		// ¥100 an hour; at the fixture's rate of 1, $100 of USD requests.

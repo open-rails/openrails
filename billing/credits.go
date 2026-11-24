@@ -376,11 +376,6 @@ type MerchantSettings struct {
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
-	// UsageGateSafeSpend lets gates keep admitting while OpenRails is
-	// unreachable: each hold names a safe amount, its money size, that its
-	// gate may spend unreserved. Off by default. Unit limits are never spent
-	// past their holds.
-	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 	// Accounting is how the merchant's books are dated; a patch replaces it
 	// whole.
 	Accounting *AccountingSettings `json:"accounting,omitempty"`

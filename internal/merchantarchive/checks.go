@@ -42,6 +42,7 @@ var excludedTables = map[string]string{
 	"failed_usage_windows":          "live grace and cutoff windows; the destination counts afresh",
 	"limit_hold_parts":              "what holds set aside of each limit: open holds refuse the archive, and the destination counts windows afresh",
 	"leases":                        "gate leases: a live one refuses the archive, and gates sync new ones at the destination",
+	"lease_in_flight":               "what live gates report in flight: a live lease refuses the archive, and gates report afresh at the destination",
 	"usage_minutes":                 "per-minute spend the rate measures read, kept a day; the destination measures afresh",
 	"payment_attempts":              "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":                 "rebill analytics: expected rebills, derived from subscriptions",
@@ -95,8 +96,9 @@ var excludedColumns = map[string]string{
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
-	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held request_units used_units contended_at answered_units",
-	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts hold_version",
+	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held",
+	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
+	"lease_in_flight":               "merchant_id lease_id customer_id limit_key unit amount updated_at",
 	"usage_minutes":                 "merchant_id customer_id currency minute_at amount",
 	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity probe_failed_at next_probe_at",
@@ -294,10 +296,10 @@ var preflightChecks = []rowCheck{
 	// subscription; restore queues its wake.
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable') AND NOT (intent_type='solana_pull' AND status='pending' AND attempts=0 AND result_evidence IS NULL)"},
 	{"payments", "status='pending'"},
-	// An open request hold, or a live gate lease, sets capacity aside the
-	// archive would drop.
-	{"limit_holds", "state='open' AND request_id IS NOT NULL"},
-	{"leases", fmt.Sprintf("closed_at IS NULL AND last_sync_at > now() - make_interval(secs => %d)", int((limits.LeaseLifetime+limits.LeaseGrace)/time.Second))},
+	// An open request hold, or a live gate lease (with its holds and
+	// in-flight report), sets capacity aside the archive would drop.
+	{"limit_holds", "state='open' AND lease_id IS NULL"},
+	{"leases", fmt.Sprintf("closed_at IS NULL AND last_sync_at > now() - make_interval(secs => %d)", int(limits.LeaseLifetime/time.Second))},
 	{"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','prune','approval','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','approval','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
