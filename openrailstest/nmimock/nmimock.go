@@ -7,13 +7,17 @@
 //
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
-//	client, err := openrails.New(ctx, openrails.Config{
+//	engine, err := openrails.New(ctx, openrails.Config{
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
-//		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
-//			"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
-//		}},
+//		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
+//			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
+//				"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
+//			},
+//		}}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
+//	id, err := engine.DeclaredMerchant("shop")
+//	shop, err := engine.Merchant(id)
 //
 // Tokenize stands in for Collect.js; SetDecline(card.Last4, InsufficientFunds)
 // makes that stored card's next charge decline, sending a renewal into dunning.
