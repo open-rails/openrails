@@ -117,6 +117,23 @@ func TestDeadReferencesFail(t *testing.T) {
 	}
 }
 
+// A method or field is checked against the type it is written on: its
+// qualifier, the table or section's type, or the page's (client.md: Client).
+func TestMemberOfAnotherTypeFails(t *testing.T) {
+	idx := fixtureIndex(t)
+	for name, c := range map[string]struct{ page, want string }{
+		"table":     {"\n| Method | Use it to |\n|---|---|\n| `NewGate`, `ListProducts` (`Merchants`) | read |\n| `AdmitUsage` | admit |\n", "AdmitUsage is no method of openrails.Client"},
+		"prose":     {"\n`ListProducts` lists; `AdmitUsage` admits.\n", "AdmitUsage is no method of openrails.Client"},
+		"qualified": {"\n`Gate.AdmitUsage` admits; `Client.AdmitUsage` does not.\n", "no openrails.Client.AdmitUsage"},
+		"field":     {"\n## Config\n\n| Field | Meaning |\n|---|---|\n| `Merchants` | served |\n| `Logger` | logs |\n", "Logger is no field of openrails.Config"},
+		"root type": {"\n`Config.Merchants` is the engine's; `Config.Engine` is server's.\n", "no openrails.Config.Engine"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantOnly(t, run1(t, fixture(t, map[string]string{"docs/client.md": c.page}), idx, false), cIdent, c.want)
+		})
+	}
+}
+
 func TestMissingMethodFailsCoverage(t *testing.T) {
 	idx := fixtureIndex(t)
 	idx.Coverage = &Coverage{Methods: map[string][]string{"CreateOrder": {"Client"}, "ListProducts": {"Client"}, "RefundPayment": {"Client"}}}

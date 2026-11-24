@@ -253,7 +253,7 @@ func Check(t Tree, idx *Index, write bool) (*Report, error) {
 
 		if hand {
 			for _, s := range d.Spans {
-				checkSpan(idx, f, s, func(class, format string, args ...any) { add(pos(s.Line), class, format, args...) }, rep.Uses)
+				checkSpan(idx, d, s, func(class, format string, args ...any) { add(pos(s.Line), class, format, args...) }, rep.Uses)
 			}
 		}
 
@@ -316,7 +316,8 @@ func lessPos(a, b string) bool {
 }
 
 // checkSpan classifies one inline code span and checks it.
-func checkSpan(idx *Index, file string, s span, bad func(class, format string, args ...any), uses map[string]int) {
+func checkSpan(idx *Index, d *doc, s span, bad func(class, format string, args ...any), uses map[string]int) {
+	file := d.Path
 	text := strings.TrimSpace(s.Text)
 	if m := routeSpan.FindStringSubmatch(text); m != nil && !strings.ContainsAny(text, "|[*…") && !strings.Contains(text, "...") {
 		at := strings.Index(m[2], "/v1")
@@ -389,7 +390,7 @@ func checkSpan(idx *Index, file string, s span, bad func(class, format string, a
 	if strings.HasPrefix(file, "web/billing-ui/") {
 		return
 	}
-	checkIdent(idx, file, text, bad, uses)
+	checkIdent(idx, file, text, idx.Go.subjectOf(d, s), bad, uses)
 }
 
 func (idx *Index) route(method, p string) bool {
@@ -439,7 +440,7 @@ func (idx *Index) eventFamily(f string) bool {
 	return false
 }
 
-func checkIdent(idx *Index, file, text string, bad func(class, format string, args ...any), uses map[string]int) {
+func checkIdent(idx *Index, file, text string, sc subject, bad func(class, format string, args ...any), uses map[string]int) {
 	text = strings.TrimLeft(text, "*&")
 	if i := strings.IndexAny(text, "({"); i > 0 && strings.ContainsAny(text[len(text)-1:], ")}") {
 		text = text[:i]
@@ -496,6 +497,14 @@ func checkIdent(idx *Index, file, text string, bad func(class, format string, ar
 		}
 	}
 	if len(parts) == 1 {
+		if sc.table != "" {
+			if !x.listed(sc, head) {
+				bad(cIdent, "%s is no %s of %s.%s in api/go.txt", text, strings.ToLower(sc.table), sc.typ.pkg, sc.typ.name)
+				return
+			}
+			use(head)
+			return
+		}
 		if !twoHumps(head) {
 			return
 		}
@@ -503,10 +512,19 @@ func checkIdent(idx *Index, file, text string, bad func(class, format string, ar
 			bad(cIdent, "%s is no name in api/go.txt", text)
 			return
 		}
+		if sc.typ != nil && x.methodOnly(head) && !x.isMethod(sc.typ, head) && !otherOwner[head] {
+			bad(cIdent, "%s is no method of %s.%s, the type this section is about", text, sc.typ.pkg, sc.typ.name)
+			return
+		}
 		use(head)
 		return
 	}
+	// A bare type is the root package's when it has one: the guide's Config
+	// and Deps are the engine's, and server's are written server.Config.
 	cands := x.byName[head]
+	if t := x.types["openrails"][head]; t != nil {
+		cands = []*goType{t}
+	}
 	if len(cands) == 0 {
 		bad(cIdent, "%s: %s is no type in api/go.txt", text, head)
 		return
@@ -523,6 +541,69 @@ func checkIdent(idx *Index, file, text string, bad func(class, format string, ar
 		}
 	}
 	bad(cIdent, "%s: no %s in api/go.txt", text, miss)
+}
+
+// pageSubject is the root type a page is about where no heading names one:
+// client.md lists *Client's methods by what they do.
+var pageSubject = map[string]string{"docs/client.md": "Client"}
+
+// otherOwner are method names a page with a subject may write bare for
+// another type because the sentence names the owner ("AuthKit's X"); each
+// entry needs its reason. None today.
+var otherOwner = map[string]bool{}
+
+// subject is the type a span is written about: the nearest heading that is a
+// root type's name (embedded.md's Config and Deps), else the page's subject.
+// table is "Method" or "Field" for a bare entry in the first column of a
+// table with that header, outside parentheses: it must be one of typ's.
+type subject struct {
+	typ   *goType
+	table string
+}
+
+var spanText = regexp.MustCompile("`[^`]*`")
+
+func (x *goIndex) subjectOf(d *doc, s span) subject {
+	if x == nil {
+		return subject{}
+	}
+	var sc subject
+	level := 7
+	for i := len(d.Heads) - 1; i >= 0 && sc.typ == nil; i-- {
+		h := d.Heads[i]
+		if h.Line > s.Line || h.Level >= level {
+			continue
+		}
+		level = h.Level
+		sc.typ = x.types["openrails"][strings.TrimPrefix(strings.Trim(h.Text, "`* "), "openrails.")]
+	}
+	if sc.typ == nil {
+		sc.typ = x.types["openrails"][pageSubject[d.Path]]
+	}
+	if sc.typ == nil || !strings.HasPrefix(strings.TrimSpace(d.Lines[s.Line]), "|") {
+		return sc
+	}
+	header := s.Line
+	for header > 0 && strings.HasPrefix(strings.TrimSpace(d.Lines[header-1]), "|") {
+		header--
+	}
+	cells := strings.Split(d.Lines[header], "|")
+	before := spanText.ReplaceAllString(s.Before, "")
+	if kind := strings.TrimSpace(cells[1]); len(cells) > 2 && s.Line > header+1 && (kind == "Method" || kind == "Field") &&
+		strings.Count(before, "|") == 1 && strings.Count(before, "(") == strings.Count(before, ")") {
+		sc.table = kind
+	}
+	return sc
+}
+
+// listed reports whether n is in the column sc's table lists: a method of
+// its type or a function of its package (a constructor beside the methods),
+// or a field.
+func (x *goIndex) listed(sc subject, n string) bool {
+	if sc.table == "Field" {
+		return x.isField(sc.typ, n)
+	}
+	return x.isMethod(sc.typ, n) || x.funcs[sc.typ.pkg][n]
 }
 
 // twoHumps: an exported CamelCase name with a lower-case letter and at

@@ -18,12 +18,38 @@ type goType struct {
 	alias     string // the target of `type T = q.N`
 }
 
-// goIndex is api/go.txt: package-level names and types by short package name.
+// goIndex is api/go.txt: package-level names and types by short package
+// name, and which names are only ever a method.
 type goIndex struct {
 	names  map[string]map[string]bool
+	funcs  map[string]map[string]bool
 	types  map[string]map[string]*goType
 	byName map[string][]*goType
 	all    map[string]bool
+	other  map[string]bool // names that are a package-level name or a field somewhere
+}
+
+func newGoIndex() *goIndex {
+	return &goIndex{names: map[string]map[string]bool{}, funcs: map[string]map[string]bool{}, types: map[string]map[string]*goType{},
+		byName: map[string][]*goType{}, all: map[string]bool{}, other: map[string]bool{}}
+}
+
+// methodOnly reports whether n is a method and nothing else: no type,
+// function, constant, variable or field has that name.
+func (x *goIndex) methodOnly(n string) bool {
+	return x.all[n] && !x.other[n]
+}
+
+// isMethod and isField report whether t has m as a method or a field,
+// promoted members included.
+func (x *goIndex) isMethod(t *goType, m string) bool {
+	f, ok := x.member(t, m, map[*goType]bool{})
+	return ok && f == ""
+}
+
+func (x *goIndex) isField(t *goType, m string) bool {
+	f, ok := x.member(t, m, map[*goType]bool{})
+	return ok && f != ""
 }
 
 var (
@@ -32,13 +58,13 @@ var (
 	typeRe     = regexp.MustCompile(`^type (\w+)`)
 	aliasRe    = regexp.MustCompile(`^type \w+ = (\S+)`)
 	methodRe   = regexp.MustCompile(`^method \(\*?(\w+)(?:\[[^\]]*\])?\) (\w+)`)
-	declRe     = regexp.MustCompile(`^(?:const|var|func) (\w+)`)
+	declRe     = regexp.MustCompile(`^(const|var|func) (\w+)`)
 	memberName = regexp.MustCompile(`^(\w+)`)
 	tagSuffix  = regexp.MustCompile("\\s+`[^`]*`$")
 )
 
 func parseGoTxt(text string) *goIndex {
-	x := &goIndex{names: map[string]map[string]bool{}, types: map[string]map[string]*goType{}, byName: map[string][]*goType{}, all: map[string]bool{}}
+	x := newGoIndex()
 	typ := func(pkg, name string) *goType {
 		if x.types[pkg] == nil {
 			x.types[pkg] = map[string]*goType{}
@@ -57,6 +83,7 @@ func parseGoTxt(text string) *goIndex {
 		}
 		x.names[pkg][n] = true
 		x.all[n] = true
+		x.other[n] = true
 	}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -83,6 +110,7 @@ func parseGoTxt(text string) *goIndex {
 				}
 				t.members[n] = field
 				x.all[n] = true
+				x.other[n] = x.other[n] || field != ""
 			}
 		case methodRe.MatchString(rest):
 			mm := methodRe.FindStringSubmatch(rest)
@@ -96,10 +124,21 @@ func parseGoTxt(text string) *goIndex {
 				t.alias = a[1]
 			}
 		case declRe.MatchString(rest):
-			name(pkg, declRe.FindStringSubmatch(rest)[1])
+			d := declRe.FindStringSubmatch(rest)
+			name(pkg, d[2])
+			if d[1] == "func" {
+				x.addFunc(pkg, d[2])
+			}
 		}
 	}
 	return x
+}
+
+func (x *goIndex) addFunc(pkg, n string) {
+	if x.funcs[pkg] == nil {
+		x.funcs[pkg] = map[string]bool{}
+	}
+	x.funcs[pkg][n] = true
 }
 
 // resolve finds the type a field or embedded type string names, from pkg.
@@ -191,6 +230,7 @@ func (x *goIndex) addGoSource(dirs ...string) error {
 				}
 				x.names[pkg][n] = true
 				x.all[n] = true
+				x.other[n] = true
 			}
 			typ := func(n string) *goType {
 				if x.types[pkg] == nil {
@@ -213,6 +253,7 @@ func (x *goIndex) addGoSource(dirs ...string) error {
 						}
 						if d.Recv == nil {
 							add(d.Name.Name)
+							x.addFunc(pkg, d.Name.Name)
 							continue
 						}
 						recv := d.Recv.List[0].Type
@@ -239,21 +280,27 @@ func (x *goIndex) addGoSource(dirs ...string) error {
 								add(sp.Name.Name)
 								t := typ(sp.Name.Name)
 								var fields *ast.FieldList
+								iface := false
 								switch tt := sp.Type.(type) {
 								case *ast.StructType:
 									fields = tt.Fields
 								case *ast.InterfaceType:
-									fields = tt.Methods
+									fields, iface = tt.Methods, true
 								}
 								if fields == nil {
 									continue
 								}
 								for _, fl := range fields.List {
 									for _, n := range fl.Names {
-										if n.IsExported() {
-											t.members[n.Name] = types.ExprString(fl.Type)
-											x.all[n.Name] = true
+										if !n.IsExported() {
+											continue
 										}
+										t.members[n.Name] = ""
+										if !iface {
+											t.members[n.Name] = types.ExprString(fl.Type)
+											x.other[n.Name] = true
+										}
+										x.all[n.Name] = true
 									}
 									if len(fl.Names) == 0 {
 										t.embedded = append(t.embedded, types.ExprString(fl.Type))
@@ -277,12 +324,12 @@ func (x *goIndex) addTSExports(texts ...string) {
 	for _, text := range texts {
 		for _, m := range tsExport.FindAllStringSubmatch(text, -1) {
 			if m[1] != "" {
-				x.all[m[1]] = true
+				x.all[m[1]], x.other[m[1]] = true, true
 			}
 			for _, part := range strings.Split(m[2], ",") {
 				f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(part), "type "))
 				if len(f) > 0 {
-					x.all[f[len(f)-1]] = true
+					x.all[f[len(f)-1]], x.other[f[len(f)-1]] = true, true
 				}
 			}
 		}
