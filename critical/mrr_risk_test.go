@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -505,6 +507,99 @@ func TestMRRRisk(t *testing.T) {
 		startFleet(t, target)
 		require.Eventually(t, func() bool { return riskQueued(t, target, client, sub.CustomerID) == 0 }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, []string{"past_due open [past_due]"}, riskCases(t, target, client, sub.ID))
+	})
+
+	t.Run("OR-J42-S22/a-customer-whose-evaluation-fails-alone-is-set-aside-with-a-finding-and-the-rest-drain", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		book := ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, 2)
+		res, err := a.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Len(t, res.Imported, 2, "%v", res.Reasons)
+		failing, healthy := book.Customers[0].Customer, book.Customers[1].Customer
+		due := pgx.Identifier{a.schema, "mrr_risk_due"}.Sanitize()
+		queue := func(customer billing.CustomerID) {
+			t.Helper()
+			_, err := a.pool.Exec(t.Context(), "INSERT INTO "+due+" (merchant_id, customer_id, changed_at) VALUES ($1, $2, $3)",
+				a.alpha.MerchantID().UUID(), customer.UUID(), a.clock.Now())
+			require.NoError(t, err)
+		}
+		finding := func() string {
+			t.Helper()
+			var status string
+			err := a.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+
+				" WHERE merchant_id = $1 AND finding_type = 'mrr.risk.evaluation_failed' AND subject_key = $2", a.alpha.MerchantID().UUID(), failing.String()).Scan(&status)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ""
+			}
+			require.NoError(t, err)
+			return status
+		}
+		// One customer's changes cannot be taken: its evaluation fails, alone.
+		poison := pgx.Identifier{a.schema, "poison_mrr_risk"}.Sanitize()
+		_, err = a.pool.Exec(t.Context(), "CREATE FUNCTION "+poison+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected evaluation failure'; END $$")
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "CREATE TRIGGER poison_mrr_risk BEFORE DELETE ON "+due+" FOR EACH ROW WHEN (OLD.customer_id = '"+failing.String()+"') EXECUTE FUNCTION "+poison+"()")
+		require.NoError(t, err)
+		queue(failing)
+		queue(healthy)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, fleet.Start(t.Context()))
+
+		runRegistered(t, fleet, "openrails.mrr_risk", 1)
+		require.Zero(t, riskQueued(t, a.world, a.alpha, healthy), "the rest of the merchant drains")
+		require.Equal(t, 1, riskQueued(t, a.world, a.alpha, failing), "the failing customer stays queued")
+		require.Equal(t, "requires_review", finding())
+		var held bool
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT bool_and(held_until > now()) FROM "+due+" WHERE customer_id = $1", failing.UUID()).Scan(&held))
+		require.True(t, held, "set aside")
+
+		// Set aside, it is skipped: the next drain completes without it.
+		queue(healthy)
+		runRegistered(t, fleet, "openrails.mrr_risk", 1)
+		require.Zero(t, riskQueued(t, a.world, a.alpha, healthy))
+		require.Equal(t, 1, riskQueued(t, a.world, a.alpha, failing))
+
+		// Once it evaluates, it takes the changes set aside and the finding closes.
+		_, err = a.pool.Exec(t.Context(), "DROP TRIGGER poison_mrr_risk ON "+due)
+		require.NoError(t, err)
+		queue(failing)
+		runRegistered(t, fleet, "openrails.mrr_risk", 1)
+		require.Zero(t, riskQueued(t, a.world, a.alpha, failing))
+		require.Equal(t, "fixed", finding())
+	})
+
+	t.Run("OR-J42-S23/canceled-at-period-end-a-card-update-clears-card-expiring-and-recovers-the-case", func(t *testing.T) {
+		boundary := monthsAgo(2)
+		a, _, sub := purchasedMembershipWith(t, 7*24, func(w *world) { w.clock.Advance(boundary.Add(-3 * 24 * time.Hour).Sub(w.clock.Now())) })
+		require.NotNil(t, sub.PaymentMethodID)
+		require.True(t, sub.CurrentPeriodEndsAt.After(boundary))
+		startFleet(t, a.world)
+		expire := func(month, year int) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPatch, "/v1/me/payment-methods/"+sub.PaymentMethodID.String(), a.aliceToken,
+				billing.UpdatePaymentMethodParams{ExpMonth: ptr(month), ExpYear: ptr(year)})
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		risk := func() []billing.MRRRiskReason {
+			if r := mrrRiskOf(t, a.alpha, sub.ID); r != nil {
+				return r.Reasons
+			}
+			return nil
+		}
+		expiry := boundary.Add(-24 * time.Hour)
+		expire(int(expiry.Month()), expiry.Year())
+		require.Eventually(t, func() bool { return slices.Equal(risk(), []billing.MRRRiskReason{billing.MRRRiskCardExpiring}) },
+			20*time.Second, 20*time.Millisecond, "the card now expires before the renewal")
+
+		// Canceled at its period end, the case stays open; its card is still
+		// read, and a new expiry clears the reason.
+		customerCancel(t, a, sub.ID)
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskCardExpiring}, risk())
+		expire(12, 2035)
+		require.Eventually(t, func() bool { return risk() == nil }, 20*time.Second, 20*time.Millisecond, "card_expiring is taken anew while canceled")
+		require.Equal(t, []string{"card_expiring recovered [card_expiring]"}, riskCases(t, a.world, a.alpha, sub.ID))
 	})
 }
 

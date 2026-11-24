@@ -19,7 +19,7 @@ migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154d
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
-migration 0027_mrr_at_risk.up.sql sha256:cc38e69fdb4f67b4cb2af7df904f49c50a42a04f8a31671622057793a5df0a38
+migration 0027_mrr_at_risk.up.sql sha256:7095819f0cd827ef179e7bee059e5be2e079d637e1ed72efa6063b5b3a922c56
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1487,8 +1487,10 @@ table billing.mrr_risk_due
   column id uuid NOT NULL DEFAULT uuidv7()
   column customer_id uuid NOT NULL
   column changed_at timestamp with time zone NOT NULL
+  column held_until timestamp with time zone
   constraint mrr_risk_due_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint mrr_risk_due_pkey PRIMARY KEY (merchant_id, id)
+  index CREATE INDEX mrr_risk_due_held_idx ON billing.mrr_risk_due USING btree (merchant_id, customer_id) WHERE (held_until IS NOT NULL)
   index CREATE UNIQUE INDEX mrr_risk_due_pkey ON billing.mrr_risk_due USING btree (merchant_id, id)
   trigger CREATE TRIGGER mrr_risk_due_notify AFTER INSERT ON billing.mrr_risk_due FOR EACH STATEMENT EXECUTE FUNCTION billing.notify_mrr_risk_due()
 
@@ -4130,8 +4132,8 @@ function billing.effect_due_mrr(uuid,uuid,timestamp with time zone)
   END;
   $function$
 
-function billing.effect_due_mrr_risk(uuid,integer)
-  CREATE OR REPLACE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer)
+function billing.effect_due_mrr_risk(uuid,integer,uuid)
+  CREATE OR REPLACE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer, p_customer uuid)
    RETURNS integer
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
@@ -4145,10 +4147,14 @@ function billing.effect_due_mrr_risk(uuid,integer)
       FOR v_due IN
           WITH claimed AS (
               DELETE FROM billing.mrr_risk_due d
-               USING (SELECT q.id FROM billing.mrr_risk_due q WHERE q.merchant_id = p_merchant ORDER BY q.id LIMIT p_batch FOR UPDATE SKIP LOCKED) c
+               USING (SELECT q.id FROM billing.mrr_risk_due q
+                       WHERE q.merchant_id = p_merchant AND (p_customer IS NULL OR q.customer_id = p_customer)
+                         AND (q.held_until IS NULL OR q.held_until <= now())
+                       ORDER BY q.id LIMIT p_batch FOR UPDATE SKIP LOCKED) c
                WHERE d.merchant_id = p_merchant AND d.id = c.id
-              RETURNING d.customer_id, d.changed_at)
-          SELECT customer_id, max(changed_at) AS changed_at, count(*)::integer AS changes FROM claimed GROUP BY customer_id ORDER BY customer_id
+              RETURNING d.customer_id, d.changed_at, d.held_until)
+          SELECT customer_id, max(changed_at) AS changed_at, count(*)::integer AS changes, bool_or(held_until IS NOT NULL) AS held
+            FROM claimed GROUP BY customer_id ORDER BY customer_id
       LOOP
           v_claimed := v_claimed + v_due.changes;
           FOR v_sub IN
@@ -4163,6 +4169,17 @@ function billing.effect_due_mrr_risk(uuid,integer)
               UPDATE billing.subscription_mrr SET risk = v_risk, risk_changed_at = greatest(v_due.changed_at, risk_changed_at)
                WHERE merchant_id = p_merchant AND subscription_id = v_sub.id AND risk <> v_risk;
           END LOOP;
+          DELETE FROM billing.mrr_risk_due d
+           USING (SELECT q.id FROM billing.mrr_risk_due q
+                   WHERE q.merchant_id = p_merchant AND q.customer_id = v_due.customer_id AND q.held_until IS NOT NULL
+                     FOR UPDATE SKIP LOCKED) h
+           WHERE d.merchant_id = p_merchant AND d.id = h.id;
+          IF FOUND OR v_due.held THEN
+              UPDATE billing.reconciliation_findings
+                 SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(), notified_at = NULL, notified_severity = NULL, updated_at = now()
+               WHERE merchant_id = p_merchant AND finding_type = 'mrr.risk.evaluation_failed' AND subject_key = v_due.customer_id::text
+                 AND psp_id IS NULL AND resolved_at IS NULL;
+          END IF;
       END LOOP;
       RETURN v_claimed;
   END;
@@ -5323,9 +5340,7 @@ function billing.queue_mrr_risk(uuid,uuid,timestamp with time zone)
    LANGUAGE sql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
-  INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
-  SELECT p_merchant, p_customer, p_at
-   WHERE EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.mrr > 0)
+  INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at) VALUES (p_merchant, p_customer, p_at)
   $function$
 
 function billing.rail_subscription_key(text,text)
@@ -6043,25 +6058,35 @@ function billing.subscription_risk(billing.subscriptions,bigint,text[])
   DECLARE
       v_currency text;
       v_fix boolean;
+      v_past_due boolean;
+      v_needs_method boolean;
+      v_unverified boolean;
       v_card uuid;
       v_expires timestamptz;
   BEGIN
       IF p_level = 0 OR s.deleted_at IS NOT NULL THEN
           RETURN '{}';
       END IF;
-      -- Canceled at its period end, it adds MRR until then: its case stays open
-      -- until the MRR ends, or a resume continues it.
+      -- Canceled at its period end, it adds MRR until then: the reasons its
+      -- status gave stay as they were at the cancel, so its case stays open
+      -- until the MRR ends or a resume continues it; the others are taken anew.
       IF s.status = 'canceled' THEN
-          RETURN p_prev;
+          v_past_due := 'past_due' = ANY(p_prev);
+          v_needs_method := 'needs_payment_method' = ANY(p_prev);
+          v_unverified := 'unverified' = ANY(p_prev);
+      ELSE
+          -- A provider retries on its own: its latest decline's action says
+          -- whether the card must be replaced.
+          IF s.status = 'past_due' AND s.collection_policy <> 'engine' THEN
+              SELECT a.action = 'fix_payment_method' INTO v_fix FROM billing.payment_attempts a
+               WHERE a.merchant_id = s.merchant_id AND a.subscription_id = s.id
+               ORDER BY a.attempted_at DESC, a.id DESC LIMIT 1;
+          END IF;
+          v_past_due := s.status = 'past_due' AND NOT COALESCE(v_fix, false);
+          v_needs_method := s.status = 'awaiting_method' OR COALESCE(v_fix, false);
+          v_unverified := s.status = 'unverified';
       END IF;
       SELECT currency INTO v_currency FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
-      -- A provider retries on its own: its latest decline's action says
-      -- whether the card must be replaced.
-      IF s.status = 'past_due' AND s.collection_policy <> 'engine' THEN
-          SELECT a.action = 'fix_payment_method' INTO v_fix FROM billing.payment_attempts a
-           WHERE a.merchant_id = s.merchant_id AND a.subscription_id = s.id
-           ORDER BY a.attempted_at DESC, a.id DESC LIMIT 1;
-      END IF;
       -- The card OpenRails charges is good through the end of its month. An NMI
       -- schedule charges the card NMI holds for it: only one the subscription
       -- names is known to be that card.
@@ -6074,9 +6099,9 @@ function billing.subscription_risk(billing.subscriptions,bigint,text[])
            WHERE pm.merchant_id = s.merchant_id AND pm.id = v_card;
       END IF;
       RETURN array_remove(ARRAY[
-          CASE WHEN s.status = 'past_due' AND NOT COALESCE(v_fix, false) THEN 'past_due' END,
-          CASE WHEN s.status = 'awaiting_method' OR COALESCE(v_fix, false) THEN 'needs_payment_method' END,
-          CASE WHEN s.status = 'unverified' THEN 'unverified' END,
+          CASE WHEN v_past_due THEN 'past_due' END,
+          CASE WHEN v_needs_method THEN 'needs_payment_method' END,
+          CASE WHEN v_unverified THEN 'unverified' END,
           CASE WHEN v_expires <= s.current_period_ends_at THEN 'card_expiring' END,
           CASE WHEN EXISTS (SELECT 1 FROM billing.customer_delinquency d WHERE d.merchant_id = s.merchant_id AND d.customer_id = s.customer_id
                               AND d.currency = v_currency AND d.state = 'delinquent') THEN 'delinquent' END

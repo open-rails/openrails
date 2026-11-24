@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 585,
+  "scenario_count": 587,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2472,6 +2472,16 @@
       "id": "OR-J42-S21",
       "journey": "J42",
       "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
+    },
+    {
+      "id": "OR-J42-S22",
+      "journey": "J42",
+      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+    },
+    {
+      "id": "OR-J42-S23",
+      "journey": "J42",
+      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
     },
     {
       "id": "OR-J28-S09",

@@ -1492,6 +1492,12 @@
     "OR-J42-S21": [
       "TestMRRRisk/OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr"
     ],
+    "OR-J42-S22": [
+      "TestMRRRisk/OR-J42-S22/a-customer-whose-evaluation-fails-alone-is-set-aside-with-a-finding-and-the-rest-drain"
+    ],
+    "OR-J42-S23": [
+      "TestMRRRisk/OR-J42-S23/canceled-at-period-end-a-card-update-clears-card-expiring-and-recovers-the-case"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],

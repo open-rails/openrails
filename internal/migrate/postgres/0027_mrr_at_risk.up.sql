@@ -17,7 +17,7 @@ ALTER TABLE billing.subscription_mrr ALTER COLUMN dirty SET EXPRESSION AS (mrr <
     OR product_id <> recorded_product_id OR price_id <> recorded_price_id OR risk <> recorded_risk);
 CREATE INDEX subscription_mrr_risk_idx ON billing.subscription_mrr (merchant_id, subscription_id)
     WHERE risk <> '{}';
-COMMENT ON COLUMN billing.subscription_mrr.risk IS 'Why the subscription''s MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons it had until its MRR ends.';
+COMMENT ON COLUMN billing.subscription_mrr.risk IS 'Why the subscription''s MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons its status gave at the cancel until its MRR ends; card_expiring and delinquent are taken anew.';
 COMMENT ON COLUMN billing.subscription_mrr.recorded_risk IS 'The reasons its open risk episodes record.';
 COMMENT ON COLUMN billing.subscription_mrr.risk_changed_at IS 'The business instant of the latest change of its reasons.';
 
@@ -110,10 +110,15 @@ CREATE TABLE billing.mrr_risk_due (
     id uuid NOT NULL DEFAULT uuidv7(),
     customer_id uuid NOT NULL,
     changed_at timestamptz NOT NULL,
+    held_until timestamptz,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT mrr_risk_due_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE
 );
 COMMENT ON TABLE billing.mrr_risk_due IS 'Changes outside a subscription row that may change the risk of its customer''s subscriptions: a card, a default card, a provider''s decline or delinquency. Each change appends its own row, so no writer waits on another''s; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer''s subscriptions, locking them in id order. changed_at dates the change. Retention: state, deleted when claimed.';
+COMMENT ON COLUMN billing.mrr_risk_due.held_until IS 'Set on the changes of a customer whose evaluation failed alone (an mrr.risk.evaluation_failed finding): drains skip them until then. Any evaluation of the customer that succeeds takes them too.';
+
+CREATE INDEX mrr_risk_due_held_idx ON billing.mrr_risk_due (merchant_id, customer_id)
+    WHERE held_until IS NOT NULL;
 
 -- Each change wakes the MRR risk worker at its commit; the payload is the
 -- schema.
@@ -136,25 +141,35 @@ LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 DECLARE
     v_currency text;
     v_fix boolean;
+    v_past_due boolean;
+    v_needs_method boolean;
+    v_unverified boolean;
     v_card uuid;
     v_expires timestamptz;
 BEGIN
     IF p_level = 0 OR s.deleted_at IS NOT NULL THEN
         RETURN '{}';
     END IF;
-    -- Canceled at its period end, it adds MRR until then: its case stays open
-    -- until the MRR ends, or a resume continues it.
+    -- Canceled at its period end, it adds MRR until then: the reasons its
+    -- status gave stay as they were at the cancel, so its case stays open
+    -- until the MRR ends or a resume continues it; the others are taken anew.
     IF s.status = 'canceled' THEN
-        RETURN p_prev;
+        v_past_due := 'past_due' = ANY(p_prev);
+        v_needs_method := 'needs_payment_method' = ANY(p_prev);
+        v_unverified := 'unverified' = ANY(p_prev);
+    ELSE
+        -- A provider retries on its own: its latest decline's action says
+        -- whether the card must be replaced.
+        IF s.status = 'past_due' AND s.collection_policy <> 'engine' THEN
+            SELECT a.action = 'fix_payment_method' INTO v_fix FROM billing.payment_attempts a
+             WHERE a.merchant_id = s.merchant_id AND a.subscription_id = s.id
+             ORDER BY a.attempted_at DESC, a.id DESC LIMIT 1;
+        END IF;
+        v_past_due := s.status = 'past_due' AND NOT COALESCE(v_fix, false);
+        v_needs_method := s.status = 'awaiting_method' OR COALESCE(v_fix, false);
+        v_unverified := s.status = 'unverified';
     END IF;
     SELECT currency INTO v_currency FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
-    -- A provider retries on its own: its latest decline's action says
-    -- whether the card must be replaced.
-    IF s.status = 'past_due' AND s.collection_policy <> 'engine' THEN
-        SELECT a.action = 'fix_payment_method' INTO v_fix FROM billing.payment_attempts a
-         WHERE a.merchant_id = s.merchant_id AND a.subscription_id = s.id
-         ORDER BY a.attempted_at DESC, a.id DESC LIMIT 1;
-    END IF;
     -- The card OpenRails charges is good through the end of its month. An NMI
     -- schedule charges the card NMI holds for it: only one the subscription
     -- names is known to be that card.
@@ -167,16 +182,16 @@ BEGIN
          WHERE pm.merchant_id = s.merchant_id AND pm.id = v_card;
     END IF;
     RETURN array_remove(ARRAY[
-        CASE WHEN s.status = 'past_due' AND NOT COALESCE(v_fix, false) THEN 'past_due' END,
-        CASE WHEN s.status = 'awaiting_method' OR COALESCE(v_fix, false) THEN 'needs_payment_method' END,
-        CASE WHEN s.status = 'unverified' THEN 'unverified' END,
+        CASE WHEN v_past_due THEN 'past_due' END,
+        CASE WHEN v_needs_method THEN 'needs_payment_method' END,
+        CASE WHEN v_unverified THEN 'unverified' END,
         CASE WHEN v_expires <= s.current_period_ends_at THEN 'card_expiring' END,
         CASE WHEN EXISTS (SELECT 1 FROM billing.customer_delinquency d WHERE d.merchant_id = s.merchant_id AND d.customer_id = s.customer_id
                             AND d.currency = v_currency AND d.state = 'delinquent') THEN 'delinquent' END
     ]::text[], NULL);
 END;
 $$;
-COMMENT ON FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint, p_prev text[]) IS 'The reasons a subscription adding MRR is at risk: its status (a provider''s past due needs a payment method when its latest decline''s action says so), the card it charges expiring by its period end (on an NMI schedule, only a card it names), and its customer''s delinquency in its currency. Canceled at its period end, it keeps p_prev.';
+COMMENT ON FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint, p_prev text[]) IS 'The reasons a subscription adding MRR is at risk: its status (a provider''s past due needs a payment method when its latest decline''s action says so), the card it charges expiring by its period end (on an NMI schedule, only a card it names), and its customer''s delinquency in its currency. Canceled at its period end, it keeps the reasons p_prev has from its status.';
 
 -- When a backfilled reason began, where the book records it: the customer's
 -- delinquency or the subscription's unverified state; else p_at.
@@ -595,13 +610,11 @@ CREATE TRIGGER trg_subscriptions_track_mrr AFTER INSERT OR UPDATE OF status, pri
 
 -- A change outside the subscription row appends its customer for the MRR
 -- risk worker instead of touching subscription_mrr: the worker locks each
--- subscription before it re-evaluates, in the order its writers take them.
--- Only a customer with a subscription adding MRR can be at risk.
+-- subscription before it re-evaluates, in the order its writers take them,
+-- and passes over a customer adding no MRR.
 CREATE FUNCTION billing.queue_mrr_risk(p_merchant uuid, p_customer uuid, p_at timestamptz) RETURNS void
 LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
-SELECT p_merchant, p_customer, p_at
- WHERE EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.mrr > 0)
+INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at) VALUES (p_merchant, p_customer, p_at)
 $$;
 
 CREATE FUNCTION billing.payment_methods_track_mrr_risk() RETURNS trigger
@@ -662,10 +675,12 @@ CREATE TRIGGER payment_attempts_track_mrr_risk AFTER INSERT ON billing.payment_a
     EXECUTE FUNCTION billing.payment_attempts_track_mrr_risk();
 
 -- The MRR risk worker: claims up to p_batch of the merchant's queued changes
--- that no other worker holds, then re-evaluates each customer's subscriptions,
--- locked in id order, dated at its latest claimed change. A change committed
--- after the claim stays queued for the next. Returns how many it claimed.
-CREATE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer) RETURNS integer
+-- (of p_customer alone, when named) that no other worker holds and none set
+-- aside, then re-evaluates each customer's subscriptions, locked in id order,
+-- dated at its latest claimed change. A change committed after the claim
+-- stays queued for the next. A customer evaluated takes its changes set
+-- aside too and closes their finding. Returns how many it claimed.
+CREATE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer, p_customer uuid) RETURNS integer
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 DECLARE
     v_due record;
@@ -676,10 +691,14 @@ BEGIN
     FOR v_due IN
         WITH claimed AS (
             DELETE FROM billing.mrr_risk_due d
-             USING (SELECT q.id FROM billing.mrr_risk_due q WHERE q.merchant_id = p_merchant ORDER BY q.id LIMIT p_batch FOR UPDATE SKIP LOCKED) c
+             USING (SELECT q.id FROM billing.mrr_risk_due q
+                     WHERE q.merchant_id = p_merchant AND (p_customer IS NULL OR q.customer_id = p_customer)
+                       AND (q.held_until IS NULL OR q.held_until <= now())
+                     ORDER BY q.id LIMIT p_batch FOR UPDATE SKIP LOCKED) c
              WHERE d.merchant_id = p_merchant AND d.id = c.id
-            RETURNING d.customer_id, d.changed_at)
-        SELECT customer_id, max(changed_at) AS changed_at, count(*)::integer AS changes FROM claimed GROUP BY customer_id ORDER BY customer_id
+            RETURNING d.customer_id, d.changed_at, d.held_until)
+        SELECT customer_id, max(changed_at) AS changed_at, count(*)::integer AS changes, bool_or(held_until IS NOT NULL) AS held
+          FROM claimed GROUP BY customer_id ORDER BY customer_id
     LOOP
         v_claimed := v_claimed + v_due.changes;
         FOR v_sub IN
@@ -694,11 +713,22 @@ BEGIN
             UPDATE billing.subscription_mrr SET risk = v_risk, risk_changed_at = greatest(v_due.changed_at, risk_changed_at)
              WHERE merchant_id = p_merchant AND subscription_id = v_sub.id AND risk <> v_risk;
         END LOOP;
+        DELETE FROM billing.mrr_risk_due d
+         USING (SELECT q.id FROM billing.mrr_risk_due q
+                 WHERE q.merchant_id = p_merchant AND q.customer_id = v_due.customer_id AND q.held_until IS NOT NULL
+                   FOR UPDATE SKIP LOCKED) h
+         WHERE d.merchant_id = p_merchant AND d.id = h.id;
+        IF FOUND OR v_due.held THEN
+            UPDATE billing.reconciliation_findings
+               SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(), notified_at = NULL, notified_severity = NULL, updated_at = now()
+             WHERE merchant_id = p_merchant AND finding_type = 'mrr.risk.evaluation_failed' AND subject_key = v_due.customer_id::text
+               AND psp_id IS NULL AND resolved_at IS NULL;
+        END IF;
     END LOOP;
     RETURN v_claimed;
 END;
 $$;
-COMMENT ON FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer) IS 'Claims up to p_batch of the merchant''s mrr_risk_due rows no other transaction holds (FOR UPDATE SKIP LOCKED), deletes them and re-evaluates each claimed customer''s subscriptions'' risk, locking them in id order. Returns the rows claimed.';
+COMMENT ON FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer, p_customer uuid) IS 'Claims up to p_batch of the merchant''s mrr_risk_due rows (p_customer''s alone when named) that no other transaction holds and none set aside (FOR UPDATE SKIP LOCKED), deletes them and re-evaluates each claimed customer''s subscriptions'' risk, locking them in id order; a customer evaluated also takes its rows set aside and closes its mrr.risk.evaluation_failed finding. Returns the rows claimed.';
 
 -- A subscription with no subscription_mrr row (one written before MRR, or a
 -- restore from an archive without it) is adopted as an opening movement, and

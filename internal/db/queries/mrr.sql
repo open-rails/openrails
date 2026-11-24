@@ -36,9 +36,29 @@ FROM billing.mrr_risk_due d
 ORDER BY d.merchant_id;
 
 -- name: EffectDueMRRRisk :one
--- Claims up to batch of the merchant's queued risk changes no other worker
--- holds and re-evaluates their customers; returns how many it claimed.
-SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(batch)::int)::int AS claimed;
+-- Claims up to batch of the merchant's queued risk changes (customer_id's
+-- alone, when named) that no other worker holds and none set aside, and
+-- re-evaluates their customers; returns how many it claimed.
+SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(batch)::int, sqlc.narg(customer_id)::uuid)::int AS claimed;
+
+-- name: ListMRRRiskDueCustomers :many
+-- The merchant's customers with queued risk changes not set aside.
+SELECT DISTINCT d.customer_id
+FROM billing.mrr_risk_due d
+WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND (d.held_until IS NULL OR d.held_until <= now())
+ORDER BY d.customer_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: SetAsideMRRRiskCustomer :execrows
+-- Sets aside a customer whose evaluation failed alone: drains skip its
+-- queued changes for an hour, then try it again.
+UPDATE billing.mrr_risk_due d
+SET held_until = now() + interval '1 hour'
+FROM (SELECT q.id FROM billing.mrr_risk_due q
+      WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid AND q.customer_id = sqlc.arg(customer_id)::uuid
+        AND (q.held_until IS NULL OR q.held_until <= now())
+      FOR UPDATE SKIP LOCKED) h
+WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND d.id = h.id;
 
 -- name: QueueRestoredMRRRisk :exec
 -- A restore re-evaluates every customer with a subscription adding MRR: the

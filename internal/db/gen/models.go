@@ -1090,6 +1090,8 @@ type BillingMrrRiskDue struct {
 	ID         uuid.UUID
 	CustomerID uuid.UUID
 	ChangedAt  time.Time
+	// Set on the changes of a customer whose evaluation failed alone (an mrr.risk.evaluation_failed finding): drains skip them until then. Any evaluation of the customer that succeeds takes them too.
+	HeldUntil *time.Time
 }
 
 // One reason a subscription's MRR was at risk, from when it entered to when it left, within its case. A delinquent one keeps the customer's overdue amount in the currency when it entered. Retention: permanent, never pruned.
@@ -2381,7 +2383,7 @@ type BillingSubscriptionMrr struct {
 	RecordedPriceID   uuid.UUID
 	RecordedMrr       int64
 	Dirty             bool
-	// Why the subscription's MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons it had until its MRR ends.
+	// Why the subscription's MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons its status gave at the cancel until its MRR ends; card_expiring and delinquent are taken anew.
 	Risk []string
 	// The reasons its open risk episodes record.
 	RecordedRisk []string

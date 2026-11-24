@@ -13,18 +13,20 @@ import (
 )
 
 const effectDueMRRRisk = `-- name: EffectDueMRRRisk :one
-SELECT billing.effect_due_mrr_risk($1::uuid, $2::int)::int AS claimed
+SELECT billing.effect_due_mrr_risk($1::uuid, $2::int, $3::uuid)::int AS claimed
 `
 
 type EffectDueMRRRiskParams struct {
 	MerchantID uuid.UUID
 	Batch      int32
+	CustomerID *uuid.UUID
 }
 
-// Claims up to batch of the merchant's queued risk changes no other worker
-// holds and re-evaluates their customers; returns how many it claimed.
+// Claims up to batch of the merchant's queued risk changes (customer_id's
+// alone, when named) that no other worker holds and none set aside, and
+// re-evaluates their customers; returns how many it claimed.
 func (q *Queries) EffectDueMRRRisk(ctx context.Context, arg EffectDueMRRRiskParams) (int32, error) {
-	row := q.db.QueryRow(ctx, effectDueMRRRisk, arg.MerchantID, arg.Batch)
+	row := q.db.QueryRow(ctx, effectDueMRRRisk, arg.MerchantID, arg.Batch, arg.CustomerID)
 	var claimed int32
 	err := row.Scan(&claimed)
 	return claimed, err
@@ -97,6 +99,40 @@ func (q *Queries) ListDueSubscriptionMRR(ctx context.Context, arg ListDueSubscri
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMRRRiskDueCustomers = `-- name: ListMRRRiskDueCustomers :many
+SELECT DISTINCT d.customer_id
+FROM billing.mrr_risk_due d
+WHERE d.merchant_id = $1::uuid AND (d.held_until IS NULL OR d.held_until <= now())
+ORDER BY d.customer_id
+LIMIT $2::int
+`
+
+type ListMRRRiskDueCustomersParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int32
+}
+
+// The merchant's customers with queued risk changes not set aside.
+func (q *Queries) ListMRRRiskDueCustomers(ctx context.Context, arg ListMRRRiskDueCustomersParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listMRRRiskDueCustomers, arg.MerchantID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, customer_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -224,4 +260,29 @@ type SeedMRRParams struct {
 func (q *Queries) SeedMRR(ctx context.Context, arg SeedMRRParams) error {
 	_, err := q.db.Exec(ctx, seedMRR, arg.MerchantID, arg.At)
 	return err
+}
+
+const setAsideMRRRiskCustomer = `-- name: SetAsideMRRRiskCustomer :execrows
+UPDATE billing.mrr_risk_due d
+SET held_until = now() + interval '1 hour'
+FROM (SELECT q.id FROM billing.mrr_risk_due q
+      WHERE q.merchant_id = $1::uuid AND q.customer_id = $2::uuid
+        AND (q.held_until IS NULL OR q.held_until <= now())
+      FOR UPDATE SKIP LOCKED) h
+WHERE d.merchant_id = $1::uuid AND d.id = h.id
+`
+
+type SetAsideMRRRiskCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// Sets aside a customer whose evaluation failed alone: drains skip its
+// queued changes for an hour, then try it again.
+func (q *Queries) SetAsideMRRRiskCustomer(ctx context.Context, arg SetAsideMRRRiskCustomerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAsideMRRRiskCustomer, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
