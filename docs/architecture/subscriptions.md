@@ -26,14 +26,7 @@ proven NMI skip opens dunning; a clock alone reaches only `unverified`. Creation
 sets the first state directly (`createMembershipCore`); a trigger logs each
 status change to `subscription_status_transitions`.
 
-**Enrollment.** A customer buys a recurring price as an order line
-(`POST /v1/me/orders`); once paid, `orders.Service.fulfil` calls
-`CreateMembershipTx` with frozen `InitialMembershipTerms` and records a
-recurring `mandates` row; it is engine-owned unless the provider enrolled it
-(`charge.Enrolled`). `subscriptions_customer_id_tier_group_key` and its product
-twin allow one live membership per tier group. A calendar price fixes its anchor
-at the first payment ([billing intervals](../client.md#catalog)); trial
-prices are refused (`order_line_unavailable`).
+**Enrollment.** A customer buys a recurring price as an order line (`POST /v1/me/orders`); once paid, `orders.Service.fulfil` calls `CreateMembershipTx` with frozen `InitialMembershipTerms` and records a recurring `mandates` row; it is engine-owned unless the provider enrolled it (`orders.Charge.Enrolled`). `subscriptions_customer_id_tier_group_key` and its product twin allow one live membership per tier group. A calendar price fixes its anchor at the first payment ([billing intervals](../client.md#catalog)); trial prices are refused (`order_line_unavailable`).
 
 **Engine renewal.** The hourly billing pass's `openrails.dunning` scan
 (`ListDueDunningMerchants`, then `ListDueDunningSubscriptions` in each
@@ -131,7 +124,7 @@ Checks:
 - `prorateCredit` and `QuoteSeatIncrease` in `proration.go`.
 - `critical/renewal_test.go` pins a $10 renewal as Stripe `amount` 1000;
   `critical/subscription_change_contract_test.go` pins 1500 and NMI `"20.00"`.
-- OR-J14-S04, OR-J19-S04: a later price edit leaves an admitted charge as is.
+- OR-J14-S04: a later price edit leaves an admitted charge as is.
 
 ### 4. Access control and tenant isolation
 
@@ -163,7 +156,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-The due pass reads partial indexes on due instants ([dunning](dunning.md)), pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations wake at `next_attempt_at`; webhooks coalesce. A due move rides the renewal that applies it.
+The due pass reads partial indexes on due instants ([dunning](dunning.md)), pages 500 merchants and defers an unchanged row (`due_recheck_at`). Operations wake at `next_attempt_at`; webhooks coalesce.
 
 Checks:
 - `ListDueDunningMerchants`, `ListDueDunningSubscriptions` read due instants.

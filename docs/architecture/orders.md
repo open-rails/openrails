@@ -105,11 +105,10 @@ pins `{id}` to the secret's order. Framing follows `checkout.embed_origins`.
 
 - Go: `Client.PreviewOrder`, `CreateOrder`, `CancelOrder`, `GetOrderPaymentAttempt`,
   `ListOrders`, `GetOrder`, `RecordExternalPayment`; `Engine.CheckoutPage`.
-- Configuration: `checkout_origin` (`server.Config.CheckoutOrigin`); merchant
-  settings `checkout.embed_origins`.
+- Configuration: `checkout_origin` (`openrails.Config.CheckoutOrigin`); merchant settings `checkout.embed_origins`.
 - Events: `order.completed` (fulfil on it), `order.payment_failed`,
   `order.requires_action`, `order.canceled`, `order.expired`.
-- Guides: [payment-page.md](../client.md#orders-and-checkout), [provider-uncertainty.md](../standalone.md#provider-intents).
+- Guides: [payment page](../client.md#orders-and-checkout), [provider intents](../standalone.md#provider-intents).
 
 ## Guarantees
 
@@ -204,15 +203,7 @@ Checks:
 - OR-J08-S70, OR-J08-S71, OR-J09-S70: expired orders act expired before any pass.
 
 ### 8. Abuse protection
-The `purchase` bucket ([limits.md](../standalone.md#abuse-limits)) covers `POST /v1/me/orders`,
-`…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and
-its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay
-URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10
-declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`).
-`GuardCardAttempt` checks the card-testing ledger before any provider call
-(`card_attempts_blocked`); an Idempotency-Key holding a card number is refused
-(`cardguard.ContainsPAN`). Previews, carts, cancels and reads are not limited here,
-only bounded by `billing.MaxOrderLines` and `MaxCartLines`.
+The `purchase` bucket ([limits](../standalone.md#abuse-limits)) covers `POST /v1/me/orders`, `…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10 declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`). `GuardCardAttempt` checks the card-testing ledger before any provider call (`card_attempts_blocked`); an Idempotency-Key holding a card number is refused (`cardguard.ContainsPAN`). Previews, carts, cancels and reads are not limited here, only bounded by `billing.MaxOrderLines` and `MaxCartLines`.
 
 Checks:
 - `isPurchasePath` matches exactly the routes above.

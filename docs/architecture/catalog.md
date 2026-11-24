@@ -163,11 +163,7 @@ Checks:
 
 ### 2. Agreement with providers
 
-A provider price keeps the terms observed in `provider_catalog_objects`, where
-pulls, webhooks and by-id reads keep the latest observation. New terms become a
-new version only at the next apply. A lost Stripe event is caught by the next
-event or a pull ([imports](imports.md)); `GET /v1/catalog/prices/{id}?verify=true`
-re-reads the provider (`VerifyPublicPriceSync`).
+A provider price keeps the terms observed in `provider_catalog_objects`, where pulls, webhooks and by-id reads keep the latest observation. New terms become a new version only at the next apply. A lost Stripe event is caught by the next event or a pull ([imports](imports.md)); `GET /v1/catalog/prices/{id}/verification` (`VerifyPrice`) re-reads the provider (`VerifyPublicPriceSync`).
 
 A migration's NMI move applies only after the schedule reads back the target amount (`PushPlanAmount`); a Stripe move waits for Stripe to bill the target.
 
@@ -295,7 +291,7 @@ are published only as setup (`CreatePrice` in `TestSolanaPlanChanges`).
 
 Gaps:
 - Nothing covers `prune: true`, entitlement replacements or a warned document.
-- Nothing tests the catalog assistant or its drafting tools.
+- Nothing tests the catalog assistant; of its drafting tools only the default effective date is tested (`TestDefaultEffectiveDateIsTheFirstWholeUTCDayPastTheWindow`).
 - No scenario shows a catalog edit spending a unit or held by an incident.
 - No scenario crashes between a Solana plan publish and the commit, or asserts
   the re-publish guard or the `limited`/`readonly` attach.

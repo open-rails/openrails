@@ -146,8 +146,7 @@ never charged: an NMI row parks `unverified`, a provider-billed row is asked by
 id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
-- `manual_rebill_completion.go` and `subscription_collection_intent.go` check
-  the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
+- `internal/intents/manual_rebill_completion.go` and `internal/modules/money/subscription_collection_intent.go` check the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
 
 ### 3. Exact money
 A retry charges its payload's frozen renewal terms through
