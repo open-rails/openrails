@@ -119,17 +119,13 @@ Checks:
 
 ### 2. Agreement with providers
 
-Webhooks only wake a converge that reads the provider. A decline for a paid or
-canceled period is ignored, a payment on a row canceled by decision goes to
-refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores
-it, and missing facts lead only to `unverified`. A Stripe
-price move settles from Stripe's record (`ProviderMovedPrice`).
+Webhooks only wake a converge that reads the provider. A decline for a paid or canceled period is ignored, a payment on a row canceled by decision goes to refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores it, and missing facts lead only to `unverified`. An end the provider confirmed is stored as `provider` and one whose first payment never completed as `abandoned`, so read back they stay decided: neither a payment nor a resume reopens them. CCBill's own cancel and expiration are lapses, which its reactivation or next renewal restores. A Stripe price move settles from Stripe's record (`ProviderMovedPrice`).
 
 Checks:
 - `lifecycle.Apply` gives no effects for a stale `RenewalPaid` or for
   `RenewalDeclined` on a canceled row.
 - `RenewalOverdue` and `DunningStale` reach only `unverified`.
-- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found).
+- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S44 (a provider-confirmed end is not reopened by a later renewal).
 
 ### 3. Exact money
 

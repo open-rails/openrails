@@ -291,6 +291,10 @@ func cancelClass(kind string) string {
 	switch models.CancelType(kind) {
 	case models.CancelTypeUser, models.CancelTypeMerchant, models.CancelTypeUpgrade:
 		return string(models.CancelTypeUser)
+	case models.CancelTypeProvider:
+		// A provider's own end, whatever it says caused it, is never moved to
+		// a lapse a later payment would revive.
+		return string(models.CancelTypeExpired)
 	}
 	return kind
 }

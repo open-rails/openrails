@@ -1615,11 +1615,13 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 		return fmt.Errorf("missing required field: subscriptionId")
 	}
 	now := s.now().UTC()
-	var ev lifecycle.Event = lifecycle.ProviderCanceled{At: now}
-	notice := ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
+	// CCBill's own cancel is a lapse, not a confirmed death: CCBill can
+	// reactivate it (UserReactivation) or bill it again (RenewalSuccess).
+	var ev lifecycle.Event = lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: now}
+	notice := ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail, providerStopped: true}
 	if data.Source == "failedRB" {
 		ev = lifecycle.Cancel{Kind: lifecycle.CancelExpired, Immediate: true, At: now}
-		notice.ended, notice.providerStopped = subscriptions.PremiumEndReasonExpired, true
+		notice.ended = subscriptions.PremiumEndReasonExpired
 	}
 	return s.ccbillMirrorEvent(ctx, data.SubscriptionID, func(sub *models.Subscription) lifecycle.Event {
 		if sub.Status != models.StatusCanceled && data.Reason != "" {
@@ -1645,6 +1647,6 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			s.Log.WarnContext(ctx, "Ignoring CCBill expiration inside a paid period", "subscription_id", sub.ID, "current_period_ends_at", sub.CurrentPeriodEndsAt)
 			return nil
 		}
-		return lifecycle.ProviderCanceled{At: now}
-	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonAccessEnded})
+		return lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: now}
+	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonAccessEnded, providerStopped: true})
 }

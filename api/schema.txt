@@ -6,7 +6,7 @@ migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
 migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
-migration 0012_order_keys_and_cancel_kinds.up.sql sha256:ba8cc61ab16e905446c488fbbcc97c6b18be757c7b4f0f5194a06e98e5344380
+migration 0012_order_keys_and_cancel_kinds.up.sql sha256:873b10efc9447ed1159f50549c617e1610b68d77b34f6a2de4a86dbb3b7f7659
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2759,7 +2759,7 @@ table billing.subscription_status_transitions
   column actor text
   column executor text
   column operation_id uuid
-  constraint subscription_status_transitions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
+  constraint subscription_status_transitions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscription_status_transitions_from_status_check CHECK ((from_status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscription_status_transitions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint subscription_status_transitions_pkey PRIMARY KEY (merchant_id, id)
@@ -2826,7 +2826,7 @@ table billing.subscriptions
   column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
-  constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
+  constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint subscriptions_canceled_has_type_check CHECK (((status <> 'canceled'::text) OR (cancel_type IS NOT NULL)))
   constraint subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled'::text) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL))))

@@ -1206,6 +1206,9 @@
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ],
+    "OR-J38-S44": [
+      "TestCCBillIdentity/OR-J38-S44/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
+    ],
     "OR-J27-S10": [
       "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"
     ],

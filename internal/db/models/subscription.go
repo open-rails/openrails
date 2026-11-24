@@ -42,6 +42,8 @@ const (
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
 	CancelTypeChargeback CancelType = "chargeback" // Canceled due to chargeback
 	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
+	CancelTypeProvider   CancelType = "provider"   // The provider confirmed it ended
+	CancelTypeAbandoned  CancelType = "abandoned"  // Its first payment never completed
 )
 
 type Subscription struct {

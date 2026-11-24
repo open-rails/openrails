@@ -304,6 +304,32 @@ func TestCCBillIdentity(t *testing.T) {
 		})
 	})
 
+	t.Run("OR-J38-S44/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		alice := customerOf(a.alice)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		due := now.Add(-time.Hour)
+		sub, sale := legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due)
+		sub.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: due}
+		importLegacyCCBill(t, a.alpha, now)(sub, sale)
+		ended := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), ended.Status)
+		require.NotNil(t, ended.CancelType)
+		require.Equal(t, "provider", *ended.CancelType, "read back, the end is still the provider's")
+		// A renewal read from the stored row afterwards cannot reopen it.
+		next := due.Add(720 * time.Hour)
+		status, body := ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": ccbillProvider, "transactionId": "0912233445566778801",
+			"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+			"cardType": "VISA", "last4": "1111"})
+		require.Equal(t, http.StatusOK, status, body)
+		after := onlySubscription(t, a.alpha, alice)
+		require.Equal(t, billing.SubscriptionStatus("canceled"), after.Status, "the end the provider confirmed stands")
+		require.Equal(t, "provider", *after.CancelType)
+		require.False(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
+		require.EqualValues(t, 10_000_000, ccbillPayments(t, a.world, alice)["0912233445566778801"], "the charge is kept for refund review")
+	})
+
 	t.Run("OR-J38-S38/datalink-import-matches-a-zero-dropped-legacy-id", func(t *testing.T) {
 		iw := newImportWorld(t, "ccbill")
 		price := ccbillMemberPrice(t, iw.alphaRemote)
