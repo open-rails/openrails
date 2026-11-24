@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -427,8 +428,11 @@ products:
 		w := a.world
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND invoker != '' AND metadata != ''"))
 
+		// The store's part is a job River retries until the store answers.
+		events := erasureEvents(t, w)
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
+		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
@@ -436,7 +440,9 @@ products:
 	})
 
 	t.Run("OR-J24-S54/an-archive-carries-the-merchants-usage-and-restores-it-into-an-empty-store", func(t *testing.T) {
-		source := newWorld(t)
+		// Two days ago: a catalog change in the last day bars a merchant's
+		// archive (destructive budget would not move with it).
+		source := newWorld(t, func(w *world) { w.clock.Advance(-48 * time.Hour) })
 		usageMeter(t, source.alpha, 100)
 		customer, _ := fundedCustomer(t, source)
 		lease := newLease()

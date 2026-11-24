@@ -548,6 +548,7 @@ func TestGate(t *testing.T) {
 		}
 		time.Sleep(1500 * time.Millisecond)
 		offline := int64(0)
+		spent := make([]int64, len(processes))
 		for i, p := range processes {
 			for n := range 200 {
 				ticket, err := p.gate.Consume(t.Context(), computeWork(customer, fmt.Sprintf("offline-%d-%d", i, n), 1))
@@ -557,6 +558,7 @@ func TestGate(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, ticket.Allowed())
 				offline++
+				spent[i]++
 			}
 		}
 		require.Positive(t, offline, "a view keeps deciding while OpenRails is unreachable")
@@ -566,7 +568,7 @@ func TestGate(t *testing.T) {
 		}
 		b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "the two gates together spent at most what was left, each its share")
+		require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "the two gates together spent at most what was left, each its share: %v units", spent)
 	})
 
 	t.Run("OR-J23-S39/near-zero-is-decided-on-the-server-exactly", func(t *testing.T) {
