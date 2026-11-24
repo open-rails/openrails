@@ -107,6 +107,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, captured[0].Err())
 	// A deposit posts the accrued usage first.
+	a.clock.Advance(time.Second)
 	topUp, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
 	require.NoError(t, err)
 	balance(t, a.alpha, m.customer, 31_000_000, 0, 31_000_000)

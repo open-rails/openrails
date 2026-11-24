@@ -116,6 +116,7 @@ func TestUsageBillingContracts(t *testing.T) {
 					units, native, cents = 2, 20_000_000, 2000
 				}
 				oneUsage(t, a.alpha, usageInput(customer, "unbilled-work", units))
+				a.clock.Advance(time.Second)
 				fleet := startFleet(t, a.world)
 				if profile == "monthly-date" {
 					runUsageDue(t, fleet)
@@ -461,6 +462,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		oneUsage(t, a.alpha, usageInput(customer, "today", 3))
 		// No day ended and no pass ran: the revocation posts today's usage on
 		// its own clock and bills it.
+		a.clock.Advance(time.Second)
 		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var revoked billing.AgreementRevocation
@@ -476,6 +478,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		}}))
 		p.core.SetDecline("4242", "202")
 		oneUsage(t, a.alpha, usageInput(customer, "declined-collection", 3))
+		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)
 		declinedAt := a.clock.Now()
 		runUsageDue(t, fleet)
@@ -529,6 +532,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		// once: the yen threshold, at the fixture's rate of 1 $1,000, withholds
 		// nothing.
 		oneUsage(t, a.alpha, usageInput(customer, "dollar-work", 3))
+		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)
 		runUsageDue(t, fleet)
 		require.Eventually(t, func() bool {

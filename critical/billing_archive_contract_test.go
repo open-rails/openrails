@@ -332,6 +332,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &paid))
 		require.Equal(t, billing.OrderComplete, paid.Status, string(raw))
 		oneUsage(t, source.alpha, usageInput(customer, "archived-work", 3))
+		source.clock.Advance(time.Second)
 		runUsageDue(t, startFleet(t, source.world))
 		require.Eventually(t, func() bool {
 			rows, err := source.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
