@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -39,6 +40,17 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	return Normalize(name, settings)
+}
+
+// Registry is the currency registry of the merchant in context: OpenRails'
+// with the merchant's own units, OpenRails' alone when no configuration is
+// bound.
+func (s *Store) Registry(ctx context.Context) (currency.Registry, error) {
+	settings, err := s.Settings(ctx)
+	if errors.Is(err, ErrNoSettings) {
+		return currency.Registry{}, nil
+	}
+	return settings.Currencies, err
 }
 
 // Messages is the messages document the merchant in context serves: the

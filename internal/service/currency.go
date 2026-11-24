@@ -43,6 +43,50 @@ func (s *Service) registryCurrency(ctx context.Context, param, code string) (str
 	return normalized, err
 }
 
+// balanceCurrency is code normalized when it is a registry currency or one of
+// the own units of the merchant in ctx: what a balance, lot or spend may be
+// in. Any other code is currency_unsupported, naming param.
+func (s *Service) balanceCurrency(ctx context.Context, param, code string) (string, error) {
+	normalized := moneyutil.NormalizeCurrency(code)
+	if normalized == "" {
+		return "", apperr.Invalidf("currency required").WithParam(param)
+	}
+	if _, ok := moneyutil.LookupCurrency(normalized); ok {
+		return normalized, nil
+	}
+	registry, err := merchantconfig.NewStore(s.rt.DB).Registry(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := registry.Unit(normalized); ok {
+		return normalized, nil
+	}
+	return "", fmt.Errorf("%w: %q", ErrCurrencyUnsupported.WithParam(param), normalized)
+}
+
+// withUnits gives each balance in one of the merchant's own units that unit,
+// to show its amounts at.
+func (s *Service) withUnits(ctx context.Context, balances []billing.Balance) error {
+	var registry *currency.Registry
+	for i := range balances {
+		code := string(balances[i].Currency)
+		if !currency.IsUnitCode(code) {
+			continue
+		}
+		if registry == nil {
+			r, err := merchantconfig.NewStore(s.rt.DB).Registry(ctx)
+			if err != nil {
+				return err
+			}
+			registry = &r
+		}
+		if u, ok := registry.Unit(code); ok {
+			balances[i].Unit = &billing.MerchantCurrency{Code: catalogwire.Currency(u.Code), Name: u.Name, Symbol: u.Symbol, Scale: u.Decimals}
+		}
+	}
+	return nil
+}
+
 // currencyRefusal refuses code, which OpenRails' registry does not hold:
 // merchant_unit_unsupported when it is one of the merchant's own units, else
 // currency_unsupported.
@@ -69,30 +113,42 @@ func (s *Service) unitRefusal(ctx context.Context, param, code string) error {
 	return nil
 }
 
-// refuseCatalogUnits refuses (merchant_unit_unsupported) a catalog document
-// whose credit grants or rate cards name one of the merchant's own units.
-// Parsing the document already refused a price or limit in one: it reads
-// OpenRails' registry alone.
-func (s *Service) refuseCatalogUnits(ctx context.Context, app catalogwire.Application) error {
-	settings, err := merchantconfig.NewStore(s.rt.DB).Settings(ctx)
-	if err != nil || len(settings.Currencies.Units()) == 0 {
+// ownUnit refuses (currency_unsupported, naming param) a code spelled as a
+// merchant's unit that the merchant in ctx does not declare.
+func (s *Service) ownUnit(ctx context.Context, param, code string) error {
+	if !currency.IsUnitCode(code) {
 		return nil
 	}
-	refuse := func(param string, code catalogwire.Currency) error {
-		if _, err := settings.Currencies.Money(string(code)); errors.Is(err, currency.ErrMerchantUnit) {
-			return merchantconfig.UnitRefusal(param, err)
-		}
+	registry, err := merchantconfig.NewStore(s.rt.DB).Registry(ctx)
+	if err != nil {
+		return err
+	}
+	if _, ok := registry.Unit(code); ok {
 		return nil
 	}
+	return fmt.Errorf("%w: %q", ErrCurrencyUnsupported.WithParam(param), moneyutil.NormalizeCurrency(code))
+}
+
+// checkCatalogUnits refuses (currency_unsupported) a catalog document whose
+// prices, credit grants or rate cards name a unit the merchant does not
+// declare. Parsing it already refused any other unknown currency.
+func (s *Service) checkCatalogUnits(ctx context.Context, app catalogwire.Application) error {
 	for _, key := range slices.Sorted(maps.Keys(app.Products)) {
 		product := app.Products[key]
 		if grant := product.CreditGrant; grant.Set && !grant.Null {
-			if err := refuse("products."+key+".credit_grant.currency", grant.Value.Currency); err != nil {
+			if err := s.ownUnit(ctx, "products."+key+".credit_grant.currency", string(grant.Value.Currency)); err != nil {
 				return err
 			}
 		}
+		for _, priceKey := range slices.Sorted(maps.Keys(product.Prices)) {
+			if price := product.Prices[priceKey]; price.Currency.Set {
+				if err := s.ownUnit(ctx, "products."+key+".prices."+priceKey+".currency", string(price.Currency.Value)); err != nil {
+					return err
+				}
+			}
+		}
 		for i, card := range product.RateCards.Value {
-			if err := refuse(fmt.Sprintf("products.%s.rate_cards[%d].price.currency", key, i), card.Price.Currency); err != nil {
+			if err := s.ownUnit(ctx, fmt.Sprintf("products.%s.rate_cards[%d].price.currency", key, i), string(card.Price.Currency)); err != nil {
 				return err
 			}
 		}

@@ -11,13 +11,15 @@ type Profile = billing.DashboardProfile
 // Empty reports a merchant with no activity yet.
 func Empty(p Profile) bool { return p == Profile{} }
 
-// Grid sizes: tiles four to a row, charts two, headings across.
+// Grid sizes: tiles four to a row, charts two, headings and wide charts
+// across.
 const (
 	cols     = 12
 	tileW    = 3
 	tileH    = 3
 	chartW   = 6
 	chartH   = 4
+	wideH    = 6
 	headingH = 1
 )
 
@@ -32,18 +34,22 @@ func DefaultWidgets(p Profile) []Widget {
 	subscriptions, cards := p.Subscriptions || empty, p.CardPayments || empty
 	var l layout
 
+	if subscriptions {
+		l.tile("kpi-mrr", "MRR", "mrr", nil)
+		l.tile("kpi-net-new-mrr", "Net new MRR", "mrr_movements", nil)
+		l.tile("kpi-subscribers", "Subscribers", "subscribers", nil)
+		l.tile("kpi-churn-rate", "Churn rate", "subscriber_churn_rate", nil)
+		l.tile("kpi-nrr", "Net revenue retention", "nrr", nil)
+		l.tile("kpi-at-risk", "At-risk MRR", "mrr_at_risk", nil)
+	}
 	l.tile("kpi-cash", "Cash collected", "cash", nil)
 	if subscriptions {
-		l.tile("kpi-subscriptions", "Subscriptions", "subscriptions", nil)
-		l.tile("kpi-new-subscriptions", "New subscriptions", "new_subscriptions", nil)
-		l.tile("kpi-cancellations", "Cancellations", "cancellations", nil)
-		l.tile("kpi-at-risk", "At-risk MRR", "mrr_at_risk", nil)
 		l.tile("kpi-first-try-rebill", "First-try rebill approval", "first_try_rebill_approval_rate", nil)
 	}
 	if cards {
 		l.tile("kpi-authorization-rate", "Authorization rate", "authorization_rate", nil)
 		l.tile("kpi-issuer-discretion", "Issuer-discretion decline rate", "issuer_discretion_decline_rate", nil)
-		l.tile("kpi-chargeback-rate", "Chargeback rate", "chargeback_rate", nil)
+		l.tile("kpi-chargeback-ratio", "Visa chargeback ratio (VAMP)", "vamp_ratio", nil)
 		l.tile("kpi-refund-rate", "Refund rate", "refund_rate", nil)
 	}
 	if p.Usage {
@@ -66,12 +72,17 @@ func DefaultWidgets(p Profile) []Widget {
 	)
 	if p.Subscriptions {
 		l.section("recurring", "Recurring",
-			chart("new-vs-canceled", "New against canceled subscriptions", "line", series([]string{"new_subscriptions", "cancellations"})),
-			chart("cancellations-by-type", "Cancellations by type", "bar", series([]string{"cancellations"}, "cancel_type")),
+			chart("mrr", "MRR", "line", series([]string{"mrr"})),
+			fixed("mrr-movements", "MRR movements by month", "bar", monthly([]string{"mrr_movements"}, "movement")),
+			fixed("scheduled-mrr", "Scheduled churn and contraction by effective week", "bar", metrics.Query{Measures: []string{"scheduled_mrr"},
+				By: []string{"time", "movement"}, Grain: "week", Range: &metrics.QueryRange{Next: "12w"}}),
 			chart("at-risk-by-reason", "At-risk MRR by reason", "area", series([]string{"mrr_at_risk"}, "risk_reason")),
 		)
 		l.section("retention", "Retention",
-			chart("rebill-rate", "Rebill rate", "line", series([]string{"rebill_rate"})),
+			wide(fixed("cohort-retention", "Retention by cohort", Cohort, metrics.Query{Measures: []string{"cohort_retention"},
+				By: []string{"cohort", "months_since_start", "basis"}, Range: &metrics.QueryRange{Last: "12m"}})),
+			fixed("revenue-retention", "Net and gross revenue retention by month", "line", monthly([]string{"nrr", "grr"})),
+			fixed("rebill-rate", "Rebill rate by month", "line", monthly([]string{"rebill_rate"})),
 		)
 	}
 	var health []Widget
@@ -80,7 +91,7 @@ func DefaultWidgets(p Profile) []Widget {
 			chart("rebills-by-outcome", "Renewals by outcome", "bar", series([]string{"rebills"}, "outcome")),
 			chart("dunning-recovery", "Dunning recovery rate", "line", series([]string{"dunning_recovery_rate"})),
 			chart("at-risk-recovery", "At-risk MRR recovered, by the reason it entered with", "line", series([]string{"at_risk_recovery_rate"}, "risk_reason")),
-			chart("first-try-rebill", "First-try rebill approval", "line", series([]string{"first_try_rebill_approval_rate"})),
+			fixed("first-try-rebill", "First-try rebill approval by month", "line", monthly([]string{"first_try_rebill_approval_rate"})),
 		)
 	}
 	if p.CardPayments {
@@ -90,8 +101,8 @@ func DefaultWidgets(p Profile) []Widget {
 				Order: []metrics.OrderTerm{{Measure: "attempts", Dir: "desc"}}, Limit: intp(10)})
 		}
 		health = append(health,
-			chart("network-ratios", "Visa VAMP and Mastercard ECM ratios against their levels", "line",
-				metrics.Query{Measures: []string{"vamp_ratio", "ecm_ratio"}, By: []string{"time"}, Grain: "month"}),
+			chart("vamp-ratio", "Visa VAMP ratio against its levels", "line", metrics.Query{Measures: []string{"vamp_ratio"}, By: []string{"time"}, Grain: "month"}),
+			chart("ecm-ratio", "Mastercard ECM ratio against its levels", "line", metrics.Query{Measures: []string{"ecm_ratio"}, By: []string{"time"}, Grain: "month"}),
 			chart("chargeback-rate", "Chargeback rate", "line", series([]string{"chargeback_rate"})),
 			chart("refund-rate", "Refund rate", "line", series([]string{"refund_rate"})),
 			Widget{ID: "dispute-programs", Title: "Dispute programs by PSP and network", Viz: Programs},
@@ -110,6 +121,22 @@ func DefaultWidgets(p Profile) []Widget {
 		)
 	}
 	l.section("payment-health", "Payment health", health...)
+	if p.Checkouts {
+		top := func(id, title, by string) Widget {
+			return chart(id, title, "table", metrics.Query{Measures: []string{"sales", "cash"}, By: []string{by},
+				Order: []metrics.OrderTerm{{Measure: "sales", Dir: "desc"}}, Limit: intp(10)})
+		}
+		l.section("checkouts", "Checkout and customers",
+			chart("checkout-funnel", "Checkout funnel", Funnel, metrics.Query{Measures: []string{"checkouts"}, By: []string{"step"}}),
+			chart("checkouts-abandoned", "Abandoned checkouts by step", "bar", withFilters(series([]string{"checkouts"}, "step"), map[string][]string{"outcome": {"abandoned"}})),
+			chart("checkout-conversion", "Checkout conversion by surface", "line", series([]string{"checkout_conversion_rate"}, "surface")),
+			chart("customers-by-type", "Customers by type", "bar", series([]string{"sales_customers"}, "customer_type")),
+			chart("repeat-purchase-rate", "Repeat purchase rate", "line", series([]string{"repeat_purchase_rate"})),
+			top("sales-by-country", "Sales and cash by country", "country"),
+			top("sales-by-language", "Sales and cash by language", "language"),
+			top("sales-by-source", "Sales and cash by source", "attribution_source"),
+		)
+	}
 	var credits []Widget
 	switch {
 	case p.Usage && p.Credits:
@@ -131,22 +158,6 @@ func DefaultWidgets(p Profile) []Widget {
 		credits = append(credits, chart("depletion-risk", "Customers at depletion risk", "line", series([]string{"customers_at_depletion_risk"})))
 	}
 	l.section("credits-usage", "Credits and usage", credits...)
-	if p.Checkouts {
-		top := func(id, title, by string) Widget {
-			return chart(id, title, "table", metrics.Query{Measures: []string{"sales", "cash"}, By: []string{by},
-				Order: []metrics.OrderTerm{{Measure: "sales", Dir: "desc"}}, Limit: intp(10)})
-		}
-		l.section("checkouts", "Checkout and customers",
-			chart("checkout-funnel", "Checkout funnel", Funnel, metrics.Query{Measures: []string{"checkouts"}, By: []string{"step"}}),
-			chart("checkouts-abandoned", "Abandoned checkouts by step", "bar", withFilters(series([]string{"checkouts"}, "step"), map[string][]string{"outcome": {"abandoned"}})),
-			chart("checkout-conversion", "Checkout conversion by surface", "line", series([]string{"checkout_conversion_rate"}, "surface")),
-			chart("customers-by-type", "Customers by type", "bar", series([]string{"sales_customers"}, "customer_type")),
-			chart("repeat-purchase-rate", "Repeat purchase rate", "line", series([]string{"repeat_purchase_rate"})),
-			top("sales-by-country", "Sales and cash by country", "country"),
-			top("sales-by-language", "Sales and cash by language", "language"),
-			top("sales-by-source", "Sales and cash by source", "attribution_source"),
-		)
-	}
 	return l.widgets
 }
 
@@ -174,7 +185,8 @@ func (l *layout) tile(id, title, measure string, filters map[string][]string) {
 	l.tiles++
 }
 
-// section is a heading over its charts, two to a row; none is no section.
+// section is a heading over its charts, two to a row, a wide one across;
+// none is no section.
 func (l *layout) section(id, title string, charts ...Widget) {
 	if len(charts) == 0 {
 		return
@@ -184,16 +196,48 @@ func (l *layout) section(id, title string, charts ...Widget) {
 	}
 	l.widgets = append(l.widgets, Widget{ID: "section-" + id, Title: title, Viz: Heading, Grid: Grid{X: 0, Y: l.y, W: cols, H: headingH}})
 	l.y += headingH
-	for i, c := range charts {
-		c.Grid = Grid{X: (i % 2) * chartW, Y: l.y + (i/2)*chartH, W: chartW, H: chartH}
+	x := 0
+	for _, c := range charts {
+		if c.Grid.W == cols || x+chartW > cols {
+			if x > 0 {
+				l.y, x = l.y+chartH, 0
+			}
+		}
+		if c.Grid.W == cols {
+			c.Grid = Grid{X: 0, Y: l.y, W: cols, H: wideH}
+			l.widgets = append(l.widgets, c)
+			l.y += wideH
+			continue
+		}
+		c.Grid = Grid{X: x, Y: l.y, W: chartW, H: chartH}
 		l.widgets = append(l.widgets, c)
+		x += chartW
 	}
-	l.y += (len(charts) + 1) / 2 * chartH
+	if x > 0 {
+		l.y += chartH
+	}
 }
 
 func chart(id, title, viz string, q metrics.Query) Widget {
 	q.Range = saved()
 	return Widget{ID: id, Title: title, Viz: viz, Query: q}
+}
+
+// fixed is a chart that keeps its own range, whatever the page's.
+func fixed(id, title, viz string, q metrics.Query) Widget {
+	return Widget{ID: id, Title: title, Viz: viz, Query: q, FixedRange: true}
+}
+
+// wide spans the dashboard.
+func wide(w Widget) Widget {
+	w.Grid.W = cols
+	return w
+}
+
+// monthly is measures by month over the last twelve, split by the given
+// dimensions.
+func monthly(measures []string, by ...string) metrics.Query {
+	return metrics.Query{Measures: measures, By: append([]string{"time"}, by...), Grain: "month", Range: &metrics.QueryRange{Last: "12m"}}
 }
 
 // series is measures over time at the grain that fits the range, split by

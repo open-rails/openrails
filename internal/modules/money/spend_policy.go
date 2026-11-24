@@ -34,15 +34,20 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	// Account settings require a registered billing currency.
-	if err := RequireBillingCurrency(cur); err != nil {
-		return nil, err
-	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tenantID := tid.UUID()
+	// A merchant's unit is prepaid, with no credit line: its settings are
+	// the defaults.
+	if IsMerchantUnit(cur) {
+		return &models.MoneyAccount{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur, BillingMode: BillingModePrepaid}, nil
+	}
+	// Account settings require a registered billing currency.
+	if err := RequireBillingCurrency(cur); err != nil {
+		return nil, err
+	}
 	row, err := s.db.Gen(ctx).GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{
 		MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
 	})

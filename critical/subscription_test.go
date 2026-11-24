@@ -125,7 +125,12 @@ func TestSubscriptions(t *testing.T) {
 		require.True(t, canceled.Resumable, "an ordinary customer cancellation remains reversible within the paid period")
 		require.Equal(t, "canceled", string(canceled.Status))
 		require.Equal(t, end, *canceled.CurrentPeriodEndsAt)
-		require.Zero(t, mrr(), "a canceled subscription inside its paid period no longer counts as recurring revenue")
+		require.Equal(t, renewing, mrr(), "a subscription canceled at period end adds its MRR until its end")
+		scheduled, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"scheduled_mrr"}, By: []string{"movement"},
+			Range: &billing.MetricsRange{From: a.clock.Now().Format(time.RFC3339), To: end.Add(time.Second).Format(time.RFC3339)}})
+		require.NoError(t, err)
+		require.Len(t, scheduled.Rows, 1)
+		require.Equal(t, "churn", scheduled.Rows[0][0], "the cancel schedules its churn at the end")
 		for _, sample := range []struct {
 			at      time.Time
 			allowed bool

@@ -580,7 +580,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.CustomerTypeNew, bob.Checkout.CustomerType)
 
-		// Sales, their cash and new subscriptions split by it.
+		// Sales and their cash split by it.
 		now := a.clock.Now()
 		window := &billing.MetricsRange{From: now.Add(-48 * time.Hour).Format(time.DateOnly), To: now.Add(48 * time.Hour).Format(time.DateOnly)}
 		byType := func(measure string, filters map[string][]string) map[string]int64 {
@@ -589,8 +589,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, map[string]int64{"new": 1, "returning": 1, "reactivated": 1}, byType("sales", nil))
 		require.Equal(t, map[string]int64{"new": 10_000_000, "returning": 5_000_000, "reactivated": 6_000_000},
 			byType("cash", map[string][]string{"currency": {"USD"}, "cash_kind": {"payment"}}))
-		require.Equal(t, map[string]int64{"new": 1}, byType("new_subscriptions", nil))
-		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"new_subscriptions"}, By: []string{"subscriber_type"}, Range: window})
+		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"subscriber_type"}, Range: window})
 		require.Equal(t, "customer_type", metricRefusals(t, err)["by[0]"]["did_you_mean"])
 	})
 }

@@ -351,7 +351,7 @@ at purchase; devnet and testnet price at $1.00 parity.
 Without rules: stripe, nmi, ccbill, solana, the first that can serve the price.
 Fallback is pre-charge only: a decline never moves to a second processor.
 
-`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry. It is never money: `CreatePrice`, a catalog's credit grants and rate cards, credit grants, balances, admissions and the money settings above refuse it with `merchant_unit_unsupported`, a catalog document cannot price in it, so nothing is charged or paid in it, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings.
+`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry, and a balance in it names it in its `unit`. It is bought, given and spent ([credits](#credits)) but never money: the money settings above refuse it with `merchant_unit_unsupported`, a credit limit or running charge in it is `currency_unsupported`, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings. Once a balance, price, credit grant or rate card counts a unit, an edit may neither remove it nor change its scale.
 
 ## Catalog
 
@@ -719,6 +719,8 @@ expiry (`expires_after_days`, default 365) fixed at purchase. `from_payment: tru
 grants what was paid, with a `customer_amount` price whose amount the buyer names
 on the order line. A recurring price with a `credit_grant` grants its credit after
 each paid renewal. A voluntary refund needs the lot unused and unheld.
+
+A `credit_grant` may count one of the merchant's own units (`settings.currencies`) instead of money: it then names its `amount` (never `from_payment`), and every price of the product buys that many units, in whatever currency the price is in, so a $50 pack of 55 credits is a product beside a $20 pack of 20. Each lot records its units, what was paid and in what currency. `CreateCreditGrants` gives units, and a recurring price's `credit_grant` in a unit is a plan's allowance, delivered each paid cycle. Units are spent by usage a rate card prices in the unit, by admissions in it, and by a one-off price in it: `POST /v1/me/orders` (with an `Idempotency-Key` and no `payment`) or `CreateOrder` pays such an order from the customer's balance as it is created, soonest-expiring lot first, or refuses it with `insufficient_credits`. A unit is never owed: an admission holds its estimate against the unit balance, and one that holds nothing is refused once the balance is all held. Usage in a unit is reported by capturing an admission (a gate's views and lease syncs take registry currencies). Its posting takes what the lots hold and forgives the rest, shown as `usage_charged` with `charge: forgiven`. `GET /v1/me/usage` reads usage in a unit at its price. Refunding a pack's payment takes the lot's share of its units, those left first. The amount shorthand (`50 GOLD`) cannot know a unit's scale: a price in a unit names `currency` and `unit_amount` in native units.
 
 A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ credits, a pack's bonus included) as its credit is spent; what lapses or is revoked is breakage, and a reinstatement reverses it. Granted credit is promotional: spending it counts as usage revenue offset by promotional credit. See [prepaid credits](architecture/prepaid-credits.md).
 
@@ -1125,7 +1127,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 | Method | Use it to |
 |---|---|
 | `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
-| `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `QueryMetrics` | cash, payment, recurring revenue, retention, renewal, usage and ops measures, grouped and bucketed |
 | `ListDisputePrograms` | each card PSP's standing in the dispute monitoring programs (Visa VAMP, Mastercard's excessive chargeback and fraud programs, Stripe's guidance, the PSP's `dispute_ratio_limit`) for a month: ratio so far, projected, level and thresholds |
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
@@ -1138,7 +1140,7 @@ return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 })
 ```
 
-A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`; rates such as `refund_rate` and `rebill_rate` divide its slices. `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
+A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`, `mrr_movements` and `subscriber_movements` by `movement`; rates such as `refund_rate` and `rebill_rate` divide its slices. Recurring measures (`mrr`, `subscribers`, `subscriber_churn_rate`, `nrr`, `grr`, `cohort_retention`, `arpa`, `ltv`, `scheduled_mrr`) read the MRR rollups; `subscriber_churn_rate` is the period's own churn as a monthly rate at any grain, `ltv` divides ARPA by the monthly churn of the trailing three months, NRR and GRR read monthly with grain `month`, `subscribers` without a currency counts each customer once, and `scheduled_mrr` looks ahead with `range.next` (`{"next": "12w"}`). `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
 
 An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself; a removed measure's error names its replacement.
 

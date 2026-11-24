@@ -60,6 +60,14 @@ func Unit(code, name, symbol string, scale int) (Units, error) {
 	return Units{Code: code, Decimals: scale, MinorDecimals: scale, Kind: KindUnit, Name: name, Symbol: symbol}, nil
 }
 
+// IsUnitCode reports whether code is spelled as a merchant's unit, never a
+// registry currency's. Which units a merchant declares is its Registry's.
+func IsUnitCode(code string) bool {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	_, registered := registry[code]
+	return !registered && unitCode.MatchString(code)
+}
+
 func displayable(s string) bool {
 	return utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
 		return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r)
@@ -96,6 +104,13 @@ func (r Registry) Lookup(code string) (Units, bool) {
 	if u, ok := Lookup(code); ok {
 		return u, true
 	}
+	u, ok := r.units[strings.ToUpper(strings.TrimSpace(code))]
+	return u, ok
+}
+
+// Unit is the merchant's unit code names, case-insensitively; false for a
+// registry currency or an unknown code.
+func (r Registry) Unit(code string) (Units, bool) {
 	u, ok := r.units[strings.ToUpper(strings.TrimSpace(code))]
 	return u, ok
 }

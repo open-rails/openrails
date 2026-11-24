@@ -152,3 +152,5 @@ UPDATE billing.dashboard_configs c
 SET layout = k.layout, updated_at = now()
 FROM cleaned k
 WHERE c.merchant_id = k.merchant_id AND k.layout <> '[]'::jsonb;
+
+COMMENT ON TABLE billing.dashboard_configs IS 'Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|funnel|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant''s profile.';

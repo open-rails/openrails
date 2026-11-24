@@ -134,9 +134,12 @@ func (s *Service) previewOrder(ctx context.Context, customer billing.CustomerID,
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, customer.UUID(), payer, quote.Prices(), quote.Products())
-	if err != nil {
-		return nil, err
+	// The balance pays an order in a merchant's unit: no PSP takes it.
+	var options []billing.OrderPaymentOption
+	if !orders.InMerchantUnit(quote.Currency) {
+		if options, err = s.orderOptions(ctx, customer.UUID(), payer, quote.Prices(), quote.Products()); err != nil {
+			return nil, err
+		}
 	}
 	out := quote.Preview(options)
 	return &out, nil
@@ -236,7 +239,7 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	if params.Payment == nil {
 		// The customer's open order of these lines is answered: asking again,
 		// from any tab or reload, makes no second order.
-		order, found, err := s.placeOrder(ctx, rt, actor, params)
+		order, found, err := s.placeOrder(ctx, rt, actor, params, key)
 		if err != nil {
 			return OrderAnswer{}, err
 		}
@@ -300,7 +303,7 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 			return uuid.Nil, false, payment.OrderCharge{}, err
 		}
 	}
-	order, found, err := s.placeOrder(ctx, rt, actor, params)
+	order, found, err := s.placeOrder(ctx, rt, actor, params, "")
 	if err != nil {
 		return uuid.Nil, false, payment.OrderCharge{}, err
 	}
@@ -313,11 +316,20 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 
 // placeOrder answers the customer's open order of params' lines (found), or
 // creates it. A cart's order is always a new one: buying the cart empties it.
-func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams) (*orders.Order, bool, error) {
+// key, the request's Idempotency-Key, names an order in a merchant's unit,
+// which its balance pays as it is created.
+func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, key string) (*orders.Order, bool, error) {
 	facts := actor.checkout()
 	facts.Attribution = s.attribution(ctx, params.Attribution)
 	in := orders.CreateInput{CustomerID: actor.Customer.UUID(), Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
 		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL, Checkout: facts}
+	if key = strings.TrimSpace(key); key != "" {
+		digest, err := s.orderCreationDigest(ctx, params, params.Lines)
+		if err != nil {
+			return nil, false, err
+		}
+		in.BalanceKey, in.BalanceDigest = "me:"+actor.Customer.String()+":"+key, digest
+	}
 	if !params.Cart {
 		digest, err := s.orderLinesDigest(ctx, params.Lines)
 		if err != nil {
@@ -826,6 +838,9 @@ func (s *Service) orderOptions(ctx context.Context, customer uuid.UUID, payer *O
 // orderPaymentUsable refuses, before an order exists, a saved card no PSP
 // that sells its lines can charge, or a new card's PSP that takes none.
 func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, pay orderPayment, customer billing.CustomerID) error {
+	if orders.InMerchantUnit(quote.Currency) {
+		return apperr.Invalidf("an order in a merchant's unit is paid from the customer's balance: send no payment").WithParam("payment")
+	}
 	for i := range quote.Lines {
 		l := &quote.Lines[i]
 		if l.Refusal == nil {

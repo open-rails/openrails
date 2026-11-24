@@ -47,7 +47,7 @@ customer asking again for the same lines (not from a cart) gets the open order
 back (`FindOrCreate`, `lines_digest`, `orders_open_lines_key`); their own unpaid
 one-line order of another price of the product is canceled for the new one. A
 cart order empties the cart in the same transaction (`takeCart`). A zero total
-completes at once. Lifetimes: `orders.CustomerTTL` 24 h; merchant orders
+completes at once. An order in one of the merchant's own units is paid from the customer's balance in it as it is created (`payFromBalance`): each line draws the live lots, soonest expiry first, one `credit_spend` per lot at (`order`, `order_line`, line) naming the order, after the customer's unposted usage; what holds and pending refunds keep is not spent, and a balance short of the total is `insufficient_credits` with nothing written. It has no payment (`orders_complete_payment_check`), takes no `payment` or pay URL, and keeps the request's `Idempotency-Key`, which is required, so a retry answers it. Lifetimes: `orders.CustomerTTL` 24 h; merchant orders
 `MerchantTTL` 30 days, at most `MaxMerchantTTL` 120 days.
 
 **Pay.** `payment.OrderAttemptService.PayOrder` (`internal/modules/payment/order_pay.go`)
@@ -173,7 +173,7 @@ Checks:
 - OR-J08-S01: cart and preview return literal line totals.
 
 ### 4. Access control and tenant isolation
-`/v1/me` routes act on the scope's customer (`orderActor`); another customer's order is not found (`GetForCustomer`). Paying needs the customer in person (`billingauth.Interactive`: a session, device key, access token or pay URL of the customer itself; never an API key or personal access token), else `customer_action_required`; a customer's pay URL needs the merchant's own signed-in person (`signedInPerson`, `customer_session_required`). `/v1/app/orders` routes require `merchant:orders:manage` or `root:orders:manage` (`needOrders`); staff routes take the customer-support pair by `Level`. A pay URL secret (credential kind `pay_url`) works only on the checkout origin. Order queries name `merchant_id`; directory reads before a merchant is pinned (`ResolveOrderPayURLMerchant`, `GetOrderMerchant`, `ListOrderExpiryMerchants`, `DeleteExpiredCarts`) span merchants by design, and a lookup matching two answers nothing.
+`/v1/me` routes act on the scope's customer (`orderActor`); another customer's order is not found (`GetForCustomer`). Paying needs the customer in person (`billingauth.Interactive`: a session, device key, access token or pay URL of the customer itself; never an API key or personal access token), else `customer_action_required`; a customer's pay URL needs the merchant's own signed-in person (`signedInPerson`, `customer_session_required`). `/v1/app/orders` routes require `merchant:orders:manage` or `root:orders:manage` (`needOrders`); staff routes take the customer-support pair by `Level`. With it an application can create an order in one of the merchant's own units, which the customer's balance pays as it is created, as a merchant order of a saved card's customer is charged without them. A pay URL secret (credential kind `pay_url`) works only on the checkout origin. Order queries name `merchant_id`; directory reads before a merchant is pinned (`ResolveOrderPayURLMerchant`, `GetOrderMerchant`, `ListOrderExpiryMerchants`, `DeleteExpiredCarts`) span merchants by design, and a lookup matching two answers nothing.
 
 Checks:
 - Each `/v1/app` route in `internal/http/routes/orders.go` has `Permission: needOrders`.
@@ -247,6 +247,7 @@ Journeys:
 - OR-J09-S01 to S06, S70: one-off charge, challenge, decline, rollback, lost
   answer, partial approval, expiry during a challenge.
 - OR-J47-S01, S02, S04 to S10: checkout steps where they happen (an attack captcha's refusal included), purchase number, customer type, country, language, attribution, renewals naming their checkout, and retention.
+- OR-J48-S04: an order in a unit is paid from the balance and grants its keys; a short balance creates nothing.
 - Also: OR-J05-S05, OR-J10-S01 to S05, OR-J21-S01 to S03, OR-J28-S04, OR-J28-S08,
   OR-J04-S04, OR-J04-S37, OR-J04-S46, OR-J29-S02, OR-J29-S08, OR-J31-S09,
   OR-J37-S70, OR-J38-S43.

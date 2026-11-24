@@ -22,11 +22,13 @@ type QueryMetricsParams struct {
 // MetricsRange bounds a query. Date-only values are calendar days in the
 // merchant's accounting timezone, From and To both inclusive; RFC 3339
 // instants are taken as [From, To). Last is a trailing window ending today
-// there ("7d", "12w", "6m", "1y"), instead of From/To.
+// there ("7d", "12w", "6m", "1y"), and Next one starting today (what is
+// scheduled ahead), instead of From/To.
 type MetricsRange struct {
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
 	Last string `json:"last,omitempty"`
+	Next string `json:"next,omitempty"`
 }
 
 // MetricsOrder orders rows by a requested measure or dimension; Dir is asc
@@ -78,10 +80,13 @@ type MetricsGroup string
 type MetricsDirection string
 
 // MetricsThreshold is a level drawn across a measure's chart: Value in the
-// measure's unit (a ratio as a fraction), Label naming it.
+// measure's unit (a ratio as a fraction), Label naming it. From and Until
+// bound the months it is in force (Until excluded); nil is open.
 type MetricsThreshold struct {
-	Value float64 `json:"value"`
-	Label string  `json:"label"`
+	Value float64    `json:"value"`
+	Label string     `json:"label"`
+	From  *time.Time `json:"from,omitempty"`
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // MetricsSchema is every measure, dimension and grain a query may use, with
@@ -115,6 +120,10 @@ type MetricsMeasure struct {
 	// UTCDays: the measure reads a rollup kept per UTC date, so its days are
 	// UTC dates, grouped as the accounting timezone's days of the same date.
 	UTCDays bool `json:"utc_days,omitempty"`
+	// Program is the dispute monitoring program whose ratio this is: its
+	// standing (ListDisputePrograms) says which level is reached, minimum
+	// counts applied, which the ratio alone does not.
+	Program DisputeProgram `json:"program,omitempty"`
 }
 
 // MetricsDimension is one axis to group or filter by.

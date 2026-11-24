@@ -185,10 +185,11 @@ func CreateMyOrder(r *httprequest.Request) {
 	if actor == nil {
 		return
 	}
-	// Only a one-call buy takes a key, naming its payment attempt; the
-	// order is the customer's open order of the same lines.
+	// A one-call buy's key names its payment attempt, and an order in a
+	// merchant's unit, paid as it is created, keeps it; otherwise the order
+	// is the customer's open order of the same lines.
 	var key string
-	if body.Payment != nil {
+	if body.Payment != nil || strings.TrimSpace(r.Request.Header.Get("Idempotency-Key")) != "" {
 		if key = orderKey(r); key == "" {
 			return
 		}

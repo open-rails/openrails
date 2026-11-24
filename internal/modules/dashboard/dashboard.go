@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,12 +16,13 @@ import (
 )
 
 // VizTypes are the supported widget visualizations. A kpi is a tile's value,
-// its change and a sparkline of the same query by time; a funnel is a count
-// by one dimension whose values are ordered steps, each drawn with the rows
-// that reached it or went further; a heading is a section title and programs
-// each card PSP's dispute program standing in the range's last month, both
-// with an empty query.
-var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "funnel", "heading", "programs"}
+// its change and a sparkline of the same query by time; a cohort is a heatmap
+// of cohort_retention by cohort and months_since_start; a funnel is a count by
+// one dimension whose values are ordered steps, each drawn with the rows that
+// reached it or went further; a heading is a section title and programs each
+// card PSP's dispute program standing in the range's last month, both with an
+// empty query.
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "cohort", "funnel", "heading", "programs"}
 
 const (
 	// Heading is the viz of a section title.
@@ -30,6 +32,8 @@ const (
 	// Programs is the viz of the dispute program standings
 	// (GET /v1/metrics/dispute-programs).
 	Programs = "programs"
+	// Cohort is the viz of a cohort heatmap.
+	Cohort = "cohort"
 )
 
 // Queryless reports whether a viz draws something other than a metrics
@@ -46,8 +50,9 @@ type Widget = billing.DashboardWidget
 // Dashboard is the GET/PUT payload.
 type Dashboard = billing.Dashboard
 
-// MaxWidgets caps a layout; a dashboard is a page, not a database.
-const MaxWidgets = 60
+// MaxWidgets caps a layout; a dashboard is a page, not a database. The
+// health overview of a merchant with every profile is under it.
+const MaxWidgets = 80
 
 // DecodePut strictly decodes the PUT /v1/merchant/dashboard body
 // {"widgets":[...]}: unknown keys anywhere (incl. inside widget queries) fail
@@ -142,6 +147,10 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 		if w.Viz == Funnel && !funnelShaped(plan) {
 			errs = append(errs, metrics.FieldError{Code: "funnel_shape", Param: at("query"),
 				Message: "a funnel draws one count measure by one dimension of ordered values (checkouts by step), with no time grouping"})
+		}
+		if w.Viz == Cohort && !(slices.Contains(w.Query.By, "cohort") && slices.Contains(w.Query.By, "months_since_start")) {
+			errs = append(errs, metrics.FieldError{Code: "invalid_widget_query", Param: at("query.by"),
+				Message: "a cohort widget groups by cohort and months_since_start", Valid: []string{"cohort", "months_since_start"}})
 		}
 	}
 	if len(errs) > 0 {

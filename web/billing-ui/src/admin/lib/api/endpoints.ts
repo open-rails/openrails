@@ -75,6 +75,8 @@ export interface SubscriptionFilters {
   // created_at (newest first), current_period_ends_at (soonest first) or
   // canceled_at (latest first).
   sort?: string
+  // at_risk "true" keeps the subscriptions whose MRR is at risk.
+  at_risk?: string
 }
 
 // --- Payments ---

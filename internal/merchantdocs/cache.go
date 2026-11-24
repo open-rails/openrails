@@ -341,6 +341,16 @@ func (c *Cache) MerchantMessages(ctx context.Context, id billing.MerchantID) (bi
 }
 
 // MerchantSettings is the merchant document's display name and settings.
+// StoredCurrencies are the units the merchant's document declares in the
+// source now, read past the cache (db.MerchantConfig).
+func (c *Cache) StoredCurrencies(ctx context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error) {
+	set, err := c.source.Load(ctx, id)
+	if err != nil || !set.HasMerchant {
+		return nil, err
+	}
+	return set.Merchant.Value.Currencies, nil
+}
+
 func (c *Cache) MerchantSettings(ctx context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error) {
 	set, err := c.Get(ctx, id)
 	if err != nil {

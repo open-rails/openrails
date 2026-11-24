@@ -67,7 +67,10 @@ So a period whose price fell (a volume tier) is carried and credited
 restore, another store attached, a purge) is never credited back (OR-J24-S62).
 Usage under a card print its intake never recorded is priced by the card in force
 that names it, else left out (OR-J24-S64). Until then the balance holds what is
-unposted (`unpostedUsage`).
+unposted (`unpostedUsage`). A merchant's own unit is never owed: a posting in
+one takes what the lots hold and forgives the rest (`usage_postings.forgiven`),
+and a reversal takes forgiveness back before it credits
+([prepaid credits](prepaid-credits.md)).
 
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or

@@ -281,18 +281,22 @@ func ParseRatioLimit(v any) (int64, error) {
 }
 
 // ProgramLines are a program's levels as lines its ratio is drawn against,
-// as they stand from the program's latest change.
+// each with the months it is in force.
 func ProgramLines(id billing.DisputeProgram) []billing.MetricsThreshold {
 	names := map[billing.DisputeLevel]string{billing.DisputeLevelWarning: "warning", billing.DisputeLevelExcessive: "excessive", billing.DisputeLevelHighExcessive: "high excessive"}
+	bound := func(t time.Time) *time.Time {
+		if t.IsZero() {
+			return nil
+		}
+		return &t
+	}
 	var out []billing.MetricsThreshold
 	for _, p := range Programs {
 		if p.ID != id {
 			continue
 		}
 		for _, l := range p.Levels {
-			if l.Until.IsZero() {
-				out = append(out, billing.MetricsThreshold{Value: float64(l.RatioBPS) / 10_000, Label: names[l.Level]})
-			}
+			out = append(out, billing.MetricsThreshold{Value: float64(l.RatioBPS) / 10_000, Label: names[l.Level], From: bound(l.From), Until: bound(l.Until)})
 		}
 	}
 	return out
