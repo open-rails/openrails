@@ -361,7 +361,8 @@ func (m *Mock) Dispute(id, sub, status, caseType, reason string) Object {
 		intent := m.intents[fmt.Sprint(pi)]
 		ch := m.charges[fmt.Sprint(intent["latest_charge"])]
 		d = Object{"object": "dispute", "id": id, "charge": ch["id"], "payment_intent": pi, "amount": ch["amount"], "currency": ch["currency"],
-			"created": m.now().Unix(), "livemode": false, "metadata": map[string]string{}}
+			"created": m.now().Unix(), "livemode": false, "metadata": map[string]string{},
+			"balance_transactions": []Object{m.disputeBalanceLocked(id, ch)}}
 		m.disputes[id] = d
 	}
 	d["status"], d["reason"] = status, reason
@@ -371,4 +372,39 @@ func (m *Mock) Dispute(id, sub, status, caseType, reason string) Object {
 		out[k] = v
 	}
 	return out
+}
+
+// ChargeDispute opens or updates the dispute id on a charge, as Dispute does
+// for a subscription's: status and reason as Stripe reports them, a
+// chargeback. Opening it withdraws the charge and DisputeFee in one balance
+// transaction. It answers the dispute.
+func (m *Mock) ChargeDispute(id, charge, status, reason string) Object {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.disputes[id]
+	if !ok {
+		ch := m.charges[charge]
+		ch["disputed"] = true
+		d = Object{"object": "dispute", "id": id, "charge": charge, "payment_intent": ch["payment_intent"], "amount": ch["amount"], "currency": ch["currency"],
+			"created": m.now().Unix(), "livemode": false, "metadata": map[string]string{},
+			"payment_method_details": Object{"type": "card", "card": Object{"brand": "visa", "case_type": "chargeback", "network_reason_code": "10.4"}},
+			"balance_transactions":   []Object{m.disputeBalanceLocked(id, ch)}}
+		m.disputes[id] = d
+	}
+	d["status"], d["reason"] = status, reason
+	return clone(d)
+}
+
+// disputeBalanceLocked is a dispute's withdrawal of its charge and its fee.
+func (m *Mock) disputeBalanceLocked(id string, ch Object) Object {
+	return m.balanceLocked("adjustment", "dispute", id, -ch["amount"].(int64), fmt.Sprint(ch["currency"]), func(int64) int64 { return DisputeFee })
+}
+
+// SetSettlement settles every later charge, refund and dispute in currency
+// (lower case) at rate per unit of its own currency, as an account whose
+// balance is in currency does; "" settles each in its own.
+func (m *Mock) SetSettlement(currency string, rate float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settlement, m.settleRate = currency, rate
 }

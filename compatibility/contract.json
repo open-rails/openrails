@@ -1838,6 +1838,9 @@
       "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tEventType   string              `json:\"event_type,omitempty\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
+    "internal/modules/money/fees": [
+      "type balanceTransaction struct {\n\tID       string `json:\"id\"`\n\tFee      int64  `json:\"fee\"`\n\tCurrency string `json:\"currency\"`\n\tCreated  int64  `json:\"created\"`\n}"
+    ],
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tBook       string    `json:\"book\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
@@ -3928,6 +3931,29 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "spendgate": "github.com/open-rails/openrails/internal/modules/admission/spendgate",
       "strings": "strings",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/money/fees/stripe.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "math": "math",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "slog": "log/slog",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "time": "time",
+      "url": "net/url",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/money/invoice_profile.go": {

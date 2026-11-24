@@ -2221,6 +2221,20 @@ type BillingStoredCardCheck struct {
 	DueAt           time.Time
 }
 
+// A Stripe charge, refund or dispute whose balance transactions the general ledger has yet to read for their fees: queued by the payment or dispute that records it, read by the billing pass's stripe_fees scan, deleted once its fees post.
+type BillingStripeFeeRead struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	// The Stripe object as the payment or dispute names it: a charge, payment intent or invoice for a payment, a refund, or a dispute.
+	Ref  string
+	Kind string
+	// When it is read next; a failed read waits longer each time, a dispute that changes is read again at once.
+	DueAt     time.Time
+	Attempts  int32
+	LastError *string
+	CreatedAt time.Time
+}
+
 // Core subscription records tracking user billing relationships
 type BillingSubscription struct {
 	ID      uuid.UUID

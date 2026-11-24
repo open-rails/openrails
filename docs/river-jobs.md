@@ -68,6 +68,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
 | `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. [Source](../internal/river/jobs_mrr_due.go) |
+| `openrails.stripe_fees` | Stripe charges, refunds and disputes whose processor fees the general ledger has yet to read (`stripe_fee_reads`, indexed on `due_at`): each object's balance transactions are read and each fee posts once. A failed read waits and is read again. [Source](../internal/modules/money/fees/stripe.go) |
 
 ## Inspect a running deployment
 

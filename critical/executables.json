@@ -1991,6 +1991,9 @@
     ],
     "OR-J40-S24": [
       "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
+    ],
+    "OR-J40-S40": [
+      "TestProcessorFees/OR-J40-S40/a-stripe-charge-fee-and-a-dispute-fee-post-once-exactly"
     ]
   }
 }
