@@ -627,37 +627,6 @@ func creditGrantTxn(lot gen.BillingCreditGrant) *models.MoneyTransaction {
 	}
 }
 
-type WithdrawParams struct {
-	// CustomerID is the payer to withdraw from; nil means the invoker's own
-	// UUID.
-	CustomerID *identity.CustomerID
-	Invoker    string
-	Currency   string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
-}
-
-func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if params.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be positive")
-	}
-
-	var trx *models.MoneyTransaction
-	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var terr error
-		trx, terr = s.withdrawTx(ctx, gen.New(tx), params)
-		return terr
-	})
-	if err != nil {
-		return nil, err
-	}
-	return trx, nil
-}
-
 // withdrawBalanceAndBlocks debits amount from the customer's prepaid balance by
 // spending credit lots FIFO (soonest-expiring first), one credit_spend transfer
 // per lot at the caller's coordinate. The available/credit-line gate is the
@@ -764,86 +733,6 @@ func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID,
 		HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
 	})
 	return row.Held, row.Accrued, err
-}
-
-func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {
-	now := s.now()
-	cur := normalizeCurrency(params.Currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return nil, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := tid.UUID()
-	payer, err := resolveCustomer(params.CustomerID, params.Invoker)
-	if err != nil {
-		return nil, err
-	}
-	payerID := payer.UUID()
-	// Lock + derive once: gate on held-aware available (a withdraw cannot eat
-	// into held funds), then idempotency, then debit the FIFO lots.
-	bal, err := s.lockBalance(ctx, q, payer, params.Invoker, cur)
-	if err != nil {
-		return nil, err
-	}
-	if bal.Balance-bal.HeldBalance < params.Amount {
-		return nil, ErrInsufficientCredits
-	}
-	if params.SourceID == nil {
-		return nil, fmt.Errorf("withdraw: source_id required for idempotency")
-	}
-	sid := params.SourceID.String()
-	sourceIDText := &sid
-	key, kerr := NewIdempotencyKey(OpWithdraw, params.Source, sid)
-	if kerr != nil {
-		return nil, kerr
-	}
-	// Compare the total already withdrawn at this coordinate (one credit_spend
-	// per FIFO lot) and refuse a replay with a different amount.
-	committed, cerr := key.requireSameAmount(ctx, q, tenantID, payerID, cur, params.Amount)
-	if cerr != nil {
-		return nil, cerr
-	}
-	if committed {
-		existing, gerr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			TransferType: "credit_spend", Operation: string(key.Operation()),
-			Source: key.Source(), SourceID: key.SourceID(),
-		})
-		if gerr == nil {
-			replayed := moneyTransactionFromTransfer(existing)
-			replayed.Replayed = true
-			return replayed, nil
-		}
-		if !errors.Is(gerr, pgx.ErrNoRows) {
-			return nil, gerr
-		}
-	}
-	newBal, applied, err := s.withdrawBalanceAndBlocks(ctx, q, payer, params.Invoker, cur, key, "", params.Amount)
-	if err != nil {
-		return nil, err
-	}
-
-	trx := &models.MoneyTransaction{
-		ID:              uuidutil.NewV7(),
-		MerchantID:      tenantID,
-		CustomerID:      payerID,
-		Currency:        cur,
-		Invoker:         params.Invoker,
-		Amount:          -params.Amount,
-		BalanceAfter:    &newBal,
-		TransactionType: "withdrawal",
-		Status:          "posted",
-		Source:          params.Source,
-		SourceID:        sourceIDText,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		// Authoritative: the unique index, not the pre-check above, decides.
-		Replayed: !applied,
-	}
-	return trx, nil
 }
 
 // SetDestructiveAdmissions wires the shared staff-command admission boundary.

@@ -45,6 +45,9 @@ type StripeAPIError struct {
 	Message     string
 	Code        string
 	DeclineCode string
+	// AdviceCode, NetworkAdviceCode and NetworkDeclineCode are a decline's
+	// advice: Stripe's, the network's, and the issuer's response code.
+	AdviceCode, NetworkAdviceCode, NetworkDeclineCode string
 }
 
 func (e *StripeAPIError) Error() string {
@@ -246,9 +249,12 @@ func (s *StripeService) stripePostForm(ctx context.Context, path string, values 
 func parseStripeAPIError(statusCode int, body []byte) error {
 	var out struct {
 		Error struct {
-			Message     string `json:"message"`
-			Code        string `json:"code"`
-			DeclineCode string `json:"decline_code"`
+			Message            string `json:"message"`
+			Code               string `json:"code"`
+			DeclineCode        string `json:"decline_code"`
+			AdviceCode         string `json:"advice_code"`
+			NetworkAdviceCode  string `json:"network_advice_code"`
+			NetworkDeclineCode string `json:"network_decline_code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -259,10 +265,13 @@ func parseStripeAPIError(statusCode int, body []byte) error {
 		msg = fmt.Sprintf("stripe API failed (%d)", statusCode)
 	}
 	return &StripeAPIError{
-		StatusCode:  statusCode,
-		Message:     msg,
-		Code:        strings.TrimSpace(out.Error.Code),
-		DeclineCode: strings.TrimSpace(out.Error.DeclineCode),
+		StatusCode:         statusCode,
+		Message:            msg,
+		Code:               strings.TrimSpace(out.Error.Code),
+		DeclineCode:        strings.TrimSpace(out.Error.DeclineCode),
+		AdviceCode:         strings.TrimSpace(out.Error.AdviceCode),
+		NetworkAdviceCode:  strings.TrimSpace(out.Error.NetworkAdviceCode),
+		NetworkDeclineCode: strings.TrimSpace(out.Error.NetworkDeclineCode),
 	}
 }
 

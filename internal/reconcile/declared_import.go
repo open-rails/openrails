@@ -456,7 +456,7 @@ func ImportDeclaredSubscriptions(
 			// Fresh ambiguous rows and every pre-existing row (incremental
 			// re-import) converge against the declared snapshot at AsOf. A row
 			// canceled between dumps carries a roster-dead entry, so the
-			// decider lands the terminal transition (cancel_type 'expired' at
+			// decider lands the terminal transition (cancel_type 'provider' at
 			// AsOf; faithful cancel types apply to first import only);
 			// already-terminal rows take no transition but still backfill
 			// charges. No first-pull floor: the declaration is the
@@ -521,7 +521,7 @@ func insertDeclaredCanceled(
 	case DeclaredCancelChargeback:
 		cancelType = string(models.CancelTypeChargeback)
 	case DeclaredCancelProviderTerminated:
-		cancelType = string(models.CancelTypeExpired)
+		cancelType = string(models.CancelTypeProvider)
 	default:
 		return uuid.Nil, fmt.Errorf("unsupported cancel kind %q", f.CancelKind)
 	}

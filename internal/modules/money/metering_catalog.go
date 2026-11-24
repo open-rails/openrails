@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 )
@@ -246,12 +247,15 @@ func usageMeterHasActivity(
 	if replacementEventType != eventTypes[0] {
 		eventTypes = append(eventTypes, replacementEventType)
 	}
-	// Meter corrections are rare control-plane writes. Hold inserts while the
-	// activity predicate is checked so a concurrent report cannot slip between
-	// the check and the semantic update and then be reinterpreted.
+	// Hold the merchant's settlements of these event types while the activity
+	// predicate is checked, so a concurrent report cannot slip between the
+	// check and the semantic update and then be reinterpreted.
 	queries := gen.New(tx)
-	if err := queries.LockUsageDailyForMeterCorrection(ctx); err != nil {
+	if err := queries.LockUsageEventTypes(ctx, gen.LockUsageEventTypesParams{MerchantID: merchantID, EventTypes: eventTypes}); err != nil {
 		return false, fmt.Errorf("lock usage activity: %w", err)
+	}
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterFence, Kind: MeterCorrectionFailpointKind}); err != nil {
+		return false, err
 	}
 	hasActivity, err := queries.UsageDailyExistsForTypes(ctx, gen.UsageDailyExistsForTypesParams{
 		MerchantID: merchantID,
@@ -262,6 +266,10 @@ func usageMeterHasActivity(
 	}
 	return hasActivity, nil
 }
+
+// MeterCorrectionFailpointKind names a meter correction holding its usage
+// fence (failpoint.AfterFence).
+const MeterCorrectionFailpointKind = "usage_meter_correction"
 
 func effectiveMeterEventType(meter catalogrules.Meter) string {
 	if meter.EventType != "" {

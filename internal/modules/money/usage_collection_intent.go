@@ -55,6 +55,10 @@ const (
 	collectionEvidenceDeclined      = "declined"
 	collectionEvidenceFailureCode   = "failure_code"
 	collectionEvidenceFailureMsg    = "failure_message"
+	// The decline's advice, as decline.Evidence names it.
+	collectionEvidenceAdvice        = "advice_code"
+	collectionEvidenceNetworkAdvice = "network_advice_code"
+	collectionEvidenceIssuerCode    = "network_decline_code"
 	collectionEvidenceNotExecuted   = "not_executed"
 	// collectionEvidenceFailureCodeNotExecuted says why a never-charged
 	// operation ended: not_executed (provider-confirmed) or
@@ -223,7 +227,8 @@ func (h *OrderCollectionHandler) classify(ctx context.Context, intent gen.Billin
 		rail = p.Rail
 	}
 	if res.Declined {
-		return h.finalizeRefusal(ctx, intent, p, rail, derefStr(res.FailureCode), derefStr(res.FailureMessage), res.TransactionID)
+		answer := decline.Evidence{Rail: rail, Code: derefStr(res.FailureCode), Text: derefStr(res.FailureMessage), Advice: res.Advice, NetworkAdvice: res.NetworkAdvice, IssuerCode: res.IssuerCode}
+		return h.finalizeRefusal(ctx, intent, p, answer, res.TransactionID)
 	}
 	if strings.TrimSpace(res.TransactionID) == "" {
 		return intents.Ambiguous("successful collection response has no transaction receipt")
@@ -427,7 +432,9 @@ func (h *OrderCollectionHandler) finalizeFromEvidence(ctx context.Context, inten
 		return h.finalizeNotExecuted(ctx, intent, p, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg)), true
 	}
 	if code := intents.EvidenceString(intent, collectionEvidenceFailureCode); code != "" {
-		return h.finalizeRefusal(ctx, intent, p, rail, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg), ""), true
+		answer := decline.Evidence{Rail: rail, Code: code, Text: intents.EvidenceString(intent, collectionEvidenceFailureMsg), Advice: intents.EvidenceString(intent, collectionEvidenceAdvice),
+			NetworkAdvice: intents.EvidenceString(intent, collectionEvidenceNetworkAdvice), IssuerCode: intents.EvidenceString(intent, collectionEvidenceIssuerCode)}
+		return h.finalizeRefusal(ctx, intent, p, answer, ""), true
 	}
 	return intents.Outcome{}, false
 }
@@ -563,16 +570,19 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 }
 
 // finalizeRefusal records a definitive provider refusal: attempt failed, the
-// usage order dunned on its own billing cycle and open again (or
-// uncollectible), with why. A local failure retains the refusal for the
-// verifier.
-func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, rail, failureCode, failureMessage, transactionID string) intents.Outcome {
-	if strings.TrimSpace(failureCode) == "" {
-		failureCode = "declined"
+// usage order dunned on its own billing cycle under the merchant's
+// dunning_policy and the networks' advice, and open again (or uncollectible),
+// with why. A local failure retains the refusal for the verifier.
+func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, answer decline.Evidence, transactionID string) intents.Outcome {
+	if strings.TrimSpace(answer.Code) == "" {
+		answer.Code = "declined"
 	}
+	rail, failureCode := answer.Rail, answer.Code
 	evidence := map[string]any{collectionEvidenceDeclined: true, collectionEvidenceFailureCode: failureCode, collectionEvidenceRail: rail}
-	if failureMessage != "" {
-		evidence[collectionEvidenceFailureMsg] = failureMessage
+	for key, value := range map[string]string{collectionEvidenceFailureMsg: answer.Text, collectionEvidenceAdvice: answer.Advice, collectionEvidenceNetworkAdvice: answer.NetworkAdvice, collectionEvidenceIssuerCode: answer.IssuerCode} {
+		if value != "" {
+			evidence[key] = value
+		}
 	}
 	now := h.now()
 	var action collection.Action
@@ -598,15 +608,18 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return complete()
 		}
 		order = &row
-		code := failureCode
-		action, err = collection.FailureAction(usageCycleHours(row), rail, &code, int(derefInt32(row.CollectionFailureCount)), row.CollectionFailedAt, now)
+		policy, err := subscriptions.DunningPolicy(ctx, h.DB.NewWithPgxTx(tx))
 		if err != nil {
 			return err
 		}
-		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: decline.Evidence{Code: failureCode, Text: failureMessage}, TransactionID: transactionID}, now); err != nil {
+		action, err = collection.FailureAction(policy, usageCycleHours(row), answer, int(derefInt32(row.CollectionFailureCount)), row.CollectionFailedAt, now)
+		if err != nil {
 			return err
 		}
-		failure := billing.DeclineReason(decline.ReasonFor(rail, failureCode)).Failure()
+		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: answer, TransactionID: transactionID}, now); err != nil {
+			return err
+		}
+		failure := action.Decline.Reason.Failure()
 		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
 			return err
 		}

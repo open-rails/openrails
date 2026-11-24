@@ -3,14 +3,21 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -193,5 +200,259 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 			require.Equal(t, sample.allowed, access.Entitlements["nmi:member"], sample.at.String())
 		}
 		p.money(t, 1, 1000)
+	})
+	t.Run("OR-J17-S07/a-stripe-resume-is-a-provider-operation", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond,
+			"the cancel reaches Stripe")
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "the resume reaches Stripe with the request")
+		subscriptionState(t, a, sub.ID, "active")
+		// The write is an operation of record, logged as every provider write is.
+		var operation, state string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id::text, status FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&operation, &state))
+		require.Equal(t, "succeeded", state)
+		var logged int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
+			" WHERE merchant_id = $1 AND provider_intent_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
+		require.Positive(t, logged)
+		// Finished, the resume was only an instruction to Stripe, as a cancel
+		// is: retention deletes it once it is older than its period.
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+intents+" SET updated_at = $3 WHERE merchant_id = $1 AND subscription_id = $2", a.alpha.MerchantID().UUID(), sub.ID.UUID(), a.clock.Now().Add(-800*24*time.Hour))
+		require.NoError(t, err)
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		rows, err := a.pool.Query(t.Context(), "SELECT intent_type FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID())
+		require.NoError(t, err)
+		kept, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		require.Empty(t, kept, "a finished resume is retained as a cancel is")
+	})
+	t.Run("OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		stripe := accounts.accounts["sk_test_old"].core
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+		require.Contains(t, string(raw), string(billing.CodeProviderWritesDisabled))
+		subscriptionState(t, a, sub.ID, "canceled")
+		var resumes int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" WHERE merchant_id = $1 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID()).Scan(&resumes))
+		require.Zero(t, resumes, "a resume Stripe cannot hear commits nothing")
+		require.Empty(t, stripe.Mutations(""))
+	})
+	t.Run("OR-J17-S09/a-stripe-resume-waits-for-the-cancel-in-flight-before-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the cancel never reached Stripe")
+		}
+		// The member resumes while the cancel is in flight.
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		subscriptionState(t, a, sub.ID, "active")
+		// Waiting is no attempt: the resume is pending, unattempted and unlogged.
+		var state string
+		var attempts, logged int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT i.status, i.attempts, (SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
+			" l WHERE l.merchant_id = i.merchant_id AND l.provider_intent_id = i.id) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" i WHERE i.merchant_id = $1 AND i.subscription_id = $2 AND i.intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&state, &attempts, &logged))
+		require.Equal(t, "pending", state)
+		require.Zero(t, attempts)
+		require.Zero(t, logged, "a waiting resume writes no mutation log")
+		held.Release()
+		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond, "the cancel lands")
+		a.clock.Advance(2 * time.Minute)
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			return stripe.Subscription(remote)["cancel_at_period_end"] == false
+		}, 20*time.Second, 100*time.Millisecond, "the resume follows it, as the two were committed")
+		subscriptionState(t, a, sub.ID, "active")
+	})
+	t.Run("OR-J17-S10/a-cancel-after-a-waiting-resume-supersedes-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		cancel := func() {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		cancel()
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the cancel never reached Stripe")
+		}
+		// The member resumes while the cancel is in flight, then cancels again.
+		status, raw := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		a.clock.Advance(time.Second)
+		cancel()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		var resume string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT status FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'",
+			a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&resume))
+		require.Equal(t, "superseded", resume, "the resume never reached Stripe, and the later cancel undoes it")
+		held.Release()
+		a.clock.Advance(2 * time.Minute)
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			var open int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2"+
+				" AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription') AND status NOT IN ('succeeded', 'superseded')",
+				a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&open))
+			return open == 0
+		}, 20*time.Second, 100*time.Millisecond, "every Stripe cancel and resume of the subscription settles")
+		require.Equal(t, true, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe ends set to cancel, as the member last asked")
+		subscriptionState(t, a, sub.ID, "canceled")
+	})
+	t.Run("OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		fleet := startFleet(t, a.world)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		subscriptionState(t, a, sub.ID, "canceled")
+		// A Stripe notice converges the subscription while its cancel waits for
+		// provider writes: Stripe still renews it, which is not a resume.
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		job, err := fleet.Insert(t.Context(), subscriptionConvergeJob{PSPID: uuid.UUID(sub.PSPID), MerchantID: a.alpha.MerchantID().UUID(), Rail: "stripe", SubscriptionReference: remote},
+			&river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		deadline := time.After(20 * time.Second)
+	converged:
+		for {
+			select {
+			case event := <-events:
+				if event != nil && event.Job.ID == job.Job.ID {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+					break converged
+				}
+			case <-deadline:
+				t.Fatal("the subscription's convergence did not finish")
+			}
+		}
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe has not heard of the cancel")
+		kept := subscriptionState(t, a, sub.ID, "canceled")
+		require.Equal(t, "user", *kept.CancelType, "the member's cancel stands")
+	})
+	t.Run("OR-J17-S12/a-resume-whose-transaction-began-first-still-follows-the-cancel-it-resumes", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		request := func(action string, body map[string]any) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path+"/"+action, a.aliceToken, body)
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		cancel := func() { request("cancel", map[string]any{"reason": "Taking a break from it"}) }
+		atStripe := func(want bool, why string) {
+			t.Helper()
+			require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == want }, 20*time.Second, 20*time.Millisecond, why)
+		}
+		cancel()
+		atStripe(true, "the first cancel reaches Stripe")
+		// A resume begins its transaction and stops before it locks the row.
+		stopped, release := make(chan struct{}), make(chan struct{})
+		var stop, open sync.Once
+		t.Cleanup(failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			if site.Point != failpoint.BeforeLock || site.Kind != subscriptions.ResumeFailpointKind || site.Subscription != sub.ID.UUID() {
+				return nil
+			}
+			first := false
+			stop.Do(func() { first = true; close(stopped) })
+			if first {
+				<-release
+			}
+			return nil
+		}))
+		t.Cleanup(func() { open.Do(func() { close(release) }) })
+		late := make(chan int, 1)
+		go func() {
+			status, _ := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+			late <- status
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(20 * time.Second):
+			t.Fatal("the resume never began")
+		}
+		// Meanwhile the member resumes and cancels again; that cancel is in
+		// flight at Stripe.
+		a.clock.Advance(time.Second)
+		request("resume", map[string]any{})
+		atStripe(false, "the second resume reaches Stripe")
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		a.clock.Advance(time.Second)
+		cancel()
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the second cancel never reached Stripe")
+		}
+		// The stopped resume now takes the row and resumes that cancel: it was
+		// committed last, so it reaches Stripe last.
+		open.Do(func() { close(release) })
+		select {
+		case status := <-late:
+			require.Equal(t, http.StatusOK, status)
+		case <-time.After(20 * time.Second):
+			t.Fatal("the stopped resume never finished")
+		}
+		subscriptionState(t, a, sub.ID, "active")
+		held.Release()
+		atStripe(true, "the cancel in flight lands")
+		a.clock.Advance(2 * time.Minute)
+		operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			var unsettled int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+operations+" WHERE merchant_id = $1 AND subscription_id = $2"+
+				" AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription') AND status NOT IN ('succeeded', 'superseded')",
+				a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&unsettled))
+			return unsettled == 0
+		}, 20*time.Second, 100*time.Millisecond, "every Stripe cancel and resume of the subscription settles")
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe ends resumed, as the member last asked")
+		subscriptionState(t, a, sub.ID, "active")
 	})
 }

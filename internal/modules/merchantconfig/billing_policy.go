@@ -154,6 +154,10 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 		if *p.DelinquencyAmountFloor < 0 {
 			return models.BillingPolicy{}, fmt.Errorf("%s: delinquency_amount_floor must be non-negative", label)
 		}
+		// A floor is an amount of one currency: debt in another has its own.
+		if out.PolicyCurrency == "" {
+			return models.BillingPolicy{}, fmt.Errorf("%s: delinquency_amount_floor requires policy_currency, the currency it is in", label)
+		}
 		out.DelinquencyAmountFloor = p.DelinquencyAmountFloor
 	}
 

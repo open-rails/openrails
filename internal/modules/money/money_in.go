@@ -48,4 +48,7 @@ type ChargeResult struct {
 	Declined       bool
 	FailureCode    *string
 	FailureMessage *string
+	// Advice, NetworkAdvice and IssuerCode are a decline's advice, as
+	// decline.Evidence names them.
+	Advice, NetworkAdvice, IssuerCode string
 }

@@ -42,7 +42,19 @@ const (
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
 	CancelTypeChargeback CancelType = "chargeback" // Canceled due to chargeback
 	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
+	CancelTypeProvider   CancelType = "provider"   // The provider confirmed it ended
+	CancelTypeAbandoned  CancelType = "abandoned"  // Its first payment never completed
 )
+
+// Terminal reports whether a cancel of this kind is final: no renewal
+// revives it. A lapse (expired) and an upgrade are not.
+func (c CancelType) Terminal() bool {
+	switch c {
+	case CancelTypeChargeback, CancelTypeUser, CancelTypeMerchant, CancelTypeProvider, CancelTypeAbandoned:
+		return true
+	}
+	return false
+}
 
 type Subscription struct {
 	CollectionPolicy CollectionPolicy `json:"collection_policy"`

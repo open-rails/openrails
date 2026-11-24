@@ -298,6 +298,12 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	return row, err
 }
 
+// stripeScheduleWrite names the operations that set a Stripe subscription's
+// cancel_at_period_end, which run in the order they commit.
+func stripeScheduleWrite(intentType string) bool {
+	return intentType == TypeStripeCancelSubscription || intentType == TypeStripeResumeSubscription
+}
+
 func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
 	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete || p.IntentType == TypePlatformMethodDelete {
 		if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {
@@ -385,6 +391,13 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	// provenance (for example an existing subscription pinned to an account).
 	var row gen.BillingProviderIntent
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// A Stripe cancel or resume is inserted under its subscription's row
+		// lock, so its created_at orders it after every one committed before.
+		if stripeScheduleWrite(p.IntentType) && p.SubscriptionID != nil {
+			if _, err := subscriptions.NewSubscriptionRepo(s.db.NewWithPgxTx(tx)).GetByIDForUpdate(ctx, *p.SubscriptionID); err != nil {
+				return fmt.Errorf("intents: lock subscription for %s: %w", p.IntentType, err)
+			}
+		}
 		var err error
 		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
 			ID:                  uuidPtrOrNil(p.operationID),

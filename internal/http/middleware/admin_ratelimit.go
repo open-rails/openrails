@@ -49,8 +49,9 @@ var adminRateLimitPolicies = map[AdminOperation][]adminRateLimitWindow{
 	AdminOperationOffChannel: {
 		{name: "minute", duration: time.Minute, limit: 10},
 	},
+	// Grants are counted by item: one full batch a minute.
 	AdminOperationGrant: {
-		{name: "minute", duration: time.Minute, limit: 10},
+		{name: "minute", duration: time.Minute, limit: billing.MaxBatchItems},
 	},
 }
 
@@ -188,7 +189,9 @@ func (l *AdminOperationLimiter) Unlock(ctx context.Context, userID, actorID stri
 
 // requestItems is how many operations a request carries: the length of its
 // JSON body's "items" batch, else one. Limits count operations, so a batch
-// never buys more than the same calls one at a time.
+// never buys more than the same calls one at a time. A batch past
+// billing.MaxBatchItems counts as the most it may carry: it is refused
+// unrun.
 func requestItems(r *request.Request) int64 {
 	var batch struct {
 		Items []json.RawMessage `json:"items"`
@@ -196,7 +199,7 @@ func requestItems(r *request.Request) int64 {
 	if r.PeekJSON(&batch) != nil || len(batch.Items) == 0 {
 		return 1
 	}
-	return int64(len(batch.Items))
+	return int64(min(len(batch.Items), billing.MaxBatchItems))
 }
 
 func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, operation AdminOperation, weight int64) adminRateLimitDecision {

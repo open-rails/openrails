@@ -6,106 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
-
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Unified credit-line model. An account spends prepaid balance first, then
 // creates pending owed items up to its admin-set credit_limit_amount.
 // Prepay-only = credit limit 0; arrears = explicit credit line.
-
-// SpendParams is a unified immediate spend (balance first, then owed). Key is
-// built with money.NewIdempotencyKey.
-type SpendParams struct {
-	Payer    *identity.CustomerID
-	Invoker  string
-	Currency string
-	Amount   int64
-	Key      IdempotencyKey
-}
-
-// SpendCredits debits an account balance-first-then-owed in one transaction,
-// gated by the credit line. Idempotent on (merchant, payer, currency,
-// operation=spend, source, source_id): the key is required, and a replay with
-// a different Amount gets ErrIdempotencyKeyReused. Returns
-// ErrInsufficientCredits when balance + remaining credit line cannot cover the
-// amount. Replayed is true when the coordinate was already committed and
-// nothing moved.
-func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*models.MoneyTransaction, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if params.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be positive")
-	}
-	if err := params.Key.RequireOperation(OpSpend); err != nil {
-		return nil, err
-	}
-	cur := normalizeCurrency(params.Currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return nil, err
-	}
-	payer, err := resolveCustomer(params.Payer, params.Invoker)
-	if err != nil {
-		return nil, err
-	}
-
-	var trx *models.MoneyTransaction
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		bound := s.WithDatabase(s.db.NewWithPgxTx(tx))
-
-		// Serialize per account and guard idempotency on the spend coordinates.
-		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
-			return err
-		}
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		tenantID := tid.UUID()
-		committed, cerr := params.Key.requireSameAmount(ctx, q, tenantID, payer.UUID(), cur, params.Amount)
-		if cerr != nil {
-			return cerr
-		}
-		applied := false
-		var serr error
-		if !committed {
-			// The pre-check is a fast path and body guard; the unique index under
-			// spendBalanceThenOwedTx enforces once-only, so `applied` stays
-			// authoritative when two transactions race past it.
-			//
-			// A replay must not reach the spend arithmetic: the balance already
-			// moved, so re-deriving it would split the charge and could deny a
-			// prepaid payer, answering a replay with a hard failure.
-			_, _, applied, serr = bound.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
-			if serr != nil {
-				return serr
-			}
-		}
-		row, rerr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
-			Operation: string(params.Key.Operation()),
-			Source:    params.Key.Source(), SourceID: params.Key.SourceID(),
-		})
-		if rerr != nil {
-			return rerr
-		}
-		trx = moneyTransactionFromTransfer(row)
-		trx.Replayed = !applied
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return trx, nil
-}
 
 // spendBalanceThenOwedTx debits amount within an existing tx: prepaid balance
 // first (FIFO credit lots → ledger spend transfers), any remainder accrued to
@@ -114,7 +24,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 // balance and accrued to owed (either may be 0).
 //
 // preAuthorized selects the gating contract:
-//   - false (SpendCredits): the remainder is gated by the credit line; a payer
+//   - false: the remainder is gated by the credit line; a payer
 //     without one, or a spend past it, gets ErrInsufficientCredits and nothing
 //     is debited.
 //   - true (capture of an admitted request): never re-gates; the remainder is

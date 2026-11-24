@@ -345,18 +345,16 @@ const CardVaultPlatform = "platform"
 // terms and privacy) and sender details; notices pick a URL by purpose
 // (MerchantProfile.NotificationURL), else support_url. AlertEmail receives
 // high and critical findings. UsageBilling is the default billing day (it
-// seeds new accounts only) and per-currency credit limits and minimum
-// invoices; CollectionThreshold, MonthlyFloor, BillingPeriodBoundary,
-// ArrearsGraceDays and ArrearsDelinquencyFloor govern when usage arrears are
-// billed and become delinquent. BillingPolicies are named spend policies and
+// seeds new accounts only) and per-currency credit limits, minimum invoices,
+// collection thresholds and delinquency floors; BillingPeriodBoundary and
+// ArrearsGraceDays govern when usage arrears are billed and become
+// delinquent. BillingPolicies are named spend policies and
 // BillingPolicyBindings decide which customers get which.
 // RepriceNoticeWindowDays is the notice before a price migration takes
 // effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
 	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
 	Profile                 *MerchantProfile      `json:"profile,omitempty"`
-	CollectionThreshold     *int64                `json:"collection_threshold,omitempty,string"`
-	MonthlyFloor            *int64                `json:"monthly_floor,omitempty,string"`
 	BillingPeriodBoundary   string                `json:"billing_period_boundary,omitempty"`
 	AlertEmail              *string               `json:"alert_email,omitempty"`
 	RepriceNoticeWindowDays *int                  `json:"reprice_notice_window_days,omitempty"`
@@ -364,10 +362,9 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int                  `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64                `json:"arrears_delinquency_floor,omitempty,string"`
-	PSPRouting              *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays     *int                  `json:"arrears_grace_days,omitempty"`
+	PSPRouting           *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -422,7 +419,8 @@ type BillingPolicy struct {
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
 	// override the merchant-wide invoice policy for payers bound here; nil defers
-	// to it. All three ride on any kind.
+	// to it. All three ride on any kind. DelinquencyAmountFloor is in
+	// PolicyCurrency, which it requires, and applies to debt in it.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
@@ -433,8 +431,13 @@ type BillingPolicy struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []BudgetWindow   `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  catalog.Currency `json:"policy_currency,omitempty"`
+	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
+	// PolicyCurrency is the currency of the policy's amounts and of a spend or
+	// bad-spend window that names none; absent, the request's. The outstanding
+	// cap and collection threshold bind only money in it, in admission and
+	// usage billing; windows and the accrual-rate cap are converted to the
+	// request's currency.
+	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
@@ -456,7 +459,8 @@ type BillingPolicyBinding struct {
 //
 // It governs renewals OpenRails collects: engine memberships on Stripe and
 // NMI, Solana pulls and NMI schedules; provider-owned Stripe and CCBill
-// subscriptions use the provider's dunning. The built-in tiers end inside one
+// subscriptions use the provider's dunning. Usage orders retry on its tiers
+// too, under the policy in force at each decline. The built-in tiers end inside one
 // cycle: under 4 days no retry; 4 to 27 days +1 and +2 days; 28 days and
 // longer +2, +4, +6 and +9 days, the fifth failure terminal. A failure older
 // than its last offset plus min(24h, cycle/2) is never charged: it parks
