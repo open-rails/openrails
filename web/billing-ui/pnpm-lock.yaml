@@ -64,8 +64,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.1(jiti@2.7.0))
       '@openrails/auth-ui':
-        specifier: 1.34.1
-        version: 1.34.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.53.0
+        version: 1.53.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@playwright/test':
         specifier: 1.60.0
         version: 1.60.0
@@ -373,8 +373,8 @@ packages:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2
 
-  '@openrails/auth-ui@1.34.1':
-    resolution: {integrity: sha512-e4kIFb+m7SSbwUq83pKTRDjol1Ni9zgV38o5r3lCMQdCD1xF9NXkqvTtNU/NaYpR1wXHBHAjrk1hj7i+NVjZsw==}
+  '@openrails/auth-ui@1.53.0':
+    resolution: {integrity: sha512-8Zvrpd1azQ9QWquNjfSzAhHn23eV9ClEYBhgxpFdTzMSORIGAX4ZIT1RI2DO8WGORh8RC6LjcFRyfxnyej0kpw==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -2673,7 +2673,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@openrails/auth-ui@1.34.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@openrails/auth-ui@1.53.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@base-ui/react': 1.9.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@hugeicons/core-free-icons': 4.3.5
