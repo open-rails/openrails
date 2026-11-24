@@ -220,7 +220,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
 
-Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when. A price key's `move` entries say which of its prices it named from when, or none once archived; `ListPriceHistory` reads them.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:
@@ -695,11 +695,11 @@ limits:
     unit: units
     reset: {kind: rolling, window_seconds: 3600}
     overrun: admit_while_positive
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}] # adds quantity × weight ÷ per; both default to 1
   monthly:
     unit: units
     reset: {kind: billing_period}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   starter: {display_name: Starter, limits: {hourly: "1000", monthly: "100000"}}
   usage:
@@ -794,6 +794,8 @@ is `fixed`, `billing_period`, `session`, `rolling`, `rate` or `lifetime`;
 `overrun: admit_while_positive` lets the request that crosses the limit finish,
 `require_estimate` admits only an estimate that fits. Late usage settles in full,
 never clamped.
+
+A named-unit limit counts meters: each of its `counts` (`catalog.LimitCount`) adds an event's quantity × `weight` ÷ `per`, rounded half up, when its meter reads the event and its optional `filter` admits the event's dimensions; `weight` and `per` default to 1, so `counts: [{meter: tokens}]` counts tokens one to one. Several counts weight a mix: `[{meter: input-tokens, per: 1000}, {meter: output-tokens, weight: 4, per: 1000}, {meter: output-tokens, weight: 6, per: 1000, filter: {model: [large]}}]` counts thousands of input tokens, output at four times that and a large model's output at ten. A currency limit counts the rated amount and has no counts; rate cards price money only.
 
 Refusals are verdicts, not errors:
 

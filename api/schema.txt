@@ -12,6 +12,8 @@ migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f2
 migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50edb9295edb31f349d302a9e18e0590bd2419f62bc58
 migration 0010_credit_grants.up.sql sha256:fdab284c9d4a8a721620c8b9c9bd34796ccbe679afc1c79e39299857c0e4e340
 migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d67d9a518e821b8da68451f
+migration 0012_operation_log.up.sql sha256:230a94a136e3e0229505fbc58dbc87a052b9b6d3112ac24ae08795870e55b9e7
+migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d3474023d1bb165d6942b0c2a8bcd81d8
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 
 table billing.balance_watches
@@ -96,7 +98,7 @@ table billing.catalog_field_owners
   column actor text NOT NULL
   column set_at timestamp with time zone NOT NULL
   constraint catalog_field_owners_actor_check CHECK (((actor <> ''::text) AND (octet_length(actor) <= 255)))
-  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text, 'limits'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text]))) OR ((object = 'limit'::text) AND (field = ANY (ARRAY['unit'::text, 'reset'::text, 'overrun'::text, 'rate_cards'::text])))))
+  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text, 'limits'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text]))) OR ((object = 'limit'::text) AND (field = ANY (ARRAY['unit'::text, 'reset'::text, 'overrun'::text, 'counts'::text])))))
   constraint catalog_field_owners_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 255)))
   constraint catalog_field_owners_manager_check CHECK ((manager = ANY (ARRAY['apply'::text, 'edit'::text])))
   constraint catalog_field_owners_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -113,17 +115,17 @@ table billing.catalog_limits
   column window_seconds integer
   column reset_anchor text
   column overrun text NOT NULL
-  column rate_cards jsonb NOT NULL
   column revision bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column counts jsonb NOT NULL
   constraint catalog_limits_anchor_check CHECK (((reset_anchor IS NOT NULL) = (reset_kind = 'fixed'::text)))
-  constraint catalog_limits_currency_rate_cards_check CHECK (((unit ~ '^[a-z]'::text) OR (rate_cards = '[]'::jsonb)))
+  constraint catalog_limits_counts_check CHECK ((jsonb_typeof(counts) = 'array'::text))
+  constraint catalog_limits_currency_counts_check CHECK (((unit ~ '^[a-z]'::text) OR (counts = '[]'::jsonb)))
   constraint catalog_limits_key_check CHECK (((key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) AND (key <> 'balance'::text)))
   constraint catalog_limits_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_limits_overrun_check CHECK ((overrun = ANY (ARRAY['require_estimate'::text, 'admit_while_positive'::text])))
   constraint catalog_limits_pkey PRIMARY KEY (merchant_id, key)
-  constraint catalog_limits_rate_cards_check CHECK ((jsonb_typeof(rate_cards) = 'array'::text))
   constraint catalog_limits_reset_anchor_check CHECK ((reset_anchor = ANY (ARRAY['subscription'::text, 'first_use'::text])))
   constraint catalog_limits_reset_kind_check CHECK ((reset_kind = ANY (ARRAY['fixed'::text, 'billing_period'::text, 'session'::text, 'rolling'::text, 'rate'::text, 'lifetime'::text])))
   constraint catalog_limits_revision_check CHECK ((revision >= 1))
@@ -221,7 +223,7 @@ table billing.change_log
   column reason text
   column request_id text
   column operation_id uuid
-  constraint change_log_action_check CHECK ((action = ANY (ARRAY['create'::text, 'update'::text, 'archive'::text, 'unarchive'::text, 'delete'::text, 'key_add'::text, 'key_remove'::text, 'key_rename'::text])))
+  constraint change_log_action_check CHECK ((action = ANY (ARRAY['create'::text, 'update'::text, 'archive'::text, 'unarchive'::text, 'delete'::text, 'key_add'::text, 'key_remove'::text, 'key_rename'::text, 'move'::text])))
   constraint change_log_actor_check CHECK (((octet_length(actor) <= 4200) AND ((actor ~ '^(staff|customer):.'::text) OR (actor ~ '^provider:[a-z][a-z0-9_]{0,31}$'::text) OR (actor = ANY (ARRAY['system'::text, 'file'::text, 'vault'::text])))))
   constraint change_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
   constraint change_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1416,6 +1418,45 @@ table billing.notification_issue_revisions
   constraint notification_issue_revisions_revision_check CHECK ((revision > 0))
   index CREATE UNIQUE INDEX notification_issue_revisions_pkey ON billing.notification_issue_revisions USING btree (merchant_id, customer_id, issue_key)
 
+table billing.operation_log
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column occurred_at timestamp with time zone NOT NULL DEFAULT now()
+  column actor text NOT NULL
+  column source text NOT NULL
+  column object_type text NOT NULL
+  column object_id text NOT NULL
+  column action text NOT NULL
+  column changes jsonb NOT NULL
+  column reason text
+  column request_id text
+  column operation_id uuid
+  column rail text NOT NULL
+  column psp_id uuid
+  column custodian_id uuid
+  column subscription_id uuid
+  constraint operation_log_action_check CHECK ((action = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
+  constraint operation_log_actor_check CHECK (((octet_length(actor) <= 4200) AND ((actor ~ '^(staff|customer):.'::text) OR (actor ~ '^provider:[a-z][a-z0-9_]{0,31}$'::text) OR (actor = ANY (ARRAY['system'::text, 'file'::text, 'vault'::text])))))
+  constraint operation_log_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
+  constraint operation_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
+  constraint operation_log_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
+  constraint operation_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint operation_log_object_id_check CHECK (((octet_length(object_id) >= 1) AND (octet_length(object_id) <= 512)))
+  constraint operation_log_object_type_check CHECK ((object_type = 'provider_intent'::text))
+  constraint operation_log_pkey PRIMARY KEY (merchant_id, id)
+  constraint operation_log_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint operation_log_reason_check CHECK (((octet_length(reason) >= 1) AND (octet_length(reason) <= 1024)))
+  constraint operation_log_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 128)))
+  constraint operation_log_source_check CHECK ((source = ANY (ARRAY['api'::text, 'customer'::text, 'console'::text, 'catalog_apply'::text, 'cli'::text, 'reload'::text, 'job'::text, 'intent'::text, 'webhook'::text, 'provider_read'::text])))
+  index CREATE INDEX operation_log_custodian_id_idx ON billing.operation_log USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
+  index CREATE INDEX operation_log_occurred_at_idx ON billing.operation_log USING btree (merchant_id, occurred_at)
+  index CREATE INDEX operation_log_operation_id_idx ON billing.operation_log USING btree (merchant_id, operation_id, occurred_at DESC, id DESC)
+  index CREATE UNIQUE INDEX operation_log_pkey ON billing.operation_log USING btree (merchant_id, id)
+  index CREATE INDEX operation_log_psp_id_idx ON billing.operation_log USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
+  index CREATE INDEX operation_log_subscription_id_idx ON billing.operation_log USING btree (merchant_id, subscription_id, occurred_at DESC, id DESC) WHERE (subscription_id IS NOT NULL)
+  trigger CREATE TRIGGER immutable_operation_log BEFORE UPDATE ON billing.operation_log FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_operation_log_truncate BEFORE TRUNCATE ON billing.operation_log FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.order_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
   column rail text NOT NULL
@@ -1991,21 +2032,6 @@ table billing.periodic_leases
   constraint periodic_leases_pkey PRIMARY KEY (kind)
   index CREATE UNIQUE INDEX periodic_leases_pkey ON billing.periodic_leases USING btree (kind)
 
-table billing.price_key_movements
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column key text NOT NULL
-  column price_id uuid NOT NULL
-  column effective_at timestamp with time zone NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column archived boolean NOT NULL
-  constraint price_key_movements_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint price_key_movements_pkey PRIMARY KEY (merchant_id, id)
-  constraint price_key_movements_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX price_key_movements_key_effective_at_idx ON billing.price_key_movements USING btree (merchant_id, key, effective_at DESC)
-  index CREATE UNIQUE INDEX price_key_movements_pkey ON billing.price_key_movements USING btree (merchant_id, id)
-  index CREATE INDEX price_key_movements_price_id_idx ON billing.price_key_movements USING btree (merchant_id, price_id)
-
 table billing.price_keys
   column merchant_id uuid NOT NULL
   column product_id uuid NOT NULL
@@ -2134,7 +2160,6 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   index CREATE INDEX prices_public_id_idx ON billing.prices USING btree (merchant_id, sha256((public_id)::bytea))
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
-  trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
   trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at', 'deleted_at', 'sell_via')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
@@ -2241,7 +2266,6 @@ table billing.products
   index CREATE UNIQUE INDEX products_pkey ON billing.products USING btree (merchant_id, id)
   index CREATE INDEX products_tier_group_idx ON billing.products USING btree (tier_group) WHERE (tier_group IS NOT NULL)
   trigger CREATE TRIGGER catalog_authored_product BEFORE INSERT OR DELETE OR UPDATE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
-  trigger CREATE TRIGGER catalog_product_offer_state AFTER UPDATE OF archived ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.catalog_product_offer_state()
   trigger CREATE TRIGGER immutable_product_identity BEFORE UPDATE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.guard_product_identity()
   trigger CREATE TRIGGER no_product_delete BEFORE DELETE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER no_product_truncate BEFORE TRUNCATE ON billing.products FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
@@ -2376,6 +2400,7 @@ table billing.provider_intents
   column subject text
   column credential text
   column destructive_action_id uuid
+  column sent_attempt integer
   constraint provider_intents_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
   constraint provider_intents_credential_check CHECK ((credential <> ''::text))
   constraint provider_intents_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
@@ -2389,6 +2414,7 @@ table billing.provider_intents
   constraint provider_intents_pkey PRIMARY KEY (merchant_id, id)
   constraint provider_intents_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE SET NULL (price_id)
   constraint provider_intents_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint provider_intents_sent_attempt_check CHECK ((sent_attempt >= 1))
   constraint provider_intents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])))
   constraint provider_intents_subject_check CHECK ((subject <> ''::text))
   constraint provider_intents_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE SET NULL (subscription_id)
@@ -2412,43 +2438,6 @@ table billing.provider_intents
   index CREATE UNIQUE INDEX provider_intents_subscription_id_open_manual_rebill_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = 'manual_rebill'::text) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE UNIQUE INDEX provider_intents_subscription_id_tier_change_subscription_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = ANY (ARRAY['nmi_upgrade'::text, 'stripe_tier_change'::text, 'initial_membership'::text])) AND (subscription_id IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'stripe_resume_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'account_updater'::text])))
-
-table billing.provider_mutation_logs
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column rail text NOT NULL
-  column psp_id uuid
-  column provider_intent_id uuid
-  column intent_type text
-  column idempotency_key text
-  column attempt integer NOT NULL
-  column phase text NOT NULL
-  column reason text
-  column evidence jsonb
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column custodian_id uuid
-  column origin text
-  column actor text
-  column executor text
-  column operation_id uuid
-  column subscription_id uuid
-  column reason_code text
-  constraint provider_mutation_logs_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
-  constraint provider_mutation_logs_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
-  constraint provider_mutation_logs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint provider_mutation_logs_phase_check CHECK ((phase = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
-  constraint provider_mutation_logs_pkey PRIMARY KEY (merchant_id, id)
-  constraint provider_mutation_logs_provider_intent_id_fkey FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id)
-  constraint provider_mutation_logs_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
-  index CREATE INDEX provider_mutation_logs_created_at_idx ON billing.provider_mutation_logs USING btree (merchant_id, created_at DESC)
-  index CREATE INDEX provider_mutation_logs_custodian_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
-  index CREATE INDEX provider_mutation_logs_operation_history_idx ON billing.provider_mutation_logs USING btree (merchant_id, operation_id, created_at DESC, id DESC) WHERE (phase = ANY (ARRAY['parked'::text, 'attempting'::text, 'succeeded'::text, 'failed'::text]))
-  index CREATE UNIQUE INDEX provider_mutation_logs_pkey ON billing.provider_mutation_logs USING btree (merchant_id, id)
-  index CREATE INDEX provider_mutation_logs_provider_intent_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, provider_intent_id) WHERE (provider_intent_id IS NOT NULL)
-  index CREATE INDEX provider_mutation_logs_psp_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
-  index CREATE INDEX provider_mutation_logs_rail_phase_created_at_idx ON billing.provider_mutation_logs USING btree (rail, phase, created_at DESC)
-  index CREATE INDEX provider_mutation_logs_subscription_history_idx ON billing.provider_mutation_logs USING btree (merchant_id, subscription_id, created_at DESC, id DESC) WHERE (subscription_id IS NOT NULL)
-  trigger CREATE TRIGGER immutable_provider_mutation_log_content BEFORE UPDATE ON billing.provider_mutation_logs FOR EACH ROW WHEN ((NOT ((new.provider_intent_id IS NULL) AND ((to_jsonb(new.*) - 'provider_intent_id'::text) = (to_jsonb(old.*) - 'provider_intent_id'::text))))) EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.provider_schedules
   column merchant_id uuid NOT NULL
@@ -3503,32 +3492,6 @@ function billing.catalog_authored_write()
       IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END $function$
 
-function billing.catalog_price_retired()
-  CREATE OR REPLACE FUNCTION billing.catalog_price_retired()
-   RETURNS trigger
-   LANGUAGE plpgsql
-  AS $function$
-  BEGIN
-   IF NOT OLD.archived AND (NEW.archived OR NEW.key <> OLD.key) THEN
-    INSERT INTO billing.price_key_movements(merchant_id,key,price_id,effective_at,archived) VALUES(OLD.merchant_id,OLD.key,OLD.id,clock_timestamp(),true);
-   END IF;
-   RETURN NEW;
-  END $function$
-
-function billing.catalog_product_offer_state()
-  CREATE OR REPLACE FUNCTION billing.catalog_product_offer_state()
-   RETURNS trigger
-   LANGUAGE plpgsql
-  AS $function$
-  BEGIN
-   IF NEW.archived IS DISTINCT FROM OLD.archived THEN
-    INSERT INTO billing.price_key_movements(merchant_id,key,price_id,effective_at,archived)
-     SELECT p.merchant_id,p.key,p.id,clock_timestamp(),NEW.archived FROM billing.prices p
-     WHERE p.merchant_id=NEW.merchant_id AND p.product_id=NEW.id AND NOT p.archived;
-   END IF;
-   RETURN NEW;
-  END $function$
-
 function billing.check_billing_restore_credit_grants(uuid)
   CREATE OR REPLACE FUNCTION billing.check_billing_restore_credit_grants(p_merchant uuid)
    RETURNS void
@@ -4063,6 +4026,7 @@ function billing.guard_billing_restore_receipt()
                     'nmi_history_months',
                     'nmi_history_reads',
                     'notification_events',
+                    'operation_log',
                     'order_attempts',
                     'order_lines',
                     'orders',
@@ -4072,7 +4036,6 @@ function billing.guard_billing_restore_receipt()
                     'payment_method_versions',
                     'payment_methods',
                     'payments',
-                    'price_key_movements',
                     'price_keys',
                     'price_migrations',
                     'price_psp_bindings',
@@ -4084,7 +4047,6 @@ function billing.guard_billing_restore_receipt()
                     'provider_charge_attributions',
                     'provider_cycle_receipts',
                     'provider_intents',
-                    'provider_mutation_logs',
                     'provider_schedules',
                     'psp_customers',
                     'psp_refresh_watermarks',

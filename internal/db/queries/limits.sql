@@ -1,11 +1,11 @@
 -- name: ListCatalogLimits :many
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY key;
 
 -- name: PageCatalogLimits :many
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(after_key)::text IS NULL OR key > sqlc.narg(after_key)::text)
@@ -13,19 +13,19 @@ ORDER BY key
 LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetCatalogLimit :one
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(limit_key)::text;
 
 -- name: UpsertCatalogLimit :exec
-INSERT INTO billing.catalog_limits (merchant_id, key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards)
+INSERT INTO billing.catalog_limits (merchant_id, key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts)
 VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(limit_key)::text, sqlc.arg(unit)::text, sqlc.arg(reset_kind)::text,
-    sqlc.narg(window_seconds)::int, sqlc.narg(reset_anchor)::text, sqlc.arg(overrun)::text, sqlc.arg(rate_cards)::jsonb
+    sqlc.narg(window_seconds)::int, sqlc.narg(reset_anchor)::text, sqlc.arg(overrun)::text, sqlc.arg(counts)::jsonb
 )
 ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit, reset_kind = EXCLUDED.reset_kind,
     window_seconds = EXCLUDED.window_seconds, reset_anchor = EXCLUDED.reset_anchor, overrun = EXCLUDED.overrun,
-    rate_cards = EXCLUDED.rate_cards, updated_at = now();
+    counts = EXCLUDED.counts, updated_at = now();
 
 -- name: CatalogLimitHasWindows :one
 SELECT EXISTS (
@@ -35,9 +35,9 @@ SELECT EXISTS (
 
 -- name: ListCatalogLimitsUsingMeters :many
 SELECT DISTINCT l.key
-FROM billing.catalog_limits l, jsonb_array_elements(l.rate_cards) card
+FROM billing.catalog_limits l, jsonb_array_elements(l.counts) entry
 WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND card->>'meter' = ANY(sqlc.arg(meter_keys)::text[])
+  AND entry->>'meter' = ANY(sqlc.arg(meter_keys)::text[])
 ORDER BY l.key;
 
 -- name: ListCatalogProductLimits :many

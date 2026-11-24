@@ -23,6 +23,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,6 +43,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -458,6 +460,39 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 	return out, nil
 }
 
+// archiveSource archives a migrated price and, in its transaction, records it
+// in the configuration history as the catalog writer would: the price's
+// archive and its key's move to nothing. It waits for the catalog lock, so no
+// catalog edit's before and after straddle it.
+func (s *PriceMigrationService) archiveSource(ctx context.Context, mid billing.MerchantID, source *models.Price) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.db.NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCatalogRevision(ctx, mid.UUID()); err != nil {
+			return err
+		}
+		prices := catalog.NewPriceService(d)
+		if err := prices.SetArchived(ctx, source.ID, true); err != nil {
+			return err
+		}
+		archived, err := prices.GetByID(ctx, source.ID)
+		if err != nil {
+			return err
+		}
+		product, err := catalog.NewProductService(d).GetByID(ctx, source.ProductID)
+		if err != nil {
+			return err
+		}
+		revision := archived.KeyRevision
+		id := history.PriceObjectID(product.Key, source.Key)
+		return history.Record(ctx, d.Gen(ctx), history.ChangeLog, mid.UUID(), history.ProvenanceAt(ctx, s.now()),
+			history.Entry{ObjectType: billing.LogObjectPrice, ObjectID: id, Action: billing.LogActionArchive, Changes: history.Fields{
+				Version: history.Version, Revision: &revision,
+				Fields: map[string]history.FieldChange{"archived": {Before: json.RawMessage("false"), After: json.RawMessage("true")}},
+			}},
+			history.PriceMoved(product.Key, source.Key, &revision, billing.PriceID(source.PublicID), true))
+	})
+}
+
 // Create records the migration and moves each classified subscription, each
 // provider push recorded with its move.
 func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePriceMigrationParams) (*billing.PriceMigration, error) {
@@ -543,7 +578,7 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 			if source.Archived {
 				continue
 			}
-			if err := s.prices.SetArchived(ctx, source.ID, true); err != nil {
+			if err := s.archiveSource(ctx, mid, source); err != nil {
 				return nil, fmt.Errorf("price migration: archive %s: %w", source.ID, err)
 			}
 		}

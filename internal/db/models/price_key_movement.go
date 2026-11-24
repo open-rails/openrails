@@ -6,15 +6,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// PriceKeyMovement is one entry in a price key's pointer history: at
-// EffectiveAt, Key moved to PriceID. Append-only (a reactivated row gets a
-// second entry), so this log answers what key K sold on date D.
+// PriceKeyMovement is one move of a price key, from its configuration
+// history: from EffectiveAt the key named PriceID or, when Archived, nothing.
+// A reactivated price moves the key again, so the moves answer what key K
+// sold on date D.
 type PriceKeyMovement struct {
-	Archived    bool      `json:"archived"`
 	ID          uuid.UUID `json:"id"`
-	MerchantID  uuid.UUID `json:"merchant_id"`
-	Key         string    `json:"key"`
 	PriceID     uuid.UUID `json:"price_id"`
 	EffectiveAt time.Time `json:"effective_at"`
-	CreatedAt   time.Time `json:"created_at"`
+	Archived    bool      `json:"archived"`
 }

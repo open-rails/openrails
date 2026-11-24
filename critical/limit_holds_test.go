@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,16 +28,16 @@ limits:
     unit: usage_units
     reset: {kind: session, window_seconds: 18000}
     overrun: admit_while_positive
-    rate_cards:
-    - meter: input-tokens
-      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+    counts:
+    - {meter: input-tokens, per: 1000, filter: {model: [small]}}
+    - {meter: input-tokens, weight: 5, per: 1000, filter: {model: [large]}}
   weekly:
     unit: usage_units
     reset: {kind: fixed, window_seconds: 604800, anchor: first_use}
     overrun: admit_while_positive
-    rate_cards:
-    - meter: input-tokens
-      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+    counts:
+    - {meter: input-tokens, per: 1000, filter: {model: [small]}}
+    - {meter: input-tokens, weight: 5, per: 1000, filter: {model: [large]}}
 products:
   pro: {display_name: Pro, limits: {five_hour: "1000", weekly: "1500"}}
   chat: {display_name: Chat, rate_cards: [{meter: input-tokens, price: {model: dynamic, currency: USD}}]}
@@ -51,10 +52,29 @@ limits:
   quota:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {quota: "100"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
+`
+
+// weightedPlan counts input and output tokens toward one cap: output weighs
+// four times input, and a large model's output six more.
+const weightedPlan = `schema_version: 1
+meters:
+  input-tokens: {event_type: chat, value_property: input_tokens, aggregation: sum, group_by: {model: model}}
+  output-tokens: {event_type: chat, value_property: output_tokens, aggregation: sum, group_by: {model: model}}
+limits:
+  tokens:
+    unit: usage_units
+    reset: {kind: lifetime}
+    counts:
+    - {meter: input-tokens, per: 1000}
+    - {meter: output-tokens, weight: 4, per: 1000}
+    - {meter: output-tokens, weight: 6, per: 1000, filter: {model: [large]}}
+products:
+  pro: {display_name: Pro, limits: {tokens: "100"}}
+  chat: {display_name: Chat, rate_cards: [{meter: input-tokens, price: {model: dynamic, currency: USD}}]}
 `
 
 func usageAdmission(w *world, customer billing.CustomerID, id, eventType string, dims map[string]int64, meta map[string]any) billing.AdmitParams {
@@ -203,6 +223,64 @@ func TestLimitHolds(t *testing.T) {
 		require.EqualValues(t, 500, customerLimit(t, w.alpha, customer, "five_hour").Remaining, "the session still has room")
 		_, err := w.alpha.GetAdmission(t.Context(), "next")
 		require.ErrorIs(t, err, billing.ErrNotFound, "a refusal holds nothing")
+	})
+
+	t.Run("OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total", func(t *testing.T) {
+		w := newAuthorityWorld(t).world
+		applyLimits(t, w.alpha, weightedPlan)
+		declared, err := w.alpha.GetLimit(t.Context(), "tokens")
+		require.NoError(t, err)
+		require.Equal(t, []catalog.LimitCount{
+			{Meter: "input-tokens", Weight: 1, Per: 1000},
+			{Meter: "output-tokens", Weight: 4, Per: 1000},
+			{Meter: "output-tokens", Weight: 6, Per: 1000, Filter: map[string][]string{"model": {"large"}}},
+		}, declared.Counts, "weight and per default to 1")
+
+		customer := billing.CustomerID(uuid.New())
+		grantLimitProduct(t, w.alpha, customer, "pro", 48)
+		tokens := func(id, model string, in, out int64) billing.AdmitParams {
+			return usageAdmission(w, customer, id, "chat", map[string]int64{"input_tokens": in, "output_tokens": out}, map[string]any{"model": model})
+		}
+		require.True(t, admitOne(t, w.alpha, tokens("small", "small", 20_000, 5_000)).Allowed(), "20 + 20 units")
+		require.EqualValues(t, 40, customerLimit(t, w.alpha, customer, "tokens").Held)
+		require.True(t, admitOne(t, w.alpha, tokens("large", "large", 1_000, 5_000)).Allowed(), "1 + 20 + 30 units")
+		require.EqualValues(t, 9, customerLimit(t, w.alpha, customer, "tokens").Remaining)
+		requireLimitReached(t, admitOne(t, w.alpha, tokens("ten-in", "small", 10_000, 0)), "tokens")
+		requireLimitReached(t, admitOne(t, w.alpha, tokens("ten-out", "small", 0, 2_500)), "tokens")
+		require.True(t, admitOne(t, w.alpha, tokens("nine", "small", 9_000, 0)).Allowed(), "an estimate that fits exactly")
+		require.Zero(t, customerLimit(t, w.alpha, customer, "tokens").Remaining)
+
+		// Each count rounds half up: 20.5 + 20.5 settle as 42, 1.499 + 20 + 30
+		// as 51, past what was held.
+		captureUsage(t, w.alpha, "small", "chat", map[string]int64{"input_tokens": 20_500, "output_tokens": 5_125}, map[string]any{"model": "small"})
+		captureUsage(t, w.alpha, "large", "chat", map[string]int64{"input_tokens": 1_499, "output_tokens": 5_000}, map[string]any{"model": "large"})
+		line := customerLimit(t, w.alpha, customer, "tokens")
+		require.EqualValues(t, 93, line.Used)
+		require.EqualValues(t, 9, line.Held)
+		require.EqualValues(t, -2, line.Remaining)
+
+		// A gate costs a request by the same counts.
+		other := billing.CustomerID(uuid.New())
+		grantLimitProduct(t, w.alpha, other, "pro", 48)
+		g := newGate(t, w.alpha, openrails.GateDeps{})
+		gateTokens := func(id, model string, in, out int64) billing.AdmitParams {
+			return billing.AdmitParams{RequestID: id, CustomerID: other, Invoker: other.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
+				Usage: &billing.UsageEstimate{EventType: "chat", Dimensions: map[string]int64{"input_tokens": in, "output_tokens": out}, Metadata: map[string]any{"model": model}, Amount: ptr(int64(0))}}
+		}
+		used := func(model string, in, out int64) billing.CaptureUsage {
+			return billing.CaptureUsage{Dimensions: map[string]int64{"input_tokens": in, "output_tokens": out}, Metadata: map[string]any{"model": model}}
+		}
+		eighty := gateAdmit(t, g, gateTokens("eighty", "small", 40_000, 10_000))
+		require.NoError(t, eighty.Capture(t.Context(), used("small", 10_000, 5_000)), "30 units of the 80 held")
+		sixty := gateAdmit(t, g, gateTokens("sixty", "large", 10_000, 5_000))
+		refused, err := g.Admit(t.Context(), gateTokens("past", "large", 1_000, 2_500))
+		require.NoError(t, err)
+		require.False(t, refused.Allowed(), "26 units do not fit the 10 left")
+		require.Equal(t, billing.DenyLimitReached, refused.Refusal().DenyCode)
+		require.Equal(t, "tokens", *refused.Refusal().Limit)
+		require.NoError(t, sixty.Capture(t.Context(), used("large", 10_000, 5_000)))
+		gateFlush(t, g)
+		require.EqualValues(t, 90, customerLimit(t, w.alpha, other, "tokens").Used)
 	})
 
 	t.Run("OR-J23-S14/balance-and-a-monthly-spend-cap-hold-both-or-neither", func(t *testing.T) {

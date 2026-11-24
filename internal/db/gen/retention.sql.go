@@ -139,9 +139,8 @@ type DeleteFinishedOutboxIntentsBeforeParams struct {
 
 // Finished intents that only carried an instruction to a provider. An intent
 // that moved or refused money, enrolled a membership or erased a card is the
-// record of that: it is not one of these types and is never deleted here. A
-// mutation log entry that names a deleted intent keeps its own row and loses
-// the link.
+// record of that: it is not one of these types and is never deleted here. An
+// operation log entry of a deleted intent keeps its row and its operation id.
 func (q *Queries) DeleteFinishedOutboxIntentsBefore(ctx context.Context, arg DeleteFinishedOutboxIntentsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteFinishedOutboxIntentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -285,6 +284,32 @@ func (q *Queries) DeleteMeterPeriodQuantitiesBefore(ctx context.Context, arg Del
 	return result.RowsAffected(), nil
 }
 
+const deleteOperationLogBefore = `-- name: DeleteOperationLogBefore :execrows
+DELETE FROM billing.operation_log
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT ol.id FROM billing.operation_log ol
+    WHERE ol.merchant_id = $1::uuid
+      AND ol.occurred_at < $2::timestamptz
+    ORDER BY ol.occurred_at
+    LIMIT $3::int
+)
+`
+
+type DeleteOperationLogBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteOperationLogBefore(ctx context.Context, arg DeleteOperationLogBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOperationLogBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOrphanPeriodicLeases = `-- name: DeleteOrphanPeriodicLeases :execrows
 DELETE FROM billing.periodic_leases
 WHERE kind IN (
@@ -305,32 +330,6 @@ type DeleteOrphanPeriodicLeasesParams struct {
 // never races a claim.
 func (q *Queries) DeleteOrphanPeriodicLeases(ctx context.Context, arg DeleteOrphanPeriodicLeasesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOrphanPeriodicLeases, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteProviderMutationLogsBefore = `-- name: DeleteProviderMutationLogsBefore :execrows
-DELETE FROM billing.provider_mutation_logs
-WHERE merchant_id = $1::uuid
-  AND id IN (
-    SELECT ml.id FROM billing.provider_mutation_logs ml
-    WHERE ml.merchant_id = $1::uuid
-      AND ml.created_at < $2::timestamptz
-    ORDER BY ml.created_at
-    LIMIT $3::int
-)
-`
-
-type DeleteProviderMutationLogsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteProviderMutationLogsBefore(ctx context.Context, arg DeleteProviderMutationLogsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteProviderMutationLogsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -651,10 +650,10 @@ FROM (
         AND pi.updated_at < $13::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
-    (SELECT DISTINCT ml.merchant_id AS mid
-       FROM billing.provider_mutation_logs ml
-      WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
-        AND ml.created_at < $13::timestamptz
+    (SELECT DISTINCT ol.merchant_id AS mid
+       FROM billing.operation_log ol
+      WHERE ($1::uuid IS NULL OR ol.merchant_id > $1::uuid)
+        AND ol.occurred_at < $13::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pk.merchant_id AS mid

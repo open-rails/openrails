@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 532,
+  "scenario_count": 541,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1004,6 +1004,11 @@
       "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
     },
     {
+      "id": "OR-J31-S16",
+      "journey": "J31",
+      "name": "Stored limit rate cards migrate to counts: a per-unit card becomes one count and a matrix one per priced cell with its filter, the limit's field owner renames, and a card counts cannot express refuses the migration with nothing changed"
+    },
+    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
@@ -1372,6 +1377,16 @@
       "id": "OR-J23-S34",
       "journey": "J23",
       "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
+    },
+    {
+      "id": "OR-J23-S35",
+      "journey": "J23",
+      "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total in Admit and in a gate, and settles each count rounded half up"
+    },
+    {
+      "id": "OR-J23-S36",
+      "journey": "J23",
+      "name": "A catalog naming a limit's rate_cards is refused with their rename to counts, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
     },
     {
       "id": "OR-J29-S07",
@@ -2662,6 +2677,36 @@
       "id": "OR-J46-S07",
       "journey": "J46",
       "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the deployment's destructive switch it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; the merchant's own stop holds it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J43-S08",
+      "journey": "J43",
+      "name": "An operation's attempting entry is written before its provider call and outlives the process dying mid-call; recovery only appends"
+    },
+    {
+      "id": "OR-J43-S09",
+      "journey": "J43",
+      "name": "A subscription's history reads its provider operations from the operations history, each entry once with its phase, kind, attempt and attribution"
+    },
+    {
+      "id": "OR-J43-S10",
+      "journey": "J43",
+      "name": "A price key's moves to a new version, an archive and back are configuration history entries with the key's revision, and a price's history reads them"
+    },
+    {
+      "id": "OR-J43-S11",
+      "journey": "J43",
+      "name": "The breaker marks a destructive attempt sent before its provider call, and its phases are written ahead with their actor"
+    },
+    {
+      "id": "OR-J43-S12",
+      "journey": "J43",
+      "name": "A price migration's source archive waits for the catalog lock another writer holds, then is recorded once, as the migration's, with the key's move to nothing"
+    },
+    {
+      "id": "OR-J43-S13",
+      "journey": "J43",
+      "name": "A parked or stale claim never counts as sent: a stale executor marks nothing, and a park of an admitted attempt clears its mark"
     }
   ]
 }

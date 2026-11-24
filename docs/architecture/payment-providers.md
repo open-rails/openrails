@@ -35,9 +35,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    destructive switch and the `VolumeBreaker`. A refusal parks it, refunding the
    attempt, for `ParkRetryInterval` (5 minutes); one no longer relevant is
    superseded, and a collection held by write posture goes unknown and is read back.
-3. It appends an `attempting` row to `provider_mutation_logs` and calls
-   `Execute`. A charge first calls `Store.RequireClaim` on its own connection:
-   the claim must still hold a lease beyond `ProviderCallHold` (30 s).
+3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
 4. The outcome is written on a detached context (`LedgerWriteContext`):
    `succeeded`, `failed_retryable` (provably not executed), `unknown_needs_verify`,
    `failed_terminal`, or parked. A lapsed lease becomes unknown, never a
@@ -231,16 +229,13 @@ Checks:
 
 ### 6. Data lifecycle
 
-In `internal/retention/tables.go`, instruction-only operations
-(`OutboxIntentTypes`) and `provider_mutation_logs` go after 25 months;
-`webhook_events` and released parks after 90 days; resolved findings after 12
-months; money-moving operations and provider bills, schedules and receipts are
-permanent. None is partitioned.
+In `internal/retention/tables.go`, instruction-only operations (`OutboxIntentTypes`) and `operation_log` entries go after 25 months; `webhook_events` and released parks after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
 
 Checks:
 - Each table comment's `Retention:` sentence matches its `tables.go` rule (`State` tables carry none).
 - `provider_intents_updated_at_idx`, `DeleteFinishedOutboxIntentsBefore` and `OutboxIntentTypes` list the same types; nothing checks it.
-- OR-J29-S06: retention and export refuse to discard unresolved money; `immutable_provider_mutation_log_content` blocks log edits.
+- OR-J29-S06: retention and export refuse to discard unresolved money; `immutable_operation_log` blocks log edits.
+- OR-J43-S08: an operation's `attempting` entry is written before its provider call and outlives a crash; OR-J43-S11: the breaker counts an in-flight attempt only once `sent_attempt` names it.
 
 ### 7. Work scales with activity
 
@@ -280,7 +275,7 @@ and `credential`; uncertainty never triggers a compensating cancel or refund.
 Checks:
 - `Runner.executeOne` checks `AllowDestructive` and `Breaker.Check` before `Execute`.
 - OR-J34-S06, S30: a held webhook cancel keeps access; the switch turned off mid-pull holds its retractions.
-- `PlanUndoRun` refuses `NeverRollbackableTables` (including `provider_mutation_logs` and `webhook_events`); OR-J38-S71 spends the actor allowance once per subscription.
+- `PlanUndoRun` refuses `NeverRollbackableTables` (including `operation_log` and `webhook_events`); OR-J38-S71 spends the actor allowance once per subscription.
 
 ## Tests
 

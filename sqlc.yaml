@@ -14,6 +14,8 @@ sql:
       - "internal/migrate/postgres/0009_order_keys_and_cancel_kinds.up.sql"
       - "internal/migrate/postgres/0010_credit_grants.up.sql"
       - "internal/migrate/postgres/0011_disputes.up.sql"
+      - "internal/migrate/postgres/0012_operation_log.up.sql"
+      - "internal/migrate/postgres/0013_limit_counts.up.sql"
       - "internal/migrate/postgres/0018_contact_erasure_admission.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

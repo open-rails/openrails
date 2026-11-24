@@ -396,41 +396,27 @@ func ValidateRateCard(where string, rc *catalog.RateCard) error {
 	return ValidateUsageAllowance(where, rc.Price, rc.Allowance)
 }
 
-// ValidateLimitRateCard normalizes and validates a limit's rate card: a usage
-// price on a meter, in the limit's unit, so it names no currency, and never
-// an event's stated amount. Meters are checked to exist by the caller.
-func ValidateLimitRateCard(where string, rc *catalog.LimitRateCard) error {
-	rc.Meter = NormalizeKey(rc.Meter)
-	if rc.Meter == "" {
-		return fmt.Errorf("%s: a limit's rate card requires a meter", where)
+// ValidateLimitCount normalizes and validates a limit's count of a meter:
+// weight and per default to 1. Meters are checked to exist by the caller.
+func ValidateLimitCount(where string, c *catalog.LimitCount) error {
+	c.Meter = NormalizeKey(c.Meter)
+	if c.Meter == "" {
+		return fmt.Errorf("%s: a limit's count requires a meter", where)
 	}
-	if strings.TrimSpace(string(rc.Price.Currency)) != "" {
-		return fmt.Errorf("%s: a limit's rate card prices in the limit's unit and names no currency", where)
+	if c.Weight < 0 || c.Per < 0 {
+		return fmt.Errorf("%s: weight and per must be positive", where)
 	}
-	if err := ValidateUsagePrice(where, &rc.Price); err != nil {
-		return err
-	}
-	if rc.Price.Model == catalog.ModelDynamic {
-		return fmt.Errorf("%s: a limit's rate card cannot take an event's stated amount", where)
-	}
-	if rc.Filter != nil {
-		if err := ValidateFilter(where, &rc.Filter); err != nil {
+	c.Weight, c.Per = max(c.Weight, 1), max(c.Per, 1)
+	if c.Filter != nil {
+		if err := ValidateFilter(where, &c.Filter); err != nil {
 			return err
 		}
-		for key, values := range rc.Filter {
+		for key, values := range c.Filter {
 			slices.Sort(values)
-			rc.Filter[key] = values
+			c.Filter[key] = values
 		}
-		if len(rc.Filter) == 0 {
-			rc.Filter = nil
-		}
-	}
-	if rc.Price.PerUnit != nil {
-		if rc.Price.PerUnit.DivideBy == 0 {
-			rc.Price.PerUnit.DivideBy = 1
-		}
-		if rc.Price.PerUnit.Round == "" {
-			rc.Price.PerUnit.Round = catalog.RoundHalfUp
+		if len(c.Filter) == 0 {
+			c.Filter = nil
 		}
 	}
 	return nil

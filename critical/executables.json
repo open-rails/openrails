@@ -520,6 +520,12 @@
     "OR-J23-S34": [
       "TestLimitHolds/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
     ],
+    "OR-J23-S35": [
+      "TestLimitHolds/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
+    ],
+    "OR-J23-S36": [
+      "TestUsageLimits/OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -768,6 +774,11 @@
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
+    ],
+    "OR-J31-S16": [
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/converts-per-unit-cards",
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
     ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
@@ -1689,6 +1700,24 @@
     ],
     "OR-J46-S13": [
       "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
+    ],
+    "OR-J43-S08": [
+      "TestOperationsHistory/OR-J43-S08/an-operation-is-recorded-before-its-provider-call-and-survives-a-crash"
+    ],
+    "OR-J43-S09": [
+      "TestOperationsHistory/OR-J43-S09/a-subscriptions-history-reads-its-operations-from-the-operations-history"
+    ],
+    "OR-J43-S10": [
+      "TestOperationsHistory/OR-J43-S10/a-price-keys-moves-are-configuration-history-with-their-revisions"
+    ],
+    "OR-J43-S11": [
+      "TestOperationsHistory/OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call"
+    ],
+    "OR-J43-S12": [
+      "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
+    ],
+    "OR-J43-S13": [
+      "TestOperationsHistory/OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent"
     ],
     "OR-J01-S20": [
       "TestRoutePermissions/OR-J01-S20/every-route-refuses-a-credential-without-its-permission"

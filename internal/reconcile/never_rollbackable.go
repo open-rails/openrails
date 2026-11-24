@@ -5,8 +5,8 @@ import "fmt"
 // NeverRollbackableTables lists the tables no rollback may restore, with why;
 // PlanUndoRun refuses a run that would restore one:
 // the money spine, the grant log every derived effect is recomputed from, the
-// lifecycle audit trail, the provider mutation record and webhook dedup. A
-// rollback restores state wrongly destroyed; it never retracts value wrongly
+// lifecycle audit trail, the operations and configuration histories and
+// webhook dedup. A rollback restores state wrongly destroyed; it never retracts value wrongly
 // granted (that is a revoke, a compensating transfer and a refund).
 var NeverRollbackableTables = map[string]string{
 	"ledger_transfers": "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the counter trigger silently corrupts every balance read",
@@ -17,11 +17,11 @@ var NeverRollbackableTables = map[string]string{
 	"credit_grant_events":             "the revocations a lot's revoked_at follows; a reversal appends a reinstatement, never rewinds",
 	"subscription_billing_changes":    "subscription billing audit; never rewound",
 	"subscription_status_transitions": "lifecycle audit trail; a reversal appends to it, never rewinds it",
-	"provider_mutation_logs":          "the record of what we did to the outside world — the divergence manifest an undo READS, never edits",
+	"operation_log":                   "the record of what we did to the outside world — the divergence manifest an undo READS, never edits",
 	"webhook_events": "dedup truth (IDEM-11). Roll it back and every webhook after T becomes re-processable: duplicate grants, " +
 		"duplicate charges, duplicate cancels",
 	"reconciliation_findings": "forensics: a rollback that erases the evidence of what went wrong defeats itself",
-	"price_key_movements":     "forensics: price-identity history",
+	"change_log":              "configuration history, price-key moves included: forensics an undo reads, never rewinds",
 	"disputes":                "provider facts: the network counted the dispute whatever a rollback restores",
 	"fraud_reports":           "provider facts: the network counted the report whatever a rollback restores",
 }
@@ -39,7 +39,7 @@ var NeverRollbackableTables = map[string]string{
 // reverse, mapped to what the operator must reach for instead. Refusing them by
 // name beats attempting a reversal that would silently restore nothing.
 var UnrecoverableRunKinds = map[string]string{
-	"merchant_purge": "a merchant purge hard-DELETEs append-only Class A rows (grants, the ledger, the intent and mutation logs). " +
+	"merchant_purge": "a merchant purge hard-DELETEs append-only Class A rows (grants, the ledger, the intents and the operations history). " +
 		"Nothing local restores them: recovery is tier 0 (cluster PITR) or a tier 2 snapshot taken before the purge",
 }
 

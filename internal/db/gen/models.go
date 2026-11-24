@@ -90,11 +90,11 @@ type BillingCatalogFieldOwner struct {
 	SetAt time.Time
 }
 
-// Usage limits the merchant declares: what a limit counts (its unit and rate cards), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
+// Usage limits the merchant declares: what a limit counts (its unit and counts), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
 type BillingCatalogLimit struct {
 	MerchantID uuid.UUID
 	Key        string
-	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no rate cards.
+	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no counts.
 	Unit      string
 	ResetKind string
 	// The window of a fixed, session, rolling or rate limit; null for billing_period and lifetime.
@@ -102,12 +102,12 @@ type BillingCatalogLimit struct {
 	// What a fixed window tiles from: the customer's subscription or its first use; null for every other reset.
 	ResetAnchor *string
 	Overrun     string
-	// How usage counts toward the limit: rate cards (meter, filter, price) priced in the limit's unit, in declaration order.
-	RateCards []byte
 	// Advances on every change to the limit.
 	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// How usage counts toward the limit: each count (meter, weight, per, filter) adds an event's quantity × weight ÷ per, rounded half up, in declaration order.
+	Counts []byte
 }
 
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
@@ -1055,6 +1055,33 @@ type BillingNotificationIssueRevision struct {
 	SourceEvent *uuid.UUID
 }
 
+// Operations history: each phase of each provider operation OpenRails ran (attempting before the provider call, then its result or a hold), who wanted it and where it was sent. Attempting and result entries are written ahead, on their own, and never rolled back; a hold commits with the intent's transition. Append-only: only retention and a merchant purge delete. Retention: rows are deleted 25 months (761 days) after occurred_at.
+type BillingOperationLog struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	OccurredAt time.Time
+	// Who wanted the operation: staff:<invoker>, customer:<invoker>, provider:<rail>, or system.
+	Actor      string
+	Source     string
+	ObjectType string
+	// The provider intent's id; an entry whose intent was never recorded names itself.
+	ObjectID string
+	Action   string
+	// Version 1: the intent type (kind), attempt, origin, executor, idempotency key, the outcome's scrubbed reason, a hold's reason_code and scrubbed evidence. Never credentials, card data or provider bodies.
+	Changes   []byte
+	Reason    *string
+	RequestID *string
+	// The provider intent the entry belongs to; kept after retention deletes the intent.
+	OperationID *uuid.UUID
+	Rail        string
+	// The PSP the operation was sent to. Required unless it was sent to a custodian (operation_log_addressed_check).
+	PspID *uuid.UUID
+	// The custodian the operation was sent to, for custodian-addressed intents.
+	CustodianID *uuid.UUID
+	// The subscription the operation acted on, for a subscription's history.
+	SubscriptionID *uuid.UUID
+}
+
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
@@ -1492,17 +1519,6 @@ type BillingPriceKey struct {
 	UpdatedAt  time.Time
 }
 
-// Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
-type BillingPriceKeyMovement struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Key         string
-	PriceID     uuid.UUID
-	EffectiveAt time.Time
-	CreatedAt   time.Time
-	Archived    bool
-}
-
 // One move of subscribers from a price (from_price_id), or from every version of a price key but the target (from_product_id, from_price_key), to to_price_id at each subscription's first renewal on or after effective_at. Matched and skipped are facts of creation (a skipped subscription gets no scheduled change); progress is counted from the scheduled_changes that carry price_migration_id. Its command settles when its last move resolves. Retention: permanent, never pruned.
 type BillingPriceMigration struct {
 	MerchantID    uuid.UUID
@@ -1717,33 +1733,8 @@ type BillingProviderIntent struct {
 	Credential *string
 	// Original admitted command; recovery and necessary consequences reuse its authority and never spend another unit.
 	DestructiveActionID *uuid.UUID
-}
-
-// Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.
-type BillingProviderMutationLog struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed_check).
-	PspID            *uuid.UUID
-	ProviderIntentID *uuid.UUID
-	IntentType       *string
-	IdempotencyKey   *string
-	Attempt          int32
-	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
-	Phase  string
-	Reason *string
-	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
-	Evidence  []byte
-	CreatedAt time.Time
-	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
-	CustodianID    *uuid.UUID
-	Origin         *string
-	Actor          *string
-	Executor       *string
-	OperationID    *uuid.UUID
-	SubscriptionID *uuid.UUID
-	ReasonCode     *string
+	// The attempt the destructive-volume breaker last admitted to the provider, set under its lock before the call. An in_flight intent counts against the breaker's budget only while this is its current attempt: a claim alone sends nothing.
+	SentAttempt *int32
 }
 
 // Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.

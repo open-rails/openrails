@@ -194,15 +194,17 @@ type LeaseWantResult struct {
 }
 
 // Hold is capacity set aside for one customer and limit set, in each limit's
-// window. RateCards count usage toward it and PriceBounds bound its money
-// price. Safe is money, the hold's balance size, that its gate may spend
-// unreserved while OpenRails is unreachable; null unless the merchant sets
-// usage_gate_safe_spend. It never covers unit limits.
+// window. Counts count usage toward its unit limits; RateCards price it in
+// money and PriceBounds bound that price. Safe is money, the hold's balance
+// size, that its gate may spend unreserved while OpenRails is unreachable;
+// null unless the merchant sets usage_gate_safe_spend. It never covers unit
+// limits.
 type Hold struct {
 	CustomerID  CustomerID       `json:"customer_id"`
 	LimitSet    string           `json:"limit_set"`
 	Currency    catalog.Currency `json:"currency"`
 	Limits      []HoldLimit      `json:"limits"`
+	Counts      []HoldCount      `json:"counts"`
 	RateCards   []HoldRateCard   `json:"rate_cards"`
 	PriceBounds []PriceBound     `json:"price_bounds"`
 	Safe        *int64           `json:"safe,string"`
@@ -222,12 +224,24 @@ type HoldLimit struct {
 	WindowEndsAt   *time.Time      `json:"window_ends_at"`
 }
 
-// HoldRateCard is how a gate counts usage toward a hold: a meter as the
-// catalog declares it and the rate card that prices it. A card with a Limit
-// counts toward that unit limit, priced in its unit; one without prices
-// money, pinned with the hold and bounded by its PriceBounds.
+// HoldCount is how a gate counts usage toward one unit limit of a hold: a
+// meter as the catalog declares it and the limit's count of it.
+type HoldCount struct {
+	Limit         string              `json:"limit"`
+	Meter         string              `json:"meter"`
+	EventType     string              `json:"event_type"`
+	ValueProperty string              `json:"value_property"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	GroupBy       map[string]string   `json:"group_by"`
+	Filter        map[string][]string `json:"filter"`
+	Weight        int64               `json:"weight"`
+	Per           int64               `json:"per"`
+}
+
+// HoldRateCard is how a gate prices a hold's usage in money: a meter as the
+// catalog declares it and the rate card that prices it, pinned with the hold
+// and bounded by its PriceBounds.
 type HoldRateCard struct {
-	Limit         *string             `json:"limit"`
 	Meter         string              `json:"meter"`
 	EventType     string              `json:"event_type"`
 	ValueProperty string              `json:"value_property"`

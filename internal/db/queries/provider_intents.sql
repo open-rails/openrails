@@ -79,6 +79,11 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
         ELSE billing.provider_intents.attempts
     END,
+    -- A revived intent's attempts restart, and with them the sent mark.
+    sent_attempt = CASE
+        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE billing.provider_intents.sent_attempt
+    END,
     last_failure_reason = CASE
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
         ELSE billing.provider_intents.last_failure_reason
@@ -221,10 +226,12 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
 -- recorded and the claim's attempts bump undone — a park is not a failure and
--- must not escalate backoff.
+-- must not escalate backoff — and the breaker's sent mark cleared, or the
+-- next claim of the same attempt would count as sent.
 -- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
+    sent_attempt = NULL,
 	result_evidence = CASE WHEN sqlc.narg(recovery_evidence)::jsonb IS NULL THEN result_evidence
 	  ELSE COALESCE(result_evidence, '{}'::jsonb) || sqlc.narg(recovery_evidence)::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
@@ -298,8 +305,8 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Destructive intents that reached the provider in the rolling window: succeeded
 -- by executed_at, unresolved outcomes (unknown_needs_verify, failed_*) by last
--- transition, and in_flight ones only once their current attempt is logged (a
--- claim alone sends nothing). Parks were never attempted.
+-- transition, and in_flight ones only once the breaker sent their current
+-- attempt (a claim alone sends nothing). Parks were never attempted.
 -- name: CountDestructiveProviderIntentsExecutedSince :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -310,15 +317,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         OR (status IN ('unknown_needs_verify', 'failed_retryable', 'failed_terminal')
             AND updated_at >= sqlc.arg(since)::timestamptz)
         -- admitted by the breaker and executing now
-        OR (status = 'in_flight' AND EXISTS (
-              SELECT 1 FROM billing.provider_mutation_logs l
-              WHERE l.merchant_id = provider_intents.merchant_id AND l.provider_intent_id = provider_intents.id
-                AND l.phase = 'attempting' AND l.attempt = provider_intents.attempts))
+        OR (status = 'in_flight' AND sent_attempt = attempts)
       );
 
+-- name: MarkProviderIntentSent :execrows
+-- The breaker admits the in-flight intent's current attempt to the provider:
+-- only the claim that holds it, never a stale executor's.
+UPDATE billing.provider_intents SET sent_attempt = attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'in_flight'
+  AND attempts = sqlc.arg(attempt)::int;
+
 -- name: LockDestructiveBreaker :exec
--- Serializes one merchant's breaker admissions; an admission records its
--- attempt before the lock is released, so the next check counts it.
+-- Serializes one merchant's breaker admissions; an admission marks its
+-- attempt sent before the lock is released, so the next check counts it.
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || sqlc.arg(merchant_id)::uuid::text, 0));
 
 -- The breaker's budget baseline: max(floor, pct of active subscriptions).

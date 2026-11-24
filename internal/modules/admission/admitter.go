@@ -206,7 +206,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	resolved, policy, sgReq := g.resolved, g.policy, g.request
 
 	// Usage limits the request counts toward: those in its currency claim its
-	// money estimate, named units what their rate cards count of its usage.
+	// money estimate, named units what their counts make of its usage.
 	claims, err := a.limitClaims(ctx, q, tid.UUID(), req)
 	if err != nil {
 		return AdmitDecision{}, err

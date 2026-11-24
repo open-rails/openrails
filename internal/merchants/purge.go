@@ -24,9 +24,8 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // merchantOwnedTables are the openrails.* tables that carry the persisted
 // merchant_id column, IN PURGE ORDER: children before the rows they reference.
 //
-// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices,
-// order_attempts→payments and provider_mutation_logs→provider_intents are all
-// RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
+// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices
+// and order_attempts→payments are all RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
 // whole purge (SQLSTATE 23001) for any merchant that owned a product with a
 // price — i.e. every real one. Nothing caught it because the only test seeded a
 // single entitlement row.
@@ -38,7 +37,7 @@ var merchantOwnedTables = []string{
 	"notification_events", "customer_messages",
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
-	"provider_mutation_logs", "provider_intents",
+	"operation_log", "provider_intents",
 	"order_attempts", "product_access", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
@@ -89,8 +88,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
 		return q.CountMerchantRowsOrderAttempts(ctx, id)
-	case "provider_mutation_logs":
-		return q.CountMerchantRowsExternalProviderMutationLogs(ctx, id)
+	case "operation_log":
+		return q.CountMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
@@ -139,8 +138,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
 		return q.PurgeMerchantRowsOrderAttempts(ctx, id)
-	case "provider_mutation_logs":
-		return q.PurgeMerchantRowsExternalProviderMutationLogs(ctx, id)
+	case "operation_log":
+		return q.PurgeMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
@@ -171,9 +170,9 @@ func notCaptured(counts map[string]int, secrets int) []string {
 				"know which vault tokens exist to be revoked. Only the end user deletes their own "+
 				"instrument; a purge must not be used as a way to.", n))
 	}
-	if n := counts["provider_intents"] + counts["provider_mutation_logs"]; n > 0 {
+	if n := counts["provider_intents"] + counts["operation_log"]; n > 0 {
 		out = append(out, fmt.Sprintf(
-			"THE PROVIDER-WRITE AUDIT TRAIL (%d rows across provider_intents and provider_mutation_logs). "+
+			"THE PROVIDER-WRITE AUDIT TRAIL (%d rows across provider_intents and the operations history, operation_log). "+
 				"The record of every external write this deployment attempted for the merchant is "+
 				"destroyed with it, including intents queued but never fired.", n))
 	}

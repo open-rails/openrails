@@ -45,12 +45,12 @@ type CatalogPSPIdentity struct {
 	AccountID   string `json:"account_id"`
 }
 
-// The order is also the foreign-key insertion order. These are all eleven
+// The order is also the foreign-key insertion order. These are all ten
 // persisted catalog tables; product/rate-card state prior to updates was never
-// retained and cannot be reconstructed by an export. Price keys are rebuilt
-// by the prices triggers.
+// retained and cannot be reconstructed by an export, and a snapshot carries no
+// configuration history. Price keys are rebuilt by the prices triggers.
 var catalogProfiles = func() []contract.Profile {
-	names := []string{"catalog_meters", "catalog_limits", "products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_product_limits", "catalog_field_owners", "catalog_applications"}
+	names := []string{"catalog_meters", "catalog_limits", "products", "product_entitlements", "prices", "price_psp_bindings", "catalog_rate_cards", "catalog_product_limits", "catalog_field_owners", "catalog_applications"}
 	out := make([]contract.Profile, 0, len(names))
 	for _, name := range names {
 		for _, p := range contract.Profiles {
@@ -187,10 +187,14 @@ func catalogDigest(document CatalogSnapshot) (string, error) {
 // migration 15 converts them. The digest is the original document's.
 func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
 	document = withoutRateOverrides(document)
-	if _, historical := document.Tables["product_archive_operations"]; historical {
-		// Product archive operations were removed by migration 66.
-		document.Tables = maps.Clone(document.Tables)
-		delete(document.Tables, "product_archive_operations")
+	for _, historical := range []string{"product_archive_operations", "price_key_movements"} {
+		if _, ok := document.Tables[historical]; ok {
+			// Product archive operations were removed by migration 66; price
+			// key movements are configuration history since migration 0018,
+			// which a snapshot does not carry.
+			document.Tables = maps.Clone(document.Tables)
+			delete(document.Tables, historical)
+		}
 	}
 	for _, added := range []string{"catalog_limits", "catalog_product_limits"} {
 		if _, current := document.Tables[added]; !current {

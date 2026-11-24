@@ -210,13 +210,10 @@ Checks:
 - A new reversal kind adds to the `reversal_kind` CHECK and `billing.PaymentKind`.
 
 ### 6. Data lifecycle
-`payments` is permanent, soft-deleted only by `openrails prune`. Refund intents
-are permanent (they moved or refused money); `provider_mutation_logs` rows go after
-25 months, `webhook_events` 90 days after completion. Nothing here is partitioned.
+`payments` is permanent, soft-deleted only by `openrails prune`. Refund intents are permanent (they moved or refused money); `operation_log` entries go after 25 months, `webhook_events` 90 days after completion. Nothing here is partitioned.
 
 Checks:
-- `internal/retention/tables.go`: `payments` `Permanent`, `provider_mutation_logs`
-  `Rows`, `provider_intents` `Rows` but kept when it moved or refused money.
+- `internal/retention/tables.go`: `payments` `Permanent`, `operation_log` `Rows`, `provider_intents` `Rows` but kept when it moved or refused money.
 - Reads filter `deleted_at IS NULL` (`ListRefundsForPayment`,
   `ListRefundRowsForTotal`).
 
