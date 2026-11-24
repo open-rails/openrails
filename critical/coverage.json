@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 643,
+  "scenario_count": 652,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -879,6 +879,41 @@
       "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
+      "id": "OR-J24-S58",
+      "journey": "J24",
+      "name": "A capture retried after a commit that was lost, and a lease item that names no occurred_at resent after one, each find the event the first attempt inserted and charge once"
+    },
+    {
+      "id": "OR-J24-S59",
+      "journey": "J24",
+      "name": "An item resent after a commit that was lost counts in the session window its first attempt opened, not one opened at the resend"
+    },
+    {
+      "id": "OR-J24-S60",
+      "journey": "J24",
+      "name": "A sync whose caller gives up while its insert is sent still finishes the insert before it lets go of its locks: the resend inserts nothing and the rollups count each item once"
+    },
+    {
+      "id": "OR-J24-S61",
+      "journey": "J24",
+      "name": "A lot lapsing mid-month funds exactly the usage and running charges before its lapse, however much usage came after it; only that usage is owed"
+    },
+    {
+      "id": "OR-J24-S62",
+      "journey": "J24",
+      "name": "Usage the event store lost after it posted is not a price that fell: usage since is charged on top of what posted, and nothing that posted is credited back"
+    },
+    {
+      "id": "OR-J24-S63",
+      "journey": "J24",
+      "name": "A usage erasure that stopped between folding the history and deleting its invokers' rows, run again, leaves each event in the history once"
+    },
+    {
+      "id": "OR-J24-S64",
+      "journey": "J24",
+      "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
       "id": "OR-J25-S01",
       "journey": "J25",
       "name": "Start and stop charge account for the exact known elapsed segment"
@@ -1132,6 +1167,11 @@
       "id": "OR-J32-S06",
       "journey": "J32",
       "name": "Merchant purge removes the directory's contacts and provisioning tokens"
+    },
+    {
+      "id": "OR-J32-S07",
+      "journey": "J32",
+      "name": "A merchant purge whose deletion from the event store fails commits and queues the job that deletes it, which River retries until the store takes it"
     },
     {
       "id": "OR-J34-S01",
@@ -2457,6 +2497,11 @@
       "id": "OR-J25-S05",
       "journey": "J25",
       "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
+    },
+    {
+      "id": "OR-J25-S43",
+      "journey": "J25",
+      "name": "While ClickHouse is out of reach a balance look at a customer without unposted usage expires its lapsed lot"
     },
     {
       "id": "OR-J29-S37",

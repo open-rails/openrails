@@ -131,8 +131,6 @@ type PeriodQuantity struct {
 	Meter, Cell, Print string
 	Quantity, Stated   int64
 	Requests           int64
-	// Later counts a posting read's usage at or after its cut.
-	Later int64
 }
 
 // PeriodQuantities are customers' quantities of the pricing periods from one
@@ -160,37 +158,113 @@ func (s *Store) PeriodQuantities(ctx context.Context, customers []billing.Custom
 FROM {database}.usage_quantities
 WHERE merchant_id = %s AND customer_id IN (%s)%s AND period_starts_at >= %s
 GROUP BY customer_id, currency, period_starts_at, meter, cell, print`, mid, strings.Join(who, ", "), narrow, timeLiteral(from))
-	return s.quantities(ctx, sql, false)
+	return s.quantities(ctx, sql)
+}
+
+// Quantities are usage's quantity, stated amounts and requests.
+type Quantities struct {
+	Quantity, Stated, Requests int64
+}
+
+// PostingQuantity is what a posting reads of a customer's usage of one meter
+// cell under one card print in a pricing period, before its cut: Read is the
+// usage an earlier posting may have taken (it occurred before that posting's
+// cut and was ingested by its watermark), Fresh the rest. Later counts the
+// usage at or after the cut, and IngestedThrough is the latest ingestion
+// before it.
+type PostingQuantity struct {
+	PeriodStartsAt     time.Time
+	Meter, Cell, Print string
+	Read, Fresh        Quantities
+	Later              int64
+	IngestedThrough    time.Time
+}
+
+// PostingWatermark is how far earlier postings read a customer's usage: what
+// occurred before Cut and was ingested by Ingested. Zero is no posting.
+type PostingWatermark struct {
+	Cut, Ingested time.Time
 }
 
 // PostingQuantities are a customer's deduplicated quantities in a currency of
-// the pricing periods from one start on, of the usage that occurred before
-// cut, each with how much occurred at or after it (Later): what a posting
-// takes.
-func (s *Store) PostingQuantities(ctx context.Context, customer billing.CustomerID, currency string, from, cut time.Time) ([]PeriodQuantity, error) {
+// the pricing periods from one start on, split at an earlier posting's
+// watermark: what a posting cut at cut takes.
+func (s *Store) PostingQuantities(ctx context.Context, customer billing.CustomerID, currency string, from, cut time.Time, prior PostingWatermark) ([]PostingQuantity, error) {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c := timeLiteral(cut)
-	sql := fmt.Sprintf(`SELECT customer_id, currency, period_starts_at, charges.meter, charges.cell, charges.print, sumIf(charges.quantity, occurred_at < %[1]s),
-       sumIf(charges.stated, occurred_at < %[1]s), toInt64(countIf(occurred_at < %[1]s)), toInt64(countIf(occurred_at >= %[1]s))
+	before := "occurred_at < " + timeLiteral(cut)
+	read := "0"
+	if !prior.Cut.IsZero() && !prior.Ingested.IsZero() {
+		read = "occurred_at < " + timeLiteral(prior.Cut) + " AND ingested_at <= " + timeLiteral(prior.Ingested)
+	}
+	sql := fmt.Sprintf(`SELECT period_starts_at, charges.meter, charges.cell, charges.print,
+       sumIf(charges.quantity, %[1]s AND %[2]s), sumIf(charges.stated, %[1]s AND %[2]s), toInt64(countIf(%[1]s AND %[2]s)),
+       sumIf(charges.quantity, %[1]s AND NOT (%[2]s)), sumIf(charges.stated, %[1]s AND NOT (%[2]s)), toInt64(countIf(%[1]s AND NOT (%[2]s))),
+       toInt64(countIf(NOT (%[1]s))), maxIf(ingested_at, %[1]s)
 FROM {database}.usage_events FINAL ARRAY JOIN charges
-WHERE merchant_id = %[2]s AND customer_id = %[3]s AND currency = %[4]s AND occurred_at >= %[5]s AND period_starts_at >= %[5]s
-GROUP BY customer_id, currency, period_starts_at, charges.meter, charges.cell, charges.print`, c, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from))
-	return s.quantities(ctx, sql, true)
+WHERE merchant_id = %[3]s AND customer_id = %[4]s AND currency = %[5]s AND occurred_at >= %[6]s AND period_starts_at >= %[6]s
+GROUP BY period_starts_at, charges.meter, charges.cell, charges.print`, before, read, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from))
+	var out []PostingQuantity
+	err = s.query(ctx, "read usage quantities", sql, func(rows interface{ Scan(...any) error }) error {
+		var q PostingQuantity
+		if err := rows.Scan(&q.PeriodStartsAt, &q.Meter, &q.Cell, &q.Print, &q.Read.Quantity, &q.Read.Stated, &q.Read.Requests,
+			&q.Fresh.Quantity, &q.Fresh.Stated, &q.Fresh.Requests, &q.Later, &q.IngestedThrough); err != nil {
+			return err
+		}
+		q.PeriodStartsAt, q.IngestedThrough = q.PeriodStartsAt.UTC(), q.IngestedThrough.UTC()
+		out = append(out, q)
+		return nil
+	})
+	return out, err
 }
 
-func (s *Store) quantities(ctx context.Context, sql string, later bool) ([]PeriodQuantity, error) {
+// PrintSource is a card print's usage: an event type it priced, and when its
+// first event was ingested.
+type PrintSource struct {
+	EventType  string
+	IngestedAt time.Time
+}
+
+// PrintSources are where a customer's usage in a currency from one period
+// start on names prints.
+func (s *Store) PrintSources(ctx context.Context, customer billing.CustomerID, currency string, from time.Time, prints []string) (map[string]PrintSource, error) {
+	out := map[string]PrintSource{}
+	if len(prints) == 0 {
+		return out, nil
+	}
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	named := make([]string, 0, len(prints))
+	for _, p := range prints {
+		named = append(named, stringLiteral(p))
+	}
+	sql := fmt.Sprintf(`SELECT charges.print, any(event_type), min(ingested_at)
+FROM {database}.usage_events ARRAY JOIN charges
+WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND occurred_at >= %s AND period_starts_at >= %s AND charges.print IN (%s)
+GROUP BY charges.print`, mid, uuidLiteral(uuid.UUID(customer)), stringLiteral(currency), timeLiteral(from), timeLiteral(from), strings.Join(named, ", "))
+	err = s.query(ctx, "read usage prints", sql, func(rows interface{ Scan(...any) error }) error {
+		var print string
+		var src PrintSource
+		if err := rows.Scan(&print, &src.EventType, &src.IngestedAt); err != nil {
+			return err
+		}
+		src.IngestedAt = src.IngestedAt.UTC()
+		out[print] = src
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) quantities(ctx context.Context, sql string) ([]PeriodQuantity, error) {
 	var out []PeriodQuantity
 	err := s.query(ctx, "read usage quantities", sql, func(rows interface{ Scan(...any) error }) error {
 		var q PeriodQuantity
 		var customer uuid.UUID
-		dest := []any{&customer, &q.Currency, &q.PeriodStartsAt, &q.Meter, &q.Cell, &q.Print, &q.Quantity, &q.Stated, &q.Requests}
-		if later {
-			dest = append(dest, &q.Later)
-		}
-		if err := rows.Scan(dest...); err != nil {
+		if err := rows.Scan(&customer, &q.Currency, &q.PeriodStartsAt, &q.Meter, &q.Cell, &q.Print, &q.Quantity, &q.Stated, &q.Requests); err != nil {
 			return err
 		}
 		q.CustomerID, q.PeriodStartsAt = billing.CustomerID(customer), q.PeriodStartsAt.UTC()

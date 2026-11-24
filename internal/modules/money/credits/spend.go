@@ -81,22 +81,22 @@ func (l *Lots) LockCustomer(ctx context.Context, customer uuid.UUID) error {
 
 // PostRunningCharges posts what a customer's running charges accrued through
 // an instant, drawing the lots that had not lapsed just before it, and
-// reports whether anything posted. now is the caller's clock. The money
-// package, which owns running charges, installs it.
+// reports whether anything posted. The caller posted the customer's usage
+// before the instant first. now is the caller's clock. The money package,
+// which owns running charges, installs it.
 var PostRunningCharges func(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, through, now time.Time) (posted bool, err error)
 
-// SettleRunningCharges posts what the customer's running charges accrued
-// through an instant, and its usage before it, before a lot is expired,
+// SettleRunningCharges posts the customer's usage before an instant, then
+// what its running charges accrued through it, before a lot is expired,
 // revoked or refunded at it: the lot funds what accrued while it lived.
 func (l *Lots) SettleRunningCharges(ctx context.Context, customer uuid.UUID, unit string, through time.Time) (bool, error) {
-	posted := false
-	if PostRunningCharges != nil {
-		var err error
-		if posted, err = PostRunningCharges(ctx, l.q, l.merchant, customer, unit, through, l.now()); err != nil {
-			return posted, err
-		}
-	}
+	// Usage first: the running charges then post with none of it unposted
+	// before through, so usage after it holds back nothing they may draw.
 	accrued, err := l.settleUsage(ctx, customer, unit, &through)
+	if err != nil || PostRunningCharges == nil {
+		return accrued, err
+	}
+	posted, err := PostRunningCharges(ctx, l.q, l.merchant, customer, unit, through, l.now())
 	return posted || accrued, err
 }
 

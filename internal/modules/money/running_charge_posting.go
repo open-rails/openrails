@@ -40,6 +40,10 @@ func init() { credits.PostRunningCharges = postRunningChargesThrough }
 type runningChargePosting struct {
 	through  time.Time
 	resource string
+	// usagePosted is a posting after the customer's usage before through
+	// posted, or the usage posting itself: it holds no unposted usage, which
+	// as of through is none.
+	usagePosted bool
 	// owed splits what a usage posting leaves owed by meter.
 	owed []owedShare
 	// owedAt dates what a usage posting leaves owed: when its usage
@@ -116,7 +120,7 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 		return row, nil
 	}
 	posting := s.WithDatabase(s.db)
-	posting.posting = &runningChargePosting{through: through}
+	posting.posting = &runningChargePosting{through: through, usagePosted: s.usagePosted}
 	if c.Resource != nil {
 		posting.posting.resource = *c.Resource
 	}
@@ -134,7 +138,8 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 
 // postRunningChargesThrough is credits.PostRunningCharges: it posts every
 // running charge of the customer in the currency through an instant, under the
-// customer lock, on the caller's clock.
+// customer lock, on the caller's clock, once the customer's usage before that
+// instant posted.
 func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, through, now time.Time) (bool, error) {
 	args := gen.ListRunningChargesByCustomerParams{MerchantID: merchantID, CustomerID: customer, Currency: currency}
 	charges, err := q.ListRunningChargesByCustomer(ctx, args)
@@ -144,7 +149,7 @@ func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, 
 	if _, bound := merchant.FromContext(ctx); !bound {
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
 	}
-	svc := &MoneyService{clock: clockwork.NewFakeClockAt(now)}
+	svc := &MoneyService{clock: clockwork.NewFakeClockAt(now), usagePosted: true}
 	payer := identity.CustomerID(customer)
 	if _, err := svc.lockBalance(ctx, q, payer, customer.String(), currency); err != nil {
 		return false, err
@@ -167,14 +172,14 @@ func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, 
 	return posted, nil
 }
 
-// settleRunningCharges posts what the customer's running charges and usage
-// have accrued through now, in the caller's transaction: a read that follows
-// sees what its credit lots hold once that spend is in the ledger.
+// settleRunningCharges posts what the customer's usage and then running
+// charges have accrued through now, in the caller's transaction: a read that
+// follows sees what its credit lots hold once that spend is in the ledger.
 func (s *MoneyService) settleRunningCharges(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) error {
 	now := s.now()
-	if _, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now); err != nil {
+	if _, err := s.postUsageTx(ctx, q, merchantID, customer, currency, now, usagePostingMovement); err != nil {
 		return err
 	}
-	_, err := s.postUsageTx(ctx, q, merchantID, customer, currency, now, usagePostingMovement)
+	_, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now)
 	return err
 }

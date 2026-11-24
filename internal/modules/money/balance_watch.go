@@ -316,10 +316,19 @@ func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watc
 		since = later(since, *prev)
 		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
 	}
+	// Only a customer with unposted usage reads the event store: one without
+	// any looks while it is out of reach.
 	var spent int64
 	if store := s.eventStore(q); store != nil {
-		if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+		_, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
 			return 0, now, err
+		default:
+			if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+				return 0, now, err
+			}
 		}
 	}
 	// Spent within one time constant of an hour is that much per hour.

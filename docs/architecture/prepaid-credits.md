@@ -30,7 +30,7 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
   event store, held as the customer's unposted usage until it posts; a release
   returns the hold (OR-J22-S01).
 - A posting (`postUsageTx`, running-charge postings) runs `spendBalanceThenOwedTx`. The balance leg is capped at what the spendable lots have available (`ListSpendableCreditLots`: started, not lapsed, not revoked, with units left, `credit_grants_live_idx`), and `credits.Lots.Spend` draws them soonest expiry first, one `credit_spend` per lot at the posting's coordinate. The rest is `owed_accrual` plus `owed_items`. A posting of admitted usage is never re-gated (`preAuthorized`): beyond the balance it is owed even without a credit line.
-- Unposted usage posts before a deposit. Before a lot is expired, revoked or refunded, the running charges and usage that accrued while it lived post first (`SettleRunningCharges`, through the `credits.PostRunningCharges` hook and the usage ledger the runtime binds, `db.UsageLedger`).
+- Unposted usage posts before a deposit. Before a lot is expired, revoked or refunded, the usage and then the running charges that accrued while it lived post first (`SettleRunningCharges`, through the usage ledger the runtime binds, `db.UsageLedger`, and the `credits.PostRunningCharges` hook). Those postings hold no unposted usage: as of the lapse there is none, so usage after it never keeps the lot from what came before (OR-J24-S61).
 
 ### Lapse
 

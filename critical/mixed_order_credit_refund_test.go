@@ -138,6 +138,7 @@ func mixedPendingRefund(t *testing.T) {
 	require.NoError(t, captured[0].Err())
 	// The capture accrues; a top-up posts it first, while the refund is
 	// still pending.
+	a.clock.Advance(time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
 	require.NoError(t, err)
 	balance(t, a.alpha, m.customer, 1_000_000, 25_000_000, 26_000_000)

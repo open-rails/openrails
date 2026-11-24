@@ -175,9 +175,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	// A merchant purge's Vault cleanup, queued with the purge.
+	// A merchant purge's Vault cleanup and event store deletion, queued with
+	// the purge.
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.MerchantUsagePurgeWorker{DB: r.DB}); err != nil {
+		return fmt.Errorf("add merchant usage purge worker: %w", err)
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
