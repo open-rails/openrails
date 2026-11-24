@@ -75,7 +75,9 @@ and a reversal takes forgiveness back before it credits
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. The threshold is its currency's
+collections as `order_collection` operations. An order bills the pending owed
+items of its window; its period starts where their charges began (a posting's
+pricing period, a running charge's last posting) and ends at its close. The threshold is its currency's
 `usage_billing` `collection_threshold`, else its credit limit; a billing policy's
 outstanding cap and `collection_threshold_amount` bind only an account in the
 policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is

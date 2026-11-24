@@ -143,7 +143,9 @@ func TestBalanceLooks(t *testing.T) {
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 300, Source: "critical", SourceID: "kept"}})
 			require.NoError(t, err)
 			settled(t, fleet, customer)
-			advanceTo(w, lapse)
+			// A second past it: the look already scheduled for the lapse's
+			// own instant is that instant's one look.
+			advanceTo(w, lapse.Add(time.Second))
 			before := looks(t, fleet, customer)
 			results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "after-the-lapse", 10)})
 			require.NoError(t, err)
