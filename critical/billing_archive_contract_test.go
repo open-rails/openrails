@@ -31,7 +31,7 @@ import (
 func archiveTarget(t *testing.T, source *world, configure ...func(*world)) (*world, *openrails.Client) {
 	t.Helper()
 	configure = append([]func(*world){func(w *world) {
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		w.deps.StripeTransport = source.deps.StripeTransport
 	}}, configure...)
 	target := newWorld(t, configure...)

@@ -40,11 +40,12 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			if strings.TrimSpace(slug) == "" {
 				return fmt.Errorf("--merchant is required")
 			}
+			if cmd.Flags().Changed("provider-write-mode") {
+				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
+			}
 			if serverURL != "" {
-				for _, flag := range []string{"config", "provider-write-mode"} {
-					if cmd.Flags().Changed(flag) {
-						return fmt.Errorf("--%s is local-only and cannot be used with --server-url", flag)
-					}
+				if cmd.Flags().Changed("config") {
+					return fmt.Errorf("--config is local-only and cannot be used with --server-url")
 				}
 				if tokenFile == "" {
 					return fmt.Errorf("remote mode requires --token-file")

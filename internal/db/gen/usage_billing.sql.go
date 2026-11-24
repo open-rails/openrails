@@ -174,32 +174,6 @@ func (q *Queries) InheritMoneyAccountCreditLimit(ctx context.Context, arg Inheri
 	return err
 }
 
-const latestUsageOrderEnd = `-- name: LatestUsageOrderEnd :one
-SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
-WHERE merchant_id=$1::uuid AND customer_id=$2::uuid
-    AND currency=$3::text AND origin='usage'
-    AND period_starts_at=$4::timestamptz
-`
-
-type LatestUsageOrderEndParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Currency    string
-	PeriodStart time.Time
-}
-
-func (q *Queries) LatestUsageOrderEnd(ctx context.Context, arg LatestUsageOrderEndParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, latestUsageOrderEnd,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.PeriodStart,
-	)
-	var period_end time.Time
-	err := row.Scan(&period_end)
-	return period_end, err
-}
-
 const latestUsageOrderEndInCurrency = `-- name: LatestUsageOrderEndInCurrency :one
 SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
 WHERE merchant_id=$1::uuid AND customer_id=$2::uuid

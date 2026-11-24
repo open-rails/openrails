@@ -63,7 +63,7 @@ const (
 	// a provider-billed one whose grace ended unanswered is read by id.
 	dunningOutcomeWindowExpired
 	// dunningOutcomeMaterialized: the charge was queued as a provider
-	// operation, which its own job runs (parked under mode=limited).
+	// operation, which its own job runs (parked under a limited write posture).
 	dunningOutcomeMaterialized
 	// dunningOutcomeSettled: another replica's pass or a concurrent command
 	// resolved the obligation between this pass's scan and its admission.
@@ -119,13 +119,13 @@ func (w *DunningWorker) Pass(ctx context.Context) error {
 }
 
 func (w *DunningWorker) due(ctx context.Context) error {
-	// Charges fire only in mode=full. Under limited the scan still materializes
-	// its decisions: stale subscriptions park as unknown and in-window charges
-	// enqueue as parked system-origin intents, visible in `openrails intents`.
-	// Nothing on this path cancels without a charge. Readonly only observes.
-	// Each merchant's write posture can lower the process's mode (an exported
-	// or restored merchant, a copied book).
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	// Charges fire only under a merchant's full write posture. Under limited
+	// the scan still materializes its decisions: stale subscriptions park as
+	// unknown and in-window charges enqueue as parked system-origin intents,
+	// visible in `openrails intents`. Nothing on this path cancels without a
+	// charge. Readonly (an exported or restored merchant, a copied book) only
+	// observes.
+	postures := writeposture.View{DB: w.DB}
 	if w.NMIResolver == nil && w.EngineCollections == nil {
 		w.Log.WarnContext(ctx, "NMI client resolver not configured; skipping dunning run")
 		return nil
@@ -281,7 +281,7 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 		return errors.New("overdue renewals: lifecycle not wired")
 	}
 	before := now.Add(-reconcile.PeriodGrace)
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	postures := writeposture.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {
@@ -375,10 +375,10 @@ func (w *DunningWorker) processSubscription(
 ) (dunningOutcome, error) {
 	if sub.AdviceDeferred() {
 		// The network's advice allowed no retry before the next renewal: the
-		// case ends there. Limited mode never ends it locally.
+		// case ends there. A limited write posture never ends it locally.
 		blocked := ""
 		if materialize {
-			blocked = "mode=limited holds local terminal cancellations"
+			blocked = "a limited write posture holds local terminal cancellations"
 		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
 			blocked = gate.Reason
 		}
@@ -391,11 +391,11 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeWindowExpired, nil
 	}
 	if sub.Status == models.StatusAwaitingMethod {
-		// The wait for a new card outlived its dunning window. Limited mode
-		// never ends it locally; the operator sees the held outcome.
+		// The wait for a new card outlived its dunning window. A limited write
+		// posture never ends it locally; the operator sees the held outcome.
 		blocked := ""
 		if materialize {
-			blocked = "mode=limited holds local terminal cancellations"
+			blocked = "a limited write posture holds local terminal cancellations"
 		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
 			blocked = gate.Reason
 		}

@@ -75,7 +75,9 @@ and a reversal takes forgiveness back before it credits
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. The threshold is its currency's
+collections as `order_collection` operations. An order bills the pending owed
+items of its window; its period starts where their charges began (a posting's
+pricing period, a running charge's last posting) and ends at its close. The threshold is its currency's
 `usage_billing` `collection_threshold`, else its credit limit; a billing policy's
 outstanding cap and `collection_threshold_amount` bind only an account in the
 policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is
@@ -121,8 +123,8 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
 arrived, and history's 15-minute buckets, so any zone's days, sum to what posts.
-Each item is one event (UUIDv5 of
-merchant, lease and number, or of the request id), sorted by customer and event
+Each item is one event (a UUIDv7 derived from
+merchant, lease and number at the lease's time, or from the request id), sorted by customer and event
 id; a resend inserts nothing, and postings read `FINAL`, so a duplicate copy never
 counts. Each posting has its own
 ledger key (`OpUsagePosting`, `usage_posting:<id>`, `1`). Postings are per

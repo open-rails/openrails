@@ -24,7 +24,7 @@ import (
 // card has no recurring lineage: a decline is the card's refusal.
 func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin) subscriptions.RecurringVerifier {
 	return func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, order string) (string, error) {
-		if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: rt.Config, DB: rt.DB}, merchantID, origin); blocked {
+		if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: rt.DB}, merchantID, origin); blocked {
 			return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
 		}
 		var ref string

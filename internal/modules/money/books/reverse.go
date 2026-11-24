@@ -550,31 +550,10 @@ func (w *reverser) adjust(ctx context.Context, id uuid.UUID, delta, contra int64
 			return err
 		}
 	}
-	s := scheduleOf(row)
-	end := s.end()
-	t := maxTime(w.at, s.through)
-	serving := w.now.Before(end) && t.Before(end)
-	var steps []recognition
-	if serving {
-		if steps, _, err = s.progress(ctx, w.loc, t, false); err != nil {
-			return err
-		}
-		more, _ := s.catchUp(t, w.loc)
-		steps = append(steps, more...)
-	} else if steps, _, err = s.progress(ctx, w.loc, w.now, false); err != nil {
+	s, contra, deferred, earned, err := w.b.moveFunding(ctx, row, delta, contra, w.at, w.now, w.loc)
+	if err != nil {
 		return err
 	}
-	if err := w.b.recognize(ctx, row, steps); err != nil {
-		return err
-	}
-
-	var deferred, earned int64
-	if delta < 0 {
-		contra, deferred = s.reduce(-delta, serving)
-	} else {
-		contra, deferred, earned = s.restore(delta, contra, serving, end)
-	}
-
 	if delta < 0 {
 		if contra > 0 {
 			if err := w.post(ctx, Ref{Type: k.contra}, w.cash, k.recognized, k.op, contra, &row); err != nil {
@@ -603,13 +582,49 @@ func (w *reverser) adjust(ctx context.Context, id uuid.UUID, delta, contra int64
 			}
 		}
 	}
-	n, err := w.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
-		MerchantID: w.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
-		NextRecognitionAt: s.nextDue(w.loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
+	return w.b.saveSchedule(ctx, id, s, w.loc)
+}
+
+// moveFunding changes a locked schedule's funding by delta: a reversal's
+// share (negative) or a recovery's (positive, contra the part of it that
+// went to recognised revenue). The schedule first recognises what its
+// service earned: up to the change while it serves, else to now. It answers
+// the schedule changed and the change's contra, deferred and earned parts.
+func (b *Books) moveFunding(ctx context.Context, row gen.BillingRevenueSchedule, delta, contra int64, at, now time.Time, loc *time.Location) (s schedule, c, deferred, earned int64, err error) {
+	s = scheduleOf(row)
+	end := s.end()
+	t := maxTime(at, s.through)
+	serving := now.Before(end) && t.Before(end)
+	var steps []recognition
+	if serving {
+		if steps, _, err = s.progress(ctx, loc, t, false); err != nil {
+			return s, 0, 0, 0, err
+		}
+		more, _ := s.catchUp(t, loc)
+		steps = append(steps, more...)
+	} else if steps, _, err = s.progress(ctx, loc, now, false); err != nil {
+		return s, 0, 0, 0, err
+	}
+	if err = b.recognize(ctx, row, steps); err != nil {
+		return s, 0, 0, 0, err
+	}
+	if delta < 0 {
+		c, deferred = s.reduce(-delta, serving)
+	} else {
+		c, deferred, earned = s.restore(delta, contra, serving, end)
+	}
+	return s, c, deferred, earned, nil
+}
+
+// saveSchedule records a schedule's change.
+func (b *Books) saveSchedule(ctx context.Context, id uuid.UUID, s schedule, loc *time.Location) error {
+	n, err := b.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
+		MerchantID: b.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
+		NextRecognitionAt: s.nextDue(loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
 		Forfeited: s.forfeited,
 	})
 	if err == nil && n != 1 {
-		err = fmt.Errorf("books: revenue schedule %s did not record its reversal", id)
+		err = fmt.Errorf("books: revenue schedule %s did not record its change", id)
 	}
 	return err
 }

@@ -24,7 +24,6 @@ args: [run-server]
 # named like them (db.url is DB_URL). host, port and private_port are the
 # chart's (ports.http, metrics.port).
 config:
-  provider_write_mode: readonly # full | limited | readonly; required
   # public_billing_base_url: https://billing.example.com
   # The server's AuthKit, in AuthKit's keys (AUTH_<PATH> env).
   # auth:
@@ -157,8 +156,8 @@ readinessProbe:
   periodSeconds: 10
   timeoutSeconds: 3
 
-# On SIGTERM the server turns unready and drains on its own: drain_delay
-# (5s) then shutdown_timeout (20s). Raise this with them.
+# On SIGTERM the server turns unready, keeps serving for 5s, then stops within
+# 20s: 25s, inside this period.
 terminationGracePeriodSeconds: 30
 
 strategy: {}

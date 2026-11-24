@@ -274,7 +274,7 @@ func (h *AccountUpdaterHandler) Execute(ctx context.Context, in gen.BillingProvi
 	update, err := updater.Update(ctx, in.ID.String())
 	switch {
 	case errors.Is(err, basistheory.ErrProviderReadOnly):
-		return intents.Parked("vault writes are blocked (mode=readonly)")
+		return intents.Parked("vault writes are blocked (readonly write posture)")
 	case errors.Is(err, paymentmethods.ErrAccountUpdaterUnauthorized):
 		return h.holdVault(ctx, m, err)
 	case errors.Is(err, paymentmethods.ErrAccountUpdateRefused):

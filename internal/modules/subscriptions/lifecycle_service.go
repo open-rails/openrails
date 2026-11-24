@@ -589,7 +589,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			data.Amount, data.Currency = &amount, catalogwire.Currency(currency)
 		}
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
+			ID:         uuidutil.ChildV7(subscription.ID, "premium_started"),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
 			Data:       data,
@@ -1458,7 +1458,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	// The committed revision identifies this cancellation, including retries
 	// after rollback and a later revoke of a period-end cancellation.
 	notification := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("canceled:%d", subscription.LifecycleRev))),
+		ID:         uuidutil.ChildV7(subscription.ID, fmt.Sprintf("canceled:%d", subscription.LifecycleRev)),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
 		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
@@ -1835,7 +1835,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("expired:%d", subscription.LifecycleRev))),
+			ID:         uuidutil.ChildV7(subscription.ID, fmt.Sprintf("expired:%d", subscription.LifecycleRev)),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
 			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
@@ -2256,7 +2256,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.NextAttemptAt = nil
 		}
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(params.FailureID, []byte("payment_failure")),
+			ID:         uuidutil.ChildV7(params.FailureID, "payment_failure"),
 			CustomerID: subscription.CustomerID,
 			EventType:  eventType,
 			Data:       data,

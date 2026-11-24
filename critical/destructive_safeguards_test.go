@@ -221,31 +221,48 @@ func TestDestructiveSafeguards(t *testing.T) {
 	t.Run("OR-J34-S37/a-merchants-books-land-one-at-a-time", func(t *testing.T) {
 		b := newNMIBook(t)
 		book := b.owed(b.started.Add(10*24*time.Hour), 3, "race")
-		type attempt struct{}
 		// A pauses between its admission and its landing; B lands the same
-		// book and loses its landing.
+		// book and loses its landing. The in-process handle carries no
+		// context value to the engine, so the attempts are told apart by
+		// order: the first admission is A's, a landing while A waits is B's,
+		// and after A resumes its own landing comes first.
 		paused, resume := make(chan struct{}), make(chan struct{})
 		var pause sync.Once
-		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
-			who, _ := ctx.Value(attempt{}).(string)
+		var mu sync.Mutex
+		resumed, aLanded := false, false
+		lostB := errors.New("B's landing lost before its commit")
+		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
 			switch {
-			case who == "A" && site.Point == failpoint.Committed && site.Kind == "destructive_admission":
+			case site.Point == failpoint.Committed && site.Kind == "destructive_admission":
 				pause.Do(func() {
 					close(paused)
 					<-resume
 				})
-			case who == "B" && site.Point == failpoint.BeforeComplete && site.Kind == "billing_import":
-				return errors.New("B's landing lost before its commit")
+			case site.Point == failpoint.BeforeComplete && site.Kind == "billing_import":
+				mu.Lock()
+				defer mu.Unlock()
+				if resumed && !aLanded {
+					aLanded = true
+					return nil
+				}
+				return lostB
 			}
 			return nil
 		})
 		t.Cleanup(remove)
 		var once sync.Once
-		release := func() { once.Do(func() { close(resume) }) }
+		release := func() {
+			once.Do(func() {
+				mu.Lock()
+				resumed = true
+				mu.Unlock()
+				close(resume)
+			})
+		}
 		t.Cleanup(release)
 		errA, errB := make(chan error, 1), make(chan error, 1)
 		go func() {
-			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "A"), book)
+			_, err := b.a.alpha.ImportBilling(t.Context(), book)
 			errA <- err
 		}()
 		select {
@@ -254,7 +271,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 			t.Fatal("A never reached its landing")
 		}
 		go func() {
-			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "B"), book)
+			_, err := b.a.alpha.ImportBilling(t.Context(), book)
 			errB <- err
 		}()
 		// B waits for A's book, or (unserialized) runs to its end first.

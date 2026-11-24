@@ -11,6 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/abusestate"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // FailureLedger counts refused cards in the abuse state: in Redis, shared by
@@ -82,7 +83,7 @@ func (l *FailureLedger) Record(ctx context.Context, merchantID uuid.UUID, subjec
 	if l == nil || merchantID == uuid.Nil || len(subjects) == 0 {
 		return
 	}
-	failure := uuid.NewString()
+	failure := uuidutil.NewV7().String()
 	marks := make([]abusestate.Mark, 0, 2*len(subjects))
 	for _, subject := range subjects {
 		if subject == MerchantSubject {

@@ -144,7 +144,8 @@ type UsageIntake struct {
 	now      time.Time
 }
 
-// limitOpening is a session or first-use window a batch opens.
+// limitOpening is a session or first-use window a batch opens, or a granted
+// window it gives a row.
 type limitOpening struct {
 	key      string
 	window   limits.Window
@@ -621,11 +622,18 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 		if len(defs) == 0 {
 			continue
 		}
+		// Windows are read once per customer and second, at its last instant
+		// (or now): a grant made earlier in the item's second is in force, as
+		// a window the item opens starts at that second.
 		k := located{customer, at.Truncate(time.Second)}
 		current, ok := windows[k]
 		if !ok {
 			var err error
-			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: k.at,
+			readAt := k.at.Add(time.Second - time.Microsecond)
+			if b.now.Before(readAt) {
+				readAt = b.now
+			}
+			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
 				Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 					return s.PricingPeriod(ctx, q, b.merchant, customer, unit, at)
 				}}
@@ -649,8 +657,13 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 				continue
 			}
 			w := c.Window
-			if c.Opens {
+			switch {
+			case c.Opens:
 				w = b.opening(customer, def, c, at)
+			case !c.Ungranted && !c.Stored && def.Reset.Kind != catalog.ResetRolling && def.Reset.Kind != catalog.ResetRate:
+				// Granted usage gives its window a row: should the grant lapse,
+				// later usage still counts there while the window lasts.
+				b.keep(customer, def.Key, c)
 			}
 			add(def.Key, bucketed(def.Reset, w, at), units)
 		}
@@ -669,6 +682,16 @@ func (b *UsageIntake) opening(customer uuid.UUID, def limits.Definition, c limit
 	w := limits.Opening(def.Reset, at)
 	b.opens[customer] = append(b.opens[customer], limitOpening{key: def.Key, window: w, capacity: c.Capacity})
 	return w
+}
+
+// keep records the row of a granted window that has none.
+func (b *UsageIntake) keep(customer uuid.UUID, key string, c limits.Claim) {
+	for _, o := range b.opens[customer] {
+		if o.key == key && o.window.StartsAt.Equal(c.Window.StartsAt) {
+			return
+		}
+	}
+	b.opens[customer] = append(b.opens[customer], limitOpening{key: key, window: c.Window, capacity: c.Capacity})
 }
 
 // bucketed is where a limit counts an item in window w: a rolling or rate

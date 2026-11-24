@@ -7,11 +7,8 @@ import (
 	"time"
 )
 
-// Webhook secret overlap bounds (SEC-29).
-const (
-	DefaultWebhookSecretOverlap = 24 * time.Hour
-	MaxWebhookSecretOverlap     = 7 * 24 * time.Hour
-)
+// MaxWebhookSecretOverlap bounds webhook_secret_overlap (SEC-29).
+const MaxWebhookSecretOverlap = 7 * 24 * time.Hour
 
 // WebhookSecretOverlapDuration is how long a rotated-out webhook signing secret
 // keeps verifying. Empty means 24h.

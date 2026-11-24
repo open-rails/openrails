@@ -1,7 +1,6 @@
 {
   "go_api": {
     ".": [
-      "const (\n\tProviderWritesFull ProviderWriteMode = \"full\"\n\n\tProviderWritesLimited ProviderWriteMode = \"limited\"\n\n\tProviderWritesReadOnly ProviderWriteMode = \"readonly\"\n)",
       "const (\n\tQueueBilling   = \"billing\"\n\tQueuePSPImport = \"psp_import\"\n)",
       "const (\n\tReadCatalog Read = \"catalog\"\n\n\tReadMeters Read = \"meters\"\n\n\tReadPublicConfig Read = \"public_config\"\n\n\tReadMerchantConfiguration Read = \"merchant_configuration\"\n)",
       "const DefaultEntitlementCheckMaxAge = 2 * time.Minute",
@@ -198,7 +197,7 @@
       "type CardVaultConfig struct {\n\tKind billing.CardVaultKind\n\n\tTenantID string\n\n\tKVMount string\n}",
       "type ClickHouseConfig struct {\n\tDatabase string\n}",
       "type Client struct {\n}",
-      "type Config struct {\n\tProviderWriteMode ProviderWriteMode\n\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tClickHouse ClickHouseConfig\n\n\tMerchants []billing.MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
+      "type Config struct {\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tClickHouse ClickHouseConfig\n\n\tMerchants []billing.MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
       "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
       "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth auth.Authenticator\n\n\tResolve func(*http.Request, auth.Verified) (CustomerBinding, error)\n}",
@@ -220,7 +219,6 @@
       "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n\n\tCCBillWebhookSources []string\n}",
-      "type ProviderWriteMode string",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
       "type Read string",
@@ -1460,7 +1458,7 @@
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AdminConsole struct {\n\tDisabled bool\n\n\tIssuers map[string]ConsoleIssuer\n}",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n}",
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
@@ -2530,7 +2528,9 @@
     },
     "config.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config"
+      "cmp": "cmp",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "strings": "strings"
     },
     "customer_proof.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -2665,7 +2665,6 @@
       "path": "path",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "regexp": "regexp",
-      "slog": "log/slog",
       "sort": "sort",
       "strings": "strings",
       "time": "time",
@@ -2872,6 +2871,7 @@
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v2": "github.com/ClickHouse/clickhouse-go/v2"
     },
     "internal/history/attribution.go": {
@@ -3226,7 +3226,6 @@
     "internal/intents/ccbill_cancel.go": {
       "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
@@ -3240,7 +3239,8 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/collection_payload.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3322,7 +3322,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
@@ -3495,7 +3496,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/price_migration_push.go": {
       "context": "context",
@@ -4413,6 +4415,7 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5",
       "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
@@ -4872,6 +4875,7 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_converge.go": {
@@ -4884,6 +4888,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_undo.go": {
@@ -5170,7 +5175,8 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
-      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/scim/bulk.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -5530,13 +5536,15 @@
       "cmp": "cmp",
       "context": "context",
       "fmt": "fmt",
+      "iam": "github.com/open-rails/authkit/iam",
       "io": "io",
       "net": "net",
       "slices": "slices",
       "strconv": "strconv",
       "strings": "strings",
       "time": "time",
-      "url": "net/url"
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "server/internal/http/console_merchants.go": {
       "adminconsole": "github.com/open-rails/openrails/server/internal/adminconsole",

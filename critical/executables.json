@@ -105,7 +105,8 @@
     "OR-J06-S03": [
       "TestPSPControls/OR-J06-S03",
       "TestPSPControls/OR-J06-S03/readonly",
-      "TestPSPControls/OR-J06-S03/limited"
+      "TestPSPControls/OR-J06-S03/limited",
+      "TestPSPControls/OR-J06-S03/copied-book"
     ],
     "OR-J06-S04": [
       "TestPSPControls/OR-J06-S04/rotation-and-archive-preserve-identity-without-exposing-secrets"
@@ -1155,6 +1156,9 @@
     "OR-J26-S62": [
       "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
     ],
+    "OR-J26-S63": [
+      "TestUsageBillingContracts/OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
@@ -1702,6 +1706,27 @@
     ],
     "OR-J28-S16": [
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
+    ],
+    "OR-J48-S13": [
+      "TestMerchantUnits/OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency"
+    ],
+    "OR-J48-S14": [
+      "TestMerchantUnits/OR-J48-S14/a-chargeback-of-a-pack-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S15": [
+      "TestMerchantUnits/OR-J48-S15/a-line-paid-with-given-units-books-no-revenue"
+    ],
+    "OR-J48-S16": [
+      "TestMerchantUnits/OR-J48-S16/a-unit-lines-later-money-adds-to-its-schedule-and-the-audit-fails-money-with-none"
+    ],
+    "OR-J48-S17": [
+      "TestMerchantUnits/OR-J48-S17/a-refund-of-a-pack-at-the-provider-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S18": [
+      "TestMerchantUnits/OR-J48-S18/a-packs-chargeback-splits-what-its-spends-earned-between-usage-and-a-schedule"
+    ],
+    "OR-J48-S19": [
+      "TestMerchantUnits/OR-J48-S19/a-chargeback-of-one-currencys-pack-reduces-only-that-currencys-schedule"
     ],
     "OR-J53-S01": [
       "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
@@ -2298,6 +2323,9 @@
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
+    ],
+    "OR-J06-S72": [
+      "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
     ]
   }
 }

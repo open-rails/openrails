@@ -16,7 +16,7 @@ import (
 // tables in database's schemas, without constructing an engine. It runs
 // regardless of database.SkipMigrations, which controls New only.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, database DatabaseConfig) error {
-	return engine.Migrate(ctx, pool, config.Config{Database: config.DatabaseConfig(database)})
+	return engine.Migrate(ctx, pool, config.Config{Database: config.DatabaseConfig(database.withDefaults())})
 }
 
 // MigrateClickHouse creates or upgrades the event store's database on conn,
@@ -26,7 +26,7 @@ func MigrateClickHouse(ctx context.Context, conn driver.Conn, clickhouse ClickHo
 	if conn == nil {
 		return errors.New("openrails: MigrateClickHouse requires a ClickHouse connection")
 	}
-	cfg := config.Config{ClickHouse: config.ClickHouseConfig(clickhouse)}
+	cfg := config.Config{ClickHouse: config.ClickHouseConfig(clickhouse.withDefaults())}
 	if err := config.ValidateClickHouse(cfg.ClickHouse); err != nil {
 		return err
 	}
