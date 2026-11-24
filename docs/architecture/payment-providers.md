@@ -16,7 +16,7 @@ provider and what the provider's answer proves.
 - **Write posture**: `full`, `limited` (no system-origin writes) or `readonly`.
 - **Provider posture**: a PSP credential's proven environment; any other verdict disarms it.
 - **Wake job**: a debounced River job that reads one provider object after a callback.
-- **Finding**: a `reconciliation_findings` row; a `pull.*` finding carries a proposed change (a proposal).
+- **Finding**: a `reconciliation_findings` row; a `pull.*` finding carries a proposed change (a proposal); the queue is [findings and alerts](findings.md).
 - **Park**: a live provider subscription converge cannot land (`parked_provider_subscriptions`).
 
 ## How it works
