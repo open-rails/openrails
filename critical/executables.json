@@ -346,6 +346,9 @@
     "OR-J17-S11": [
       "TestCancellationRecoveryContracts/OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it"
     ],
+    "OR-J17-S12": [
+      "TestCancellationRecoveryContracts/OR-J17-S12/a-resume-whose-transaction-began-first-still-follows-the-cancel-it-resumes"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

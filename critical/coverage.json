@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 478,
+  "scenario_count": 479,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -472,6 +472,11 @@
       "id": "OR-J17-S11",
       "journey": "J17",
       "name": "A member's Stripe cancel survives a converge before Stripe hears it: a renewing Stripe subscription is not read as a portal resume while the cancel waits"
+    },
+    {
+      "id": "OR-J17-S12",
+      "journey": "J17",
+      "name": "Stripe cancels and resumes are ordered by commit, not transaction start: a resume whose transaction began before the cancel it resumes waits for that cancel and reaches Stripe last"
     },
     {
       "id": "OR-J18-S01",

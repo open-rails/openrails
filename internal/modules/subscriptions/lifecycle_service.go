@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -1087,6 +1088,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	return nil
 }
 
+// ResumeFailpointKind names a resume's transaction (failpoint.BeforeLock).
+const ResumeFailpointKind = "subscription_resume"
+
 // ResumeMembership restores a reversibly-canceled subscription and its
 // standing entitlement projection in one transaction.
 func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
@@ -1102,6 +1106,9 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 	var resumed *models.Subscription
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := s.DB.NewWithPgxTx(tx)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeLock, Kind: ResumeFailpointKind, Subscription: params.SubscriptionID}); err != nil {
+			return err
+		}
 		if observed.CollectionPolicy == models.CollectionPolicyEngine {
 			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
 				return err

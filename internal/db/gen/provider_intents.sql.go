@@ -490,7 +490,7 @@ INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id,
-    lease_expires_at
+    lease_expires_at, created_at
 ) VALUES (
     COALESCE($1::uuid, uuidv7()), $2, $3, $4,
     $5, $6, $7,
@@ -498,7 +498,7 @@ INSERT INTO billing.provider_intents (
     $10::timestamptz, $11,
     $12, $13, $14, $15, $16,
     $17::uuid, $18::uuid, $19::uuid,
-    $20::timestamptz
+    $20::timestamptz, clock_timestamp()
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -593,7 +593,9 @@ type EnqueueProviderIntentParams struct {
 // untouched. Frozen operations (tier changes, collections, manual rebills,
 // sales, initial membership) are never refreshed or revived: a same-key race
 // must not replace a frozen commercial decision. lease_expires_at, when set,
-// is the producer's hold on the first attempt it runs inline.
+// is the producer's hold on the first attempt it runs inline. created_at is
+// the insert's own instant, not its transaction's start: an operation inserted
+// under a row lock is later than every one committed before it took the lock.
 func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
 		arg.ID,
@@ -1274,7 +1276,8 @@ type HasEarlierStripeScheduleWriteParams struct {
 
 // Another Stripe cancel or resume of the subscription, committed before this
 // one, whose write is in flight or unresolved: this one waits for it, so they
-// reach Stripe in the order they were committed.
+// reach Stripe in the order they were committed. Each is inserted under the
+// subscription's row lock, so created_at orders them by commit.
 func (q *Queries) HasEarlierStripeScheduleWrite(ctx context.Context, arg HasEarlierStripeScheduleWriteParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasEarlierStripeScheduleWrite,
 		arg.MerchantID,

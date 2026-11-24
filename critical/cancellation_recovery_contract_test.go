@@ -3,8 +3,10 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -365,5 +369,90 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe has not heard of the cancel")
 		kept := subscriptionState(t, a, sub.ID, "canceled")
 		require.Equal(t, "user", *kept.CancelType, "the member's cancel stands")
+	})
+	t.Run("OR-J17-S12/a-resume-whose-transaction-began-first-still-follows-the-cancel-it-resumes", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		request := func(action string, body map[string]any) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path+"/"+action, a.aliceToken, body)
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		cancel := func() { request("cancel", map[string]any{"reason": "Taking a break from it"}) }
+		atStripe := func(want bool, why string) {
+			t.Helper()
+			require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == want }, 20*time.Second, 20*time.Millisecond, why)
+		}
+		cancel()
+		atStripe(true, "the first cancel reaches Stripe")
+		// A resume begins its transaction and stops before it locks the row.
+		stopped, release := make(chan struct{}), make(chan struct{})
+		var stop, open sync.Once
+		t.Cleanup(failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
+			if site.Point != failpoint.BeforeLock || site.Kind != subscriptions.ResumeFailpointKind || site.Subscription != sub.ID.UUID() {
+				return nil
+			}
+			first := false
+			stop.Do(func() { first = true; close(stopped) })
+			if first {
+				<-release
+			}
+			return nil
+		}))
+		t.Cleanup(func() { open.Do(func() { close(release) }) })
+		late := make(chan int, 1)
+		go func() {
+			status, _ := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+			late <- status
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(20 * time.Second):
+			t.Fatal("the resume never began")
+		}
+		// Meanwhile the member resumes and cancels again; that cancel is in
+		// flight at Stripe.
+		a.clock.Advance(time.Second)
+		request("resume", map[string]any{})
+		atStripe(false, "the second resume reaches Stripe")
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		a.clock.Advance(time.Second)
+		cancel()
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the second cancel never reached Stripe")
+		}
+		// The stopped resume now takes the row and resumes that cancel: it was
+		// committed last, so it reaches Stripe last.
+		open.Do(func() { close(release) })
+		select {
+		case status := <-late:
+			require.Equal(t, http.StatusOK, status)
+		case <-time.After(20 * time.Second):
+			t.Fatal("the stopped resume never finished")
+		}
+		subscriptionState(t, a, sub.ID, "active")
+		held.Release()
+		atStripe(true, "the cancel in flight lands")
+		a.clock.Advance(2 * time.Minute)
+		operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			var unsettled int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+operations+" WHERE merchant_id = $1 AND subscription_id = $2"+
+				" AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription') AND status NOT IN ('succeeded', 'superseded')",
+				a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&unsettled))
+			return unsettled == 0
+		}, 20*time.Second, 100*time.Millisecond, "every Stripe cancel and resume of the subscription settles")
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe ends resumed, as the member last asked")
+		subscriptionState(t, a, sub.ID, "active")
 	})
 }

@@ -8,13 +8,15 @@
 -- untouched. Frozen operations (tier changes, collections, manual rebills,
 -- sales, initial membership) are never refreshed or revived: a same-key race
 -- must not replace a frozen commercial decision. lease_expires_at, when set,
--- is the producer's hold on the first attempt it runs inline.
+-- is the producer's hold on the first attempt it runs inline. created_at is
+-- the insert's own instant, not its transaction's start: an operation inserted
+-- under a row lock is later than every one committed before it took the lock.
 -- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, subject, credential, expires_at, psp_id, custodian_id, destructive_action_id,
-    lease_expires_at
+    lease_expires_at, created_at
 ) VALUES (
     COALESCE(sqlc.narg(id)::uuid, uuidv7()), sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
@@ -22,7 +24,7 @@ INSERT INTO billing.provider_intents (
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
     sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(subject), sqlc.narg(credential), sqlc.narg(expires_at),
     sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.narg(destructive_action_id)::uuid,
-    sqlc.narg(lease_expires_at)::timestamptz
+    sqlc.narg(lease_expires_at)::timestamptz, clock_timestamp()
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -872,7 +874,8 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: HasEarlierStripeScheduleWrite :one
 -- Another Stripe cancel or resume of the subscription, committed before this
 -- one, whose write is in flight or unresolved: this one waits for it, so they
--- reach Stripe in the order they were committed.
+-- reach Stripe in the order they were committed. Each is inserted under the
+-- subscription's row lock, so created_at orders them by commit.
 SELECT EXISTS (
     SELECT 1 FROM billing.provider_intents
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
