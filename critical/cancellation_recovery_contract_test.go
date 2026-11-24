@@ -201,7 +201,7 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		stripe := accounts.accounts["sk_test_old"].core
 		remote := *sub.RailSubscriptionID
 		armDestructive(t, a, true)
-		startFleet(t, a.world)
+		fleet := startFleet(t, a.world)
 		path := "/v1/me/subscriptions/" + sub.ID.String()
 		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
 		require.Equal(t, http.StatusOK, status, string(raw))
@@ -220,6 +220,17 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
 			" WHERE merchant_id = $1 AND provider_intent_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
 		require.Positive(t, logged)
+		// Finished, the resume was only an instruction to Stripe, as a cancel
+		// is: retention deletes it once it is older than its period.
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+intents+" SET updated_at = $3 WHERE merchant_id = $1 AND subscription_id = $2", a.alpha.MerchantID().UUID(), sub.ID.UUID(), a.clock.Now().Add(-800*24*time.Hour))
+		require.NoError(t, err)
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		rows, err := a.pool.Query(t.Context(), "SELECT intent_type FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID())
+		require.NoError(t, err)
+		kept, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		require.Empty(t, kept, "a finished resume is retained as a cancel is")
 	})
 	t.Run("OR-J17-S08/a-stripe-resume-is-refused-while-provider-writes-are-off", func(t *testing.T) {
 		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
