@@ -712,7 +712,7 @@ type BillingLedgerAccount struct {
 	// The account's role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.
 	AccountType string
 	Currency    string
-	// Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart; a merchant-wide general-ledger account has none.
+	// Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart. A merchant-wide general-ledger account keeps no counters: its type total is held to the rule at commit (billing.settle_ledger_rollups).
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	// Maintained counter: posted credits, for O(1) balance reads.
@@ -782,7 +782,7 @@ type BillingLedgerTransfer struct {
 	ProductID *uuid.UUID
 }
 
-// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
 type BillingLedgerTypeTotal struct {
 	MerchantID    uuid.UUID
 	Book          string

@@ -12,6 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
+const countOpenGeneralLedgerAccounts = `-- name: CountOpenGeneralLedgerAccounts :one
+SELECT count(*)::bigint AS open
+FROM billing.ledger_accounts
+WHERE merchant_id = $1::uuid
+  AND book = 'general' AND customer_id IS NULL
+  AND currency = $2::text
+  AND (psp_id IS NULL OR psp_id = $3::uuid)
+`
+
+type CountOpenGeneralLedgerAccountsParams struct {
+	MerchantID uuid.UUID
+	Currency   string
+	PspID      *uuid.UUID
+}
+
+// CountOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
+// open in a currency, cash clearing counted for the PSP named only.
+func (q *Queries) CountOpenGeneralLedgerAccounts(ctx context.Context, arg CountOpenGeneralLedgerAccountsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenGeneralLedgerAccounts, arg.MerchantID, arg.Currency, arg.PspID)
+	var open int64
+	err := row.Scan(&open)
+	return open, err
+}
+
 const getLedgerAccount = `-- name: GetLedgerAccount :one
 
 SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at, book, class, psp_id FROM billing.ledger_accounts
@@ -193,6 +217,7 @@ func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedg
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
+  AND book = 'units'
   AND customer_id = $2::uuid
   AND currency = $3::text
   AND transfer_type = $4::text
@@ -213,9 +238,9 @@ type GetLedgerTransferByCoordsParams struct {
 	SourceID     string
 }
 
-// GetLedgerTransferByCoords: the latest transfer at the full operation
-// coordinate. `operation` keeps a capture and a wasted-spend usage charge that
-// share one (source, source_id) apart.
+// GetLedgerTransferByCoords: the latest units-book transfer at the full
+// operation coordinate. `operation` keeps a capture and a wasted-spend usage
+// charge that share one (source, source_id) apart.
 func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTransferByCoordsParams) (BillingLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, getLedgerTransferByCoords,
 		arg.MerchantID,
@@ -490,6 +515,7 @@ SELECT (credits_posted - debits_posted)::bigint AS balance
 FROM billing.ledger_accounts
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
+  AND (book = 'units' OR customer_id IS NOT NULL)
 `
 
 type LedgerAccountBalanceParams struct {
@@ -498,7 +524,8 @@ type LedgerAccountBalanceParams struct {
 }
 
 // LedgerAccountBalance: net credit (credits - debits) from the maintained
-// account counters.
+// account counters. A merchant-wide general-ledger account keeps none and
+// reads no row: its balance is its type total, kept at commit.
 func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBalanceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, ledgerAccountBalance, arg.MerchantID, arg.AccountID)
 	var balance int64
@@ -720,6 +747,54 @@ func (q *Queries) ListLedgerDailyDrifts(ctx context.Context, merchantID uuid.UUI
 			&i.LoggedCredits,
 			&i.StoredDebits,
 			&i.LoggedDebits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerSignBreaches = `-- name: ListLedgerSignBreaches :many
+SELECT a.currency, a.account_type, a.psp_id, t.credits_posted, t.debits_posted
+FROM billing.ledger_accounts a
+JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+    AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+WHERE a.merchant_id = $1::uuid
+  AND a.book = 'general' AND a.customer_id IS NULL
+  AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
+    OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
+ORDER BY a.currency, a.account_type, a.psp_id
+`
+
+type ListLedgerSignBreachesRow struct {
+	Currency      string
+	AccountType   string
+	PspID         *uuid.UUID
+	CreditsPosted int64
+	DebitsPosted  int64
+}
+
+// ListLedgerSignBreaches: merchant-wide general-ledger accounts whose type
+// total crosses the side their sign rule holds them to.
+func (q *Queries) ListLedgerSignBreaches(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerSignBreachesRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerSignBreaches, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerSignBreachesRow
+	for rows.Next() {
+		var i ListLedgerSignBreachesRow
+		if err := rows.Scan(
+			&i.Currency,
+			&i.AccountType,
+			&i.PspID,
+			&i.CreditsPosted,
+			&i.DebitsPosted,
 		); err != nil {
 			return nil, err
 		}

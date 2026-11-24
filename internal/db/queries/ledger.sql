@@ -10,6 +10,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
   AND psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid;
 
+-- CountOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
+-- open in a currency, cash clearing counted for the PSP named only.
+-- name: CountOpenGeneralLedgerAccounts :one
+SELECT count(*)::bigint AS open
+FROM billing.ledger_accounts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND book = 'general' AND customer_id IS NULL
+  AND currency = sqlc.arg(currency)::text
+  AND (psp_id IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+
 -- name: InsertLedgerAccount :one
 INSERT INTO billing.ledger_accounts (
     merchant_id, book, class, customer_id, psp_id, account_type, currency,
@@ -85,12 +95,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND order_line_id IS NOT DISTINCT FROM sqlc.narg(order_line_id)::uuid;
 
 -- LedgerAccountBalance: net credit (credits - debits) from the maintained
--- account counters.
+-- account counters. A merchant-wide general-ledger account keeps none and
+-- reads no row: its balance is its type total, kept at commit.
 -- name: LedgerAccountBalance :one
 SELECT (credits_posted - debits_posted)::bigint AS balance
 FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND id = sqlc.arg(account_id)::uuid;
+  AND id = sqlc.arg(account_id)::uuid
+  AND (book = 'units' OR customer_id IS NOT NULL);
 
 -- name: ListLedgerTransfersByCustomer :many
 -- A customer's units-book movements in one currency, newest first.
@@ -111,12 +123,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid AND book = 'units'
 ORDER BY created_at DESC, id DESC;
 
--- GetLedgerTransferByCoords: the latest transfer at the full operation
--- coordinate. `operation` keeps a capture and a wasted-spend usage charge that
--- share one (source, source_id) apart.
+-- GetLedgerTransferByCoords: the latest units-book transfer at the full
+-- operation coordinate. `operation` keeps a capture and a wasted-spend usage
+-- charge that share one (source, source_id) apart.
 -- name: GetLedgerTransferByCoords :one
 SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND book = 'units'
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type = sqlc.arg(transfer_type)::text
@@ -165,6 +178,19 @@ FROM (
 GROUP BY book, currency
 HAVING SUM(net) <> 0
 ORDER BY book, currency;
+
+-- ListLedgerSignBreaches: merchant-wide general-ledger accounts whose type
+-- total crosses the side their sign rule holds them to.
+-- name: ListLedgerSignBreaches :many
+SELECT a.currency, a.account_type, a.psp_id, t.credits_posted, t.debits_posted
+FROM billing.ledger_accounts a
+JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+    AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.book = 'general' AND a.customer_id IS NULL
+  AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
+    OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
+ORDER BY a.currency, a.account_type, a.psp_id;
 
 -- ListLedgerCounterDrifts rebuilds account counters from the immutable
 -- transfer log and returns every account whose maintained projection differs.

@@ -17,7 +17,7 @@ migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d347402
 migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
 migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
-migration 0017_books.up.sql sha256:1fa9ed8a5189f3ae4316dbafeab9eb70d7688802823613855aa9b943cb63d096
+migration 0017_books.up.sql sha256:3cb6cbebe56ebba0f8e19965b4df54c65e8e96154aeb88be02729cbd2fc63ae6
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
 migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
@@ -762,7 +762,7 @@ table billing.eventlog_pending
   constraint eventlog_pending_version_check CHECK ((version > 0))
   index CREATE UNIQUE INDEX eventlog_pending_pkey ON billing.eventlog_pending USING btree (ordinal)
   index CREATE INDEX eventlog_pending_transaction_id_idx ON billing.eventlog_pending USING btree (transaction_id)
-  trigger CREATE CONSTRAINT TRIGGER eventlog_flush_at_commit AFTER INSERT ON billing.eventlog_pending DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.eventlog_flush()
+  trigger CREATE CONSTRAINT TRIGGER eventlog_flush_at_commit AFTER INSERT ON billing.eventlog_pending DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit()
 
 table billing.eventlog_streams
   column source text NOT NULL
@@ -976,7 +976,7 @@ table billing.ledger_accounts
   constraint ledger_accounts_customer_id_currency_id_key UNIQUE (merchant_id, customer_id, currency, id)
   constraint ledger_accounts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint ledger_accounts_general_currency_check CHECK (((book = 'units'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
-  constraint ledger_accounts_general_sign_check CHECK (((book = 'units'::text) OR ((debits_must_not_exceed_credits = (account_type = 'deferred_revenue_credit'::text)) AND (credits_must_not_exceed_debits = (account_type = 'usage_receivable'::text)))))
+  constraint ledger_accounts_general_sign_check CHECK (((book = 'units'::text) OR ((debits_must_not_exceed_credits = (account_type = ANY (ARRAY['allowance_doubtful'::text, 'unapplied_cash'::text, 'deferred_revenue'::text, 'deferred_revenue_credit'::text]))) AND (credits_must_not_exceed_debits = (account_type = 'usage_receivable'::text)))))
   constraint ledger_accounts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint ledger_accounts_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_accounts_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
@@ -4121,44 +4121,6 @@ function billing.event_subject_id(text,uuid)
         WHEN 'mandate' THEN 'mdt_' WHEN 'destructive_hold' THEN 'dsh_' ELSE '' END || id::text END
   $function$
 
-function billing.eventlog_flush()
-  CREATE OR REPLACE FUNCTION billing.eventlog_flush()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'pg_temp'
-  AS $function$
-  DECLARE
-   s record; e record; next_position bigint; stamp timestamptz;
-  BEGIN
-   -- Every scope touched by this transaction is known before taking any locks.
-   FOR s IN SELECT DISTINCT source,scope FROM "billing".eventlog_pending
-            WHERE transaction_id=pg_current_xact_id() ORDER BY source,scope
-   LOOP
-    INSERT INTO "billing".eventlog_streams(source,scope) VALUES(s.source,s.scope) ON CONFLICT DO NOTHING;
-    PERFORM 1 FROM "billing".eventlog_streams WHERE source=s.source AND scope=s.scope FOR UPDATE;
-    -- Delivered at commit, so a LISTENing consumer reads when its stream has moved (version 2).
-    PERFORM pg_notify(TG_TABLE_SCHEMA || '.eventlog', s.source || ' ' || s.scope);
-   END LOOP;
-   FOR e IN SELECT * FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id() ORDER BY ordinal
-   LOOP
-    IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id) THEN
-     IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id
-       AND event_source=e.event_source AND event_type=e.event_type AND version=e.version
-       AND occurred_at=e.occurred_at AND subject_type=e.subject_type AND subject_id=e.subject_id AND data=e.data) THEN
-      CONTINUE;
-     END IF;
-     RAISE EXCEPTION 'event ID already records a different fact' USING ERRCODE='23505';
-    END IF;
-    UPDATE "billing".eventlog_streams SET position=position+1,head_id=coalesce(e.boundary,e.id),
-     recorded_at=greatest(recorded_at,clock_timestamp())
-     WHERE source=e.source AND scope=e.scope RETURNING position,recorded_at INTO next_position,stamp;
-    INSERT INTO "billing".eventlog_events(source,scope,position,id,boundary,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data)
-     VALUES(e.source,e.scope,next_position,e.id,coalesce(e.boundary,e.id),e.event_source,e.event_type,e.version,e.occurred_at,stamp,e.subject_type,e.subject_id,e.data);
-   END LOOP;
-   DELETE FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id();
-   RETURN NULL;
-  END $function$
-
 function billing.eventlog_immutable()
   CREATE OR REPLACE FUNCTION billing.eventlog_immutable()
    RETURNS trigger
@@ -4184,6 +4146,43 @@ function billing.finish_billing_restore(uuid,text,bigint)
           WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
   END;
   $function$
+
+function billing.flush_event_log(text)
+  CREATE OR REPLACE FUNCTION billing.flush_event_log(p_schema text)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'pg_temp'
+  AS $function$
+  DECLARE
+   s record; e record; next_position bigint; stamp timestamptz;
+  BEGIN
+   -- Every scope touched by this transaction is known before taking any locks.
+   FOR s IN SELECT DISTINCT source,scope FROM "billing".eventlog_pending
+            WHERE transaction_id=pg_current_xact_id() ORDER BY source,scope
+   LOOP
+    INSERT INTO "billing".eventlog_streams(source,scope) VALUES(s.source,s.scope) ON CONFLICT DO NOTHING;
+    PERFORM 1 FROM "billing".eventlog_streams WHERE source=s.source AND scope=s.scope FOR UPDATE;
+    -- Delivered at commit, so a LISTENing consumer reads when its stream has moved (version 2).
+    PERFORM pg_notify(p_schema || '.eventlog', s.source || ' ' || s.scope);
+   END LOOP;
+   FOR e IN SELECT * FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id() ORDER BY ordinal
+   LOOP
+    IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id) THEN
+     IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id
+       AND event_source=e.event_source AND event_type=e.event_type AND version=e.version
+       AND occurred_at=e.occurred_at AND subject_type=e.subject_type AND subject_id=e.subject_id AND data=e.data) THEN
+      CONTINUE;
+     END IF;
+     RAISE EXCEPTION 'event ID already records a different fact' USING ERRCODE='23505';
+    END IF;
+    UPDATE "billing".eventlog_streams SET position=position+1,head_id=coalesce(e.boundary,e.id),
+     recorded_at=greatest(recorded_at,clock_timestamp())
+     WHERE source=e.source AND scope=e.scope RETURNING position,recorded_at INTO next_position,stamp;
+    INSERT INTO "billing".eventlog_events(source,scope,position,id,boundary,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data)
+     VALUES(e.source,e.scope,next_position,e.id,coalesce(e.boundary,e.id),e.event_source,e.event_type,e.version,e.occurred_at,stamp,e.subject_type,e.subject_id,e.data);
+   END LOOP;
+   DELETE FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id();
+  END $function$
 
 function billing.fraud_report_network_activity()
   CREATE OR REPLACE FUNCTION billing.fraud_report_network_activity()
@@ -5401,16 +5400,35 @@ function billing.settle_at_commit()
   AS $function$
   BEGIN
       IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
-          IF NOT EXISTS (SELECT 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id) THEN
-              RETURN NULL;
-          END IF;
-      ELSIF NOT EXISTS (SELECT 1 FROM billing.subscription_mrr
-                         WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty) THEN
-          RETURN NULL;
+          PERFORM 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id;
+      ELSIF TG_TABLE_NAME = 'subscription_mrr' THEN
+          PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty;
+      ELSE
+          PERFORM 1 FROM billing.eventlog_pending WHERE ordinal = NEW.ordinal;
       END IF;
-      PERFORM billing.settle_ledger_rollups(NEW.merchant_id);
-      PERFORM billing.settle_mrr(NEW.merchant_id);
+      IF FOUND THEN
+          PERFORM billing.settle_commit(TG_TABLE_SCHEMA);
+      END IF;
       RETURN NULL;
+  END;
+  $function$
+
+function billing.settle_commit(text)
+  CREATE OR REPLACE FUNCTION billing.settle_commit(p_schema text)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_merchant uuid;
+  BEGIN
+      FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.ledger_rollup_pending ORDER BY merchant_id LOOP
+          PERFORM billing.settle_ledger_rollups(v_merchant);
+      END LOOP;
+      FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.subscription_mrr WHERE dirty ORDER BY merchant_id LOOP
+          PERFORM billing.settle_mrr(v_merchant);
+      END LOOP;
+      PERFORM billing.flush_event_log(p_schema);
   END;
   $function$
 
@@ -5420,7 +5438,10 @@ function billing.settle_ledger_rollups(uuid)
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
+  DECLARE
+      v_breach record;
   BEGIN
+      WITH kept AS (
       INSERT INTO billing.ledger_type_totals AS r (merchant_id, book, currency, account_type, psp_id, credits_posted, debits_posted)
       SELECT p_merchant, t.book, t.currency, a.account_type, a.psp_id,
              sum(CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END)::bigint,
@@ -5432,7 +5453,19 @@ function billing.settle_ledger_rollups(uuid)
        GROUP BY 2, 3, 4, 5
        ORDER BY 2, 3, 4, 5
       ON CONFLICT (merchant_id, book, currency, account_type, psp_id) DO UPDATE
-      SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted;
+      SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted
+      RETURNING r.book, r.currency, r.account_type, r.psp_id, r.credits_posted, r.debits_posted)
+      SELECT k.account_type, k.currency, k.credits_posted - k.debits_posted AS balance INTO v_breach
+        FROM kept k
+        JOIN billing.ledger_accounts a ON a.merchant_id = p_merchant AND a.book = k.book AND a.customer_id IS NULL
+         AND a.account_type = k.account_type AND a.currency = k.currency AND a.psp_id IS NOT DISTINCT FROM k.psp_id
+       WHERE k.book = 'general'
+         AND (a.debits_must_not_exceed_credits AND k.debits_posted > k.credits_posted
+              OR a.credits_must_not_exceed_debits AND k.credits_posted > k.debits_posted)
+       LIMIT 1;
+      IF FOUND THEN
+          RAISE EXCEPTION 'ledger_type_total_sign: % % balance %', v_breach.account_type, v_breach.currency, v_breach.balance USING ERRCODE = '23514';
+      END IF;
       INSERT INTO billing.ledger_daily AS r (merchant_id, book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits)
       SELECT p_merchant, t.book, t.currency, a.account_type, date_bin('15 minutes', t.effective_at, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
              t.transfer_type, a.psp_id, t.product_id,

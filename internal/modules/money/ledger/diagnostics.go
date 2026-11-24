@@ -13,8 +13,9 @@ import (
 
 // Integrity diagnostics of both books, per (merchant, book, currency):
 //
-//  1. Conservation: sum(credits_posted - debits_posted) over every account is
-//     0. Cheap (O(accounts)); catches one-sided counter corruption.
+//  1. Conservation: every balance sums to 0, an account's counters or, for a
+//     merchant-wide general-ledger account, its type total. Cheap
+//     (O(accounts)); catches one-sided counter corruption.
 //  2. Counter drift: ledger_accounts counters are a projection kept by the
 //     transfer insert trigger. Disabling that trigger can skew balances while
 //     conservation still holds; recomputing from ledger_transfers catches it.
@@ -23,6 +24,8 @@ import (
 //     Its units_reserved is what its payment's pending refunds reserve.
 //  4. Rollup drift: ledger_type_totals and ledger_daily, recomputed from
 //     ledger_transfers.
+//  5. Sign breaches: a merchant-wide general-ledger account's type total on
+//     the wrong side of its sign rule, which its commit refuses.
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -111,17 +114,33 @@ func (d RollupDrift) String() string {
 		moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
 }
 
+// SignBreach is a merchant-wide general-ledger account whose type total
+// crosses the side its sign rule holds it to.
+type SignBreach struct {
+	Currency      string     `json:"currency"`
+	AccountType   string     `json:"account_type"`
+	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	CreditsPosted int64      `json:"credits_posted"`
+	DebitsPosted  int64      `json:"debits_posted"`
+}
+
+func (b SignBreach) String() string {
+	return fmt.Sprintf("sign: general/%s balance=%s against its sign rule",
+		b.AccountType, moneyutil.FormatAmount(b.CreditsPosted-b.DebitsPosted, b.Currency))
+}
+
 // IntegrityReport is the combined result. Empty means every invariant holds.
 type IntegrityReport struct {
 	Conservation []ConservationBreach `json:"conservation_breaches"`
 	Counters     []CounterDrift       `json:"counter_drifts"`
 	Lots         []LotDrift           `json:"lot_drifts"`
 	Rollups      []RollupDrift        `json:"rollup_drifts"`
+	Signs        []SignBreach         `json:"sign_breaches"`
 }
 
 // OK reports whether the books are intact.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -140,7 +159,28 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 	if r.Rollups, err = CheckRollupDrift(ctx, q, merchant); err != nil {
 		return r, err
 	}
+	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {
+		return r, err
+	}
 	return r, nil
+}
+
+// CheckSignBreaches returns the merchant-wide general-ledger accounts whose
+// type total crosses its sign rule. An empty slice is the healthy answer.
+func CheckSignBreaches(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]SignBreach, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("ledger: merchant is required")
+	}
+	rows, err := gen.New(q).ListLedgerSignBreaches(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: sign check: %w", err)
+	}
+	var out []SignBreach
+	for _, row := range rows {
+		out = append(out, SignBreach{Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+			CreditsPosted: row.CreditsPosted, DebitsPosted: row.DebitsPosted})
+	}
+	return out, nil
 }
 
 // CheckLotDrift recomputes every credit lot's counters from the legs on its

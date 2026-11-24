@@ -89,14 +89,14 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 		}
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "MERCHANT\tCONSERVATION\tCOUNTERS\tLOTS\tROLLUPS\tDETAIL")
+		fmt.Fprintln(w, "MERCHANT\tCONSERVATION\tCOUNTERS\tLOTS\tROLLUPS\tSIGNS\tDETAIL")
 		for _, res := range results {
 			detail := ""
 			switch {
 			case res.Err != "":
 				detail = res.Err
 			case !res.Report.OK():
-				parts := make([]string, 0, len(res.Report.Conservation)+len(res.Report.Counters)+len(res.Report.Lots)+len(res.Report.Rollups))
+				parts := make([]string, 0, len(res.Report.Conservation)+len(res.Report.Counters)+len(res.Report.Lots)+len(res.Report.Rollups)+len(res.Report.Signs))
 				for _, b := range res.Report.Conservation {
 					parts = append(parts, b.String())
 				}
@@ -109,14 +109,18 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 				for _, d := range res.Report.Rollups {
 					parts = append(parts, d.String())
 				}
+				for _, b := range res.Report.Signs {
+					parts = append(parts, b.String())
+				}
 				detail = strings.Join(parts, "; ")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				ledgerAuditLabel(res),
 				ledgerAuditVerdict(len(res.Report.Conservation)),
 				ledgerAuditVerdict(len(res.Report.Counters)),
 				ledgerAuditVerdict(len(res.Report.Lots)),
 				ledgerAuditVerdict(len(res.Report.Rollups)),
+				ledgerAuditVerdict(len(res.Report.Signs)),
 				detail)
 		}
 		if err := w.Flush(); err != nil {

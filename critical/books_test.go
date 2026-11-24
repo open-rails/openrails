@@ -50,7 +50,9 @@ func TestBooks(t *testing.T) {
 		c, psp := customer.UUID(), fixturePSP(t, w)
 
 		// Every account type opens through the chart, in its book and class,
-		// with its sign rules, scoped as the chart says.
+		// with its sign rules, scoped as the chart says: a merchant-wide
+		// general-ledger account by Open, before any business transaction.
+		booksOpen(t, w, mid, "USD", &psp)
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			for _, a := range books.Chart() {
 				var cust, p *uuid.UUID
@@ -90,9 +92,21 @@ func TestBooks(t *testing.T) {
 			}, accounts[string(a.Type)], a.Type)
 		}
 
+		// A balance read is a counter: a merchant-wide general-ledger account
+		// keeps none, and reads none.
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			revenue, err := q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{MerchantID: mid, AccountType: string(books.UsageRevenue), Currency: "USD"})
+			if err != nil {
+				return err
+			}
+			_, err = ledger.New(q, mid).Balance(ctx, revenue.ID)
+			require.ErrorIs(t, err, pgx.ErrNoRows)
+			return nil
+		}))
+
 		// The schema admits no other pairing of type, book, class or scope, no
-		// general-ledger sign rule but the chart's (on customer accounts only)
-		// and no general-ledger currency outside the registry.
+		// general-ledger sign rule but the chart's and no general-ledger
+		// currency outside the registry.
 		insert := "INSERT INTO " + booksTable(w, "ledger_accounts") + " (merchant_id, book, class, account_type, customer_id, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits) VALUES ($1, $2, $3, $4, $5, $6, $7, false)"
 		for _, bad := range []struct {
 			book, class, typ string
@@ -106,8 +120,8 @@ func TestBooks(t *testing.T) {
 			{"general", "asset", "customer_balance", nil, "EUR", false, "ledger_accounts_type_check"},
 			{"units", "retired", "units_redeemed", &c, "EUR", false, "ledger_accounts_scope_check"},
 			{"general", "asset", "cash_clearing", nil, "EUR", false, "ledger_accounts_scope_check"},
-			{"general", "liability", "unapplied_cash", nil, "EUR", true, "ledger_accounts_general_sign_check"},
-			{"general", "liability", "deferred_revenue_credit", &c, "EUR", false, "ledger_accounts_general_sign_check"},
+			{"general", "liability", "unapplied_cash", nil, "EUR", false, "ledger_accounts_general_sign_check"},
+			{"general", "revenue", "usage_revenue", nil, "EUR", true, "ledger_accounts_general_sign_check"},
 			{"general", "revenue", "usage_revenue", nil, "GOLD", false, "ledger_accounts_general_currency_check"},
 		} {
 			_, err := w.pool.Exec(t.Context(), insert, mid, bad.book, bad.class, bad.typ, bad.customer, bad.currency, bad.floor)
@@ -231,6 +245,66 @@ func TestBooks(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, byID.Items)
 		balance(t, w.alpha, customer, 1000, 0, 1000)
+
+		// usage_reversed posts in each book at one coordinate. Its units leg
+		// reads as a spend given back to its lot, or as usage owed taken back;
+		// the lot counts it unspent; the units book's coordinate lookup reads
+		// the units leg, though the general ledger's posted after it.
+		var lot uuid.UUID
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "credit_grants")+" WHERE merchant_id=$1 AND customer_id=$2", mid, c).Scan(&lot))
+		reversal := books.Coord{Operation: "usage_reversal", Source: "critical", SourceID: "period"}
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			l := ledger.New(q, mid)
+			held, err := l.EnsureCustomerBalance(ctx, c, "USD")
+			if err != nil {
+				return err
+			}
+			owed, err := l.EnsureCustomerArrears(ctx, c, "USD")
+			if err != nil {
+				return err
+			}
+			redeemed, err := l.EnsureSystemAccount(ctx, ledger.PlatformRevenue, "USD")
+			if err != nil {
+				return err
+			}
+			for _, tr := range []ledger.Transfer{
+				{Debit: held, Credit: redeemed, Amount: 300, Type: ledger.CreditSpend, CreditGrantID: &lot, Coord: ledger.Coord{Operation: ledger.OpSpend, Source: "critical", SourceID: "spent"}},
+				{Debit: redeemed, Credit: held, Amount: 100, Type: ledger.UsageReversed, CreditGrantID: &lot, Coord: ledger.Coord{Operation: "usage_reversal", Source: "critical", SourceID: "given-back"}},
+				{Debit: owed, Credit: redeemed, Amount: 50, Type: ledger.OwedAccrual, Coord: ledger.Coord{Operation: "usage_accrual", Source: "critical", SourceID: "owed"}},
+				{Debit: redeemed, Credit: owed, Amount: 20, Type: ledger.UsageReversed, Coord: reversal},
+			} {
+				tr.Currency, tr.Customer = "USD", &c
+				if _, err := l.Apply(ctx, tr); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			_, applied, err := books.New(q, mid).Post(ctx, books.Posting{
+				Debit: books.Ref{Type: books.RevenueAdjustments}, Credit: books.Ref{Type: books.UsageReceivable, Customer: &c},
+				Amount: 20, Currency: "USD", Type: books.UsageReversed, Coord: reversal, EffectiveAt: w.clock.Now(), Customer: &c,
+			})
+			require.True(t, applied, "the general ledger's leg is not the units book's")
+			return err
+		}))
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			tr, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{MerchantID: mid, CustomerID: c, Currency: "USD",
+				TransferType: string(ledger.UsageReversed), Operation: string(reversal.Operation), Source: reversal.Source, SourceID: reversal.SourceID})
+			require.Equal(t, "units", tr.Book)
+			return err
+		}))
+		history, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
+		require.NoError(t, err)
+		var moves []string
+		for _, item := range history.Items {
+			moves = append(moves, fmt.Sprintf("%s %d", item.Type, item.Amount))
+		}
+		require.ElementsMatch(t, []string{"deposit 1000", "spend -300", "spend 100", "owed_accrual 50", "owed_accrual -20"}, moves)
+		grant, err := w.alpha.GetCreditGrant(t.Context(), billing.CreditGrantID(lot))
+		require.NoError(t, err)
+		require.Equal(t, [2]int64{200, 800}, [2]int64{grant.SpentAmount, grant.RemainingAmount})
+		balance(t, w.alpha, customer, 800, 0, 800)
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
@@ -251,6 +325,7 @@ func TestBooks(t *testing.T) {
 			}))
 			return id
 		}
+		booksOpen(t, w, mid, "USD", nil)
 		aliceUSD, aliceEUR, bobUSD := account(books.CustomerUnits, "USD", &a), account(books.CustomerUnits, "EUR", &a), account(books.CustomerUnits, "USD", &b)
 		sold, receivable, revenue := account(books.UnitsSold, "USD", nil), account(books.UsageReceivable, "USD", &a), account(books.UsageRevenue, "USD", nil)
 		before := booksSnapshot(t, w)
@@ -312,6 +387,36 @@ func TestBooks(t *testing.T) {
 			require.Error(t, err)
 		}
 
+		// A merchant-wide account is opened before the business transaction,
+		// never inside one, and no posting reaches one that is not open.
+		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		require.NoError(t, err)
+		require.ErrorIs(t, booksRawTx(t, w, func(ctx context.Context, _ pgx.Tx, _ *gen.Queries) error {
+			return books.Open(ctx, database.DataPool(), mid, "EUR", nil)
+		}), db.ErrCallerTransaction)
+		receive := func(currency string, amount int64, key string) error {
+			return booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+				_, _, err := books.New(q, mid).Post(ctx, books.Posting{
+					Debit: books.Ref{Type: books.ExternalReceipts}, Credit: books.Ref{Type: books.UnappliedCash},
+					Amount: amount, Currency: currency, Type: books.CashReceived, EffectiveAt: w.clock.Now(),
+					Coord: books.Coord{Operation: "cash_receipt", Source: "critical", SourceID: key},
+				})
+				return err
+			})
+		}
+		require.ErrorIs(t, receive("EUR", 100, "not-open"), books.ErrNotOpen)
+
+		// A merchant-wide account's sign rule holds at commit: unapplied cash
+		// drawn beyond what was received refuses the commit.
+		require.ErrorContains(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
+				Debit: books.Ref{Type: books.UnappliedCash}, Credit: books.Ref{Type: books.DeferredRevenue},
+				Amount: 100, Currency: "USD", Type: books.CashApplied, EffectiveAt: w.clock.Now(),
+				Coord: books.Coord{Operation: "cash_application", Source: "critical", SourceID: "unfunded"},
+			})
+			return err
+		}), "ledger_type_total_sign: unapplied_cash USD")
+
 		// Nothing moved.
 		require.Equal(t, before, booksSnapshot(t, w))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
@@ -342,6 +447,7 @@ func TestBooks(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		fundBooks(t, w, customer, "USD", 1000)
 		c := customer.UUID()
+		booksOpen(t, w, mid, "USD", nil)
 		// Half past eleven on the evening of 30 November in New York is
 		// 04:30 UTC on 1 December: its bucket is UTC, and a reader grouping in
 		// the merchant's zone counts it on 30 November.
@@ -354,6 +460,14 @@ func TestBooks(t *testing.T) {
 				Amount: 2_500_000, Currency: "USD", Type: books.UsageAccrued,
 				Coord:       books.Coord{Operation: "usage_accrual", Source: "critical", SourceID: "evening"},
 				EffectiveAt: at, Customer: &c,
+			})
+			if err != nil {
+				return err
+			}
+			_, _, err = books.New(q, mid).Post(ctx, books.Posting{
+				Debit: books.Ref{Type: books.ExternalReceipts}, Credit: books.Ref{Type: books.UnappliedCash},
+				Amount: 1_000_000, Currency: "USD", Type: books.CashReceived, EffectiveAt: at,
+				Coord: books.Coord{Operation: "cash_receipt", Source: "critical", SourceID: "remittance"},
 			})
 			return err
 		}))
@@ -411,15 +525,19 @@ func TestBooks(t *testing.T) {
 		corrupt("ledger_type_totals", "guard_ledger_type_totals", "DELETE FROM $table WHERE merchant_id=$1 AND account_type='customer_units'")
 		corrupt("ledger_accounts", "guard_ledger_account_facts", "UPDATE $table SET debits_posted=debits_posted+1 WHERE merchant_id=$1 AND account_type='usage_receivable'")
 		corrupt("ledger_accounts", "guard_ledger_account_facts", "UPDATE $table SET credits_posted=credits_posted+1 WHERE merchant_id=$1 AND account_type='usage_revenue'")
+		corrupt("ledger_type_totals", "guard_ledger_type_totals", "UPDATE $table SET debits_posted=debits_posted+2000000 WHERE merchant_id=$1 AND account_type='unapplied_cash'")
 		output, err = hostCLIResult(t, w, "ledger-audit", "--merchant", audit)
 		require.Error(t, err)
 		require.Contains(t, output, "rollup drift: ledger_type_totals units/customer_units")
+		require.Contains(t, output, "rollup drift: ledger_type_totals general/unapplied_cash")
 		require.Equal(t, 2, strings.Count(output, "counter drift:"), output)
 		require.Contains(t, output, "conservation: merchant="+w.alpha.MerchantID().String()+" book=general")
-		require.Equal(t, 3, strings.Count(output, "FAIL("), output)
+		require.Contains(t, output, "sign: general/unapplied_cash balance=")
+		require.Equal(t, 4, strings.Count(output, "FAIL("), output)
 		output, err = hostCLIResult(t, w, "ledger-audit", "--merchant", audit, "--format", "json")
 		require.Error(t, err)
 		require.Contains(t, output, `"rollup_drifts"`)
+		require.Contains(t, output, `"sign_breaches"`)
 	})
 
 	t.Run("OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book", func(t *testing.T) {
@@ -495,62 +613,44 @@ func TestBooks(t *testing.T) {
 		members, err := pgx.CollectRows(rows, pgx.RowToStructByPos[member])
 		require.NoError(t, err)
 		require.Len(t, members, 2)
-		accrue := func(ctx context.Context, q *gen.Queries, customer uuid.UUID, key string) error {
-			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
-				Debit: books.Ref{Type: books.UsageReceivable, Customer: &customer}, Credit: books.Ref{Type: books.UsageRevenue},
-				Amount: 100, Currency: "USD", Type: books.UsageAccrued, EffectiveAt: w.clock.Now(), Customer: &customer,
-				Coord: books.Coord{Operation: "usage_accrual", Source: "critical", SourceID: key},
-			})
-			return err
-		}
+		booksOpen(t, w, mid, "USD", nil)
 		seat := func(ctx context.Context, tx pgx.Tx, sub uuid.UUID) error {
 			_, err := tx.Exec(ctx, "UPDATE "+booksTable(w, "subscriptions")+" SET quantity=COALESCE(quantity, 1)+1, updated_at=now() WHERE merchant_id=$1 AND id=$2", mid, sub)
 			return err
 		}
-		for i, m := range members {
-			require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
-				return accrue(ctx, q, m.customer, fmt.Sprintf("open-%d", i))
-			}))
-		}
-		// One transaction posts and then adds a seat, the other adds a seat
-		// and then posts; both commit together. Each takes the ledger's
-		// rollup rows before MRR's, whichever its commit queued first.
-		const rounds = 8
-		for round := range rounds {
-			var errs [2]error
-			var group sync.WaitGroup
-			done := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			for i, m := range members {
-				group.Go(func() {
-					errs[i] = booksRawTx(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
-						key := fmt.Sprintf("round-%d-%d", round, i)
-						if i == 0 {
-							if err := accrue(ctx, q, m.customer, key); err != nil {
-								return err
-							}
-							if err := seat(ctx, tx, m.sub); err != nil {
-								return err
-							}
-						} else {
-							if err := seat(ctx, tx, m.sub); err != nil {
-								return err
-							}
-							if err := accrue(ctx, q, m.customer, key); err != nil {
-								return err
-							}
-						}
-						close(done[i])
-						return booksAwait(done[1-i], "the other transaction's statements")
-					})
-				})
+				if err := booksAccrue(ctx, q, w, mid, m.customer, fmt.Sprintf("open-%d", i)); err != nil {
+					return err
+				}
 			}
-			group.Wait()
-			require.NoError(t, errs[0], "round %d", round)
-			require.NoError(t, errs[1], "round %d", round)
-		}
-		seats := int64(1 + rounds)
-		require.Equal(t, [3]int64{2 * seats * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD"))
-		require.Equal(t, [2]int64{2 * 100 * (1 + rounds), 0}, booksTotal(t, w, "general", "usage_revenue"))
+			return nil
+		}))
+		// The first transaction posts, then adds a seat. Held at its commit
+		// inside the ledger step, it holds the totals both post to.
+		release := booksHold(t, w, mid, "usage_revenue")
+		first := booksCommit(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
+			if err := booksAccrue(ctx, q, w, mid, members[0].customer, "posted-first"); err != nil {
+				return err
+			}
+			return seat(ctx, tx, members[0].sub)
+		})
+		first.blocked(t, w, "the transaction that posted first")
+		// The second adds a seat, then posts: its commit settles the ledger
+		// before MRR too, so it waits on the first's totals holding nothing
+		// the first needs.
+		second := booksCommit(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
+			if err := seat(ctx, tx, members[1].sub); err != nil {
+				return err
+			}
+			return booksAccrue(ctx, q, w, mid, members[1].customer, "seated-first")
+		})
+		second.blocked(t, w, "the transaction that seated first")
+		release()
+		require.NoError(t, first.wait())
+		require.NoError(t, second.wait())
+		require.Equal(t, [3]int64{2 * 2 * ccbillMemberMRR, 2, 2}, mrrTotals(t, w, a.alpha, "USD"))
+		require.Equal(t, [2]int64{4 * 100, 0}, booksTotal(t, w, "general", "usage_revenue"))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
@@ -561,28 +661,55 @@ func TestBooks(t *testing.T) {
 		fundBooks(t, w, customer, "USD", 1000)
 		c, psp := customer.UUID(), fixturePSP(t, w)
 		const rounds = 8
-		post := func(ctx context.Context, q *gen.Queries, debit, credit books.Ref, typ books.TransferType, key string, who *uuid.UUID) error {
+		post := func(ctx context.Context, q *gen.Queries, debit, credit books.Ref, typ books.TransferType, currency, key string, who *uuid.UUID) error {
 			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
-				Debit: debit, Credit: credit, Amount: 100, Currency: "USD", Type: typ, EffectiveAt: w.clock.Now(), Customer: who,
+				Debit: debit, Credit: credit, Amount: 100, Currency: currency, Type: typ, EffectiveAt: w.clock.Now(), Customer: who,
 				Coord: books.Coord{Operation: books.Operation(typ), Source: "critical", SourceID: key},
 			})
 			return err
 		}
 		cash, unapplied := books.Ref{Type: books.CashClearing, PSP: &psp}, books.Ref{Type: books.UnappliedCash}
 		deferred, receivable := books.Ref{Type: books.DeferredRevenue}, books.Ref{Type: books.UsageReceivable, Customer: &c}
-		checkout := func(ctx context.Context, q *gen.Queries, key string) error {
-			if err := post(ctx, q, cash, unapplied, books.CashReceived, key, nil); err != nil {
+		checkout := func(ctx context.Context, q *gen.Queries, currency, key string) error {
+			if err := post(ctx, q, cash, unapplied, books.CashReceived, currency, key, nil); err != nil {
 				return err
 			}
-			return post(ctx, q, unapplied, deferred, books.CashApplied, key, nil)
+			return post(ctx, q, unapplied, deferred, books.CashApplied, currency, key, nil)
 		}
-		// Every account exists, and the customer owes every round's usage.
+
+		// The first checkouts in a currency and PSP find their accounts
+		// open, opened before either began: neither waits on the other.
+		booksOpen(t, w, mid, "EUR", &psp)
+		var firsts [2]error
+		var group sync.WaitGroup
+		posted := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+		for i := range posted {
+			group.Go(func() {
+				firsts[i] = booksRawTx(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+					if err := checkout(ctx, q, "EUR", fmt.Sprintf("first-%d", i)); err != nil {
+						return err
+					}
+					close(posted[i])
+					return booksAwait(posted[1-i], "the other first checkout")
+				})
+			})
+		}
+		group.Wait()
+		require.NoError(t, firsts[0])
+		require.NoError(t, firsts[1])
+
+		// The customer owes every round's usage, and remittances cover every
+		// collection's draw on unapplied cash.
+		booksOpen(t, w, mid, "USD", &psp)
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
-			if err := checkout(ctx, q, "open"); err != nil {
+			if err := checkout(ctx, q, "USD", "open"); err != nil {
 				return err
 			}
 			for round := range rounds {
-				if err := post(ctx, q, receivable, books.Ref{Type: books.UsageRevenue}, books.UsageAccrued, fmt.Sprintf("usage-%d", round), &c); err != nil {
+				if err := post(ctx, q, receivable, books.Ref{Type: books.UsageRevenue}, books.UsageAccrued, "USD", fmt.Sprintf("usage-%d", round), &c); err != nil {
+					return err
+				}
+				if err := post(ctx, q, books.Ref{Type: books.ExternalReceipts}, unapplied, books.CashReceived, "USD", fmt.Sprintf("remittance-%d", round), nil); err != nil {
 					return err
 				}
 			}
@@ -608,7 +735,7 @@ func TestBooks(t *testing.T) {
 							return err
 						}
 					}
-					return post(ctx, q, unapplied, receivable, books.UsageCollected, fmt.Sprintf("collect-%d", round), &c)
+					return post(ctx, q, unapplied, receivable, books.UsageCollected, "USD", fmt.Sprintf("collect-%d", round), &c)
 				})
 			})
 			for i := range posted {
@@ -617,7 +744,7 @@ func TestBooks(t *testing.T) {
 						if err := booksAwait(locked, "the collection's customer lock"); err != nil {
 							return err
 						}
-						if err := checkout(ctx, q, fmt.Sprintf("checkout-%d-%d", round, i)); err != nil {
+						if err := checkout(ctx, q, "USD", fmt.Sprintf("checkout-%d-%d", round, i)); err != nil {
 							return err
 						}
 						close(posted[i])
@@ -634,11 +761,116 @@ func TestBooks(t *testing.T) {
 				require.NoError(t, err, "round %d, transaction %d", round, i)
 			}
 		}
-		require.Equal(t, [2]int64{100 * (1 + 2*rounds), 100 * (1 + 2*rounds + rounds)}, booksTotal(t, w, "general", "unapplied_cash"))
+		require.Equal(t, [2]int64{100 * (1 + 3*rounds), 100 * (1 + 3*rounds)}, booksTotal(t, w, "general", "unapplied_cash"))
 		require.Equal(t, [2]int64{100 * rounds, 100 * rounds}, booksTotal(t, w, "general", "usage_receivable"))
 		require.Equal(t, [2]int64{100 * rounds, 100 * rounds}, booksCounters(t, w, "usage_receivable"))
 		require.Equal(t, [2]int64{0, 0}, booksCounters(t, w, "unapplied_cash"))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
+	})
+
+	t.Run("OR-J40-S23/an-event-queued-before-or-after-a-ledger-transfer-both-commit", func(t *testing.T) {
+		w := newWorld(t)
+		mid := w.alpha.MerchantID().UUID()
+		booksOpen(t, w, mid, "USD", nil)
+		first, second := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+		fundBooks(t, w, first, "USD", 1000)
+		fundBooks(t, w, second, "USD", 1000)
+		a, b := first.UUID(), second.UUID()
+		notify := func(ctx context.Context, q *gen.Queries, customer uuid.UUID) error {
+			return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "order_due"})
+		}
+		// Every row both commits lock exists, the merchant's stream included.
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			if err := booksAccrue(ctx, q, w, mid, a, "open-a"); err != nil {
+				return err
+			}
+			if err := booksAccrue(ctx, q, w, mid, b, "open-b"); err != nil {
+				return err
+			}
+			return notify(ctx, q, a)
+		}))
+		var events int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "eventlog_events")+" WHERE merchant_id=$1", mid).Scan(&events))
+		// The first transaction posts, then queues an event (a credit pack
+		// bought): held at its commit inside the ledger step.
+		release := booksHold(t, w, mid, "usage_revenue")
+		posted := booksCommit(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+			if err := booksAccrue(ctx, q, w, mid, a, "posted-first"); err != nil {
+				return err
+			}
+			return notify(ctx, q, a)
+		})
+		posted.blocked(t, w, "the transaction that posted first")
+		// The second queues an event, then posts (a usage order made due):
+		// its commit takes the ledger step before the event streams, so it
+		// waits on the first's totals holding no stream.
+		queued := booksCommit(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+			if err := notify(ctx, q, b); err != nil {
+				return err
+			}
+			return booksAccrue(ctx, q, w, mid, b, "queued-first")
+		})
+		queued.blocked(t, w, "the transaction that queued first")
+		release()
+		require.NoError(t, posted.wait())
+		require.NoError(t, queued.wait())
+		var after int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "eventlog_events")+" WHERE merchant_id=$1", mid).Scan(&after))
+		require.Equal(t, events+2, after, "both events are numbered")
+		require.Equal(t, [2]int64{4 * 100, 0}, booksTotal(t, w, "general", "usage_revenue"))
+		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
+	})
+
+	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit", func(t *testing.T) {
+		w := newWorld(t)
+		merchants := []uuid.UUID{w.alpha.MerchantID().UUID(), w.beta.MerchantID().UUID()}
+		slices.SortFunc(merchants, func(x, y uuid.UUID) int { return bytes.Compare(x[:], y[:]) })
+		low, high := merchants[0], merchants[1]
+		receive := func(ctx context.Context, q *gen.Queries, merchant uuid.UUID, key string) error {
+			_, _, err := books.New(q, merchant).Post(ctx, books.Posting{
+				Debit: books.Ref{Type: books.ExternalReceipts}, Credit: books.Ref{Type: books.UnappliedCash},
+				Amount: 100, Currency: "USD", Type: books.CashReceived, EffectiveAt: w.clock.Now(),
+				Coord: books.Coord{Operation: "cash_receipt", Source: "critical", SourceID: key},
+			})
+			return err
+		}
+		for _, m := range merchants {
+			booksOpen(t, w, m, "USD", nil)
+		}
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			if err := receive(ctx, q, low, "open"); err != nil {
+				return err
+			}
+			return receive(ctx, q, high, "open")
+		}))
+		// The first transaction posts for the lower merchant, then the
+		// higher: held at its commit inside the lower merchant's ledger step.
+		release := booksHold(t, w, low, "unapplied_cash")
+		lowFirst := booksCommit(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+			if err := receive(ctx, q, low, "low-first"); err != nil {
+				return err
+			}
+			return receive(ctx, q, high, "low-first")
+		})
+		lowFirst.blocked(t, w, "the transaction that posted for the lower merchant first")
+		// The second posts for the higher merchant first; its commit settles
+		// the lower merchant first all the same, so it holds nothing the
+		// first needs.
+		highFirst := booksCommit(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
+			if err := receive(ctx, q, high, "high-first"); err != nil {
+				return err
+			}
+			return receive(ctx, q, low, "high-first")
+		})
+		highFirst.blocked(t, w, "the transaction that posted for the higher merchant first")
+		release()
+		require.NoError(t, lowFirst.wait())
+		require.NoError(t, highFirst.wait())
+		for _, m := range merchants {
+			var credits int64
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT credits_posted FROM "+booksTable(w, "ledger_type_totals")+" WHERE merchant_id=$1 AND book='general' AND account_type='unapplied_cash'", m).Scan(&credits))
+			require.Equal(t, int64(300), credits)
+		}
 	})
 }
 
@@ -740,6 +972,98 @@ func booksAwait(step <-chan struct{}, what string) error {
 		return nil
 	case <-time.After(15 * time.Second):
 		return fmt.Errorf("waited 15s for %s", what)
+	}
+}
+
+// booksOpen opens the merchant's general ledger in a currency, as a writer
+// does before its business transaction.
+func booksOpen(t *testing.T, w *world, merchant uuid.UUID, currency string, psp *uuid.UUID) {
+	t.Helper()
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	require.NoError(t, err)
+	require.NoError(t, books.Open(t.Context(), database.DataPool(), merchant, currency, psp))
+}
+
+// booksAccrue posts 100 of a customer's usage to the general ledger.
+func booksAccrue(ctx context.Context, q *gen.Queries, w *world, merchant, customer uuid.UUID, key string) error {
+	_, _, err := books.New(q, merchant).Post(ctx, books.Posting{
+		Debit: books.Ref{Type: books.UsageReceivable, Customer: &customer}, Credit: books.Ref{Type: books.UsageRevenue},
+		Amount: 100, Currency: "USD", Type: books.UsageAccrued, EffectiveAt: w.clock.Now(), Customer: &customer,
+		Coord: books.Coord{Operation: "usage_accrual", Source: "critical", SourceID: key},
+	})
+	return err
+}
+
+// booksHold locks, from a session of its own, the merchant's general-ledger
+// bucket of one account type, which the ledger step locks after its totals:
+// a commit that reaches it waits there holding the totals. release ends the
+// hold.
+func booksHold(t *testing.T, w *world, merchant uuid.UUID, accountType string) (release func()) {
+	t.Helper()
+	tx, err := w.pool.Begin(t.Context())
+	require.NoError(t, err)
+	var held int
+	require.NoError(t, tx.QueryRow(t.Context(), "SELECT count(*) FROM (SELECT 1 FROM "+booksTable(w, "ledger_daily")+
+		" WHERE merchant_id=$1 AND book='general' AND account_type=$2 FOR UPDATE) held", merchant, accountType).Scan(&held))
+	require.Positive(t, held)
+	var once sync.Once
+	release = func() { once.Do(func() { _ = tx.Rollback(context.Background()) }) }
+	t.Cleanup(release)
+	return release
+}
+
+// booksCommitting is a transaction of alpha's run on its own goroutine.
+type booksCommitting struct {
+	pid  chan int32
+	done chan error
+}
+
+// booksCommit runs fn in a transaction of alpha's and commits it, on a
+// goroutine of its own.
+func booksCommit(t *testing.T, w *world, fn func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error) *booksCommitting {
+	c := &booksCommitting{pid: make(chan int32, 1), done: make(chan error, 1)}
+	go func() {
+		c.done <- booksRawTx(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
+			var pid int32
+			if err := tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+				return err
+			}
+			if err := fn(ctx, tx, q); err != nil {
+				return err
+			}
+			c.pid <- pid
+			return nil
+		})
+	}()
+	return c
+}
+
+// blocked waits until the transaction, its statements done, waits on a lock
+// as it commits.
+func (c *booksCommitting) blocked(t *testing.T, w *world, what string) {
+	t.Helper()
+	var pid int32
+	select {
+	case pid = <-c.pid:
+	case err := <-c.done:
+		t.Fatalf("%s ended before it committed: %v", what, err)
+	case <-time.After(15 * time.Second):
+		t.Fatalf("%s never finished its statements", what)
+	}
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := w.pool.QueryRow(t.Context(), "SELECT COALESCE(wait_event_type = 'Lock', false) FROM pg_stat_activity WHERE pid = $1", pid).Scan(&waiting)
+		return err == nil && waiting
+	}, 15*time.Second, 20*time.Millisecond, "%s waits on a lock at commit", what)
+}
+
+// wait is the transaction's outcome.
+func (c *booksCommitting) wait() error {
+	select {
+	case err := <-c.done:
+		return err
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("the transaction did not finish")
 	}
 }
 

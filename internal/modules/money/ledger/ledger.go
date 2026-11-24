@@ -70,7 +70,8 @@ const (
 	OwedRepayment TransferType = "owed_repayment"
 	// UsageReversed credits a lot with what a period's usage posted beyond
 	// its price, once a volume tier's price fell (units_redeemed ->
-	// customer_units). The general ledger shares the type.
+	// customer_units), naming the lot; a leg that reduces owed names none.
+	// The general ledger shares the type.
 	UsageReversed = books.UsageReversed
 )
 

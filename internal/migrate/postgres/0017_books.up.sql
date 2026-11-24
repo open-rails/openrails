@@ -58,11 +58,10 @@ ALTER TABLE billing.ledger_accounts
         ELSE customer_id IS NULL AND psp_id IS NULL
     END),
     ADD CONSTRAINT ledger_accounts_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps (merchant_id, id),
-    -- The general ledger's sign rules are the chart's, on its customer
-    -- accounts only, and it holds only the registry's currencies
-    -- (internal/currency), never a merchant's own unit.
+    -- The general ledger's sign rules are the chart's, and it holds only the
+    -- registry's currencies (internal/currency), never a merchant's own unit.
     ADD CONSTRAINT ledger_accounts_general_sign_check CHECK (book = 'units'
-        OR debits_must_not_exceed_credits = (account_type = 'deferred_revenue_credit')
+        OR debits_must_not_exceed_credits = (account_type IN ('allowance_doubtful', 'unapplied_cash', 'deferred_revenue', 'deferred_revenue_credit'))
         AND credits_must_not_exceed_debits = (account_type = 'usage_receivable')),
     ADD CONSTRAINT ledger_accounts_general_currency_check CHECK (book = 'units'
         OR currency IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
@@ -75,7 +74,7 @@ COMMENT ON COLUMN billing.ledger_accounts.account_type IS 'The account''s role i
 COMMENT ON COLUMN billing.ledger_accounts.book IS 'units or general. A transfer never crosses books.';
 COMMENT ON COLUMN billing.ledger_accounts.class IS 'The account type''s class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.';
 COMMENT ON COLUMN billing.ledger_accounts.psp_id IS 'The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.';
-COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart; a merchant-wide general-ledger account has none.';
+COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart. A merchant-wide general-ledger account keeps no counters: its type total is held to the rule at commit (billing.settle_ledger_rollups).';
 
 -- Transfers carry their book, the instant they take effect and the order line
 -- and product they belong to. Existing transfers are the units book's,
@@ -139,11 +138,11 @@ $$;
 CREATE TRIGGER trg_ledger_transfers_book_rules BEFORE INSERT ON billing.ledger_transfers
     FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_book_rules();
 
--- A merchant-wide general-ledger account keeps no counters and no sign rule,
--- so no transaction holds it from its insert to commit: its balance is its
--- ledger_type_totals row, kept at commit. The accounts that keep counters are
--- locked in id order; the book rules refused a missing account and a
--- cross-currency transfer.
+-- A merchant-wide general-ledger account keeps no counters, so no transaction
+-- holds it from its insert to commit: its balance is its ledger_type_totals
+-- row, kept and held to its sign rule at commit. The accounts that keep
+-- counters are locked in id order; the book rules refused a missing account
+-- and a cross-currency transfer.
 CREATE OR REPLACE FUNCTION billing.ledger_transfers_apply_counters() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'billing', 'pg_catalog' AS $$
 DECLARE
@@ -194,7 +193,7 @@ CREATE TABLE billing.ledger_type_totals (
     CONSTRAINT ledger_type_totals_account_type_key UNIQUE NULLS NOT DISTINCT (merchant_id, book, currency, account_type, psp_id),
     CONSTRAINT ledger_type_totals_posted_check CHECK (credits_posted >= 0 AND debits_posted >= 0)
 );
-COMMENT ON TABLE billing.ledger_type_totals IS 'What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account''s balance, since that account keeps no counters. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.';
+COMMENT ON TABLE billing.ledger_type_totals IS 'What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account''s balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account''s sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.';
 
 CREATE TABLE billing.ledger_daily (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
@@ -273,10 +272,14 @@ CREATE TRIGGER trg_ledger_transfers_rollups AFTER INSERT ON billing.ledger_trans
     FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_queue_rollups();
 
 -- Folds a merchant's queued transfers into the rollups: each total, then each
--- bucket, in key order, then empties the queue.
+-- bucket, in key order, then empties the queue. A merchant-wide general-ledger
+-- account's total, locked here, is held to the account's sign rule.
 CREATE FUNCTION billing.settle_ledger_rollups(p_merchant uuid) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+DECLARE
+    v_breach record;
 BEGIN
+    WITH kept AS (
     INSERT INTO billing.ledger_type_totals AS r (merchant_id, book, currency, account_type, psp_id, credits_posted, debits_posted)
     SELECT p_merchant, t.book, t.currency, a.account_type, a.psp_id,
            sum(CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END)::bigint,
@@ -288,7 +291,19 @@ BEGIN
      GROUP BY 2, 3, 4, 5
      ORDER BY 2, 3, 4, 5
     ON CONFLICT (merchant_id, book, currency, account_type, psp_id) DO UPDATE
-    SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted;
+    SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted
+    RETURNING r.book, r.currency, r.account_type, r.psp_id, r.credits_posted, r.debits_posted)
+    SELECT k.account_type, k.currency, k.credits_posted - k.debits_posted AS balance INTO v_breach
+      FROM kept k
+      JOIN billing.ledger_accounts a ON a.merchant_id = p_merchant AND a.book = k.book AND a.customer_id IS NULL
+       AND a.account_type = k.account_type AND a.currency = k.currency AND a.psp_id IS NOT DISTINCT FROM k.psp_id
+     WHERE k.book = 'general'
+       AND (a.debits_must_not_exceed_credits AND k.debits_posted > k.credits_posted
+            OR a.credits_must_not_exceed_debits AND k.credits_posted > k.debits_posted)
+     LIMIT 1;
+    IF FOUND THEN
+        RAISE EXCEPTION 'ledger_type_total_sign: % % balance %', v_breach.account_type, v_breach.currency, v_breach.balance USING ERRCODE = '23514';
+    END IF;
     INSERT INTO billing.ledger_daily AS r (merchant_id, book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits)
     SELECT p_merchant, t.book, t.currency, a.account_type, date_bin('15 minutes', t.effective_at, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
            t.transfer_type, a.psp_id, t.product_id,
@@ -306,23 +321,77 @@ BEGIN
 END;
 $$;
 
--- One settler keeps what a transaction defers to its commit, after every
--- statement-time lock: the ledger rollups, then MRR (billing.settle_mrr). Both
--- queues fire it, so whichever event comes first, every transaction takes the
--- commit-time rows in that one order. A later event finds its row settled.
+-- The event log's flush, as billing.eventlog_flush did it: numbers the
+-- transaction's staged events into their streams, each stream locked in
+-- (source, scope) order and notified at commit.
+CREATE FUNCTION billing.flush_event_log(p_schema text) RETURNS void
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'pg_temp' AS $$
+DECLARE
+ s record; e record; next_position bigint; stamp timestamptz;
+BEGIN
+ -- Every scope touched by this transaction is known before taking any locks.
+ FOR s IN SELECT DISTINCT source,scope FROM "billing".eventlog_pending
+          WHERE transaction_id=pg_current_xact_id() ORDER BY source,scope
+ LOOP
+  INSERT INTO "billing".eventlog_streams(source,scope) VALUES(s.source,s.scope) ON CONFLICT DO NOTHING;
+  PERFORM 1 FROM "billing".eventlog_streams WHERE source=s.source AND scope=s.scope FOR UPDATE;
+  -- Delivered at commit, so a LISTENing consumer reads when its stream has moved (version 2).
+  PERFORM pg_notify(p_schema || '.eventlog', s.source || ' ' || s.scope);
+ END LOOP;
+ FOR e IN SELECT * FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id() ORDER BY ordinal
+ LOOP
+  IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id) THEN
+   IF EXISTS(SELECT 1 FROM "billing".eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id
+     AND event_source=e.event_source AND event_type=e.event_type AND version=e.version
+     AND occurred_at=e.occurred_at AND subject_type=e.subject_type AND subject_id=e.subject_id AND data=e.data) THEN
+    CONTINUE;
+   END IF;
+   RAISE EXCEPTION 'event ID already records a different fact' USING ERRCODE='23505';
+  END IF;
+  UPDATE "billing".eventlog_streams SET position=position+1,head_id=coalesce(e.boundary,e.id),
+   recorded_at=greatest(recorded_at,clock_timestamp())
+   WHERE source=e.source AND scope=e.scope RETURNING position,recorded_at INTO next_position,stamp;
+  INSERT INTO "billing".eventlog_events(source,scope,position,id,boundary,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data)
+   VALUES(e.source,e.scope,next_position,e.id,coalesce(e.boundary,e.id),e.event_source,e.event_type,e.version,e.occurred_at,stamp,e.subject_type,e.subject_id,e.data);
+ END LOOP;
+ DELETE FROM "billing".eventlog_pending WHERE transaction_id=pg_current_xact_id();
+END $$;
+
+-- Everything a transaction keeps at commit, after every statement-time lock,
+-- in one order: each merchant's ledger rollups, then each merchant's MRR,
+-- merchants in id order, then the event streams. A new commit-time step takes
+-- its place in this sequence.
+CREATE FUNCTION billing.settle_commit(p_schema text) RETURNS void
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+DECLARE
+    v_merchant uuid;
+BEGIN
+    FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.ledger_rollup_pending ORDER BY merchant_id LOOP
+        PERFORM billing.settle_ledger_rollups(v_merchant);
+    END LOOP;
+    FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.subscription_mrr WHERE dirty ORDER BY merchant_id LOOP
+        PERFORM billing.settle_mrr(v_merchant);
+    END LOOP;
+    PERFORM billing.flush_event_log(p_schema);
+END;
+$$;
+
+-- Every commit-time queue fires this one settler: the first event whose row
+-- is still unsettled runs the whole sequence; every later one finds its row
+-- settled and returns.
 CREATE FUNCTION billing.settle_at_commit() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
     IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
-        IF NOT EXISTS (SELECT 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id) THEN
-            RETURN NULL;
-        END IF;
-    ELSIF NOT EXISTS (SELECT 1 FROM billing.subscription_mrr
-                       WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty) THEN
-        RETURN NULL;
+        PERFORM 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id;
+    ELSIF TG_TABLE_NAME = 'subscription_mrr' THEN
+        PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty;
+    ELSE
+        PERFORM 1 FROM billing.eventlog_pending WHERE ordinal = NEW.ordinal;
     END IF;
-    PERFORM billing.settle_ledger_rollups(NEW.merchant_id);
-    PERFORM billing.settle_mrr(NEW.merchant_id);
+    IF FOUND THEN
+        PERFORM billing.settle_commit(TG_TABLE_SCHEMA);
+    END IF;
     RETURN NULL;
 END;
 $$;
@@ -332,6 +401,10 @@ CREATE CONSTRAINT TRIGGER ledger_rollups_settle AFTER INSERT ON billing.ledger_r
 DROP TRIGGER subscription_mrr_settle ON billing.subscription_mrr;
 DROP FUNCTION billing.settle_subscription_mrr();
 CREATE CONSTRAINT TRIGGER subscription_mrr_settle AFTER INSERT OR UPDATE ON billing.subscription_mrr DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit();
+DROP TRIGGER eventlog_flush_at_commit ON billing.eventlog_pending;
+DROP FUNCTION billing.eventlog_flush();
+CREATE CONSTRAINT TRIGGER eventlog_flush_at_commit AFTER INSERT ON billing.eventlog_pending DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit();
 
 -- A restore settles its rollups before the receipt's commit check reads them.

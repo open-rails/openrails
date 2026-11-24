@@ -12,7 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/currency"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -21,8 +23,12 @@ var (
 	// registry, a merchant's own unit included.
 	ErrNotMoney = errors.New("books: the general ledger holds registry currencies only")
 	// ErrSignRule is a general-ledger posting that would breach a customer
-	// account's sign rule; a merchant-wide account has none.
+	// account's sign rule. A merchant-wide account's rule holds at commit,
+	// whose refusal names ledger_type_total_sign.
 	ErrSignRule = errors.New("books: transfer breaches an account's sign rule")
+	// ErrNotOpen is a posting to a merchant-wide account its currency or PSP
+	// has not opened (Open).
+	ErrNotOpen = errors.New("books: the merchant-wide account is not open; books.Open it before the transaction")
 	// ErrCoordinateReused is a posting at a coordinate that already posted
 	// another transfer.
 	ErrCoordinateReused = errors.New("books: the coordinate already posted a different transfer")
@@ -36,10 +42,15 @@ func CheckCurrency(code string) error {
 	return nil
 }
 
+// merchantWide is a general-ledger account with no customer: opened by Open,
+// never in a business transaction.
+func (a Account) merchantWide() bool { return a.Book == General && a.Scope != Customer }
+
 // EnsureAccount get-or-creates one account of the chart in a currency, with
 // the chart's book, class and sign rules: a customer-scoped type names its
 // customer, cash_clearing its PSP. created reports this call made it; one a
-// concurrent writer created first is read back.
+// concurrent writer created first is read back. A merchant-wide
+// general-ledger account is only read: Open creates it, or it is ErrNotOpen.
 func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t AccountType, currency string, customer, psp *uuid.UUID) (id uuid.UUID, created bool, err error) {
 	acct, ok := Lookup(t)
 	if !ok {
@@ -56,23 +67,76 @@ func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t Ac
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
 	}
-	inserted, err := q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
-		MerchantID: merchant, Book: string(acct.Book), Class: string(acct.Class),
-		CustomerID: customer, PspID: psp, AccountType: string(t), Currency: currency,
-		DebitsMustNotExceedCredits: acct.DebitsMustNotExceedCredits,
-		CreditsMustNotExceedDebits: acct.CreditsMustNotExceedDebits,
-	})
-	if err == nil {
-		return inserted.ID, true, nil
+	if acct.merchantWide() {
+		return uuid.Nil, false, fmt.Errorf("%w: %s %s", ErrNotOpen, t, currency)
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, fmt.Errorf("books: create %s account: %w", t, err)
+	created, err = insertAccount(ctx, q, merchant, acct, currency, customer, psp)
+	if err != nil {
+		return uuid.Nil, false, err
 	}
 	row, err = q.GetLedgerAccount(ctx, get)
 	if err != nil {
 		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
 	}
-	return row.ID, false, nil
+	return row.ID, created, nil
+}
+
+// insertAccount creates one account unless a concurrent writer did.
+func insertAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, acct Account, currency string, customer, psp *uuid.UUID) (bool, error) {
+	_, err := q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
+		MerchantID: merchant, Book: string(acct.Book), Class: string(acct.Class),
+		CustomerID: customer, PspID: psp, AccountType: string(acct.Type), Currency: currency,
+		DebitsMustNotExceedCredits: acct.DebitsMustNotExceedCredits,
+		CreditsMustNotExceedDebits: acct.CreditsMustNotExceedDebits,
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("books: create %s account: %w", acct.Type, err)
+}
+
+// Open opens a merchant's general ledger in a currency: every merchant-wide
+// account, and psp's cash clearing when psp is set. It commits on its own, so
+// it runs before the business transaction that posts there: created inside
+// one, an account's uncommitted row would hold every other first writer until
+// that transaction ends. Once open it only reads.
+func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currency string, psp *uuid.UUID) error {
+	if db.InCallerTransaction(ctx) {
+		return db.ErrCallerTransaction
+	}
+	if err := CheckCurrency(currency); err != nil {
+		return err
+	}
+	var want []Account
+	for _, a := range chart {
+		if a.merchantWide() && (a.Scope == System || psp != nil) {
+			want = append(want, a)
+		}
+	}
+	count := gen.CountOpenGeneralLedgerAccountsParams{MerchantID: merchant, Currency: currency, PspID: psp}
+	open, err := gen.New(pool).CountOpenGeneralLedgerAccounts(ctx, count)
+	if err != nil {
+		return fmt.Errorf("books: read the open general ledger: %w", err)
+	}
+	if open == int64(len(want)) {
+		return nil
+	}
+	return pool.CommittedMerchantTx(ctx, billing.MerchantID(merchant), func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		for _, a := range want {
+			var scope *uuid.UUID
+			if a.Scope == PSP {
+				scope = psp
+			}
+			if _, err := insertAccount(ctx, q, merchant, a, currency, nil, scope); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // Books posts one merchant's general-ledger transfers.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 610,
+  "scenario_count": 612,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2551,12 +2551,22 @@
     {
       "id": "OR-J40-S08",
       "journey": "J40",
-      "name": "A ledger transfer and an MRR change in either statement order, in two transactions committing together, both commit"
+      "name": "A ledger transfer and an MRR change in either statement order, in two transactions held at commit, both commit"
     },
     {
       "id": "OR-J40-S09",
       "journey": "J40",
       "name": "Two checkouts and a usage collection for one customer, in opposite lock orders, all commit"
+    },
+    {
+      "id": "OR-J40-S23",
+      "journey": "J40",
+      "name": "An event queued before or after a ledger transfer, in two transactions held at commit, both commit"
+    },
+    {
+      "id": "OR-J40-S24",
+      "journey": "J40",
+      "name": "One transaction posting for two merchants in either order, two held at commit, both commit"
     },
     {
       "id": "OR-J42-S01",

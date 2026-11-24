@@ -26,7 +26,7 @@ const (
 	Owed     Class = "owed"     // units a customer owes
 	Issued   Class = "issued"   // where units come from
 	Retired  Class = "retired"  // where units go
-	Clearing Class = "clearing" // former refund clearing and loss; history only
+	Clearing Class = "clearing" // a purchased-credit refund's units in transit, and its loss
 
 	// General ledger.
 	Asset         Class = "asset"
@@ -108,10 +108,10 @@ const (
 	OpeningBalanceEquity  AccountType = "opening_balance_equity"
 )
 
-// Account is one account type in the chart: its book, class, scope and the
-// sign rules its accounts' counters enforce. A merchant-wide general-ledger
-// account keeps no counters and so no sign rule: its balance is its type
-// total, kept at commit.
+// Account is one account type in the chart: its book, class, scope and sign
+// rules. An account's counters enforce its rules as each transfer posts; a
+// merchant-wide general-ledger account keeps no counters, and its type total
+// is held to them at commit.
 type Account struct {
 	Type  AccountType
 	Book  Book
@@ -140,9 +140,9 @@ var chart = []Account{
 	{Type: CashClearing, Book: General, Class: Asset, Scope: PSP},
 	{Type: ExternalReceipts, Book: General, Class: Asset, Scope: System},
 	{Type: UsageReceivable, Book: General, Class: Asset, Scope: Customer, CreditsMustNotExceedDebits: true},
-	{Type: AllowanceDoubtful, Book: General, Class: ContraAsset, Scope: System},
-	{Type: UnappliedCash, Book: General, Class: Liability, Scope: System},
-	{Type: DeferredRevenue, Book: General, Class: Liability, Scope: System},
+	{Type: AllowanceDoubtful, Book: General, Class: ContraAsset, Scope: System, DebitsMustNotExceedCredits: true},
+	{Type: UnappliedCash, Book: General, Class: Liability, Scope: System, DebitsMustNotExceedCredits: true},
+	{Type: DeferredRevenue, Book: General, Class: Liability, Scope: System, DebitsMustNotExceedCredits: true},
 	{Type: DeferredRevenueCredit, Book: General, Class: Liability, Scope: Customer, DebitsMustNotExceedCredits: true},
 	{Type: TaxPayable, Book: General, Class: Liability, Scope: System},
 	{Type: SubscriptionRevenue, Book: General, Class: Revenue, Scope: System},
