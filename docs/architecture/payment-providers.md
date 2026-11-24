@@ -235,11 +235,7 @@ Checks:
 
 ### 6. Data lifecycle
 
-In `internal/retention/tables.go`, instruction-only operations
-(`OutboxIntentTypes`) and `provider_mutation_logs` go after 25 months;
-`webhook_events` and released parks after 90 days; resolved findings after 12
-months; money-moving operations and provider bills, schedules and receipts are
-permanent. None is partitioned.
+In `internal/retention` (`tables.go`; `OutboxIntentTypes` in `retention.go`), instruction-only operations and `provider_mutation_logs` go after 25 months; `webhook_events` and released parks after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
 
 Checks:
 - Each table comment's `Retention:` sentence matches its `tables.go` rule (`State` tables carry none).
@@ -266,7 +262,7 @@ Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
 - Stripe's public path checks its signed time within 5 minutes; only the queued re-verification skips it. NMI's signed `t` is a nonce (`sigverify.VerifyNMI`): no window, and a replay is its `event_id`, applied once (`DeduplicationService.ProcessWebhook`).
-- `webhookauth.CCBillIPAllowed` refuses an allowlisted source when the account's money class is unknown; `internal/config` refuses a `/0` entry.
+- `webhookauth.CCBillIPAllowed` refuses an allowlisted source when the account's money class is unknown; `internal/config` drops a `/0` entry and reports it.
 
 ### 9. Destructive-action safeguards
 
