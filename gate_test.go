@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -967,6 +968,32 @@ func heldOf(h billing.Hold) map[string]int64 {
 	return out
 }
 
+func TestGateWriteKeysKeepTheirPathAcrossLayoutVersions(t *testing.T) {
+	var s sharedGate
+	if got, want := s.k("ns", "key"), "openrails:gate:v2:{ns}:k:key"; got != want {
+		t.Fatalf("write key %q, want %q: a Record retried on a process of another version must find it", got, want)
+	}
+	tag := func(key string) string { return key[strings.Index(key, "{") : strings.Index(key, "}")+1] }
+	if tag(s.k("ns", "key")) != tag(s.g("ns", "lease")) {
+		t.Fatalf("write key %q leaves the group's hash slot %q", s.k("ns", "key"), s.g("ns", "lease"))
+	}
+}
+
+func TestGatePartIDNamesItsWindowToTheMicrosecond(t *testing.T) {
+	start := time.Date(2026, 11, 23, 12, 0, 0, 123456000, time.UTC)
+	later := start.Add(time.Microsecond)
+	id := partID("tick", &start)
+	if got := partStart(id); got == nil || !got.Equal(start) || partLimit(id) != "tick" {
+		t.Fatalf("part %q names %v of %q, want %v of tick", id, got, partLimit(id), start)
+	}
+	if id == partID("tick", &later) {
+		t.Fatalf("windows a microsecond apart share the part %q", id)
+	}
+	if got := partStart(partID("balance", nil)); got != nil {
+		t.Fatalf("an end-less part names the window %v", got)
+	}
+}
+
 func TestGateHoldSetMergesNextWindowHoldsByPartAndWindow(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	t0 := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
@@ -1195,6 +1222,13 @@ type stepOutbox struct {
 	memOutbox
 	failN   int64
 	release chan struct{}
+	// ackDelay is how long an Ack takes, as a disk's does.
+	ackDelay time.Duration
+}
+
+func (o *stepOutbox) Ack(ctx context.Context, refs []billing.LeaseUsageRef) error {
+	time.Sleep(o.ackDelay)
+	return o.memOutbox.Ack(ctx, refs)
 }
 
 func (o *stepOutbox) Put(ctx context.Context, items []billing.OutboxItem) error {
@@ -1212,7 +1246,8 @@ func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
-		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
+		// A slow Ack: a flush returns only once what settled is acked.
+		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{}), ackDelay: time.Millisecond}
 		g := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())

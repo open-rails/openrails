@@ -28,17 +28,36 @@ export function defaultMigrationMode(direction: PriceDirection): MigrationMode {
   return direction === "decrease" ? "migrate" : "grandfather"
 }
 
-// minEffectiveDate is the earliest allowed migration date, or null when there
-// is no minimum (a decrease needs no notice).
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// SUBMIT_SLACK_MS is how long a confirm may take to reach the server's
+// notice check after the console checked it.
+export const SUBMIT_SLACK_MS = 10 * 60 * 1000
+
+// utcDay is the UTC midnight that starts at's day: the instant a date names.
+const utcDay = (at: Date) => Math.floor(at.getTime() / DAY_MS) * DAY_MS
+
+// serverOffset is how far the server's clock is ahead of the device's, from
+// a preview sent no effective_at, which answers the server's now; measured
+// from when it was sent, so it never runs behind. 0 when it cannot be read.
+export function serverOffset(serverNow: string, sentAt: number): number {
+  const at = Date.parse(serverNow)
+  return Number.isNaN(at) ? 0 : at - sentAt
+}
+
+// minEffectiveDate is the earliest allowed migration date, as its UTC
+// midnight, or null when there is no minimum (a decrease needs no notice).
+// now is the server's clock. The server measures the window from the
+// instant sent, a date's UTC midnight, so it is the first date whose
+// midnight is the whole window and the submit slack away.
 export function minEffectiveDate(
   direction: PriceDirection,
   now: Date,
   noticeWindowDays: number
 ): Date | null {
   if (direction !== "increase") return null
-  const min = new Date(now)
-  min.setUTCDate(min.getUTCDate() + noticeWindowDays)
-  return min
+  const floor = now.getTime() + noticeWindowDays * DAY_MS + SUBMIT_SLACK_MS
+  return new Date(Math.ceil(floor / DAY_MS) * DAY_MS)
 }
 
 // defaultEffectiveDate is Step 2's pre-filled migration date: the notice
@@ -52,7 +71,8 @@ export function defaultEffectiveDate(
 }
 
 // isEffectiveDateValid enforces the console-side notice-window gate: an
-// increase+migrate plan may not pick a date inside the notice window.
+// increase+migrate plan may not pick a date inside the notice window. It
+// compares whole UTC days.
 export function isEffectiveDateValid(
   direction: PriceDirection,
   effectiveAt: Date,
@@ -60,7 +80,7 @@ export function isEffectiveDateValid(
   noticeWindowDays: number
 ): boolean {
   const min = minEffectiveDate(direction, now, noticeWindowDays)
-  return !min || effectiveAt.getTime() >= min.getTime()
+  return !min || utcDay(effectiveAt) >= min.getTime()
 }
 
 export interface MigrationPlan {
@@ -74,6 +94,7 @@ const dateLabel = (iso: string) =>
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   })
 
 // buildReviewText renders Step 3's plan in words, e.g. "New subscribers pay $12

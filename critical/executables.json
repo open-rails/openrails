@@ -466,6 +466,9 @@
     "OR-J23-S31": [
       "TestGate/OR-J23-S31/a-redis-usage-write-whose-reply-was-lost-posts-once-when-retried"
     ],
+    "OR-J23-S32": [
+      "TestGate/OR-J23-S32/a-redis-gates-commitment-keeps-its-microsecond-window-across-a-rollover"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],

@@ -123,15 +123,13 @@ export const LIVE_STATUSES = new Set([
   "unverified",
 ])
 
-const future = (at: string | null | undefined) =>
-  !!at && new Date(at).getTime() > Date.now()
-
-/** A current subscription, or a canceled subscription retaining paid access. */
+/**
+ * A current subscription, or a canceled subscription retaining paid access:
+ * `access` is the window the server found live when it answered, so the
+ * device's clock decides nothing.
+ */
 export const isLive = (s: Subscription) =>
-  LIVE_STATUSES.has(s.status) ||
-  (s.status === "canceled" &&
-    !!s.access &&
-    (!s.access.ends_at || future(s.access.ends_at)))
+  LIVE_STATUSES.has(s.status) || (s.status === "canceled" && !!s.access)
 
 /** Future billing has stopped or cancellation is scheduled. */
 export const isEnding = (s: Subscription) =>

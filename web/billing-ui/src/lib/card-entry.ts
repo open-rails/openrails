@@ -80,9 +80,10 @@ function parseExpiry(value: string, now: Date) {
   const month = Number(d.slice(0, 2))
   const year = 2000 + Number(d.slice(2))
   if (month < 1 || month > 12) return null
+  // A card lapses when its month ends in UTC, as the server reads it.
   const lapsed =
-    year < now.getFullYear() ||
-    (year === now.getFullYear() && month < now.getMonth() + 1)
+    year < now.getUTCFullYear() ||
+    (year === now.getUTCFullYear() && month < now.getUTCMonth() + 1)
   return lapsed ? null : { month, year }
 }
 

@@ -56,8 +56,9 @@ func (d *deliverer) post(ctx context.Context, url string, body []byte, key strin
 
 // shapeWebhookBody renders the alert per the webhook format: generic=our alert
 // JSON, discord={content}, slack={text}. Discord/Slack native channel-webhook
-// URLs accept these directly (no bot).
+// URLs accept these directly (no bot). Instants are UTC on the wire.
 func shapeWebhookBody(format WebhookFormat, alert Alert) ([]byte, error) {
+	alert.FiredAt = alert.FiredAt.UTC()
 	switch format {
 	case FormatDiscord:
 		return json.Marshal(map[string]string{"content": chatMessage(alert)})

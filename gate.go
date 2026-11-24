@@ -172,7 +172,8 @@ func (g *Gate) Consume(ctx context.Context, p billing.AdmitParams) (*Ticket, err
 //
 // Its customer, event type, source and source_id name it. With Redis, a
 // Record repeated under the same four before 15 minutes past the first's
-// settlement posts once, so retrying one whose write may have landed is
+// settlement posts once, on any process sharing the Redis, of this gate
+// version or another, so retrying one whose write may have landed is
 // safe. In process, every Record that returns nil posts, and one that
 // returns an error stored nothing, so a retry posts once. The server itself
 // deduplicates usage only by its lease and number.
@@ -205,10 +206,10 @@ func (g *Gate) ListCustomerLimits(ctx context.Context, customer billing.Customer
 }
 
 // Flush syncs now and returns once every usage item captured before the call
-// is settled, or with ErrUnavailable, the sync's refusal or ctx's error;
-// under a ctx with no deadline it gives up after a bound with
-// ErrUnavailable. It returns the errors of items OpenRails refused since the
-// last Flush; those posted nothing.
+// is settled (and acked in the Outbox), or with ErrUnavailable, the sync's
+// refusal or ctx's error; under a ctx with no deadline it gives up after a
+// bound with ErrUnavailable. It returns the errors of items OpenRails
+// refused since the last Flush; those posted nothing.
 func (g *Gate) Flush(ctx context.Context) error {
 	if g.shared != nil {
 		return errors.Join(g.shared.flush(ctx), g.shared.fallback().flushIfStarted(ctx))
