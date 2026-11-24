@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -94,7 +95,10 @@ func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) er
 			if err := scoped.insert(ctx, payment); err != nil {
 				return err
 			}
-			return scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID)
+			if err := scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID); err != nil {
+				return err
+			}
+			return books.PostReversal(ctx, d, payment.ID, s.now())
 		})
 	}
 	return s.insert(ctx, payment)
@@ -192,9 +196,13 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 			return err
 		}
 		if reversalKind == ReversalRefund && refund.Metadata["admin_refund_idempotency_key"] == nil {
-			err = scoped.ApplyRefundAccessPolicy(ctx, originalPaymentID)
+			if err := scoped.ApplyRefundAccessPolicy(ctx, originalPaymentID); err != nil {
+				return err
+			}
 		}
-		return err
+		// Booked after the access policy: access it ended makes the refund
+		// take unrecognised revenue first.
+		return books.PostReversal(ctx, transactionDB, refund.ID, s.now())
 	})
 	return refund, err
 }
@@ -402,6 +410,9 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 				return err
 			}
 		}
+		if err := books.PostReversal(ctx, d, reservationID, s.now()); err != nil {
+			return err
+		}
 		if result, err = scoped.GetByID(ctx, reservationID); err != nil {
 			return err
 		}
@@ -555,7 +566,10 @@ func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, ori
 		if err := scoped.linkRefundedPayment(ctx, paymentID, originalPaymentID); err != nil {
 			return err
 		}
-		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
+		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID); err != nil {
+			return err
+		}
+		return books.PostReversal(ctx, d, paymentID, s.now())
 	})
 }
 

@@ -372,9 +372,9 @@ func TestRevenueRecognition(t *testing.T) {
 		var paidAt time.Time
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT purchased_at FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), payment.ID.UUID()).Scan(&paidAt))
 		paidAt = paidAt.UTC()
-		got := glFor(t, a.world, "payment", payment.ID.String())
+		got := glFor(t, a.world, "payment", payment.ID.UUID().String())
 		require.Len(t, got, 2)
-		require.Equal(t, glRow{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.ID.String(), Debit: "external_receipts", Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt}, got[0],
+		require.Equal(t, glRow{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.ID.UUID().String(), Debit: "external_receipts", Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt}, got[0],
 			"money received outside OpenRails is no PSP's")
 		require.Equal(t, "cash_applied", got[1].Type)
 		require.EqualValues(t, 30_000_000, got[1].Amount)

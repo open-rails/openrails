@@ -117,10 +117,17 @@ SELECT EXISTS (
 -- A completed bill's line that sells revenue (not credit or usage) but has no
 -- revenue schedule: a provider's tax and shipping line among them, which is
 -- never scheduled. before_books is a line whose order was made and completed
--- before the merchant's general ledger took its first transfer.
+-- before the payment the merchant's general ledger first booked, by the
+-- clock that stamps both.
 WITH started AS (
-    SELECT min(created_at) AS at FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general'
+    SELECT (
+        SELECT p.created_at FROM billing.payments p
+        WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = (
+            SELECT t.source_id::uuid FROM billing.ledger_transfers t
+            WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.operation = 'cash' AND t.source = 'payment'
+            ORDER BY t.created_at, t.id
+            LIMIT 1)
+    ) AS at
 )
 SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
        (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,

@@ -203,6 +203,12 @@ func (s *schedule) catchUp(at time.Time, loc *time.Location) ([]recognition, *ti
 // service did not earn, and an end undone takes back what it forfeited. It
 // returns when the schedule is next due, nil once done.
 func (s *schedule) advance(ctx context.Context, loc *time.Location, now time.Time) ([]recognition, *time.Time, error) {
+	return s.progress(ctx, loc, now, true)
+}
+
+// progress is advance; without forfeit an early end recognises what its
+// service earned and leaves the rest deferred, for a reversal to take first.
+func (s *schedule) progress(ctx context.Context, loc *time.Location, now time.Time, forfeit bool) ([]recognition, *time.Time, error) {
 	end := s.end()
 	var steps []recognition
 	if earned := s.service.target(s.funded, s.through); s.recognized > earned && (s.ended == nil || s.ended.After(s.through)) {
@@ -232,7 +238,7 @@ func (s *schedule) advance(ctx context.Context, loc *time.Location, now time.Tim
 	}
 	dated := end.Add(-time.Microsecond)
 	steps = s.earn(steps, OpRecognition, end, dated, s.service.target(s.funded, end))
-	if s.ended != nil {
+	if s.ended != nil && forfeit {
 		steps = s.earn(steps, OpTermination, end, dated, s.funded)
 	}
 	s.through = maxTime(s.through, end)

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 652,
+  "scenario_count": 658,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3262,6 +3262,36 @@
       "id": "OR-J41-S17",
       "journey": "J41",
       "name": "An imported purchase is applied over the access its import grants"
+    },
+    {
+      "id": "OR-J41-S18",
+      "journey": "J41",
+      "name": "A partial refund while the service runs is a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J41-S19",
+      "journey": "J41",
+      "name": "A full refund that revokes access takes unrecognised revenue first"
+    },
+    {
+      "id": "OR-J41-S20",
+      "journey": "J41",
+      "name": "A chargeback reduces its schedule and the won dispute restores it, its deferral forfeited at once"
+    },
+    {
+      "id": "OR-J41-S21",
+      "journey": "J41",
+      "name": "A refund row written past the poster commits; ledger-audit names it and raises a finding"
+    },
+    {
+      "id": "OR-J41-S22",
+      "journey": "J41",
+      "name": "A duplicate capture's refund returns it from unapplied cash"
+    },
+    {
+      "id": "OR-J41-S23",
+      "journey": "J41",
+      "name": "A refund of a payment from before the books is never refused; its sign breach is a finding"
     }
   ]
 }

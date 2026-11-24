@@ -2,8 +2,9 @@
 
 This system reverses charges: a staff refund OpenRails sends to the provider, a
 refund made at the provider, a chargeback, and a won dispute that returns the
-money. Each reversal is a `payments` row linked to its charge; reversing a payment
-that bought credit also posts its share to the [books](books.md). It also
+money. Each reversal is a `payments` row linked to its charge, and posts to the
+[books](books.md): the general ledger and, for a payment that bought credit,
+its share to the units book. It also
 records external payments: money a merchant received outside OpenRails, booked
 against an order with no provider call.
 
@@ -102,6 +103,10 @@ System refunds use the same reservation and intents with `OriginSystem`
   it is only logged for review.
 - A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once, from whichever event reports it, and stays actionable only while every event says so. An actionable one received while `fraud_warning_refund` is `refund` is `pending` and queues `openrails.dispute_response`, which refunds its charge in full (`intents.QueueFraudWarningRefund`, `fraud_warning`, sent to Stripe as `fraudulent`), ends what it paid for and blocks its card, unless an open dispute (or an unbooked chargeback) decides the charge, checked under the report's lock. A charge no refund can reach (nothing left, no money moved at the rail, a usage order's settlement, credits bought and spent, no provider target) is `nothing_to_refund` and still ended. A report received while the merchant recorded reports only stays recorded when the setting changes.
 - `openrails.dispute_response` also answers each chargeback: it blocks the card. Both then cancel at period end the customer's other provider-billed subscriptions on the card. Each step runs in one transaction as an autonomous `dispute_response` command (`destructive.Admissions.AdmitAutonomous`; the block is `block_payment_method`), keyed on its case and step, under a `full` write posture, the merchant's own emergency stop and an allowance of its own (`dispute:<merchant>`, apart from the merchant's other autonomous work); a case a reconcile pull found waits for the merchant to be armed or a provider's notice of it. The refund, the end and the block are protective and do not wait for the deployment's destructive switch; the period-end cancels are destructive and do. A failed wake is retried with backoff, and an unreadable posture is retried as an error, not waited on. A held response raises `life.disputes.response_waiting` (high, alerting once) and ends; a change of the switch, a merchant's destructive policy or write posture, the book identity or a cleared hold notifies `openrails_dispute_responses`, and `disputes.Service.Run` queues every waiting response again, as on every start.
+
+### General ledger
+
+A settled reversal posts to the general ledger once, in the transaction that settles it (`books.PostReversal`): at the end of `recordRefund`, after the provider access policy; in `CompleteRefundReservation`, after the access a staff refund revokes; and where a won dispute's recovery is stored or linked. Its money leaves what the payment left unapplied first, so a late or duplicate payment's refund comes from `unapplied_cash`; then each schedule the payment funded, pro rata: a price reduction with catch-up while its service runs, its unrecognised revenue first once the service has ended, the rest to `refunds` or `chargebacks`. A won dispute brings back, pro rata, what its chargeback took. A refund of a payment from before the books is never refused: `unapplied_cash` goes below zero and raises `books.sign_breach`. `ledger-audit` names any receipt or settled reversal stored without its posting and raises `books.entry.missing`. The legs are in [books](books.md#reversals).
 
 ### Dispute monitoring
 

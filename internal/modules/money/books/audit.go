@@ -2,7 +2,9 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/google/uuid"
 
@@ -103,4 +105,65 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 		warnings = append(warnings, line)
 	}
 	return failing, warnings, nil
+}
+
+// UnpostedFindingType is the finding ledger-audit raises for a payment the
+// general ledger holds no posting of.
+const UnpostedFindingType = "books.entry.missing"
+
+// UnpostedPayment is a receipt, or a settled reversal of one, that the
+// general ledger holds no posting of: its writer stored it past the poster.
+type UnpostedPayment struct {
+	PaymentID uuid.UUID `json:"payment_id"`
+	// Kind is receipt, refund, chargeback or dispute_reversal.
+	Kind     string `json:"kind"`
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount"`
+}
+
+func (u UnpostedPayment) String() string {
+	return fmt.Sprintf("unposted %s: payment=%s amount=%s", u.Kind, u.PaymentID, moneyutil.FormatAmount(u.Amount, u.Currency))
+}
+
+// CheckPostings returns the merchant's receipts and settled reversals with
+// no general-ledger posting, stored since the books started (a payment from
+// before them waits for their rebuild). An empty slice is the healthy
+// answer.
+func CheckPostings(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]UnpostedPayment, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("books: merchant is required")
+	}
+	rows, err := gen.New(q).ListUnpostedPayments(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("books: posting check: %w", err)
+	}
+	var out []UnpostedPayment
+	for _, r := range rows {
+		if CheckCurrency(r.Currency) != nil {
+			continue
+		}
+		kind := "receipt"
+		if r.ReversalKind != nil {
+			kind = *r.ReversalKind
+		}
+		out = append(out, UnpostedPayment{PaymentID: r.ID, Kind: kind, Currency: r.Currency, Amount: r.Amount})
+	}
+	return out, nil
+}
+
+// RaiseUnposted raises a finding for each payment the general ledger holds
+// no posting of. The gap is recorded, never refused.
+func RaiseUnposted(ctx context.Context, q *gen.Queries, merchant uuid.UUID, unposted []UnpostedPayment) error {
+	for _, u := range unposted {
+		evidence, err := json.Marshal(map[string]string{"payment_id": u.PaymentID.String(), "kind": u.Kind, "currency": u.Currency, "amount": strconv.FormatInt(u.Amount, 10)})
+		if err != nil {
+			return err
+		}
+		action := "The payment was stored without its general-ledger posting. Find the writer that skipped the poster; the books' rebuild posts the payment."
+		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: merchant, FindingType: UnpostedFindingType,
+			SubjectKey: "payment:" + u.PaymentID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+			return fmt.Errorf("books: raise %s: %w", UnpostedFindingType, err)
+		}
+	}
+	return nil
 }

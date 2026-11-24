@@ -99,9 +99,14 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		}
 		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
 	}
+	// What each payment's earlier applications and reversals took of it.
 	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
 	for i, p := range receipts {
-		paid[i], before[i] = p.Amount, applied["payment:"+p.ID.String()]
+		pb, err := paymentBooksOf(ctx, q, mid.UUID(), p.ID)
+		if err != nil {
+			return err
+		}
+		paid[i], before[i] = p.Amount, pb.used()
 	}
 	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
 	// The bill is paid when the last money it took arrived, and applied when

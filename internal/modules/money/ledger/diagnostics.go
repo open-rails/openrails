@@ -34,6 +34,8 @@ import (
 //     (books.CheckApplications), and every completed revenue line has its
 //     revenue schedule (books.CheckSchedules). A line from before the books
 //     started, or a provider's tax and shipping, is a warning.
+//  8. Postings: every receipt and settled reversal of one stored since the
+//     books started has its general-ledger posting (books.CheckPostings).
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -174,12 +176,13 @@ type IntegrityReport struct {
 	// Awaiting are warnings: revenue lines unscheduled by design, until the
 	// books' rebuild or a tax booking.
 	Awaiting []books.UnscheduledLine `json:"awaiting_lines"`
+	Unposted []books.UnpostedPayment `json:"unposted_payments"`
 }
 
 // OK reports whether the books are intact; side warnings and awaiting lines
 // do not count.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0 && len(r.Unposted) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -202,6 +205,9 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Unscheduled, r.Awaiting, err = books.CheckSchedules(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Unposted, err = books.CheckPostings(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {

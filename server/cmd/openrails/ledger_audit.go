@@ -13,7 +13,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
@@ -70,7 +72,11 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 			// the predicate that scopes the check.
 			rep, err := ledger.CheckIntegrity(ctx, database.Qx(ctx), target.id.UUID())
 			res.Report = rep
-			return err
+			if err != nil {
+				return err
+			}
+			// A payment stored past its poster is recorded as a finding.
+			return books.RaiseUnposted(ctx, gen.New(database.Qx(ctx)), target.id.UUID(), rep.Unposted)
 		})
 		if runErr != nil {
 			res.Err = runErr.Error()
@@ -116,6 +122,9 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 					parts = append(parts, u.String())
 				}
 				for _, u := range res.Report.Awaiting {
+					parts = append(parts, u.String())
+				}
+				for _, u := range res.Report.Unposted {
 					parts = append(parts, u.String())
 				}
 				for _, b := range res.Report.Signs {

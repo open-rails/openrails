@@ -2117,6 +2117,24 @@
     ],
     "OR-J41-S17": [
       "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
+    ],
+    "OR-J41-S18": [
+      "TestRevenueReversals/OR-J41-S18/a-partial-refund-while-service-runs-is-a-price-reduction-with-catch-up"
+    ],
+    "OR-J41-S19": [
+      "TestRevenueReversals/OR-J41-S19/a-full-refund-that-revokes-access-takes-unrecognised-revenue-first"
+    ],
+    "OR-J41-S20": [
+      "TestRevenueReversals/OR-J41-S20/a-chargeback-reduces-its-schedule-and-the-won-dispute-restores-it"
+    ],
+    "OR-J41-S21": [
+      "TestRevenueReversals/OR-J41-S21/a-writer-that-skips-the-poster-commits-and-ledger-audit-raises-a-finding"
+    ],
+    "OR-J41-S22": [
+      "TestRevenueReversals/OR-J41-S22/a-duplicate-captures-refund-returns-it-from-unapplied-cash"
+    ],
+    "OR-J41-S23": [
+      "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
     ]
   }
 }
