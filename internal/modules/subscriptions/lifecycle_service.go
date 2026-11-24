@@ -1935,6 +1935,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// the case's scheduled retry. A case it set that ends exhausted ends
 		// issuer_deferred.
 		advice := subscription.RetryAdvisedAt
+		adviceDeferred := subscription.AdviceDeferred()
 		deferred := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
@@ -2007,6 +2008,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 					}
 					subscription.NextRetryAt = &next
+					// Never before the network's standing advice; a case it
+					// deferred to the next renewal stays deferred.
+					if advice != nil && advice.After(next) {
+						subscription.NextRetryAt = nil
+						if !adviceDeferred {
+							at := *advice
+							subscription.NextRetryAt = &at
+						}
+					}
 					event = nil
 					break
 				}
