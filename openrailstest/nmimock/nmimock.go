@@ -178,6 +178,8 @@ type Schedule struct {
 	Deleted, Paused bool
 	// Custom is a custom-amount schedule: its plan shows an empty plan_name.
 	Custom bool
+	// UnstatedPayments is a schedule whose plan states no plan_payments.
+	UnstatedPayments bool
 }
 
 // AddPlan stores a recurring plan the account already has.

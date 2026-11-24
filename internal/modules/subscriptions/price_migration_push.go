@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -9,10 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
@@ -27,8 +31,24 @@ type MovePush struct {
 	Resolution string
 }
 
-// errPushRefused is a push the provider cannot take as configured.
-var errPushRefused = errors.New(migrationBlockedRailPushFailed)
+// pushRefusal is a push the provider can never take as it stands: retrying
+// it changes nothing, so the move blocks with Reason, a stable blocked reason.
+type pushRefusal struct{ Reason, Detail string }
+
+func (e *pushRefusal) Error() string {
+	if e.Detail == "" {
+		return e.Reason
+	}
+	return e.Reason + ": " + e.Detail
+}
+
+func refusePush(reason, detail string, args ...any) error {
+	return &pushRefusal{Reason: reason, Detail: fmt.Sprintf(detail, args...)}
+}
+
+// MigrationBlockedFindingType is the finding a move blocked at its push
+// raises, one per migration and reason: nothing retries it.
+const MigrationBlockedFindingType = "life.price_migration.blocked"
 
 // PushMove carries one scheduled move to its provider: the body of its
 // price_migration_push operation. A move that no longer applies is skipped,
@@ -97,11 +117,11 @@ func (s *PriceMigrationService) PushMove(ctx context.Context, changeID uuid.UUID
 		// The renewal applies it.
 		return MovePush{Resolution: "engine"}, nil
 	case capabilityUserAction:
-		return MovePush{}, errors.New("no declared account reaches the subscription's provider")
+		return s.block(ctx, change, sub, &pushRefusal{Reason: migrationBlockedRailUserAction, Detail: "no declared account reaches the subscription's provider"})
 	}
 	err = s.push(ctx, capability, sub, source, target, product, change)
-	if errors.Is(err, errPushRefused) {
-		return s.block(ctx, change, err.Error())
+	if refused := (*pushRefusal)(nil); errors.As(err, &refused) {
+		return s.block(ctx, change, sub, refused)
 	}
 	if err != nil {
 		return MovePush{}, err
@@ -118,11 +138,64 @@ func (s *PriceMigrationService) skip(ctx context.Context, change *models.Schedul
 	return MovePush{Resolution: "skipped: " + reason}, err
 }
 
-func (s *PriceMigrationService) block(ctx context.Context, change *models.ScheduledChange, reason string) (MovePush, error) {
+// block ends a move its provider refuses for good and raises the
+// migration's finding for that reason in the same transaction.
+func (s *PriceMigrationService) block(ctx context.Context, change *models.ScheduledChange, sub *models.Subscription, refused *pushRefusal) (MovePush, error) {
 	err := s.resolveMove(ctx, change, func(ctx context.Context, d *db.DB) error {
-		return resolved(ctx, d.Gen(ctx), s.now())(d.Gen(ctx).BlockScheduledChange(ctx, gen.BlockScheduledChangeParams{MerchantID: change.MerchantID, ID: change.ID, Reason: reason}))
+		q := d.Gen(ctx)
+		if err := resolved(ctx, q, s.now())(q.BlockScheduledChange(ctx, gen.BlockScheduledChangeParams{MerchantID: change.MerchantID, ID: change.ID, Reason: refused.Reason})); err != nil {
+			return err
+		}
+		return s.raiseMigrationBlocked(ctx, d, change, sub, refused)
 	})
-	return MovePush{Blocked: reason}, err
+	return MovePush{Blocked: refused.Reason}, err
+}
+
+// raiseMigrationBlocked opens, or observes again, the finding of moves the
+// migration's provider refused for one reason, and alerts the operator once.
+func (s *PriceMigrationService) raiseMigrationBlocked(ctx context.Context, d *db.DB, change *models.ScheduledChange, sub *models.Subscription, refused *pushRefusal) error {
+	if change.PriceMigrationID == nil {
+		return nil
+	}
+	evidence, err := json.Marshal(map[string]any{
+		"price_migration_id":   billing.PriceMigrationID(*change.PriceMigrationID).String(),
+		"subscription_id":      billing.SubscriptionID(sub.ID).String(),
+		"rail":                 string(sub.Rail),
+		"rail_subscription_id": sub.RailSubscriptionID,
+		"reason":               refused.Reason,
+		"detail":               refused.Detail,
+	})
+	if err != nil {
+		return err
+	}
+	action := "The provider cannot move these subscriptions to the migration's price, and nothing retries it: they keep billing their old price. " + blockedRemedy(refused.Reason)
+	row, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: change.MerchantID, FindingType: MigrationBlockedFindingType, SubjectKey: change.PriceMigrationID.String() + "/" + refused.Reason,
+		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence, PspID: &sub.PspID,
+	})
+	if err != nil {
+		return fmt.Errorf("raise %s: %w", MigrationBlockedFindingType, err)
+	}
+	if err := alertjob.Notify(ctx, d, alertjob.FindingOf(row), s.now()); err != nil && ctx.Err() == nil {
+		s.Log.WarnContext(ctx, "alerting the operator of a blocked price migration failed; the finding stays in the console", logx.Err(err), "price_migration_id", *change.PriceMigrationID)
+	}
+	return nil
+}
+
+func blockedRemedy(reason string) string {
+	switch reason {
+	case migrationBlockedNMINamedPlan:
+		return "NMI changes a named plan's schedule only by moving it to another plan: change each subscription's plan at NMI, or keep it grandfathered."
+	case migrationBlockedNMIPaymentsUnknown:
+		return "NMI does not state the schedule's plan_payments, which an amount update must send: check the schedule at NMI."
+	case migrationBlockedNMIScheduleMissing:
+		return "NMI has no such schedule: check the subscription at NMI."
+	case migrationBlockedRailUserAction:
+		return "No declared account reaches the subscription's provider: declare it, then migrate these subscriptions again."
+	case migrationBlockedMissingRailPrice:
+		return "Map both prices to their Stripe prices, then migrate these subscriptions again."
+	}
+	return "Check the subscription at its provider, then migrate it again."
 }
 
 // resolveMove runs one transition of change under its subscription's lock; one

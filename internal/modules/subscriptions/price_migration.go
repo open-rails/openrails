@@ -88,6 +88,11 @@ const (
 	migrationBlockedNMIIntervalMismatch = "nmi_interval_mismatch"
 	// NMI bills whole minor units.
 	migrationBlockedNMISubCentAmount = "nmi_amount_not_cent_representable"
+	// NMI moves a named plan's schedule only by a plan swap.
+	migrationBlockedNMINamedPlan = "nmi_named_plan"
+	// An update writes plan_payments; one NMI does not state is not guessed.
+	migrationBlockedNMIPaymentsUnknown = "nmi_plan_payments_unknown"
+	migrationBlockedNMIScheduleMissing = "nmi_schedule_missing"
 )
 
 // MigrationPushes records a move's provider push as a durable operation in
@@ -676,10 +681,10 @@ func (s *PriceMigrationService) pushNMI(ctx context.Context, sub *models.Subscri
 		return fmt.Errorf("nmi pusher not configured")
 	}
 	if strings.TrimSpace(sub.RailSubscriptionID) == "" {
-		return fmt.Errorf("%w: subscription missing nmi reference", errPushRefused)
+		return refusePush(migrationBlockedRailPushFailed, "subscription missing nmi reference")
 	}
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
+		return refusePush(migrationBlockedRailPushFailed, "subscription missing current period end")
 	}
 	if deferredPushRequired(change.EffectiveAt, sub) {
 		return fmt.Errorf("nmi_deferred_push_required: effective_at %s is beyond the current period end %s", change.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))
@@ -699,18 +704,18 @@ func (s *PriceMigrationService) pushStripe(ctx context.Context, sub *models.Subs
 	}
 	targetStripeID, ok := target.GetStripeConfig()
 	if !ok || strings.TrimSpace(targetStripeID) == "" {
-		return fmt.Errorf("%w: %s", errPushRefused, migrationBlockedMissingRailPrice)
+		return refusePush(migrationBlockedMissingRailPrice, "")
 	}
 	sourceStripeID, ok := source.GetStripeConfig()
 	if !ok || strings.TrimSpace(sourceStripeID) == "" {
-		return fmt.Errorf("%w: %s", errPushRefused, migrationBlockedMissingRailPrice)
+		return refusePush(migrationBlockedMissingRailPrice, "")
 	}
 	railSubID := strings.TrimSpace(sub.RailSubscriptionID)
 	if railSubID == "" {
-		return fmt.Errorf("%w: subscription missing stripe reference", errPushRefused)
+		return refusePush(migrationBlockedRailPushFailed, "subscription missing stripe reference")
 	}
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
-		return fmt.Errorf("%w: subscription missing current period end", errPushRefused)
+		return refusePush(migrationBlockedRailPushFailed, "subscription missing current period end")
 	}
 	if deferredPushRequired(change.EffectiveAt, sub) {
 		return fmt.Errorf("stripe_deferred_push_required: effective_at %s is beyond the current period end %s", change.EffectiveAt.UTC().Format(time.RFC3339), sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339))

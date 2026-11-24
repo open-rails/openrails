@@ -2123,6 +2123,11 @@
     ],
     "OR-J37-S71": [
       "TestSolanaCatalog/OR-J37-S71/a-price-created-with-its-product-publishes-its-plan-outside-the-catalog-lock"
+    ],
+    "OR-J19-S08": [
+      "TestPriceMigrationContracts/OR-J19-S08/named-plan",
+      "TestPriceMigrationContracts/OR-J19-S08/unstated-plan-payments",
+      "TestPriceMigrationContracts/OR-J19-S08"
     ]
   }
 }
