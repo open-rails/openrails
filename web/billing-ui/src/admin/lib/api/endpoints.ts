@@ -516,7 +516,8 @@ export function createEndpoints(client: AdminClient) {
 
   // previewPriceMigration is the wizard's affected-count dry run, called
   // before the price edit lands: by key with no target it counts every
-  // version's subscribers. It never writes.
+  // version's subscribers. It never writes. Sent no effective_at, it
+  // answers the server's now as effective_at: the wizard's clock.
   const previewPriceMigration = (productKey: string, priceKey: string) =>
     api<PriceMigrationPreview>("/catalog/price-migrations/preview", {
       method: "POST",

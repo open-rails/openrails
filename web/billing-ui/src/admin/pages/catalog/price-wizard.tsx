@@ -37,6 +37,7 @@ import {
   detectDirection,
   isEffectiveDateValid,
   minEffectiveDate,
+  serverOffset,
   type MigrationMode,
 } from "#orck/admin/pages/catalog/price-wizard-logic"
 
@@ -63,9 +64,12 @@ const priceChangeFormValues = (price: Price, draft?: PriceChangeDraft) => ({
 //
 // draft (#779): when the catalog copilot proposed this change, the dialog
 // opens PRE-FILLED straight at Step 3 (review) — the affected count already
-// rode in the draft, so no extra preview call is needed. Confirm behaves
-// EXACTLY as a hand-typed change (the same create-price and price-migration
-// calls).
+// rode in the draft. Confirm behaves EXACTLY as a hand-typed change (the
+// same server-clock check, create-price and price-migration calls).
+//
+// The notice window is measured on the server's clock, read from a preview
+// at Step 2 and again at confirm: neither a device clock that is off nor a
+// wizard left open can schedule a date the server's check would skip.
 export function PriceChangeWizard({
   price,
   productName,
@@ -98,13 +102,52 @@ export function PriceChangeWizard({
   const noticeWindowDays =
     configuration?.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
 
-  const [now] = React.useState(() => new Date())
+  // offset is the server's clock less the device's; now is the server's
+  // clock as of the last preview or step change.
+  const [offset, setOffset] = React.useState(0)
+  const [now, setNow] = React.useState(() => new Date())
+
+  // readServerClock previews the key to read the server's now.
+  const readServerClock = async (key: string) => {
+    const sent = Date.now()
+    const preview = await previewPriceChange.mutateAsync({
+      productKey: key,
+      priceKey: price.key,
+    })
+    const next = serverOffset(preview.effective_at, sent)
+    const at = new Date(Date.now() + next)
+    setOffset(next)
+    setNow(at)
+    return at
+  }
+
   const form = useForm({
     defaultValues: priceChangeFormValues(price, draft),
     onSubmit: async ({ value }) => {
       if (!productKey || price.customer_amount) return
       const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
       if (newAmount === null || BigInt(newAmount) <= 0n) return
+
+      let effectiveAt: string | undefined
+      if (value.mode === "migrate") {
+        let at: Date
+        try {
+          at = await readServerClock(productKey)
+        } catch (err) {
+          toastApiError(err, "Change price")
+          return
+        }
+        const effective = fromDateInputValue(value.effectiveAt)
+        const direction = detectDirection(newAmount, price.unit_amount)
+        if (!isEffectiveDateValid(direction, effective, at, noticeWindowDays)) {
+          toast.error(
+            "Change price: the effective date is inside the notice window"
+          )
+          setStep(2)
+          return
+        }
+        effectiveAt = effective.toISOString()
+      }
 
       try {
         await changePrice.mutateAsync({
@@ -121,16 +164,9 @@ export function PriceChangeWizard({
             sell_via: price.sell_via ?? undefined,
             expected_revision: price.revision,
           },
-          migration:
-            value.mode === "migrate"
-              ? {
-                  productKey,
-                  priceKey: price.key,
-                  effectiveAt: fromDateInputValue(
-                    value.effectiveAt
-                  ).toISOString(),
-                }
-              : undefined,
+          migration: effectiveAt
+            ? { productKey, priceKey: price.key, effectiveAt }
+            : undefined,
         })
         toast.success(
           value.mode === "migrate"
@@ -168,16 +204,26 @@ export function PriceChangeWizard({
       amount ?? price.unit_amount,
       price.unit_amount
     )
+    const redefault = (at: Date) =>
+      form.setFieldValue(
+        "effectiveAt",
+        toDateInputValue(defaultEffectiveDate(direction, at, noticeWindowDays))
+      )
+    const at = new Date(Date.now() + offset)
+    setNow(at)
     form.setFieldValue("mode", defaultMigrationMode(direction))
-    form.setFieldValue(
-      "effectiveAt",
-      toDateInputValue(defaultEffectiveDate(direction, now, noticeWindowDays))
-    )
+    redefault(at)
     setStep(2)
     previewPriceChange.reset()
-    previewPriceChange.mutate(
-      { productKey, priceKey: price.key },
-      { onError: (err) => toastApiError(err, "Preview affected subscribers") }
+    readServerClock(productKey).then(
+      (at) => {
+        // A default the server's clock puts inside the window moves out.
+        const chosen = fromDateInputValue(form.state.values.effectiveAt)
+        if (!isEffectiveDateValid(direction, chosen, at, noticeWindowDays)) {
+          redefault(at)
+        }
+      },
+      (err) => toastApiError(err, "Preview affected subscribers")
     )
   }
 

@@ -44,10 +44,20 @@ func defaultMigrationMode(direction string) string {
 	return "grandfather"
 }
 
-// defaultEffectiveDate mirrors price-wizard-logic.ts's defaultEffectiveDate.
+// submitSlack mirrors price-wizard-logic.ts's SUBMIT_SLACK_MS.
+const submitSlack = 10 * time.Minute
+
+// defaultEffectiveDate mirrors price-wizard-logic.ts's defaultEffectiveDate:
+// for an increase, the first UTC midnight the notice window and the submit
+// slack away, as the wizard sends a date.
 func defaultEffectiveDate(direction string, now time.Time) time.Time {
 	if direction == "increase" {
-		return now.AddDate(0, 0, noticeWindowDaysDoctrine)
+		floor := now.UTC().Add(noticeWindowDaysDoctrine*24*time.Hour + submitSlack)
+		day := floor.Truncate(24 * time.Hour)
+		if day.Before(floor) {
+			day = day.Add(24 * time.Hour)
+		}
+		return day
 	}
 	return now
 }
