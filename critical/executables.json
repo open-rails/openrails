@@ -410,26 +410,17 @@
       "TestBillingImportBounds/OR-J21-S61/a-line-whose-list-total-overflows-is-refused"
     ],
     "OR-J22-S01": [
-      "TestCredits/OR-J22-S01/reservation-capture-conserves-native-units"
+      "TestCredits/OR-J22-S01/usage-in-flight-then-settled-conserves-native-units"
     ],
     "OR-J22-S02": [
-      "TestAdmissionBoundaries/OR-J22-S02/capture-and-credit-revocation-conserve-funds"
+      "TestCreditRevocation/OR-J22-S02/capture-and-credit-revocation-conserve-funds"
     ],
     "OR-J22-S03": [
-      "TestCreditExpiry/OR-J22-S03/expiry-preserves-spent-value-and-live-funded-reservation"
+      "TestCreditExpiry/OR-J22-S03/expiry-preserves-spent-value-and-what-a-live-gate-has-in-flight"
     ],
     "OR-J22-S04": [
       "TestCreditAtomicity/OR-J22-S04/batch-conflict-rolls-back-ledger-and-events",
       "TestLedgerMaintenance/OR-J22-S04/concurrent-credit-replay-and-manual-ledger-diagnostic"
-    ],
-    "OR-J23-S01": [
-      "TestAdmissionBoundaries/OR-J23-S01/batch-results-and-hold-lifecycle"
-    ],
-    "OR-J23-S02": [
-      "TestAdmissionBoundaries/OR-J23-S02/capture-release-race-has-one-terminal-outcome"
-    ],
-    "OR-J23-S03": [
-      "TestAdmissionBoundaries/OR-J23-S03/request-identity-refuses-changed-terms"
     ],
     "OR-J23-S04": [
       "TestHostTransactions/OR-J23-S04/host-transaction-owns-financial-commit"
@@ -456,22 +447,19 @@
       "TestUsageLimits/OR-J23-S12/a-customer-reads-its-own-limits"
     ],
     "OR-J23-S13": [
-      "TestLimitHolds/OR-J23-S13/a-session-and-a-weekly-cap-let-the-crossing-request-finish"
+      "TestLimitDecisions/OR-J23-S13/a-session-cap-lets-the-crossing-request-finish-and-refuses-the-next-until-it-resets"
     ],
     "OR-J23-S14": [
-      "TestLimitHolds/OR-J23-S14/balance-and-a-monthly-spend-cap-hold-both-or-neither"
-    ],
-    "OR-J23-S15": [
-      "TestLimitHolds/OR-J23-S15/four-replicas-racing-for-the-last-units-admit-exactly-the-capacity"
+      "TestLimitDecisions/OR-J23-S14/a-request-past-the-balance-or-a-monthly-spend-cap-takes-from-neither"
     ],
     "OR-J23-S16": [
-      "TestLimitHolds/OR-J23-S16/an-overrun-settles-past-capacity-and-records-reached-once"
+      "TestLimitDecisions/OR-J23-S16/an-overrun-settles-past-capacity-and-records-reached-once"
     ],
     "OR-J23-S17": [
-      "TestLimitHolds/OR-J23-S17/a-delegated-invoker-is-refused-and-holds-nothing"
+      "TestLimitDecisions/OR-J23-S17/a-delegated-invoker-is-refused-and-takes-nothing"
     ],
     "OR-J23-S18": [
-      "TestLimitHolds/OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own"
+      "TestLimitDecisions/OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own"
     ],
     "OR-J23-S19": [
       "TestGate/OR-J23-S19/remote-and-embedded-gates-decide-warm-without-openrails"
@@ -488,20 +476,17 @@
     "OR-J23-S24": [
       "TestGate/OR-J23-S24/refusals-are-verdicts-and-openrails-down-is-unavailable"
     ],
-    "OR-J23-S26": [
-      "TestLimitHolds/OR-J23-S26/a-gates-in-flight-report-counts-as-held-for-admissions-while-its-lease-lives"
-    ],
     "OR-J23-S27": [
       "TestGate/OR-J23-S27/closing-a-gate-ends-its-lease-and-releases-what-it-had"
     ],
     "OR-J23-S33": [
-      "TestLimitHolds/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
+      "TestLimitDecisions/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
     ],
     "OR-J23-S34": [
-      "TestLimitHolds/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
+      "TestLimitDecisions/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
     ],
     "OR-J23-S35": [
-      "TestLimitHolds/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
+      "TestLimitDecisions/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
     ],
     "OR-J23-S36": [
       "TestUsageLimits/OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename"
@@ -543,10 +528,10 @@
       "TestLeaseSyncs/OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled"
     ],
     "OR-J24-S16": [
-      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-releases-its-holds-and-clears-its-report"
+      "TestLeaseSyncs/OR-J24-S16/a-closed-lease-settles-and-clears-its-report"
     ],
     "OR-J24-S18": [
-      "TestLeaseVersions/OR-J24-S18/a-lapsed-leases-report-and-holds-count-nowhere-until-it-syncs-again"
+      "TestLeaseVersions/OR-J24-S18/a-lapsed-leases-report-counts-nowhere-until-it-syncs-again"
     ],
     "OR-J24-S19": [
       "TestLeaseVersions/OR-J24-S19/lease-ids-are-uuidv7-an-id-past-the-replay-horizon-is-not-found-and-a-usage-only-close-ends-an-earlier-lease"
@@ -573,13 +558,10 @@
       "TestLeaseVersions/OR-J24-S26/a-view-never-opens-a-session-and-the-first-use-opens-it-at-its-admission"
     ],
     "OR-J24-S27": [
-      "TestLeaseVersions/OR-J24-S27/admit-while-positive-admits-the-crossing-request-once-on-the-server"
-    ],
-    "OR-J24-S28": [
-      "TestLeaseVersions/OR-J24-S28/no-hold-holds-past-the-30-day-hold-lifetime"
+      "TestLeaseVersions/OR-J24-S27/admit-while-positive-admits-the-crossing-request-once"
     ],
     "OR-J24-S29": [
-      "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
+      "TestLeaseVersions/OR-J24-S29/concurrent-syncs-on-the-same-customers-never-deadlock"
     ],
     "OR-J24-S31": [
       "TestLeaseVersions/OR-J24-S31/a-sync-takes-no-customer-lock-and-one-that-cannot-take-its-locks-in-time-fails-fast"
@@ -591,7 +573,7 @@
       "TestLeaseVersions/OR-J24-S33/usage-without-a-grant-opens-no-window-and-a-lapsed-grants-windows-keep-counting"
     ],
     "OR-J24-S34": [
-      "TestLeaseVersions/OR-J24-S34/a-backlog-across-a-thousand-customers-settles-a-bounded-prefix-per-sync"
+      "TestLeaseVersions/OR-J24-S34/a-full-sync-across-a-thousand-customers-settles-whole"
     ],
     "OR-J24-S36": [
       "TestUsageContracts/OR-J24-S36/a-meter-correction-holds-only-its-own-merchants-usage"
@@ -630,7 +612,7 @@
       "TestUsageBillingContracts/OR-J26-S04"
     ],
     "OR-J26-S30": [
-      "TestUsageBillingContracts/OR-J26-S30/admission-applies-the-customers-own-delinquency-policy"
+      "TestUsageBillingContracts/OR-J26-S30/a-view-applies-the-customers-own-delinquency-policy"
     ],
     "OR-J27-S01": [
       "TestPublicEntitlements/OR-J27-S01/purchase-and-grant-overlap-counts-once"
@@ -1117,9 +1099,6 @@
     "OR-J29-S40": [
       "TestBackgroundJobs/OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants"
     ],
-    "OR-J29-S41": [
-      "TestBackgroundJobs/OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts"
-    ],
     "OR-J26-S50": [
       "TestUsageBillingContracts/OR-J26-S50/paid",
       "TestUsageBillingContracts/OR-J26-S50/waived",
@@ -1136,7 +1115,7 @@
       "TestUsageBillingContracts/OR-J26-S53/usage-pass-queues-the-charge-without-waiting-on-the-gateway"
     ],
     "OR-J22-S50": [
-      "TestCreditExpiry/OR-J22-S50/admission-refuses-credit-that-lapsed-before-its-watch-looks"
+      "TestCreditExpiry/OR-J22-S50/a-view-offers-no-credit-that-lapsed-before-its-watch-looks"
     ],
     "OR-J26-S54": [
       "TestUsageBillingContracts/OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting"
@@ -1373,7 +1352,7 @@
     ],
     "OR-J25-S40": [
       "TestBalanceLooks/OR-J25-S40",
-      "TestBalanceLooks/OR-J25-S40/a-hold-that-crosses-the-line-commits-its-look",
+      "TestBalanceLooks/OR-J25-S40/usage-that-crosses-the-line-queues-its-look",
       "TestBalanceLooks/OR-J25-S40/a-revocation-that-crosses-the-line-commits-its-look",
       "TestBalanceLooks/OR-J25-S40/a-lapse-that-crosses-the-line-commits-its-look"
     ],
@@ -1869,9 +1848,6 @@
     "OR-J23-S38": [
       "TestGate/OR-J23-S38/two-gates-and-an-unreachable-openrails-spend-at-most-the-remaining"
     ],
-    "OR-J23-S39": [
-      "TestGate/OR-J23-S39/near-zero-is-decided-on-the-server-exactly"
-    ],
     "OR-J23-S40": [
       "TestGate/OR-J23-S40/an-idle-gate-stops-syncing-and-decides-one-request-on-its-stale-view"
     ],
@@ -1939,14 +1915,8 @@
     "OR-J24-S43": [
       "TestLeaseSyncs/OR-J24-S43/usage-counts-in-the-spend-window-of-its-admission-to-the-millisecond"
     ],
-    "OR-J24-S44": [
-      "TestLeaseSyncs/OR-J24-S44/a-hold-made-under-a-lapsed-lease-counts-at-once"
-    ],
     "OR-J24-S45": [
       "TestLeaseSyncs/OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait"
-    ],
-    "OR-J24-S46": [
-      "TestLeaseSyncs/OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate"
     ],
     "OR-J24-S47": [
       "TestUsageStore/OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice"
@@ -1986,7 +1956,6 @@
     ],
     "OR-J24-S58": [
       "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts",
-      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-capture-retried-after-a-lost-commit-charges-once",
       "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once"
     ],
     "OR-J24-S59": [
@@ -2322,7 +2291,7 @@
       "TestMerchantUnits/OR-J48-S07/a-refund-claws-back-its-lots-units-first"
     ],
     "OR-J48-S08": [
-      "TestMerchantUnits/OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage"
+      "TestMerchantUnits/OR-J48-S08/a-gate-decides-on-the-unit-balance-and-an-overrun-is-forgiven-usage"
     ],
     "OR-J48-S09": [
       "TestMerchantUnits/OR-J48-S09/a-packs-reversals-take-what-they-took-as-they-settled"
@@ -2331,7 +2300,7 @@
       "TestMerchantUnits/OR-J48-S10/a-period-whose-price-falls-takes-back-forgiveness-first"
     ],
     "OR-J48-S11": [
-      "TestMerchantUnits/OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit"
+      "TestMerchantUnits/OR-J48-S11/a-lease-sync-takes-usage-in-a-declared-unit-only"
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"

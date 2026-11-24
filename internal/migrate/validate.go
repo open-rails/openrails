@@ -20,9 +20,7 @@ import (
 // Validate checks existing OpenRails and River ledgers and writes nothing:
 // every migration of the chain is recorded, by the same file and with the
 // content this build carries. Apply settles a difference; Validate only
-// refuses it. Startup does not prepare partitions here; normal runtime
-// maintenance keeps its existing behavior, and explicit Apply prepares
-// initial partitions.
+// refuses it.
 func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return errors.New("openrails: validating migrations needs a Postgres pool")

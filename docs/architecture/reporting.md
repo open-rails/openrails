@@ -182,8 +182,7 @@ Checks:
 - Compare the console's hand-written `Dashboard` and `Widget` (`web/billing-ui/src/admin/lib/api/metrics.ts`) with `wire.ts`: `updated_at` and `updated_by` are optional there but `string | null` on the wire.
 
 ### 6. Data lifecycle
-The engine owns no table. Every flow statement bounds its time column by the range;
-no family reads a partitioned table (`limit_holds`, `limit_hold_parts`).
+The engine owns no table. Every flow statement bounds its time column by the range.
 `dashboard_configs` has retention class state; a row lives as long as its
 merchant. Merchant archives exclude it as presentation, so a restored merchant
 starts from the default template.

@@ -570,11 +570,12 @@ func TestUsageBillingContracts(t *testing.T) {
 		p.money(t, 1, 3000)
 		// A $1,500 request is within the dollar line, which the yen cap does
 		// not bind.
-		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "past-the-yen-cap", 1_500_000_000)})
-		require.NoError(t, err)
-		require.True(t, results[0].Allowed(), "%+v", results[0].Admission)
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		set := out.LimitSets[0]
+		require.Nil(t, set.Refusal)
+		require.GreaterOrEqual(t, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining+set.CreditLine, int64(1_500_000_000))
 	})
-	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
+	t.Run("OR-J26-S30/a-view-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
@@ -590,11 +591,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "the customer's policy has no grace")
-		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "after-strict-grace", 500)})
-		require.NoError(t, err)
-		require.False(t, results[0].Allowed())
-		require.NotNil(t, results[0].Admission)
-		require.NotNil(t, results[0].Admission.DenyCode)
-		require.Equal(t, billing.DenyDelinquentUnpaidOrder, *results[0].Admission.DenyCode)
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		require.NotNil(t, out.LimitSets[0].Refusal)
+		require.Equal(t, billing.DenyDelinquentUnpaidOrder, out.LimitSets[0].Refusal.DenyCode)
 	})
 }

@@ -415,40 +415,6 @@ func (q *Queries) DeleteWebhookHealthDaysBefore(ctx context.Context, arg DeleteW
 	return result.RowsAffected(), nil
 }
 
-const dropMonthPartitions = `-- name: DropMonthPartitions :one
-SELECT billing.drop_month_partitions($1::name, $2::timestamptz)::int AS dropped
-`
-
-type DropMonthPartitionsParams struct {
-	TableName string
-	Before    time.Time
-}
-
-func (q *Queries) DropMonthPartitions(ctx context.Context, arg DropMonthPartitionsParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dropMonthPartitions, arg.TableName, arg.Before)
-	var dropped int32
-	err := row.Scan(&dropped)
-	return dropped, err
-}
-
-const ensureMonthPartitions = `-- name: EnsureMonthPartitions :one
-SELECT billing.ensure_month_partitions($1::name, $2::timestamptz, $3::timestamptz)::int AS created
-`
-
-type EnsureMonthPartitionsParams struct {
-	TableName string
-	FromAt    time.Time
-	ThroughAt time.Time
-}
-
-// Calendar-driven partition maintenance: neither statement reads a row.
-func (q *Queries) EnsureMonthPartitions(ctx context.Context, arg EnsureMonthPartitionsParams) (int32, error) {
-	row := q.db.QueryRow(ctx, ensureMonthPartitions, arg.TableName, arg.FromAt, arg.ThroughAt)
-	var created int32
-	err := row.Scan(&created)
-	return created, err
-}
-
 const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 
 SELECT q.mid AS merchant_id

@@ -22,7 +22,7 @@ import (
 // of the balances its usage moved: one read per kind for all of them, never
 // one per customer. PostgreSQL is read before the event store: every writer
 // inserts its events before it commits what they replace (an in-flight
-// report, a request hold, an unposted mark), so a reader in that order
+// report, an unposted mark), so a reader in that order
 // counts an item twice at worst, never not at all.
 
 // UsageAccount is one customer's balance in a currency that usage moved.
@@ -166,7 +166,7 @@ func (s *MoneyService) capacities(ctx context.Context, q *gen.Queries, merchantI
 		return nil, nil, err
 	}
 	now := s.now()
-	rows, err := q.ListViewCapacities(ctx, gen.ListViewCapacitiesParams{MerchantID: merchantID, Currency: currency, HeldSince: limits.HeldSince(now), AsOf: now,
+	rows, err := q.ListViewCapacities(ctx, gen.ListViewCapacitiesParams{MerchantID: merchantID, Currency: currency, AsOf: now,
 		LeaseLiveSince: limits.LeaseLiveSince(now), ExceptLease: except, CustomerIds: customers})
 	if err != nil {
 		return nil, nil, err

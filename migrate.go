@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/logx"
 )
 
-// Migrate prepares OpenRails' schema, this month's partitions and River's
-// tables in database's schemas, without constructing an engine. It runs
+// Migrate prepares OpenRails' schema and River's tables in database's
+// schemas, without constructing an engine. It runs
 // regardless of database.SkipMigrations, which controls New only.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, database DatabaseConfig) error {
 	return engine.Migrate(ctx, pool, config.Config{Database: config.DatabaseConfig(database.withDefaults())})

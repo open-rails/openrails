@@ -398,11 +398,10 @@ once and a deleted one is `merchant_unresolved`.
 - `Client.Uncached()` returns a handle that reads catalog, configuration and
   entitlements live.
 - `NewGate(client, deps)` admits usage in process over the same handle
-  ([the Gate](client.md#limits-admissions-and-the-gate)).
+  ([the Gate](client.md#limits-and-the-gate)).
 
 `Engine.LocalMerchant(id)` returns a `*LocalClient` for what only the engine in
-your process can do: commit with your own rows. `AdmitTx`,
-`CaptureAdmissionsTx`, `ReleaseAdmissionsTx`, `StartRunningChargeTx` and
+your process can do: commit with your own rows. `StartRunningChargeTx` and
 `StopRunningChargeTx` take a `pgx.Tx` from your pool, so a crash leaves both
 your row and the billing change, or neither:
 
@@ -416,16 +415,10 @@ if err != nil {
 	return err
 }
 defer func() { _ = tx.Rollback(ctx) }()
-verdicts, err := local.AdmitTx(ctx, tx, []billing.AdmitParams{{
-	RequestID: jobID, CustomerID: customer, Invoker: customer.String(), Currency: "USD",
-	Usage:     &billing.UsageEstimate{EventType: "render", Dimensions: map[string]int64{"frames": 1200}},
-	ExpiresAt: new(time.Now().Add(time.Hour)),
-}})
-if err != nil {
+if _, err := local.StartRunningChargeTx(ctx, tx, billing.StartRunningChargeParams{
+	Reference: jobID, CustomerID: customer, Currency: "USD", RatePerHour: 3_600_000,
+}); err != nil {
 	return err
-}
-if !verdicts[0].Allowed() {
-	return errors.New("refused") // verdicts[0] says why
 }
 if _, err := tx.Exec(ctx, `INSERT INTO app.jobs (id, customer_id) VALUES ($1, $2)`, jobID, customer); err != nil {
 	return err

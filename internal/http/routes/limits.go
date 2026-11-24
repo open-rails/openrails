@@ -38,8 +38,8 @@ var limitsRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
 	{Method: POST, Path: "/v1/app/leases/sync", EventStore: true, Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
 		Doc: "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the " +
-			"lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request " +
-			"holds of the lease it releases and the customers whose views it asks for; it answers how far the " +
+			"lease's usage, numbered within the lease, what its gate has had in flight across a sync and the " +
+			"customers whose views it asks for; it settles all the usage it carries and answers how far the " +
 			"usage settled (a resend is matched by lease and number), each view (where the customer stands on " +
 			"its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate " +
 			"costs requests with, and how many of the merchant's leases are live. The first sync under a new " +
@@ -47,7 +47,7 @@ var limitsRoutes = []Route{
 			"posts to the ledger at each month's end in the merchant's accounting zone and before any other " +
 			"movement of the customer's balance.",
 		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
-		Errors: codes("admission_not_found", "currency_unsupported", "idempotency_key_reused", "invalid_param", "resource_conflict", billing.CodeLeaseNotFound, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
+		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", "resource_conflict", billing.CodeLeaseNotFound, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", EventStore: true, Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Args: []any{billing.CustomerID{}},
 		Doc: "AdjustCustomerLimit adds params.Amount to the capacity of the customer's current window of " +

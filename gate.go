@@ -20,11 +20,11 @@ import (
 
 // Gate admits requests against a merchant's usage limits in the host's
 // process. Each sync answers views: where each customer the gate serves
-// stands on its limits, which reserve nothing. A warm decision takes the
+// stands on its limits, which reserve nothing. Every decision takes the
 // request's cost from the view, less what the gate has in flight, with no
-// I/O; near a limit the request is decided on the server, exactly, as a
-// request hold of the gate's lease. Overshoot is bounded by what other gates
-// admit within a few syncs. While OpenRails is unreachable the gate keeps
+// I/O; nothing is decided or held on the server. Overshoot is bounded by
+// what other gates admit within about four syncs, plus one request per
+// gate. While OpenRails is unreachable the gate keeps
 // deciding on its views, spending at most its share of each. The gate syncs
 // while it is active, carrying the usage its tickets captured, which the
 // server prices exactly. It works over the remote Client and the embedded
@@ -122,12 +122,11 @@ func (g *Gate) isClosed() bool {
 	return g.closed
 }
 
-// Admit decides one request, as Client.Admit would. A refusal is a verdict
+// Admit decides one request on the gate's view. A refusal is a verdict
 // (Ticket.Refusal), not an error: limit_reached names the limit and when it
 // resets, and money refusals keep their deny codes. The error is for bad
-// input, ctx, or ErrUnavailable. A request that declares
-// AccrualRateDeltaPerHour is decided by the server. ExpiresAt is not needed:
-// a ticket lives while the gate does.
+// input, ctx, usage_not_priced (no rate card prices the request's usage), or
+// ErrUnavailable. A ticket lives while the gate does.
 func (g *Gate) Admit(ctx context.Context, p billing.AdmitParams) (*Ticket, error) {
 	if g.isClosed() {
 		return nil, errGateClosed
@@ -159,7 +158,7 @@ func (g *Gate) Consume(ctx context.Context, p billing.AdmitParams) (*Ticket, err
 	return t, nil
 }
 
-// Record reports usage no admission held, sent on the next sync. It counts
+// Record reports usage no ticket admitted, sent on the next sync. It counts
 // toward the customer's limits and is billed as the server prices it. Every
 // Record that returns nil posts once, and one that returns an error stored
 // nothing, so a retry posts once.
@@ -194,8 +193,7 @@ func (g *Gate) Flush(ctx context.Context) error {
 }
 
 // Close sends pending usage and ends the gate's lease
-// (SyncLeasesParams.Close), which releases its request holds and clears its
-// in-flight report, then stops syncing, within ctx (or a bound when ctx has
+// (SyncLeasesParams.Close), which clears its in-flight report, then stops syncing, within ctx (or a bound when ctx has
 // no deadline). A sync that cannot reach OpenRails is retried until then;
 // usage still unsent at the end is named in the error, and without an Outbox
 // it is lost when the process exits. Close after the gate's tickets are
@@ -241,11 +239,9 @@ type Ticket struct {
 	mu    sync.Mutex
 	state ticketState
 
-	// view and takes are what a local decision took of the gate's view;
-	// held is a decision the server made as a request hold of the lease.
+	// view and takes are what the decision took of the gate's view.
 	view       *custView
 	takes      []take
-	held       bool
 	admittedAt time.Time
 	// build is the gate's sync count when the ticket was admitted: it is
 	// reported in flight once a sync built after it has passed.
@@ -275,7 +271,7 @@ func (t *Ticket) Refusal() *billing.Refusal {
 // Capture reports the request's usage, sent on the next sync (with an
 // Outbox, stored before Capture returns). Usage is today's CaptureUsage: its
 // event type is the admitted one, Source defaults to "admit" and SourceID to
-// the request id. A dynamic card charges the admission's stated amount. A
+// the request id. A dynamic card charges the request's stated amount. A
 // capture that fails leaves the ticket open, to capture again or release.
 func (t *Ticket) Capture(ctx context.Context, u billing.CaptureUsage) error {
 	if !t.Allowed() {
@@ -318,7 +314,7 @@ func (t *Ticket) Release(ctx context.Context) error {
 }
 
 // captureUsage fills a capture's defaults and checks it against the
-// admission.
+// request.
 func (t *Ticket) captureUsage(u *billing.CaptureUsage) error {
 	u.EventType = strings.TrimSpace(u.EventType)
 	admitted := ""
@@ -370,10 +366,6 @@ func captureItem(t *Ticket, u billing.CaptureUsage, now time.Time) billing.Lease
 	if p.Resource != "" {
 		item.Resource = &p.Resource
 	}
-	if t.held {
-		item.RequestID = &p.RequestID
-		return item
-	}
 	at := t.admittedAt.UTC()
 	item.AdmittedAt = &at
 	return item
@@ -387,7 +379,7 @@ func recordItem(u billing.UsageParams) (billing.LeaseUsage, error) {
 		return billing.LeaseUsage{}, invalidParam("customer_id", "customer_id is required")
 	case u.Currency == "":
 		return billing.LeaseUsage{}, invalidParam("currency", "currency is required")
-	case moneyutil.ValidateCurrency(string(u.Currency)) != nil:
+	case moneyutil.ValidateBalanceCurrency(string(u.Currency)) != nil:
 		return billing.LeaseUsage{}, currencyUnsupported()
 	case !validInvokerType(u.InvokerType):
 		return billing.LeaseUsage{}, invalidParam("invoker_type", `invoker_type must be "customer" or "delegated"`)
@@ -440,18 +432,14 @@ func normalizeGateAdmit(p *billing.AdmitParams) error {
 		return invalidParam("customer_id", "customer_id is required")
 	case p.Currency == "":
 		return invalidParam("currency", "currency is required")
-	case moneyutil.ValidateCurrency(string(p.Currency)) != nil:
+	case moneyutil.ValidateBalanceCurrency(string(p.Currency)) != nil:
 		return currencyUnsupported()
 	case !validInvokerType(p.InvokerType):
 		return invalidParam("invoker_type", `invoker_type must be "customer" or "delegated"`)
-	case p.AccrualRateDeltaPerHour < 0:
-		return invalidParam("accrual_rate_delta_per_hour", "accrual_rate_delta_per_hour must be nonnegative")
 	case p.EstimatedAmount < 0:
 		return invalidParam("estimated_amount", "estimated_amount must be nonnegative")
 	case p.Usage != nil && p.EstimatedAmount != 0:
 		return invalidParam("usage", "state usage or estimated_amount, not both")
-	case p.LeaseID != nil:
-		return invalidParam("lease_id", "a gate names its own lease")
 	}
 	if p.Usage != nil {
 		p.Usage.EventType = strings.TrimSpace(p.Usage.EventType)

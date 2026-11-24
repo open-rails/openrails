@@ -106,10 +106,8 @@ type DatabaseConfig struct {
 	// fleet passed to Start with WithRiverClient must use the same schema.
 	RiverSchema string
 	// SkipMigrations makes New validate existing schemas without applying
-	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is billing.ErrMigrationsRequired.
-	// Call Migrate first. Normal request-time and scheduled partition
-	// maintenance is unchanged.
+	// migrations: a migration that is missing, or was applied with other
+	// content, is billing.ErrMigrationsRequired. Call Migrate first.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
 	// configuration, that renews leases: idempotency claims, the billing pass

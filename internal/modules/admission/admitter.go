@@ -1,43 +1,35 @@
-// Package admission implements OpenRails service admission: the payer money
-// affordability and spend-cap gate, usage limits, and the delegated
-// wasted-spend cutoff.
-//
-// Admission and settlement share request holds under the payer money lock.
-// Redis is used only by independent rate and abuse signals, never as financial truth.
+// Package admission resolves what a gate's view decides a customer's
+// requests against: the payer's money policy and its spend windows, the
+// usage limits a request claims, and the checks made whatever a request
+// costs (delegated invokers, failed-usage cutoffs, delinquency, the
+// accrual-rate cap). Nothing is held: gates decide locally.
 package admission
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // DefaultTrustLevel is assigned to actors with no explicit trust level — the
 // new-account low default (#300): start at the lowest level until graduated.
 const DefaultTrustLevel = "free"
 
-// Admitter is the service-admit money gate.
+// Admitter resolves a customer's money policy and limits for gates' views.
 type Admitter struct {
 	money  *money.MoneyService
-	gate   *spendgate.Gate
 	loader *SpendgatePolicyLoader
+	now    func() time.Time
 
 	// delinquency is the optional or#878 arrears delinquency gate; nil disables
 	// it (the amount cap still applies — the two axes are independent).
@@ -48,7 +40,7 @@ type Admitter struct {
 	failedCutoff FailedUsageCutoff
 
 	// rates is the optional or#897 accrual-rate meter; nil makes an
-	// accrual_rate_cap policy unenforceable, so Admit refuses rather than
+	// accrual_rate_cap policy unenforceable, so its views fail rather than
 	// silently admitting past a quota nobody is measuring.
 	rates *AccrualRateMeter
 }
@@ -59,9 +51,9 @@ func (a *Admitter) WithAccrualRateMeter(m *AccrualRateMeter) *Admitter {
 	return a
 }
 
-// NewAdmitter builds admission over durable SQL reservations and merchant policy.
-func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *SpendgatePolicyLoader) *Admitter {
-	return &Admitter{money: moneySvc, gate: gate, loader: loader}
+// NewAdmitter resolves merchant policy on now's clock.
+func NewAdmitter(moneySvc *money.MoneyService, loader *SpendgatePolicyLoader, now func() time.Time) *Admitter {
+	return &Admitter{money: moneySvc, loader: loader, now: now}
 }
 
 // WithDelinquency enables the or#878 arrears delinquency admit gate.
@@ -82,7 +74,8 @@ func (a *Admitter) WithFailedUsageCutoff(c FailedUsageCutoff) *Admitter {
 	return a
 }
 
-// AdmitRequest is one admission decision input.
+// AdmitRequest is the attributes of a customer's requests that policy
+// resolution reads.
 type AdmitRequest struct {
 	CustomerID  identity.CustomerID // the merchant subject
 	Invoker     string              // canonical invoker: user:<id> / apiKey:<key_id> / <issuer>:<sub>
@@ -90,201 +83,15 @@ type AdmitRequest struct {
 	TrustLevel  string              // optional payer trust level; empty resolves from OpenRails money state
 	Resource    string              // caller-supplied resource string for host-side attribution only
 	Roles       []uuid.UUID         // immutable role UUIDs the invoker holds (#473)
-
-	Currency        string
-	EstimatedAmount int64
-	// Usage is the usage estimate the rate cards price into the hold, in place
-	// of EstimatedAmount.
-	Usage *billing.UsageEstimate
-	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
-	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
-	// the host knows it, because only the host knows what it is about to deploy.
-	// Zero means "this request adds no ongoing rate", which is the right answer
-	// for one-shot work and leaves an accrual_rate_cap payer gated on what is
-	// already running.
-	AccrualRateDeltaPerHour int64
-	Source                  string    // idempotency namespace (e.g. "usage")
-	SourceID                string    // idempotency id (request id) — the hold key
-	ExpiresAt               time.Time // the owner's declared job deadline; REQUIRED when EstimatedAmount > 0 and no lease owns the hold
-	// LeaseID is the gate lease that owns the hold: it lives while the lease
-	// does.
-	LeaseID *uuid.UUID
+	Currency    string
 }
 
-// AdmitDecision is the unified outcome.
+// AdmitDecision is a refusal made whatever a request costs.
 type AdmitDecision struct {
-	Allowed bool
-	// EstimatedAmount is what the admission holds: the host's estimate, or
-	// what its usage estimate was priced at.
-	EstimatedAmount int64
-	BlockedBy       string // "budget" | "abuse" | "money" | "limit" | ""
-	DenyCode        billing.DenyCode
-	// Limit and ResetsAt name a limit_reached refusal's limit and when it
-	// resets.
-	Limit    string
-	ResetsAt *time.Time
-	// AvailableAmount is the payer's spendable balance (settled − money-window
-	// reservations) the affordability gate was evaluated against; HeldAmount is the
-	// total in-flight reservation after this admit. StartCapacity = Available − Held.
-	AvailableAmount int64
-	HeldAmount      int64
-	// RetryAfterSeconds is when the blocking budget window next resets (0 unless
-	// a window was the binding gate). Hosts stamp it as the 429 Retry-After.
+	BlockedBy string // "budget" | "abuse" | "money"
+	DenyCode  billing.DenyCode
+	// RetryAfterSeconds is when the refusal clears, when it does.
 	RetryAfterSeconds int64
-	HoldExpiresAt     *time.Time
-	Replayed          bool
-	State             string
-}
-
-// Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
-// then checks affordability and spend windows and records the reservation in
-// one transaction under the payer money lock.
-func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, error) {
-	if a == nil || a.money == nil || a.gate == nil || a.loader == nil {
-		return AdmitDecision{}, fmt.Errorf("admission service is not initialized")
-	}
-	if err := spendgate.ValidateRequest(req.SourceID, req.EstimatedAmount, req.AccrualRateDeltaPerHour); err != nil {
-		return AdmitDecision{}, err
-	}
-	req.SourceID = strings.TrimSpace(req.SourceID)
-	var result AdmitDecision
-	err := a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(ctx context.Context, d *db.DB, capacity money.AdmissionCapacity) error {
-		bound := *a
-		bound.money = a.money.WithDatabase(d)
-		bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), a.loader.fx)
-		if a.rates != nil {
-			rates := *a.rates
-			rates.db = d
-			rates.now = a.gate.Now
-			bound.rates = &rates
-		}
-		var err error
-		result, err = bound.admitLocked(ctx, d.Gen(ctx), req, capacity)
-		return err
-	})
-	return result, err
-}
-
-func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitRequest, capacity money.AdmissionCapacity) (AdmitDecision, error) {
-	tid, err := merchant.Require(ctx) // #336: no default merchant
-	if err != nil {
-		return AdmitDecision{}, err
-	}
-
-	terms := spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
-		Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour}
-	var estimate []byte
-	if req.Usage != nil {
-		if estimate, err = money.UsageEstimate(*req.Usage); err != nil {
-			return AdmitDecision{}, err
-		}
-	}
-	replay, err := a.gate.CheckIdentity(ctx, q, spendgate.AdmitInput{Customer: req.CustomerID.UUID(), Currency: req.Currency,
-		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms, EstimateUsage: estimate, LeaseID: req.LeaseID})
-	if err != nil {
-		var conflict *spendgate.Conflict
-		if errors.As(err, &conflict) {
-			return AdmitDecision{}, fmt.Errorf("%w: %w", money.ErrIdempotencyKeyReused, err)
-		}
-		return AdmitDecision{}, err
-	}
-	if replay != nil {
-		return AdmitDecision{Allowed: true, EstimatedAmount: replay.EstimatedAmount, AvailableAmount: replay.AvailableAmount,
-			HoldExpiresAt: replay.ExpiresAt, Replayed: true, State: replay.State}, nil
-	}
-	if req.LeaseID != nil {
-		lease, err := q.GetLease(ctx, gen.GetLeaseParams{MerchantID: tid.UUID(), ID: *req.LeaseID})
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && lease.ClosedAt != nil {
-			return AdmitDecision{}, apperr.New(http.StatusConflict, billing.CodeLeaseNotHeld, "the lease is closed or never synced").WithParam("lease_id")
-		}
-		if err != nil {
-			return AdmitDecision{}, err
-		}
-	}
-
-	// A usage estimate is priced at the customer's current period quantities
-	// by the cards it pins.
-	var pinned []byte
-	if req.Usage != nil {
-		if req.EstimatedAmount, pinned, err = a.money.RateUsageEstimate(ctx, q, req.CustomerID, money.NormalizeCurrency(req.Currency), *req.Usage); err != nil {
-			return AdmitDecision{}, err
-		}
-	}
-
-	g, refused, err := a.gates(ctx, q, req)
-	if err != nil || refused != nil {
-		if refused != nil {
-			return *refused, nil
-		}
-		return AdmitDecision{}, err
-	}
-	resolved, policy, sgReq := g.resolved, g.policy, g.request
-
-	// Usage limits the request counts toward: those in its currency claim its
-	// money estimate, named units what their counts make of its usage.
-	claims, err := a.limitClaims(ctx, q, tid.UUID(), req)
-	if err != nil {
-		return AdmitDecision{}, err
-	}
-
-	available, creditLine, outstanding := payerCapacity(capacity, resolved)
-	// A merchant's unit is never owed: a request that holds nothing of it is
-	// admitted only while its balance, net of what is held, has some left.
-	if money.IsMerchantUnit(req.Currency) && req.EstimatedAmount == 0 && available <= 0 {
-		return AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyInsufficientBalance, AvailableAmount: available}, nil
-	}
-	input := spendgate.AdmitInput{
-		Customer: req.CustomerID.UUID(), Currency: req.Currency, RequestID: req.SourceID,
-		Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt,
-		AccountBalance: available, CreditLimit: creditLine, Policy: policy, Request: sgReq,
-		EstimateUsage: estimate, RateCards: pinned,
-		Terms: spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
-			Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour},
-		Limits:  claims,
-		LeaseID: req.LeaseID,
-	}
-	dec, err := a.gate.Admit(ctx, q, input)
-	if err != nil {
-		var conflict *spendgate.Conflict
-		if errors.As(err, &conflict) {
-			return AdmitDecision{}, fmt.Errorf("%w: %w", money.ErrIdempotencyKeyReused, err)
-		}
-		if errors.Is(err, spendgate.ErrExpired) {
-			return AdmitDecision{}, ErrHoldDeadlinePassed
-		}
-		if errors.Is(err, spendgate.ErrDeadlineRequired) {
-			return AdmitDecision{}, ErrHoldDeadlineRequired
-		}
-		return AdmitDecision{}, err
-	}
-	if dec.Allowed {
-		return AdmitDecision{Allowed: true, EstimatedAmount: dec.EstimatedAmount, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
-	}
-	if dec.BlockedLimit != nil {
-		out := AdmitDecision{BlockedBy: "limit", DenyCode: billing.DenyLimitReached, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
-			Limit: dec.BlockedLimit.Key, ResetsAt: dec.BlockedLimit.ResetsAt}
-		if out.ResetsAt != nil {
-			out.RetryAfterSeconds = ceilSeconds(out.ResetsAt.Sub(a.gate.Now()))
-		}
-		return out, nil
-	}
-	code, blocked := billing.DenyBudgetExceeded, "budget"
-	if dec.BlockedBalance {
-		if capacity.HardCreditLimit && outstanding > 0 && canFitAfterDebtSettlement(capacity, resolved, req.EstimatedAmount) {
-			if err := a.money.RequestUsageCollection(ctx, q, req.CustomerID, req.Currency); err != nil {
-				return AdmitDecision{}, err
-			}
-		}
-		code, blocked = billing.DenyInsufficientBalance, "money"
-		if creditLine > 0 {
-			code = billing.DenyInsufficientCredit
-		}
-		if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
-			code = billing.DenyOutstandingCapReached
-		}
-	}
-	return AdmitDecision{BlockedBy: blocked, DenyCode: code, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
-		RetryAfterSeconds: ceilSeconds(dec.RetryAfter)}, nil
 }
 
 // gated is a request past the checks admission makes before it weighs any
@@ -312,7 +119,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, werr
 		}
 		if over {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "abuse", DenyCode: billing.DenyFailureRateLimited}, nil
+			return gated{}, &AdmitDecision{BlockedBy: "abuse", DenyCode: billing.DenyFailureRateLimited}, nil
 		}
 	}
 
@@ -335,7 +142,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, derr
 		}
 		if delinquent {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidOrder}, nil
+			return gated{}, &AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidOrder}, nil
 		}
 	}
 
@@ -351,7 +158,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	// Only the customer's own credential spends its balance: nothing grants a
 	// delegated invoker spend.
 	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
+		return gated{}, &AdmitDecision{BlockedBy: "budget", DenyCode: billing.DenyDelegatedSpendNotAllowed}, nil
 	}
 
 	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
@@ -370,8 +177,8 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 		if rerr != nil {
 			return gated{}, nil, rerr
 		}
-		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
-			return gated{}, &AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: billing.DenyAccrualRateCapReached}, nil
+		if measured > resolved.AccrualRateCapPerHour {
+			return gated{}, &AdmitDecision{BlockedBy: "budget", DenyCode: billing.DenyAccrualRateCapReached}, nil
 		}
 	}
 
@@ -406,40 +213,8 @@ func (a *Admitter) policyOf(ctx context.Context, req AdmitRequest, trustLevel st
 	return sgReq, declared, resolved, policy, err
 }
 
-func ceilSeconds(d time.Duration) int64 {
-	if d <= 0 {
-		return 0
-	}
-	seconds := int64(d / time.Second)
-	if d%time.Second > 0 {
-		seconds++
-	}
-	return seconds
-}
-
-// limitClaims are the request's claims on the merchant's declared limits.
-func (a *Admitter) limitClaims(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, req AdmitRequest) ([]limits.Claim, error) {
-	defs, err := limits.Definitions(ctx, q, merchantID)
-	if err != nil || len(defs) == 0 {
-		return nil, err
-	}
-	meters, err := limits.Meters(ctx, q, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	var usage *limits.Usage
-	if req.Usage != nil {
-		usage = &limits.Usage{EventType: strings.TrimSpace(req.Usage.EventType), Dimensions: req.Usage.Dimensions, Metadata: req.Usage.Metadata}
-	}
-	reader := limits.Customer{Q: q, MerchantID: merchantID, CustomerID: req.CustomerID.UUID(), Now: a.gate.Now(),
-		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
-			return a.money.PricingPeriod(ctx, q, merchantID, req.CustomerID.UUID(), unit, at)
-		}}
-	return reader.Claims(ctx, defs, meters, money.NormalizeCurrency(req.Currency), req.EstimatedAmount, usage)
-}
-
-// limitClaimsFor are a renewed hold's claims on the declared limits a
-// request of eventType counts toward, with no cost.
+// limitClaimsFor are the claims on the declared limits a request of
+// eventType counts toward, with no cost.
 func (a *Admitter) limitClaimsFor(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, req AdmitRequest, eventType string) ([]limits.Claim, error) {
 	defs, err := limits.Definitions(ctx, q, merchantID)
 	if err != nil || len(defs) == 0 {
@@ -449,7 +224,7 @@ func (a *Admitter) limitClaimsFor(ctx context.Context, q *gen.Queries, merchantI
 	if err != nil {
 		return nil, err
 	}
-	reader := limits.Customer{Q: q, MerchantID: merchantID, CustomerID: req.CustomerID.UUID(), Now: a.gate.Now(),
+	reader := limits.Customer{Q: q, MerchantID: merchantID, CustomerID: req.CustomerID.UUID(), Now: a.now(),
 		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 			return a.money.PricingPeriod(ctx, q, merchantID, req.CustomerID.UUID(), unit, at)
 		}}
@@ -467,14 +242,3 @@ func roleStrings(roles []uuid.UUID) []string {
 	}
 	return out
 }
-
-// ErrHoldDeadlineRequired: a request that places a money hold must say how
-// long the job owning it will run (xs-007 row 33). The hold used to default
-// to one hour, after which `held` was recomputed without it and the still-
-// running job's spend was admitted twice over. There is no default here: the
-// caller's deadline is the only source for "abandoned", and a job that runs
-// past it re-declares through ExtendHold.
-var ErrHoldDeadlineRequired = errors.New("admission: expires_at is required when estimated_amount places a hold")
-
-// ErrHoldDeadlinePassed: the declared deadline is already in the past.
-var ErrHoldDeadlinePassed = errors.New("admission: expires_at is already in the past")

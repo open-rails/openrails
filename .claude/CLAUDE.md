@@ -187,7 +187,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   baseline is a deliberate re-squash proven by CI's `scripts/schemaproof` step, because every
   deployed database must then be settled against it; after v1.0.0 it is immutable.
 - `Migrate`/`New` settle a database that recorded a migration with other content: a schema
-  equal to a fresh build, whichever monthly partitions exist, is re-stamped; any other is
+  equal to a fresh build is re-stamped; any other is
   refused with the difference. A `SkipMigrations` start (`migrate.Validate`) only checks, and
   refuses a missing migration or one recorded with other content (`ErrMigrationsRequired`)
   until `Migrate` has run. Only OpenRails' objects live in its schema: the comparison covers
@@ -208,10 +208,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
-- Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
-  state), stated in its table comment; the `retention` package doc lists the periods.
-  `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
-  them names a time range.
+- Every table has a retention class (`internal/retention`: permanent, rows, state),
+  stated in its table comment; the `retention` package doc lists the periods.
 - External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);

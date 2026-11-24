@@ -763,7 +763,7 @@ Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage
 
 Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken does not start without ClickHouse (`event_store_required`, naming the merchants): only the store can post it.
 
-The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Scaling and Redis
 
@@ -836,8 +836,8 @@ With `clickhouse`, the same step creates or upgrades the event store's database,
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
 rolling upgrades are safe. A database that recorded a migration with other
-content is compared with a fresh build of the migrations it records, whatever
-monthly partitions exist: equal, it is re-stamped and the change audited;
+content is compared with a fresh build of the migrations it records: equal, it
+is re-stamped and the change audited;
 different, the migration stops and reports the difference. Before v1 a release
 may break the schema in one step: its release notes say so, the previous build
 does not run on the migrated schema, there is no rollback past it, and every
@@ -1161,11 +1161,10 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
-| `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
@@ -1178,20 +1177,18 @@ Periods are constants, the same for every merchant, except the event log's `even
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
 | `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
-| `leases` (with their holds), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
+| `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
 The event store's tables expire by their own TTLs: raw usage events 100 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
 
-The hourly cleanup creates partitions two months ahead and drops expired ones
-(giving up after 2 seconds rather than queue behind a long reader), then deletes
-1,000 rows per statement and at most 50,000 per merchant per pass.
+The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per
+merchant per pass.
 `subscription_status_transitions` refuses other deletes
 (`billing.guard_retention_delete`). What integrators see: usage may be dated up
-to 35 days back; a lease answers resends for 61 days after its last sync; a
-request hold lasts at most 30 days; after 61 days a request id reads as never
-admitted; usage reports reach back about 26 months.
+to 35 days back; a lease answers resends for 61 days after its last sync; usage
+reports reach back about 26 months.
 
 ## Backup and restore
 
