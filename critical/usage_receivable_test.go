@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // TestUsageReceivable is the general ledger's usage receivable: what a
@@ -27,12 +29,45 @@ import (
 func TestUsageReceivable(t *testing.T) {
 	t.Run("OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance", func(t *testing.T) {
 		t.Run("card", func(t *testing.T) {
-			a, customer, _ := cardCollectedUsage(t)
+			a, customer, _, _ := cardCollectedUsage(t)
 			w := a.world
 			require.Equal(t, [2]int64{30_000_000, 30_000_000}, booksTotal(t, w, "general", "usage_receivable"), "accrued as it posted, collected by the card")
 			require.EqualValues(t, 30_000_000, glBalance(t, w, "usage_revenue"))
 			require.Equal(t, [2]int64{30_000_000, 30_000_000}, booksTotal(t, w, "general", "unapplied_cash"), "the card's cash is applied to the receivable")
 			require.Equal(t, [2]int64{0, 30_000_000}, booksTotal(t, w, "general", "cash_clearing"))
+			owedIsReceivable(t, a, customer, 0)
+			receivableAudited(t, w, false)
+		})
+		t.Run("observed", func(t *testing.T) {
+			// The card declines; the customer pays the order at NMI another way,
+			// and the next collection finds that sale and records it.
+			a, p, customer := usageBillingWorld(t, true, false)
+			w := a.world
+			p.core.SetDecline("4242", "202")
+			oneUsage(t, a.alpha, usageInput(customer, "observed", 3))
+			a.clock.Advance(time.Second)
+			fleet := quietFleet(t, w)
+			runUsageDue(t, fleet)
+			var order billing.Order
+			require.Eventually(t, func() bool {
+				rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+				if err != nil || len(rows.Items) != 1 {
+					return false
+				}
+				order = rows.Items[0]
+				return order.Payment.LastPaymentError != nil
+			}, 15*time.Second, 20*time.Millisecond, "the collection is declined")
+			require.NotNil(t, order.Usage.NextCollectionAttemptAt)
+			var vault string
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT rail_customer_ref FROM "+booksTable(w, "payment_methods")+" WHERE merchant_id=$1 AND customer_id=$2 AND rail='nmi'",
+				w.alpha.MerchantID().UUID(), customer.UUID()).Scan(&vault))
+			p.core.AddSale(nmimock.Sale{OrderID: uuid.NewString(), Vault: vault, OrderDescription: "invoice " + order.ID.String(), Amount: "30.00", Currency: "USD"})
+			a.clock.Advance(order.Usage.NextCollectionAttemptAt.Sub(a.clock.Now()) + time.Second)
+			runUsageDue(t, fleet)
+			require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
+			require.Equal(t, []int64{30_000_000}, collected(t, w, "usage_collection"), "the observed sale settles the receivable")
+			require.Equal(t, [2]int64{0, 30_000_000}, booksTotal(t, w, "general", "cash_clearing"))
+			require.Zero(t, glBalance(t, w, "unapplied_cash"))
 			owedIsReceivable(t, a, customer, 0)
 			receivableAudited(t, w, false)
 		})
@@ -97,40 +132,61 @@ func TestUsageReceivable(t *testing.T) {
 		})
 	})
 	t.Run("OR-J40-S22/units-owed-equal-the-receivable-after-every-path", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
-		w := a.world
-		oneUsage(t, a.alpha, usageInput(customer, "every-path", 1))
-		a.clock.Advance(time.Second)
-		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "every-path", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
-		require.NoError(t, err)
-		fleet := quietFleet(t, w)
-		a.clock.Advance(12*time.Hour + 10*time.Second)
-		_, err = a.alpha.StopRunningCharge(t.Context(), "every-path", billing.StopRunningChargeParams{})
-		require.NoError(t, err)
-		// $10.00 of usage posts before the running charge's 12 h 10 s at
-		// $0.36 an hour.
-		owedIsReceivable(t, a, customer, 14_321_000)
-		runUsageDue(t, fleet)
-		order := oneUsageOrder(t, a, customer)
-		require.EqualValues(t, 14_321_000, order.Total)
-		owedIsReceivable(t, a, customer, 14_321_000)
-		remit(t, a, order.ID, 4_321_000, "every-path-part")
-		owedIsReceivable(t, a, customer, 10_000_000)
-		_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 5_000_000, Source: "critical", SourceID: "every-path-gift"}})
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 5_000_000)
-		_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 5_000_000)
-		require.EqualValues(t, 5_000_000, glBalance(t, w, "allowance_doubtful"))
-		remit(t, a, order.ID, 2_000_000, "every-path-late")
-		owedIsReceivable(t, a, customer, 3_000_000)
-		require.EqualValues(t, 3_000_000, glBalance(t, w, "allowance_doubtful"))
-		_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 0)
-		require.Zero(t, glBalance(t, w, "allowance_doubtful"))
-		receivableAudited(t, w, false)
+		t.Run("invoiced", func(t *testing.T) {
+			a, _, customer := usageBillingWorld(t, true, true)
+			w := a.world
+			oneUsage(t, a.alpha, usageInput(customer, "every-path", 1))
+			a.clock.Advance(time.Second)
+			_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "every-path", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
+			require.NoError(t, err)
+			fleet := quietFleet(t, w)
+			a.clock.Advance(12*time.Hour + 10*time.Second)
+			_, err = a.alpha.StopRunningCharge(t.Context(), "every-path", billing.StopRunningChargeParams{})
+			require.NoError(t, err)
+			// $10.00 of usage posts before the running charge's 12 h 10 s at
+			// $0.36 an hour.
+			owedIsReceivable(t, a, customer, 14_321_000)
+			runUsageDue(t, fleet)
+			order := oneUsageOrder(t, a, customer)
+			require.EqualValues(t, 14_321_000, order.Total)
+			owedIsReceivable(t, a, customer, 14_321_000)
+			remit(t, a, order.ID, 4_321_000, "every-path-part")
+			owedIsReceivable(t, a, customer, 10_000_000)
+			_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 5_000_000, Source: "critical", SourceID: "every-path-gift"}})
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 5_000_000)
+			_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 5_000_000)
+			require.EqualValues(t, 5_000_000, glBalance(t, w, "allowance_doubtful"))
+			remit(t, a, order.ID, 2_000_000, "every-path-late")
+			owedIsReceivable(t, a, customer, 3_000_000)
+			require.EqualValues(t, 3_000_000, glBalance(t, w, "allowance_doubtful"))
+			_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 0)
+			require.Zero(t, glBalance(t, w, "allowance_doubtful"))
+			receivableAudited(t, w, false)
+		})
+		t.Run("charged-back", func(t *testing.T) {
+			// A chargeback reopens the debt; with no further usage it is billed
+			// at once and collected again.
+			a, customer, payment, fleet := cardCollectedUsage(t)
+			w := a.world
+			owedIsReceivable(t, a, customer, 0)
+			ctx, service := paymentService(t, w)
+			// A partial chargeback, under the $1.00 minimum invoice.
+			_, err := service.Refund(ctx, payment.UUID(), "every-path-chargeback", 500_000, payments.ReversalChargeback)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 500_000)
+			runUsageDue(t, fleet)
+			require.Eventually(t, func() bool {
+				rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+				return err == nil && len(rows.Items) == 2 && rows.Items[0].Status == billing.OrderComplete && rows.Items[1].Status == billing.OrderComplete
+			}, 15*time.Second, 20*time.Millisecond, "the reopened debt is billed and collected")
+			owedIsReceivable(t, a, customer, 0)
+			receivableAudited(t, w, false)
+		})
 	})
 	t.Run("OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true)
@@ -167,58 +223,101 @@ func TestUsageReceivable(t *testing.T) {
 		owedIsReceivable(t, a, customer, 0)
 		receivableAudited(t, w, false)
 	})
-	t.Run("OR-J40-S28/a-chargeback-of-a-usage-payment-reopens-owed-and-its-won-dispute-settles-it-again", func(t *testing.T) {
-		a, customer, payment := cardCollectedUsage(t)
+	t.Run("OR-J40-S28/a-chargeback-of-a-usage-payment-reopens-owed-and-its-won-dispute-credits-what-the-customer-paid-again", func(t *testing.T) {
+		a, customer, payment, fleet := surplusCollectedUsage(t)
 		w := a.world
-		ctx, service := paymentService(t, w)
-		chargeback, err := service.Refund(ctx, payment.UUID(), "usage-chargeback", 30_000_000, payments.ReversalChargeback)
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 30_000_000)
-		require.Equal(t, billing.OrderComplete, oneUsageOrder(t, a, customer).Status, "the order stays as it was paid")
-		require.Equal(t, [2]int64{30_000_000, 30_000_000}, booksTotal(t, w, "general", "cash_clearing"), "the network took the cash back")
-		require.Equal(t, []int64{30_000_000}, glLegs(t, w, "usage_reopened"))
-		var pending int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount), 0) FROM "+booksTable(w, "owed_items")+" WHERE merchant_id=$1 AND source_type='owed_reopened' AND source_id=$2 AND status='pending'",
-			w.alpha.MerchantID().UUID(), chargeback.ID.String()).Scan(&pending))
-		require.EqualValues(t, 30_000_000, pending, "the next usage order bills it")
-		// Replayed, the chargeback reopens nothing more.
-		_, err = service.Refund(ctx, payment.UUID(), "usage-chargeback", 30_000_000, payments.ReversalChargeback)
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 30_000_000)
 
+		// The network takes the whole $14.33 back: the owed is reopened, the
+		// change the lot holds is a loss, and nothing leaves unapplied cash.
+		ctx, service := paymentService(t, w)
+		chargeback, err := service.Refund(ctx, payment.UUID(), "surplus-chargeback", 14_330_000, payments.ReversalChargeback)
+		require.NoError(t, err)
+		owedIsReceivable(t, a, customer, 14_321_000)
+		require.Equal(t, []int64{14_321_000}, glLegs(t, w, "usage_reopened"))
+		require.Equal(t, [2]int64{0, 9_000}, booksTotal(t, w, "general", "chargebacks"))
+		require.Zero(t, glBalance(t, w, "unapplied_cash"))
+		require.Equal(t, billing.OrderComplete, oneUsageOrder(t, a, customer).Status, "the order stays as it was paid")
+		// Replayed, the chargeback reopens nothing more.
+		_, err = service.Refund(ctx, payment.UUID(), "surplus-chargeback", 14_330_000, payments.ReversalChargeback)
+		require.NoError(t, err)
+		owedIsReceivable(t, a, customer, 14_321_000)
+
+		// The reopened debt is billed at once and the card pays it again.
+		runUsageDue(t, fleet)
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 2 && rows.Items[0].Status == billing.OrderComplete && rows.Items[1].Status == billing.OrderComplete
+		}, 15*time.Second, 20*time.Millisecond)
+		owedIsReceivable(t, a, customer, 0)
+
+		// Then the dispute is won: the customer has paid twice, so all $14.33
+		// is theirs, a credit lot at face with a finding for the merchant.
 		original, err := service.GetByID(ctx, payment.UUID())
 		require.NoError(t, err)
 		kind := payments.ReversalDisputeReversal
+		recovery := uuid.New()
 		require.NoError(t, service.Create(ctx, &models.Payment{
-			ID: uuid.New(), CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Rail: original.Rail, PspID: original.PspID,
-			TransactionID: "usage-won", Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}, Amount: 30_000_000, ListAmount: original.ListAmount,
+			ID: recovery, CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Rail: original.Rail, PspID: original.PspID,
+			TransactionID: "surplus-won", Metadata: map[string]any{"reverses_payment_id": chargeback.ID.String()}, Amount: 14_330_000, ListAmount: original.ListAmount,
 			Currency: original.Currency, ReversalKind: &kind, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 		}))
 		owedIsReceivable(t, a, customer, 0)
-		require.Equal(t, []int64{30_000_000}, glLegs(t, w, "dispute_won"))
-		require.Equal(t, [2]int64{30_000_000, 60_000_000}, booksTotal(t, w, "general", "cash_clearing"))
+		require.Equal(t, []int64{14_330_000}, glLegs(t, w, "dispute_won"))
+		require.Zero(t, glBalance(t, w, "unapplied_cash"), "nothing is left unapplied")
+		balance(t, a.alpha, customer, 14_348_000, 0, 14_348_000)
+		lots, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer, Currency: "USD"})
+		require.NoError(t, err)
+		var credited int64
+		for _, lot := range lots.Items {
+			if lot.SourceID != nil && *lot.SourceID == recovery.String() {
+				credited += lot.Amount
+			}
+		}
+		require.EqualValues(t, 14_330_000, credited)
+		findings, err := a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: "books.dispute.customer_credit"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
 		receivableAudited(t, w, false)
 	})
 	t.Run("OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled", func(t *testing.T) {
-		a, customer, payment := cardCollectedUsage(t)
-		w := a.world
-		refund, err := a.alpha.RefundPayment(t.Context(), "usage-goodwill", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Goodwill"})
-		require.NoError(t, err)
-		require.Equal(t, billing.PaymentSucceeded, refund.Status)
-		ctx, service := paymentService(t, w)
-		_, err = service.RecordObservedRefund(ctx, payment.UUID(), "usage-observed-refund", 5_000_000, payments.ReversalRefund, w.clock.Now(), nil)
-		require.NoError(t, err)
-		owedIsReceivable(t, a, customer, 0)
-		require.Empty(t, glLegs(t, w, "usage_reopened"))
-		require.Equal(t, billing.OrderComplete, oneUsageOrder(t, a, customer).Status)
-		receivableAudited(t, w, false)
+		t.Run("refunds", func(t *testing.T) {
+			a, customer, payment, _ := cardCollectedUsage(t)
+			w := a.world
+			refund, err := a.alpha.RefundPayment(t.Context(), "usage-goodwill", payment, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Goodwill"})
+			require.NoError(t, err)
+			require.Equal(t, billing.PaymentSucceeded, refund.Status)
+			ctx, service := paymentService(t, w)
+			_, err = service.RecordObservedRefund(ctx, payment.UUID(), "usage-observed-refund", 5_000_000, payments.ReversalRefund, w.clock.Now(), nil)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 0)
+			require.Empty(t, glLegs(t, w, "usage_reopened"))
+			require.Equal(t, billing.OrderComplete, oneUsageOrder(t, a, customer).Status)
+			receivableAudited(t, w, false)
+		})
+		t.Run("refund-then-chargeback", func(t *testing.T) {
+			// $5.00 of the $14.33 is refunded, then the network takes the
+			// other $9.33: only the $9.321 of owed the refund left is owed
+			// again; the change is a loss.
+			a, customer, payment, _ := surplusCollectedUsage(t)
+			w := a.world
+			refund, err := a.alpha.RefundPayment(t.Context(), "surplus-goodwill", payment, billing.RefundPaymentParams{Amount: 5_000_000, Reason: "Goodwill"})
+			require.NoError(t, err)
+			require.Equal(t, billing.PaymentSucceeded, refund.Status)
+			ctx, service := paymentService(t, w)
+			_, err = service.Refund(ctx, payment.UUID(), "after-refund-chargeback", 9_330_000, payments.ReversalChargeback)
+			require.NoError(t, err)
+			owedIsReceivable(t, a, customer, 9_321_000)
+			require.Equal(t, []int64{9_321_000}, glLegs(t, w, "usage_reopened"))
+			require.Equal(t, [2]int64{0, 9_000}, booksTotal(t, w, "general", "chargebacks"))
+			receivableAudited(t, w, false)
+		})
 	})
 }
 
 // cardCollectedUsage is alice's $30.00 of usage beyond her balance, billed
 // and collected by her saved card.
-func cardCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, billing.PaymentID) {
+func cardCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, billing.PaymentID, *river.Client[pgx.Tx]) {
 	t.Helper()
 	a, _, customer := usageBillingWorld(t, true, false)
 	oneUsage(t, a.alpha, usageInput(customer, "card-collected", 3))
@@ -231,7 +330,31 @@ func cardCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, bill
 	}, 15*time.Second, 20*time.Millisecond)
 	order := oneUsageOrder(t, a, customer)
 	require.NotNil(t, order.Payment.PaymentID)
-	return a, customer, *order.Payment.PaymentID
+	return a, customer, *order.Payment.PaymentID, fleet
+}
+
+// surplusCollectedUsage is alice's $10.00 of usage and a running charge's
+// 12 h 10 s at $0.36 an hour, $14.321, which her card pays as $14.33: the
+// change is a credit lot of $0.009.
+func surplusCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, billing.PaymentID, *river.Client[pgx.Tx]) {
+	t.Helper()
+	a, p, customer := usageBillingWorld(t, true, false)
+	oneUsage(t, a.alpha, usageInput(customer, "surplus", 1))
+	a.clock.Advance(time.Second)
+	_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "surplus", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
+	require.NoError(t, err)
+	fleet := quietFleet(t, a.world)
+	a.clock.Advance(12*time.Hour + 10*time.Second)
+	_, err = a.alpha.StopRunningCharge(t.Context(), "surplus", billing.StopRunningChargeParams{})
+	require.NoError(t, err)
+	runUsageDue(t, fleet)
+	require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
+	order := oneUsageOrder(t, a, customer)
+	require.EqualValues(t, 14_321_000, order.Total)
+	require.NotNil(t, order.Payment.PaymentID)
+	p.money(t, 1, 1433)
+	balance(t, a.alpha, customer, 9_000, 0, 9_000)
+	return a, customer, *order.Payment.PaymentID, fleet
 }
 
 // openUsageOrder is alice's $30.00 of usage beyond her balance on an open

@@ -12,6 +12,7 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -37,10 +38,12 @@ const (
 	OpAllowance Operation = "allowance"
 	// A chargeback of a payment posts at (chargeback, payment, its id), its
 	// won dispute at (dispute_won_reopened, payment, its id) for the owed it
-	// collects again and (dispute_won, payment, its id) for the rest.
+	// collects again from the receivable, (dispute_won_revenue, ...) for owed
+	// from before the books and (dispute_won, payment, its id) for the rest.
 	OpChargeback         Operation = "chargeback"
 	OpDisputeWon         Operation = "dispute_won"
 	OpDisputeWonReopened Operation = "dispute_won_reopened"
+	OpDisputeWonRevenue  Operation = "dispute_won_revenue"
 )
 
 // Receivable is what the general ledger holds receivable from a customer in
@@ -205,12 +208,18 @@ type UsageReversal struct {
 	// Owed is the owed it reopened (a chargeback) or settled again (a
 	// recovery).
 	Owed int64
+	// Unapplied is what of the payment's cash unapplied cash still held
+	// before a chargeback.
+	Unapplied int64
 }
 
-// ReopenUsage posts a chargeback of a usage order payment: the owed it
-// reopened is receivable again, usage_reopened DR usage_receivable / CR the
-// payment's cash account; the rest of the cash leaves unapplied cash
-// (cash_returned). Both at (chargeback, payment, its id).
+// ReopenUsage posts a chargeback of a usage order payment, all at
+// (chargeback, payment, its id): the owed it reopened is receivable again,
+// usage_reopened DR usage_receivable / CR the payment's cash account; the
+// rest of the cash leaves what the payment still has in unapplied cash
+// (cash_returned), and beyond that is a loss to chargebacks
+// (chargeback_recognized): cash a credit lot already took, such as the
+// change of a card's rounding.
 func (b *Books) ReopenUsage(ctx context.Context, r UsageReversal) error {
 	amount := -r.Reversal.Amount
 	if amount <= 0 || CheckCurrency(r.Reversal.Currency) != nil {
@@ -218,31 +227,62 @@ func (b *Books) ReopenUsage(ctx context.Context, r UsageReversal) error {
 	}
 	customer := r.Reversal.CustomerID
 	reopened := min(r.Owed, amount)
+	returned := min(amount-reopened, max(r.Unapplied, 0))
+	cash := CashAccount(r.Original)
 	return b.reversalLegs(ctx, r.Reversal, []reversalLeg{
-		{Ref{Type: UsageReceivable, Customer: &customer}, CashAccount(r.Original), reopened, UsageReopened, OpChargeback},
-		{Ref{Type: UnappliedCash}, CashAccount(r.Original), amount - reopened, CashReturned, OpChargeback},
+		{Ref{Type: UsageReceivable, Customer: &customer}, cash, reopened, UsageReopened, OpChargeback},
+		{Ref{Type: UnappliedCash}, cash, returned, CashReturned, OpChargeback},
+		{Ref{Type: Chargebacks}, cash, amount - reopened - returned, ChargebackRecognized, OpChargeback},
 	})
 }
 
-// ResettleUsage posts a won dispute's recovery of a usage order payment:
-// the owed it settled again leaves the receivable, within what it holds
-// (dispute_won DR the cash account / CR usage_receivable, at
-// dispute_won_reopened); the rest of the cash is unapplied (at dispute_won).
-func (b *Books) ResettleUsage(ctx context.Context, r UsageReversal) error {
+// ResettleUsage posts a won dispute's recovery of a usage order payment and
+// returns what it brought beyond the owed it settled again: that owed leaves
+// the receivable as far as it holds it (dispute_won DR the cash account / CR
+// usage_receivable, at dispute_won_reopened), owed from before the books is
+// usage revenue (at dispute_won_revenue), and the rest is unapplied cash (at
+// dispute_won), the customer's, for the caller to credit.
+func (b *Books) ResettleUsage(ctx context.Context, r UsageReversal) (int64, error) {
 	amount := r.Reversal.Amount
 	if amount <= 0 || CheckCurrency(r.Reversal.Currency) != nil {
-		return nil
+		return 0, nil
 	}
 	customer := r.Reversal.CustomerID
 	receivable, err := b.Receivable(ctx, customer, r.Reversal.Currency)
 	if err != nil {
+		return 0, err
+	}
+	owed := min(r.Owed, amount)
+	settled := min(owed, max(receivable, 0))
+	cash := CashAccount(r.Original)
+	excess := amount - owed
+	return excess, b.reversalLegs(ctx, r.Reversal, []reversalLeg{
+		{cash, Ref{Type: UsageReceivable, Customer: &customer}, settled, DisputeWon, OpDisputeWonReopened},
+		{cash, Ref{Type: UsageRevenue}, owed - settled, DisputeWon, OpDisputeWonRevenue},
+		{cash, Ref{Type: UnappliedCash}, excess, DisputeWon, OpDisputeWon},
+	})
+}
+
+// CustomerCreditFindingType is the finding a won dispute's credit to its
+// customer raises: the merchant may refund it instead.
+const CustomerCreditFindingType = "books.dispute.customer_credit"
+
+// RaiseCustomerCredit records that a won dispute of a usage order payment
+// brought back more than the customer still owed, credited to them as a credit lot.
+func (b *Books) RaiseCustomerCredit(ctx context.Context, recovery gen.BillingPayment, lot uuid.UUID, amount int64) error {
+	raw, err := json.Marshal(map[string]any{"payment_id": recovery.ID, "refunded_payment_id": recovery.RefundedPaymentID, "credit_grant_id": lot,
+		"amount": amount, "currency": recovery.Currency})
+	if err != nil {
 		return err
 	}
-	settled := min(r.Owed, amount, max(receivable, 0))
-	return b.reversalLegs(ctx, r.Reversal, []reversalLeg{
-		{CashAccount(r.Original), Ref{Type: UsageReceivable, Customer: &customer}, settled, DisputeWon, OpDisputeWonReopened},
-		{CashAccount(r.Original), Ref{Type: UnappliedCash}, amount - settled, DisputeWon, OpDisputeWon},
-	})
+	action := "A won dispute returned more of a usage order payment than the customer still owed. The rest is credit on their balance; refund it to the customer if they should have the money back instead."
+	if _, err := b.q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: b.merchant, FindingType: CustomerCreditFindingType, SubjectKey: "payment:" + recovery.ID.String(),
+		Severity: "low", Status: "requires_review", RecommendedAction: &action, Evidence: raw,
+	}); err != nil {
+		return fmt.Errorf("books: raise %s: %w", CustomerCreditFindingType, err)
+	}
+	return nil
 }
 
 type reversalLeg struct {

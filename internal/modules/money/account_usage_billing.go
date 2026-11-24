@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -33,6 +34,9 @@ const UsageOrdersInterval = 5 * time.Minute
 var usageOutstanding = []rivertype.JobState{
 	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 }
+
+// reopenedOwedSource is the line source of owed a chargeback reopened.
+const reopenedOwedSource = owed.ReopenedSource
 
 // UsageOrderArgs is one usage pass over every merchant: it bills the due
 // accounts, then queues the due collections. Bill or Collect continues a pass
@@ -347,15 +351,18 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 		return false, err
 	}
 	var pending int64
+	reopened := false
 	for _, source := range sources {
 		pending += source.Amount
+		// Owed a chargeback reopened is billed at once, whatever the minimum.
+		reopened = reopened || source.Source == reopenedOwedSource && source.Amount > 0
 	}
 	claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
 	amount := min(pending, max(owed-claimed, 0))
-	if amount <= 0 || amount < terms.minimum {
+	if amount <= 0 || amount < terms.minimum && !reopened {
 		return false, nil
 	}
 	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)

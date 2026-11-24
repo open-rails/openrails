@@ -3927,6 +3927,7 @@
       "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
+      "owed": "github.com/open-rails/openrails/internal/modules/money/owed",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
       "strings": "strings",

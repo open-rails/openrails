@@ -246,11 +246,11 @@ func (q *Queries) GetLatestCreditGrantEvent(ctx context.Context, arg GetLatestCr
 }
 
 const getPaymentCashApplication = `-- name: GetPaymentCashApplication :one
-SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
+SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received' OR transfer_type = 'dispute_won' AND operation = 'dispute_won' AND revenue_schedule_id IS NULL), 0)::bigint AS received,
        COALESCE(sum(amount) FILTER (WHERE transfer_type IN ('cash_applied', 'usage_collected')), 0)::bigint AS applied
 FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
-  AND source_id = $2::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected')
+  AND source_id = $2::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected', 'dispute_won')
 `
 
 type GetPaymentCashApplicationParams struct {
@@ -266,7 +266,9 @@ type GetPaymentCashApplicationRow struct {
 // What a payment's receipt brought and what the general ledger applied of
 // it: to its bill's lines at (application, payment, id), to the credit lot
 // it bought at (credit_issue, payment, id) and to the owed a usage order's
-// payment settles at (usage_collection*, payment, id).
+// payment settles at (usage_collection*, payment, id). A won dispute's
+// recovery receives what it returns to unapplied cash (dispute_won at
+// (dispute_won, payment, id)).
 func (q *Queries) GetPaymentCashApplication(ctx context.Context, arg GetPaymentCashApplicationParams) (GetPaymentCashApplicationRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentCashApplication, arg.MerchantID, arg.PaymentID)
 	var i GetPaymentCashApplicationRow
