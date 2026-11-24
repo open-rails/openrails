@@ -20,8 +20,8 @@
 // never reached a provider, and unpaid closed orders with none, 90 days;
 // parked_provider_subscriptions 90 days after release; carts 30 days idle;
 // notification_events and host_outbox 90 days, never before EventRetention;
-// the event log at EventRetention; webhook_events 90 days after completion; idempotency_keys and
-// solana_pay_references at expiry (after the 7-day watch);
+// the event log at EventRetention; webhook_events 90 days after completion;
+// idempotency_keys and solana_pay_references at expiry (after the 7-day watch);
 // user_destructive_reservations 24 hours; limit_windows 61 days after
 // window_ends_at (lifetime and rate limits stay); leases with their in-flight
 // reports, and limit_adjustments, 61 days after the last sync;
