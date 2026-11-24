@@ -312,6 +312,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// An archive from before the reporting rollups lacks them: they are
+		// rebuilt from its movements, flows and status transitions.
+		if err := q.RebuildMRRRollups(ctx, id.UUID()); err != nil {
+			return err
+		}
 		// An archive from before MRR carries subscriptions without it: they
 		// open MRR now. The restore check proves the rest agree.
 		if err := q.SeedMRR(ctx, gen.SeedMRRParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {

@@ -269,8 +269,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own ClickHouse
   database). `critical/coverage.json` lists the scenarios and
   `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
-  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
-  disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.
+  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`)
+  runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all. A
+  `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI and qualifies nothing.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
 - A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like

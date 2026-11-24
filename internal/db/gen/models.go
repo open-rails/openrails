@@ -396,7 +396,7 @@ type BillingCustomerMrr struct {
 	FirstActiveAt *time.Time
 }
 
-// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|heading), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
+// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
@@ -1072,7 +1072,20 @@ type BillingMrrCohortFlow struct {
 	Logos      int64
 }
 
-// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+// Per 15-minute UTC bucket, customers gaining MRR in a first currency less those losing it in their last: the change of mrr_customer_totals.
+type BillingMrrCustomerFlow struct {
+	MerchantID uuid.UUID
+	BucketAt   time.Time
+	Logos      int64
+}
+
+// The merchant's customers with MRR in any currency now, each once, kept at commit; at an instant it is this less mrr_customer_flows from it on.
+type BillingMrrCustomerTotal struct {
+	MerchantID uuid.UUID
+	Customers  int64
+}
+
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary and churn_chargeback, parts of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days; MRR at an instant is mrr_totals less the movements of the buckets from it on.
 type BillingMrrFlow struct {
 	MerchantID uuid.UUID
 	Currency   string
@@ -1128,6 +1141,15 @@ type BillingMrrProductFlow struct {
 	BucketAt    time.Time
 	ProductID   uuid.UUID
 	Amount      int64
+	Subscribers int64
+}
+
+// Each product's MRR and the subscriptions adding it now, per currency: its mrr_product_flows summed, kept at commit. A product's MRR at an instant is this less its flows of the buckets from it on.
+type BillingMrrProductTotal struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	ProductID   uuid.UUID
+	Mrr         int64
 	Subscribers int64
 }
 
@@ -1216,6 +1238,17 @@ type BillingMrrScheduled struct {
 	Status            string
 	ScheduledAt       time.Time
 	ResolvedAt        *time.Time
+}
+
+// Expansion, contraction, churn (and its voluntary and chargeback parts) and corrections per currency and 15-minute UTC bucket, with their sum and logo change, by the bucket in which each customer's run of MRR began (its latest movement from none): the customers with MRR when a period began are the runs begun before it, so churn and revenue retention read this and mrr_totals, never the movements.
+type BillingMrrStreakFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	BucketAt   time.Time
+	StreakAt   time.Time
+	Measure    string
+	Amount     int64
+	Logos      int64
 }
 
 // The merchant's MRR now per currency, the customers with any and the subscriptions adding to it: the sums of customer_mrr.
@@ -2474,6 +2507,16 @@ type BillingSubscriptionBillingChange struct {
 	Actor                *string
 	Executor             *string
 	OperationID          *uuid.UUID
+}
+
+// Each cancel decision: a subscription's move into canceled, dated by its writer's clock (updated_at), and when a move out of canceled (a resume) took it back. Kept by trg_subscriptions_track_cancellations; reports count cancellations here. Retention: permanent, never pruned.
+type BillingSubscriptionCancellation struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CancelType     *string
+	DecidedAt      time.Time
+	ReversedAt     *time.Time
 }
 
 // What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's MRR for its seats (billing.price_mrr), while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.
