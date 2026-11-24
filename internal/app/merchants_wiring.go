@@ -221,15 +221,15 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		return reject("settings: " + err.Error()), nil
 	}
 	mctx := merchant.WithID(ctx, id)
-	err = r.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		q := r.DB.Gen(ctx)
+	err = r.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
 		if err := scim.Declare(ctx, q, id, doc.Secrets.SCIMToken); err != nil {
 			return err
 		}
 		return recordDanglingPolicies(ctx, r.Log, q, id, settings)
 	})
 	if err != nil {
-		if errors.Is(err, scim.ErrTokenTooShort) {
+		if errors.Is(err, scim.ErrTokenTooShort) || errors.Is(err, scim.ErrTokenInUse) {
 			return reject("secrets.scim_token: " + err.Error()), nil
 		}
 		return previous, err

@@ -107,6 +107,9 @@
     "OR-J07-S04": [
       "TestCustomerDirectory/OR-J07-S04/live-host-directory-exposes-no-copied-write-authority"
     ],
+    "OR-J07-S06": [
+      "TestProvisioningTokenDeclaration/OR-J07-S06/a-shared-scim-token-provisions-only-its-holder"
+    ],
     "OR-J08-S01": [
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],
