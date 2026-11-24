@@ -24,8 +24,9 @@ import (
 //     Its units_reserved is what its payment's pending refunds reserve.
 //  4. Rollup drift: ledger_type_totals and ledger_daily, recomputed from
 //     ledger_transfers.
-//  5. Sign breaches: a merchant-wide general-ledger account's type total on
-//     the wrong side of its sign rule, which its commit refuses.
+//  5. Sign breaches: a general-ledger account across its sign rule, a
+//     customer's by its counters, a merchant-wide one by its type total. The
+//     general ledger never refuses one: it raises books.sign_breach.
 //  6. Side warnings: one with no sign rule whose type total sits opposite its
 //     class's normal side. Reported, never a failure.
 //
@@ -116,19 +117,25 @@ func (d RollupDrift) String() string {
 		moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
 }
 
-// SignBreach is a merchant-wide general-ledger account whose type total
-// crosses the side its sign rule holds it to.
+// SignBreach is a general-ledger account across the side its sign rule
+// holds it to: a customer's by its counters, a merchant-wide one by its type
+// total.
 type SignBreach struct {
 	Currency      string     `json:"currency"`
 	AccountType   string     `json:"account_type"`
 	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	CustomerID    *uuid.UUID `json:"customer_id,omitempty"`
 	CreditsPosted int64      `json:"credits_posted"`
 	DebitsPosted  int64      `json:"debits_posted"`
 }
 
 func (b SignBreach) String() string {
-	return fmt.Sprintf("sign: general/%s balance=%s against its sign rule",
-		b.AccountType, moneyutil.FormatAmount(b.CreditsPosted-b.DebitsPosted, b.Currency))
+	who := ""
+	if b.CustomerID != nil {
+		who = " customer=" + b.CustomerID.String()
+	}
+	return fmt.Sprintf("sign: general/%s%s balance=%s against its sign rule",
+		b.AccountType, who, moneyutil.FormatAmount(b.CreditsPosted-b.DebitsPosted, b.Currency))
 }
 
 // SideWarning is a merchant-wide general-ledger account with no sign rule
@@ -207,8 +214,8 @@ func CheckSides(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]SideWarn
 	return out, nil
 }
 
-// CheckSignBreaches returns the merchant-wide general-ledger accounts whose
-// type total crosses its sign rule. An empty slice is the healthy answer.
+// CheckSignBreaches returns the general-ledger accounts across their sign
+// rule. An empty slice is the healthy answer.
 func CheckSignBreaches(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]SignBreach, error) {
 	if merchant == uuid.Nil {
 		return nil, fmt.Errorf("ledger: merchant is required")
@@ -219,7 +226,7 @@ func CheckSignBreaches(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]S
 	}
 	var out []SignBreach
 	for _, row := range rows {
-		out = append(out, SignBreach{Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+		out = append(out, SignBreach{Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID, CustomerID: row.CustomerID,
 			CreditsPosted: row.CreditsPosted, DebitsPosted: row.DebitsPosted})
 	}
 	return out, nil

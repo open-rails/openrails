@@ -74,7 +74,7 @@ COMMENT ON COLUMN billing.ledger_accounts.account_type IS 'The account''s role i
 COMMENT ON COLUMN billing.ledger_accounts.book IS 'units or general. A transfer never crosses books.';
 COMMENT ON COLUMN billing.ledger_accounts.class IS 'The account type''s class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.';
 COMMENT ON COLUMN billing.ledger_accounts.psp_id IS 'The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.';
-COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart. A merchant-wide general-ledger account keeps no counters: its type total is held to the rule at commit (billing.settle_ledger_rollups).';
+COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero. Set by the chart. The units book refuses a breach, less a floor the transfer supplies; the general ledger never refuses one: it raises books.sign_breach, a merchant-wide account''s on its type total at commit.';
 
 -- Transfers carry their book, the instant they take effect and the order line
 -- and product they belong to. Existing transfers are the units book's,
@@ -91,7 +91,7 @@ ALTER TABLE billing.ledger_transfers DROP CONSTRAINT ledger_transfers_type_check
 ALTER TABLE billing.ledger_transfers
     ALTER COLUMN book SET NOT NULL,
     ALTER COLUMN effective_at SET NOT NULL,
-    -- No floor relaxes a general-ledger sign rule.
+    -- A general-ledger transfer carries no floor: its sign rules never refuse.
     ADD CONSTRAINT ledger_transfers_general_floor_check CHECK (book = 'units' OR allow_debit_negative_up_to = 0),
     ADD CONSTRAINT ledger_transfers_type_check CHECK (
         book = 'units' AND transfer_type IN ('deposit', 'deposit_bonus', 'credit_purchase_revenue', 'credit_spend', 'credit_expire', 'credit_revoke', 'credit_reinstate', 'owed_accrual', 'owed_payment', 'owed_writeoff', 'owed_repayment', 'credit_refund', 'credit_refund_restore', 'credit_refund_cash', 'credit_refund_cash_restore', 'credit_refund_funding', 'usage_reversed')
@@ -112,6 +112,28 @@ COMMENT ON INDEX billing.ledger_transfers_operation_once_key IS 'The structural 
 -- opened first raises books.account.opened_late.
 ALTER TABLE billing.reconciliation_findings DROP CONSTRAINT reconciliation_findings_type_check,
     ADD CONSTRAINT reconciliation_findings_type_check CHECK (finding_type ~ '^(pull|derive|life|consistency|notify|catalog|books)\.[a-z0-9_]+(\.[a-z0-9_]+)?$');
+
+-- The general ledger records what happened and never refuses a posting for a
+-- sign rule: a breach is the finding books.sign_breach, one per account type,
+-- currency and (for a customer's account) customer, reopened by a later
+-- breach once resolved and kept if ignored.
+CREATE FUNCTION billing.record_sign_breach(p_merchant uuid, p_account_type text, p_currency text, p_customer uuid, p_credits bigint, p_debits bigint) RETURNS void
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    INSERT INTO billing.reconciliation_findings AS f (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
+    VALUES (p_merchant, 'books.sign_breach', p_account_type || '/' || p_currency || coalesce('/' || p_customer::text, ''), 'high', 'requires_review',
+            'The general ledger''s ' || p_account_type || ' in ' || p_currency || ' crossed its sign rule. Find the posting that drew it (a reversal of money received before the books, or a writer bound by a balance it cannot read) and correct it.',
+            jsonb_strip_nulls(jsonb_build_object('account_type', p_account_type, 'currency', p_currency, 'customer_id', p_customer,
+                                                 'credits_posted', p_credits::text, 'debits_posted', p_debits::text)))
+    ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
+        status = CASE WHEN f.status = 'ignored' THEN f.status ELSE EXCLUDED.status END,
+        resolved_at = CASE WHEN f.status = 'ignored' THEN f.resolved_at END,
+        resolution = CASE WHEN f.status = 'ignored' THEN f.resolution END,
+        resolved_by = CASE WHEN f.status = 'ignored' THEN f.resolved_by END,
+        severity = EXCLUDED.severity, recommended_action = EXCLUDED.recommended_action,
+        evidence = EXCLUDED.evidence, last_seen_at = now(), updated_at = now();
+END;
+$$;
 
 -- A transfer stays in one book and currency, and a customer's account moves
 -- only in that customer's transfers.
@@ -145,9 +167,10 @@ CREATE TRIGGER trg_ledger_transfers_book_rules BEFORE INSERT ON billing.ledger_t
 
 -- A merchant-wide general-ledger account keeps no counters, so no transaction
 -- holds it from its insert to commit: its balance is its ledger_type_totals
--- row, kept and held to its sign rule at commit. The accounts that keep
--- counters are locked in id order; the book rules refused a missing account
--- and a cross-currency transfer.
+-- row, kept and checked at commit. The accounts that keep counters are locked
+-- in id order: the units book refuses a breach of a sign rule, the general
+-- ledger records it. The book rules refused a missing account and a
+-- cross-currency transfer.
 CREATE OR REPLACE FUNCTION billing.ledger_transfers_apply_counters() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'billing', 'pg_catalog' AS $$
 DECLARE
@@ -167,13 +190,19 @@ BEGIN
     LOOP
         IF acc.id = NEW.debit_account_id THEN
             IF acc.debits_must_not_exceed_credits AND acc.credits_posted - acc.debits_posted - NEW.amount < -NEW.allow_debit_negative_up_to THEN
-                RAISE EXCEPTION 'ledger_insufficient_funds: balance %, amount %, floor %', acc.credits_posted - acc.debits_posted, NEW.amount, NEW.allow_debit_negative_up_to;
+                IF acc.book = 'units' THEN
+                    RAISE EXCEPTION 'ledger_insufficient_funds: balance %, amount %, floor %', acc.credits_posted - acc.debits_posted, NEW.amount, NEW.allow_debit_negative_up_to;
+                END IF;
+                PERFORM billing.record_sign_breach(NEW.merchant_id, acc.account_type, acc.currency, acc.customer_id, acc.credits_posted, acc.debits_posted + NEW.amount);
             END IF;
             UPDATE billing.ledger_accounts SET debits_posted = debits_posted + NEW.amount
              WHERE merchant_id = NEW.merchant_id AND id = acc.id;
         ELSE
             IF acc.credits_must_not_exceed_debits AND acc.debits_posted - acc.credits_posted - NEW.amount < 0 THEN
-                RAISE EXCEPTION 'ledger_credit_constraint: credit account % would exceed debits', acc.id;
+                IF acc.book = 'units' THEN
+                    RAISE EXCEPTION 'ledger_credit_constraint: credit account % would exceed debits', acc.id;
+                END IF;
+                PERFORM billing.record_sign_breach(NEW.merchant_id, acc.account_type, acc.currency, acc.customer_id, acc.credits_posted + NEW.amount, acc.debits_posted);
             END IF;
             UPDATE billing.ledger_accounts SET credits_posted = credits_posted + NEW.amount
              WHERE merchant_id = NEW.merchant_id AND id = acc.id;
@@ -278,14 +307,11 @@ CREATE TRIGGER trg_ledger_transfers_rollups AFTER INSERT ON billing.ledger_trans
 
 -- Folds a merchant's queued transfers into the rollups: each total, then each
 -- bucket, in key order, then empties the queue. A merchant-wide general-ledger
--- account's total, locked here, that crosses the account's sign rule raises
--- the finding books.sign_breach, once per type and currency, reopened by a
--- later breach once resolved. It never refuses the commit: bookkeeping never
--- blocks a money movement.
+-- account's total this settlement moved, locked here, that crosses the
+-- account's sign rule raises books.sign_breach; it never refuses the commit.
 CREATE FUNCTION billing.settle_ledger_rollups(p_merchant uuid) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    WITH kept AS (
     INSERT INTO billing.ledger_type_totals AS r (merchant_id, book, currency, account_type, psp_id, credits_posted, debits_posted)
     SELECT p_merchant, t.book, t.currency, a.account_type, a.psp_id,
            sum(CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END)::bigint,
@@ -297,27 +323,18 @@ BEGIN
      GROUP BY 2, 3, 4, 5
      ORDER BY 2, 3, 4, 5
     ON CONFLICT (merchant_id, book, currency, account_type, psp_id) DO UPDATE
-    SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted
-    RETURNING r.book, r.currency, r.account_type, r.psp_id, r.credits_posted, r.debits_posted)
-    INSERT INTO billing.reconciliation_findings AS f (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
-    SELECT p_merchant, 'books.sign_breach', k.account_type || '/' || k.currency, 'high', 'requires_review',
-           'The general ledger''s ' || k.account_type || ' total in ' || k.currency || ' crossed its sign rule. Find the posting that drew it (a reversal of money received before the books, or a writer bound by a balance it cannot read) and correct it.',
-           jsonb_build_object('account_type', k.account_type, 'currency', k.currency,
-                              'credits_posted', k.credits_posted::text, 'debits_posted', k.debits_posted::text)
-      FROM kept k
-      JOIN billing.ledger_accounts a ON a.merchant_id = p_merchant AND a.book = k.book AND a.customer_id IS NULL
-       AND a.account_type = k.account_type AND a.currency = k.currency AND a.psp_id IS NOT DISTINCT FROM k.psp_id
-     WHERE k.book = 'general'
-       AND (a.debits_must_not_exceed_credits AND k.debits_posted > k.credits_posted
-            OR a.credits_must_not_exceed_debits AND k.credits_posted > k.debits_posted)
-     ORDER BY 3
-    ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
-        status = CASE WHEN f.status = 'ignored' THEN f.status ELSE EXCLUDED.status END,
-        resolved_at = CASE WHEN f.status = 'ignored' THEN f.resolved_at END,
-        resolution = CASE WHEN f.status = 'ignored' THEN f.resolution END,
-        resolved_by = CASE WHEN f.status = 'ignored' THEN f.resolved_by END,
-        severity = EXCLUDED.severity, recommended_action = EXCLUDED.recommended_action,
-        evidence = EXCLUDED.evidence, last_seen_at = now(), updated_at = now();
+    SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted;
+    PERFORM billing.record_sign_breach(p_merchant, t.account_type, t.currency, NULL, t.credits_posted, t.debits_posted)
+       FROM billing.ledger_type_totals t
+       JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.book = t.book AND a.customer_id IS NULL
+        AND a.account_type = t.account_type AND a.currency = t.currency AND a.psp_id IS NOT DISTINCT FROM t.psp_id
+      WHERE t.merchant_id = p_merchant AND t.book = 'general'
+        AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
+             OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
+        AND EXISTS (SELECT 1 FROM billing.ledger_rollup_pending p
+                      JOIN billing.ledger_transfers x ON x.merchant_id = p.merchant_id AND x.id = p.transfer_id
+                     WHERE p.merchant_id = p_merchant AND a.id IN (x.debit_account_id, x.credit_account_id))
+      ORDER BY t.account_type, t.currency;
     INSERT INTO billing.ledger_daily AS r (merchant_id, book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits)
     SELECT p_merchant, t.book, t.currency, a.account_type, date_bin('15 minutes', t.effective_at, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
            t.transfer_type, a.psp_id, t.product_id,

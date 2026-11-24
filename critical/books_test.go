@@ -350,7 +350,7 @@ func TestBooks(t *testing.T) {
 			require.ErrorContains(t, err, bad.refusal, bad.name)
 		}
 
-		// No floor relaxes a general-ledger sign rule.
+		// A general-ledger transfer carries no floor.
 		_, err := w.pool.Exec(t.Context(), strings.Replace(insert, "$6, 0,", "$6, 5,", 1), mid, "general", receivable, revenue, "USD", "usage_accrued", "floor", &a)
 		require.ErrorContains(t, err, "ledger_transfers_general_floor_check")
 
@@ -431,6 +431,25 @@ func TestBooks(t *testing.T) {
 		status, findings = breach()
 		require.Equal(t, "requires_review", status, "a later breach reopens it")
 		require.Equal(t, 1, findings)
+
+		// A customer's general-ledger account is recorded, never refused,
+		// too: usage receivable credited beyond what was accrued commits and
+		// raises the finding for that customer.
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
+				Debit: books.Ref{Type: books.RevenueAdjustments}, Credit: books.Ref{Type: books.UsageReceivable, Customer: &a},
+				Amount: 100, Currency: "USD", Type: books.UsageReversed, EffectiveAt: w.clock.Now(), Customer: &a,
+				Coord: books.Coord{Operation: "usage_reversal", Source: "critical", SourceID: "beyond-accrued"},
+			})
+			return err
+		}))
+		var customerBreach string
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT status FROM "+booksTable(w, "reconciliation_findings")+
+			" WHERE merchant_id=$1 AND finding_type='books.sign_breach' AND subject_key=$2", mid, "usage_receivable/USD/"+a.String()).Scan(&customerBreach))
+		require.Equal(t, "requires_review", customerBreach)
+		output, err = hostCLIResult(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String())
+		require.Error(t, err)
+		require.Contains(t, output, "sign: general/usage_receivable customer="+a.String())
 	})
 
 	t.Run("OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption", func(t *testing.T) {

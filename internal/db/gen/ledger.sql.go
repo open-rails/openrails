@@ -811,27 +811,33 @@ func (q *Queries) ListLedgerSideWarnings(ctx context.Context, merchantID uuid.UU
 }
 
 const listLedgerSignBreaches = `-- name: ListLedgerSignBreaches :many
-SELECT a.currency, a.account_type, a.psp_id, t.credits_posted, t.debits_posted
-FROM billing.ledger_accounts a
-JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
-    AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
-WHERE a.merchant_id = $1::uuid
-  AND a.book = 'general' AND a.customer_id IS NULL
-  AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
-    OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
-ORDER BY a.currency, a.account_type, a.psp_id
+SELECT currency::text AS currency, account_type::text AS account_type, psp_id, customer_id,
+       credits_posted::bigint AS credits_posted, debits_posted::bigint AS debits_posted
+FROM (
+    SELECT a.currency, a.account_type, a.psp_id, a.customer_id,
+           a.debits_must_not_exceed_credits AS dmnec, a.credits_must_not_exceed_debits AS cmned,
+           COALESCE(CASE WHEN a.customer_id IS NULL THEN t.credits_posted ELSE a.credits_posted END, 0) AS credits_posted,
+           COALESCE(CASE WHEN a.customer_id IS NULL THEN t.debits_posted ELSE a.debits_posted END, 0) AS debits_posted
+    FROM billing.ledger_accounts a
+    LEFT JOIN billing.ledger_type_totals t ON a.customer_id IS NULL AND t.merchant_id = a.merchant_id AND t.book = a.book
+        AND t.currency = a.currency AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+    WHERE a.merchant_id = $1::uuid AND a.book = 'general'
+) balances
+WHERE dmnec AND debits_posted > credits_posted OR cmned AND credits_posted > debits_posted
+ORDER BY currency, account_type, psp_id, customer_id
 `
 
 type ListLedgerSignBreachesRow struct {
 	Currency      string
 	AccountType   string
 	PspID         *uuid.UUID
+	CustomerID    *uuid.UUID
 	CreditsPosted int64
 	DebitsPosted  int64
 }
 
-// ListLedgerSignBreaches: merchant-wide general-ledger accounts whose type
-// total crosses the side their sign rule holds them to.
+// ListLedgerSignBreaches: general-ledger accounts across their sign rule, a
+// customer's by its counters, a merchant-wide one by its type total.
 func (q *Queries) ListLedgerSignBreaches(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerSignBreachesRow, error) {
 	rows, err := q.db.Query(ctx, listLedgerSignBreaches, merchantID)
 	if err != nil {
@@ -845,6 +851,7 @@ func (q *Queries) ListLedgerSignBreaches(ctx context.Context, merchantID uuid.UU
 			&i.Currency,
 			&i.AccountType,
 			&i.PspID,
+			&i.CustomerID,
 			&i.CreditsPosted,
 			&i.DebitsPosted,
 		); err != nil {

@@ -17,7 +17,7 @@ migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d347402
 migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
 migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
-migration 0017_books.up.sql sha256:9cfccb14961b3c9e9bab4596574d6d92adced8ad3eee7884614b67e69f04984c
+migration 0017_books.up.sql sha256:1d7910f68695cdd7199d232706e42481298dab131ac673a0c511cf79e2ff0151
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
 migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
@@ -4783,13 +4783,19 @@ function billing.ledger_transfers_apply_counters()
       LOOP
           IF acc.id = NEW.debit_account_id THEN
               IF acc.debits_must_not_exceed_credits AND acc.credits_posted - acc.debits_posted - NEW.amount < -NEW.allow_debit_negative_up_to THEN
-                  RAISE EXCEPTION 'ledger_insufficient_funds: balance %, amount %, floor %', acc.credits_posted - acc.debits_posted, NEW.amount, NEW.allow_debit_negative_up_to;
+                  IF acc.book = 'units' THEN
+                      RAISE EXCEPTION 'ledger_insufficient_funds: balance %, amount %, floor %', acc.credits_posted - acc.debits_posted, NEW.amount, NEW.allow_debit_negative_up_to;
+                  END IF;
+                  PERFORM billing.record_sign_breach(NEW.merchant_id, acc.account_type, acc.currency, acc.customer_id, acc.credits_posted, acc.debits_posted + NEW.amount);
               END IF;
               UPDATE billing.ledger_accounts SET debits_posted = debits_posted + NEW.amount
                WHERE merchant_id = NEW.merchant_id AND id = acc.id;
           ELSE
               IF acc.credits_must_not_exceed_debits AND acc.debits_posted - acc.credits_posted - NEW.amount < 0 THEN
-                  RAISE EXCEPTION 'ledger_credit_constraint: credit account % would exceed debits', acc.id;
+                  IF acc.book = 'units' THEN
+                      RAISE EXCEPTION 'ledger_credit_constraint: credit account % would exceed debits', acc.id;
+                  END IF;
+                  PERFORM billing.record_sign_breach(NEW.merchant_id, acc.account_type, acc.currency, acc.customer_id, acc.credits_posted + NEW.amount, acc.debits_posted);
               END IF;
               UPDATE billing.ledger_accounts SET credits_posted = credits_posted + NEW.amount
                WHERE merchant_id = NEW.merchant_id AND id = acc.id;
@@ -5112,6 +5118,28 @@ function billing.rail_subscription_key(text,text)
    LANGUAGE sql
    IMMUTABLE PARALLEL SAFE
   AS $function$ SELECT CASE WHEN rail = 'ccbill' THEN ltrim(ref, '0') ELSE ref END $function$
+
+function billing.record_sign_breach(uuid,text,text,uuid,bigint,bigint)
+  CREATE OR REPLACE FUNCTION billing.record_sign_breach(p_merchant uuid, p_account_type text, p_currency text, p_customer uuid, p_credits bigint, p_debits bigint)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      INSERT INTO billing.reconciliation_findings AS f (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
+      VALUES (p_merchant, 'books.sign_breach', p_account_type || '/' || p_currency || coalesce('/' || p_customer::text, ''), 'high', 'requires_review',
+              'The general ledger''s ' || p_account_type || ' in ' || p_currency || ' crossed its sign rule. Find the posting that drew it (a reversal of money received before the books, or a writer bound by a balance it cannot read) and correct it.',
+              jsonb_strip_nulls(jsonb_build_object('account_type', p_account_type, 'currency', p_currency, 'customer_id', p_customer,
+                                                   'credits_posted', p_credits::text, 'debits_posted', p_debits::text)))
+      ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
+          status = CASE WHEN f.status = 'ignored' THEN f.status ELSE EXCLUDED.status END,
+          resolved_at = CASE WHEN f.status = 'ignored' THEN f.resolved_at END,
+          resolution = CASE WHEN f.status = 'ignored' THEN f.resolution END,
+          resolved_by = CASE WHEN f.status = 'ignored' THEN f.resolved_by END,
+          severity = EXCLUDED.severity, recommended_action = EXCLUDED.recommended_action,
+          evidence = EXCLUDED.evidence, last_seen_at = now(), updated_at = now();
+  END;
+  $function$
 
 function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with time zone,text)
   CREATE OR REPLACE FUNCTION billing.refresh_subscription_mrr(s billing.subscriptions, p_at timestamp with time zone, p_cause text)
@@ -5451,7 +5479,6 @@ function billing.settle_ledger_rollups(uuid)
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
   BEGIN
-      WITH kept AS (
       INSERT INTO billing.ledger_type_totals AS r (merchant_id, book, currency, account_type, psp_id, credits_posted, debits_posted)
       SELECT p_merchant, t.book, t.currency, a.account_type, a.psp_id,
              sum(CASE WHEN a.id = t.credit_account_id THEN t.amount ELSE 0 END)::bigint,
@@ -5463,27 +5490,18 @@ function billing.settle_ledger_rollups(uuid)
        GROUP BY 2, 3, 4, 5
        ORDER BY 2, 3, 4, 5
       ON CONFLICT (merchant_id, book, currency, account_type, psp_id) DO UPDATE
-      SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted
-      RETURNING r.book, r.currency, r.account_type, r.psp_id, r.credits_posted, r.debits_posted)
-      INSERT INTO billing.reconciliation_findings AS f (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
-      SELECT p_merchant, 'books.sign_breach', k.account_type || '/' || k.currency, 'high', 'requires_review',
-             'The general ledger''s ' || k.account_type || ' total in ' || k.currency || ' crossed its sign rule. Find the posting that drew it (a reversal of money received before the books, or a writer bound by a balance it cannot read) and correct it.',
-             jsonb_build_object('account_type', k.account_type, 'currency', k.currency,
-                                'credits_posted', k.credits_posted::text, 'debits_posted', k.debits_posted::text)
-        FROM kept k
-        JOIN billing.ledger_accounts a ON a.merchant_id = p_merchant AND a.book = k.book AND a.customer_id IS NULL
-         AND a.account_type = k.account_type AND a.currency = k.currency AND a.psp_id IS NOT DISTINCT FROM k.psp_id
-       WHERE k.book = 'general'
-         AND (a.debits_must_not_exceed_credits AND k.debits_posted > k.credits_posted
-              OR a.credits_must_not_exceed_debits AND k.credits_posted > k.debits_posted)
-       ORDER BY 3
-      ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
-          status = CASE WHEN f.status = 'ignored' THEN f.status ELSE EXCLUDED.status END,
-          resolved_at = CASE WHEN f.status = 'ignored' THEN f.resolved_at END,
-          resolution = CASE WHEN f.status = 'ignored' THEN f.resolution END,
-          resolved_by = CASE WHEN f.status = 'ignored' THEN f.resolved_by END,
-          severity = EXCLUDED.severity, recommended_action = EXCLUDED.recommended_action,
-          evidence = EXCLUDED.evidence, last_seen_at = now(), updated_at = now();
+      SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted;
+      PERFORM billing.record_sign_breach(p_merchant, t.account_type, t.currency, NULL, t.credits_posted, t.debits_posted)
+         FROM billing.ledger_type_totals t
+         JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.book = t.book AND a.customer_id IS NULL
+          AND a.account_type = t.account_type AND a.currency = t.currency AND a.psp_id IS NOT DISTINCT FROM t.psp_id
+        WHERE t.merchant_id = p_merchant AND t.book = 'general'
+          AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
+               OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
+          AND EXISTS (SELECT 1 FROM billing.ledger_rollup_pending p
+                        JOIN billing.ledger_transfers x ON x.merchant_id = p.merchant_id AND x.id = p.transfer_id
+                       WHERE p.merchant_id = p_merchant AND a.id IN (x.debit_account_id, x.credit_account_id))
+        ORDER BY t.account_type, t.currency;
       INSERT INTO billing.ledger_daily AS r (merchant_id, book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits)
       SELECT p_merchant, t.book, t.currency, a.account_type, date_bin('15 minutes', t.effective_at, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
              t.transfer_type, a.psp_id, t.product_id,

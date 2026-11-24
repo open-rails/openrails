@@ -712,7 +712,7 @@ type BillingLedgerAccount struct {
 	// The account's role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.
 	AccountType string
 	Currency    string
-	// Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart. A merchant-wide general-ledger account keeps no counters: its type total is held to the rule at commit (billing.settle_ledger_rollups).
+	// Sign rule: the balance (credits - debits) may not go below zero. Set by the chart. The units book refuses a breach, less a floor the transfer supplies; the general ledger never refuses one: it raises books.sign_breach, a merchant-wide account's on its type total at commit.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	// Maintained counter: posted credits, for O(1) balance reads.

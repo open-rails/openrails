@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/currency"
@@ -24,10 +22,6 @@ var (
 	// ErrNotMoney refuses a general-ledger posting in a currency outside the
 	// registry, a merchant's own unit included.
 	ErrNotMoney = errors.New("books: the general ledger holds registry currencies only")
-	// ErrSignRule is a general-ledger posting that would breach a customer
-	// account's sign rule. A merchant-wide account's rule is checked at
-	// commit, where a breach raises books.sign_breach and never refuses.
-	ErrSignRule = errors.New("books: transfer breaches an account's sign rule")
 	// ErrCoordinateReused is a posting at a coordinate that already posted
 	// another transfer.
 	ErrCoordinateReused = errors.New("books: the coordinate already posted a different transfer")
@@ -296,10 +290,6 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 			return tr, false, fmt.Errorf("%w at %s", ErrCoordinateReused, p.Coord)
 		}
 		return tr, false, nil
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && (strings.Contains(pgErr.Message, "ledger_insufficient_funds") || strings.Contains(pgErr.Message, "ledger_credit_constraint")) {
-		return tr, false, fmt.Errorf("%w: %s", ErrSignRule, pgErr.Message)
 	}
 	return tr, false, err
 }

@@ -109,9 +109,10 @@ const (
 )
 
 // Account is one account type in the chart: its book, class, scope and sign
-// rules. An account's counters enforce its rules as each transfer posts; a
-// merchant-wide general-ledger account keeps no counters, and its type total
-// is held to them at commit.
+// rules. The units book enforces business rules and refuses a breach as each
+// transfer posts; the general ledger records what happened and never refuses
+// one: a breach raises books.sign_breach, on a customer's account as it
+// posts, on a merchant-wide account's type total at commit.
 type Account struct {
 	Type  AccountType
 	Book  Book
