@@ -168,6 +168,50 @@ func TestDeclineCauses(t *testing.T) {
 			"scheduled_rebill/brand_not_accepted/refused/merchant": 1,
 		}, history)
 	})
+	t.Run("OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, code, issuer string
+			raised             bool
+		}{
+			// NMI's 200 behind which the issuer's own system failed (96).
+			{"an-issuers-malfunction-is-not-ours", "200", "96", false},
+			{"a-processor-error-is", "400", "", true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a, _ := newNMIWorld(t)
+				psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+				require.NoError(t, err)
+				require.NotEmpty(t, psps.Items)
+				merchant, customer := a.alpha.MerchantID().UUID(), uuid.New()
+				_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "customers"}.Sanitize()+" (id, merchant_id) VALUES ($1, $2)", customer, merchant)
+				require.NoError(t, err)
+				attempt := func(outcome, cause, reason, action, code, issuer string) {
+					t.Helper()
+					_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "payment_attempts"}.Sanitize()+
+						` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, outcome, decline_cause, reason, action, response_code, issuer_code, amount, currency, attempted_at, step)
+						VALUES ($1, $2, $3, 'nmi', 'initial', 'none', 'new', 'openrails', 'response', $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), 1000000, 'USD', $10, '')`,
+						merchant, customer, psps.Items[0].ID.UUID(), outcome, cause, reason, action, code, issuer, a.clock.Now().Add(-10*time.Minute))
+					require.NoError(t, err)
+				}
+				for range 19 {
+					attempt("approved", "", "", "", "100", "00")
+				}
+				attempt("error", "processing", "processing_error", "retry", tc.code, tc.issuer)
+				fleet := hostFleet(t, a.world)
+				fleet.PeriodicJobs().Clear()
+				require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+				require.NoError(t, fleet.Start(t.Context()))
+				runRegistered(t, fleet, "openrails.merchant_health", 1)
+				found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.payments.system_errors"})
+				require.NoError(t, err)
+				if tc.raised {
+					require.Len(t, found.Items, 1, "one error in twenty attempts is past 2%")
+					return
+				}
+				require.Empty(t, found.Items, "the issuer's failure is not ours")
+			})
+		}
+	})
 	t.Run("OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud", func(t *testing.T) {
 		for _, tc := range []struct {
 			name   string

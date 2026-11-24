@@ -197,7 +197,7 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 // 20), or any answer about our own credentials, which is critical.
 func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	from := now.Add(-systemErrorWindow)
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "reason"}}, from, now, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "rail", "response_code"}}, from, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]Converg
 		k := healthKey{str(r["psp"]), str(r["owner"])}
 		s := errs[k]
 		s.total += count(r["attempts"])
-		if systemError(billing.DeclineReason(str(r["reason"]))) {
+		if systemError(str(r["rail"]), str(r["response_code"])) {
 			s.failed += count(r["attempts"])
 		}
 		errs[k] = s
@@ -377,7 +377,10 @@ func count(v any) int64 {
 
 // systemError: a refusal of ours or our processor's, not the card's: a
 // processing failure, our configuration, a malformed or duplicate request.
-func systemError(reason billing.DeclineReason) bool {
+// It is read from the rail's own code: an issuer's code behind a generic
+// decline (91, 96, ...) is the issuer's, not ours.
+func systemError(rail, code string) bool {
+	reason := decline.Classify(rail, code).Reason
 	switch reason {
 	case billing.DeclineMerchantConfig, billing.DeclineInvalidRequest, billing.DeclineDuplicateTransaction:
 		return true
