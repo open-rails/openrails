@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 541,
+  "scenario_count": 553,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1124,6 +1124,21 @@
       "name": "A provisioning token declared by a second merchant is refused and provisions only its holder"
     },
     {
+      "id": "OR-J07-S07",
+      "journey": "J07",
+      "name": "An application without the provisioning permission neither reads nor writes the directory"
+    },
+    {
+      "id": "OR-J07-S08",
+      "journey": "J07",
+      "name": "Contact erasures keep a budget and holds of their own, and an erasure past it waits rather than fails"
+    },
+    {
+      "id": "OR-J07-S09",
+      "journey": "J07",
+      "name": "A waiting erasure takes the contact at once and a report older than it cannot restore it"
+    },
+    {
       "id": "OR-J01-S12",
       "journey": "J01",
       "name": "Existing customer proof is read-only and never enrolls or requires recent sign-in"
@@ -1162,6 +1177,41 @@
       "id": "OR-J01-S19",
       "journey": "J01",
       "name": "A customer route refuses a signed-in account of another tenant than its merchant's binding"
+    },
+    {
+      "id": "OR-J01-S20",
+      "journey": "J01",
+      "name": "Every catalog route refuses a bound credential without its permission and admits its root twin"
+    },
+    {
+      "id": "OR-J01-S21",
+      "journey": "J01",
+      "name": "A configuration-only credential cannot approve a finding's refund, cancellation or access action"
+    },
+    {
+      "id": "OR-J01-S22",
+      "journey": "J01",
+      "name": "A configuration-only person cannot approve a proposal that cancels, revokes, refunds, collects or corrects a subscription"
+    },
+    {
+      "id": "OR-J01-S23",
+      "journey": "J01",
+      "name": "A finding approval spends the operation limit of the action it runs"
+    },
+    {
+      "id": "OR-J01-S24",
+      "journey": "J01",
+      "name": "A PSP import's apply approves only the corrections its approver may approve"
+    },
+    {
+      "id": "OR-J01-S25",
+      "journey": "J01",
+      "name": "An approval is one operation of its change's route limit, however many changes it carries"
+    },
+    {
+      "id": "OR-J01-S26",
+      "journey": "J01",
+      "name": "A proposal rewritten before its lock is held to the change kinds its approval allowed"
     },
     {
       "id": "OR-J22-S05",
@@ -1702,6 +1752,16 @@
       "id": "OR-J34-S31",
       "journey": "J34",
       "name": "Only an in-process handle acts for a named person; a remote handle refuses ActingFor"
+    },
+    {
+      "id": "OR-J34-S32",
+      "journey": "J34",
+      "name": "A reservation that never starts, left by a crash or refused at its start, stops holding budget"
+    },
+    {
+      "id": "OR-J34-S33",
+      "journey": "J34",
+      "name": "A reservation started past its life is admitted against the budget again"
     },
     {
       "id": "OR-J16-S30",

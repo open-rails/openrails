@@ -116,6 +116,7 @@ its role's permissions. Grant only what the backend needs:
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
+| push the customer directory over SCIM, or mint its provisioning tokens | `merchant:provisioning:read`, `merchant:provisioning:manage` |
 
 Each permission also has a `root:` name, held in your auth's root scope for
 every merchant; `billing.Permissions()` lists them and roles should be built
@@ -196,15 +197,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's.
-Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your
-own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to
-`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token;
-`externalId` is the user's UUID, and the newest write wins. On a standalone
-server or the hosted platform, your issuer pushes to the server's directory
-(`/directory/scim/v2`), and verified contact claims in customer tokens fill in
-as they are used. OpenRails emails a customer only at an address that was
-verified.
+**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -1120,10 +1113,7 @@ return f.Close()
 
 ## Proposals and findings
 
-A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the
-provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A
-`pull.*` finding with a change is a proposal: approving it applies that change.
-Findings need merchant configuration authority, not customer support's.
+A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A `pull.*` finding with a change is a proposal: approving it applies that change. Findings need merchant configuration authority. Approving a finding whose recommendation refunds, cancels, or grants or revokes a product, or a proposal whose change refunds, revokes, cancels, collects a renewal or corrects a subscription's price or terms, also needs `merchant:customer:manage`, as that action's own route does, and spends that route's operation limit once per request, however many changes it carries; a proposal that only records what the provider already did and billed needs the configuration alone. Applying a PSP import approves only the corrections its approver may approve, and is refused while one they may not is open.
 
 | Method | Use it to |
 |---|---|
@@ -1194,18 +1184,13 @@ return err
 
 ## Destructive holds
 
-Refunds, cancellations, card removals, access and credit revocations, write-offs
-and substantive catalog or configuration changes share one admission policy per
-staff member or application: by default 5 an hour and 15 a day per actor, with
-merchant and deployment ceilings that grow with active customers. A breach is a
-**hold**: denied `429`, and held until a person reviews and clears it; waiting,
-restarting or rotating a key does not release it. The in-process host's own
-calls spend nothing; a call made for a person through `ActingFor` is theirs.
+Refunds, cancellations, card removals, access and credit revocations, write-offs and substantive catalog or configuration changes share one admission policy per staff member or application: by default 5 an hour and 15 a day per actor, with merchant and deployment ceilings that grow with active customers. A breach is a **hold**: denied `429` with `Retry-After`, and held until a person reviews and clears it; waiting, restarting or rotating a key does not release it. An admitted action that never starts stops counting after 15 minutes. SCIM contact erasures keep their own per-merchant budget and hold, apart from all of these ([contacts](#customers)). The in-process host's own calls spend nothing; a call made for a person through `ActingFor` is theirs.
 
 | Method | Use it to |
 |---|---|
 | `ListDestructiveHolds` | the merchant's incidents |
 | `ClearDestructiveHold` | clear one after review, with a reason |
+| `ClearErasureHold` | clear the merchant's contact-erasure hold, with `merchant:provisioning:manage` alone |
 
 ```go guide:destructive-holds
 page, err := reviewer.ListDestructiveHolds(ctx, billing.DestructiveHoldListParams{})

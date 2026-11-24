@@ -17,6 +17,7 @@ migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d347402
 migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
 migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
+migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -545,7 +546,7 @@ table billing.destructive_actions
   constraint destructive_actions_actor_key_check CHECK ((actor_key ~ '^[0-9a-f]{64}$'::text))
   constraint destructive_actions_admission_sequence_key UNIQUE (admission_sequence)
   constraint destructive_actions_credential_check CHECK ((credential <> ''::text))
-  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'block_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text])))
+  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'block_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'erase_contact'::text])))
   constraint destructive_actions_lifecycle_check CHECK ((((state = 'reserved'::text) AND (started_at IS NULL) AND (finished_at IS NULL)) OR ((state = ANY (ARRAY['started'::text, 'uncertain'::text])) AND (started_at IS NOT NULL) AND (finished_at IS NULL)) OR ((state = 'succeeded'::text) AND (started_at IS NOT NULL) AND (finished_at IS NOT NULL) AND (completion_sequence IS NOT NULL)) OR ((state = 'no_effect'::text) AND (finished_at IS NOT NULL))))
   constraint destructive_actions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_actions_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'host'::text, 'automation'::text])))
@@ -558,6 +559,8 @@ table billing.destructive_actions
   index CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions USING btree (actor_key, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((state = 'succeeded'::text) AND (origin = 'staff'::text))
   index CREATE UNIQUE INDEX destructive_actions_admission_sequence_key ON billing.destructive_actions USING btree (admission_sequence)
   index CREATE INDEX destructive_actions_completion_sequence_idx ON billing.destructive_actions USING btree (completion_sequence) WHERE (completion_sequence IS NOT NULL)
+  index CREATE INDEX destructive_actions_erasure_queue_idx ON billing.destructive_actions USING btree (merchant_id, admission_sequence) WHERE ((kind = 'erase_contact'::text) AND (state = ANY (ARRAY['reserved'::text, 'started'::text])))
+  index CREATE INDEX destructive_actions_erasure_recent_idx ON billing.destructive_actions USING btree (merchant_id, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((kind = 'erase_contact'::text) AND (state = 'succeeded'::text))
   index CREATE INDEX destructive_actions_key_history_idx ON billing.destructive_actions USING btree (merchant_id, action_key, admitted_at DESC, id DESC)
   index CREATE UNIQUE INDEX destructive_actions_live_key ON billing.destructive_actions USING btree (merchant_id, action_key) WHERE (state <> 'no_effect'::text)
   index CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions USING btree (merchant_id, origin, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
@@ -598,7 +601,7 @@ table billing.destructive_holds
   constraint destructive_holds_observed_check CHECK ((observed >= 0))
   constraint destructive_holds_pkey PRIMARY KEY (merchant_id, id)
   constraint destructive_holds_requested_check CHECK ((requested > 0))
-  constraint destructive_holds_scope_check CHECK ((scope = ANY (ARRAY['actor'::text, 'merchant'::text, 'deployment'::text])))
+  constraint destructive_holds_scope_check CHECK ((scope = ANY (ARRAY['actor'::text, 'merchant'::text, 'deployment'::text, 'erasure'::text])))
   constraint destructive_holds_scope_key_check CHECK ((btrim(scope_key) <> ''::text))
   constraint destructive_holds_target_check CHECK ((btrim(target) <> ''::text))
   constraint destructive_holds_window_name_check CHECK ((window_name = ANY (ARRAY['hour'::text, 'day'::text])))

@@ -769,6 +769,10 @@ type DestructiveActionLimitsConfig struct {
 	MerchantPerDay    int64
 	DeploymentPerHour int64
 	DeploymentPerDay  int64
+	// ErasurePerHour and ErasurePerDay are the floors of a merchant's own
+	// contact-erasure budget, which rises with its directory.
+	ErasurePerHour int64
+	ErasurePerDay  int64
 }
 
 // NormalizeDestructiveActionLimits fills the defaults and refuses limits that
@@ -778,7 +782,7 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 	for _, f := range []struct {
 		v   *int64
 		def int64
-	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}} {
+	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}, {&c.ErasurePerHour, 100}, {&c.ErasurePerDay, 1000}} {
 		if *f.v == 0 {
 			*f.v = f.def
 		}
@@ -787,7 +791,7 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 		}
 	}
 	switch {
-	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay:
+	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay || c.ErasurePerHour > c.ErasurePerDay:
 		return c, fmt.Errorf("destructive_action_limits: an hourly limit cannot exceed its daily limit")
 	case c.ActorPerHour > c.MerchantPerHour || c.ActorPerDay > c.MerchantPerDay:
 		return c, fmt.Errorf("destructive_action_limits: an actor limit cannot exceed the merchant limit")

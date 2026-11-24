@@ -1082,10 +1082,12 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 // ApplyPSPImport lands the import's linked records as customers, payment
 // methods, subscriptions and payments, then approves its corrections (the
 // proposals that keep or extend access) in the caller's name. Only a person
-// signed in, or the in-process host, applies. It runs in the background. A
-// subscription lands on the provider price mapping its plan; one whose plan
-// is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
-// and applied again.
+// signed in, or the in-process host, applies; one holding
+// merchant:customer:manage too approves the corrections that move a
+// subscription's price or terms, and without it an import with one open is
+// refused. It runs in the background. A subscription lands on the provider
+// price mapping its plan; one whose plan is unmapped stays blocked until it
+// is mapped (CreateProviderPrice), linked and applied again.
 func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	var out billing.PSPImport
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/psp-imports/{id}/apply", args: []string{id.String()}}, &out); err != nil {
@@ -1185,12 +1187,25 @@ func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.Destru
 
 // ClearDestructiveHold clears an incident after review, recording who and
 // why. It needs a person other than the one whose action opened it, holding
-// root:admin-rate-limits:unlock and merchant configuration authority: over
+// merchant configuration authority and root:admin-rate-limits:unlock, or for
+// the merchant's contact-erasure hold merchant:provisioning:manage: over
 // HTTP a self-acting human's own credential; in process the handle ActingFor
 // names them, once the host has authenticated them.
 func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
 	var out billing.DestructiveHold
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/destructive-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearErasureHold clears the merchant's contact-erasure hold after review,
+// recording who and why; its waiting erasures then run. It needs a person
+// holding merchant:provisioning:manage: over HTTP a self-acting human's own
+// credential; in process the handle ActingFor names them.
+func (c *Client) ClearErasureHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
+	var out billing.DestructiveHold
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/erasure-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1288,8 +1303,9 @@ func (c *Client) ListProposals(ctx context.Context, params billing.ProposalListP
 
 // ApproveProposals applies 1 to 100 proposals, each in its own transaction,
 // under one approval run that `openrails undo-run` reverses. Only a person
-// signed in, or the in-process host, approves. idempotencyKey is required: a
-// retry with it answers the first call's results.
+// signed in, or the in-process host, approves; a change that refunds,
+// revokes or cancels also needs merchant:customer:manage. idempotencyKey is
+// required: a retry with it answers the first call's results.
 func (c *Client) ApproveProposals(ctx context.Context, idempotencyKey string, params billing.ApproveProposalsParams) (*billing.ProposalResults, error) {
 	var out billing.ProposalResults
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/proposals/approve", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
@@ -1309,7 +1325,8 @@ func (c *Client) DismissProposals(ctx context.Context, params billing.DismissPro
 }
 
 // ResolveFinding approves (runs the recommendation) or ignores one open
-// finding.
+// finding. Approving a refund, cancellation or product-access recommendation
+// also needs what that action's own route needs: merchant:customer:manage.
 func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error) {
 	var out billing.FindingResolution
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/findings/{id}/resolve", args: []string{id.String()}, body: params}, &out); err != nil {

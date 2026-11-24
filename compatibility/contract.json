@@ -18,6 +18,7 @@
       "func (c *Client) ChangeSubscription(ctx context.Context, idempotencyKey string, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)",
       "func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
+      "func (c *Client) ClearErasureHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, params billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)",
       "func (c *Client) CreateCustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error)",
@@ -202,7 +203,7 @@
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth auth.Authenticator\n\n\tResolve func(*http.Request, auth.Verified) (CustomerBinding, error)\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n\n\tSkipMigrations bool\n\n\tLeaseConns int\n}",
       "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tClickHouse driver.Conn\n\n\tEmail EmailSender\n\n\tMessageRenderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)\n\n\tLogger *slog.Logger\n\n\tUserInfo userinfo.Lookup\n\n\tNotifications *NotificationChannel\n\n\tCheckoutAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
-      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n}",
+      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n\tErasurePerHour    int64\n\tErasurePerDay     int64\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -332,7 +333,7 @@
       "const (\n\tMaxEntitlementPrefixes  = 10\n\tDefaultHeldEntitlements = 1000\n\tMaxHeldEntitlements     = 10000\n)",
       "const (\n\tMaxSyncUsageItems = 1000\n\tMaxSyncViews      = 1000\n\tMaxSyncReleases   = 1000\n\tMaxSyncInFlight   = 10_000\n)",
       "const (\n\tMerchantActive MerchantStatus = \"active\"\n\n\tMerchantDeleted MerchantStatus = \"deleted\"\n)",
-      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigRead   Permission = \"merchant:config:read\"\n\tRootConfigRead       Permission = \"root:config:read\"\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageRead Permission = \"merchant:usage:read\"\n\tRootUsageRead     Permission = \"root:usage:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantCustomersRead Permission = \"merchant:customers:read\"\n\tRootCustomersRead     Permission = \"root:customers:read\"\n)",
+      "const (\n\tMerchantCustomerRead Permission = \"merchant:customer:read\"\n\tRootCustomerRead     Permission = \"root:customer:read\"\n\n\tMerchantCustomerManage Permission = \"merchant:customer:manage\"\n\tRootCustomerManage     Permission = \"root:customer:manage\"\n\n\tMerchantCatalogManage Permission = \"merchant:catalog:manage\"\n\tRootCatalogManage     Permission = \"root:catalog:manage\"\n\n\tMerchantConfigRead   Permission = \"merchant:config:read\"\n\tRootConfigRead       Permission = \"root:config:read\"\n\tMerchantConfigManage Permission = \"merchant:config:manage\"\n\tRootConfigManage     Permission = \"root:config:manage\"\n\n\tMerchantMetricsRead Permission = \"merchant:metrics:read\"\n\tRootMetricsRead     Permission = \"root:metrics:read\"\n\n\tMerchantEntitlementsRead Permission = \"merchant:entitlements:read\"\n\tRootEntitlementsRead     Permission = \"root:entitlements:read\"\n\n\tMerchantCatalogRead Permission = \"merchant:catalog:read\"\n\tRootCatalogRead     Permission = \"root:catalog:read\"\n\n\tMerchantUsageRead Permission = \"merchant:usage:read\"\n\tRootUsageRead     Permission = \"root:usage:read\"\n\n\tMerchantUsageManage Permission = \"merchant:usage:manage\"\n\tRootUsageManage     Permission = \"root:usage:manage\"\n\n\tMerchantEventsRead Permission = \"merchant:events:read\"\n\tRootEventsRead     Permission = \"root:events:read\"\n\n\tMerchantOrdersManage Permission = \"merchant:orders:manage\"\n\tRootOrdersManage     Permission = \"root:orders:manage\"\n\n\tMerchantProvisioningRead   Permission = \"merchant:provisioning:read\"\n\tRootProvisioningRead       Permission = \"root:provisioning:read\"\n\tMerchantProvisioningManage Permission = \"merchant:provisioning:manage\"\n\tRootProvisioningManage     Permission = \"root:provisioning:manage\"\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tMessagePending MessageStatus = \"pending\"\n\n\tMessageQueued MessageStatus = \"queued\"\n\n\tMessageSending MessageStatus = \"sending\"\n\n\tMessageSent MessageStatus = \"sent\"\n\n\tMessageDisabled MessageStatus = \"disabled\"\n\n\tMessageTestEnvironment MessageStatus = \"test_environment\"\n\n\tMessageNoContact MessageStatus = \"no_contact\"\n\n\tMessageRateLimited MessageStatus = \"rate_limited\"\n\n\tMessageFailed MessageStatus = \"failed\"\n)",
@@ -1602,6 +1603,7 @@
       "type Subscription struct {\n\tCollectionPolicy CollectionPolicy `json:\"collection_policy\"`\n\tID               uuid.UUID        `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id,omitempty\"`\n\tProductID  uuid.UUID `json:\"product_id\"`\n\tPriceID    uuid.UUID `json:\"price_id\"`\n\n\tScheduledChange *ScheduledChange `json:\"-\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tAccessDurationHoursSnapshot   *int `json:\"access_duration_hours_snapshot\"`\n\tProviderAccessDefaultSnapshot bool `json:\"provider_access_default_snapshot\"`\n\n\tStatus                SubscriptionStatus `json:\"status\"`\n\tStartedAt             time.Time          `json:\"started_at\"`\n\tEndedAt               *time.Time         `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time         `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time         `json:\"current_period_ends_at\"`\n\n\tRail               Rail   `json:\"rail\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id\"`\n\n\tPaymentMethodID *uuid.UUID `json:\"payment_method_id\"`\n\n\tLastRetryAt   *time.Time `json:\"last_retry_at\"`\n\tRetryAttempts *int       `json:\"retry_attempts\"`\n\n\tTransientRetries int        `json:\"transient_retries\"`\n\tNextRetryAt      *time.Time `json:\"next_retry_at\"`\n\tGraceEndsAt      *time.Time `json:\"grace_ends_at\"`\n\n\tCancelFeedback *string     `json:\"cancel_feedback\"`\n\tCancelType     *CancelType `json:\"cancel_type\"`\n\tCanceledAt     *time.Time  `json:\"canceled_at\"`\n\n\tDeletionScheduledAt *time.Time `json:\"deletion_scheduled_at,omitempty\"`\n\n\tLifecycleRev int64 `json:\"-\"`\n\n\tRowVersion int64 `json:\"-\"`\n\n\tDunningPolicy []byte `json:\"-\"`\n\n\tPrice         *Price         `json:\"price,omitempty\"`\n\tPaymentMethod *PaymentMethod `json:\"payment_method,omitempty\"`\n\n\tProduct *Product `json:\"product,omitempty\"`\n\n\tMetadata json.RawMessage `json:\"gateway_response,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}"
     ],
     "internal/destructive": [
+      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n}",
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/disputejob": [
@@ -1948,7 +1950,7 @@
       "type position struct {\n\tRank int32     `json:\"r\"`\n\tAt   time.Time `json:\"t\"`\n\tID   uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/pspimport": [
-      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n\n\tApprovalActor *destructive.Actor `json:\"approval_actor,omitempty\"`\n}",
+      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n\n\tApprovalActor *destructive.Actor `json:\"approval_actor,omitempty\"`\n\n\tApprovedKinds []billing.ChangeKind `json:\"approved_kinds\"`\n}",
       "type cardData struct {\n\tMethodRef string `json:\"method_ref\"`\n\tPrimary   bool   `json:\"primary,omitempty\"`\n\tBrand     string `json:\"brand,omitempty\"`\n\tLast4     string `json:\"last4,omitempty\"`\n\tExpMonth  int    `json:\"exp_month,omitempty\"`\n\tExpYear   int    `json:\"exp_year,omitempty\"`\n}",
       "type customerData struct {\n\tCards  []cardData                      `json:\"cards\"`\n\tRemote []reconcile.RemotePaymentMethod `json:\"remote,omitempty\"`\n}",
       "type recordPosition struct {\n\tID uuid.UUID `json:\"i\"`\n}",
@@ -2738,6 +2740,18 @@
       "json": "encoding/json",
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/destructive/erasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/destructive/user_actions.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4614,6 +4628,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "slices": "slices",
       "slog": "log/slog",
       "strings": "strings",
       "time": "time",
@@ -4644,7 +4659,9 @@
       "proposals": "github.com/open-rails/openrails/internal/proposals",
       "providerobjects": "github.com/open-rails/openrails/internal/modules/catalog/providerobjects",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
+      "slices": "slices",
       "slog": "log/slog",
       "sort": "sort",
       "strings": "strings",
@@ -5052,6 +5069,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",

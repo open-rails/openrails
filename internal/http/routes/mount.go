@@ -90,7 +90,8 @@ type Env struct {
 	// payURL scopes customer routes to the order a pay URL's secret
 	// opened (the checkout origin).
 	payURL bool
-	// applicationPermissions are the mounted application routes' permission pairs.
+	// applicationPermissions are the mounted application and provisioning
+	// routes' permission pairs.
 	applicationPermissions []Pair
 	Log                    *slog.Logger
 }
@@ -103,7 +104,7 @@ func (e *Env) scimServer() *scim.Server {
 	}
 	if e.scim == nil {
 		rt := e.Runtime
-		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Now: func() time.Time {
+		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Admissions: rt.DestructiveAdmissions, Now: func() time.Time {
 			if rt.Clock != nil {
 				return rt.Clock.Now()
 			}
@@ -123,7 +124,7 @@ func newEnv(logger *slog.Logger, rt *app.Runtime, opts Options) *Env {
 	}
 	seen := map[Pair]bool{}
 	for _, route := range Catalog() {
-		if route.Auth == AuthApplication && env.on(route) && env.enabled(route.When) && !seen[route.Needs()] {
+		if (route.Auth == AuthApplication || route.Auth == AuthProvisioning) && env.on(route) && env.enabled(route.When) && !seen[route.Needs()] {
 			seen[route.Needs()] = true
 			env.applicationPermissions = append(env.applicationPermissions, route.Needs())
 		}

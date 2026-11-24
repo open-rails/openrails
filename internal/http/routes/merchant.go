@@ -5,6 +5,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // merchantRoutes is the merchant itself: its configuration, outbound
@@ -114,10 +115,12 @@ var merchantRoutes = []Route{
 		Args: []any{billing.PSPImportID{}},
 		Doc: "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and " +
 			"payments, then approves its corrections (the proposals that keep or extend access) in the caller's " +
-			"name. Only a person signed in, or the in-process host, applies. It runs in the background. A " +
+			"name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage " +
+			"too approves the corrections that move a subscription's price or terms, and without it an import " +
+			"with one open is refused. It runs in the background. A " +
 			"subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked " +
 			"until it is mapped (CreateProviderPrice), linked and applied again.",
-		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "person_required", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ApplyPSPImport)},
+		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("finding_not_actionable", "invalid_param", "person_required", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.ApplyPSPImport(e.staffCan)) }},
 	{Method: POST, Path: "/v1/merchant/psp-import-mappings", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "SetPSPImportMappings",
 		Doc: "SetPSPImportMappings maps the merchant's own identifiers (a legacy user or order id) to customers, " +
 			"for import rules to read.",

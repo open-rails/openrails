@@ -29,6 +29,7 @@ pkg openrails, method (*Client) CaptureAdmissions(context.Context, []billing.Cap
 pkg openrails, method (*Client) ChangeSubscription(context.Context, string, billing.SubscriptionID, billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)
 pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)
 pkg openrails, method (*Client) ClearDestructiveHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)
+pkg openrails, method (*Client) ClearErasureHold(context.Context, billing.DestructiveHoldID, billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) CreateCreditGrants(context.Context, []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)
 pkg openrails, method (*Client) CreateCustomerAssertion(context.Context, billing.CustomerTokenParams) (string, error)
@@ -283,6 +284,8 @@ pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerHour int64
 pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerHour int64
+pkg openrails, type DestructiveActionLimitsConfig struct, ErasurePerDay int64
+pkg openrails, type DestructiveActionLimitsConfig struct, ErasurePerHour int64
 pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerHour int64
 pkg openrails, type Email struct
@@ -897,13 +900,14 @@ pkg openrails/billing, const MerchantConfigManage Permission = "merchant:config:
 pkg openrails/billing, const MerchantConfigRead Permission = "merchant:config:read"
 pkg openrails/billing, const MerchantCustomerManage Permission = "merchant:customer:manage"
 pkg openrails/billing, const MerchantCustomerRead Permission = "merchant:customer:read"
-pkg openrails/billing, const MerchantCustomersRead Permission = "merchant:customers:read"
 pkg openrails/billing, const MerchantDeleted MerchantStatus = "deleted"
 pkg openrails/billing, const MerchantEntitlementsRead Permission = "merchant:entitlements:read"
 pkg openrails/billing, const MerchantEventsRead Permission = "merchant:events:read"
 pkg openrails/billing, const MerchantGroupPersona untyped string = "merchant"
 pkg openrails/billing, const MerchantMetricsRead Permission = "merchant:metrics:read"
 pkg openrails/billing, const MerchantOrdersManage Permission = "merchant:orders:manage"
+pkg openrails/billing, const MerchantProvisioningManage Permission = "merchant:provisioning:manage"
+pkg openrails/billing, const MerchantProvisioningRead Permission = "merchant:provisioning:read"
 pkg openrails/billing, const MerchantRetirementRefusedActive MerchantRetirementRefusal = "active"
 pkg openrails/billing, const MerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = "group_mismatch"
 pkg openrails/billing, const MerchantRetirementRefusedNotLive MerchantRetirementRefusal = "not_live"
@@ -1053,7 +1057,6 @@ pkg openrails/billing, const RootConfigManage Permission = "root:config:manage"
 pkg openrails/billing, const RootConfigRead Permission = "root:config:read"
 pkg openrails/billing, const RootCustomerManage Permission = "root:customer:manage"
 pkg openrails/billing, const RootCustomerRead Permission = "root:customer:read"
-pkg openrails/billing, const RootCustomersRead Permission = "root:customers:read"
 pkg openrails/billing, const RootEntitlementsRead Permission = "root:entitlements:read"
 pkg openrails/billing, const RootEventsRead Permission = "root:events:read"
 pkg openrails/billing, const RootMerchantsDelete Permission = "root:merchants:delete"
@@ -1061,6 +1064,8 @@ pkg openrails/billing, const RootMerchantsRead Permission = "root:merchants:read
 pkg openrails/billing, const RootMerchantsRestore Permission = "root:merchants:restore"
 pkg openrails/billing, const RootMetricsRead Permission = "root:metrics:read"
 pkg openrails/billing, const RootOrdersManage Permission = "root:orders:manage"
+pkg openrails/billing, const RootProvisioningManage Permission = "root:provisioning:manage"
+pkg openrails/billing, const RootProvisioningRead Permission = "root:provisioning:read"
 pkg openrails/billing, const RootUsageManage Permission = "root:usage:manage"
 pkg openrails/billing, const RootUsageRead Permission = "root:usage:read"
 pkg openrails/billing, const RootWorkerHealthRead Permission = "root:worker-health:read"

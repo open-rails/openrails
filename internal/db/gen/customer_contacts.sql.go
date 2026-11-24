@@ -245,6 +245,26 @@ func (q *Queries) ListProvisionedContacts(ctx context.Context, arg ListProvision
 	return items, nil
 }
 
+const provisionedContactsAtLeast = `-- name: ProvisionedContactsAtLeast :one
+SELECT count(*)::bigint AS contacts FROM (
+ SELECT 1 FROM billing.customer_contacts WHERE merchant_id=$1::uuid AND provisioned_at IS NOT NULL
+ LIMIT $2::bigint
+) AS provisioned
+`
+
+type ProvisionedContactsAtLeastParams struct {
+	MerchantID uuid.UUID
+	Required   int64
+}
+
+// Only read enough to decide an erasure ceiling.
+func (q *Queries) ProvisionedContactsAtLeast(ctx context.Context, arg ProvisionedContactsAtLeastParams) (int64, error) {
+	row := q.db.QueryRow(ctx, provisionedContactsAtLeast, arg.MerchantID, arg.Required)
+	var contacts int64
+	err := row.Scan(&contacts)
+	return contacts, err
+}
+
 const searchCustomerContacts = `-- name: SearchCustomerContacts :many
 SELECT merchant_id, customer_id, email, display_name, user_name, active, provisioned_at, directory_updated_at, created_at, updated_at FROM billing.customer_contacts c
 WHERE c.merchant_id = $1::uuid
