@@ -1304,6 +1304,9 @@
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ],
+    "OR-J38-S85": [
+      "TestMerchantConsole/OR-J38-S85/console-dashboard-shows-merchant-units-at-their-scale"
+    ],
     "OR-J38-S75": [
       "TestCCBillIdentity/OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
     ],

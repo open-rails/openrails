@@ -75,6 +75,7 @@ import {
   type Registry,
 } from "./registry"
 import { band, inForce, nearest, reached, severest } from "./levels"
+import { MerchantUnitsContext, useDeclaredUnits, useUnits } from "./units"
 
 export function WidgetVizView({
   viz,
@@ -89,6 +90,33 @@ export function WidgetVizView({
   // spark is a kpi's query by time.
   spark?: MetricsResult
   registry?: Registry
+}) {
+  const units = useDeclaredUnits()
+  return (
+    <MerchantUnitsContext.Provider value={units}>
+      <WidgetVizBody
+        viz={viz}
+        result={result}
+        query={query}
+        spark={spark}
+        registry={registry}
+      />
+    </MerchantUnitsContext.Provider>
+  )
+}
+
+function WidgetVizBody({
+  viz,
+  result,
+  query,
+  spark,
+  registry,
+}: {
+  viz: VizType
+  result: MetricsResult
+  query?: QueryMetricsParams
+  spark?: MetricsResult
+  registry: Registry
 }) {
   const currency = filteredCurrency(query)
   switch (viz) {
@@ -208,6 +236,7 @@ function KpiViz({
   registry: Registry
 }) {
   const { text: adminText } = useAdminUI()
+  const units = useUnits()
   const idx = indexColumns(result.columns)
   const primary = idx.measures[0]
   // A program's ratio reads its level from the dispute monitor, whose
@@ -224,7 +253,12 @@ function KpiViz({
   const value =
     !row && primary.unit === "money" && !currency
       ? "—"
-      : formatMeasure(row ? row[primary.index] : 0, primary.unit, currency)
+      : formatMeasure(
+          row ? row[primary.index] : 0,
+          primary.unit,
+          currency,
+          units
+        )
   const delta = row ? statDelta(result, row, primary.index) : null
   const direction = registry.direction(primary.name)
   const levels = inForce(registry.thresholds(primary.name), last)
@@ -388,6 +422,7 @@ function StatViz({
   registry: Registry
 }) {
   const { text: adminText } = useAdminUI()
+  const units = useUnits()
 
   const idx = indexColumns(result.columns)
   const primary = idx.measures[0]
@@ -399,7 +434,7 @@ function StatViz({
       <div className="text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl">
         {primary.unit === "money" && !fallback
           ? "—"
-          : formatMeasure(0, primary.unit, fallback)}
+          : formatMeasure(0, primary.unit, fallback, units)}
       </div>
     )
   }
@@ -433,7 +468,7 @@ function StatViz({
                   : "text-2xl @min-[12rem]/tile:text-3xl"
               )}
             >
-              {formatMeasure(row[primary.index], primary.unit, currency)}
+              {formatMeasure(row[primary.index], primary.unit, currency, units)}
             </span>
             {dimLabel ? (
               <span className="text-xs text-muted-foreground">{dimLabel}</span>
@@ -478,6 +513,7 @@ export function MetricTooltip({
   series,
   ...props
 }: ComponentProps<typeof ChartTooltipContent> & { series: PivotSeries[] }) {
+  const units = useUnits()
   const measure = series[0]
   return (
     <ChartTooltipContent
@@ -501,7 +537,7 @@ export function MetricTooltip({
                 name}
             </span>
             <span className="font-mono font-medium tabular-nums">
-              {formatMeasure(cell, measure.unit, measure.currency)}
+              {formatMeasure(cell, measure.unit, measure.currency, units)}
             </span>
           </div>
         )
@@ -584,13 +620,14 @@ function TimeSeriesChart({
   registry: Registry
   rangeEnd?: string
 }) {
+  const units = useUnits()
   const config: ChartConfig = {}
   series.forEach((s, i) => {
     config[s.key] = { label: seriesLabel(s), color: chartColor(i) }
   })
   const unit = series[0]?.unit
   const tickFormatter = (v: number) =>
-    formatMeasure(v, unit, series[0]?.currency)
+    formatMeasure(v, unit, series[0]?.currency, units)
   // A measure's levels (a network's dispute program levels) cross its line,
   // each bucket against the levels in force at its middle, so a month in any
   // timezone reads its own month's; alone on its chart, each level shades
@@ -934,6 +971,7 @@ function TableViz({
   currency?: string
 }) {
   const { text: adminText } = useAdminUI()
+  const units = useUnits()
   // A PSP reads as its key, for those who may read the PSPs.
   const pspKey = usePSPKeys(result.columns.some((c) => c.name === "psp"))
 
@@ -972,7 +1010,7 @@ function TableViz({
                   )
                 else if (c.kind === "measure") {
                   const currency = rowCurrency(row, idx, fallback)
-                  rendered = formatMeasure(cell, c.unit, currency)
+                  rendered = formatMeasure(cell, c.unit, currency, units)
                 } else if (c.name === "psp" && cell)
                   rendered = pspKey(String(cell))
                 else
