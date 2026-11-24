@@ -133,7 +133,7 @@ func summarize(r *Results) string {
 			p("")
 		}
 		var waits int64
-		blockers := map[string]bool{}
+		blockers, waiters := map[string]bool{}, map[string]bool{}
 		for _, s := range w.Samples {
 			waits = max(waits, s.PGLockWaits)
 			for _, b := range s.PGBlockers {
@@ -141,8 +141,13 @@ func summarize(r *Results) string {
 					blockers[b] = true
 				}
 			}
+			for _, b := range s.PGWaiters {
+				if len(waiters) < 5 {
+					waiters[b] = true
+				}
+			}
 		}
-		p("PostgreSQL: at most %d sessions waiting on a lock in a sample; blockers seen: %s", waits, strings.Join(sortedKeys(blockers), " | "))
+		p("PostgreSQL: at most %d sessions waiting on a lock in a sample; blockers seen: %s; waiting for: %s", waits, strings.Join(sortedKeys(blockers), " | "), strings.Join(sortedKeys(waiters), " | "))
 		p("")
 		rowsAndDisk(p, w.Rows, w.Storage)
 	}

@@ -253,12 +253,24 @@ func (e *env) syncAll(ctx context.Context, c *openrails.Client, lease billing.Le
 
 // cloneHeavy copies the customer's one event n times in ClickHouse, spread
 // back over the month so far: a month of a heavy customer's usage, which
-// every posting of the customer scans under FINAL.
+// every posting of the customer scans under FINAL. Each copy keeps the
+// event's pricing period, so it is spread back no further than that period's
+// start: intake never dates an event before its period (an earlier copy
+// would be usage of the previous period filed under this one, which no
+// posting of either period reads).
 func (e *env) cloneHeavy(ctx context.Context, database string, merchant billing.MerchantID, customer billing.CustomerID, n int64, now time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	spread := max(int64(now.Sub(monthStart).Seconds())-60, 1)
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	var period time.Time
+	if err := e.ch.QueryRow(ctx, fmt.Sprintf("SELECT period_starts_at FROM `%s`.usage_events WHERE merchant_id = toUUID('%s') AND customer_id = toUUID('%s') LIMIT 1",
+		database, merchant, customer)).Scan(&period); err != nil {
+		return fmt.Errorf("the heavy customer's period: %w", err)
+	}
+	if period.After(from) {
+		from = period
+	}
+	spread := max(int64(now.Sub(from).Seconds())-60, 1)
 	cols := "merchant_id, event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, " +
 		"dimensions, metadata, amount, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`, `limits.key`, `limits.window_starts_at`, `limits.window_ends_at`, `limits.units`"
 	exprs := strings.NewReplacer(

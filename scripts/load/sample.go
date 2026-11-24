@@ -29,6 +29,8 @@ type Sample struct {
 	// PGBlockers are the sessions others wait on while any wait on a lock:
 	// state, wait and the start of their query.
 	PGBlockers []string `json:"pg_blockers,omitempty"`
+	// PGWaiters are the locks sessions wait for, with their statements.
+	PGWaiters []string `json:"pg_waiters,omitempty"`
 }
 
 const sampleEvery = 5 * time.Second
@@ -207,6 +209,19 @@ func pgSample(ctx context.Context, pool *pgxpool.Pool, s *Sample) {
 	}
 	rows, err := pool.Query(ctx, `SELECT b.state || ' ' || coalesce(b.wait_event_type || ':' || b.wait_event, '-') || ' for ' || round(extract(epoch FROM now() - b.state_change)) || 's: ' || left(regexp_replace(b.query, '\s+', ' ', 'g'), 160)
 FROM pg_stat_activity b WHERE b.pid IN (SELECT unnest(pg_blocking_pids(pid)) FROM pg_stat_activity WHERE wait_event_type = 'Lock') LIMIT 5`)
+	if err == nil {
+		for rows.Next() {
+			var line string
+			if rows.Scan(&line) == nil {
+				s.PGBlockers = append(s.PGBlockers, line)
+			}
+		}
+		rows.Close()
+	}
+	// What the waiters wait for: the lock (pg_locks, not granted) and the
+	// statement waiting on it.
+	rows, err = pool.Query(ctx, `SELECT l.locktype || ' ' || l.mode || coalesce(' on ' || l.relation::regclass::text, '') || ': ' || left(regexp_replace(a.query, '\s+', ' ', 'g'), 120)
+FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE NOT l.granted LIMIT 5`)
 	if err != nil {
 		return
 	}
@@ -214,7 +229,7 @@ FROM pg_stat_activity b WHERE b.pid IN (SELECT unnest(pg_blocking_pids(pid)) FRO
 	for rows.Next() {
 		var line string
 		if rows.Scan(&line) == nil {
-			s.PGBlockers = append(s.PGBlockers, line)
+			s.PGWaiters = append(s.PGWaiters, line)
 		}
 	}
 }
