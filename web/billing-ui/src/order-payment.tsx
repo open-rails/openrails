@@ -80,6 +80,10 @@ const platformCard = (psp: PspConfig) =>
 const settled = (order: Order) =>
   order.status === "complete" || order.status === "processing"
 
+// pageURL is where a hosted payment page returns the customer: this page,
+// without its query or fragment, which may hold what a URL must not carry.
+const pageURL = () => window.location.origin + window.location.pathname
+
 // How often a Solana order awaiting its wallet is read again.
 const SOLANA_POLL_MS = 3000
 // How often an order whose payment OpenRails is still confirming is read
@@ -688,7 +692,7 @@ export function OrderPayment({
               onSubmit={(event) => {
                 event.preventDefault()
                 void pay(async () => ({
-                  return_url: returnUrl ?? window.location.href,
+                  return_url: returnUrl ?? pageURL(),
                   psp_id: item.psp_id,
                 }))
               }}
@@ -722,7 +726,7 @@ export function OrderPayment({
                       aria-describedby={blocked ? reason : undefined}
                       onClick={() =>
                         void pay(async () => ({
-                          return_url: returnUrl ?? window.location.href,
+                          return_url: returnUrl ?? pageURL(),
                           psp_id: item.psp_id,
                         }))
                       }

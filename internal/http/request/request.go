@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/logx"
@@ -424,6 +425,10 @@ func BindError(err error) *api.APIError {
 	}
 	if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
 		field = strings.Trim(field, `"`)
+		if cardguard.ContainsPAN(field) {
+			// The name is a card number: never echo it.
+			return api.Coded(billing.CodeUnknownField, "unknown field "+cardguard.Redacted)
+		}
 		return api.Coded(billing.CodeUnknownField, "unknown field "+field).WithParam(field)
 	}
 	return api.Coded(billing.CodeInvalidParam, normaliseBindError(err))

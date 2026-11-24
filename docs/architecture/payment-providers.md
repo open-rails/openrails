@@ -124,14 +124,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   origins under `limited`, system origin only under `full`, nothing under
   `readonly`. The transports refuse writes again in `readonly`
   (`ErrProviderReadOnly` in `stripeapi` and the NMI client).
-- **Provider posture** (`providerposture.Registry`): a verdict keyed by rail,
-  merchant, PSP, account, endpoint and credential fingerprint. Only `Live` or
-  `Simulated`, as the environment expects, arms. NMI, Solana and Stripe test keys
-  are proven at load and again at the first write after `VerdictTTL` (one hour);
-  a live Stripe key's verdict is its prefix, and the transport refuses it only
-  toward a fake provider (`stripeapi` `guardTransport`). An unarmed PSP's writes
-  fail with `ErrDisarmed` before any bytes are sent; reads work. A sandbox CCBill
-  PSP never arms.
+- **Provider posture** (`providerposture.Registry`): a verdict keyed by rail, merchant, PSP, account, endpoint and credential fingerprint. Only `Live` or `Simulated`, as the environment expects, arms. NMI accounts and Solana networks are proven at load and again at the first write after `VerdictTTL` (one hour). A Stripe key is proven once per merchant, PSP, declared account and key: `GET /v1/account` must name the declared account (another is `Mismatched`), a test key's `GET /v1/balance` must report test mode, and a live key's mode is its prefix; a key Stripe refuses, or one lacking a read's permission, is `Refused` with Stripe's reason, and asked again at most every `RefusedRecheck` (five minutes). Loading a merchant's configuration, in a server or a one-off tool (`merchants.RegisterStripePosture`), makes each Stripe PSP document's key, archived ones too, that document's registration (`Registry.Register`): a changed document replaces it, a removed one drops it. `stripeapi`'s `guardTransport` holds each write to an armed registration of its merchant for its key (`Registry.RequireCredential`), so a document declaring the key with a wrong account disarms only itself: a key the merchant declares nowhere is refused at once with `ErrPending`, an `ErrDisarmed` that parks an intent for a later try, a first check still running is waited for, a 401 Stripe answers to a write refuses the key until it is accepted again (not dispatched), and a live key never goes to a fake provider. An unarmed PSP's writes fail with `ErrDisarmed` before any bytes are sent; reads work. A sandbox CCBill PSP never arms.
 - A second live PSP with another's key (`psps.credential_fingerprint`) stays
   disarmed (`consistency.duplicate_gateway_account`). Objects OpenRails creates
   at NMI and Stripe carry the book id (`internal/booktag`).
@@ -246,12 +239,7 @@ Checks:
 
 ### 7. Work scales with activity
 
-An operation's wake is queued by the write that leaves it live, at its due
-time; `openrails.operation_wakes` only requeues operations an hour overdue, 500
-at a time. Wake jobs coalesce per object. The `Verifier` reads queued ids; the
-rebill watch reads only overdue NMI schedules without an attempt
-(`ListOverdueRebills`). Provider posture is proven per credential set at load
-and at the first write after an hour (a live Stripe key: its prefix), never by sweep.
+An operation's wake is queued by the write that leaves it live, at its due time; `openrails.operation_wakes` only requeues operations an hour overdue, 500 at a time. Wake jobs coalesce per object. The `Verifier` reads queued ids; the rebill watch reads only overdue NMI schedules without an attempt (`ListOverdueRebills`). Provider posture is proven per credential set at load and at the first write after an hour (a Stripe key's once), never by sweep.
 
 Checks:
 - `OperationWakes.Pass` uses `ListOverdueProviderOperations` past `OperationWakeGrace`; OR-J04-S60 requeues a lost wake.
@@ -293,7 +281,7 @@ Checks:
 
 Critical scenarios:
 
-- J06: OR-J06-S01 to S05, S30, S31, S60 to S64 (`TestPSPControls`, `TestStripeWebhookDueWork`), S07 (`TestBackgroundJobs`), S08 (`TestPSPPostureExpiry`), S65 (`TestDueWork`).
+- J06: OR-J06-S01 to S05, S09, S30, S31, S60 to S64 (`TestPSPControls`, `TestStripeWebhookDueWork`), S07 (`TestBackgroundJobs`), S08 (`TestPSPPostureExpiry`), S65 (`TestDueWork`).
 - J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestOrderPaymentReceipts`).
 - J11: OR-J11-S01, S02 (`TestProviderRecovery`), S04 (`TestUnresolvedRouting`).
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).

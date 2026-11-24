@@ -7,6 +7,8 @@ package cardguard
 const (
 	minPANDigits = 13
 	maxPANDigits = 19
+	// maxE164Digits is the longest phone number E.164 allows.
+	maxE164Digits = 15
 )
 
 // ContainsPAN reports whether s contains a payment card number. A candidate is
@@ -19,6 +21,8 @@ const (
 //     an identifier's digit groups always do.
 //  3. Luhn: the check digit passes.
 //  4. Range: its leading digits and length are an issued range (issuedRange).
+//  5. Not a phone: one unseparated run of at most 15 digits right after a +
+//     (E.164) is none; a longer or separated one still is.
 //
 // Rules 1 and 2 exclude UUIDs exactly; rule 4 excludes 13/16/19-digit epoch
 // keys starting with 1. An unseparated 13-19 digit run is a candidate wherever
@@ -41,7 +45,7 @@ func ContainsPAN(s string) bool {
 			}
 			digits = append(digits, groups[j].digits...)
 			lens = append(lens, len(groups[j].digits))
-			if len(digits) < minPANDigits {
+			if len(digits) < minPANDigits || j == i && groups[i].plusBefore && len(digits) <= maxE164Digits {
 				continue
 			}
 			// Rule 2 applies to separated candidates only: an unseparated run
@@ -58,12 +62,14 @@ func ContainsPAN(s string) bool {
 }
 
 // digitGroup is one run of digits, whether card formatting — and nothing else —
-// separated it from the run before it, and whether a letter butts against it.
+// separated it from the run before it, whether a letter butts against it, and
+// whether a + opens it.
 type digitGroup struct {
 	digits       []byte
 	joined       bool
 	letterBefore bool
 	letterAfter  bool
+	plusBefore   bool
 }
 
 func digitGroups(s string) []digitGroup {
@@ -85,6 +91,7 @@ func digitGroups(s string) []digitGroup {
 		group.joined = len(out) > 0 && isCardFormatting(s[gap:start])
 		group.letterBefore = start > 0 && isLetter(s[start-1])
 		group.letterAfter = i < len(s) && isLetter(s[i])
+		group.plusBefore = start > 0 && s[start-1] == '+'
 		out = append(out, group)
 		gap = i
 	}

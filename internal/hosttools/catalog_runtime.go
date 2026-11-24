@@ -52,10 +52,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	// Mapping a provider price wakes the subscriptions parked on it.
 	bindParkWakes(ctx, cfg, database)
 	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: logger}
-	rt.StripeClients = stripeapi.NewFactory(nil)
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
-	}
+	rt.StripeClients = stripeapi.ConfiguredFactory(cfg)
 	cleanup := func() {
 		cancel()
 		if err := rt.Close(context.Background()); err != nil {
@@ -78,7 +75,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	previous := cleanup
 	cleanup = func() { opened.Close(); previous() }
 	rt.Merchants, rt.MerchantConfig = opened.Service, opened.Service.Config()
-	rt.Merchants.StripeClients = rt.StripeClients
+	rt.StripeClients = rt.Merchants.StripeClients // the one its load registered Stripe posture with
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
 	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: cfg, MerchantsFn: func() *merchants.Service { return rt.Merchants }, Endpoint: config.SandboxSolanaRPCURL(cfg), Log: logger}
 	// Catalog application publishes recurring plans with the deployment's

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 527,
+  "scenario_count": 531,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1369,6 +1369,11 @@
       "name": "A PSP's environment proof expires after an hour and is proven again before the next write; an account that changed environment is refused"
     },
     {
+      "id": "OR-J06-S09",
+      "journey": "J06",
+      "name": "A live Stripe key of the declared account passes the production write gate; one of another account is Mismatched and writes nothing"
+    },
+    {
       "id": "OR-J12-S08",
       "journey": "J12",
       "name": "Expired vault card is updated at its Account Updater, as a new token or a new expiry, and its renewal retries on it"
@@ -1777,6 +1782,21 @@
       "id": "OR-J12-S13",
       "journey": "J12",
       "name": "Each Stripe account charges and saves cards on its own customer; another account's customer is never reused or overwritten"
+    },
+    {
+      "id": "OR-J12-S14",
+      "journey": "J12",
+      "name": "A card number in any field of a card save or order payment but the typed card is refused before a provider sees it"
+    },
+    {
+      "id": "OR-J12-S15",
+      "journey": "J12",
+      "name": "A HyperSwitch card save consults the card-testing ledger: a blocked customer never reaches HyperSwitch"
+    },
+    {
+      "id": "OR-J12-S16",
+      "journey": "J12",
+      "name": "Legitimate phone numbers, UUIDs, Solana addresses and numeric order ids pass the firewall on every card route, which refuses a card number; a card number as a field name is not echoed and no test header is stored"
     },
     {
       "id": "OR-J06-S30",

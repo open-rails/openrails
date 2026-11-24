@@ -914,6 +914,9 @@
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/test-account-leaves-test-mode",
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/live-account-enters-test-mode"
     ],
+    "OR-J06-S09": [
+      "TestPSPControls/OR-J06-S09/a-live-stripe-key-of-another-account-is-mismatched-and-never-armed"
+    ],
     "OR-J06-S30": [
       "TestPSPControls/OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint"
     ],
@@ -1237,6 +1240,15 @@
     ],
     "OR-J12-S13": [
       "TestStripeCustomerPerAccount/OR-J12-S13/each-stripe-account-resolves-its-own-customer"
+    ],
+    "OR-J12-S14": [
+      "TestCardGuard/OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused"
+    ],
+    "OR-J12-S15": [
+      "TestPaymentMethodContracts/OR-J12-S15/a-hyperswitch-card-save-consults-the-card-testing-ledger"
+    ],
+    "OR-J12-S16": [
+      "TestCardGuard/OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route"
     ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
