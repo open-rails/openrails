@@ -54,15 +54,16 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
 	from := strings.TrimSpace(resolved.PolicyCurrency)
 	to := money.NormalizeCurrency(requestCurrency)
+	// No rate converts money into a merchant's unit, and a cap naming no
+	// currency is money: a policy's caps bind no unit.
+	if currency.IsUnitCode(to) && money.NormalizeCurrency(from) != to {
+		resolved.OutstandingCapAmount, resolved.AccrualRateCapPerHour = 0, 0
+		return resolved, nil
+	}
 	if from == "" || money.NormalizeCurrency(from) == to {
 		return resolved, nil
 	}
 	resolved.OutstandingCapAmount = 0
-	// No rate converts money into a merchant's unit: its caps bind only money.
-	if currency.IsUnitCode(to) {
-		resolved.AccrualRateCapPerHour = 0
-		return resolved, nil
-	}
 	if resolved.AccrualRateCapPerHour > 0 {
 		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, resolved.AccrualRateCapPerHour)
 		if err != nil {
@@ -87,10 +88,11 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 		if c == "" {
 			c = strings.TrimSpace(policyCurrency)
 		}
+		// A window naming no currency is money: it binds no unit.
+		if currency.IsUnitCode(reqCur) && money.NormalizeCurrency(c) != reqCur {
+			continue
+		}
 		if c != "" && money.NormalizeCurrency(c) != reqCur {
-			if currency.IsUnitCode(reqCur) {
-				continue
-			}
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)
 			if err != nil {
 				return nil, err

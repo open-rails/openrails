@@ -85,9 +85,11 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 		}
 		byMeter := map[string]int64{}
 		var meters []string
+		var posting []AccrualLine
 		for i := range lines {
 			delta := lines[i].Amount - lines[i].PostedAmount
 			if delta > 0 {
+				posting = append(posting, AccrualLine{MeterKey: lines[i].MeterKey, Cell: lines[i].Cell, Amount: delta})
 				if _, ok := byMeter[lines[i].MeterKey]; !ok {
 					meters = append(meters, lines[i].MeterKey)
 				}
@@ -109,19 +111,44 @@ func (s *MoneyService) postUsageAccrualsTx(ctx context.Context, q *gen.Queries, 
 		if err := q.MarkUsageAccrualPosted(ctx, gen.MarkUsageAccrualPostedParams{Lines: encoded, Now: now, MerchantID: merchantID, ID: row.ID}); err != nil {
 			return false, err
 		}
-		posting := *s
-		posting.clock = clockwork.NewFakeClockAt(now)
-		posting.posting = &runningChargePosting{through: through, owed: owed, owedAt: owedAt(row, now, billed)}
+		spender := *s
+		spender.clock = clockwork.NewFakeClockAt(now)
+		spender.posting = &runningChargePosting{through: through, owed: owed, owedAt: owedAt(row, now, billed)}
 		key := MustIdempotencyKey(OpUsageAccrual, usageAccrualSourcePrefix+row.ID.String(), strconv.Itoa(int(row.Postings)+1))
-		_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
+		spent, owedAccrued, applied, err := spender.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
 		if err != nil {
 			return false, err
 		}
 		if !applied {
 			return false, fmt.Errorf("usage accrual %s: the ledger already held posting %d", row.ID, row.Postings+1)
 		}
+		// What a merchant's unit could not pay is forgiven usage, not charged.
+		if waived := amount - spent - owedAccrued; waived > 0 {
+			if err := forgiveUsage(ctx, q, row, posting, waived, now); err != nil {
+				return false, err
+			}
+		}
 	}
 	return true, nil
+}
+
+// forgiveUsage moves waived of a posting's usage, shared across the meter
+// cells it posted, from charged to forgiven in the day's rollups.
+func forgiveUsage(ctx context.Context, q *gen.Queries, row gen.BillingUsageAccrual, posting []AccrualLine, waived int64, now time.Time) error {
+	weights := make([]int64, len(posting))
+	for i, l := range posting {
+		weights[i] = l.Amount
+	}
+	for i, amount := range share(waived, weights) {
+		if amount <= 0 {
+			continue
+		}
+		if err := q.ForgiveUsageDaily(ctx, gen.ForgiveUsageDailyParams{Amount: amount, MerchantID: row.MerchantID, CustomerID: row.CustomerID, DayAt: row.DayAt,
+			Currency: row.Currency, MeterKey: posting[i].MeterKey, Cell: posting[i].Cell, Now: now}); err != nil {
+			return fmt.Errorf("forgive usage: %w", err)
+		}
+	}
+	return nil
 }
 
 // owedAt dates what an accrual's posting leaves owed: the last instant of its

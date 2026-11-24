@@ -28,11 +28,17 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND billing_policy IS NOT NULL
   AND NOT (billing_policy = ANY(COALESCE(sqlc.arg(names)::text[], '{}')))
 LIMIT 1;
 
--- name: MerchantUnitInUse :one
--- Whether a merchant's unit counts anything: a balance (whose deposit made a
--- system account in it), a price, a product's credit or a rate card. A
--- settings change may not remove or rescale it then.
-SELECT EXISTS (SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id IS NULL AND a.currency = sqlc.arg(unit)::text)
-    OR EXISTS (SELECT 1 FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.currency = sqlc.arg(unit)::text)
-    OR EXISTS (SELECT 1 FROM billing.products p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.credit_grant ->> 'currency' = sqlc.arg(unit)::text)
-    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.price ->> 'currency' = sqlc.arg(unit)::text) AS in_use;
+-- name: ListMerchantUnitsInUse :many
+-- The merchant's own units something counts: a balance (whose deposit made a
+-- system account in it), a price, a product's credit or a rate card. Every
+-- code outside the registry is a unit. A settings change may not remove or
+-- rescale one.
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT a.currency AS code FROM billing.ledger_accounts a WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id IS NULL
+    UNION ALL SELECT p.currency FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL(sqlc.arg(registry)::text[])
+ORDER BY 1;

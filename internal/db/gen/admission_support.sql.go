@@ -86,26 +86,45 @@ func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg 
 	return items, nil
 }
 
-const merchantUnitInUse = `-- name: MerchantUnitInUse :one
-SELECT EXISTS (SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id = $1::uuid AND a.customer_id IS NULL AND a.currency = $2::text)
-    OR EXISTS (SELECT 1 FROM billing.prices p WHERE p.merchant_id = $1::uuid AND p.currency = $2::text)
-    OR EXISTS (SELECT 1 FROM billing.products p WHERE p.merchant_id = $1::uuid AND p.credit_grant ->> 'currency' = $2::text)
-    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid AND c.price ->> 'currency' = $2::text) AS in_use
+const listMerchantUnitsInUse = `-- name: ListMerchantUnitsInUse :many
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT a.currency AS code FROM billing.ledger_accounts a WHERE a.merchant_id = $1::uuid AND a.customer_id IS NULL
+    UNION ALL SELECT p.currency FROM billing.prices p WHERE p.merchant_id = $1::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = $1::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL($2::text[])
+ORDER BY 1
 `
 
-type MerchantUnitInUseParams struct {
+type ListMerchantUnitsInUseParams struct {
 	MerchantID uuid.UUID
-	Unit       string
+	Registry   []string
 }
 
-// Whether a merchant's unit counts anything: a balance (whose deposit made a
-// system account in it), a price, a product's credit or a rate card. A
-// settings change may not remove or rescale it then.
-func (q *Queries) MerchantUnitInUse(ctx context.Context, arg MerchantUnitInUseParams) (bool, error) {
-	row := q.db.QueryRow(ctx, merchantUnitInUse, arg.MerchantID, arg.Unit)
-	var in_use bool
-	err := row.Scan(&in_use)
-	return in_use, err
+// The merchant's own units something counts: a balance (whose deposit made a
+// system account in it), a price, a product's credit or a rate card. Every
+// code outside the registry is a unit. A settings change may not remove or
+// rescale one.
+func (q *Queries) ListMerchantUnitsInUse(ctx context.Context, arg ListMerchantUnitsInUseParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listMerchantUnitsInUse, arg.MerchantID, arg.Registry)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		items = append(items, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setCustomerBillingPolicy = `-- name: SetCustomerBillingPolicy :execrows

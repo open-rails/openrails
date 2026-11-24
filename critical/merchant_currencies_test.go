@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -135,6 +137,35 @@ func TestMerchantCurrencies(t *testing.T) {
 		require.Equal(t, edited.Revision, after.Revision, "a refused edit writes nothing")
 		require.Equal(t, []billing.MerchantCurrency{goldUnit}, after.Currencies)
 		require.Nil(t, after.UsageBilling)
+
+		// A Vault edit made outside OpenRails that removes the counted unit
+		// keeps serving its declaration, with a finding.
+		path := a.cfg.Vault.KVMount + "/data/openrails/merchants/" + a.alpha.MerchantID().UUID().String() + "/merchant"
+		stored, err := a.deps.Vault.Logical().ReadWithContext(t.Context(), path)
+		require.NoError(t, err)
+		data := stored.Data["data"].(map[string]any)
+		data["currencies"] = []any{map[string]any{"code": "CREDITS", "name": "Credits", "scale": 2}}
+		_, err = a.deps.Vault.Logical().WriteWithContext(t.Context(), path, map[string]any{"data": data})
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "SELECT pg_notify($1, $2)", merchantdocs.Channel(a.schema), a.alpha.MerchantID().UUID().String())
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			findings, err := a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: merchantdocs.RefusedDocumentFindingType})
+			if err != nil {
+				return false
+			}
+			for _, f := range findings.Items {
+				if f.SubjectKey == "currencies" && (f.Status == "reconcile_required" || f.Status == "requires_review") {
+					return true
+				}
+			}
+			return false
+		}, 20*time.Second, 50*time.Millisecond, "the operator is told the unit is still counted")
+		units := customerUnits(t, a, a.aliceToken)
+		require.Contains(t, units, billing.MerchantCurrency{Code: "GOLD", Name: "Gold coins", Symbol: "🪙"}, "GOLD keeps the declaration its balances are counted in")
+		gold, err := a.alphaRemote.GetBalance(t.Context(), billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.GetBalanceParams{Currency: "GOLD"})
+		require.NoError(t, err)
+		require.EqualValues(t, 400, gold.BalanceAmount)
 	})
 
 	t.Run("OR-J05-S08/a-unit-is-never-owed-never-a-packs-price-and-only-the-merchants-own", func(t *testing.T) {

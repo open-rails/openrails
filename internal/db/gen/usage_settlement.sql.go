@@ -37,6 +37,49 @@ func (q *Queries) AddToUsageAccrual(ctx context.Context, arg AddToUsageAccrualPa
 	return err
 }
 
+const forgiveUsageDaily = `-- name: ForgiveUsageDaily :exec
+WITH r AS (
+    SELECT d.event_type, d.invoker, d.outcome,
+           LEAST(d.amount, GREATEST($1::bigint - (SUM(d.amount) OVER (ORDER BY d.event_type, d.invoker, d.outcome) - d.amount), 0)) AS take
+    FROM billing.usage_daily d
+    WHERE d.merchant_id = $2::uuid AND d.customer_id = $3::uuid AND d.day_at = $4::timestamptz
+      AND d.currency = $5::text AND d.meter_key = $6::text AND d.cell = $7::text AND d.amount > 0
+)
+UPDATE billing.usage_daily d
+SET amount = d.amount - r.take, forgiven_amount = d.forgiven_amount + r.take, updated_at = $8::timestamptz
+FROM r
+WHERE d.merchant_id = $2::uuid AND d.customer_id = $3::uuid AND d.day_at = $4::timestamptz
+  AND d.currency = $5::text AND d.meter_key = $6::text AND d.cell = $7::text
+  AND d.event_type = r.event_type AND d.invoker = r.invoker AND d.outcome = r.outcome AND r.take > 0
+`
+
+type ForgiveUsageDailyParams struct {
+	Amount     int64
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	DayAt      time.Time
+	Currency   string
+	MeterKey   string
+	Cell       string
+	Now        time.Time
+}
+
+// Moves amount of one meter cell's charged usage on a day to forgiven, from
+// its rows in key order: what a posting could not draw of a merchant's unit.
+func (q *Queries) ForgiveUsageDaily(ctx context.Context, arg ForgiveUsageDailyParams) error {
+	_, err := q.db.Exec(ctx, forgiveUsageDaily,
+		arg.Amount,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.DayAt,
+		arg.Currency,
+		arg.MeterKey,
+		arg.Cell,
+		arg.Now,
+	)
+	return err
+}
+
 const getFirstPostingSince = `-- name: GetFirstPostingSince :one
 SELECT id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid

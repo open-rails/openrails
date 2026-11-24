@@ -240,6 +240,20 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: in.CustomerID}); err != nil {
 			return err
 		}
+		// A retry of an order in a merchant's unit, which the balance paid as
+		// it was created, answers that order before anything else is read.
+		if in.BalanceKey != "" && in.IdempotencyKey == "" {
+			prior, err := q.GetOrderByIdempotencyKey(ctx, gen.GetOrderByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: in.BalanceKey})
+			switch {
+			case err == nil && (prior.CustomerID != in.CustomerID || !bytes.Equal(prior.RequestDigest, in.BalanceDigest)):
+				return errUnitOrderKeyReused
+			case err == nil:
+				id, found = prior.ID, true
+				return nil
+			case !db.IsNotFound(err):
+				return err
+			}
+		}
 		if len(in.LinesDigest) > 0 {
 			open, err := q.GetOpenOrderByLines(ctx, gen.GetOpenOrderByLinesParams{MerchantID: mid.UUID(), CustomerID: in.CustomerID, LinesDigest: in.LinesDigest})
 			switch {
@@ -282,21 +296,11 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 		}
 		unit := InMerchantUnit(quote.Currency)
 		keyed, digest := in.IdempotencyKey, in.RequestDigest
-		// An order in a merchant's unit is paid as it is created: its key
-		// answers a retry with that order instead of spending again.
+		// An order in a merchant's unit is paid as it is created: it keeps
+		// its key, which answers a retry instead of spending again.
 		if unit && quote.Total > 0 && keyed == "" {
 			if in.BalanceKey == "" {
 				return errUnitOrderKey
-			}
-			prior, err := q.GetOrderByIdempotencyKey(ctx, gen.GetOrderByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: in.BalanceKey})
-			switch {
-			case err == nil && (prior.CustomerID != in.CustomerID || !bytes.Equal(prior.RequestDigest, in.BalanceDigest)):
-				return errUnitOrderKeyReused
-			case err == nil:
-				id, found = prior.ID, true
-				return nil
-			case !db.IsNotFound(err):
-				return err
 			}
 			keyed, digest = in.BalanceKey, in.BalanceDigest
 		}

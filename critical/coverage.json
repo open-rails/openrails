@@ -141,7 +141,7 @@
     {
       "id": "OR-J05-S07",
       "journey": "J05",
-      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing; a unit a balance counts is neither removed nor rescaled"
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing; a unit a balance counts is neither removed nor rescaled, and a Vault edit outside OpenRails that removes it keeps serving its declaration with a finding"
     },
     {
       "id": "OR-J05-S08",
@@ -2531,7 +2531,7 @@
     {
       "id": "OR-J48-S01",
       "journey": "J48",
-      "name": "A pack buys a merchant's unit at its own price-to-units ratio, bonus packs included: one lot per pack records its units, what was paid and in what currency, deposited from processor_clearing, and the balance shows at the unit's scale"
+      "name": "A pack buys a merchant's unit at its own price-to-units ratio, bonus packs included: one lot per pack records its units, what was paid and in what currency, deposited from processor_clearing; the balance shows at the unit's scale, and the lots move with a billing archive"
     },
     {
       "id": "OR-J48-S02",
@@ -2546,17 +2546,17 @@
     {
       "id": "OR-J48-S04",
       "journey": "J48",
-      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; a balance short of it is refused insufficient_credits and creates nothing"
+      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; its key answers a retry with the same order; a balance short of it is refused insufficient_credits and creates nothing"
     },
     {
       "id": "OR-J48-S05",
       "journey": "J48",
-      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first; usage the units cannot cover is never owed"
+      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first, and a card naming no currency prices no unit; usage the units cannot cover is never owed"
     },
     {
       "id": "OR-J48-S06",
       "journey": "J48",
-      "name": "A lapsed pack is never drawn and its unspent units expire in the unit, once"
+      "name": "A lapsed pack is never drawn and its unspent units expire in the unit, once; usage captured before a lot lapsed and posted after is forgiven usage"
     },
     {
       "id": "OR-J48-S07",
@@ -2566,7 +2566,7 @@
     {
       "id": "OR-J48-S08",
       "journey": "J48",
-      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused; a capture's overrun charges what the units still cover and the rest is forgiven usage in usage_charged, and the customer reads its usage in the unit"
+      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused, and a dollar failed-usage limit binds no unit; a capture's overrun charges what the units still cover and the rest is forgiven usage in usage_charged, and the customer reads its usage in the unit"
     }
   ]
 }

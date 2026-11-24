@@ -293,12 +293,19 @@ func (s *Service) failedUsageWindows(ctx context.Context, customer identity.Cust
 		return nil, err
 	}
 	out := make([]money.FailedUsageWindow, 0, len(windows))
+	unit := money.IsMerchantUnit(currency)
 	for _, w := range windows {
 		if w.Limit <= 0 || w.Window < time.Second {
 			continue
 		}
 		limit := w.Limit
-		if wc := money.NormalizeCurrency(w.Currency); wc != "" && wc != currency {
+		wc := money.NormalizeCurrency(w.Currency)
+		// No rate converts money into a merchant's unit, and a limit naming no
+		// currency (the defaults among them) is money.
+		if unit && wc != currency {
+			continue
+		}
+		if wc != "" && wc != currency {
 			if limit, _, err = fx.ConvertAmount(ctx, s.rt.FXProvider, wc, currency, w.Limit); err != nil {
 				return nil, err
 			}

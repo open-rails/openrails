@@ -313,15 +313,29 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return validateReferences(ctx, tx, id)
 }
 
+// registryCurrencies is OpenRails' registry as an SQL array: every other code
+// a balance or credit grant names is a merchant's unit.
+var registryCurrencies = func() string {
+	codes := make([]string, 0, len(moneyutil.CurrencyCodes()))
+	for _, code := range moneyutil.CurrencyCodes() {
+		codes = append(codes, "'"+code+"'")
+	}
+	return "ARRAY[" + strings.Join(codes, ",") + "]::text[]"
+}()
+
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
 	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.
+	// A pack of a merchant's unit sells in any registry currency; no credit
+	// product sells in a unit.
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (
     (prices.customer_amount IS NOT NULL AND (pr.credit_grant IS NULL OR NOT COALESCE((pr.credit_grant->>'from_payment')::boolean,false)))
-    OR (pr.credit_grant IS NOT NULL AND (prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
+    OR (pr.credit_grant IS NOT NULL AND (
+       (prices.currency IS DISTINCT FROM pr.credit_grant->>'currency' AND pr.credit_grant->>'currency' = ANY(` + registryCurrencies + `))
+       OR prices.currency <> ALL(` + registryCurrencies + `)
        OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
 
 	// A native lot retains its payment's accepted promise. The product's current
@@ -330,7 +344,7 @@ var referenceChecks = []rowCheck{
   SELECT 1 FROM billing.credit_grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
   WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
     AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
-    AND g.unit=payments.currency AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
+    AND g.unit=payments.credit_grant_snapshot->>'currency' AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
     AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
     AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},

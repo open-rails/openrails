@@ -468,6 +468,10 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	}
 
 	price, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
+		// Under the catalog lock a configuration edit takes to remove a unit.
+		if err := scoped.ownUnit(ctx, "currency", string(req.Currency)); err != nil {
+			return nil, err
+		}
 		products, err := scoped.requireProductService()
 		if err != nil {
 			return nil, err

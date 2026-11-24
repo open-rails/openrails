@@ -221,12 +221,33 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		set.Merchant, set.HasMerchant = previous.Merchant, previous.HasMerchant
 		return set
 	}
+	mctx := merchant.WithID(ctx, id)
+	// A unit something counts keeps the declaration it is counted in: a
+	// document that removes or rescales one serves its previous declaration
+	// of it, with a finding.
+	var inUse []string
+	if err := r.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		inUse, err = merchantconfig.UnitsInUse(ctx, gen.New(tx), id.UUID())
+		return err
+	}); err != nil {
+		return previous, err
+	}
+	var served []billing.MerchantCurrency
+	if previous.HasMerchant {
+		served = previous.Merchant.Value.Currencies
+	}
+	if why := merchantconfig.KeepCountedUnits(inUse, served, &set.Merchant.Value.MerchantSettings); why != "" {
+		if set.Rejected == nil {
+			set.Rejected = map[string]string{}
+		}
+		set.Rejected[merchantconfig.UnitsDoc] = why
+	}
 	doc := set.Merchant.Value
 	settings, err := merchantconfig.Normalize(doc.DisplayName, doc.MerchantSettings)
 	if err != nil {
 		return reject("settings: " + err.Error()), nil
 	}
-	mctx := merchant.WithID(ctx, id)
 	err = r.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := scim.Declare(ctx, q, id, doc.Secrets.SCIMToken); err != nil {

@@ -176,3 +176,20 @@ SELECT COALESCE(SUM(amount - posted_amount), 0)::bigint AS unposted
 FROM billing.usage_accruals
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND amount > posted_amount;
+
+-- name: ForgiveUsageDaily :exec
+-- Moves amount of one meter cell's charged usage on a day to forgiven, from
+-- its rows in key order: what a posting could not draw of a merchant's unit.
+WITH r AS (
+    SELECT d.event_type, d.invoker, d.outcome,
+           LEAST(d.amount, GREATEST(sqlc.arg(amount)::bigint - (SUM(d.amount) OVER (ORDER BY d.event_type, d.invoker, d.outcome) - d.amount), 0)) AS take
+    FROM billing.usage_daily d
+    WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND d.customer_id = sqlc.arg(customer_id)::uuid AND d.day_at = sqlc.arg(day_at)::timestamptz
+      AND d.currency = sqlc.arg(currency)::text AND d.meter_key = sqlc.arg(meter_key)::text AND d.cell = sqlc.arg(cell)::text AND d.amount > 0
+)
+UPDATE billing.usage_daily d
+SET amount = d.amount - r.take, forgiven_amount = d.forgiven_amount + r.take, updated_at = sqlc.arg(now)::timestamptz
+FROM r
+WHERE d.merchant_id = sqlc.arg(merchant_id)::uuid AND d.customer_id = sqlc.arg(customer_id)::uuid AND d.day_at = sqlc.arg(day_at)::timestamptz
+  AND d.currency = sqlc.arg(currency)::text AND d.meter_key = sqlc.arg(meter_key)::text AND d.cell = sqlc.arg(cell)::text
+  AND d.event_type = r.event_type AND d.invoker = r.invoker AND d.outcome = r.outcome AND r.take > 0;
