@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 483,
+  "scenario_count": 484,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2404,11 +2404,6 @@
       "name": "Newly mapped codes decline with their cause: NMI 461 is the merchant account's brand, and Stripe's do_not_try_again, new_account_information_available, service_not_allowed, mobile_device_authentication_required, invalid_amount and testmode_decline have their reasons"
     },
     {
-      "id": "OR-J45-S05",
-      "journey": "J45",
-      "name": "Mastercard retry-after advice (MAC 24 to 30) delays the next dunning retry, and advice past the case's window waits for a new card instead of canceling"
-    },
-    {
       "id": "OR-J45-S06",
       "journey": "J45",
       "name": "New card data (MAC 01, confirm_card_data) is update_cardholder_data, and cards that won't recur (MAC 40, 41) wait for a new card"
@@ -2417,6 +2412,16 @@
       "id": "OR-J45-S09",
       "journey": "J45",
       "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, and keeps each attempt's action"
+    },
+    {
+      "id": "OR-J45-S05",
+      "journey": "J45",
+      "name": "Mastercard retry-after advice (MAC 24 to 30) delays the next dunning retry; a delay past the case's window keeps the subscription past due, retries at the advised time and recovers, never asking for another card"
+    },
+    {
+      "id": "OR-J45-S11",
+      "journey": "J45",
+      "name": "An engine NMI renewal declined with 200 reads the issuer's code after the decline, or from the order read when the answer was lost; a failed read keeps NMI's own code"
     }
   ]
 }

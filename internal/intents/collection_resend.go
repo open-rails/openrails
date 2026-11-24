@@ -155,21 +155,31 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, res
 	return client.ReadRecurringOrderAttempts(ctx, accepted)
 }
 
+// CustomerIssuerRead bounds the issuer read of a decline a customer waits on;
+// other reads take the client's own timeout.
+const CustomerIssuerRead = 2 * time.Second
+
 // ReadNMIIssuerAnswer is the issuer's answer to a declined transaction of the
 // operation's accepted account, read from the Query API; empty when the read
-// fails, which leaves NMI's own code to classify the decline.
-func ReadNMIIssuerAnswer(ctx context.Context, logger *slog.Logger, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, transactionID string) decline.Evidence {
+// fails, which leaves NMI's own code to classify the decline. customer: the
+// customer is waiting, so the read gives up after CustomerIssuerRead.
+func ReadNMIIssuerAnswer(ctx context.Context, logger *slog.Logger, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, transactionID string, customer bool) decline.Evidence {
 	client, err := resolveReceiptNMIClient(ctx, resolver, in)
 	if err != nil {
 		logger.WarnContext(ctx, "NMI decline classified without the issuer's answer", "transaction_id", transactionID, logx.Err(err))
 		return decline.Evidence{}
 	}
-	return readIssuerAnswer(ctx, logger, client, transactionID)
+	return readIssuerAnswer(ctx, logger, client, transactionID, customer)
 }
 
-func readIssuerAnswer(ctx context.Context, logger *slog.Logger, client *nmi.NMIClient, transactionID string) decline.Evidence {
+func readIssuerAnswer(ctx context.Context, logger *slog.Logger, client *nmi.NMIClient, transactionID string, customer bool) decline.Evidence {
 	if strings.TrimSpace(transactionID) == "" {
 		return decline.Evidence{}
+	}
+	if customer {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, CustomerIssuerRead)
+		defer cancel()
 	}
 	issuer, err := client.IssuerAnswer(ctx, transactionID)
 	if err != nil {

@@ -153,7 +153,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 			return Ambiguous("rebill response requires provider verification")
 		}
 		refusal := RecurringDecline{ResponseCode: response.ResponseCode, Reference: response.TransactionID}
-		refusal.Issuer = readIssuerAnswer(ctx, h.DB.Log, client, response.TransactionID)
+		refusal.Issuer = readIssuerAnswer(ctx, h.DB.Log, client, response.TransactionID, p.Initiator == charge.InitiatorCustomer)
 		if err := h.retainDecline(ctx, in, refusal); err != nil {
 			return Ambiguous("retain rebill refusal: " + err.Error())
 		}

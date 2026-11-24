@@ -3,10 +3,14 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -314,6 +318,53 @@ func TestDeclineCauses(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code", func(t *testing.T) {
+		renew := func(t *testing.T, issuer string, fault func(*nmiJournal)) (*authorityWorld, *billing.Subscription, billing.PaymentAttempt) {
+			t.Helper()
+			a, p, sub := nmiEngineMembership(t)
+			p.core.SetDecline("4242", "200")
+			p.core.SetIssuerCode("4242", issuer)
+			fault(p)
+			a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+			fleet := hostFleet(t, a.world)
+			fleet.PeriodicJobs().Clear()
+			require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+			require.NoError(t, fleet.Start(t.Context()))
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			var rebill []billing.PaymentAttempt
+			require.Eventually(t, func() bool {
+				a.clock.Advance(6 * time.Minute)
+				wakeJobs(t, fleet, "openrails.provider_operation")
+				page, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID, Kind: []string{"rebill"}})
+				require.NoError(t, err)
+				rebill = page.Items
+				return len(rebill) > 0
+			}, 30*time.Second, 50*time.Millisecond)
+			require.Len(t, rebill, 1)
+			return a, sub, rebill[0]
+		}
+		t.Run("a-never-retry-code-behind-200-waits-for-a-new-card", func(t *testing.T) {
+			a, sub, rebill := renew(t, "04", func(*nmiJournal) {})
+			require.Equal(t, billing.DeclinePickupCard, rebill.Reason)
+			require.Equal(t, "fix_payment_method", rebill.Action)
+			require.Equal(t, "04", rebill.IssuerCode)
+			waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+			require.NotNil(t, waiting.Dunning)
+			require.True(t, waiting.Dunning.WaitingForNewCard)
+		})
+		t.Run("a-lost-answer-takes-the-issuers-code-from-the-order-read", func(t *testing.T) {
+			_, _, rebill := renew(t, "51", func(p *nmiJournal) { p.core.DropSaleResponses(1) })
+			require.Equal(t, billing.DeclineInsufficientFunds, rebill.Reason, "the order read carries the issuer's code")
+			require.Equal(t, "51", rebill.IssuerCode)
+			require.Equal(t, "retry", rebill.Action)
+		})
+		t.Run("a-failed-issuer-read-keeps-nmis-own-code", func(t *testing.T) {
+			_, _, rebill := renew(t, "04", func(p *nmiJournal) { p.core.FailRequests(transactionLookup, http.StatusServiceUnavailable, 1_000_000) })
+			require.Equal(t, billing.DeclineGeneric, rebill.Reason)
+			require.Equal(t, "retry", rebill.Action)
+			require.Empty(t, rebill.IssuerCode)
+		})
+	})
 	t.Run("OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code", func(t *testing.T) {
 		for _, tc := range []struct {
 			name, issuer string
@@ -367,6 +418,38 @@ func TestDeclineCauses(t *testing.T) {
 			})
 		}
 	})
+}
+
+// nmiEngineMembership buys a weekly OpenRails membership on NMI with a new
+// card the gateway vaults: OpenRails collects its renewals.
+func nmiEngineMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.Subscription) {
+	t.Helper()
+	a, p := newNMIWorld(t)
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-engine-membership", DisplayName: "NMI engine membership", Entitlements: []string{"nmi:engine"}})
+	require.NoError(t, err)
+	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
+	require.NoError(t, err)
+	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-engine-membership"})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
+	require.NotNil(t, order.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, "engine", string(sub.CollectionPolicy))
+	return a, p, sub
+}
+
+// transactionLookup matches the Query API's read of one transaction by id.
+func transactionLookup(r *http.Request) bool {
+	body, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	form, _ := url.ParseQuery(string(body))
+	query := strings.HasSuffix(r.URL.Path, "/query.php") || form.Has("report_type")
+	return query && (form.Get("transaction_id") != "" || r.URL.Query().Get("transaction_id") != "")
 }
 
 // convergeNMISubscription runs the convergence a provider notice queues for
