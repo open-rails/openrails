@@ -131,8 +131,12 @@ return 0`)
 // Claim takes key's slot when it is open at now, the caller's clock, and
 // keeps it until next; otherwise it answers when the slot opens. One caller
 // takes a slot, across instances with Redis. A slot memory took while Redis
-// was down still holds once it answers again.
+// was down still holds once it answers again. Slots keep whole milliseconds,
+// next rounded up, so a slot never opens before next.
 func (s *Store) Claim(ctx context.Context, key string, now, next time.Time) (time.Time, bool) {
+	if ms := time.UnixMilli(next.UnixMilli()).UTC(); ms.Before(next) {
+		next = ms.Add(time.Millisecond)
+	}
 	keep := 2 * next.Sub(now) // the record outlives its slot; the instant decides
 	if held, ok := s.slots.held(key, now.UnixMilli(), s.now()); ok {
 		return time.UnixMilli(held).UTC(), false

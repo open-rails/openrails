@@ -34,3 +34,20 @@ func TestReopenOpensAHeldSlot(t *testing.T) {
 		t.Fatal("a reopened slot stayed held")
 	}
 }
+
+// A slot kept to the millisecond never opens before the instant claimed.
+func TestClaimNeverOpensEarly(t *testing.T) {
+	s := New(slog.New(slog.DiscardHandler), nil)
+	now := time.Date(2026, 11, 20, 10, 0, 0, 123_456_789, time.UTC)
+	next := now.Add(time.Hour)
+	opens, ok := s.Claim(t.Context(), "slot", now, next)
+	if !ok || opens.Before(next) {
+		t.Fatalf("claim = %v, %v; want it kept until %v", opens, ok, next)
+	}
+	if at, ok := s.Claim(t.Context(), "slot", next.Truncate(time.Millisecond), next.Add(time.Hour)); ok || at.Before(next) {
+		t.Fatalf("a claim a fraction of a millisecond before %v = %v, %v", next, at, ok)
+	}
+	if _, ok := s.Claim(t.Context(), "slot", opens, opens.Add(time.Hour)); !ok {
+		t.Fatal("the slot did not open when it said")
+	}
+}
