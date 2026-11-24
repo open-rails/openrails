@@ -2188,7 +2188,7 @@ JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id
 WHERE pm.merchant_id = $1::uuid AND pm.id = $2::uuid
   AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
   AND s.collection_policy IN ('engine', 'nmi_schedule')
-  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > $3::timestamptz)))
+  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > $3::timestamptz OR s.retry_advised_at IS NOT NULL)))
   AND s.deleted_at IS NULL
 ORDER BY s.id
 `

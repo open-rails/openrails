@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 490,
+  "scenario_count": 491,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2452,6 +2452,11 @@
       "id": "OR-J45-S14",
       "journey": "J45",
       "name": "A weekly plan whose first decline is advised past its renewal (MAC 30) stays past due with no retry, and ends at the renewal as issuer_deferred"
+    },
+    {
+      "id": "OR-J45-S15",
+      "journey": "J45",
+      "name": "A new card on a case the old card's advice deferred is not held to that advice: its plain decline keeps dunning, and the case ends as the card failed, not issuer_deferred"
     }
   ]
 }

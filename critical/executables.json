@@ -1591,6 +1591,9 @@
     ],
     "OR-J45-S14": [
       "TestDeclineCauses/OR-J45-S14/advice-past-a-weekly-renewal-keeps-the-case-past-due-until-then"
+    ],
+    "OR-J45-S15": [
+      "TestDeclineCauses/OR-J45-S15/a-new-card-is-not-held-to-the-old-cards-advice"
     ]
   }
 }

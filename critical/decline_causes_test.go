@@ -450,6 +450,42 @@ func TestDeclineCauses(t *testing.T) {
 		awaitAttempt(t, a, sub.ID, "rebill")
 		awaitDeferredToRenewal(t, a, fleet, sub.ID, renewal, 0)
 	})
+	t.Run("OR-J45-S15/a-new-card-is-not-held-to-the-old-cards-advice", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t, 7*24)
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		renewal := due.Add(7 * 24 * time.Hour)
+		p.core.SetDecline("4242", "insufficient_funds")
+		p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "30", NetworkDeclineCode: "51"})
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		awaitAttempt(t, a, sub.ID, "rebill")
+		deferred := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, deferred.Dunning)
+		require.Nil(t, deferred.Dunning.NextRetryAt, "the old card's advice defers the case to the renewal")
+		// A new card, declined plainly: the case goes on under its policy.
+		method := saveMethod(t, a, p, a.aliceToken, "5556")
+		status, raw := a.request(t, http.MethodPut, "/v1/me/subscriptions/"+sub.ID.String()+"/payment-method", a.aliceToken, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &method.ID})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		p.core.SetDecline("5556", "insufficient_funds")
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		retry := awaitAttempt(t, a, sub.ID, "dunning_retry")
+		require.NotNil(t, retry.Card)
+		require.Equal(t, "5556", *retry.Card.Last4)
+		dunned := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, dunned.Dunning)
+		require.NotNil(t, dunned.Dunning.NextRetryAt, "the new card's decline keeps dunning")
+		require.True(t, dunned.Dunning.NextRetryAt.Before(renewal))
+		// Its last retry declines too: the case ends as the card failed, not
+		// as the issuer deferred.
+		a.clock.Advance(dunned.Dunning.NextRetryAt.Sub(a.clock.Now()) + time.Minute)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		ended := subscriptionState(t, a, sub.ID, "canceled")
+		require.NotNil(t, ended.CancelFeedback)
+		require.NotEqual(t, "issuer_deferred", *ended.CancelFeedback)
+		require.True(t, a.clock.Now().Before(renewal))
+	})
 	t.Run("OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card", func(t *testing.T) {
 		for _, tc := range []struct {
 			name   string

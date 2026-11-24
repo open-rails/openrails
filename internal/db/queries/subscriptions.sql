@@ -512,14 +512,15 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
 -- name: ListSubscriptionsToWake :many
 -- The delinquent memberships OpenRails collects that a replaced card retries
--- at the next due pass, and those awaiting a card
+-- at the next due pass (a retry not yet due, or one network advice on the old
+-- card set), and those awaiting a card
 -- (subscriptions.WakeForReplacedMethod).
 SELECT s.id FROM billing.payment_methods pm
 JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_method_id)::uuid
   AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
   AND s.collection_policy IN ('engine', 'nmi_schedule')
-  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > sqlc.arg(now)::timestamptz)))
+  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > sqlc.arg(now)::timestamptz OR s.retry_advised_at IS NOT NULL)))
   AND s.deleted_at IS NULL
 ORDER BY s.id;
 

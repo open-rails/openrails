@@ -70,7 +70,10 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   `grace_ends_at` at that renewal, where the due pass ends it
   (`EndAdviceDeferred`). A case whose last scheduled retry the advice set ends
   exhausted with cancel feedback `issuer_deferred`. A retry late for any other
-  reason keeps the policy's schedule. A spent schedule is
+  reason keeps the policy's schedule, and a quick transient retry still waits
+  for standing advice. Advice is a card's: a new card, or the old one an
+  account updater replaced, drops it and the deferral it set (`ReplaceMethod`,
+  or `ForgetAdvice` when staff choose the card). A spent schedule is
   `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a

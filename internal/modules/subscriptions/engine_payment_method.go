@@ -97,6 +97,10 @@ func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *
 	if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
 		return nil, err
 	}
+	before, err := PaymentMethodOf(ctx, q, sub)
+	if err != nil {
+		return nil, err
+	}
 	sub.PaymentMethodID = methodID
 	target, err := PaymentMethodOf(ctx, q, sub)
 	if err != nil {
@@ -104,6 +108,11 @@ func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, d *
 	}
 	if target == nil {
 		return nil, ErrDefaultPaymentMethodRequired
+	}
+	if before == nil || *before != *target {
+		if err := ForgetAdvice(ctx, d, sub); err != nil {
+			return nil, err
+		}
 	}
 	method, err := s.engineCard(ctx, d, sub, *target)
 	if err != nil {
