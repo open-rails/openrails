@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 func TestReversalAdjustments(t *testing.T) {
@@ -66,4 +68,32 @@ func TestReversalDrawsFromItsPayment(t *testing.T) {
 	require.Zero(t, pb.unapplied())
 	require.Equal(t, map[uuid.UUID]int64{one: 4_000_000, two: 1_500_000}, pb.held())
 	require.EqualValues(t, 10_000_000, pb.used())
+}
+
+func TestPaymentBooksFromLegs(t *testing.T) {
+	payment, schedule := uuid.New(), uuid.New()
+	refund, chargeback, won := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	row := func(source string, op Operation, typ TransferType, s *uuid.UUID, amount int64) gen.ListPaymentBooksLegsRow {
+		return gen.ListPaymentBooksLegsRow{SourceID: source, Operation: string(op), TransferType: string(typ), RevenueScheduleID: s, Amount: amount}
+	}
+	own := payment.String()
+	pb := paymentBooksFrom(payment, []gen.ListPaymentBooksLegsRow{
+		row(own, OpCash, CashReceived, nil, 10_000_000),
+		row(own, OpApplication, CashApplied, &schedule, 6_000_000),
+		// A usage refund's contra takes nothing unapplied or applied.
+		row(refund, OpRefund, RefundRecognized, nil, 1_000_000),
+		row(refund, OpRefund, CashReturned, nil, 2_000_000),
+		row(chargeback, OpChargeback, ChargebackDeferred, &schedule, 3_000_000),
+		row(chargeback, OpChargeback, ChargebackRecognized, &schedule, 1_000_000),
+		row(chargeback, OpChargeback, UsageReopened, nil, 500_000),
+		row(won, OpDisputeWon, DisputeWon, &schedule, 1_000_000),
+		row(won, OpDisputeWonDeferred, DisputeWon, &schedule, 3_000_000),
+		row(won, OpDisputeWonReopened, DisputeWon, nil, 500_000),
+	})
+	require.EqualValues(t, 2_000_000, pb.unapplied())
+	require.Equal(t, map[uuid.UUID]int64{schedule: 6_000_000}, pb.held())
+	require.True(t, pb.legs[chargeback].chargeback)
+	require.EqualValues(t, 500_000, pb.legs[chargeback].reopened)
+	require.EqualValues(t, -500_000, pb.legs[won].reopened)
+	require.Equal(t, taken{deferred: 3_000_000, contra: 1_000_000}, pb.legs[chargeback].schedules[schedule])
 }

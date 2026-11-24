@@ -3,17 +3,20 @@
 package critical_test
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
@@ -226,6 +229,53 @@ func TestRevenueReversals(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, breaches.Items, 1)
 		require.Equal(t, "unapplied_cash/USD", breaches.Items[0].SubjectKey)
+	})
+
+	t.Run("OR-J41-S24/a-usage-orders-refund-is-contra-revenue-and-its-chargeback-the-cash-side-alone", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, false)
+		oneUsage(t, a.alpha, usageInput(customer, "refunded-work", 3))
+		a.clock.Advance(time.Second)
+		fleet := startFleet(t, a.world)
+		runUsageDue(t, fleet)
+		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
+		order := oneUsageOrder(t, a, customer)
+		var paid uuid.UUID
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND order_id=$2",
+			a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&paid))
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		// A usage order's payment is not refundable through PaymentService
+		// (ValidateRefund): its reversals are stored rows, booked by the poster.
+		reverse := func(kind string, amount int64, reason *string) uuid.UUID {
+			t.Helper()
+			id := uuid.New()
+			_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
+				" (merchant_id, id, customer_id, order_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind, refund_reason, money_movement)"+
+				" SELECT merchant_id, $3, customer_id, order_id, channel, rail, psp_id, $4, $5, list_amount, currency, 'succeeded', $6, id, $7, $8, 'rail'"+
+				" FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND id=$2",
+				a.alpha.MerchantID().UUID(), paid, id, kind+"-"+id.String(), -amount, a.clock.Now(), kind, reason)
+			require.NoError(t, err)
+			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				return books.PostReversal(ctx, database.NewWithPgxTx(tx), id, a.clock.Now())
+			}))
+			return id
+		}
+		now := a.clock.Now().UTC().Truncate(time.Microsecond)
+
+		// The merchant refunds 1.00 of the delivered usage: nothing owed
+		// reopens, and the refund is the usage's contra revenue.
+		refund := reverse("refund", 1_000_000, ptr("requested_by_customer"))
+		require.Equal(t, []glRow{{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: refund.String(), Debit: "refunds", Credit: "cash_clearing", Amount: 1_000_000, At: now}},
+			glFor(t, a.world, "payment", refund.String()))
+
+		// The rest is charged back: the owed amount stands again, so the
+		// chargeback posts its cash side alone, no contra.
+		chargeback := reverse("chargeback", 29_000_000, nil)
+		legs := glFor(t, a.world, "payment", chargeback.String())
+		require.Len(t, legs, 1)
+		require.Equal(t, glRow{Type: "cash_returned", Operation: "chargeback", Source: "payment", SourceID: chargeback.String(), Debit: "unapplied_cash", Credit: "cash_clearing", Amount: 29_000_000, At: now}, legs[0])
+		require.Empty(t, glQuery(t, a.world, "t.transfer_type IN ('chargeback_recognized', 'chargeback_deferred')"))
 	})
 }
 

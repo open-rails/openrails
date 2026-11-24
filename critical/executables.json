@@ -2141,6 +2141,9 @@
     ],
     "OR-J41-S23": [
       "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
+    ],
+    "OR-J41-S24": [
+      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-is-contra-revenue-and-its-chargeback-the-cash-side-alone"
     ]
   }
 }

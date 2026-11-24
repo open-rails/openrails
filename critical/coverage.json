@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 660,
+  "scenario_count": 661,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3302,6 +3302,11 @@
       "id": "OR-J41-S23",
       "journey": "J41",
       "name": "A refund of a payment from before the books is never refused; its sign breach is a finding"
+    },
+    {
+      "id": "OR-J41-S24",
+      "journey": "J41",
+      "name": "A usage order's refund is contra revenue; its chargeback posts the cash side alone"
     }
   ]
 }
