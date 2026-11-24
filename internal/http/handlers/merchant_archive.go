@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
@@ -98,7 +99,13 @@ func writeMerchantArchiveError(r *httprequest.Request, err error) {
 			detail.Metadata = map[string]any{"table": failure.Table, "count": failure.Count}
 		}
 	}
-	// Do not expose PostgreSQL failing-row details or archive/provider bytes.
+	// Do not expose PostgreSQL failing-row details or archive/provider bytes;
+	// the operator's log keeps the cause.
+	if err != nil && status >= http.StatusInternalServerError {
+		r.Log.ErrorContext(r.Request.Context(), "billing archive failed", logx.Err(err), "code", detail.Code)
+	} else if err != nil {
+		r.Log.WarnContext(r.Request.Context(), "billing archive refused", logx.Err(err), "code", detail.Code)
+	}
 	detail.RequestID = r.RequestID()
 	r.JSON(status, map[string]any{"error": detail})
 }
