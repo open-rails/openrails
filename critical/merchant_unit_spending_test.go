@@ -4,9 +4,12 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +20,8 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/stripemock"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,6 +37,10 @@ func TestMerchantUnits(t *testing.T) {
 	t.Run("OR-J48-S06/an-unspent-pack-expires-in-its-unit", unitExpiry)
 	t.Run("OR-J48-S07/a-refund-claws-back-its-lots-units-first", unitRefundByLot)
 	t.Run("OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage", unitOverrun)
+	t.Run("OR-J48-S09/a-packs-reversals-take-what-they-took-as-they-settled", unitReversalsAsSettled)
+	t.Run("OR-J48-S10/a-period-whose-price-falls-takes-back-forgiveness-first", unitPriceFalls)
+	t.Run("OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit", unitLeaseUsage)
+	t.Run("OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock", unitFirstBalance)
 }
 
 // unitPaymentWorld declares GOLD and CREDITS on alpha, whose card PSP is
@@ -540,7 +549,9 @@ func unitOverrun(t *testing.T) {
 	require.True(t, delegated.Allowed(), "no rate turns a dollar limit into GOLD: %+v", delegated)
 	_, err = a.alpha.ReleaseAdmissions(t.Context(), []string{"agent"})
 	require.NoError(t, err)
-	require.True(t, admitImages(t, a, s.alice, "second", 2).Allowed())
+	phone := billing.AdmitParams{RequestID: "second", CustomerID: s.alice, Invoker: "alice-phone", InvokerType: billing.InvokerTypeCustomer, Currency: "GOLD",
+		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "image", Dimensions: map[string]int64{"images": 2}}}
+	require.True(t, admitOne(t, a.alpha, phone).Allowed())
 	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 20, 20)
 	requireDenied(t, admitOne(t, a.alpha, billing.AdmitParams{RequestID: "costless", CustomerID: s.alice, Invoker: s.alice.String(), InvokerType: billing.InvokerTypeCustomer,
 		Currency: "GOLD", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}), "insufficient_balance")
@@ -565,6 +576,10 @@ func unitOverrun(t *testing.T) {
 	require.Zero(t, owed, "nothing is owed in a unit")
 
 	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, usageByCharge(t, a, s.alice, a.clock.Now()), "the overrun shows as forgiven usage")
+	// Each invoker's charge gives up its share of the 8, 20:8 to the largest
+	// remainder: what each charged and had forgiven adds up to its usage.
+	require.Equal(t, map[string]int64{s.alice.String() + "/charged": 14, s.alice.String() + "/forgiven": 6, "alice-phone/charged": 6, "alice-phone/forgiven": 2},
+		usageCharged(t, a, s.alice, a.clock.Now(), "invoker"))
 
 	status, raw := a.request(t, http.MethodGet, "/v1/me/usage?currency=GOLD", a.aliceToken, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -629,26 +644,36 @@ func unitExpiry(t *testing.T) {
 // charge.
 func usageByCharge(t *testing.T, a *authorityWorld, customer billing.CustomerID, day time.Time) map[string]int64 {
 	t.Helper()
+	return usageCharged(t, a, customer, day)
+}
+
+// usageCharged is customer's usage_charged in GOLD on day's UTC day, by the
+// dimensions by and then charge, keyed by their values joined with "/".
+func usageCharged(t *testing.T, a *authorityWorld, customer billing.CustomerID, day time.Time, by ...string) map[string]int64 {
+	t.Helper()
 	on := day.UTC().Format(time.DateOnly)
-	result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"usage_charged"}, By: []string{"charge"},
+	dims := append(slices.Clone(by), "charge")
+	result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"usage_charged"}, By: dims,
 		Filters: map[string][]string{"customer": {customer.String()}, "currency": {"GOLD"}}, Range: &billing.MetricsRange{From: on, To: on}})
 	require.NoError(t, err)
-	charge, amount := -1, -1
+	columns := map[string]int{}
 	for i, c := range result.Columns {
-		switch c.Name {
-		case "charge":
-			charge = i
-		case "usage_charged":
-			amount = i
-		}
+		columns[c.Name] = i
 	}
-	require.True(t, charge >= 0 && amount >= 0, "%+v", result.Columns)
+	amount, ok := columns["usage_charged"]
+	require.True(t, ok, "%+v", result.Columns)
 	out := map[string]int64{}
 	for _, row := range result.Rows {
 		var n int64
 		_, err := fmt.Sscan(fmt.Sprint(row[amount]), &n)
 		require.NoError(t, err)
-		out[fmt.Sprint(row[charge])] += n
+		key := make([]string, len(dims))
+		for i, d := range dims {
+			c, ok := columns[d]
+			require.True(t, ok, "%+v", result.Columns)
+			key[i] = fmt.Sprint(row[c])
+		}
+		out[strings.Join(key, "/")] += n
 	}
 	return out
 }
@@ -716,4 +741,222 @@ func unitRefundByLot(t *testing.T) {
 	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundClearing), "the clearing account nets to zero")
 	require.EqualValues(t, 0, systemBalance(t, a, "GOLD", ledger.UnitsRefundLoss), "the consumed units are no loss once the money is back")
 	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.UnitsSold), "400 sold, 100 returned with the refund")
+}
+
+func unitReversalsAsSettled(t *testing.T) {
+	s, p := unitPaymentWorld(t, 0)
+	a := s.a
+	gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+	toolkit, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "toolkit", DisplayName: "Toolkit", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"toolkit:owned"}})
+	require.NoError(t, err)
+	toolkitPrice, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: toolkit.ID, Key: "toolkit", UnitAmount: 30_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: gold["usd"]}, {PriceID: toolkitPrice.ID}}, ExpectedTotal: ptr(int64(50_000_000)), Reusable: ptr(true),
+		Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "pack-and-toolkit"})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.Equal(t, billing.OrderComplete, order.Status)
+	payment := *order.Payment.PaymentID
+	unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
+
+	// R1, $15 back, is sent and its answer lost: pending, it holds the 300
+	// GOLD its share of the pack's $20 would take.
+	p.mu.Lock()
+	p.lostRefundResponse = true
+	p.mu.Unlock()
+	_, _ = a.alpha.RefundPayment(t.Context(), "r1", payment, billing.RefundPaymentParams{Amount: 15_000_000, Reason: "Part back"})
+	unitBalance(t, a.alpha, s.alice, "GOLD", 100, 300, 400)
+
+	// R2, a $15 chargeback, settles first: the pack's line returns $15 and
+	// takes 300, leaving R1 the line's last $5, 100 GOLD.
+	var charge, intent string
+	for _, effect := range p.effects(t) {
+		if effect.Kind == "charge" {
+			charge, intent = effect.ID, effect.Operation
+		}
+	}
+	require.NotEmpty(t, charge)
+	notice := func(id, kind string, object stripemock.Object) {
+		body := stripeNotice(t, id, kind, object)
+		status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+		require.Equal(t, http.StatusOK, status, raw)
+	}
+	dispute := stripemock.Object{"id": "dp_order", "object": "dispute", "amount": 1500, "currency": "usd", "charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"}
+	notice("evt_order_dispute", "charge.dispute.created", dispute)
+	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 100, 100)
+
+	// R1 settles after it: it takes what is left of its share, not what it
+	// would have taken first.
+	p.mu.Lock()
+	p.lostRefundResponse = false
+	p.mu.Unlock()
+	a.clock.Advance(20 * time.Minute)
+	fleet := startFleet(t, a.world)
+	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
+	require.NoError(t, err)
+	for _, job := range jobs.Jobs {
+		if job.State != rivertype.JobStateCompleted && job.State != rivertype.JobStateRunning {
+			_, err = fleet.JobRetry(t.Context(), job.ID)
+			require.NoError(t, err)
+		}
+	}
+	require.Eventually(t, func() bool {
+		read, err := a.alpha.GetPayment(t.Context(), payment)
+		return err == nil && read.AmountRefunded == 15_000_000
+	}, 20*time.Second, 20*time.Millisecond)
+	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 0, 0)
+	lot := lots(t, a.alpha, s.alice, "GOLD")[0]
+	sources := map[string]int64{}
+	for _, leg := range unitLegs(t, a, "GOLD") {
+		if leg.Lot != nil && *leg.Lot == lot.ID.UUID() && leg.Type != "deposit" {
+			sources[leg.Source] += leg.Amount
+		}
+	}
+	require.Equal(t, map[string]int64{"credit": 400, "units_returned": 400}, sources, "the two reversals take the 400 once, none of it consumed")
+	type share struct{ cash, units int64 }
+	shares := func() []share {
+		rows, err := a.pool.Query(t.Context(), "SELECT cash, units FROM "+pgx.Identifier{a.schema, "credit_grant_reversals"}.Sanitize()+
+			" WHERE merchant_id = $1 AND credit_grant_id = $2 ORDER BY created_at, reversal_id", a.alpha.MerchantID().UUID(), lot.ID.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []share
+		for rows.Next() {
+			var r share
+			require.NoError(t, rows.Scan(&r.cash, &r.units))
+			out = append(out, r)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	require.Equal(t, []share{{15_000_000, 300}, {5_000_000, 100}}, shares(), "each reversal's share as it settled")
+
+	// Winning R2's dispute restores what R2 took: the line has $15 open,
+	// 300 GOLD.
+	dispute["status"] = "won"
+	notice("evt_order_dispute_won", "charge.dispute.closed", dispute)
+	unitBalance(t, a.alpha, s.alice, "GOLD", 300, 0, 300)
+	require.Equal(t, []share{{15_000_000, 300}, {5_000_000, 100}, {15_000_000, 300}}, shares())
+	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.UnitsSold), "400 sold, 400 returned, 300 restored")
+	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundLoss))
+	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundClearing))
+}
+
+func unitPriceFalls(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	earlyInMonth(a.world)
+	images, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "images", DisplayName: "Images"})
+	require.NoError(t, err)
+	// 4 GOLD an image up to 5, 1 each once there are more.
+	price := tiers(catalog.TierModeVolume, 4, 1, 5)
+	price.Currency = "GOLD"
+	_, err = a.alpha.SetMeter(t.Context(), "images", billing.SetMeterParams{EventType: "image", ValueProperty: "images", Aggregation: catalog.AggregationSum,
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: images.ID, Price: price})})
+	require.NoError(t, err)
+	grant := func(id string, amount int64) {
+		t.Helper()
+		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: amount, Source: "critical", SourceID: id}})
+		require.NoError(t, err)
+	}
+	grant("ten", 10)
+	require.True(t, admitImages(t, a, s.alice, "five", 2).Allowed())
+	captureUsage(t, a.alpha, "five", "image", map[string]int64{"images": 5}, nil)
+	// Five images cost 20: the posting takes the 10 and forgives 10.
+	grant("post", 1)
+	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
+	// A sixth brings the period's price to 6: it posted 20.
+	require.True(t, admitImages(t, a, s.alice, "sixth", 1).Allowed())
+	captureUsage(t, a.alpha, "sixth", "image", map[string]int64{"images": 1}, nil)
+	fleet := startFleet(t, a.world)
+	nextMonth(a.world)
+	closeMonths(t, fleet)
+	type posting struct{ amount, forgiven int64 }
+	postings := func() []posting {
+		rows, err := a.pool.Query(t.Context(), "SELECT amount, forgiven FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+			" WHERE merchant_id = $1 AND customer_id = $2 ORDER BY created_at, id", a.alpha.MerchantID().UUID(), s.alice.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []posting
+		for rows.Next() {
+			var r posting
+			require.NoError(t, rows.Scan(&r.amount, &r.forgiven))
+			out = append(out, r)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	require.Equal(t, []posting{{20, 10}}, postings(), "the fall is carried while late usage may come")
+	// Once it closes, the 14 the period posted beyond its price takes back
+	// the 10 forgiven first; only the 4 the lots paid beyond it comes back.
+	a.clock.Advance(70 * 24 * time.Hour)
+	closeMonths(t, fleet)
+	require.Equal(t, []posting{{20, 10}, {-14, -10}}, postings())
+	unitBalance(t, a.alpha, s.alice, "GOLD", 5, 0, 5)
+}
+
+func unitLeaseUsage(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	imageMeter(t, a)
+	_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 20, Source: "critical", SourceID: "twenty"}})
+	require.NoError(t, err)
+	item := billing.LeaseUsage{CustomerID: s.alice, Invoker: s.alice.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "GOLD", EventType: "image",
+		Dimensions: map[string]int64{"images": 1}, Source: "critical", SourceID: "gate"}
+	out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, item)})
+	require.Equal(t, billing.CodeCurrencyUnsupported, refusedItem(t, out, 1).Error.Code, "usage in a unit comes through an admission's capture")
+	unitBalance(t, a.alpha, s.alice, "GOLD", 20, 0, 20)
+}
+
+func unitFirstBalance(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	hold := func() pgx.Tx {
+		t.Helper()
+		tx, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+		_, err = tx.Exec(t.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ledger.UnitsLock(a.alpha.MerchantID().UUID()))
+		require.NoError(t, err)
+		return tx
+	}
+	give := func(id string) chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 10, Source: "critical", SourceID: id}})
+			done <- err
+		}()
+		return done
+	}
+	// A settings change removing GOLD holds the units lock: the gift that
+	// opens the first GOLD balance waits for it.
+	tx := hold()
+	first := give("first")
+	select {
+	case err := <-first:
+		t.Fatalf("the first GOLD balance did not wait for the units lock: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	require.NoError(t, tx.Rollback(t.Context()))
+	select {
+	case err := <-first:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the gift did not finish once the lock was free")
+	}
+	var scale int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT scale FROM "+pgx.Identifier{a.schema, "ledger_units"}.Sanitize()+" WHERE merchant_id = $1 AND unit = 'GOLD'",
+		a.alpha.MerchantID().UUID()).Scan(&scale))
+	require.Zero(t, scale, "the book records GOLD at the scale it was declared")
+
+	// Once GOLD is counted, a gift takes no lock.
+	hold()
+	select {
+	case err := <-give("second"):
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("a gift in a counted unit waited for the units lock")
+	}
+	unitBalance(t, a.alpha, s.alice, "GOLD", 20, 0, 20)
 }

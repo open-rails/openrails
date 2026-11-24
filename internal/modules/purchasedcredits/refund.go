@@ -1,14 +1,10 @@
 package purchasedcredits
 
 import (
-	"bytes"
-	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -55,7 +51,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if additional <= 0 {
 			return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
 		}
-		returned, err := returnedCash(ctx, q, grant, paid)
+		returned, err := returnedCash(ctx, q, grant)
 		if err != nil {
 			return err
 		}
@@ -137,14 +133,17 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return err
 		}
 		// What the credit line's earlier reversals returned: a money lot's
-		// cash legs, a unit pack's replayed shares.
+		// cash legs, a unit pack's recorded shares.
 		var net int64
 		var book unitReversals
 		if unit {
-			if book, err = replayUnitReversals(ctx, q, g, paid); err != nil {
+			if book, err = loadUnitReversals(ctx, q, g); err != nil {
 				return err
 			}
-			net = book.before[reversalID]
+			if _, applied := book.share[reversalID]; applied {
+				return nil
+			}
+			net = book.net
 		} else {
 			state, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID})
 			if err != nil {
@@ -184,7 +183,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				return err
 			}
 			if unit {
-				origin.Cash, recovered = book.share[*reversesID], book.recovered[reversalID]
+				origin.Cash, recovered = book.share[*reversesID], book.recovered[*reversesID]
 			} else if recovered, err = q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
 				return err
 			}
@@ -319,10 +318,13 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return err
 		}
 		if unit {
-			// The units go back to the account that issued them. A reversal
-			// whose share is no whole unit posts nothing, and is evaluated
-			// again.
-			posted = faceDelta > 0
+			// The share is recorded as it applies, even one that moves no
+			// whole unit: a later reversal reads it, never recomputes it.
+			// The units go back to the account that issued them.
+			if err := q.InsertCreditGrantReversal(ctx, gen.InsertCreditGrantReversalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID,
+				ReversalID: reversalID, ReversesID: reversesID, Cash: cashDelta, Units: faceDelta}); err != nil {
+				return err
+			}
 			return post(ledger.UnitsSold, faceDelta, ledger.CreditRefundFunding, restoring, "units_returned"+strings.TrimPrefix(cashSource, "cash"))
 		}
 		if err := post(ledger.UnitsSold, cashDelta, cashType, restoring, cashSource); err != nil {
@@ -353,84 +355,38 @@ func fundingAmount(lot gen.BillingCreditGrant) (int64, error) {
 
 // returnedCash is what of a purchased lot's paid amount settled reversals
 // returned: its cash legs for credit in its payment's currency, a unit pack's
-// replayed shares (replayUnitReversals).
-func returnedCash(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant, paid int64) (int64, error) {
+// recorded shares.
+func returnedCash(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant) (int64, error) {
 	if *lot.PaidCurrency == lot.Unit {
 		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
 		return net.Cash, err
 	}
-	book, err := replayUnitReversals(ctx, q, lot, paid)
+	book, err := loadUnitReversals(ctx, q, lot)
 	return book.net, err
 }
 
-// unitReversals are a unit pack's payment's settled reversals as money lots
-// apply them: each one's share of the credit line's cash, what the line had
-// returned before it, and for a recovery what earlier recoveries of its
-// reversal returned.
+// unitReversals are the settled reversals of a unit pack's payment as they
+// applied (credit_grant_reversals): each one's share of the credit line's
+// cash, what recoveries restored of each reversal, and what the line has
+// returned net.
 type unitReversals struct {
-	share, before, recovered map[uuid.UUID]int64
-	net                      int64
+	share, recovered map[uuid.UUID]int64
+	net              int64
 }
 
-// replayUnitReversals replays the settled reversals of a unit pack's payment
-// as syncing them applies a money lot's: passes over the reversals in the
-// order they were recorded, refunds and chargebacks first, then recoveries,
-// until none moves. A reversal takes what the credit line has open when it
-// first takes any, and keeps it; a recovery returns what its own reversal
-// took. A unit has no cash leg to keep these shares, so they are replayed
-// from the payments themselves.
-func replayUnitReversals(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant, paid int64) (unitReversals, error) {
-	out := unitReversals{share: map[uuid.UUID]int64{}, before: map[uuid.UUID]int64{}, recovered: map[uuid.UUID]int64{}}
-	rows, err := q.ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: lot.MerchantID, RefundedPaymentID: lot.PaymentID})
-	if err != nil {
-		return out, err
-	}
-	slices.SortFunc(rows, func(x, y gen.BillingPayment) int {
-		return cmp.Or(x.CreatedAt.Compare(y.CreatedAt), bytes.Compare(x.ID[:], y.ID[:]))
-	})
-	reverses := map[uuid.UUID]uuid.UUID{}
+func loadUnitReversals(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant) (unitReversals, error) {
+	out := unitReversals{share: map[uuid.UUID]int64{}, recovered: map[uuid.UUID]int64{}}
+	rows, err := q.ListCreditGrantReversals(ctx, gen.ListCreditGrantReversalsParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
 	for _, r := range rows {
-		if r.Amount > 0 && r.Status == "succeeded" {
-			var meta struct {
-				Reverses string `json:"reverses_payment_id"`
-			}
-			if len(r.Metadata) > 0 && json.Unmarshal(r.Metadata, &meta) == nil {
-				if id, err := uuid.Parse(meta.Reverses); err == nil {
-					reverses[r.ID] = id
-				}
-			}
+		out.share[r.ReversalID] = r.Cash
+		if r.ReversesID == nil {
+			out.net += r.Cash
+		} else {
+			out.recovered[*r.ReversesID] += r.Cash
+			out.net -= r.Cash
 		}
 	}
-	taken := map[uuid.UUID]int64{}
-	for moved := true; moved; {
-		moved = false
-		for _, refunds := range []bool{true, false} {
-			for _, r := range rows {
-				if r.Status != "succeeded" || r.Amount == 0 || (r.Amount < 0) != refunds || out.share[r.ID] > 0 {
-					continue
-				}
-				out.before[r.ID] = out.net
-				var c int64
-				if refunds {
-					c = min(-r.Amount, paid-out.net)
-				} else if origin, ok := reverses[r.ID]; ok {
-					out.recovered[r.ID] = taken[origin]
-					c = min(r.Amount, out.share[origin]-taken[origin])
-				}
-				if c <= 0 {
-					continue
-				}
-				out.share[r.ID], moved = c, true
-				if refunds {
-					out.net += c
-				} else {
-					taken[reverses[r.ID]] += c
-					out.net -= c
-				}
-			}
-		}
-	}
-	return out, nil
+	return out, err
 }
 
 // proportional uses integer arithmetic without int64 multiplication overflow.

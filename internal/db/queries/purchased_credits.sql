@@ -55,3 +55,17 @@ SELECT COALESCE(sum(CASE
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid AND book='units';
+
+-- name: InsertCreditGrantReversal :exec
+-- Records what a settled reversal of a unit pack's payment took of its lot,
+-- or a recovery restored.
+INSERT INTO billing.credit_grant_reversals (merchant_id, credit_grant_id, reversal_id, reverses_id, cash, units)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(credit_grant_id)::uuid, sqlc.arg(reversal_id)::uuid, sqlc.narg(reverses_id)::uuid,
+    sqlc.arg(cash)::bigint, sqlc.arg(units)::bigint);
+
+-- name: ListCreditGrantReversals :many
+-- What each settled reversal of a unit pack's payment took or restored, as
+-- it applied.
+SELECT reversal_id, reverses_id, cash, units FROM billing.credit_grant_reversals
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND credit_grant_id = sqlc.arg(credit_grant_id)::uuid
+ORDER BY created_at, reversal_id;

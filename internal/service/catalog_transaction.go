@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -65,7 +65,7 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		}
 		// A settings edit removing a unit takes it too: neither sees the other
 		// half done.
-		if err := q.LockCatalogKey(ctx, merchantconfig.UnitsLock(mid.UUID())); err != nil {
+		if err := q.LockCatalogKey(ctx, ledger.UnitsLock(mid.UUID())); err != nil {
 			return err
 		}
 		scoped := *s

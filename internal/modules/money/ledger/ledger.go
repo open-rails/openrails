@@ -17,7 +17,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/billing"
 	unit "github.com/open-rails/openrails/internal/currency"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 )
@@ -135,6 +137,15 @@ const MaxCoordBytes = books.MaxCoordBytes
 // ErrMerchantUnitOwed refuses debt in a merchant's own unit: its units are
 // prepaid, never owed.
 var ErrMerchantUnitOwed = errors.New("ledger: nothing is owed in a merchant's unit")
+
+// ErrUndeclaredUnit refuses an account in a unit the merchant does not
+// declare.
+var ErrUndeclaredUnit = errors.New("ledger: the merchant does not declare the unit")
+
+// UnitsLock is the transaction lock key the units book takes when it first
+// counts a merchant's unit, and a catalog write or settings change that could
+// remove or rescale one takes, so neither sees the other half done.
+func UnitsLock(merchant uuid.UUID) string { return "merchant-units:" + merchant.String() }
 
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
@@ -256,7 +267,40 @@ func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency stri
 	if acct, ok := books.Lookup(t); !ok || acct.Book != books.Units {
 		return uuid.Nil, false, fmt.Errorf("ledger: %q is not a units-book account", t)
 	}
+	if unit.IsUnitCode(currency) {
+		if err := l.countUnit(ctx, currency); err != nil {
+			return uuid.Nil, false, err
+		}
+	}
 	return books.EnsureAccount(ctx, l.q, l.merchant, t, currency, customer, nil)
+}
+
+// countUnit records a merchant's unit the first time the book counts it, at
+// the scale the merchant declares then (ledger_units), under UnitsLock: a
+// settings change that would remove or rescale it either commits first, and
+// this reads its result, or sees the record.
+func (l *Ledger) countUnit(ctx context.Context, code string) error {
+	key := gen.GetLedgerUnitScaleParams{MerchantID: l.merchant, Unit: code}
+	if _, err := l.q.GetLedgerUnitScale(ctx, key); !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err := l.q.LockCatalogKey(ctx, UnitsLock(l.merchant)); err != nil {
+		return err
+	}
+	config := db.MerchantConfigOf(l.q)
+	if config == nil {
+		return fmt.Errorf("%w: %s (no merchant configuration is bound)", ErrUndeclaredUnit, code)
+	}
+	_, settings, err := config.MerchantSettings(ctx, billing.MerchantID(l.merchant))
+	if err != nil {
+		return fmt.Errorf("ledger: read the merchant's units: %w", err)
+	}
+	for _, u := range settings.Currencies {
+		if strings.EqualFold(string(u.Code), code) {
+			return l.q.InsertLedgerUnit(ctx, gen.InsertLedgerUnitParams{MerchantID: l.merchant, Unit: code, Scale: int32(u.Scale)})
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrUndeclaredUnit, code)
 }
 
 // Transfer is one double-entry movement to append.

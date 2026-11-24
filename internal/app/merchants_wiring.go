@@ -224,11 +224,15 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 	mctx := merchant.WithID(ctx, id)
 	// A unit something counts keeps the declaration it is counted in: a
 	// document that removes or rescales one serves its previous declaration
-	// of it, with a finding.
+	// of it, at the scale the units book recorded, with a finding.
 	var inUse []string
+	var counted map[string]int
 	if err := r.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		inUse, err = merchantconfig.UnitsInUse(ctx, gen.New(tx), id.UUID())
+		if inUse, err = merchantconfig.UnitsInUse(ctx, gen.New(tx), id.UUID()); err != nil {
+			return err
+		}
+		counted, err = merchantconfig.CountedScales(ctx, gen.New(tx), id.UUID())
 		return err
 	}); err != nil {
 		return previous, err
@@ -237,7 +241,7 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 	if previous.HasMerchant {
 		served = previous.Merchant.Value.Currencies
 	}
-	if why := merchantconfig.KeepCountedUnits(inUse, served, &set.Merchant.Value.MerchantSettings); why != "" {
+	if why := merchantconfig.KeepCountedUnits(inUse, counted, served, &set.Merchant.Value.MerchantSettings); why != "" {
 		if set.Rejected == nil {
 			set.Rejected = map[string]string{}
 		}

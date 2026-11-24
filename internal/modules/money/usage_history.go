@@ -2,6 +2,8 @@ package money
 
 import (
 	"context"
+	"math/big"
+	"slices"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -66,62 +68,96 @@ func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFil
 }
 
 // UsageForgiveness is what postings cut in (from, to] forgave of usage in a
-// merchant's unit, as rows of its cut's bucket: Forgiven, and the same taken
+// merchant's unit, as rows of the cut's bucket: Forgiven, and the same taken
 // out of Amount, what was charged. A posting's forgiveness is shared across
-// its lines by amount; a reversal that takes forgiveness back is negative.
+// what its period charged before the cut, by invoker, event type and meter
+// cell, exactly (largestRemainder); a reversal that takes forgiveness back
+// is negative.
 func (s *MoneyService) UsageForgiveness(ctx context.Context, from, to time.Time) ([]UsageHistoryRow, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	q := s.db.Gen(ctx)
-	postings, err := q.ListForgivenUsagePostings(ctx, gen.ListForgivenUsagePostingsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
+	postings, err := s.db.Gen(ctx).ListForgivenUsagePostings(ctx, gen.ListForgivenUsagePostingsParams{MerchantID: mid.UUID(), CutAfter: from, CutThrough: to})
 	if err != nil || len(postings) == 0 {
 		return nil, err
 	}
-	lines := make([][]PostingLine, len(postings))
-	var prints []string
-	for i, p := range postings {
-		if lines[i], err = decodePostingLines(p.Lines); err != nil {
+	var out []UsageHistoryRow
+	for _, p := range postings {
+		bucket := p.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
+		period := p.PeriodStartsAt.UTC()
+		history, err := s.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: billing.CustomerID(p.CustomerID), Currency: p.Currency,
+			From: period.Truncate(eventstore.HistoryBucket), To: bucket.Add(eventstore.HistoryBucket), PeriodsFrom: &period})
+		if err != nil {
 			return nil, err
 		}
-		for _, l := range lines[i] {
-			prints = append(prints, l.Print)
+		charged := map[eventstore.UsageBucket]int64{}
+		var keys []eventstore.UsageBucket
+		for _, r := range history {
+			if r.Meter == "" || !r.PeriodStartsAt.Equal(period) || r.BucketAt.After(bucket) || r.Amount <= 0 {
+				continue
+			}
+			k := eventstore.UsageBucket{CustomerID: r.CustomerID, BucketAt: bucket, Currency: r.Currency, EventType: r.EventType, Meter: r.Meter,
+				Cell: r.Cell, Print: r.Print, PeriodStartsAt: r.PeriodStartsAt, Invoker: r.Invoker, Outcome: r.Outcome}
+			if _, ok := charged[k]; !ok {
+				keys = append(keys, k)
+			}
+			charged[k] = addSat(charged[k], r.Amount)
 		}
-	}
-	cards, err := loadPrints(ctx, q, mid.UUID(), prints)
-	if err != nil {
-		return nil, err
-	}
-	var out []UsageHistoryRow
-	for i, p := range postings {
+		if len(keys) == 0 {
+			keys = []eventstore.UsageBucket{{CustomerID: billing.CustomerID(p.CustomerID), BucketAt: bucket, Currency: p.Currency, PeriodStartsAt: period,
+				Outcome: eventstore.UsageSucceeded}}
+			charged[keys[0]] = 1
+		}
+		weights := make([]int64, len(keys))
+		for i, k := range keys {
+			weights[i] = charged[k]
+		}
 		sign := int64(1)
 		if p.Forgiven < 0 {
 			sign = -1
 		}
-		var shared []PostingLine
-		var weights []int64
-		for _, l := range lines[i] {
-			if l.Amount*sign > 0 {
-				shared, weights = append(shared, l), append(weights, l.Amount*sign)
+		for i, x := range largestRemainder(p.Forgiven*sign, weights) {
+			if x == 0 {
+				continue
 			}
-		}
-		if len(shared) == 0 {
-			shared, weights = []PostingLine{{}}, []int64{1}
-		}
-		bucket := p.CutAt.Add(-time.Microsecond).UTC().Truncate(eventstore.HistoryBucket)
-		for j, x := range share(p.Forgiven*sign, weights) {
-			l := shared[j]
-			event := l.MeterKey
-			if c, ok := cards[l.Print]; ok && c.card.EventType != "" {
-				event = c.card.EventType
-			}
-			out = append(out, UsageHistoryRow{UsageBucket: eventstore.UsageBucket{CustomerID: billing.CustomerID(p.CustomerID), BucketAt: bucket,
-				Currency: p.Currency, EventType: event, Meter: l.MeterKey, Cell: l.Cell, Print: l.Print, PeriodStartsAt: p.PeriodStartsAt,
-				Outcome: eventstore.UsageSucceeded, Forgiven: x * sign}, Amount: -x * sign})
+			row := UsageHistoryRow{UsageBucket: keys[i], Amount: -x * sign}
+			row.Forgiven = x * sign
+			out = append(out, row)
 		}
 	}
 	return out, nil
+}
+
+// largestRemainder splits a nonnegative amount across positive weights: each
+// part is its exact share's floor, and what the floors leave goes one at a
+// time to the largest fractions, earlier first on a tie.
+func largestRemainder(amount int64, weights []int64) []int64 {
+	out := make([]int64, len(weights))
+	var total big.Int
+	for _, w := range weights {
+		total.Add(&total, big.NewInt(w))
+	}
+	if total.Sign() <= 0 {
+		return out
+	}
+	a := big.NewInt(amount)
+	fractions := make([]*big.Int, len(weights))
+	left := amount
+	for i, w := range weights {
+		q, r := new(big.Int).QuoRem(new(big.Int).Mul(a, big.NewInt(w)), &total, new(big.Int))
+		out[i], fractions[i] = q.Int64(), r
+		left -= out[i]
+	}
+	order := make([]int, len(weights))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(x, y int) int { return fractions[y].Cmp(fractions[x]) })
+	for _, i := range order[:left] {
+		out[i]++
+	}
+	return out
 }
 
 // UsageDays are the instants that bound the days of the merchant's

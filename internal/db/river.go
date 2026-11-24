@@ -89,6 +89,21 @@ func (d *DB) MerchantConfig() MerchantConfig {
 	return d.river.config
 }
 
+// MerchantConfigOf is the merchant configuration bound to the DB whose
+// transaction q runs in; nil outside one.
+func MerchantConfigOf(q *gen.Queries) MerchantConfig {
+	if q == nil {
+		return nil
+	}
+	tx, ok := q.DBTX().(schemaTx)
+	if !ok || tx.river == nil {
+		return nil
+	}
+	tx.river.mu.RLock()
+	defer tx.river.mu.RUnlock()
+	return tx.river.config
+}
+
 // ErrRiverTablesMissing reports a River schema that was never migrated.
 var ErrRiverTablesMissing = errors.New("River's tables are missing")
 

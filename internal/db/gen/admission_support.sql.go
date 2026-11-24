@@ -93,6 +93,7 @@ FROM (
     UNION ALL SELECT p.currency FROM billing.prices p WHERE p.merchant_id = $1::uuid
     UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = $1::uuid AND pr.credit_grant IS NOT NULL
     UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid
+    UNION ALL SELECT l.unit FROM billing.ledger_units l WHERE l.merchant_id = $1::uuid
 ) u
 WHERE u.code IS NOT NULL AND u.code <> ALL($2::text[])
 ORDER BY 1

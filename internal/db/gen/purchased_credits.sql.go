@@ -179,3 +179,77 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 	)
 	return i, err
 }
+
+const insertCreditGrantReversal = `-- name: InsertCreditGrantReversal :exec
+INSERT INTO billing.credit_grant_reversals (merchant_id, credit_grant_id, reversal_id, reverses_id, cash, units)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+    $5::bigint, $6::bigint)
+`
+
+type InsertCreditGrantReversalParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    uuid.UUID
+	ReversesID    *uuid.UUID
+	Cash          int64
+	Units         int64
+}
+
+// Records what a settled reversal of a unit pack's payment took of its lot,
+// or a recovery restored.
+func (q *Queries) InsertCreditGrantReversal(ctx context.Context, arg InsertCreditGrantReversalParams) error {
+	_, err := q.db.Exec(ctx, insertCreditGrantReversal,
+		arg.MerchantID,
+		arg.CreditGrantID,
+		arg.ReversalID,
+		arg.ReversesID,
+		arg.Cash,
+		arg.Units,
+	)
+	return err
+}
+
+const listCreditGrantReversals = `-- name: ListCreditGrantReversals :many
+SELECT reversal_id, reverses_id, cash, units FROM billing.credit_grant_reversals
+WHERE merchant_id = $1::uuid AND credit_grant_id = $2::uuid
+ORDER BY created_at, reversal_id
+`
+
+type ListCreditGrantReversalsParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+type ListCreditGrantReversalsRow struct {
+	ReversalID uuid.UUID
+	ReversesID *uuid.UUID
+	Cash       int64
+	Units      int64
+}
+
+// What each settled reversal of a unit pack's payment took or restored, as
+// it applied.
+func (q *Queries) ListCreditGrantReversals(ctx context.Context, arg ListCreditGrantReversalsParams) ([]ListCreditGrantReversalsRow, error) {
+	rows, err := q.db.Query(ctx, listCreditGrantReversals, arg.MerchantID, arg.CreditGrantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCreditGrantReversalsRow
+	for rows.Next() {
+		var i ListCreditGrantReversalsRow
+		if err := rows.Scan(
+			&i.ReversalID,
+			&i.ReversesID,
+			&i.Cash,
+			&i.Units,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

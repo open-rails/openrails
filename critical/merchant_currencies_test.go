@@ -247,4 +247,35 @@ func TestMerchantCurrencies(t *testing.T) {
 		require.Equal(t, []billing.MerchantCurrency{{Code: "GOLD", Name: "Beta gold", Symbol: "GOLD", Scale: 2}}, customerUnits(t, a, a.aliceToken),
 			"beta's customers see beta's GOLD at its own scale, never alpha's units")
 	})
+
+	t.Run("OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale", func(t *testing.T) {
+		a := unitWorld(t)
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 400, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err)
+		// The file now declares GOLD in hundredths, and the process restarts:
+		// nothing served before is left to compare it with but the units
+		// book's record.
+		alpha := cfgMerchant(a.cfg, "alpha")
+		alpha.Currencies = []billing.MerchantCurrency{{Code: "GOLD", Name: "Gold bars", Symbol: "🪙", Scale: 2}, creditsUnit}
+		setCfgMerchant(&a.cfg, "alpha", alpha)
+		a.restart(t)
+		require.Eventually(t, func() bool {
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: merchantdocs.RefusedDocumentFindingType})
+			if err != nil {
+				return false
+			}
+			for _, f := range findings.Items {
+				if f.SubjectKey == "currencies" && (f.Status == "reconcile_required" || f.Status == "requires_review") {
+					return true
+				}
+			}
+			return false
+		}, 20*time.Second, 50*time.Millisecond, "the operator is told GOLD keeps its scale")
+		gold, err := a.alpha.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "GOLD"})
+		require.NoError(t, err)
+		require.EqualValues(t, 400, gold.BalanceAmount)
+		require.Equal(t, &billing.MerchantCurrency{Code: "GOLD", Name: "Gold bars", Symbol: "🪙", Scale: 0}, gold.Unit, "400 whole coins, never 4.00")
+		require.Contains(t, customerUnits(t, a, a.aliceToken), billing.MerchantCurrency{Code: "GOLD", Name: "Gold bars", Symbol: "🪙", Scale: 0})
+	})
 }

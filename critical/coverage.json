@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 620,
+  "scenario_count": 625,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -152,6 +152,11 @@
       "id": "OR-J05-S09",
       "journey": "J05",
       "name": "Another merchant does not see a merchant's units: the same code is its own unit at its own scale, and another merchant's code is an unknown currency"
+    },
+    {
+      "id": "OR-J05-S10",
+      "journey": "J05",
+      "name": "A unit the units book counts keeps the scale it recorded (ledger_units) when a restart loads a file that rescales it: the balance reads at the recorded scale and the operator gets the refused-document finding"
     },
     {
       "id": "OR-J06-S01",
@@ -2867,6 +2872,26 @@
       "id": "OR-J48-S08",
       "journey": "J48",
       "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused, and a dollar failed-usage limit binds no unit; a capture prices its overrun in full, its posting takes what the lots hold and records the rest forgiven (usage_postings.forgiven, usage_charged charge: forgiven), never owed, and the customer reads its usage in the unit"
+    },
+    {
+      "id": "OR-J48-S09",
+      "journey": "J48",
+      "name": "Reversals of a multi-line order's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded (credit_grant_reversals), and a won dispute restores what the chargeback took"
+    },
+    {
+      "id": "OR-J48-S10",
+      "journey": "J48",
+      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave before crediting what the lots paid beyond its price"
+    },
+    {
+      "id": "OR-J48-S11",
+      "journey": "J48",
+      "name": "A lease sync's usage in a merchant's unit is refused currency_unsupported and moves nothing: usage in a unit arrives through an admission's capture"
+    },
+    {
+      "id": "OR-J48-S12",
+      "journey": "J48",
+      "name": "The first balance in a unit waits for the units lock a settings change takes and records the unit's scale; a gift in a counted unit takes no lock"
     },
     {
       "id": "OR-J53-S01",

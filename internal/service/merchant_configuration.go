@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -210,7 +211,7 @@ func (s *Service) putUnitChange(ctx context.Context, mid billing.MerchantID, cha
 	var set merchantdocs.Set
 	err := s.rt.DB.MerchantTx(ctx, func(txCtx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := q.LockCatalogKey(txCtx, merchantconfig.UnitsLock(mid.UUID())); err != nil {
+		if err := q.LockCatalogKey(txCtx, ledger.UnitsLock(mid.UUID())); err != nil {
 			return err
 		}
 		inUse, err := merchantconfig.UnitsInUse(txCtx, q, mid.UUID())

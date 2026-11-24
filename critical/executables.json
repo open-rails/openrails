@@ -91,6 +91,9 @@
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
     ],
+    "OR-J05-S10": [
+      "TestMerchantCurrencies/OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],
@@ -2015,6 +2018,18 @@
     ],
     "OR-J48-S08": [
       "TestMerchantUnits/OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage"
+    ],
+    "OR-J48-S09": [
+      "TestMerchantUnits/OR-J48-S09/a-packs-reversals-take-what-they-took-as-they-settled"
+    ],
+    "OR-J48-S10": [
+      "TestMerchantUnits/OR-J48-S10/a-period-whose-price-falls-takes-back-forgiveness-first"
+    ],
+    "OR-J48-S11": [
+      "TestMerchantUnits/OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit"
+    ],
+    "OR-J48-S12": [
+      "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
     ]
   }
 }

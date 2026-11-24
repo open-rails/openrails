@@ -22,7 +22,7 @@ migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650
 migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
 migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6ee5680c979809e6cfadd2e84b9a7ac3f4f
 migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c321d951aac93b728ca4
-migration 0027_merchant_unit_spending.up.sql sha256:200b8b34aee3b47c1777645f52a12db38d0afb966a60f946145621e167f1f74a
+migration 0027_merchant_unit_spending.up.sql sha256:87b0e2705d302b66941a09f2b3d9fd4a24b4923694c076690b4903bc1d734f6f
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -267,6 +267,25 @@ table billing.credit_grant_events
   trigger CREATE TRIGGER immutable_credit_grant_events BEFORE DELETE OR UPDATE ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_credit_grant_events_truncate BEFORE TRUNCATE ON billing.credit_grant_events FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER trg_credit_grant_events_apply AFTER INSERT ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.credit_grant_events_apply()
+
+table billing.credit_grant_reversals
+  column merchant_id uuid NOT NULL
+  column credit_grant_id uuid NOT NULL
+  column reversal_id uuid NOT NULL
+  column reverses_id uuid
+  column cash bigint NOT NULL
+  column units bigint NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint credit_grant_reversals_cash_check CHECK ((cash > 0))
+  constraint credit_grant_reversals_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants(merchant_id, id)
+  constraint credit_grant_reversals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint credit_grant_reversals_pkey PRIMARY KEY (merchant_id, credit_grant_id, reversal_id)
+  constraint credit_grant_reversals_reversal_id_fkey FOREIGN KEY (merchant_id, reversal_id) REFERENCES billing.payments(merchant_id, id)
+  constraint credit_grant_reversals_reverses_id_check CHECK ((reverses_id <> reversal_id))
+  constraint credit_grant_reversals_units_check CHECK ((units >= 0))
+  index CREATE UNIQUE INDEX credit_grant_reversals_pkey ON billing.credit_grant_reversals USING btree (merchant_id, credit_grant_id, reversal_id)
+  trigger CREATE TRIGGER immutable_credit_grant_reversals BEFORE DELETE OR UPDATE ON billing.credit_grant_reversals FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_credit_grant_reversals_truncate BEFORE TRUNCATE ON billing.credit_grant_reversals FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.credit_grants
   column merchant_id uuid NOT NULL
@@ -1088,6 +1107,19 @@ table billing.ledger_type_totals
   index CREATE UNIQUE INDEX ledger_type_totals_account_type_key ON billing.ledger_type_totals USING btree (merchant_id, book, currency, account_type, psp_id) NULLS NOT DISTINCT
   trigger CREATE TRIGGER guard_ledger_type_totals BEFORE INSERT OR DELETE OR UPDATE ON billing.ledger_type_totals FOR EACH ROW EXECUTE FUNCTION billing.guard_ledger_rollups()
   trigger CREATE TRIGGER immutable_ledger_type_totals_truncate BEFORE TRUNCATE ON billing.ledger_type_totals FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.ledger_units
+  column merchant_id uuid NOT NULL
+  column unit text NOT NULL
+  column scale integer NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint ledger_units_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_units_pkey PRIMARY KEY (merchant_id, unit)
+  constraint ledger_units_scale_check CHECK (((scale >= 0) AND (scale <= 6)))
+  constraint ledger_units_unit_check CHECK (((unit ~ '^[A-Z][A-Z0-9]{3,11}$'::text) AND (unit <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  index CREATE UNIQUE INDEX ledger_units_pkey ON billing.ledger_units USING btree (merchant_id, unit)
+  trigger CREATE TRIGGER immutable_ledger_units BEFORE DELETE OR UPDATE ON billing.ledger_units FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_ledger_units_truncate BEFORE TRUNCATE ON billing.ledger_units FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.limit_adjustments
   column merchant_id uuid NOT NULL
@@ -3883,16 +3915,13 @@ function billing.credit_grant_reservation(uuid,uuid)
           CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
               WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
                 AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
-          CROSS JOIN LATERAL (SELECT CASE WHEN g.paid_currency = g.unit THEN
+          CROSS JOIN LATERAL (SELECT
                   (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric
                    FROM billing.ledger_transfers t
                    WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund')
-              ELSE
-                  (SELECT LEAST(GREATEST(COALESCE(sum(-r.amount), 0), 0), g.paid_amount)::numeric
-                   FROM billing.payments r
-                   WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id
-                     AND r.status = 'succeeded' AND r.deleted_at IS NULL)
-              END AS amount) returned
+                + (SELECT COALESCE(sum(CASE WHEN v.reverses_id IS NULL THEN v.cash ELSE -v.cash END), 0)::numeric
+                   FROM billing.credit_grant_reversals v
+                   WHERE v.merchant_id = g.merchant_id AND v.credit_grant_id = g.id) AS amount) returned
           WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
             AND pending.amount > 0), 0)
   $function$
@@ -4289,6 +4318,7 @@ function billing.guard_billing_restore_receipt()
                     'catalog_rate_cards',
                     'catalog_restore_receipts',
                     'credit_grant_events',
+                    'credit_grant_reversals',
                     'credit_grants',
                     'custodians',
                     'customer_delinquency',
@@ -4315,6 +4345,7 @@ function billing.guard_billing_restore_receipt()
                     'ledger_rollup_pending',
                     'ledger_transfers',
                     'ledger_type_totals',
+                    'ledger_units',
                     'limit_adjustments',
                     'limit_hold_parts',
                     'limit_holds',

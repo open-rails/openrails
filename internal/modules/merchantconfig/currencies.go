@@ -51,14 +51,21 @@ func Currencies(r currency.Registry) []billing.MerchantCurrency {
 // declaration keeps serving.
 const UnitsDoc = "currencies"
 
-// UnitsLock is the transaction lock key a catalog write and a settings edit
-// that removes or rescales a unit take, so neither sees the other half done.
-func UnitsLock(merchant uuid.UUID) string { return "merchant-units:" + merchant.String() }
-
 // UnitsInUse are the merchant's units something counts: a balance, a price, a
 // product's credit or a rate card.
 func UnitsInUse(ctx context.Context, q *gen.Queries, merchant uuid.UUID) ([]string, error) {
 	return q.ListMerchantUnitsInUse(ctx, gen.ListMerchantUnitsInUseParams{MerchantID: merchant, Registry: moneyutil.CurrencyCodes()})
+}
+
+// CountedScales are the scales the units book recorded the merchant's units
+// at, by code.
+func CountedScales(ctx context.Context, q *gen.Queries, merchant uuid.UUID) (map[string]int, error) {
+	rows, err := q.ListLedgerUnits(ctx, merchant)
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.Unit] = int(r.Scale)
+	}
+	return out, err
 }
 
 // ChangedUnits are the units held declares that next removes or rescales.
@@ -73,11 +80,12 @@ func ChangedUnits(held []billing.MerchantCurrency, next currency.Registry) []str
 	return out
 }
 
-// KeepCountedUnits keeps, in a loaded document, the previous declaration of
-// each unit in use that it removes or rescales, so balances keep their unit,
-// and answers why; a unit in use no previous declaration served is named
-// alone. It answers "" when the document keeps every unit in use.
-func KeepCountedUnits(inUse []string, previous []billing.MerchantCurrency, doc *billing.MerchantSettings) string {
+// KeepCountedUnits keeps, in a loaded document, each unit in use as it is
+// counted, and answers why; "" when the document keeps every one. A unit the
+// units book recorded (counted, by code) keeps its recorded scale, so a
+// restart is no way around it; another unit in use keeps the declaration
+// served before (previous), and one no declaration served is named alone.
+func KeepCountedUnits(inUse []string, counted map[string]int, previous []billing.MerchantCurrency, doc *billing.MerchantSettings) string {
 	served := map[string]billing.MerchantCurrency{}
 	for _, u := range previous {
 		served[strings.ToUpper(string(u.Code))] = u
@@ -91,6 +99,17 @@ func KeepCountedUnits(inUse []string, previous []billing.MerchantCurrency, doc *
 	for _, code := range inUse {
 		i, ok := declared[code]
 		old, kept := served[code]
+		scale, recorded := counted[code]
+		if recorded {
+			// The served declaration names and shows the unit; the book's
+			// scale is what its amounts were written at.
+			if !kept || old.Scale != scale {
+				old, kept = billing.MerchantCurrency{Code: catalog.Currency(code), Name: code, Scale: scale}, true
+				if ok {
+					old.Name, old.Symbol = currencies[i].Name, currencies[i].Symbol
+				}
+			}
+		}
 		switch {
 		case ok && (!kept || currencies[i].Scale == old.Scale):
 		case ok:

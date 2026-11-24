@@ -160,7 +160,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 491 named SQL statements in 89 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 493 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -189,7 +189,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |
 | [idempotency_keys.sql](../internal/db/queries/idempotency_keys.sql) | 6 | `idempotency_keys` |
 | [leases.sql](../internal/db/queries/leases.sql) | 11 | `leases`, `limit_hold_parts`, `limit_holds` |
-| [ledger.sql](../internal/db/queries/ledger.sql) | 2 | `ledger_accounts`, `ledger_transfers` |
+| [ledger.sql](../internal/db/queries/ledger.sql) | 3 | `ledger_accounts`, `ledger_transfers`, `ledger_units` |
 | [limit_holds.sql](../internal/db/queries/limit_holds.sql) | 5 | `limit_hold_parts`, `limit_holds` |
 | [limits.sql](../internal/db/queries/limits.sql) | 9 | `catalog_limits`, `catalog_product_limits`, `customer_limit_overrides`, `limit_adjustments`, `limit_windows` |
 | [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
@@ -233,6 +233,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [psp_customers.sql](../internal/db/queries/psp_customers.sql) | 2 | `psp_customers` |
 | [psp_imports.sql](../internal/db/queries/psp_imports.sql) | 19 | `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `subscriptions` |
 | [psps.sql](../internal/db/queries/psps.sql) | 10 | `psps` |
+| [purchased_credits.sql](../internal/db/queries/purchased_credits.sql) | 1 | `credit_grant_reversals` |
 | [rail_pull_prune.sql](../internal/db/queries/rail_pull_prune.sql) | 11 | `maintenance_runs`, `order_attempts`, `payments`, `product_access`, `subscriptions` |
 | [rebill_cycles.sql](../internal/db/queries/rebill_cycles.sql) | 4 | `rebill_cycles` |
 | [reconciliation.sql](../internal/db/queries/reconciliation.sql) | 26 | `nmi_bulk_checkpoints`, `payment_methods`, `reconciliation_findings`, `reconciliation_state`, `subscription_verifications`, `subscriptions` |
@@ -253,14 +254,14 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 | [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
 
-The migrations declare these 115 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 117 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`, `catalog_meters`
-- `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `credit_grant_events`, `credit_grants`, `custodians`, `customer_contacts`
+- `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `credit_grant_events`, `credit_grant_reversals`, `credit_grants`, `custodians`, `customer_contacts`
 - `customer_delinquency`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`, `customer_mrr`, `customers`, `dashboard_configs`
 - `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`
 - `event_store`, `eventlog_streams`, `grants`, `host_outbox`, `idempotency_keys`, `leases`, `ledger_accounts`
-- `ledger_transfers`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`, `limit_windows`, `maintenance_runs`, `mandates`
+- `ledger_transfers`, `ledger_units`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`, `limit_windows`, `maintenance_runs`, `mandates`
 - `merchant_destructive_policy`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`, `money_settings`, `mrr_cohort_flows`
 - `mrr_flows`, `mrr_movement_lines`, `mrr_movements`, `mrr_product_flows`, `mrr_scheduled`, `mrr_totals`, `nmi_bulk_checkpoints`
 - `nmi_history_months`, `nmi_history_reads`, `notification_channel_state`, `notification_events`, `notification_issue_revisions`, `operation_log`, `order_attempts`

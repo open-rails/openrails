@@ -234,6 +234,19 @@ type BillingCreditGrantEvent struct {
 	CreatedAt   time.Time
 }
 
+// Each settled reversal of a merchant unit pack's payment as it applied to the pack's lot: the credit line's share of the payment it returned (a refund or chargeback) or restored (a recovery, naming the reversal in reverses_id), and the units that moved. A money lot keeps the same in its cash legs; a unit has none. Later reversals and recoveries read what each one took, never recompute it. Retention: permanent, never pruned.
+type BillingCreditGrantReversal struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    uuid.UUID
+	ReversesID    *uuid.UUID
+	// The credit line's share of the reversal, in the lot's paid_currency.
+	Cash int64
+	// The lot's units the reversal took, or the recovery restored.
+	Units     int64
+	CreatedAt time.Time
+}
+
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -791,6 +804,14 @@ type BillingLedgerTypeTotal struct {
 	PspID         *uuid.UUID
 	CreditsPosted int64
 	DebitsPosted  int64
+}
+
+// A merchant's own unit as the units book first counted it: written when the book opens its first account in the unit, under the units lock a settings change takes, with the scale the merchant then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.
+type BillingLedgerUnit struct {
+	MerchantID uuid.UUID
+	Unit       string
+	Scale      int32
+	CreatedAt  time.Time
 }
 
 // One staff adjustment of a customer's limit window, so a retry with its source_id adds nothing again; the capacity it added is the window's adjusted. Retention: rows are deleted 61 days after created_at.
