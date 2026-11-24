@@ -99,8 +99,11 @@ type funnel struct {
 }
 
 var (
-	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined", "refused", "error"}}
-	rebillFunnel  = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "refused", "error", "missed"},
+	// A processor outage is a system error, not card testing: errors are left
+	// out of the new-card decline rate.
+	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined", "refused"},
+		counted: []string{"approved", "declined", "refused"}}
+	rebillFunnel = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "refused", "error", "missed"},
 		counted: []string{"approved", "declined", "refused", "error", "missed"}}
 )
 
