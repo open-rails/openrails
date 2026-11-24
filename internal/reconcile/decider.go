@@ -63,7 +63,7 @@ func boundaryAdvanced(next time.Time, start, end *time.Time) bool {
 
 // DefaultDunningWindow bounds how far past the period end a FAILED renewal is
 // still recoverable (past_due) vs terminal: the built-in schedule's longest
-// window.
+// window. Converge gives a subscription OpenRails duns its case policy's.
 var DefaultDunningWindow = collection.DefaultPolicy.LongestWindow()
 
 // SubscriptionState is the decider's view of the local row.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 448,
+  "scenario_count": 449,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1872,6 +1872,11 @@
       "id": "OR-J16-S71",
       "journey": "J16",
       "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+    },
+    {
+      "id": "OR-J16-S54",
+      "journey": "J16",
+      "name": "A provider-declared failure inside the merchant's longer dunning schedule stays in dunning: converge reads the subscription's case policy, not the built-in window"
     },
     {
       "id": "OR-J15-S70",

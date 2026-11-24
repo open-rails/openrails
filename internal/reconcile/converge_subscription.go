@@ -46,6 +46,20 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 	}
 }
 
+// dunningWindowOf is how long past its period end a failed renewal of sub stays
+// recoverable: its dunning case's schedule when OpenRails runs its dunning,
+// the built-in one when the provider retries on its own.
+func dunningWindowOf(ctx context.Context, database *db.DB, sub *models.Subscription) (time.Duration, error) {
+	if sub.CollectionPolicy == models.CollectionPolicyProvider {
+		return DefaultDunningWindow, nil
+	}
+	policy, err := subscriptions.CasePolicy(ctx, database, sub)
+	if err != nil {
+		return 0, err
+	}
+	return policy.LongestWindow(), nil
+}
+
 // ConvergeSubscriptionFromSnapshot converges one local subscription to fetched
 // provider truth: Decide, backfill the provider's charges (idempotent by
 // transaction id), materialize the provider customer id, then ApplyDecision.
@@ -72,7 +86,10 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, logger *slog.
 		return out, fmt.Errorf("converge subscription: db, lifecycle, subscription and snapshot are required")
 	}
 	if dunningWindow <= 0 {
-		dunningWindow = DefaultDunningWindow
+		var err error
+		if dunningWindow, err = dunningWindowOf(ctx, database, sub); err != nil {
+			return out, fmt.Errorf("converge subscription %s: %w", sub.ID, err)
+		}
 	}
 
 	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)

@@ -1138,6 +1138,9 @@
     "OR-J16-S71": [
       "TestDueWork/OR-J16-S71/an-overdue-renewal-is-asked-before-the-rebill-watch-reads-nmi"
     ],
+    "OR-J16-S54": [
+      "TestDunningSchedule/OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
     ],

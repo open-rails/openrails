@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -213,5 +215,46 @@ func TestDunningSchedule(t *testing.T) {
 				require.Len(t, p.effects(t), 1)
 			})
 		}
+	})
+	t.Run("OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning", func(t *testing.T) {
+		// A monthly renewal is retried up to 18 days after it falls due: a
+		// 19-day window, where the built-in schedule's is 10 days.
+		const day = 24
+		a, p := newNMIWorld(t, dunningPolicy(billing.DunningPolicy{Tiers: []billing.DunningTier{
+			{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{day, 2 * day}}, {RetryAfterHours: []int{2 * day, 6 * day, 12 * day, 18 * day}},
+		}}))
+		p.core.AddPlan(nmimock.Plan{ID: "monthly", Name: "Monthly", Amount: "10.00", Days: 30})
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "nmi-monthly", PSP: "nmi", PlanID: "monthly", Currency: "USD"})
+		require.NoError(t, err)
+		// NMI is still retrying a renewal that fell due fifteen days ago.
+		now := a.clock.Now()
+		due := now.Add(-15 * 24 * time.Hour)
+		started := due.Add(-30 * 24 * time.Hour)
+		vaultID := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+		vault := p.core.Vault(vaultID)
+		scheduleID := p.core.AddSchedule(nmimock.Schedule{Vault: vaultID, Plan: "monthly", Amount: "10.00", Days: 30, Created: started, NextBilling: due, Order: "dunned-nmi-membership"})
+		initial := p.core.AddScheduleSale(scheduleID, started)
+		require.NoError(t, p.persist(t.Context()))
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		ref := billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vaultID, RailMethodRef: vault.BillingID}
+		book := billing.DeclaredBilling{AsOf: now, DefaultPSP: billing.PSPRef{Key: "nmi"},
+			Customers:      []billing.DeclaredCustomer{{Customer: customer}},
+			PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customer, Rail: "nmi", RailCustomerRef: vaultID, RailMethodRef: vault.BillingID, RecurringTransactionID: initial.TransactionID, CreatedAt: started}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "dunned-nmi-membership", Customer: customer, Price: price.ID, Rail: "nmi", RailSubscriptionID: scheduleID,
+				StartedAt: started, PaidThrough: &due, PaymentMethod: &ref, Dunning: &billing.DunningEvidence{Retries: 3, ScheduleLive: true},
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: scheduleID, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: due}}},
+			Transactions: []billing.DeclaredTransaction{{SourceID: "dunned-nmi-initial-receipt", RailSubscriptionID: scheduleID, TransactionID: initial.TransactionID, Type: "sale", Success: true,
+				Amount: 10_000_000, Currency: "USD", OccurredAt: started, NextBillingAt: &due}},
+		}
+		imported, err := a.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Empty(t, imported.Blocked, "%+v", imported.Reasons)
+		subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
+		require.NoError(t, err)
+		require.Len(t, subs.Items, 1)
+		dunned := subscriptionState(t, a, subs.Items[0].ID, "past_due")
+		require.Equal(t, due, *dunned.CurrentPeriodEndsAt, "no period is granted")
 	})
 }

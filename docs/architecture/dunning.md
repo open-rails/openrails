@@ -139,11 +139,7 @@ Checks:
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
-`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another
-period. The completion handlers also require an unchanged failure count. A
-provider-run subscription is mirrored, not retried. A row past its window is
-never charged: an NMI row parks `unverified`, a provider-billed row is asked by
-id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
+`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge judges a provider-declared failure against the subscription's case policy (`reconcile.DefaultDunningWindow` only where the provider retries). A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
 - `manual_rebill_completion.go` and `subscription_collection_intent.go` check
@@ -229,8 +225,7 @@ Checks:
 ## Tests
 
 Journeys:
-- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines,
-  due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits).
+- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54 (converge's window is the case policy's).
 - OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55 (usage collection,
   delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
@@ -248,7 +243,5 @@ Gaps:
   `life.cadence.unknown` findings; a Solana schedule spent with the switch off.
 - The floors (`arrears_delinquency_floor`, `monthly_floor`, `DefaultAmountFloor`
   1,000,000) are one number across currencies, one unit only at 6 decimals.
-- Converge judges a failed renewal against the built-in window
-  (`reconcile.DefaultDunningWindow`), not the merchant's `dunning_policy`.
 - Nothing checks that `decline`'s `reasons` covers every
   `billing.DeclineReasons()` entry.
