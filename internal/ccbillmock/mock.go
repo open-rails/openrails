@@ -6,8 +6,9 @@
 //
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
-// exports honor startTime and endTime (CCBill's MST clock) and list only
-// rebills.
+// exports honor startTime and endTime (CCBill's MST clock), refuse a range
+// over 24 hours as CCBill does, and list only rebills; there is no limit of
+// one request an hour.
 package ccbillmock
 
 import (
@@ -44,6 +45,13 @@ type Call struct {
 	Form url.Values
 }
 
+// Export is one transaction export DataLink answered: its types and its
+// startTime and endTime, both inclusive.
+type Export struct {
+	Types      string
+	Start, End time.Time
+}
+
 // Mock is a running fake DataLink. Its methods are safe for concurrent use.
 type Mock struct {
 	server  *httptest.Server
@@ -53,6 +61,7 @@ type Mock struct {
 	rebills []Rebill
 	cancels map[string]int
 	calls   []Call
+	exports []Export
 	odd     []string
 	auth    *credentials
 }
@@ -145,6 +154,13 @@ func (m *Mock) Mutations() []Call {
 	return out
 }
 
+// Exports are the transaction exports answered, in order.
+func (m *Mock) Exports() []Export {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]Export(nil), m.exports...)
+}
+
 // Unexpected lists requests the mock does not model; tests assert it empty.
 func (m *Mock) Unexpected() []string {
 	m.mu.Lock()
@@ -199,6 +215,17 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		switch {
+		case end.Before(start):
+			m.odd = append(m.odd, "export ending before it starts")
+			_, _ = io.WriteString(w, "Error: Start date is greater than end date.")
+			return
+		case end.Sub(start) > 24*time.Hour:
+			m.odd = append(m.odd, "export over 24 hours")
+			_, _ = io.WriteString(w, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		m.exports = append(m.exports, Export{Types: r.Form.Get("transactionTypes"), Start: start, End: end})
 		var rows []string
 		if strings.Contains(r.Form.Get("transactionTypes"), "REBILL") {
 			for _, rb := range m.rebills {

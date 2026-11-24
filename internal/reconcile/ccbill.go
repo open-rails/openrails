@@ -12,7 +12,8 @@ import (
 )
 
 // CCBillFetcher pulls CCBill via DataLink batch exports: the ACTIVEMEMBERS
-// roster, and REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over [Since,Until].
+// roster, and REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over [Since,Until),
+// a day per export.
 // It has no vault read. A termination appears only inside its window, so
 // absence means inactive-or-out-of-window, never unknown-to-CCBill. Rows carry
 // no currency: the matched local record denominates them, never a default. The

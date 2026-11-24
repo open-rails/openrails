@@ -44,6 +44,27 @@ const dataLinkTimeFormat = "20060102150405"
 // CCBill operates on US Mountain Standard Time (Arizona — no DST).
 var dataLinkLocation = time.FixedZone("MST", -7*60*60)
 
+// maxDataLinkWindow is the longest range one export answers: CCBill refuses
+// a startTime to endTime range over 24 hours.
+const maxDataLinkWindow = 24 * time.Hour
+
+// dataLinkWindows splits [start, end) into export requests of whole seconds:
+// at most maxDataLinkWindow each, an inclusive endTime the second before the
+// next startTime.
+func dataLinkWindows(start, end time.Time) [][2]time.Time {
+	start, end = start.Truncate(time.Second), end.Truncate(time.Second)
+	var out [][2]time.Time
+	for from := start; from.Before(end); {
+		to := from.Add(maxDataLinkWindow)
+		if to.After(end) {
+			to = end
+		}
+		out = append(out, [2]time.Time{from, to.Add(-time.Second)})
+		from = to
+	}
+	return out
+}
+
 // DataLinkExportRow is one CSV row from a transaction-type batch export. The
 // full row is preserved in Fields (quoted columns, in order); the typed
 // accessors decode the per-type column meanings documented above.
@@ -89,8 +110,9 @@ func (r DataLinkExportRow) Amount() string {
 }
 
 // FetchTransactionExport pulls the requested transaction-type batches over
-// [start, end] (converted to CCBill's MST clock) in one request. Rows of
-// unrequested types are returned too, so nothing in the export is dropped.
+// [start, end), one request per day at most (dataLinkWindows), in CCBill's
+// MST clock. Rows of unrequested types are returned too, so nothing in the
+// export is dropped.
 func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end time.Time, types []DataLinkTxnType) ([]DataLinkExportRow, error) {
 	if len(types) == 0 {
 		return nil, fmt.Errorf("at least one transaction type is required")
@@ -107,16 +129,23 @@ func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end 
 		names = append(names, string(t))
 	}
 
-	formData := url.Values{}
-	formData.Set("transactionTypes", strings.Join(names, ","))
-	formData.Set("startTime", start.In(dataLinkLocation).Format(dataLinkTimeFormat))
-	formData.Set("endTime", end.In(dataLinkLocation).Format(dataLinkTimeFormat))
-
-	content, err := c.fetchDataLink(ctx, formData)
-	if err != nil {
-		return nil, err
+	var rows []DataLinkExportRow
+	for _, window := range dataLinkWindows(start, end) {
+		formData := url.Values{}
+		formData.Set("transactionTypes", strings.Join(names, ","))
+		formData.Set("startTime", window[0].In(dataLinkLocation).Format(dataLinkTimeFormat))
+		formData.Set("endTime", window[1].In(dataLinkLocation).Format(dataLinkTimeFormat))
+		content, err := c.fetchDataLink(ctx, formData)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := parseDataLinkExportCSV(content)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, parsed...)
 	}
-	return parseDataLinkExportCSV(content)
+	return rows, nil
 }
 
 // parseDataLinkExportCSV decodes a transaction-export response body. An empty

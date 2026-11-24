@@ -21,9 +21,6 @@ type ccbillSource struct {
 	dl *ccbill.DataLinkClient
 }
 
-// dataLinkPeriod is the longest window one DataLink export answers.
-const dataLinkPeriod = 24 * time.Hour
-
 func ccbillDate(s string) (time.Time, bool) {
 	t, err := timeutil.ParseFirstUTC(strings.TrimSpace(s), "2006-01-02 15:04:05", "2006-01-02", "20060102150405", "01/02/2006", time.RFC3339)
 	return t, err == nil
@@ -60,29 +57,22 @@ func (s *ccbillSource) roster(ctx context.Context) ([]staged, error) {
 }
 
 func (s *ccbillSource) history(ctx context.Context, since, until time.Time, _ bool) ([]staged, error) {
+	rows, err := s.dl.FetchTransactionExport(ctx, since, until, []ccbill.DataLinkTxnType{ccbill.DataLinkTxnRebill})
+	if err != nil {
+		return nil, fmt.Errorf("ccbill rebills: %w", err)
+	}
 	var out []staged
-	for from := since; from.Before(until); from = from.Add(dataLinkPeriod) {
-		to := from.Add(dataLinkPeriod)
-		if to.After(until) {
-			to = until
+	for _, row := range rows {
+		if row.TransactionType != ccbill.DataLinkTxnRebill || row.TransactionID() == "" {
+			continue
 		}
-		to = to.Add(-time.Second) // DataLink's end is inclusive
-		rows, err := s.dl.FetchTransactionExport(ctx, from, to, []ccbill.DataLinkTxnType{ccbill.DataLinkTxnRebill})
-		if err != nil {
-			return nil, fmt.Errorf("ccbill rebills: %w", err)
-		}
-		for _, row := range rows {
-			if row.TransactionType != ccbill.DataLinkTxnRebill || row.TransactionID() == "" {
-				continue
-			}
-			at, _ := ccbillDate(row.Timestamp())
-			f := facts{}
-			f.add(FactSubscriptionRef, row.SubscriptionID())
-			// DataLink names no currency: the subscription's price prices it.
-			remote := reconcile.CCBillRemoteTransaction(row)
-			out = append(out, staged{kind: billing.PSPImportTransaction, ref: row.TransactionID(), subscriptionRef: row.SubscriptionID(), occurredAt: at, facts: f,
-				data: transactionData{TransactionID: row.TransactionID(), Type: "sale", Success: true, Decimal: row.Amount(), OccurredAt: at, Remote: &remote}})
-		}
+		at, _ := ccbillDate(row.Timestamp())
+		f := facts{}
+		f.add(FactSubscriptionRef, row.SubscriptionID())
+		// DataLink names no currency: the subscription's price prices it.
+		remote := reconcile.CCBillRemoteTransaction(row)
+		out = append(out, staged{kind: billing.PSPImportTransaction, ref: row.TransactionID(), subscriptionRef: row.SubscriptionID(), occurredAt: at, facts: f,
+			data: transactionData{TransactionID: row.TransactionID(), Type: "sale", Success: true, Decimal: row.Amount(), OccurredAt: at, Remote: &remote}})
 	}
 	return out, nil
 }

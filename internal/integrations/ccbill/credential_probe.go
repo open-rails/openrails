@@ -13,7 +13,7 @@ func (c *DataLinkClient) ProbeCredentials(ctx context.Context) error {
 		return err
 	}
 	end := time.Now().UTC()
-	if _, err := c.FetchTransactionExport(ctx, end.Add(-time.Second), end, []DataLinkTxnType{DataLinkTxnRebill}); err != nil {
+	if _, err := c.FetchTransactionExport(ctx, end.Add(-time.Minute), end, []DataLinkTxnType{DataLinkTxnRebill}); err != nil {
 		return fmt.Errorf("ccbill credential probe: %w", err)
 	}
 	return nil

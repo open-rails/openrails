@@ -1357,6 +1357,9 @@
     "OR-J15-S73": [
       "TestProviderTime/OR-J15-S73/prune-keeps-an-nmi-sale-settled-after-its-window"
     ],
+    "OR-J38-S44": [
+      "TestProviderTime/OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

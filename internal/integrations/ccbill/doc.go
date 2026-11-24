@@ -3,7 +3,8 @@
 // the rebill schedule; OpenRails never sees card data. A PSP's account is
 // client_accnum-client_subacc ("999999-0000"); its secrets are the FlexForm
 // salt and an optional DataLink username/password pair, which enables
-// merchant-initiated cancels and the provider pull.
+// merchant-initiated cancels and the provider pull. DataLink refuses an export
+// range over 24 hours, so every export is read a day at a time.
 //
 // Sales: a price links a FlexForm (flex_id, recurring_billing_option_id)
 // whose pricing must equal the catalog's; renewals are checked within 2%. A

@@ -351,7 +351,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -386,7 +386,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-10 * 24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -577,7 +577,11 @@ func dataLinkFeedFor(t *testing.T, sub, txn string, rebill time.Time) *httptest.
 			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
 			return
 		}
-		if !rebill.Before(from) && rebill.Before(until) {
+		if until.Sub(from) > 24*time.Hour {
+			fmt.Fprint(out, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		if !rebill.Before(from) && !rebill.After(until) {
 			fmt.Fprintf(out, "REBILL,945280,0001,%s,%s,%s,10.00\n", sub, rebill.UTC().Format("2006-01-02 15:04:05"), txn)
 		}
 	}))

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 461,
+  "scenario_count": 462,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2132,6 +2132,11 @@
       "id": "OR-J15-S73",
       "journey": "J15",
       "name": "An NMI window read reaches a sale settled, refunded or voided after it: prune keeps its receipt, and still finds a receipt NMI does not list"
+    },
+    {
+      "id": "OR-J38-S44",
+      "journey": "J38",
+      "name": "A CCBill provider refresh reads DataLink in exports of at most 24 hours, which CCBill requires, and records every rebill of its eight-day windows"
     },
     {
       "id": "OR-J39-S01",

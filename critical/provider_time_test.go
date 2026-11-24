@@ -4,13 +4,19 @@ package critical_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -111,5 +117,74 @@ func TestProviderTime(t *testing.T) {
 		kept, err := a.alpha.GetPayment(t.Context(), receipt.ID)
 		require.NoError(t, err)
 		require.Equal(t, sale.TransactionID, kept.TransactionID)
+	})
+
+	t.Run("OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		w := newWorld(t, func(w *world) { declareCCBill(w, dataLink.URL()) })
+		price := ccbillMemberPrice(t, w.alpha)
+		now := w.clock.Now().Truncate(time.Second)
+		// Nine members, each rebilled once, over nine days at drifting
+		// times of day.
+		book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"}}
+		rebills := map[string]time.Time{}
+		members := map[string]billing.CustomerID{}
+		for i := range 9 {
+			sub, initial, txn := fmt.Sprintf("0223344556600000%03d", i), fmt.Sprintf("0812233445500000%03d", i), fmt.Sprintf("0912233445500000%03d", i)
+			rebill := now.Add(-time.Hour - time.Duration(i)*(26*time.Hour+37*time.Minute+13*time.Second))
+			start, next := rebill.Add(-720*time.Hour), rebill.Add(720*time.Hour)
+			customer := billing.CustomerID(uuid.New())
+			rebills[txn], members[txn] = rebill, customer
+			dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member-" + sub, Email: "member-" + sub + "@critical.invalid", Signup: start, Rebill: &next})
+			dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, TransactionID: txn, At: rebill, Amount: "10.00"})
+			book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
+			book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: "ccbill-member-" + sub, Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: sub,
+				StartedAt: start, PaidThrough: &rebill,
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: sub, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: rebill}})
+			book.Transactions = append(book.Transactions,
+				billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: initial, Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
+				billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: txn, Type: "sale", Success: true, Currency: "USD", OccurredAt: rebill})
+		}
+		res, err := w.alpha.ImportBilling(t.Context(), book)
+		require.NoError(t, err)
+		require.Empty(t, res.Blocked, "%+v", res.Reasons)
+		fleet := hostFleet(t, w)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		require.Eventually(t, func() bool {
+			return len(attributionJobs(t, fleet, rivertype.JobStateScheduled)) == 1
+		}, 20*time.Second, 20*time.Millisecond, "the import's rebills wait for the pull")
+		refreshMerchant(t, fleet, w.alpha.MerchantID().UUID())
+
+		for txn, customer := range members {
+			require.EqualValues(t, 10_000_000, ccbillPayments(t, w, customer)[txn], "the pull records the rebill of %s", rebills[txn])
+		}
+		require.Empty(t, dataLink.Unexpected(), "no export spans more than 24 hours")
+		// The pull's exports (every type) cover the nine days without a gap.
+		var exports []ccbillmock.Export
+		for _, e := range dataLink.Exports() {
+			require.LessOrEqual(t, e.End.Sub(e.Start), 24*time.Hour-time.Second)
+			if strings.Contains(e.Types, "CHARGEBACK") {
+				exports = append(exports, e)
+			}
+		}
+		slices.SortFunc(exports, func(a, b ccbillmock.Export) int { return a.Start.Compare(b.Start) })
+		times := slices.Collect(maps.Values(rebills))
+		first, last := slices.MinFunc(times, time.Time.Compare), slices.MaxFunc(times, time.Time.Compare)
+		var reach time.Time // the end of the run of exports holding first
+		for _, e := range exports {
+			switch {
+			case reach.IsZero():
+				if !e.Start.After(first) && !e.End.Before(first) {
+					reach = e.End
+				}
+			case e.Start.After(reach.Add(time.Second)):
+			case e.End.After(reach):
+				reach = e.End
+			}
+		}
+		require.False(t, reach.Before(last), "the exports holding %s end at %s, before %s", first, reach, last)
 	})
 }
