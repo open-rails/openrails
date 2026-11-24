@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -101,10 +102,16 @@ func writeMerchantArchiveError(r *httprequest.Request, err error) {
 	}
 	// Do not expose PostgreSQL failing-row details or archive/provider bytes;
 	// the operator's log keeps the cause.
-	if err != nil && status >= http.StatusInternalServerError {
-		r.Log.ErrorContext(r.Request.Context(), "billing archive failed", logx.Err(err), "code", detail.Code)
-	} else if err != nil {
-		r.Log.WarnContext(r.Request.Context(), "billing archive refused", logx.Err(err), "code", detail.Code)
+	if err != nil {
+		cause := err
+		if failure != nil && failure.Err != nil {
+			cause = failure.Err
+		}
+		level, msg := slog.LevelWarn, "billing archive refused"
+		if status >= http.StatusInternalServerError {
+			level, msg = slog.LevelError, "billing archive failed"
+		}
+		r.Log.Log(r.Request.Context(), level, msg, logx.Err(err), "cause", logx.Redact(cause.Error()), "code", detail.Code)
 	}
 	detail.RequestID = r.RequestID()
 	r.JSON(status, map[string]any{"error": detail})
