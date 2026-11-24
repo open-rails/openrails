@@ -140,6 +140,13 @@ func nmiMembershipWithAccess(t *testing.T, access catalog.Field[int], configure 
 // nmiMembershipOn imports alice's weekly NMI membership into a world.
 func nmiMembershipOn(t *testing.T, a *authorityWorld, p *nmiJournal, access catalog.Field[int], configure ...func(*nmimock.Schedule)) *billing.Subscription {
 	t.Helper()
+	return nmiMembershipDeclared(t, a, p, access, nil, configure...)
+}
+
+// nmiMembershipDeclared is nmiMembershipOn with declare changing the book
+// before its import.
+func nmiMembershipDeclared(t *testing.T, a *authorityWorld, p *nmiJournal, access catalog.Field[int], declare func(*billing.DeclaredBilling), configure ...func(*nmimock.Schedule)) *billing.Subscription {
+	t.Helper()
 	p.core.AddPlan(nmimock.Plan{ID: "weekly", Name: "Weekly", Amount: "10.00", Days: 7})
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-membership", DisplayName: "NMI membership", Entitlements: []string{"nmi:member"}})
 	require.NoError(t, err)
@@ -166,6 +173,9 @@ func nmiMembershipOn(t *testing.T, a *authorityWorld, p *nmiJournal, access cata
 			PaymentMethod:    &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vaultID, RailMethodRef: vault.BillingID},
 			AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: scheduleID, Amount: 10_000_000, Currency: "USD", IntervalHours: 168, FirstDueAt: due}}},
 		Transactions: []billing.DeclaredTransaction{{SourceID: "known-nmi-initial-receipt", RailSubscriptionID: scheduleID, TransactionID: initial.TransactionID, Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: started, NextBillingAt: &due}},
+	}
+	if declare != nil {
+		declare(&book)
 	}
 	imported, err := a.alpha.ImportBilling(t.Context(), book)
 	require.NoError(t, err)

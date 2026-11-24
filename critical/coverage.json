@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 625,
+  "scenario_count": 639,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2624,6 +2624,66 @@
       "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
     },
     {
+      "id": "OR-J42-S11",
+      "journey": "J42",
+      "name": "A declined renewal puts the subscription's MRR at risk as past due, listed and in mrr_at_risk; a paid retry closes the case recovered; dunning exhausted on a later renewal closes the next case churned, involuntary; the recovery rate is a half"
+    },
+    {
+      "id": "OR-J42-S12",
+      "journey": "J42",
+      "name": "A non-retryable decline puts MRR at risk as needing a payment method; a new card moves the same case to past due, and the paid retry recovers it"
+    },
+    {
+      "id": "OR-J42-S13",
+      "journey": "J42",
+      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+    },
+    {
+      "id": "OR-J42-S14",
+      "journey": "J42",
+      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+    },
+    {
+      "id": "OR-J42-S15",
+      "journey": "J42",
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
+    },
+    {
+      "id": "OR-J42-S16",
+      "journey": "J42",
+      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+    },
+    {
+      "id": "OR-J42-S17",
+      "journey": "J42",
+      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+    },
+    {
+      "id": "OR-J42-S18",
+      "journey": "J42",
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+    },
+    {
+      "id": "OR-J42-S19",
+      "journey": "J42",
+      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+    },
+    {
+      "id": "OR-J42-S21",
+      "journey": "J42",
+      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
+    },
+    {
+      "id": "OR-J42-S22",
+      "journey": "J42",
+      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+    },
+    {
+      "id": "OR-J42-S23",
+      "journey": "J42",
+      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
+    },
+    {
       "id": "OR-J28-S09",
       "journey": "J28",
       "name": "An NMI delivery signed under any nonce is accepted, with no replay window; a replay or retry of its event applies nothing"
@@ -2907,6 +2967,16 @@
       "id": "OR-J53-S03",
       "journey": "J53",
       "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
+    },
+    {
+      "id": "OR-J53-S04",
+      "journey": "J53",
+      "name": "A sale and usage at 23:30 in a merchant's accounting timezone, ten hours behind UTC, count on that local day: date ranges and day buckets start at its midnights and the result names the zone"
+    },
+    {
+      "id": "OR-J53-S05",
+      "journey": "J53",
+      "name": "A day chart across a midnight clock change has one row per local day, the changed day starting at its transition with the sale made on it; the catalogue marks measures read from rollups kept per UTC date"
     },
     {
       "id": "OR-J43-S01",

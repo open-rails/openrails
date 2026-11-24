@@ -875,6 +875,11 @@ pkg openrails/billing, const LogSourceWebhook LogSource = "webhook"
 pkg openrails/billing, const LowBalanceLineCustomer LowBalanceLineSource = "customer"
 pkg openrails/billing, const LowBalanceLineDefault LowBalanceLineSource = "default"
 pkg openrails/billing, const LowBalanceLineMerchant LowBalanceLineSource = "merchant"
+pkg openrails/billing, const MRRRiskCardExpiring MRRRiskReason = "card_expiring"
+pkg openrails/billing, const MRRRiskDelinquent MRRRiskReason = "delinquent"
+pkg openrails/billing, const MRRRiskNeedsPaymentMethod MRRRiskReason = "needs_payment_method"
+pkg openrails/billing, const MRRRiskPastDue MRRRiskReason = "past_due"
+pkg openrails/billing, const MRRRiskUnverified MRRRiskReason = "unverified"
 pkg openrails/billing, const MandateActive MandateStatus = "active"
 pkg openrails/billing, const MandateCardOnFile MandateKind = "card_on_file"
 pkg openrails/billing, const MandateEndBrandChanged MandateEndReason = "brand_changed"
@@ -1121,6 +1126,7 @@ pkg openrails/billing, func DefaultPSPImportRules() []PSPImportRule
 pkg openrails/billing, func ErrorCodeFrom(error) (ErrorCode, bool)
 pkg openrails/billing, func ErrorCodes() []ErrorCodeInfo
 pkg openrails/billing, func LookupErrorCode(ErrorCode) (ErrorCodeInfo, bool)
+pkg openrails/billing, func MRRRiskReasons() []MRRRiskReason
 pkg openrails/billing, func NewCard(string, int, int, string) (*Card, error)
 pkg openrails/billing, func NewPriceID(string, string, int64) (PriceID, error)
 pkg openrails/billing, func NormalizeMerchantSlug(string) string
@@ -2589,6 +2595,11 @@ pkg openrails/billing, type LowBalanceLine struct, Amount *int64 `json:"amount,s
 pkg openrails/billing, type LowBalanceLine struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type LowBalanceLine struct, RunwayHours *int `json:"runway_hours"`
 pkg openrails/billing, type LowBalanceLineSource string
+pkg openrails/billing, type MRRRisk struct
+pkg openrails/billing, type MRRRisk struct, EntryReason MRRRiskReason `json:"entry_reason"`
+pkg openrails/billing, type MRRRisk struct, Reasons []MRRRiskReason `json:"reasons"`
+pkg openrails/billing, type MRRRisk struct, Since time.Time `json:"since"`
+pkg openrails/billing, type MRRRiskReason string
 pkg openrails/billing, type Mandate struct
 pkg openrails/billing, type Mandate struct, AcceptedAt time.Time `json:"accepted_at"`
 pkg openrails/billing, type Mandate struct, CardBrand *string `json:"card_brand"`
@@ -2884,6 +2895,7 @@ pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"gro
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
 pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
+pkg openrails/billing, type MetricsMeasure struct, UTCDays bool `json:"utc_days,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Unit string `json:"unit"`
 pkg openrails/billing, type MetricsOrder struct
 pkg openrails/billing, type MetricsOrder struct, Dimension string `json:"dimension,omitempty"`
@@ -2900,6 +2912,7 @@ pkg openrails/billing, type MetricsResult struct, CompareRows [][]any `json:"com
 pkg openrails/billing, type MetricsResult struct, Grain string `json:"grain,omitempty"`
 pkg openrails/billing, type MetricsResult struct, Range MetricsResultRange `json:"range"`
 pkg openrails/billing, type MetricsResult struct, Rows [][]any `json:"rows"`
+pkg openrails/billing, type MetricsResult struct, Timezone string `json:"timezone"`
 pkg openrails/billing, type MetricsResultRange struct
 pkg openrails/billing, type MetricsResultRange struct, From time.Time `json:"from"`
 pkg openrails/billing, type MetricsResultRange struct, To time.Time `json:"to"`
@@ -3976,6 +3989,7 @@ pkg openrails/billing, type Subscription struct, Dunning *SubscriptionDunning `j
 pkg openrails/billing, type Subscription struct, EndedAt *time.Time `json:"ended_at"`
 pkg openrails/billing, type Subscription struct, ID SubscriptionID `json:"id"`
 pkg openrails/billing, type Subscription struct, MRR *SubscriptionMRR `json:"mrr"`
+pkg openrails/billing, type Subscription struct, MRRRisk *MRRRisk `json:"mrr_risk"`
 pkg openrails/billing, type Subscription struct, MandateID *MandateID `json:"mandate_id"`
 pkg openrails/billing, type Subscription struct, NextAction *NextAction `json:"next_action"`
 pkg openrails/billing, type Subscription struct, PSPID PSPID `json:"psp_id"`
@@ -4108,6 +4122,7 @@ pkg openrails/billing, type SubscriptionHistoryTransition struct, ToPeriodEnd *t
 pkg openrails/billing, type SubscriptionHistoryTransition struct, ToStatus SubscriptionStatus `json:"to_status"`
 pkg openrails/billing, type SubscriptionID [16]byte
 pkg openrails/billing, type SubscriptionListParams struct
+pkg openrails/billing, type SubscriptionListParams struct, AtRisk bool `form:"at_risk"`
 pkg openrails/billing, type SubscriptionListParams struct, CanceledAfter time.Time `form:"canceled_after"`
 pkg openrails/billing, type SubscriptionListParams struct, CanceledBefore time.Time `form:"canceled_before"`
 pkg openrails/billing, type SubscriptionListParams struct, CreatedAfter time.Time `form:"created_after"`
@@ -4118,6 +4133,7 @@ pkg openrails/billing, type SubscriptionListParams struct, ExpiresBefore time.Ti
 pkg openrails/billing, type SubscriptionListParams struct, IDs []SubscriptionID `form:"ids,comma"`
 pkg openrails/billing, type SubscriptionListParams struct, PriceID PriceID `form:"price_id"`
 pkg openrails/billing, type SubscriptionListParams struct, Rail Rail `form:"rail"`
+pkg openrails/billing, type SubscriptionListParams struct, RiskReason MRRRiskReason `form:"risk_reason"`
 pkg openrails/billing, type SubscriptionListParams struct, ScheduledChangeBefore time.Time `form:"scheduled_change_before"`
 pkg openrails/billing, type SubscriptionListParams struct, Sort SubscriptionSort `form:"sort"`
 pkg openrails/billing, type SubscriptionListParams struct, Status SubscriptionStatus `form:"status"`

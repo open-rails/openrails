@@ -2929,6 +2929,13 @@
         "description": "ListSubscriptions returns one page of the merchant's subscriptions matching params, newest first.",
         "parameters": [
           {
+            "name": "at_risk",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "canceled_after",
             "in": "query",
             "schema": {
@@ -3027,6 +3034,20 @@
                 "nmi",
                 "solana",
                 "stripe"
+              ]
+            }
+          },
+          {
+            "name": "risk_reason",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "card_expiring",
+                "delinquent",
+                "needs_payment_method",
+                "past_due",
+                "unverified"
               ]
             }
           },
@@ -20535,6 +20556,43 @@
           "runway_hours"
         ]
       },
+      "MRRRisk": {
+        "type": "object",
+        "properties": {
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "card_expiring",
+                "delinquent",
+                "needs_payment_method",
+                "past_due",
+                "unverified"
+              ]
+            }
+          },
+          "entry_reason": {
+            "type": "string",
+            "enum": [
+              "card_expiring",
+              "delinquent",
+              "needs_payment_method",
+              "past_due",
+              "unverified"
+            ]
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reasons",
+          "entry_reason",
+          "since"
+        ]
+      },
       "Mandate": {
         "type": "object",
         "properties": {
@@ -21254,6 +21312,9 @@
           },
           "money": {
             "type": "boolean"
+          },
+          "utc_days": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -21302,6 +21363,9 @@
           "grain": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string"
+          },
           "range": {
             "$ref": "#/components/schemas/MetricsResultRange"
           },
@@ -21330,6 +21394,7 @@
           }
         },
         "required": [
+          "timezone",
           "range",
           "columns",
           "rows"
@@ -26922,6 +26987,16 @@
               }
             ]
           },
+          "mrr_risk": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MRRRisk"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psp_id": {
             "type": "string"
           },
@@ -27105,6 +27180,7 @@
           "price_id",
           "quantity",
           "mrr",
+          "mrr_risk",
           "psp_id",
           "rail",
           "rail_subscription_id",

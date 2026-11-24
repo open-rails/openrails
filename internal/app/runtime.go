@@ -138,6 +138,9 @@ type Runtime struct {
 	EmailSender config.EmailSender
 	// Messages sends customers their billing messages.
 	Messages *messages.Service
+	// MRRRisk re-evaluates the risk of the customers a change outside their
+	// subscriptions queued.
+	MRRRisk *subscriptions.MRRRisk
 
 	EntitlementService   *entitlements.EntitlementService
 	ProductAccessService *productaccess.Service
@@ -507,9 +510,14 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		wakeDone = make(chan struct{})
 		go func() { defer close(wakeDone); r.Disputes.Run(loopCtx) }()
 	}
+	var riskDone chan struct{}
+	if r.MRRRisk != nil {
+		riskDone = make(chan struct{})
+		go func() { defer close(riskDone); r.MRRRisk.Run(loopCtx) }()
+	}
 	joinLoops := func() {
 		stopLoops()
-		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone} {
+		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone, riskDone} {
 			if done != nil {
 				<-done
 			}

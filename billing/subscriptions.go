@@ -64,6 +64,10 @@ type SubscriptionListParams struct {
 	// change by then: a cancellation at period end, or a scheduled price or
 	// seat change, effective at or before it.
 	ScheduledChangeBefore time.Time `form:"scheduled_change_before"`
+	// AtRisk keeps the subscriptions whose MRR is at risk; RiskReason keeps
+	// those at risk for that reason.
+	AtRisk     bool          `form:"at_risk"`
+	RiskReason MRRRiskReason `form:"risk_reason"`
 }
 
 // Subscription is one subscription's lifecycle and recovery state. The
@@ -91,7 +95,10 @@ type Subscription struct {
 	// MRR is what the subscription adds to monthly recurring revenue, with
 	// its scheduled change; the merchant routes fill it, the customer's own
 	// routes leave it null.
-	MRR                *SubscriptionMRR   `json:"mrr"`
+	MRR *SubscriptionMRR `json:"mrr"`
+	// MRRRisk is why the subscription's MRR is at risk, or null; the
+	// merchant routes fill it.
+	MRRRisk            *MRRRisk           `json:"mrr_risk"`
 	PSPID              PSPID              `json:"psp_id"`
 	Rail               Rail               `json:"rail"`
 	RailSubscriptionID *string            `json:"rail_subscription_id"`
@@ -165,6 +172,41 @@ type ScheduledMRR struct {
 	Kind        ScheduledMRRKind `json:"kind"`
 	Amount      int64            `json:"amount,string"`
 	EffectiveAt time.Time        `json:"effective_at"`
+}
+
+// MRRRiskReason is why a subscription's MRR is at risk.
+type MRRRiskReason string
+
+const (
+	// MRRRiskPastDue is a declined renewal being retried.
+	MRRRiskPastDue MRRRiskReason = "past_due"
+	// MRRRiskNeedsPaymentMethod is a declined renewal that waits for a new
+	// card: awaiting_method, or a provider's past due whose latest decline
+	// asks for one.
+	MRRRiskNeedsPaymentMethod MRRRiskReason = "needs_payment_method"
+	// MRRRiskUnverified is a subscription whose provider state is unknown.
+	MRRRiskUnverified MRRRiskReason = "unverified"
+	// MRRRiskCardExpiring is a card OpenRails charges that expires before the
+	// renewal it pays for.
+	MRRRiskCardExpiring MRRRiskReason = "card_expiring"
+	// MRRRiskDelinquent is a customer delinquent in the subscription's
+	// currency: overdue usage past its grace.
+	MRRRiskDelinquent MRRRiskReason = "delinquent"
+)
+
+// MRRRiskReasons is every MRRRiskReason, in the order a subscription lists
+// them.
+func MRRRiskReasons() []MRRRiskReason {
+	return []MRRRiskReason{MRRRiskPastDue, MRRRiskNeedsPaymentMethod, MRRRiskUnverified, MRRRiskCardExpiring, MRRRiskDelinquent}
+}
+
+// MRRRisk is a subscription's MRR at risk: its reasons now, and the case
+// they belong to, which began at Since for EntryReason. The at-risk amount is
+// the subscription's MRR.
+type MRRRisk struct {
+	Reasons     []MRRRiskReason `json:"reasons"`
+	EntryReason MRRRiskReason   `json:"entry_reason"`
+	Since       time.Time       `json:"since"`
 }
 
 // SubscriptionDunning is a declined renewal's collection. Attempts counts

@@ -1521,6 +1521,42 @@
     "OR-J42-S10": [
       "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
     ],
+    "OR-J42-S11": [
+      "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"
+    ],
+    "OR-J42-S12": [
+      "TestMRRRisk/OR-J42-S12/a-non-retryable-decline-needs-a-payment-method-a-card-update-moves-it-to-past-due-then-paid"
+    ],
+    "OR-J42-S13": [
+      "TestMRRRisk/OR-J42-S13/a-card-expiring-before-renewal-enters-on-the-period-change-and-leaves-on-an-account-updater-refresh"
+    ],
+    "OR-J42-S14": [
+      "TestMRRRisk/OR-J42-S14/unverified-enters-and-leaves"
+    ],
+    "OR-J42-S15": [
+      "TestMRRRisk/OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it"
+    ],
+    "OR-J42-S16": [
+      "TestMRRRisk/OR-J42-S16/the-risk-drain-and-a-decline-for-one-customer-both-commit-and-the-decline-queued-after-the-claim-is-re-evaluated"
+    ],
+    "OR-J42-S17": [
+      "TestMRRRisk/OR-J42-S17/a-cancel-at-period-end-keeps-the-case-open-a-resume-continues-it-the-end-churns-it-once"
+    ],
+    "OR-J42-S18": [
+      "TestMRRRisk/OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-never-an-nmi-schedule"
+    ],
+    "OR-J42-S19": [
+      "TestMRRRisk/OR-J42-S19/an-upgrade-while-at-risk-supersedes-the-case-and-the-replacement-opens-its-own"
+    ],
+    "OR-J42-S21": [
+      "TestMRRRisk/OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr"
+    ],
+    "OR-J42-S22": [
+      "TestMRRRisk/OR-J42-S22/a-customer-whose-evaluation-fails-alone-is-set-aside-with-a-finding-and-the-rest-drain"
+    ],
+    "OR-J42-S23": [
+      "TestMRRRisk/OR-J42-S23/canceled-at-period-end-a-card-update-clears-card-expiring-and-recovers-the-case"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],
@@ -1663,6 +1699,12 @@
     ],
     "OR-J53-S03": [
       "TestReporting/OR-J53-S03/money-never-sums-across-currencies"
+    ],
+    "OR-J53-S04": [
+      "TestReporting/OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day"
+    ],
+    "OR-J53-S05": [
+      "TestReporting/OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day"
     ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"

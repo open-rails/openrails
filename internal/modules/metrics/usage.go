@@ -50,7 +50,7 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 		for _, r := range forgiven {
 			var bucket time.Time
 			if plan.HasTime {
-				bucket = truncGrain(r.BucketAt, plan.Grain)
+				bucket = truncGrain(r.BucketAt, plan.Grain, plan.zone())
 			}
 			values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
 				"outcome": string(r.Outcome), "rate_card": r.EventType}
@@ -75,7 +75,7 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 	for _, r := range rows {
 		var bucket time.Time
 		if plan.HasTime {
-			bucket = truncGrain(r.BucketAt, plan.Grain)
+			bucket = truncGrain(r.BucketAt, plan.Grain, plan.zone())
 		}
 		values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
 			"outcome": string(r.Outcome), "rate_card": r.EventType}
