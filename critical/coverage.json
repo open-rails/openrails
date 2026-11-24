@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 573,
+  "scenario_count": 591,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1074,6 +1074,11 @@
       "name": "Operator CLI purge confirms its inventory and the job queued with it deletes the merchant's Vault configuration"
     },
     {
+      "id": "OR-J32-S06",
+      "journey": "J32",
+      "name": "Merchant purge removes the directory's contacts and provisioning tokens"
+    },
+    {
       "id": "OR-J34-S01",
       "journey": "J34",
       "name": "Destructive ceiling records and enforces hold for original actor and command"
@@ -1689,6 +1694,16 @@
       "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
     },
     {
+      "id": "OR-J38-S76",
+      "journey": "J38",
+      "name": "A failed PSP import cannot be applied"
+    },
+    {
+      "id": "OR-J38-S77",
+      "journey": "J38",
+      "name": "A price picked for an import record is never deleted"
+    },
+    {
       "id": "OR-J38-S35",
       "journey": "J38",
       "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply, never into or out of a chargeback and never for an unpaid Stripe subscription; status, period and access stay byte-identical and the provider sees no write"
@@ -1787,6 +1802,41 @@
       "id": "OR-J34-S33",
       "journey": "J34",
       "name": "A reservation started past its life is admitted against the budget again"
+    },
+    {
+      "id": "OR-J34-S39",
+      "journey": "J34",
+      "name": "With the destructive switch off a spent Solana schedule waits past due with access"
+    },
+    {
+      "id": "OR-J34-S40",
+      "journey": "J34",
+      "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
+    },
+    {
+      "id": "OR-J34-S34",
+      "journey": "J34",
+      "name": "A staff card removal is a staff admission and spends no customer-action budget"
+    },
+    {
+      "id": "OR-J34-S35",
+      "journey": "J34",
+      "name": "A declined charge that spends dunning in a billing import is an admitted cancel, held while the switch is off"
+    },
+    {
+      "id": "OR-J34-S36",
+      "journey": "J34",
+      "name": "A lost admission answer leaves no action spending the budget"
+    },
+    {
+      "id": "OR-J34-S37",
+      "journey": "J34",
+      "name": "A merchant's books land one at a time"
+    },
+    {
+      "id": "OR-J34-S38",
+      "journey": "J34",
+      "name": "An abandon waiting on its actions stalls no other admission"
     },
     {
       "id": "OR-J16-S30",
@@ -2074,6 +2124,36 @@
       "name": "A PSP whose webhooks went silent while pulls find its charges raises a finding; one with no charges or no webhooks does not, and it clears when webhooks resume"
     },
     {
+      "id": "OR-J06-S66",
+      "journey": "J06",
+      "name": "A refund the ledger cannot book alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S67",
+      "journey": "J06",
+      "name": "A low Solana cranker alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S68",
+      "journey": "J06",
+      "name": "A refused message sender alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S69",
+      "journey": "J06",
+      "name": "A rate-limited customer alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S70",
+      "journey": "J06",
+      "name": "A held terminal outcome alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S71",
+      "journey": "J06",
+      "name": "Distinct repairs of one transaction alert separately"
+    },
+    {
       "id": "OR-J14-S70",
       "journey": "J14",
       "name": "An engine renewal nothing attempted by its deadline reads as missed without a recorded miss"
@@ -2262,6 +2342,16 @@
       "id": "OR-J12-S71",
       "journey": "J12",
       "name": "NMI card erasure completes only after provider confirmation"
+    },
+    {
+      "id": "OR-J12-S72",
+      "journey": "J12",
+      "name": "A card with permanent versions is never hard-deleted"
+    },
+    {
+      "id": "OR-J12-S73",
+      "journey": "J12",
+      "name": "A card an unverified membership bills cannot be removed"
     },
     {
       "id": "OR-J04-S37",

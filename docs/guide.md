@@ -245,12 +245,7 @@ price-change notice (`subscription_reprice_scheduled`). Every other notification
 type has a built-in English message and is off. A declined checkout, the failure
 that ended a subscription and a refund the provider reports more than seven days late send none.
 
-A message ends in the log as `sent` or why not: `disabled`, `test_environment`
-(its PSP is a test or sandbox account), `no_contact`, `rate_limited` (ten an
-hour per customer, with a `life.customer.messages_rate_limited` finding) or
-`failed`. A send is retried, ten attempts in all; only a mail server's refusal of
-the recipient is final, and a refused sender opens
-`life.customer.messages_sender_refused` until one is accepted.
+A message ends in the log as `sent` or why not: `disabled`, `test_environment` (its PSP is a test or sandbox account), `no_contact`, `rate_limited` (ten an hour per customer, with a `life.customer.messages_rate_limited` finding) or `failed`. A send is retried, ten attempts in all; only a mail server's refusal of the recipient is final, and a refused sender opens `life.customer.messages_sender_refused` until one is accepted. Both findings alert the merchant's operator once.
 
 **The `messages` document** turns types on or off and replaces any message. It
 sits beside the merchant document (`MerchantDocument.Messages`; in Vault,

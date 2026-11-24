@@ -245,13 +245,14 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 		return queryScopeErr
 	}
 
-	// The card's agreements end with it; the mandates stay as evidence.
+	// The card's agreements end with it; the mandates and the card's
+	// versions stay as evidence.
 	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := mandates.EndForPaymentMethod(ctx, q, queryMerchant.UUID(), id, mandates.EndPaymentMethodRemoved, time.Time{}); err != nil {
 			return err
 		}
-		rows, err := q.DeletePaymentMethod(ctx, gen.DeletePaymentMethodParams{MerchantID: queryMerchant.UUID(), ID: id})
+		rows, err := q.DiscardPaymentMethod(ctx, gen.DiscardPaymentMethodParams{MerchantID: queryMerchant.UUID(), ID: id})
 		if err != nil {
 			return err
 		}

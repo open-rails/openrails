@@ -323,9 +323,9 @@ SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'
 FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid;
 
--- name: CountPSPLiveSubscriptions :one
--- The PSP's live provider subscriptions: what a roster read is weighed against.
-SELECT count(*)::int FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
-  AND rail_subscription_id IS NOT NULL AND status IN ('active', 'past_due', 'pending');
+-- name: LockBillingImport :exec
+-- Session lock: one billing book of a merchant admits and lands at a time.
+SELECT pg_advisory_lock(hashtextextended('openrails.billing_import:' || sqlc.arg(merchant_id)::uuid::text, 0));
 
+-- name: UnlockBillingImport :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.billing_import:' || sqlc.arg(merchant_id)::uuid::text, 0));

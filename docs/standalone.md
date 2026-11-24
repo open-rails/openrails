@@ -955,24 +955,11 @@ Until then a cancel of an NMI- or CCBill-owned membership is
 `409 provider_cancel_held`: OpenRails will not cancel locally while the provider
 would keep charging.
 
-**Cancellation caps.** A provider read may cancel at most
-`min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or
-the whole book when it has at most 5. Over that it cancels none, halts the
-merchant's pass and raises `pull.cancellation.capped`. The usual causes are a
-misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a
-provider returning a short page.
+**Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
 ## Destructive holds
 
-Staff refunds, cancellations, payment-method removal, access and credit
-revocation, write-offs and substantive catalog or configuration changes share
-one admission policy. It counts each staff member's and application's logical
-actions (affected targets in a batch, not requests), keyed on the verified
-issuer and invoker: rotating a credential creates no new allowance. Replays and
-proven no-ops spend nothing; creating a catalog object spends nothing; a file
-applied with `openrails catalog apply` spends the merchant's own budget. An
-in-process call that names no person is the host's own work and spends no
-allowance.
+Staff refunds, cancellations, payment-method removal, access and credit revocation, write-offs and substantive catalog or configuration changes share one admission policy. It counts each staff member's and application's logical actions (affected targets in a batch, not requests), keyed on the verified issuer and invoker: rotating a credential creates no new allowance. A billing import is a merchant-level operation: its cancels, the terminal declines it lands and the provider stops it owes a canceled subscription are `cancel_subscription` actions recorded in its caller's name and admitted together before any lands, against the merchant's and the deployment's budgets rather than the caller's; a book larger than what they have left is refused with 429 and `Retry-After`, opening no incident. Replays and proven no-ops spend nothing; creating a catalog object spends nothing; a file applied with `openrails catalog apply` spends the merchant's own budget. An in-process call that names no person is the host's own work: it is recorded, and spends no allowance.
 
 The defaults are `destructive_action_limits`: 5 an hour and 15 a day per actor;
 per merchant at least 15 and 25, per deployment at least 50 and 100, both rising

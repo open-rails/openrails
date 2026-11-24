@@ -37,7 +37,9 @@ against an order with no provider call.
   chargebacks and fraud reports per PSP, network, currency and UTC day, kept by
   triggers on `payments`, `disputes` and `fraud_reports`.
 - **Ledger repair**: a `consistency.ledger.unbooked` finding for a provider
-  reversal OpenRails could not book (`alerting.RecordLedgerRepair`).
+  reversal OpenRails could not book (`alerting.RecordLedgerRepair`), one per
+  event: its idempotency key, else its operation, transaction and the
+  resources it names (OR-J06-S71).
 
 ## How it works
 

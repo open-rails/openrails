@@ -74,11 +74,7 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
   an expired card may queue a refresh ([payment methods](payment-methods.md)).
-- `NonRecoverable` or a spent schedule cancels, ends access and queues the
-  provider cancel, given a certainty leg and an open `destructive.Gate` (a
-  Solana pull checks no gate). Otherwise `lifecycle.TerminalHeld` keeps engine
-  members `past_due`, makes NMI-schedule members `unverified`, and raises
-  `life.terminal_outcome.held`.
+- `NonRecoverable` or a spent schedule cancels, ends access and queues the provider cancel, given a certainty leg and an open `destructive.Gate`. Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`, which alerts the merchant's operator once per case; its recommended action names what lets the outcome apply (the switch, a billing import's cancellation cap, a re-import, or a provider check).
 - Access while dunning is a grace grant (`dunningAccess`), unless
   `access_during_dunning` is `suspend`.
 
@@ -224,16 +220,11 @@ Checks:
 - OR-J16-S51 and S52: the retry caps hold the networks' reattempt limits.
 
 ### 9. Destructive-action safeguards
-A terminal outcome needs a certainty leg and an open `destructive.Gate` (a
-Solana pull checks no gate). Under `limited`, the due pass holds the end of an
-`awaiting_method` case. A held outcome keeps access and raises
-`life.terminal_outcome.held`. Waiving and marking uncollectible run through
-`destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
+A terminal outcome needs a certainty leg and an open `destructive.Gate`. Under `limited`, the due pass holds the end of an `awaiting_method` case. A held outcome keeps access and raises `life.terminal_outcome.held`, alerting the operator once (OR-J06-S70). Waiving and marking uncollectible run through `destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
 `subscription_status_transitions` records the actor of each status change.
 
 Checks:
-- The engine, NMI and converge callers pass `TerminalBlocked` from
-  `destructive.Gate`; the Solana crank (`solana/pull/crank.go`) passes none.
+- The engine, NMI, converge and Solana crank callers pass `TerminalBlocked` from `destructive.Gate` (OR-J34-S39), for any decline, since spending the schedule is terminal too; a declared book holds it through `HoldTerminal` (OR-J34-S35).
 - `ExpireAwaitingMethod` keeps a blocked row (OR-J16-S31).
 
 ## Tests

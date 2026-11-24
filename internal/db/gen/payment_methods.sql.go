@@ -274,17 +274,25 @@ func (q *Queries) CustomerHasVaultedPaymentMethod(ctx context.Context, arg Custo
 	return exists, err
 }
 
-const deletePaymentMethod = `-- name: DeletePaymentMethod :execrows
-DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = $2::uuid AND id = $1
+const discardPaymentMethod = `-- name: DiscardPaymentMethod :execrows
+UPDATE billing.payment_methods
+SET status = CASE WHEN status IN ('active', 'requires_action') THEN 'removed' ELSE status END,
+    setup_ref = NULL,
+    park_reason = 'removed:' || id::text,
+    updated_at = now()
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
 `
 
-type DeletePaymentMethodParams struct {
-	ID         uuid.UUID
+type DiscardPaymentMethodParams struct {
 	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-func (q *Queries) DeletePaymentMethod(ctx context.Context, arg DeletePaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePaymentMethod, arg.ID, arg.MerchantID)
+// A card deleted at its holder outside an operation (a declined purchase's
+// new card) stays as a removed tombstone: its versions are permanent.
+func (q *Queries) DiscardPaymentMethod(ctx context.Context, arg DiscardPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, discardPaymentMethod, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

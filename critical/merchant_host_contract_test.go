@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
@@ -212,5 +213,42 @@ func TestMerchantHost(t *testing.T) {
 		}
 		require.Eventually(t, func() bool { return run() == "completed" && len(documents()) == 0 },
 			30*time.Second, 100*time.Millisecond, "the job queued with the purge deletes the merchant's Vault configuration")
+	})
+	t.Run("OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens", func(t *testing.T) {
+		a, _ := newPSPWorld(t, func(w *world) { w.deps.UserInfo = nil })
+		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "owned directory"})
+		require.NoError(t, err)
+		user := map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": uuid.NewString(), "userName": "purged-contact", "displayName": "Purged Contact"}
+		status, raw := a.request(t, "POST", "/v1/app/scim/v2/Users", token.Token, user)
+		require.Equal(t, 201, status, string(raw))
+		rows := func(table string) int {
+			t.Helper()
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, table}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&n))
+			return n
+		}
+		require.Equal(t, 1, rows("customer_contacts"))
+		require.Equal(t, 1, rows("provisioning_tokens"))
+		enableLifecycleMaintenance(t, a)
+		vault := map[string]any{"vault": map[string]any{"address": a.deps.Vault.Address(), "token": a.deps.Vault.Token(), "kv_mount": a.cfg.Vault.KVMount}}
+		purge := func(out any, args ...string) error {
+			stdout, err := hostCLICommand(t, a.world, vault, append([]string{"merchant", "purge", "--merchant", "alpha", "--by", "critical operator"}, args...)...).Output()
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return fmt.Errorf("%w: %s", err, exit.Stderr)
+			}
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(stdout, out)
+		}
+		var inventory billing.MerchantPurgeInventory
+		require.NoError(t, purge(&inventory))
+		require.Equal(t, 1, inventory.RowCounts["customer_contacts"], "the inventory counts the directory's copy")
+		require.Equal(t, 1, inventory.RowCounts["provisioning_tokens"])
+		var purged billing.MerchantPurge
+		require.NoError(t, purge(&purged, "--inventory", inventory.ID.String(), "--confirm", inventory.ConfirmPhrase, "--expect-rows", strconv.Itoa(inventory.TotalRows)))
+		require.Zero(t, rows("customer_contacts"), "the merchant's copy of its directory goes with it")
+		require.Zero(t, rows("provisioning_tokens"), "and the tokens its directory pushed with")
 	})
 }

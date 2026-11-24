@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -71,6 +72,10 @@ type Options struct {
 	// import passes reconcile.ProviderFacts, whose book skips every row
 	// OpenRails already holds.
 	Authority reconcile.FactsAuthority
+	// Admissions admits the book's cancels and provider stops as Actor's
+	// commands; a nil Actor is ctx's admitted actor.
+	Admissions *destructive.Admissions
+	Actor      *destructive.Actor
 }
 
 // Import lands a host-declared billing book. Explicitly canceled facts are
@@ -78,7 +83,10 @@ type Options struct {
 // the decider against the declared snapshot at AsOf. Charges land idempotently
 // by (rail, transaction_id). One merchant-scoped transaction: infrastructure
 // failures roll back the whole book; per-source business refusals stay
-// ordinary outcomes for the other rows.
+// ordinary outcomes for the other rows. A book that cancels or stops a
+// provider schedule is admitted as its actor's destructive commands and lands
+// again under them (reconcile.DeclaredBook); a denied admission is a
+// destructive.HeldError.
 func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, error) {
 	res := Result{Reasons: map[string]string{}}
 	if ctx == nil {
@@ -112,13 +120,17 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		return res, err
 	}
 	opts.Book = book
-	history := reconcile.NewDeclaredHistory()
-	if err := validateReceiptSources(opts.Book, history); err != nil {
+	// The book's cancels and provider stops are its admitted effects.
+	effects := reconcile.NewDeclaredBook(opts.Admissions, opts.Actor, asOf)
+	release, err := reconcile.LockDeclaredBooks(ctx, database, merchantID)
+	if err != nil {
 		return res, err
 	}
+	defer release()
+	var history *reconcile.DeclaredHistory
 	var plans []plannedPurchase
 	var historical []historicalPayment
-	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	land := func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)
@@ -131,7 +143,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		// service and deferred-delete scheduler share this transaction so no
 		// write partially commits.
 		lc := subscriptions.NewSubscriptionLifecycleService(txdb, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
-		deferDelete := intents.NewProviderCancelScheduler(txdb, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
+		deferDelete := intents.NewProviderCancelScheduler(txdb, nil, intents.OriginAdmin, "billing-import terminal cancel, remote may be alive")
 		lc.SetProviderCancelScheduler(deferDelete)
 
 		// Every provider-bound row carries a PSP: its own ref, else the book
@@ -436,7 +448,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, logger, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
 			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
 			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
-		}, asOf, history, authority)
+		}, asOf, history, authority, effects)
 		if err != nil {
 			return err
 		}
@@ -497,9 +509,33 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		sort.Strings(res.Skipped)
 		sort.Strings(res.Blocked)
 		return nil
-	})
-	if err != nil {
-		return res, err
+	}
+	// A landing that wants destructive effects rolls back; they are admitted
+	// and the book lands again under its admission.
+	for admitted := false; ; {
+		res = Result{Reasons: map[string]string{}}
+		plans, historical = nil, nil
+		history = reconcile.NewDeclaredHistory()
+		if err := validateReceiptSources(opts.Book, history); err != nil {
+			return res, err
+		}
+		err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			if err := land(ctx, tx); err != nil {
+				return err
+			}
+			return failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeComplete, Kind: FailpointKind})
+		})
+		if errors.Is(err, reconcile.ErrDeclaredAdmission) && !admitted {
+			admitted = true
+			if err := effects.Admit(ctx, database, merchantID); err != nil {
+				return Result{}, errors.Join(err, effects.Abandon(ctx))
+			}
+			continue
+		}
+		if err != nil {
+			return res, errors.Join(err, effects.Abandon(ctx))
+		}
+		break
 	}
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.Committed, Kind: FailpointKind}); err != nil {
 		return res, err

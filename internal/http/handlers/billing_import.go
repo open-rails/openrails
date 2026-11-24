@@ -44,6 +44,7 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 		MerchantID: mid,
 		Book:       book,
 		Clock:      r.Clock,
+		Admissions: r.State.DestructiveAdmissions,
 	})
 	if err != nil {
 		writeRefusal(r, err, "billing import failed")

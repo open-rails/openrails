@@ -279,5 +279,4 @@ Gaps:
   OR-J01-S02 only checks that they refuse a missing credential.
 - `CheckEntitlementsLive` with `at` or prefixes leaves cached entries as they were.
 - No test reaches an `outstanding_cap` cap, or declares a spend window in another currency than its policy's.
-- Nothing checks that partitioned reads name a time range, or that
-  `retention.Tables` matches the schema; both are review-only.
+- Nothing checks that partitioned reads name a time range; it is review-only. `TestTablesMatchSchema` holds `retention.Tables` to the schema.

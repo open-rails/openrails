@@ -1770,9 +1770,11 @@
     ],
     "internal/modules/alerting": [
       "type Alert struct {\n\tTitle         string    `json:\"title\"`\n\tSeverity      Severity  `json:\"severity\"`\n\tSummary       string    `json:\"summary\"`\n\tDashboardLink string    `json:\"dashboard_link,omitempty\"`\n\tFiredAt       time.Time `json:\"fired_at\"`\n}",
+      "type FieldError struct {\n\tParam   string   `json:\"param\"`\n\tCode    string   `json:\"code\"`\n\tMessage string   `json:\"message\"`\n\tValid   []string `json:\"valid,omitempty\"`\n}"
+    ],
+    "internal/modules/alerting/alertjob": [
       "type ChannelRef struct {\n\tType      ChannelType `json:\"type\"`\n\tWebhookID *uuid.UUID  `json:\"webhook_id,omitempty\"`\n}",
       "type DeliveryArgs struct {\n\tMerchantID uuid.UUID     `json:\"merchant_id\"`\n\tHold       *HoldAlert    `json:\"hold,omitempty\"`\n\tFinding    *FindingAlert `json:\"finding,omitempty\"`\n\tChannel    *ChannelRef   `json:\"channel,omitempty\"`\n}",
-      "type FieldError struct {\n\tParam   string   `json:\"param\"`\n\tCode    string   `json:\"code\"`\n\tMessage string   `json:\"message\"`\n\tValid   []string `json:\"valid,omitempty\"`\n}",
       "type FindingAlert struct {\n\tID         uuid.UUID `json:\"id\"`\n\tNotifiedAt time.Time `json:\"notified_at\"`\n}",
       "type HoldAlert struct {\n\tID       uuid.UUID `json:\"id\"`\n\tScope    string    `json:\"scope\"`\n\tOpenedAt time.Time `json:\"opened_at\"`\n}"
     ],
@@ -3651,21 +3653,21 @@
       "sha256": "crypto/sha256",
       "time": "time"
     },
-    "internal/modules/alerting/delivery.go": {
+    "internal/modules/alerting/alertjob/alertjob.go": {
       "context": "context",
-      "errors": "errors",
+      "db": "github.com/open-rails/openrails/internal/db",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
-      "strconv": "strconv",
-      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/alerting/types.go": {
+      "alertjob": "github.com/open-rails/openrails/internal/modules/alerting/alertjob",
       "billing": "github.com/open-rails/openrails/billing",
       "strings": "strings",
       "time": "time",

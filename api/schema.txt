@@ -19,6 +19,7 @@ migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154d
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
+migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2034,7 +2035,7 @@ table billing.payment_method_versions
   constraint payment_method_versions_network_token_id_check CHECK ((network_token_id <> ''::text))
   constraint payment_method_versions_network_token_par_check CHECK ((network_token_par <> ''::text))
   constraint payment_method_versions_network_token_status_check CHECK ((network_token_status = ANY (ARRAY['active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
-  constraint payment_method_versions_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE CASCADE
+  constraint payment_method_versions_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE RESTRICT
   constraint payment_method_versions_pkey PRIMARY KEY (merchant_id, id)
   constraint payment_method_versions_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
   constraint payment_method_versions_rail_customer_ref_check CHECK ((rail_customer_ref <> ''::text))

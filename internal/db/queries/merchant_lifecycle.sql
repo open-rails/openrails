@@ -116,3 +116,15 @@ SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyAccounts :exec
 DELETE FROM billing.money_settings WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsCustomerContacts :one
+SELECT count(*) FROM billing.customer_contacts WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsCustomerContacts :exec
+DELETE FROM billing.customer_contacts WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsProvisioningTokens :one
+SELECT count(*) FROM billing.provisioning_tokens WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsProvisioningTokens :exec
+DELETE FROM billing.provisioning_tokens WHERE merchant_id = $1;

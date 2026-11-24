@@ -296,7 +296,7 @@ func (im *Importer) plausibleRoster(ctx context.Context, row gen.BillingPspImpor
 	if roster == 0 || reconcile.Provider(scope.Rail) != reconcile.ProviderNMI {
 		return roster > 0, nil
 	}
-	live, err := im.DB.Gen(ctx).CountPSPLiveSubscriptions(ctx, gen.CountPSPLiveSubscriptionsParams{MerchantID: row.MerchantID, PspID: row.PspID})
+	live, err := im.DB.Gen(ctx).CountLiveLinkedSubscriptionsForPSP(ctx, gen.CountLiveLinkedSubscriptionsForPSPParams{MerchantID: row.MerchantID, PspID: row.PspID})
 	if err != nil {
 		return false, err
 	}

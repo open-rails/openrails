@@ -21,6 +21,7 @@ sql:
       - "internal/migrate/postgres/0016_mrr.up.sql"
       - "internal/migrate/postgres/0018_contact_erasure_admission.up.sql"
       - "internal/migrate/postgres/0023_decline_causes.up.sql"
+      - "internal/migrate/postgres/0024_payment_method_versions_restrict.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

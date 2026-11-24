@@ -133,9 +133,9 @@ channel after an archive restore.
 
 **Merchant alerts.** A finding's engine calls `alerting.Service.NotifyFinding` after
 persisting it (reconcile and converge engines, configuration evaluation, webhook
-parks, pay URL failures). Findings raised through `reconcile.PGStore.RaiseFinding`
-(`alerting.RecordLedgerRepair`, `alerting.RecordCrankerGas`) are not passed to it
-and reach only the console. Only `requires_review` findings notify. In one
+parks, pay URL failures), and `alerting.RecordLedgerRepair`,
+`alerting.RecordCrankerGas`, `alerting.RecordMessageRateLimit` and
+`alerting.RecordMessageSenderRefused` notify the findings they raise, and so does the lifecycle for `life.terminal_outcome.held`, through `alertjob.Notify`, the claim and queue the others share. Only `requires_review` findings notify. In one
 transaction `ClaimReconciliationFindingNotification` stamps `notified_at` and
 `notified_severity` (first time, or a strict escalation) and an
 `openrails.operator_alert` job (`DeliveryArgs`) is queued; a low finding stays in
@@ -344,7 +344,8 @@ Checks:
   publish and withdraw against AuthKit's real store; they run with the suite but
   map to no scenario id.
 - Alerts: OR-J06-S62 (daily re-alert), OR-J06-S64 (failed email retried, sent once),
-  OR-J06-S05 (webhook URL refusal). Findings: OR-J37-S09 (a cranker low-gas
+  OR-J06-S05 (webhook URL refusal), OR-J06-S70 (a held terminal outcome), OR-J06-S71
+  (distinct repairs of one transaction). Findings: OR-J37-S09 (a cranker low-gas
   finding raised and resolved), OR-J34-S04 (a hold's finding cannot be resolved
   around the hold).
 - Balance notices: OR-J25-S04, OR-J25-S37, OR-J25-S40, OR-J25-S41, OR-J25-S42.
