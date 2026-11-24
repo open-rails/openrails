@@ -21,7 +21,12 @@
 //     the mock clock; validation failures (400, 404) are not retained.
 //   - Charge and refund lists honor created[gte]/[lte], customer, limit and
 //     starting_after; PaymentIntent lists filter by customer only; disputes
-//     are what Dispute seeds.
+//     are what Dispute and ChargeDispute seed.
+//   - Each charge, refund and dispute makes one balance transaction, settled
+//     in its own currency unless SetSettlement names another: a charge's fee
+//     is 2.9% of the settled amount plus 30 minor units, a refund's 0 (unless
+//     RefundReturningFee returns part of it), a dispute's DisputeFee, which a
+//     won dispute returns with the charge.
 //   - Products and prices are what AddProduct and AddPrice seed. Lists honor
 //     active (prices list only active ones unless asked) and never show
 //     inline prices; a by-id read does. Moving a subscription onto an

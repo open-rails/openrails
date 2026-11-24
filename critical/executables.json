@@ -2067,6 +2067,12 @@
     "OR-J40-S24": [
       "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
     ],
+    "OR-J40-S40": [
+      "TestProcessorFees/OR-J40-S40/a-stripe-charge-fee-and-a-dispute-fee-post-once-exactly"
+    ],
+    "OR-J40-S41": [
+      "TestProcessorFees/OR-J40-S41/a-prevention-refund-reads-through-its-dispute"
+    ],
     "OR-J41-S01": [
       "TestRevenueRecognition/OR-J41-S01/a-monthly-plan-bought-mid-month-books-cash-per-psp-and-recognises-at-the-boundary-and-the-end"
     ],
