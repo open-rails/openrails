@@ -3,14 +3,12 @@ package books
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -79,19 +77,9 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	if err != nil || posted {
 		return err
 	}
-	// While the lot's poster has not decided its share (a pack of a
-	// merchant's unit the books never booked waits), the rest waits with it.
-	if g, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: p.ID}); err == nil {
-		decided, err := q.CreditReversalDecided(ctx, gen.CreditReversalDecidedParams{MerchantID: mid.UUID(), ReversalID: r.ID, CreditGrantID: g.ID})
-		if err != nil || !decided {
-			return err
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
 	// The credit lot the payment bought is first: its poster has moved its
 	// share already (books.ReverseCredit, books.RecoverCredit). The rest is
-	// this one's.
+	// this one's, all of it when the lot was never booked.
 	lot, err := q.GetLotReversalCash(ctx, gen.GetLotReversalCashParams{MerchantID: mid.UUID(), CustomerID: r.CustomerID, Currency: r.Currency, ReversalID: r.ID.String()})
 	if err != nil {
 		return err

@@ -17,44 +17,83 @@ CREATE TRIGGER immutable_books_starts_truncate BEFORE TRUNCATE ON billing.books_
     FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
 -- The share of a credit lot each reversal took, or each recovery restored,
--- decided once when it first settled, nothing included: a later pass never
--- revisits it.
+-- decided once when it first settles, nothing included: the lot's record of
+-- what its reversals moved, whether or not the general ledger booked the lot.
 CREATE TABLE billing.credit_reversal_shares (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
     reversal_id uuid NOT NULL,
     credit_grant_id uuid NOT NULL,
+    origin_id uuid NOT NULL,
     cash bigint NOT NULL CHECK (cash >= 0),
     units bigint NOT NULL CHECK (units >= 0),
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT credit_reversal_shares_pkey PRIMARY KEY (merchant_id, reversal_id, credit_grant_id),
+    CONSTRAINT credit_reversal_shares_pkey PRIMARY KEY (merchant_id, reversal_id, credit_grant_id, origin_id),
     CONSTRAINT credit_reversal_shares_reversal_id_fkey FOREIGN KEY (merchant_id, reversal_id) REFERENCES billing.payments (merchant_id, id),
+    CONSTRAINT credit_reversal_shares_origin_id_fkey FOREIGN KEY (merchant_id, origin_id) REFERENCES billing.payments (merchant_id, id),
     CONSTRAINT credit_reversal_shares_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants (merchant_id, id)
 );
-COMMENT ON TABLE billing.credit_reversal_shares IS 'One row per settled reversal of a paid credit lot''s payment: the share of the lot it took, or a recovery restored, decided when it first settled, zero included. A later reversal or recovery never changes it. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.credit_reversal_shares.cash IS 'The lot''s money it moved, in the lot''s paid_currency.';
-COMMENT ON COLUMN billing.credit_reversal_shares.units IS 'The lot''s units it moved, in the lot''s unit.';
+CREATE INDEX credit_reversal_shares_credit_grant_id_idx ON billing.credit_reversal_shares (merchant_id, credit_grant_id, origin_id);
+COMMENT ON TABLE billing.credit_reversal_shares IS 'Each settled reversal''s share of the paid credit lot its payment bought, decided when it first settled, zero included, and never changed: the record of the lot''s returned money and units. A refund or chargeback has one row, its own (origin_id = reversal_id); a recovery has one per chargeback it restored, or one of its own, zero, when it restored none. Retention: permanent, never pruned.';
+COMMENT ON COLUMN billing.credit_reversal_shares.origin_id IS 'The reversal whose share this is: the row''s own, or the chargeback a recovery restored.';
+COMMENT ON COLUMN billing.credit_reversal_shares.cash IS 'The lot''s money it took, or restored of origin_id''s, in the lot''s paid_currency.';
+COMMENT ON COLUMN billing.credit_reversal_shares.units IS 'The lot''s units it took, or restored of origin_id''s, in the lot''s unit.';
 
--- A reversal settled before this migration was decided then: its share is
--- what its legs moved, nothing when it has none. One of a merchant-unit pack
--- the books never booked still waits, undecided.
-INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, cash, units)
-SELECT r.merchant_id, r.id, g.id, COALESCE(m.cash, 0)::bigint, COALESCE(m.units, 0)::bigint
-FROM billing.payments r
-JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
-CROSS JOIN LATERAL (
-    SELECT count(*) AS legs,
-           sum(lt.amount) FILTER (WHERE lt.book = 'units' AND lt.transfer_type IN ('credit_refund_cash', 'credit_refund_cash_restore')
-               OR lt.book = 'general' AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))) AS cash,
-           sum(lt.amount) FILTER (WHERE lt.book = 'units' AND (lt.transfer_type IN ('credit_refund', 'credit_refund_restore')
-               OR lt.source IN ('consumed_credit', 'expired_credit', 'revoked_credit', 'repaid_owed')
-               OR lt.source ~ '^(retired_credit|expired_credit|revoked_credit|repaid_owed|consumed_credit)_restore:')) AS units
-    FROM billing.ledger_transfers lt
-    JOIN billing.ledger_accounts d ON d.merchant_id = lt.merchant_id AND d.id = lt.debit_account_id
-    JOIN billing.ledger_accounts c ON c.merchant_id = lt.merchant_id AND c.id = lt.credit_account_id
-    WHERE lt.merchant_id = r.merchant_id AND lt.credit_grant_id = g.id AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
-) m
-WHERE r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
-  AND (m.legs > 0 OR g.deferred_credited > 0 OR g.paid_currency = g.unit);
+-- Records the share of each of a merchant's settled reversals of a paid lot
+-- that has none, as it was decided, from its legs in either book: a refund's
+-- or chargeback's own; a recovery's per chargeback its labels name; nothing
+-- when it has none, unless it was set aside (one of a unit pack the books
+-- never booked, which the next pass decides). Units are every units-book leg
+-- of the lot's face (not the cash, nor the difference of face and cash a lot
+-- from before the credit books posted to promotion or revenue). This
+-- migration and a restore of an archive from before the shares call it.
+CREATE FUNCTION billing.seed_credit_reversal_shares(p_merchant uuid) RETURNS void
+LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+    WITH legs AS (
+        SELECT r.merchant_id, r.id AS reversal_id, g.id AS credit_grant_id,
+               CASE WHEN r.amount > 0 THEN substring(lt.source FROM 'restore:([0-9a-f-]{36})$')::uuid ELSE r.id END AS origin_id,
+               CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund_cash', 'credit_refund_cash_restore')
+                      OR lt.book = 'general' AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))
+                    THEN lt.amount ELSE 0 END AS cash,
+               CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund', 'credit_refund_restore', 'credit_refund_funding') AND lt.source NOT IN ('promotion', 'revenue')
+                    THEN lt.amount ELSE 0 END AS units
+        FROM billing.payments r
+        JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
+        JOIN billing.ledger_transfers lt ON lt.merchant_id = r.merchant_id AND lt.credit_grant_id = g.id AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
+        JOIN billing.ledger_accounts d ON d.merchant_id = lt.merchant_id AND d.id = lt.debit_account_id
+        JOIN billing.ledger_accounts c ON c.merchant_id = lt.merchant_id AND c.id = lt.credit_account_id
+        WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
+    )
+    INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
+    SELECT merchant_id, reversal_id, credit_grant_id, origin_id, sum(cash)::bigint, sum(units)::bigint
+    FROM legs WHERE origin_id IS NOT NULL
+    GROUP BY merchant_id, reversal_id, credit_grant_id, origin_id;
+    INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
+    SELECT r.merchant_id, r.id, g.id, r.id, 0, 0
+    FROM billing.payments r
+    JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
+    WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
+      AND (g.deferred_credited > 0 OR g.paid_currency = g.unit);
+$$;
+SELECT billing.seed_credit_reversal_shares(id) FROM billing.merchants;
+
+-- What a lot's pending refunds reserve follows what its reversals returned,
+-- as their shares record it.
+CREATE OR REPLACE FUNCTION billing.credit_grant_reservation(p_merchant uuid, p_lot uuid) RETURNS bigint
+LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+    SELECT COALESCE((
+        SELECT LEAST(g.units, ceil(g.units::numeric * GREATEST(LEAST(pending.amount, g.paid_amount - returned.amount), 0) / g.paid_amount))::bigint
+        FROM billing.credit_grants g
+        CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
+            WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
+              AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
+        CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE WHEN s.origin_id = s.reversal_id THEN s.cash ELSE -s.cash END), 0)::numeric AS amount
+            FROM billing.credit_reversal_shares s
+            WHERE s.merchant_id = g.merchant_id AND s.credit_grant_id = g.id) returned
+        WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+          AND pending.amount > 0), 0)
+$$;
 
 CREATE TRIGGER immutable_credit_reversal_shares BEFORE DELETE OR UPDATE ON billing.credit_reversal_shares
     FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();

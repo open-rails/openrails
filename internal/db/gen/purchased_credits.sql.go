@@ -32,6 +32,58 @@ func (q *Queries) CreditReversalDecided(ctx context.Context, arg CreditReversalD
 	return decided, err
 }
 
+const getCreditRecoveredShare = `-- name: GetCreditRecoveredShare :one
+SELECT COALESCE(sum(cash),0)::bigint AS cash, COALESCE(sum(units),0)::bigint AS units
+FROM billing.credit_reversal_shares
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
+ AND origin_id=$3::uuid AND reversal_id<>$3::uuid
+`
+
+type GetCreditRecoveredShareParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    uuid.UUID
+}
+
+type GetCreditRecoveredShareRow struct {
+	Cash  int64
+	Units int64
+}
+
+// What recoveries restored of one reversal's share.
+func (q *Queries) GetCreditRecoveredShare(ctx context.Context, arg GetCreditRecoveredShareParams) (GetCreditRecoveredShareRow, error) {
+	row := q.db.QueryRow(ctx, getCreditRecoveredShare, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
+	var i GetCreditRecoveredShareRow
+	err := row.Scan(&i.Cash, &i.Units)
+	return i, err
+}
+
+const getCreditReversalShare = `-- name: GetCreditReversalShare :one
+SELECT COALESCE(sum(cash),0)::bigint AS cash, COALESCE(sum(units),0)::bigint AS units
+FROM billing.credit_reversal_shares
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
+ AND reversal_id=$3::uuid AND origin_id=$3::uuid
+`
+
+type GetCreditReversalShareParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	ReversalID    uuid.UUID
+}
+
+type GetCreditReversalShareRow struct {
+	Cash  int64
+	Units int64
+}
+
+// What one reversal took of the lot, as its share records it.
+func (q *Queries) GetCreditReversalShare(ctx context.Context, arg GetCreditReversalShareParams) (GetCreditReversalShareRow, error) {
+	row := q.db.QueryRow(ctx, getCreditReversalShare, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
+	var i GetCreditReversalShareRow
+	err := row.Scan(&i.Cash, &i.Units)
+	return i, err
+}
+
 const getPurchasedCreditPendingRefunds = `-- name: GetPurchasedCreditPendingRefunds :one
 SELECT COALESCE(sum(-amount),0)::bigint AS amount
 FROM billing.payments
@@ -51,45 +103,15 @@ func (q *Queries) GetPurchasedCreditPendingRefunds(ctx context.Context, arg GetP
 	return amount, err
 }
 
-const getPurchasedCreditRecoveryTotal = `-- name: GetPurchasedCreditRecoveryTotal :one
-SELECT COALESCE(sum(lt.amount),0)::bigint AS amount
-FROM billing.ledger_transfers lt
-JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
-WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
- AND lt.operation='purchased_credit_refund'
- AND ((lt.book='units' AND lt.transfer_type='credit_refund_cash_restore' AND lt.source='cash_restore:' || $3::text)
-   OR (lt.book='general' AND dr.account_type IN ('cash_clearing','external_receipts') AND lt.source LIKE '%\_restore:' || $3::text))
-`
-
-type GetPurchasedCreditRecoveryTotalParams struct {
-	MerchantID    uuid.UUID
-	CreditGrantID uuid.UUID
-	ReversalID    string
-}
-
-// What recoveries restored of one reversal's cash, in either book.
-func (q *Queries) GetPurchasedCreditRecoveryTotal(ctx context.Context, arg GetPurchasedCreditRecoveryTotalParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getPurchasedCreditRecoveryTotal, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
-	var amount int64
-	err := row.Scan(&amount)
-	return amount, err
-}
-
 const getPurchasedCreditRefundState = `-- name: GetPurchasedCreditRefundState :one
 
 SELECT
- COALESCE(sum(CASE
-     WHEN lt.book='units' AND lt.transfer_type='credit_refund_cash' THEN lt.amount
-     WHEN lt.book='units' AND lt.transfer_type='credit_refund_cash_restore' THEN -lt.amount
-     WHEN lt.book='general' AND cr.account_type IN ('cash_clearing','external_receipts') THEN lt.amount
-     WHEN lt.book='general' AND dr.account_type IN ('cash_clearing','external_receipts') THEN -lt.amount
-     ELSE 0 END),0)::bigint AS cash,
- COALESCE(sum(CASE WHEN lt.book<>'units' THEN 0 WHEN lt.transfer_type='credit_refund' THEN lt.amount WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE 0 END),0)::bigint AS withdrawn
-FROM billing.ledger_transfers lt
-JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
-JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
-WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
- AND lt.operation='purchased_credit_refund'
+ (SELECT COALESCE(sum(CASE WHEN s.origin_id = s.reversal_id THEN s.cash ELSE -s.cash END),0) FROM billing.credit_reversal_shares s
+   WHERE s.merchant_id=$1::uuid AND s.credit_grant_id=$2::uuid)::bigint AS cash,
+ (SELECT COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund' THEN lt.amount WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE 0 END),0)
+   FROM billing.ledger_transfers lt
+   WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
+     AND lt.book='units' AND lt.operation='purchased_credit_refund')::bigint AS withdrawn
 `
 
 type GetPurchasedCreditRefundStateParams struct {
@@ -102,9 +124,9 @@ type GetPurchasedCreditRefundStateRow struct {
 	Withdrawn int64
 }
 
-// What reversals of purchased credit lots posted, from the lots' ledger legs.
-// cash is what reversals returned of the lot's price, net of recoveries: the
-// units book's cash legs before the credit books, the general ledger's since.
+// What reversals of purchased credit lots took: their shares, and their legs.
+// cash is what reversals returned of the lot's price, net of recoveries, as
+// their shares record it; withdrawn, the units they took from the balance.
 func (q *Queries) GetPurchasedCreditRefundState(ctx context.Context, arg GetPurchasedCreditRefundStateParams) (GetPurchasedCreditRefundStateRow, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditRefundState, arg.MerchantID, arg.CreditGrantID)
 	var i GetPurchasedCreditRefundStateRow
@@ -165,16 +187,12 @@ func (q *Queries) GetPurchasedCreditRetiredBalance(ctx context.Context, arg GetP
 
 const getPurchasedCreditReversalState = `-- name: GetPurchasedCreditReversalState :one
 SELECT
- (COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund_cash'),0)
-  + COALESCE(sum(lt.amount) FILTER (WHERE lt.book='general' AND cr.account_type IN ('cash_clearing','external_receipts')),0))::bigint AS cash,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='expired_credit'),0)::bigint AS expired,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='revoked_credit'),0)::bigint AS revoked,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND (lt.transfer_type='credit_refund' OR lt.source IN ('consumed_credit','expired_credit','revoked_credit','repaid_owed'))),0)::bigint AS face,
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
-JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
 WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
  AND lt.operation='purchased_credit_refund' AND lt.source_id=$3::text
 `
@@ -186,53 +204,62 @@ type GetPurchasedCreditReversalStateParams struct {
 }
 
 type GetPurchasedCreditReversalStateRow struct {
-	Cash      int64
 	Withdrawn int64
 	Expired   int64
 	Revoked   int64
 	Repaid    int64
-	Face      int64
 	Legs      int64
 }
 
-// What one reversal took of the lot: its cash from either book, its units by
-// where they were. legs counts both books', so a reversal posts once.
+// Where the units one reversal took of the lot were. legs counts both
+// books', so a reversal posts once.
 func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPurchasedCreditReversalStateParams) (GetPurchasedCreditReversalStateRow, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditReversalState, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var i GetPurchasedCreditReversalStateRow
 	err := row.Scan(
-		&i.Cash,
 		&i.Withdrawn,
 		&i.Expired,
 		&i.Revoked,
 		&i.Repaid,
-		&i.Face,
 		&i.Legs,
 	)
 	return i, err
 }
 
 const recordCreditReversalShare = `-- name: RecordCreditReversalShare :exec
-INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, cash, units)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4::bigint, $5::bigint)
+INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::bigint, $6::bigint)
 `
 
 type RecordCreditReversalShareParams struct {
 	MerchantID    uuid.UUID
 	ReversalID    uuid.UUID
 	CreditGrantID uuid.UUID
+	OriginID      uuid.UUID
 	Cash          int64
 	Units         int64
 }
 
-// Decides a reversal's share of the lot once; a second decision fails.
+// Decides a reversal's share of the lot, or of origin's, once; a second
+// decision fails.
 func (q *Queries) RecordCreditReversalShare(ctx context.Context, arg RecordCreditReversalShareParams) error {
 	_, err := q.db.Exec(ctx, recordCreditReversalShare,
 		arg.MerchantID,
 		arg.ReversalID,
 		arg.CreditGrantID,
+		arg.OriginID,
 		arg.Cash,
 		arg.Units,
 	)
+	return err
+}
+
+const seedCreditReversalShares = `-- name: SeedCreditReversalShares :exec
+SELECT billing.seed_credit_reversal_shares($1::uuid)
+`
+
+// Records the shares of reversals an archive from before them restored.
+func (q *Queries) SeedCreditReversalShares(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, seedCreditReversalShares, merchantID)
 	return err
 }

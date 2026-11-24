@@ -19,7 +19,7 @@ var NeverRollbackableTables = map[string]string{
 		"this is the table that makes the whole design work (ID-8)",
 	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",
 	"credit_grant_events":             "the revocations a lot's revoked_at follows; a reversal appends a reinstatement, never rewinds",
-	"credit_reversal_shares":          "money: each reversal's share of its lot, decided once; rewinding one lets a later pass split it again",
+	"credit_reversal_shares":          "money: each reversal's share of its lot, decided once and the record of its returned money; rewinding one lets a later pass split it again",
 	"ledger_units":                    "the scale a unit's stored amounts were written at; rewinding it would let a configuration rescale them",
 	"subscription_billing_changes":    "subscription billing audit; never rewound",
 	"subscription_status_transitions": "lifecycle audit trail; a reversal appends to it, never rewinds it",

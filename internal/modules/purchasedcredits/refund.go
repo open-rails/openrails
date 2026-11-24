@@ -91,14 +91,16 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 // payment bought, and posts it: a negative payment returns the credit line's
 // money first (the rest of an order's payment bought no credit); a recovery
 // restores what its chargeback took. The share is recorded, zero included,
-// so a later call never revisits it. posted reports whether it moved any.
-func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.UUID, reversesID *uuid.UUID) (posted bool, err error) {
+// so a later call never revisits it; decided reports whether this call
+// decided it. The units always move; the money only once the general ledger
+// booked the lot.
+func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.UUID, reversesID *uuid.UUID) (decided bool, err error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		posted = false
+		decided = false
 		q := gen.New(tx)
 		g, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: paymentID})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -115,10 +117,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err != nil {
 			return err
 		}
-		if reversalPathOf(books.CreditLotOf(g)) == reversalRefused {
-			// It waits, unapplied, until the lot is booked.
-			return refuseUnbookedUnitPack(ctx, q, g, paymentID, reversalID)
-		}
+		path := reversalPathOf(books.CreditLotOf(g))
 		if _, _, err := s.lockBalance(ctx, q, mid.UUID(), g.CustomerID, currency); err != nil {
 			return err
 		}
@@ -135,11 +134,14 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		}
 		// A reversal's share is decided once, when it first settles: a later
 		// recovery never gives an earlier reversal more of the lot.
-		if decided, err := q.CreditReversalDecided(ctx, gen.CreditReversalDecidedParams{MerchantID: mid.UUID(), ReversalID: reversalID, CreditGrantID: g.ID}); err != nil || decided {
+		if done, err := q.CreditReversalDecided(ctx, gen.CreditReversalDecidedParams{MerchantID: mid.UUID(), ReversalID: reversalID, CreditGrantID: g.ID}); err != nil || done {
 			return err
 		}
-		decide := func(cash, units int64) error {
-			return q.RecordCreditReversalShare(ctx, gen.RecordCreditReversalShareParams{MerchantID: mid.UUID(), ReversalID: reversalID, CreditGrantID: g.ID, Cash: cash, Units: units})
+		// decide records the share: the reversal's own, or what a recovery
+		// restored of origin's.
+		decide := func(origin uuid.UUID, cash, units int64) error {
+			decided = true
+			return q.RecordCreditReversalShare(ctx, gen.RecordCreditReversalShareParams{MerchantID: mid.UUID(), ReversalID: reversalID, CreditGrantID: g.ID, OriginID: origin, Cash: cash, Units: units})
 		}
 		paid, err := fundingAmount(g)
 		if err != nil {
@@ -151,9 +153,9 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		}
 		restoring := reversal.Amount > 0
 		// move posts cashDelta of the lot's money, and the units it is worth,
-		// out of the lot or, for a recovery of reversesID, back into it; it
-		// returns the units.
-		move := func(reversesID *uuid.UUID, cashDelta int64, origin gen.GetPurchasedCreditReversalStateRow, recovered int64) (int64, error) {
+		// out of the lot or, for a recovery of reversesID (which took share
+		// and had recovered back), into it; it returns the units.
+		move := func(reversesID *uuid.UUID, cashDelta int64, origin gen.GetPurchasedCreditReversalStateRow, share gen.GetCreditReversalShareRow, recovered int64) (int64, error) {
 			var err error
 			// Finalization must not leave the unrefunded remainder of an expired
 			// source available until the next sweep. Retired balances remain bound
@@ -192,8 +194,8 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				}
 				repaid = min(max(standing, 0), faceDelta-withdrawn-expired-revoked)
 			} else {
-				before := proportional(origin.Face, recovered, origin.Cash, false)
-				after := proportional(origin.Face, recovered+cashDelta, origin.Cash, false)
+				before := proportional(share.Units, recovered, share.Cash, false)
+				after := proportional(share.Units, recovered+cashDelta, share.Cash, false)
 				faceDelta = after - before
 				// Return previously removed value before reversing consumed-value loss.
 				// Sequential allocation is monotone at every integer rounding boundary;
@@ -227,7 +229,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			l := ledger.New(q, mid.UUID())
 			units := unitsMoved{withdrawn: withdrawn, retired: retired, expired: expired, revoked: revoked, repaid: repaid,
 				consumed: faceDelta - withdrawn - retired - expired - revoked - repaid, retiredAccount: retiredAccount}
-			if reversalPathOf(books.CreditLotOf(g)) == reversalLegacy {
+			if path == reversalLegacy {
 				// A lot from before the credit books keeps its reversals' cash in
 				// the units book until the books are rebuilt.
 				return faceDelta, postLegacyReversal(ctx, l, g, reversalID, reversesID, restoring, cashDelta, faceDelta, units, source, cashSource, lossSource)
@@ -261,6 +263,9 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 						return 0, err
 					}
 				}
+				if path == reversalUnbooked {
+					return faceDelta, unbookedUnitPack(ctx, q, g, paymentID, reversalID)
+				}
 				if g, err = lots.Get(ctx, g.ID); err != nil {
 					return 0, err
 				}
@@ -283,6 +288,9 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 				if err := leg(ledger.UnitsRefunded, to.account, to.amount, ledger.CreditRefundFunding, to.label); err != nil {
 					return 0, err
 				}
+			}
+			if path == reversalUnbooked {
+				return faceDelta, unbookedUnitPack(ctx, q, g, paymentID, reversalID)
 			}
 			original, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: *reversesID})
 			if err != nil {
@@ -323,15 +331,13 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			}
 			// The credit line's part of the reversal.
 			cash := min(-reversal.Amount, open)
-			if cash == 0 {
-				return decide(0, 0)
+			units := int64(0)
+			if cash > 0 {
+				if units, err = move(nil, cash, gen.GetPurchasedCreditReversalStateRow{}, gen.GetCreditReversalShareRow{}, 0); err != nil {
+					return err
+				}
 			}
-			posted = true
-			units, err := move(nil, cash, gen.GetPurchasedCreditReversalStateRow{}, 0)
-			if err != nil {
-				return err
-			}
-			return decide(cash, units)
+			return decide(reversalID, cash, units)
 		}
 		// A recovery restores what its chargeback took of the lot; one naming
 		// none, what chargebacks took, the oldest first. Only a chargeback's:
@@ -354,36 +360,44 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			}
 			origins = []uuid.UUID{*reversesID}
 		}
-		left := reversal.Amount
-		var cash, units int64
+		left, restored := reversal.Amount, false
 		for _, id := range origins {
 			origin, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: id.String()})
 			if err != nil {
 				return err
 			}
-			recovered, err := q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: id.String()})
+			share, err := q.GetCreditReversalShare(ctx, gen.GetCreditReversalShareParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: id})
 			if err != nil {
 				return err
 			}
-			if origin.Cash < 0 || recovered < 0 || recovered > origin.Cash {
+			recovered, err := q.GetCreditRecoveredShare(ctx, gen.GetCreditRecoveredShareParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: id})
+			if err != nil {
+				return err
+			}
+			if recovered.Cash > share.Cash {
 				return fmt.Errorf("credit recovery exceeds its recorded reversal")
 			}
 			// A recovery restores what its reversal took from the credit line
 			// first: a reversal that took none restores none.
-			c := min(left, origin.Cash-recovered)
+			c := min(left, share.Cash-recovered.Cash)
 			if c == 0 {
 				continue
 			}
-			posted = true
-			u, err := move(&id, c, origin, recovered)
+			u, err := move(&id, c, origin, share, recovered.Cash)
 			if err != nil {
 				return err
 			}
-			left, cash, units = left-c, cash+c, units+u
+			if err := decide(id, c, u); err != nil {
+				return err
+			}
+			left, restored = left-c, true
 		}
-		return decide(cash, units)
+		if !restored {
+			return decide(reversalID, 0, 0)
+		}
+		return nil
 	})
-	return posted && err == nil, err
+	return decided && err == nil, err
 }
 
 // reversalPath is how a reversal of a paid lot posts.
@@ -396,9 +410,11 @@ const (
 	// reversalLegacy: a lot from before the credit books keeps its cash legs
 	// in the units book.
 	reversalLegacy
-	// reversalRefused: a pack of a merchant's unit the general ledger never
-	// booked has nowhere to keep its cash; the units book holds no money.
-	reversalRefused
+	// reversalUnbooked: a pack of a merchant's unit the general ledger never
+	// booked moves its units alone; the units book holds no money, and the
+	// reversal's cash is booked against the payment, as one from before the
+	// books is.
+	reversalUnbooked
 )
 
 func reversalPathOf(l books.CreditLot) reversalPath {
@@ -406,7 +422,7 @@ func reversalPathOf(l books.CreditLot) reversalPath {
 	case l.Booked():
 		return reversalInBooks
 	case l.PaidCurrency != l.Unit:
-		return reversalRefused
+		return reversalUnbooked
 	}
 	return reversalLegacy
 }
@@ -415,15 +431,15 @@ func reversalPathOf(l books.CreditLot) reversalPath {
 // merchant's unit raises when the general ledger never booked the pack.
 const UnbookedUnitPackFindingType = "books.credit.unbooked_unit_pack"
 
-// refuseUnbookedUnitPack records, rather than applies, a reversal of a pack
-// of a merchant's unit the general ledger never booked (its payment's cash
-// did not apply: books.credit.unapplied).
-func refuseUnbookedUnitPack(ctx context.Context, q *gen.Queries, g gen.BillingCreditGrant, paymentID, reversalID uuid.UUID) error {
+// unbookedUnitPack records, once per lot, that a reversal of a pack of a
+// merchant's unit moved its units while the general ledger never booked the
+// pack (its payment's cash did not apply: books.credit.unapplied).
+func unbookedUnitPack(ctx context.Context, q *gen.Queries, g gen.BillingCreditGrant, paymentID, reversalID uuid.UUID) error {
 	raw, err := json.Marshal(map[string]any{"credit_grant_id": g.ID, "payment_id": paymentID, "reversal_id": reversalID, "unit": g.Unit, "paid_currency": g.PaidCurrency})
 	if err != nil {
 		return err
 	}
-	action := "A reversal of this pack of a merchant's unit waits: the general ledger never booked the pack's price, and its unit holds no money to return. Book the lot's price (see books.credit.unapplied), then the reversal applies."
+	action := "The general ledger never booked this pack of a merchant's unit: its reversals withdraw its units, and their money is booked against the payment. Book the lot's price (see books.credit.unapplied) to settle its deferred revenue."
 	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID: g.MerchantID, FindingType: UnbookedUnitPackFindingType, SubjectKey: "credit_grant:" + g.ID.String(),
 		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw,

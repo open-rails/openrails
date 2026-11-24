@@ -779,6 +779,61 @@ func TestRevenueReversals(t *testing.T) {
 		require.EqualValues(t, 80_000_000, scheduled[0].Funded)
 		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"), "the pack's 10.00 waits for its lot")
 	})
+
+	t.Run("OR-J41-S37/an-unbooked-unit-packs-refund-withdraws-its-units-and-books-its-cash-against-the-payment", func(t *testing.T) {
+		s, p := unitPaymentWorld(t, 0)
+		a, w := s.a, s.a.world
+		// A pack bought at checkout counts GOLD and opens its accounts.
+		gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+		s.buy(t, gold["usd"], 20_000_000, "booked-gold")
+		bought := lots(t, a.alpha, s.alice, "GOLD")[0]
+
+		// Another 400 GOLD, bought before the credit books by a payment the
+		// books received: its units deposited, its price never deferred.
+		shop := &creditShop{a: a, p: p, customer: s.alice}
+		payment := shop.cardPayment(t, 20_000_000, models.MoneyMovementRail, "unbooked-gold")
+		lot := uuid.New()
+		table := booksTable(w, "credit_grants")
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" DISABLE TRIGGER credit_grants_require_books")
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at, payment_id)"+
+			" SELECT merchant_id, $3, customer_id, account_id, unit, 400, 'purchase', 20000000, 'USD', 'pack_purchase', $4::text, invoker, starts_at, $4 FROM "+table+" WHERE merchant_id = $1 AND id = $2",
+			w.alpha.MerchantID().UUID(), bought.ID.UUID(), lot, payment)
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" ENABLE TRIGGER credit_grants_require_books")
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(t.Context()))
+		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+			_, err := ledger.New(q, w.alpha.MerchantID().UUID()).DepositFrom(ctx, ledger.UnitsSold, s.alice.UUID(), "GOLD", 400,
+				ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.String()}, lot)
+			return err
+		}))
+		unitBalance(t, a.alpha, s.alice, "GOLD", 800, 0, 800)
+
+		// Refunded whole: its 400 GOLD leave at once, its share is recorded,
+		// and its $20 leaves the payment's unapplied cash.
+		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
+		refund, err := payments.NewPaymentService(database, w.clock).Refund(ctx, payment, "unbooked-gold-refund", 20_000_000, payments.ReversalRefund)
+		require.NoError(t, err)
+		unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
+		require.Equal(t, [2]int64{20_000_000, 400}, lotShare(t, w, refund.ID))
+		require.EqualValues(t, 400, systemBalance(t, a, "GOLD", ledger.UnitsRefunded))
+		legs := glFor(t, w, "payment", refund.ID.String())
+		require.Len(t, legs, 1)
+		require.Equal(t, "cash_returned", legs[0].Type)
+		require.EqualValues(t, 20_000_000, legs[0].Amount)
+		require.Zero(t, unappliedCash(t, w, "USD"))
+		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.credit.unbooked_unit_pack"})
+		require.NoError(t, err)
+		require.Len(t, found.Items, 1)
+		require.Equal(t, "credit_grant:"+lot.String(), found.Items[0].SubjectKey)
+		booksAudited(t, w)
+	})
 }
 
 // lotShare is the cash and units of a lot a reversal took or a recovery

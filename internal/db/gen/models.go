@@ -248,14 +248,16 @@ type BillingCreditGrantEvent struct {
 	RequestKey *string
 }
 
-// One row per settled reversal of a paid credit lot's payment: the share of the lot it took, or a recovery restored, decided when it first settled, zero included. A later reversal or recovery never changes it. Retention: permanent, never pruned.
+// Each settled reversal's share of the paid credit lot its payment bought, decided when it first settled, zero included, and never changed: the record of the lot's returned money and units. A refund or chargeback has one row, its own (origin_id = reversal_id); a recovery has one per chargeback it restored, or one of its own, zero, when it restored none. Retention: permanent, never pruned.
 type BillingCreditReversalShare struct {
 	MerchantID    uuid.UUID
 	ReversalID    uuid.UUID
 	CreditGrantID uuid.UUID
-	// The lot's money it moved, in the lot's paid_currency.
+	// The reversal whose share this is: the row's own, or the chargeback a recovery restored.
+	OriginID uuid.UUID
+	// The lot's money it took, or restored of origin_id's, in the lot's paid_currency.
 	Cash int64
-	// The lot's units it moved, in the lot's unit.
+	// The lot's units it took, or restored of origin_id's, in the lot's unit.
 	Units     int64
 	CreatedAt time.Time
 }

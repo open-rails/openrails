@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 704,
+  "scenario_count": 705,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3442,6 +3442,11 @@
       "id": "OR-J41-S36",
       "journey": "J41",
       "name": "A provider's discount on a bill with a credit line reduces the other lines alone: the lot keeps its own price"
+    },
+    {
+      "id": "OR-J41-S37",
+      "journey": "J41",
+      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked_unit_pack"
     },
     {
       "id": "OR-J40-S10",

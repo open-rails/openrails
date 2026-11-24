@@ -2224,6 +2224,9 @@
     "OR-J41-S36": [
       "TestRevenueReversals/OR-J41-S36/a-provider-discount-never-reaches-a-credit-line"
     ],
+    "OR-J41-S37": [
+      "TestRevenueReversals/OR-J41-S37/an-unbooked-unit-packs-refund-withdraws-its-units-and-books-its-cash-against-the-payment"
+    ],
     "OR-J04-S80": [
       "TestBillingPass/OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session"
     ],
