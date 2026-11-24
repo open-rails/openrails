@@ -8,7 +8,7 @@ Every route of the HTTP API (189), from the API root: a standalone server serves
 
 **Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.
 
-**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.
+**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client; `event store` a route that answers `event_store_required` on a deployment without ClickHouse.
 
 ## Process
 
@@ -63,8 +63,8 @@ A customer acting on its own account.
 | GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | PUT | `/v1/me/low-balance-lines/{currency}` | customer | — | `SetLowBalanceLineParams` | 200 `EffectiveLowBalanceLine` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
-| GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
-| GET | `/v1/me/limits` | customer | — | — | 200 `ListPage<CustomerLimit>` |  |
+| GET | `/v1/me/usage` | customer | — | — | 200 `Usage` | event store |
+| GET | `/v1/me/limits` | customer | — | — | 200 `ListPage<CustomerLimit>` | event store |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
 | PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
@@ -109,7 +109,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
-| POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant` |
+| POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant`; event store |
 | POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RecordExternalPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
@@ -133,7 +133,7 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | POST | `/v1/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | catalog update |
 | GET | `/v1/catalog/meters` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Meter` |  |
-| PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | catalog update |
+| PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | catalog update; event store |
 | POST | `/v1/console/catalog/ask` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | console only; when `catalog_copilot` |
 | POST | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | catalog update |
 | GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
@@ -154,7 +154,7 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | POST | `/v1/catalog/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | catalog update |
 | GET | `/v1/catalog/limits` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Limit>` |  |
 | GET | `/v1/catalog/limits/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Limit` |  |
-| PUT | `/v1/catalog/limits/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetLimitParams` | 200 `Limit` | catalog update |
+| PUT | `/v1/catalog/limits/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetLimitParams` | 200 `Limit` | catalog update; event store |
 
 ## Merchant configuration
 
@@ -237,16 +237,16 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | GET | `/v1/app/admissions/{request_id}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `Admission` |  |
 | GET | `/v1/app/admissions` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<Admission>` |  |
-| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` |  |
-| POST | `/v1/app/admissions/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionBatchParams` | 200 `CaptureBatchResult` |  |
-| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
-| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` |  |
+| POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | event store |
+| POST | `/v1/app/admissions/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionBatchParams` | 200 `CaptureBatchResult` | event store |
+| POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | event store |
+| POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | event store |
 | POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` |  |
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<RunningCharge>` |  |
-| GET | `/v1/app/limits` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<CustomerLimit>` |  |
-| POST | `/v1/app/leases/sync` | application | `merchant:usage:manage`<br>`root:usage:manage` | `SyncLeasesParams` | 200 `SyncLeasesResult` |  |
+| GET | `/v1/app/limits` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<CustomerLimit>` | event store |
+| POST | `/v1/app/leases/sync` | application | `merchant:usage:manage`<br>`root:usage:manage` | `SyncLeasesParams` | 200 `SyncLeasesResult` | event store |
 | GET | `/v1/app/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `EventPage` |  |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
 | GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
