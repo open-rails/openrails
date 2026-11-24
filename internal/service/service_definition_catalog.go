@@ -361,7 +361,11 @@ func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) 
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
-	return catalogCommand(ctx, s, "price/create", req, "", createPricePlan(req), func(ctx context.Context, s *Service) (*billing.Price, error) { return s.createPriceCommand(ctx, req) })
+	price, err := catalogCommand(ctx, s, "price/create", req, "", createPricePlan(req), func(ctx context.Context, s *Service) (*billing.Price, error) { return s.createPriceCommand(ctx, req) })
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
+	return price, err
 }
 
 func (s *Service) createPriceCommand(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {

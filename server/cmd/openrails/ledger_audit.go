@@ -89,14 +89,14 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 		}
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "MERCHANT\tCONSERVATION\tCOUNTERS\tLOTS\tROLLUPS\tSIGNS\tDETAIL")
+		fmt.Fprintln(w, "MERCHANT\tCONSERVATION\tCOUNTERS\tLOTS\tROLLUPS\tSIGNS\tSIDES\tDETAIL")
 		for _, res := range results {
 			detail := ""
 			switch {
 			case res.Err != "":
 				detail = res.Err
-			case !res.Report.OK():
-				parts := make([]string, 0, len(res.Report.Conservation)+len(res.Report.Counters)+len(res.Report.Lots)+len(res.Report.Rollups)+len(res.Report.Signs))
+			default:
+				parts := make([]string, 0, len(res.Report.Conservation)+len(res.Report.Counters)+len(res.Report.Lots)+len(res.Report.Rollups)+len(res.Report.Signs)+len(res.Report.Sides))
 				for _, b := range res.Report.Conservation {
 					parts = append(parts, b.String())
 				}
@@ -112,15 +112,19 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 				for _, b := range res.Report.Signs {
 					parts = append(parts, b.String())
 				}
+				for _, warning := range res.Report.Sides {
+					parts = append(parts, warning.String())
+				}
 				detail = strings.Join(parts, "; ")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				ledgerAuditLabel(res),
 				ledgerAuditVerdict(len(res.Report.Conservation)),
 				ledgerAuditVerdict(len(res.Report.Counters)),
 				ledgerAuditVerdict(len(res.Report.Lots)),
 				ledgerAuditVerdict(len(res.Report.Rollups)),
 				ledgerAuditVerdict(len(res.Report.Signs)),
+				ledgerAuditWarning(len(res.Report.Sides)),
 				detail)
 		}
 		if err := w.Flush(); err != nil {
@@ -133,6 +137,13 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 	}
 	fmt.Printf("\nLedger integrity OK across %d merchant(s).\n", len(results))
 	return nil
+}
+
+func ledgerAuditWarning(warnings int) string {
+	if warnings == 0 {
+		return "ok"
+	}
+	return fmt.Sprintf("WARN(%d)", warnings)
 }
 
 func ledgerAuditVerdict(findings int) string {

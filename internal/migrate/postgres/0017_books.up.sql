@@ -108,6 +108,11 @@ DROP INDEX billing.ledger_transfers_operation_once_key;
 CREATE UNIQUE INDEX ledger_transfers_operation_once_key ON billing.ledger_transfers (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book) NULLS NOT DISTINCT;
 COMMENT ON INDEX billing.ledger_transfers_operation_once_key IS 'The structural once-only key for EVERY transfer type. ledger.ApplyIdempotent and books.Post insert ON CONFLICT DO NOTHING against this index, so a replay is refused by the database rather than by a check-then-insert in Go. credit_grant_id, order_line_id and book are part of the identity (one debit per operation per FIFO lot; one posting per order line; usage_reversed''s leg in each book); NULLS NOT DISTINCT because the owed/payment legs carry no lot and system transfers carry no customer.';
 
+-- A posting that creates a merchant-wide general-ledger account nothing
+-- opened first raises books.account.opened_late.
+ALTER TABLE billing.reconciliation_findings DROP CONSTRAINT reconciliation_findings_type_check,
+    ADD CONSTRAINT reconciliation_findings_type_check CHECK (finding_type ~ '^(pull|derive|life|consistency|notify|catalog|books)\.[a-z0-9_]+(\.[a-z0-9_]+)?$');
+
 -- A transfer stays in one book and currency, and a customer's account moves
 -- only in that customer's transfers.
 CREATE FUNCTION billing.ledger_transfers_book_rules() RETURNS trigger

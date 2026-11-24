@@ -2556,7 +2556,7 @@
     {
       "id": "OR-J40-S09",
       "journey": "J40",
-      "name": "Two checkouts and a usage collection for one customer, in opposite lock orders, all commit"
+      "name": "Two first checkouts in a currency a catalog apply opened overlap; a posting nothing opened for raises a finding; two checkouts and a usage collection in opposite lock orders all commit"
     },
     {
       "id": "OR-J40-S23",

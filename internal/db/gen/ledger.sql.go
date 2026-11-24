@@ -12,30 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countOpenGeneralLedgerAccounts = `-- name: CountOpenGeneralLedgerAccounts :one
-SELECT count(*)::bigint AS open
-FROM billing.ledger_accounts
-WHERE merchant_id = $1::uuid
-  AND book = 'general' AND customer_id IS NULL
-  AND currency = $2::text
-  AND (psp_id IS NULL OR psp_id = $3::uuid)
-`
-
-type CountOpenGeneralLedgerAccountsParams struct {
-	MerchantID uuid.UUID
-	Currency   string
-	PspID      *uuid.UUID
-}
-
-// CountOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
-// open in a currency, cash clearing counted for the PSP named only.
-func (q *Queries) CountOpenGeneralLedgerAccounts(ctx context.Context, arg CountOpenGeneralLedgerAccountsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countOpenGeneralLedgerAccounts, arg.MerchantID, arg.Currency, arg.PspID)
-	var open int64
-	err := row.Scan(&open)
-	return open, err
-}
-
 const getLedgerAccount = `-- name: GetLedgerAccount :one
 
 SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at, book, class, psp_id FROM billing.ledger_accounts
@@ -533,6 +509,31 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 	return balance, err
 }
 
+const listGeneralLedgerPSPs = `-- name: ListGeneralLedgerPSPs :many
+SELECT id FROM billing.psps WHERE merchant_id = $1::uuid ORDER BY id
+`
+
+// ListGeneralLedgerPSPs: the merchant's PSPs, each with cash clearing.
+func (q *Queries) ListGeneralLedgerPSPs(ctx context.Context, merchantID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listGeneralLedgerPSPs, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLedgerConservationBreaches = `-- name: ListLedgerConservationBreaches :many
 SELECT $1::uuid AS merchant_id,
        book::text AS book,
@@ -747,6 +748,57 @@ func (q *Queries) ListLedgerDailyDrifts(ctx context.Context, merchantID uuid.UUI
 			&i.LoggedCredits,
 			&i.StoredDebits,
 			&i.LoggedDebits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerSideWarnings = `-- name: ListLedgerSideWarnings :many
+SELECT a.currency, a.account_type, a.class, a.psp_id, t.credits_posted, t.debits_posted
+FROM billing.ledger_accounts a
+JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+    AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+WHERE a.merchant_id = $1::uuid
+  AND a.book = 'general' AND a.customer_id IS NULL
+  AND NOT a.debits_must_not_exceed_credits AND NOT a.credits_must_not_exceed_debits
+  AND CASE WHEN a.class IN ('asset', 'contra_revenue', 'expense') THEN t.credits_posted > t.debits_posted
+           ELSE t.debits_posted > t.credits_posted END
+ORDER BY a.currency, a.account_type, a.psp_id
+`
+
+type ListLedgerSideWarningsRow struct {
+	Currency      string
+	AccountType   string
+	Class         string
+	PspID         *uuid.UUID
+	CreditsPosted int64
+	DebitsPosted  int64
+}
+
+// ListLedgerSideWarnings: merchant-wide general-ledger accounts with no sign
+// rule whose type total sits on the side opposite their class's normal one.
+func (q *Queries) ListLedgerSideWarnings(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerSideWarningsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerSideWarnings, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerSideWarningsRow
+	for rows.Next() {
+		var i ListLedgerSideWarningsRow
+		if err := rows.Scan(
+			&i.Currency,
+			&i.AccountType,
+			&i.Class,
+			&i.PspID,
+			&i.CreditsPosted,
+			&i.DebitsPosted,
 		); err != nil {
 			return nil, err
 		}
@@ -998,6 +1050,101 @@ func (q *Queries) ListLedgerTypeTotalDrifts(ctx context.Context, merchantID uuid
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenGeneralLedgerAccounts = `-- name: ListOpenGeneralLedgerAccounts :many
+SELECT account_type, currency, psp_id
+FROM billing.ledger_accounts
+WHERE merchant_id = $1::uuid
+  AND book = 'general' AND customer_id IS NULL
+`
+
+type ListOpenGeneralLedgerAccountsRow struct {
+	AccountType string
+	Currency    string
+	PspID       *uuid.UUID
+}
+
+// ListOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
+// open.
+func (q *Queries) ListOpenGeneralLedgerAccounts(ctx context.Context, merchantID uuid.UUID) ([]ListOpenGeneralLedgerAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenGeneralLedgerAccounts, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenGeneralLedgerAccountsRow
+	for rows.Next() {
+		var i ListOpenGeneralLedgerAccountsRow
+		if err := rows.Scan(&i.AccountType, &i.Currency, &i.PspID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPSPImportCurrencies = `-- name: ListPSPImportCurrencies :many
+SELECT DISTINCT (data->>'currency')::text AS currency FROM billing.psp_import_records
+WHERE merchant_id = $1::uuid AND import_id = $2::uuid
+  AND data->>'currency' IS NOT NULL
+`
+
+type ListPSPImportCurrenciesParams struct {
+	MerchantID uuid.UUID
+	ImportID   uuid.UUID
+}
+
+// ListPSPImportCurrencies: the currencies a PSP import's records name.
+func (q *Queries) ListPSPImportCurrencies(ctx context.Context, arg ListPSPImportCurrenciesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPSPImportCurrencies, arg.MerchantID, arg.ImportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var currency string
+		if err := rows.Scan(&currency); err != nil {
+			return nil, err
+		}
+		items = append(items, currency)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSellableCurrencies = `-- name: ListSellableCurrencies :many
+SELECT currency::text AS currency FROM billing.prices WHERE merchant_id = $1::uuid
+UNION
+SELECT (price->>'currency')::text FROM billing.catalog_rate_cards
+WHERE merchant_id = $1::uuid AND deleted_at IS NULL AND price->>'currency' IS NOT NULL
+`
+
+// ListSellableCurrencies: every currency the merchant's catalog prices in.
+func (q *Queries) ListSellableCurrencies(ctx context.Context, merchantID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listSellableCurrencies, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var currency string
+		if err := rows.Scan(&currency); err != nil {
+			return nil, err
+		}
+		items = append(items, currency)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

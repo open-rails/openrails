@@ -10,15 +10,30 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
   AND psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid;
 
--- CountOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
--- open in a currency, cash clearing counted for the PSP named only.
--- name: CountOpenGeneralLedgerAccounts :one
-SELECT count(*)::bigint AS open
+-- ListOpenGeneralLedgerAccounts: the merchant-wide general-ledger accounts
+-- open.
+-- name: ListOpenGeneralLedgerAccounts :many
+SELECT account_type, currency, psp_id
 FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND book = 'general' AND customer_id IS NULL
-  AND currency = sqlc.arg(currency)::text
-  AND (psp_id IS NULL OR psp_id = sqlc.narg(psp_id)::uuid);
+  AND book = 'general' AND customer_id IS NULL;
+
+-- ListSellableCurrencies: every currency the merchant's catalog prices in.
+-- name: ListSellableCurrencies :many
+SELECT currency::text AS currency FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+UNION
+SELECT (price->>'currency')::text FROM billing.catalog_rate_cards
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL AND price->>'currency' IS NOT NULL;
+
+-- ListGeneralLedgerPSPs: the merchant's PSPs, each with cash clearing.
+-- name: ListGeneralLedgerPSPs :many
+SELECT id FROM billing.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid ORDER BY id;
+
+-- ListPSPImportCurrencies: the currencies a PSP import's records name.
+-- name: ListPSPImportCurrencies :many
+SELECT DISTINCT (data->>'currency')::text AS currency FROM billing.psp_import_records
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND import_id = sqlc.arg(import_id)::uuid
+  AND data->>'currency' IS NOT NULL;
 
 -- name: InsertLedgerAccount :one
 INSERT INTO billing.ledger_accounts (
@@ -190,6 +205,20 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND a.book = 'general' AND a.customer_id IS NULL
   AND (a.debits_must_not_exceed_credits AND t.debits_posted > t.credits_posted
     OR a.credits_must_not_exceed_debits AND t.credits_posted > t.debits_posted)
+ORDER BY a.currency, a.account_type, a.psp_id;
+
+-- ListLedgerSideWarnings: merchant-wide general-ledger accounts with no sign
+-- rule whose type total sits on the side opposite their class's normal one.
+-- name: ListLedgerSideWarnings :many
+SELECT a.currency, a.account_type, a.class, a.psp_id, t.credits_posted, t.debits_posted
+FROM billing.ledger_accounts a
+JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+    AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.book = 'general' AND a.customer_id IS NULL
+  AND NOT a.debits_must_not_exceed_credits AND NOT a.credits_must_not_exceed_debits
+  AND CASE WHEN a.class IN ('asset', 'contra_revenue', 'expense') THEN t.credits_posted > t.debits_posted
+           ELSE t.debits_posted > t.credits_posted END
 ORDER BY a.currency, a.account_type, a.psp_id;
 
 -- ListLedgerCounterDrifts rebuilds account counters from the immutable

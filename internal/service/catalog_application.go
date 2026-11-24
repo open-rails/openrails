@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -30,14 +31,32 @@ import (
 // price of ours sells on, before local mutation. An object whose named field
 // an edit set differently is skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, "")
+	receipt, err := s.applyCatalog(ctx, document, params.Force, "")
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
+	return receipt, err
 }
 
 // ApplyOperatorCatalog applies a catalog file for trusted operator tooling,
 // which carries no verified identity. Its substantive changes are admitted on
 // the merchant's autonomous budget.
 func (s *Service) ApplyOperatorCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(history.WithSource(ctx, billing.LogSourceCLI), document, params.Force, "operator_catalog")
+	receipt, err := s.applyCatalog(history.WithSource(ctx, billing.LogSourceCLI), document, params.Force, "operator_catalog")
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
+	return receipt, err
+}
+
+// prepareBooks opens the merchant's general ledger in every currency its
+// catalog now sells in, once the catalog has committed.
+func (s *Service) prepareBooks(ctx context.Context) {
+	mid, ok := merchant.FromContext(ctx)
+	if !ok || s.rt == nil || s.rt.DB == nil {
+		return
+	}
+	books.Prepare(ctx, s.rt.DB.DataPool(), s.Log, mid.UUID())
 }
 
 func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, origin string) (*billing.CatalogApplicationReceipt, error) {

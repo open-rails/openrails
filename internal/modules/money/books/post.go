@@ -2,8 +2,10 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -26,9 +28,6 @@ var (
 	// account's sign rule. A merchant-wide account's rule holds at commit,
 	// whose refusal names ledger_type_total_sign.
 	ErrSignRule = errors.New("books: transfer breaches an account's sign rule")
-	// ErrNotOpen is a posting to a merchant-wide account its currency or PSP
-	// has not opened (Open).
-	ErrNotOpen = errors.New("books: the merchant-wide account is not open; books.Open it before the transaction")
 	// ErrCoordinateReused is a posting at a coordinate that already posted
 	// another transfer.
 	ErrCoordinateReused = errors.New("books: the coordinate already posted a different transfer")
@@ -42,15 +41,20 @@ func CheckCurrency(code string) error {
 	return nil
 }
 
-// merchantWide is a general-ledger account with no customer: opened by Open,
-// never in a business transaction.
+// OpenedLateFindingType is the finding a posting raises when it creates a
+// merchant-wide general-ledger account that nothing opened first.
+const OpenedLateFindingType = "books.account.opened_late"
+
+// merchantWide is a general-ledger account with no customer: Open creates it
+// where its currency or PSP becomes sellable.
 func (a Account) merchantWide() bool { return a.Book == General && a.Scope != Customer }
 
 // EnsureAccount get-or-creates one account of the chart in a currency, with
 // the chart's book, class and sign rules: a customer-scoped type names its
 // customer, cash_clearing its PSP. created reports this call made it; one a
 // concurrent writer created first is read back. A merchant-wide
-// general-ledger account is only read: Open creates it, or it is ErrNotOpen.
+// general-ledger account is Open's to create; one created here, inside the
+// caller's transaction, raises OpenedLateFindingType once.
 func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t AccountType, currency string, customer, psp *uuid.UUID) (id uuid.UUID, created bool, err error) {
 	acct, ok := Lookup(t)
 	if !ok {
@@ -67,18 +71,41 @@ func EnsureAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t Ac
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
 	}
-	if acct.merchantWide() {
-		return uuid.Nil, false, fmt.Errorf("%w: %s %s", ErrNotOpen, t, currency)
-	}
-	created, err = insertAccount(ctx, q, merchant, acct, currency, customer, psp)
-	if err != nil {
+	if created, err = insertAccount(ctx, q, merchant, acct, currency, customer, psp); err != nil {
 		return uuid.Nil, false, err
+	}
+	if created && acct.merchantWide() {
+		if err := openedLate(ctx, q, merchant, t, currency, psp); err != nil {
+			return uuid.Nil, false, err
+		}
 	}
 	row, err = q.GetLedgerAccount(ctx, get)
 	if err != nil {
 		return uuid.Nil, false, fmt.Errorf("books: get %s account: %w", t, err)
 	}
 	return row.ID, created, nil
+}
+
+// openedLate records a merchant-wide account a posting had to create.
+func openedLate(ctx context.Context, q *gen.Queries, merchant uuid.UUID, t AccountType, currency string, psp *uuid.UUID) error {
+	subject, evidence := string(t)+"/"+currency, map[string]string{"account_type": string(t), "currency": currency}
+	if psp != nil {
+		subject += "/" + psp.String()
+		evidence["psp_id"] = psp.String()
+	}
+	raw, err := json.Marshal(evidence)
+	if err != nil {
+		return err
+	}
+	action := "A posting created this general-ledger account inside its own transaction, where a concurrent first posting waits on it. Open the books where its currency or PSP becomes sellable (books.Open)."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: merchant, FindingType: OpenedLateFindingType, SubjectKey: subject,
+		Severity: "low", Status: "requires_review", RecommendedAction: &action, Evidence: raw,
+	})
+	if err != nil {
+		return fmt.Errorf("books: raise %s: %w", OpenedLateFindingType, err)
+	}
+	return nil
 }
 
 // insertAccount creates one account unless a concurrent writer did.
@@ -98,45 +125,98 @@ func insertAccount(ctx context.Context, q *gen.Queries, merchant uuid.UUID, acct
 	return false, fmt.Errorf("books: create %s account: %w", acct.Type, err)
 }
 
-// Open opens a merchant's general ledger in a currency: every merchant-wide
-// account, and psp's cash clearing when psp is set. It commits on its own, so
-// it runs before the business transaction that posts there: created inside
-// one, an account's uncommitted row would hold every other first writer until
-// that transaction ends. Once open it only reads.
-func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currency string, psp *uuid.UUID) error {
+// Open makes a merchant's general ledger whole in a short transaction of its
+// own: in every currency its catalog prices in, every currency named and
+// every currency already open, every merchant-wide account and each of its
+// PSPs' cash clearing. A merchant's own unit is not money and is skipped. It
+// runs where a currency or PSP becomes sellable, outside any business
+// transaction, so no first posting waits on another's uncommitted account;
+// once whole it only reads.
+func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...string) error {
 	if db.InCallerTransaction(ctx) {
 		return db.ErrCallerTransaction
 	}
-	if err := CheckCurrency(currency); err != nil {
-		return err
+	q := gen.New(pool)
+	sellable, err := q.ListSellableCurrencies(ctx, merchant)
+	if err != nil {
+		return fmt.Errorf("books: read the sellable currencies: %w", err)
 	}
-	var want []Account
-	for _, a := range chart {
-		if a.merchantWide() && (a.Scope == System || psp != nil) {
-			want = append(want, a)
-		}
-	}
-	count := gen.CountOpenGeneralLedgerAccountsParams{MerchantID: merchant, Currency: currency, PspID: psp}
-	open, err := gen.New(pool).CountOpenGeneralLedgerAccounts(ctx, count)
+	open, err := q.ListOpenGeneralLedgerAccounts(ctx, merchant)
 	if err != nil {
 		return fmt.Errorf("books: read the open general ledger: %w", err)
 	}
-	if open == int64(len(want)) {
+	psps, err := q.ListGeneralLedgerPSPs(ctx, merchant)
+	if err != nil {
+		return fmt.Errorf("books: read the PSPs: %w", err)
+	}
+	type key struct {
+		t        AccountType
+		currency string
+		psp      uuid.UUID
+	}
+	have := map[key]bool{}
+	var money []string
+	for _, a := range open {
+		var psp uuid.UUID
+		if a.PspID != nil {
+			psp = *a.PspID
+		}
+		have[key{AccountType(a.AccountType), a.Currency, psp}] = true
+		money = append(money, a.Currency)
+	}
+	for _, c := range append(sellable, currencies...) {
+		if CheckCurrency(c) == nil {
+			money = append(money, c)
+		}
+	}
+	slices.Sort(money)
+	type missing struct {
+		acct     Account
+		currency string
+		psp      *uuid.UUID
+	}
+	var want []missing
+	for _, c := range slices.Compact(money) {
+		for _, a := range chart {
+			switch {
+			case !a.merchantWide():
+			case a.Scope == System:
+				if !have[key{a.Type, c, uuid.Nil}] {
+					want = append(want, missing{a, c, nil})
+				}
+			default:
+				for _, p := range psps {
+					if !have[key{a.Type, c, p}] {
+						want = append(want, missing{a, c, &p})
+					}
+				}
+			}
+		}
+	}
+	if len(want) == 0 {
 		return nil
 	}
 	return pool.CommittedMerchantTx(ctx, billing.MerchantID(merchant), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		for _, a := range want {
-			var scope *uuid.UUID
-			if a.Scope == PSP {
-				scope = psp
-			}
-			if _, err := insertAccount(ctx, q, merchant, a, currency, nil, scope); err != nil {
+		for _, m := range want {
+			if _, err := insertAccount(ctx, q, merchant, m.acct, m.currency, nil, m.psp); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// Prepare is Open where a currency or PSP becomes sellable: it never fails
+// the operation that sells. A gap it leaves is filled by the first posting,
+// which raises OpenedLateFindingType.
+func Prepare(ctx context.Context, pool *db.Pool, logger *slog.Logger, merchant uuid.UUID, currencies ...string) {
+	if pool == nil {
+		return
+	}
+	if err := Open(ctx, pool, merchant, currencies...); err != nil && logger != nil {
+		logger.WarnContext(ctx, "books: the general ledger was not opened; its first posting will open it", "merchant_id", merchant, "error", err)
+	}
 }
 
 // Books posts one merchant's general-ledger transfers.

@@ -26,6 +26,8 @@ import (
 //     ledger_transfers.
 //  5. Sign breaches: a merchant-wide general-ledger account's type total on
 //     the wrong side of its sign rule, which its commit refuses.
+//  6. Side warnings: one with no sign rule whose type total sits opposite its
+//     class's normal side. Reported, never a failure.
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -129,16 +131,35 @@ func (b SignBreach) String() string {
 		b.AccountType, moneyutil.FormatAmount(b.CreditsPosted-b.DebitsPosted, b.Currency))
 }
 
-// IntegrityReport is the combined result. Empty means every invariant holds.
+// SideWarning is a merchant-wide general-ledger account with no sign rule
+// whose type total sits opposite its class's normal side.
+type SideWarning struct {
+	Currency      string     `json:"currency"`
+	AccountType   string     `json:"account_type"`
+	Class         string     `json:"class"`
+	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	CreditsPosted int64      `json:"credits_posted"`
+	DebitsPosted  int64      `json:"debits_posted"`
+}
+
+func (w SideWarning) String() string {
+	return fmt.Sprintf("side: general/%s balance=%s opposite its %s class's normal side (warning)",
+		w.AccountType, moneyutil.FormatAmount(w.CreditsPosted-w.DebitsPosted, w.Currency), w.Class)
+}
+
+// IntegrityReport is the combined result. Empty but for Sides means every
+// invariant holds.
 type IntegrityReport struct {
 	Conservation []ConservationBreach `json:"conservation_breaches"`
 	Counters     []CounterDrift       `json:"counter_drifts"`
 	Lots         []LotDrift           `json:"lot_drifts"`
 	Rollups      []RollupDrift        `json:"rollup_drifts"`
 	Signs        []SignBreach         `json:"sign_breaches"`
+	// Sides are warnings: they never make the report fail.
+	Sides []SideWarning `json:"side_warnings"`
 }
 
-// OK reports whether the books are intact.
+// OK reports whether the books are intact; side warnings do not count.
 func (r IntegrityReport) OK() bool {
 	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0
 }
@@ -162,7 +183,28 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {
 		return r, err
 	}
+	if r.Sides, err = CheckSides(ctx, q, merchant); err != nil {
+		return r, err
+	}
 	return r, nil
+}
+
+// CheckSides returns the merchant-wide general-ledger accounts with no sign
+// rule whose type total sits opposite their class's normal side.
+func CheckSides(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]SideWarning, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("ledger: merchant is required")
+	}
+	rows, err := gen.New(q).ListLedgerSideWarnings(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: side check: %w", err)
+	}
+	var out []SideWarning
+	for _, row := range rows {
+		out = append(out, SideWarning{Currency: row.Currency, AccountType: row.AccountType, Class: row.Class, PSPID: row.PspID,
+			CreditsPosted: row.CreditsPosted, DebitsPosted: row.DebitsPosted})
+	}
+	return out, nil
 }
 
 // CheckSignBreaches returns the merchant-wide general-ledger accounts whose
