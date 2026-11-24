@@ -164,6 +164,7 @@ func TestUsageStore(t *testing.T) {
 		balance(t, w.alpha, other, 1500, 0, 1500)
 
 		conn.down.Store(false)
+		w.clock.Advance(time.Minute)
 		fund(t, w.alpha, user, "top-up", 500)
 		balance(t, w.alpha, user, 1400, 0, 1400)
 		out := settleUsage(t, w.alpha, lease, numbered(2, usageInput(user, "during", 2))...)
@@ -180,6 +181,9 @@ func TestUsageStore(t *testing.T) {
 			lease := newLease()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 6))...)
 			balance(t, w.alpha, customer, 940, 60, 1000)
+			// Usage at a movement's instant is not before its cut: the top-up
+			// comes a minute later.
+			w.clock.Advance(time.Minute)
 			fund(t, w.alpha, customer, "top-up", 100)
 			balance(t, w.alpha, customer, 1040, 0, 1040)
 			settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "second", 6))...)
@@ -199,6 +203,7 @@ func TestUsageStore(t *testing.T) {
 			customer, _ := fundedCustomer(t, w)
 			lease := newLease()
 			settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "first", 8))...)
+			w.clock.Advance(time.Minute)
 			fund(t, w.alpha, customer, "top-up", 100)
 			balance(t, w.alpha, customer, 1020, 0, 1020)
 			// 12 units cost 60 at the cheaper band: 20 less than posted.

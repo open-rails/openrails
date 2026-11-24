@@ -157,6 +157,9 @@ func TestAdmissionBoundaries(t *testing.T) {
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeCreditGrantHeld, held.Code)
+		// The capture occurred when it was admitted: a revocation after it
+		// posts it first.
+		w.clock.Advance(time.Second)
 		type captureResult struct {
 			rows []billing.CaptureResult
 			err  error

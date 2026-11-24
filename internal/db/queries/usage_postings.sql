@@ -54,10 +54,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING customer_id, currency, since_at;
 
 -- name: InsertUsagePosting :one
-INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at)
+INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
+    ingested_through, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(period_starts_at)::timestamptz,
     sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(cut_at)::timestamptz, sqlc.arg(reason)::text, sqlc.arg(amount)::bigint,
-    sqlc.arg(lines)::jsonb, sqlc.arg(now)::timestamptz)
+    sqlc.arg(lines)::jsonb, sqlc.arg(ingested_through)::timestamptz, sqlc.arg(now)::timestamptz)
 RETURNING *;
 
 -- name: ListUsagePostings :many

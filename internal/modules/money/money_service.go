@@ -74,6 +74,9 @@ type MoneyService struct {
 	clock                 clockwork.Clock
 	// posting is set on the service a running charge's posting runs on.
 	posting *runningChargePosting
+	// usagePosted marks running-charge postings made after the customer's
+	// usage before their instant posted.
+	usagePosted bool
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -762,7 +765,10 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 
 // heldAmount is the one held total against a customer's balance in a
 // currency as of now (live request reservations, provider authorizations,
-// running-charge accrual and unposted usage), and the accrual apart.
+// running-charge accrual and unposted usage), and the accrual apart. A
+// posting after the usage before its instant posted holds no usage: as of
+// that instant there is none, so usage after it never keeps a lot lapsing
+// then from what came before.
 func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
 	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
@@ -770,6 +776,9 @@ func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID,
 	})
 	if err != nil {
 		return 0, 0, err
+	}
+	if s.posting != nil && s.posting.usagePosted {
+		return row.Held, row.Accrued, nil
 	}
 	unposted, err := s.unpostedUsage(ctx, q, tenantID, payerID, cur)
 	return addSat(row.Held, unposted), row.Accrued, err

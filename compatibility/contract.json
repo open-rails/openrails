@@ -1772,7 +1772,8 @@
     ],
     "internal/merchants": [
       "type SecretCleanupArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRunID      uuid.UUID `json:\"run_id\" river:\"unique\"`\n}",
-      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}"
+      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
+      "type UsagePurgeArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}"
     ],
     "internal/modules/admission/spendgate": [
       "type Policy struct {\n\tScopes []ScopedWindows `json:\"scopes\"`\n}",
@@ -3672,6 +3673,10 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/merchants/usage_purge.go": {
+      "river": "github.com/riverqueue/river",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/modules/admission/spendgate/gate.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "bytes": "bytes",
@@ -5264,9 +5269,15 @@
       "time": "time"
     },
     "internal/usageerasure/usageerasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/wakejobs/wakejobs.go": {
       "context": "context",
