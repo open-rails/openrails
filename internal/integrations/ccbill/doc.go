@@ -6,6 +6,12 @@
 // merchant-initiated cancels and the provider pull. DataLink refuses an export
 // range over 24 hours, so every export is read a day at a time.
 //
+// CCBill documents the shape of its times but not their zone. DataLink rows,
+// webhook timestamps and subscription-management dates are read as UTC
+// (ParseTime); a date-only field (a REBILL or EXPIRE row's timestamp, a
+// rebill, renewal or expiry date) is a day, and a paid-through date runs to
+// its end (DayEnd). DataLink's startTime and endTime are sent in MST.
+//
 // Sales: a price links a FlexForm (flex_id, recurring_billing_option_id)
 // whose pricing must equal the catalog's; renewals are checked within 2%. A
 // FlexForm sells subscriptions only. Paying an order on CCBill redirects to a

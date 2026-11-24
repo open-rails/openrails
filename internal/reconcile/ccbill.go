@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // CCBillFetcher pulls CCBill via DataLink batch exports: the ACTIVEMEMBERS
@@ -113,7 +112,7 @@ func CCBillRemoteSubscription(rec ccbill.CCBillRecord) RemoteSubscription {
 	if !ccbill.IsDataLinkActiveStatus(rec.Status) {
 		sub.Status = SubscriptionStatusUnknown
 	}
-	if next, err := timeutil.ParseFirstUTC(strings.TrimSpace(rec.RebillDate), "2006-01-02", "01/02/2006", time.RFC3339); err == nil {
+	if next, err := ccbill.ParseTime(rec.RebillDate); err == nil {
 		sub.NextBillingAt = &next
 	}
 	return sub
@@ -149,7 +148,7 @@ func CCBillRemoteTransaction(row ccbill.DataLinkExportRow) RemoteTransaction {
 		txn.Type = TransactionTypeSale
 	}
 	txn.setAmount(row.Amount())
-	if ts, err := timeutil.ParseFirstUTC(row.Timestamp(), "2006-01-02 15:04:05", "2006-01-02", "20060102150405", "01/02/2006"); err == nil {
+	if ts, err := ccbill.ParseTime(row.Timestamp()); err == nil {
 		txn.OccurredAt = ts
 	}
 	return txn

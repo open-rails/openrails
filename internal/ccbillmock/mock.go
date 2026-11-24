@@ -4,6 +4,11 @@
 // Config.ProviderSandbox.CCBillDataLinkURL at URL. Only tests and sandbox
 // commands may import it.
 //
+// Times are written as CCBill's DataLink guide writes them: a roster row's
+// transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every rebill
+// and expire date as YYYY-MM-DD. CCBill names no zone for them; they are UTC,
+// the zone OpenRails reads them in.
+//
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
 // exports honor startTime and endTime (CCBill's MST clock), refuse a range
@@ -204,7 +209,7 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var rows []string
 		for _, mem := range m.members {
 			rows = append(rows, fmt.Sprintf(`"ACTIVEMEMBERS","999999","0000","%s","%s","%s","%s","1","%s","%s"`,
-				mem.SubscriptionID, mem.Signup.UTC().Format(time.DateOnly), mem.Username, mem.Email, date(mem.Rebill), date(mem.Expiry)))
+				mem.SubscriptionID, mem.Signup.UTC().Format("20060102150405"), mem.Username, mem.Email, date(mem.Rebill), date(mem.Expiry)))
 		}
 		_, _ = io.WriteString(w, strings.Join(rows, "\n"))
 	case r.URL.Path == "/data/main.cgi" && r.Form.Get("transactionTypes") != "":
@@ -232,7 +237,7 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if at := rb.At.Truncate(time.Second); at.Before(start) || at.After(end) {
 					continue
 				}
-				rows = append(rows, fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","%s"`, rb.SubscriptionID, rb.At.UTC().Format(time.DateTime), rb.TransactionID, rb.Amount))
+				rows = append(rows, fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","%s"`, rb.SubscriptionID, date(&rb.At), rb.TransactionID, rb.Amount))
 			}
 		}
 		_, _ = io.WriteString(w, strings.Join(rows, "\n"))

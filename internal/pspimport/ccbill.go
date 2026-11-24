@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // ccbillSource reads a CCBill account through DataLink: the ACTIVEMEMBERS
@@ -22,7 +20,7 @@ type ccbillSource struct {
 }
 
 func ccbillDate(s string) (time.Time, bool) {
-	t, err := timeutil.ParseFirstUTC(strings.TrimSpace(s), "2006-01-02 15:04:05", "2006-01-02", "20060102150405", "01/02/2006", time.RFC3339)
+	t, err := ccbill.ParseTime(s)
 	return t, err == nil
 }
 
