@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
@@ -265,5 +266,51 @@ func TestPublicCatalog(t *testing.T) {
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 2997, effects[0].Amount)
+	})
+	t.Run("OR-J05-S13/prune-keeps-a-refused-price-and-its-ownership", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"pro":{"display_name":"Pro","prices":{"monthly":{"amount":"10.00 USD","billing_interval":"30 days"},"omitted":{"amount":"2.00 USD"}}}}}`))
+		require.NoError(t, err)
+		first, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, first.Warnings)
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Key: "monthly"})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		price := prices.Items[0]
+		require.EqualValues(t, 1, price.Version)
+		require.False(t, price.Archived)
+		omitted, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Key: "omitted"})
+		require.NoError(t, err)
+		require.Len(t, omitted.Items, 1)
+		ownersQuery := "SELECT jsonb_agg(o ORDER BY field, manager) FROM " + pgx.Identifier{a.schema, "catalog_field_owners"}.Sanitize() + " o WHERE merchant_id = $1 AND object = 'price' AND key = 'pro' AND price_key = 'monthly'"
+		var ownersBefore, ownersAfter []byte
+		require.NoError(t, a.pool.QueryRow(t.Context(), ownersQuery, a.alpha.MerchantID().UUID()).Scan(&ownersBefore))
+		require.NotEmpty(t, ownersBefore)
+
+		prune, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"prune":true,"products":{"pro":{"display_name":"Pro","prices":{"monthly":{"amount":"10.00 USD","billing_interval":"30 days","sell_via":["solana"]}}}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), prune, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Changes)
+		require.Empty(t, receipt.Conflicts)
+		require.Len(t, receipt.Warnings, 1)
+		require.True(t, receipt.Warnings[0].Refused)
+		require.Equal(t, "pro", receipt.Warnings[0].ProductKey)
+		require.Equal(t, "monthly", receipt.Warnings[0].Key)
+		require.Contains(t, receipt.Warnings[0].Message, "Solana")
+		kept, err := a.alphaRemote.GetPrice(t.Context(), price.ID)
+		require.NoError(t, err)
+		require.Equal(t, price, *kept)
+		live, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Archived: ptr(false)})
+		require.NoError(t, err)
+		require.Equal(t, []billing.Price{price}, live.Items)
+		require.NoError(t, a.pool.QueryRow(t.Context(), ownersQuery, a.alpha.MerchantID().UUID()).Scan(&ownersAfter))
+		require.Equal(t, ownersBefore, ownersAfter)
+		_, err = a.alphaRemote.GetPrice(t.Context(), omitted.Items[0].ID)
+		require.ErrorIs(t, err, billing.ErrNotFound)
+		var recorded bool
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT EXISTS (SELECT 1 FROM "+pgx.Identifier{a.schema, "catalog_applications"}.Sanitize()+" WHERE merchant_id = $1 AND application_id = $2)", a.alpha.MerchantID().UUID(), receipt.ApplicationID).Scan(&recorded))
+		require.False(t, recorded)
 	})
 }

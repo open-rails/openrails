@@ -273,7 +273,7 @@ func applicationAdmissionPlan(document catalogwire.Application, prepared *catalo
 		if err != nil {
 			return nil, err
 		}
-		plan, err := planCatalogApplication(withoutRefused(document, prepared.refused), state, owners, prepared.providers, force)
+		plan, err := planCatalogApplication(withoutRefused(document, prepared.refused), state, owners, prepared.providers, prepared.refused, force)
 		if err != nil {
 			return nil, err
 		}

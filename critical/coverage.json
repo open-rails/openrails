@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 710,
+  "scenario_count": 711,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -167,6 +167,11 @@
       "id": "OR-J05-S12",
       "journey": "J05",
       "name": "A unit's first count reads its declaration in Vault under the units lock, not a replica's stale copy"
+    },
+    {
+      "id": "OR-J05-S13",
+      "journey": "J05",
+      "name": "Prune keeps a price refused during preparation live with its ownership unchanged, prunes an omitted file-owned price, and does not record the document as applied"
     },
     {
       "id": "OR-J06-S01",

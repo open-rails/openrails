@@ -32,7 +32,7 @@ type catalogPlan struct {
 	renamed map[catalogObject]bool
 }
 
-func planCatalogApplication(params catalogwire.Application, live catalogState, owners catalogOwners, providers map[[2]string]*providerPrice, force bool) (catalogPlan, error) {
+func planCatalogApplication(params catalogwire.Application, live catalogState, owners catalogOwners, providers map[[2]string]*providerPrice, refused map[[2]string]bool, force bool) (catalogPlan, error) {
 	plan := catalogPlan{named: map[catalogObject][]string{}, declared: map[catalogObject]bool{}, conflicts: []billing.CatalogConflict{}, renamed: map[catalogObject]bool{}}
 	plan.document = catalogwire.Application{SchemaVersion: params.SchemaVersion, EntitlementReplacements: params.EntitlementReplacements}
 	renamed, err := renamedProducts(live, params.EntitlementReplacements)
@@ -124,7 +124,8 @@ func planCatalogApplication(params catalogwire.Application, live catalogState, o
 			product, declared := params.Products[obj.key]
 			_, kept := product.Prices[obj.priceKey]
 			_, keptProvider := product.ProviderPrices[obj.priceKey]
-			kept = kept || keptProvider
+			// Prices refused during preparation are still declared.
+			kept = kept || keptProvider || refused[[2]string{obj.key, obj.priceKey}]
 			switch {
 			case obj.kind == billing.CatalogObjectMeter, obj.kind == billing.CatalogObjectLimit,
 				obj.kind == billing.CatalogObjectProduct && declared,
