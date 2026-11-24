@@ -27867,6 +27867,12 @@
               "$ref": "#/components/schemas/LimitSet"
             }
           },
+          "refused_views": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViewRefusal"
+            }
+          },
           "pricing": {
             "type": "array",
             "items": {
@@ -27882,6 +27888,7 @@
           "usage",
           "views",
           "limit_sets",
+          "refused_views",
           "pricing",
           "gates"
         ]
@@ -29085,6 +29092,32 @@
           "filter",
           "allowance",
           "price"
+        ]
+      },
+      "ViewRefusal": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "index",
+          "status",
+          "error"
         ]
       },
       "ViewWindow": {

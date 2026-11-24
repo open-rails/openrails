@@ -4143,6 +4143,7 @@ pkg openrails/billing, type SyncLeasesResult struct, Gates int `json:"gates"`
 pkg openrails/billing, type SyncLeasesResult struct, Lease Lease `json:"lease"`
 pkg openrails/billing, type SyncLeasesResult struct, LimitSets []*LimitSet `json:"limit_sets"`
 pkg openrails/billing, type SyncLeasesResult struct, Pricing []ViewPricing `json:"pricing"`
+pkg openrails/billing, type SyncLeasesResult struct, RefusedViews []ViewRefusal `json:"refused_views"`
 pkg openrails/billing, type SyncLeasesResult struct, Usage LeaseUsageResult `json:"usage"`
 pkg openrails/billing, type SyncLeasesResult struct, Views []View `json:"views"`
 pkg openrails/billing, type SyncStatus string
@@ -4331,6 +4332,10 @@ pkg openrails/billing, type ViewRateCard struct, GroupBy map[string]string `json
 pkg openrails/billing, type ViewRateCard struct, Meter string `json:"meter"`
 pkg openrails/billing, type ViewRateCard struct, Price catalog.RatePrice `json:"price"`
 pkg openrails/billing, type ViewRateCard struct, ValueProperty string `json:"value_property"`
+pkg openrails/billing, type ViewRefusal struct
+pkg openrails/billing, type ViewRefusal struct, Error *ErrorDetails `json:"error"`
+pkg openrails/billing, type ViewRefusal struct, Index int `json:"index"`
+pkg openrails/billing, type ViewRefusal struct, Status int `json:"status"`
 pkg openrails/billing, type ViewWindow struct
 pkg openrails/billing, type ViewWindow struct, EndsAt *time.Time `json:"ends_at"`
 pkg openrails/billing, type ViewWindow struct, Remaining int64 `json:"remaining,string"`

@@ -129,15 +129,27 @@ type ViewParams struct {
 // SyncLeasesResult answers a sync: the lease, what its usage settled, a view
 // of each customer and currency it named (read after its usage settled), the
 // limit set of each ViewParams in order (null when the sync ran out of time
-// for it: ask again), the pricing of each currency and event type named, and
-// how many of the merchant's leases are live.
+// for it: ask again, or when RefusedViews names it), the pricing of each
+// currency and event type named, and how many of the merchant's leases are
+// live.
 type SyncLeasesResult struct {
 	Lease     Lease            `json:"lease"`
 	Usage     LeaseUsageResult `json:"usage"`
 	Views     []View           `json:"views"`
 	LimitSets []*LimitSet      `json:"limit_sets"`
-	Pricing   []ViewPricing    `json:"pricing"`
-	Gates     int              `json:"gates"`
+	// RefusedViews are the ViewParams refused alone, as Admit would refuse
+	// their requests; the rest of the sync stands.
+	RefusedViews []ViewRefusal `json:"refused_views"`
+	Pricing      []ViewPricing `json:"pricing"`
+	Gates        int           `json:"gates"`
+}
+
+// ViewRefusal is one refused ViewParams, by its index in Views: Status is
+// what it alone answers, with Error.
+type ViewRefusal struct {
+	Index  int           `json:"index"`
+	Status int           `json:"status"`
+	Error  *ErrorDetails `json:"error"`
 }
 
 // Lease is a gate's lease: it is live until ExpiresAt unless its gate syncs

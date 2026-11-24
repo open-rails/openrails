@@ -93,29 +93,9 @@ it names, replaces its in-flight report (changed rows only), answers views,
 limit sets and pricing (`views.go`), and stores `settled_through_n` and receipts.
 Views read usage only through `leases.UsageReader`.
 
-**Holds.** Every writer of holds and windows locks the customer
-(`LockCustomerForSpend`) and takes window rows in one order (`limits.Holder.Take`).
-A claim fits by its overrun (`limits.Fits`). A request is checked against
-`balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits;
-held is request holds plus what live leases report in flight. `admission.Admitter`
-adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing
-`usage_minutes`) and the delegated-invoker cutoff. Settlement (`settleLimitsTx`)
-adds units to their windows in full, never clamped: a request hold's windows, or
-those current when the usage was admitted (`admitted_at`), and the spend windows
-of the invoker attributes it reports. A lease's report and holds count while it
-is live (`limits.LeaseLiveSince`); no hold counts past 30 days (`limits.HeldSince`).
+**Holds.** Every writer of holds and windows locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it) and takes window rows in one order (`limits.Holder.Take`). A claim fits by its overrun (`limits.Fits`). A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits; held is request holds plus what live leases report in flight. `admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing `usage_minutes`) and the delegated-invoker cutoff. Settlement (`settleLimitsTx`) adds units to their windows in full, never clamped: a request hold's windows, or those current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage). A lease's report and holds count while it is live (`limits.LeaseLiveSince`), and a lease's hold also for a lease lifetime after it is made; no hold counts past 30 days (`limits.HeldSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 
-**The gate.** `openrails.NewGate` keeps one lease for its life and a view of each
-customer it serves (`gate_view.go`). A warm decision prices the request (named
-units by the view's counts, money at its `PriceBound`s) and takes it from
-every limit of its set or none, against the view less what the gate has in
-flight, with no I/O. Within a margin of four sync intervals of what the views
-show others adding it is decided on the server as a request hold of the lease;
-refused locally when it cannot fit. Tickets open across a sync, and usage a sync
-left unsettled, are reported in flight. A view older than two syncs decides one
-request until a sync answers; with OpenRails unreachable a view keeps deciding
-within the gate's share (remaining ÷ live leases). An idle gate stops syncing.
-Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
+**The gate.** `openrails.NewGate` keeps one lease for its life and a view of each customer it serves (`gate_view.go`). A warm decision prices the request (named units by the view's counts, money at its `PriceBound`s) and takes it from every limit of its set or none, against the view less what the gate has in flight, with no I/O. Within a margin of four sync intervals of what the views show others adding it is decided on the server as a request hold of the lease; refused locally when it cannot fit. Tickets open across a sync, and usage a sync left unsettled, are reported in flight. A view older than two syncs decides one request until a sync answers; with OpenRails unreachable a view answered when the outage began keeps deciding within the gate's share (remaining under the request's policy, less running charges since, ÷ live leases). A view with anything in flight is never dropped. An idle gate stops syncing. Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
 
 ## Interfaces
 
@@ -285,8 +265,7 @@ Checks:
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
 - **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S22, S24, S26, S27, S37 to S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares, near zero, idle stop, window resets), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`), S35 (a limit counting two meters by weight, admitted and through a gate), S36 (a limit's `rate_cards` refused with their rename to `counts`); OR-J25-S05 (running charges under `accrual_rate_cap`).
-- **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S29, S31 to
-  S34, S37, S38 (lease lifetime, views, limit sets, admission windows, bounded syncs).
+- **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S29, S31 to S34, S37, S38, S42 to S46 (lease lifetime, views, limit sets, admission windows, bounded syncs, view refusals, lock order).
 - Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14, OR-J31-S16 (stored limit rate cards migrate to counts).
 
 Other tests: `entitlement_check_cache_test.go` drives the cache against a test

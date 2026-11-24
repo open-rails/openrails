@@ -2824,6 +2824,7 @@ export type SyncLeasesResult = {
   usage: LeaseUsageResult
   views: View[]
   limit_sets: LimitSet[]
+  refused_views: ViewRefusal[]
   pricing: ViewPricing[]
   gates: number
 }
@@ -3063,6 +3064,12 @@ export type ViewRateCard = {
   filter: Record<string, string[]> | null
   allowance: Allowance | null
   price: RatePrice
+}
+
+export type ViewRefusal = {
+  index: number
+  status: number
+  error: ErrorDetails | null
 }
 
 export type ViewWindow = {

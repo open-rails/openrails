@@ -53,7 +53,8 @@ ORDER BY limit_key COLLATE "C";
 -- current window (in_flight), what live leases other than except_lease
 -- report in flight. A request's hold is live until its deadline; past it, it
 -- still counts where counts_expired (a window with an end) until it is
--- captured or released. A gate's hold is live while its lease is.
+-- captured or released. A gate's hold is live while its lease is, and for a
+-- lease lifetime after it is made: one its lapsed lease made counts at once.
 -- name: SumWindowHeld :one
 SELECT (COALESCE((SELECT SUM(p.held)
     FROM billing.limit_hold_parts p
@@ -65,7 +66,7 @@ SELECT (COALESCE((SELECT SUM(p.held)
       AND h.state = 'open'
       AND CASE WHEN h.lease_id IS NULL
           THEN sqlc.arg(counts_expired)::boolean OR h.expires_at > sqlc.arg(as_of)::timestamptz
-          ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
+          ELSE h.created_at > sqlc.arg(lease_live_since)::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
   + CASE WHEN sqlc.arg(in_flight)::boolean THEN COALESCE((SELECT SUM(f.amount)
     FROM billing.lease_in_flight f
@@ -92,7 +93,7 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
                AND lh.currency = sqlc.arg(currency)::text AND lh.state = 'open'
                AND hp.hold_created_at >= sqlc.arg(held_since)::timestamptz AND lh.created_at >= sqlc.arg(held_since)::timestamptz
                AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
-                   ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+                   ELSE lh.created_at > sqlc.arg(lease_live_since)::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
      -- What live gates report in flight of the balance.
      + COALESCE((SELECT SUM(f.amount)

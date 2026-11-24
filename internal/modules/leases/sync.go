@@ -120,7 +120,8 @@ var (
 	unitPattern     = regexp.MustCompile(`^([a-z][a-z0-9_]{0,63}|[A-Z0-9]{3,12})$`)
 )
 
-// validate refuses a sync whose shape is wrong before anything is read.
+// validate refuses a sync whose shape is wrong before anything is read. A
+// view request or usage item is refused alone, never the sync.
 func validate(p billing.SyncLeasesParams) error {
 	switch {
 	case p.LeaseID.IsZero():
@@ -146,16 +147,6 @@ func validate(p billing.SyncLeasesParams) error {
 			return invalid(fmt.Sprintf("in_flight[%d].unit", i), "unit must be a unit or currency code")
 		case f.Amount < 0:
 			return invalid(fmt.Sprintf("in_flight[%d].amount", i), "amount must be nonnegative")
-		}
-	}
-	for i, v := range p.Views {
-		switch {
-		case v.CustomerID.IsZero():
-			return invalid(fmt.Sprintf("views[%d].customer_id", i), "customer_id is required")
-		case v.InvokerType != "" && v.InvokerType != billing.InvokerTypeCustomer && v.InvokerType != billing.InvokerTypeDelegated:
-			return invalid(fmt.Sprintf("views[%d].invoker_type", i), `invoker_type must be "customer" or "delegated"`)
-		case moneyutil.ValidateCurrency(money.NormalizeCurrency(string(v.Currency))) != nil:
-			return apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam(fmt.Sprintf("views[%d].currency", i))
 		}
 	}
 	for i, r := range p.Releases {
@@ -319,8 +310,8 @@ type syncRun struct {
 	holds []gen.ListLeaseOpenHoldsRow
 	// settled is what this sync's usage settled into each customer's limits.
 	settled map[settledKey]int64
-	// spend caches each item's spend windows by its attributes and instant.
-	spend map[string][]limits.Claim
+	// spend caches the billing policy of each item's attributes.
+	spend map[string]*admission.SpendPolicy
 }
 
 // settledKey names one customer's limit: balance's key carries its currency.
@@ -394,8 +385,8 @@ func (r *syncRun) sync() (*billing.SyncLeasesResult, error) {
 		return nil, err
 	}
 	r.prefix = r.usagePrefix()
-	r.settled, r.spend = map[settledKey]int64{}, map[string][]limits.Claim{}
-	r.result = &billing.SyncLeasesResult{Views: []billing.View{}, LimitSets: make([]*billing.LimitSet, len(r.p.Views)), Pricing: []billing.ViewPricing{},
+	r.settled, r.spend = map[settledKey]int64{}, map[string]*admission.SpendPolicy{}
+	r.result = &billing.SyncLeasesResult{Views: []billing.View{}, LimitSets: make([]*billing.LimitSet, len(r.p.Views)), RefusedViews: []billing.ViewRefusal{}, Pricing: []billing.ViewPricing{},
 		Usage: billing.LeaseUsageResult{Refused: []billing.LeaseUsageRefusal{}}}
 	if err := r.findReleases(); err != nil {
 		return nil, err
@@ -818,18 +809,37 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 		roles[i] = role.String()
 	}
 	slices.Sort(roles)
-	key := strings.Join([]string{u.CustomerID.String(), req.Invoker, req.InvokerType, req.TrustLevel, strings.Join(roles, ","), req.Resource, currency,
-		strconv.FormatInt(at.Truncate(time.Second).Unix(), 10)}, "\x00")
-	spend, ok := r.spend[key]
+	key := strings.Join([]string{u.CustomerID.String(), req.Invoker, req.InvokerType, req.TrustLevel, strings.Join(roles, ","), req.Resource, currency}, "\x00")
+	policy, ok := r.spend[key]
 	if !ok {
 		var err error
-		if spend, err = r.admitter.SpendWindows(r.ctx, req, at); err != nil {
+		if policy, err = r.admitter.SpendPolicy(r.ctx, req); err != nil {
+			if !isolated(err) {
+				return money.UsageItem{}, err
+			}
+			// A policy that cannot be resolved now (an FX outage, a policy
+			// the deployment cannot enforce) counts this customer's usage in
+			// no spend window, as before usage had any: it still settles.
+			policy = nil
+		}
+		r.spend[key] = policy
+	}
+	spend, err := policy.Windows(at)
+	if err != nil {
+		if !isolated(err) {
 			return money.UsageItem{}, err
 		}
-		r.spend[key] = spend
+		spend = nil
 	}
 	item.Spend = spend
 	return item, nil
+}
+
+// isolated reports an error that concerns one customer alone: not one of
+// the transaction (a database error aborts it) or of the request's context.
+func isolated(err error) bool {
+	var pg *pgconn.PgError
+	return !errors.As(err, &pg) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, pgx.ErrTxClosed)
 }
 
 // capture settles an item that captures one of the lease's request holds:
@@ -854,8 +864,10 @@ func (r *syncRun) capture(u billing.LeaseUsage) error {
 	if err != nil {
 		return err
 	}
+	// The hold already held its estimate: the capture moves balance by the
+	// difference.
 	k := settledKey{row.CustomerID, balanceKey(row.Currency)}
-	r.settled[k] = satAdd(r.settled[k], receipt.Amount)
+	r.settled[k] = satAdd(r.settled[k], satAdd(receipt.Amount, -row.EstimatedAmount))
 	return nil
 }
 
