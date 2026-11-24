@@ -343,6 +343,37 @@ func TestDeclineCauses(t *testing.T) {
 			}, 20*time.Second, 20*time.Millisecond, "the advised retry collects the renewal")
 		})
 	})
+	t.Run("OR-J45-S12/an-issuer-that-keeps-deferring-ends-the-case-at-the-next-renewal", func(t *testing.T) {
+		// A month further back, so every retry is dated in the database's past.
+		a, p, sub := purchasedMembershipWith(t, 30*24, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		p.core.SetDecline("4242", "insufficient_funds")
+		p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "30", NetworkDeclineCode: "51"})
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		awaitAttempt(t, a, sub.ID, "rebill")
+		// Each decline says retry in ten days: days 10 and 20 run, and the
+		// retry day 30 would need is the next renewal's.
+		for retries := 1; retries <= 2; retries++ {
+			dunned := subscriptionState(t, a, sub.ID, "past_due")
+			require.NotNil(t, dunned.Dunning)
+			require.NotNil(t, dunned.Dunning.NextRetryAt)
+			require.True(t, dunned.Dunning.NextRetryAt.Before(due.Add(30*24*time.Hour)))
+			a.clock.Advance(dunned.Dunning.NextRetryAt.Sub(a.clock.Now()) + time.Minute)
+			runRegistered(t, fleet, "openrails.billing_pass", 1)
+			require.Eventually(t, func() bool {
+				page, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID, Kind: []string{"dunning_retry"}})
+				require.NoError(t, err)
+				return len(page.Items) == retries
+			}, 20*time.Second, 20*time.Millisecond)
+		}
+		ended := subscriptionState(t, a, sub.ID, "canceled")
+		require.NotNil(t, ended.CancelFeedback)
+		require.Equal(t, "issuer_deferred", *ended.CancelFeedback, "the issuer kept deferring: not a card that failed")
+		require.True(t, a.clock.Now().Before(due.Add(30*24*time.Hour)), "the case ends before the next renewal")
+	})
 	t.Run("OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card", func(t *testing.T) {
 		for _, tc := range []struct {
 			name   string

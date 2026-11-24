@@ -162,6 +162,11 @@ func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
 	return uuid.NewSHA1(sub.ID, []byte(key))
 }
 
+// CancelIssuerDeferred is the cancel feedback of a case the issuer's advice
+// kept deferring until the next renewal: not paid, rather than a card that
+// failed.
+const CancelIssuerDeferred = "issuer_deferred"
+
 type FailMembershipParams struct {
 	// Prepared preserves the accepted engine charge cadence for retry policy.
 	// Native provider failures leave this nil.
@@ -182,7 +187,8 @@ type FailMembershipParams struct {
 	// RetryAfter is the network's earliest retry after the decline
 	// (Mastercard's MAC 24 to 30); zero for none. It delays the next retry,
 	// and the case's end moves with it (collection.Policy.CaseEnd), so every
-	// attempt the merchant's policy allows still runs.
+	// attempt the merchant's policy allows still runs, up to the next renewal:
+	// a retry advised past it ends the case as exhausted (issuer_deferred).
 	RetryAfter time.Duration
 	// Terminal requests immediate cancellation (entitlements revoked, no
 	// further retries) without incrementing the retry count. It is a request:

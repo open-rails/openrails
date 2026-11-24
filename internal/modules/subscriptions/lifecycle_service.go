@@ -1931,6 +1931,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		heldTerminal := ""
+		// deferred: the issuer's advice still put off the retry at the next
+		// renewal, so the case ends there.
+		deferred := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -2038,9 +2041,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					return err
 				}
 				// The network's earliest retry, from the decline: the case's end
-				// moves with it (collection.Policy.CaseEnd).
+				// moves with it (collection.Policy.CaseEnd), never past the next
+				// renewal. An issuer still deferring there has not paid this
+				// period: the case ends as exhausted.
 				if advised := declined.Add(params.RetryAfter); ok && params.RetryAfter > 0 && advised.After(nextRetry) {
 					nextRetry = advised
+				}
+				if next := periodStart.Add(time.Duration(cycleHours) * time.Hour); ok && !nextRetry.Before(next) {
+					ok, deferred = false, params.RetryAfter > 0
+					if refusal := terminalRefusal(leg); refusal != "" {
+						heldTerminal, event = refusal, lifecycle.TerminalHeld{}
+					} else {
+						event = lifecycle.DunningExhausted{At: now}
+					}
 				}
 				subscription.NextRetryAt = nil
 				if ok {
@@ -2071,6 +2084,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
 				reason = "transaction_failure"
+			}
+			if deferred {
+				reason = CancelIssuerDeferred
 			}
 			subscription.CancelFeedback = &reason
 		}

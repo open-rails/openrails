@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 485,
+  "scenario_count": 486,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2427,6 +2427,11 @@
       "id": "OR-J45-S10",
       "journey": "J45",
       "name": "The system-errors finding counts the rail's own processing errors, not an issuer's failure behind a generic decline"
+    },
+    {
+      "id": "OR-J45-S12",
+      "journey": "J45",
+      "name": "An issuer that keeps deferring retries ends the case as exhausted at the next renewal, recorded as issuer_deferred, never later"
     }
   ]
 }
