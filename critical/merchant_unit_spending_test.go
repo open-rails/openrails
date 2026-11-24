@@ -757,7 +757,8 @@ func unitRefundByLot(t *testing.T) {
 }
 
 func unitReversalsAsSettled(t *testing.T) {
-	s, p := unitPaymentWorld(t, 0)
+	// Begun an hour ago: R1 settles twenty minutes on, never in the future.
+	s, p := unitPaymentWorld(t, time.Hour)
 	a := s.a
 	gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
 	toolkit, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "toolkit", DisplayName: "Toolkit", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"toolkit:owned"}})

@@ -233,7 +233,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, source, source_id, invoker, starts_at, expires_at)"+
 		" SELECT merchant_id, $3, customer_id, account_id, unit, 5000, 'grant', 'critical', 'unposted', invoker, $4, $5"+
 		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
-		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().Add(72*time.Hour))
+		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().Add(40*24*time.Hour))
 	require.NoError(t, err)
 	lot := lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.RemainingAmount, "no unit of the lot posted")

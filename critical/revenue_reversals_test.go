@@ -443,7 +443,8 @@ func TestRevenueReversals(t *testing.T) {
 	})
 
 	t.Run("OR-J41-S29/a-refund-the-rail-confirms-later-is-dated-when-it-settled", func(t *testing.T) {
-		m := newMixedSale(t)
+		// Begun an hour ago: it settles twenty minutes on, never in the future.
+		m := newMixedSale(t, func(w *world) { w.clock.Advance(-time.Hour) })
 		a, provider := m.a, m.p
 		payment := m.buy(t, "settled-later")
 

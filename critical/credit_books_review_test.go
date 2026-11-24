@@ -95,8 +95,8 @@ func (s *creditShop) recover(t *testing.T, payment billing.PaymentID, chargeback
 	require.NoError(t, err)
 	kind := payments.ReversalDisputeReversal
 	require.NoError(t, service.Create(ctx, &models.Payment{
-		ID: uuid.New(), CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Rail: original.Rail,
-		TransactionID: key, Metadata: map[string]any{"reverses_payment_id": chargeback.String()}, Amount: amount, ListAmount: original.ListAmount,
+		ID: uuid.New(), CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail,
+		PspID: original.PspID, TransactionID: key, Metadata: map[string]any{"reverses_payment_id": chargeback.String()}, Amount: amount, ListAmount: original.ListAmount,
 		Currency: original.Currency, ReversalKind: &kind, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 	}))
@@ -123,7 +123,9 @@ func lotUnits(t *testing.T, w *world, lot uuid.UUID) int64 {
 // after its revocation deferred more than its price, and a pack from before
 // the credit books deferred none, and both restore as they were.
 func restoresCreditBooks(t *testing.T) {
-	s := newCreditShop(t)
+	// The revocation is a destructive action: a merchant's books move only a
+	// day after one. It happened two days ago.
+	s := newCreditShop(t, func(w *world) { w.clock.Advance(-48 * time.Hour) })
 	a, w := s.a, s.a.world
 	_, reinstated := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
 	s.spend(t, 11_000_000, "before-the-revocation")
@@ -355,22 +357,31 @@ func piecedAndUnitRefunds(t *testing.T) {
 	})
 }
 
-// cardPayment stores a succeeded card payment with no order, as a checkout's
-// credit line leaves its cash: for the lot it bought alone.
+// cardPayment stores a succeeded card payment for an order of one credit
+// line, as a checkout's credit line leaves its cash: for the lot it bought
+// alone. Every payment has its order.
 func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.MoneyMovement, key string) uuid.UUID {
 	t.Helper()
 	w := s.a.world
+	mid := w.alpha.MerchantID().UUID()
 	_, err := s.a.alpha.UpdateCustomer(t.Context(), s.customer, billing.UpdateCustomerParams{})
 	require.NoError(t, err)
 	var psp uuid.UUID
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "psps")+" WHERE merchant_id=$1 AND rail='stripe' ORDER BY created_at LIMIT 1",
-		w.alpha.MerchantID().UUID()).Scan(&psp))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "psps")+" WHERE merchant_id=$1 AND rail='stripe' ORDER BY created_at LIMIT 1", mid).Scan(&psp))
+	order := uuid.New()
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "orders")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'complete', 'USD', $4, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "orders")+" WHERE merchant_id = $1), 'succeeded', 'provider', $5, $5, $5)",
+		mid, order, s.customer.UUID(), amount, w.clock.Now())
+	require.NoError(t, err)
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "order_lines")+" (merchant_id, id, order_id, customer_id, position, description, quantity, unit_amount, amount, credit_grant, source)"+
+		" VALUES ($1, $2, $3, $4, 0, 'Credit pack', 1, $5, $5, '{\"from_payment\": true}', 'provider_line')", mid, uuid.New(), order, s.customer.UUID(), amount)
+	require.NoError(t, err)
 	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	id := uuid.New()
 	require.NoError(t, payments.NewPaymentService(database, w.clock).Create(ctx, &models.Payment{
-		ID: id, CustomerID: s.customer.UUID(), Channel: models.ChannelRail, Rail: models.RailStripe, PspID: &psp, TransactionID: key,
+		ID: id, CustomerID: s.customer.UUID(), OrderID: &order, Channel: models.ChannelRail, Rail: models.RailStripe, PspID: &psp, TransactionID: key,
 		Amount: amount, ListAmount: amount, Currency: "USD", Status: payments.PaymentStatusSucceededValue, MoneyMovement: movement,
 		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 	}))
