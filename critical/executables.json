@@ -1218,6 +1218,9 @@
     "OR-J38-S77": [
       "TestCCBillIdentity/OR-J38-S77/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill"
     ],
+    "OR-J38-S78": [
+      "TestCCBillIdentity/OR-J38-S78/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided"
+    ],
     "OR-J27-S10": [
       "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"
     ],

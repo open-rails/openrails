@@ -411,6 +411,43 @@ func TestCCBillIdentity(t *testing.T) {
 		require.True(t, entitledTo(t, a.alpha, carol, "ccbill:member"))
 	})
 
+	t.Run("OR-J38-S78/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		price := ccbillMemberPrice(t, a.alpha)
+		alice, carol := customerOf(a.alice), customerOf(a.bob)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		due := now.Add(-time.Hour)
+		// Alice's end the provider confirmed; Carol's is a chargeback.
+		provided, sale := legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due)
+		provided.Cancel = billing.CancelEvidence{Kind: "provider_terminated", At: due}
+		land := importLegacyCCBill(t, a.alpha, now)
+		land(provided, sale)
+		land(legacyCCBillMember(carol, price, "334455667788990011", "0812233445566778803", due))
+		status, body := ccbillNotice(t, a, "Chargeback", map[string]any{"subscriptionId": "0334455667788990011", "transactionId": "0812233445566778803",
+			"amount": "10.00", "currencyCode": "840", "reason": "fraud"})
+		require.Equal(t, http.StatusOK, status, body)
+		for _, member := range []struct {
+			customer    billing.CustomerID
+			sub, rebill string
+			kind        string
+		}{{alice, ccbillProvider, "0912233445566778801", "provider"}, {carol, "0334455667788990011", "0912233445566778803", "chargeback"}} {
+			require.Equal(t, member.kind, *onlySubscription(t, a.alpha, member.customer).CancelType)
+			// CCBill then reports a failed-rebill cancel, and bills again.
+			status, body := ccbillNotice(t, a, "Cancellation", map[string]any{"subscriptionId": member.sub, "reason": "failedRB", "source": "failedRB"})
+			require.Equal(t, http.StatusOK, status, body)
+			require.Equal(t, member.kind, *onlySubscription(t, a.alpha, member.customer).CancelType, "a lapse never replaces a decided end")
+			next := due.Add(720 * time.Hour)
+			status, body = ccbillNotice(t, a, "RenewalSuccess", map[string]any{"subscriptionId": member.sub, "transactionId": member.rebill,
+				"billedAmount": "10.00", "billedCurrencyCode": "840", "timestamp": now.Format(time.DateTime), "nextRenewalDate": next.Format(time.DateOnly),
+				"cardType": "VISA", "last4": "1111"})
+			require.Equal(t, http.StatusOK, status, body)
+			after := onlySubscription(t, a.alpha, member.customer)
+			require.Equal(t, billing.SubscriptionStatus("canceled"), after.Status, "%s stays ended", member.kind)
+			require.Equal(t, member.kind, *after.CancelType)
+			require.False(t, entitledTo(t, a.alpha, member.customer, "ccbill:member"))
+		}
+	})
+
 	t.Run("OR-J38-S38/datalink-import-matches-a-zero-dropped-legacy-id", func(t *testing.T) {
 		iw := newImportWorld(t, "ccbill")
 		price := ccbillMemberPrice(t, iw.alphaRemote)

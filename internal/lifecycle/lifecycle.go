@@ -425,9 +425,13 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		}
 		if s.Status == Canceled {
 			// A later immediate cancel (a chargeback, a merchant revoke) ends
-			// paid access now; otherwise the first decided cancel stands.
+			// paid access now; otherwise the first decided cancel stands. Its
+			// kind replaces the recorded one unless it is a lapse, which would
+			// make a decided end revivable, or the end is a chargeback's.
 			if ev.Immediate || ev.Kind == CancelChargeback {
-				s.CancelKind = ev.Kind
+				if ev.Kind != CancelExpired && s.CancelKind != CancelChargeback {
+					s.CancelKind = ev.Kind
+				}
 				if s.EndedAt.After(ev.At) {
 					s.EndedAt = ev.At
 				}
