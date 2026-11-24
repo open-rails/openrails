@@ -42,8 +42,8 @@ func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*wo
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
 		w.cfg.UsageBillingEnabled = enabled
 		m := cfgMerchant(w.cfg, "alpha")
-		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
-		m.ArrearsGraceDays, m.ArrearsDelinquencyFloor = ptr(0), ptr(int64(0))
+		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000, DelinquencyFloor: ptr(int64(0))}}}
+		m.ArrearsGraceDays = ptr(0)
 		setCfgMerchant(&w.cfg, "alpha", m)
 	}}, configure...)
 	a, p := newNMIWorld(t, changes...)
@@ -488,11 +488,29 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NotNil(t, order.Usage.NextCollectionAttemptAt)
 		require.Equal(t, declinedAt.Add(retry), *order.Usage.NextCollectionAttemptAt, "the merchant's schedule sets the retry")
 	})
+	t.Run("OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency", func(t *testing.T) {
+		// The policy's floor is a million euros; the debt is in dollars.
+		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "euro-floor", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000,
+				DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(1_000_000_000_000)), PolicyCurrency: "EUR"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("euro-floor")})
+		require.NoError(t, err)
+		oneUsage(t, a.alpha, usageInput(customer, "overdue-in-dollars", 3))
+		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
+		runUsageDue(t, fleet)
+		a.clock.Advance(24 * time.Hour)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "dollar debt is held to the dollar floor, not the policy's euro one")
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0))}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0)), PolicyCurrency: "USD"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("strict")})

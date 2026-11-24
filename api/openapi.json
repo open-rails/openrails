@@ -19837,10 +19837,6 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -19860,10 +19856,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -26954,10 +26946,6 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -26977,10 +26965,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -27380,12 +27364,24 @@
           "minimum_invoice_amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "delinquency_floor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "currency",
           "credit_limit",
-          "minimum_invoice_amount"
+          "minimum_invoice_amount",
+          "delinquency_floor"
         ]
       },
       "UsageBillingSettings": {

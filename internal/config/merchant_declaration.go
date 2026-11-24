@@ -114,6 +114,8 @@ var retiredDeclarationKeys = []struct{ key, fate string }{
 	{"rail_merchant_accounts", "was renamed to psps"},
 	{"provider_accounts", "was renamed to psps"},
 	{"api_host", "was removed: a request names its merchant by its credential, never by its host"},
+	{"arrears_delinquency_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
+	{"monthly_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
 }
 
 // RetiredDeclarationKey is the first retired key doc sets, with what became

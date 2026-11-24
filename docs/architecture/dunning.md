@@ -97,11 +97,7 @@ Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
 
 ## Interfaces
 
-- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving
-  `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`,
-  `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`,
-  and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`,
-  `ArrearsDelinquencyFloor`, `MonthlyFloor`).
+- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`, `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`, and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`, `UsageBilling` with each currency's `DelinquencyFloor`).
 - **Staff:** `GET /v1/admin/subscriptions?dunning=true`, `GET /v1/admin/renewals`,
   `GET /v1/admin/payment-attempts`, `GET /v1/admin/orders?overdue=true`,
   `POST /v1/admin/orders/{id}/waive-balance`, `…/mark-uncollectible`,
@@ -231,7 +227,5 @@ Gaps:
 - No scenario sends advice on a declined usage-order collection: the Stripe fake has no invoice collection.
 - Untested: `access_during_dunning: suspend`; the `life.decline.unmapped` and
   `life.cadence.unknown` findings; a Solana schedule spent with the switch off.
-- The floors (`arrears_delinquency_floor`, `monthly_floor`, `DefaultAmountFloor`
-  1,000,000) are one number across currencies, one unit only at 6 decimals.
 - Nothing checks that `decline`'s `reasons` covers every
   `billing.DeclineReasons()` entry.

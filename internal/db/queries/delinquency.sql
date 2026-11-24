@@ -20,7 +20,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- since when, and when the next one falls due. Every evaluation and the
 -- admission gate's live recompute read it, so the stored state and the gate
 -- agree. grace_days and amount_floor are the bound billing policy's overrides,
--- -1 for none. policies is the merchant's settings, {policies: {name: body},
+-- -1 for none; its floor is in its policy_currency, and overrides only there. policies is the merchant's settings, {policies: {name: body},
 -- tiers: {tier: name}, default: name}; the payer's policy is its own
 -- assignment while the settings still declare it, else its tier's
 -- (money_settings.tier), else the default.
@@ -29,7 +29,8 @@ LIMIT sqlc.arg(row_limit)::int;
 -- they mean nothing when their count is 0, and every caller reads it first.
 WITH pol AS (
     SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
-           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
+           CASE WHEN bound.body ->> 'policy_currency' = sqlc.arg(currency)::text
+                THEN (bound.body ->> 'delinquency_amount_floor')::bigint END AS amount_floor
     FROM billing.customers c
     LEFT JOIN billing.money_settings ms
       ON ms.merchant_id = c.merchant_id AND ms.customer_id = c.id AND ms.currency = sqlc.arg(currency)

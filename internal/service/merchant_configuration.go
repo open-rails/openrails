@@ -229,9 +229,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.CollectionThreshold != nil {
 		current.CollectionThreshold = patch.CollectionThreshold
 	}
-	if patch.MonthlyFloor != nil {
-		current.MonthlyFloor = patch.MonthlyFloor
-	}
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}
@@ -252,9 +249,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	}
 	if patch.ArrearsGraceDays != nil {
 		current.ArrearsGraceDays = patch.ArrearsGraceDays
-	}
-	if patch.ArrearsDelinquencyFloor != nil {
-		current.ArrearsDelinquencyFloor = patch.ArrearsDelinquencyFloor
 	}
 	if patch.PSPRouting != nil {
 		current.PSPRouting = patch.PSPRouting

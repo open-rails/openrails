@@ -1084,6 +1084,9 @@
     "OR-J26-S59": [
       "TestUsageBillingContracts/OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy"
     ],
+    "OR-J26-S60": [
+      "TestUsageBillingContracts/OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],

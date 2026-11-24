@@ -68,8 +68,9 @@ type BillingPolicy struct {
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 
 	// DelinquencyGraceDays / DelinquencyAmountFloor override the merchant's
-	// arrears_grace_days / arrears_delinquency_floor for bound payers; unset
-	// defers to them. Allowed with any Kind: debt ages even where it never
+	// arrears_grace_days / its currency's delinquency_floor for bound payers;
+	// unset defers to them. DelinquencyAmountFloor is in PolicyCurrency and
+	// applies to debt in it. Allowed with any Kind: debt ages even where it never
 	// gates admission.
 	DelinquencyGraceDays   *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty"`

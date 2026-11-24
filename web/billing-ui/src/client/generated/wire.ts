@@ -1427,13 +1427,11 @@ export type MerchantConfigurationState = {
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
   collection_threshold?: string
-  monthly_floor?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
-  arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
@@ -2808,13 +2806,11 @@ export type UpdateMerchantConfigurationParams = {
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
   collection_threshold?: string
-  monthly_floor?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
-  arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
@@ -2896,6 +2892,7 @@ export type UsageBillingCurrency = {
   currency: string
   credit_limit: string
   minimum_invoice_amount: string
+  delinquency_floor: string | null
 }
 
 export type UsageBillingSettings = {
