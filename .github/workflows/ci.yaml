@@ -5,6 +5,11 @@ on:
     branches: [master, "rc/**"]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
   workflow_dispatch:
+    inputs:
+      critical:
+        description: Only these critical journeys or scenarios (J24 OR-J04-S80 …); such a run qualifies nothing
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -22,6 +27,8 @@ env:
 
 # A PR into rc/** is the light tier: selected suites without the critical
 # journeys. A PR into master is the full tier: every suite, nothing skipped.
+# A dispatch naming critical journeys or scenarios is the focused tier: only
+# those, and no gate.
 # Suite selection is deliberately coarse. Shared or unknown inputs fan out.
 jobs:
   source:
@@ -51,6 +58,7 @@ jobs:
       chart: ${{ steps.scope.outputs.chart }}
       security: ${{ steps.scope.outputs.security }}
       artifacts: ${{ steps.scope.outputs.artifacts }}
+      critical: ${{ steps.scope.outputs.critical }}
       base_ref: ${{ steps.scope.outputs.base_ref }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
     steps:
@@ -68,9 +76,22 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          CRITICAL: ${{ inputs.critical }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [[ "$EVENT" == workflow_dispatch && -n "$CRITICAL" ]]; then
+            selection=()
+            for item in $CRITICAL; do
+              [[ "$item" =~ ^(J[0-9]{2}|OR-J[0-9]{2}-S[0-9]{2})$ ]] || { echo "Not a journey or scenario: $item" >&2; exit 1; }
+              selection+=("$item")
+            done
+            ((${#selection[@]})) || { echo 'critical names no journey or scenario' >&2; exit 1; }
+            printf 'tier=focused\ncritical=%s\n' "${selection[*]}" >> "$GITHUB_OUTPUT"
+            printf '%s=false\n' core runtime browser chart security artifacts >> "$GITHUB_OUTPUT"
+            echo "Focused critical run: ${selection[*]}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [[ "$EVENT" == pull_request ]]; then
             [[ "$GITHUB_REF" == refs/pull/*/merge ]]
             [[ "$(git rev-list --parents -n 1 HEAD | awk '{print NF}')" == 3 ]]
@@ -96,6 +117,7 @@ jobs:
   guards:
     name: Source guards
     needs: scope
+    if: ${{ needs.scope.outputs.tier != 'focused' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -296,7 +318,7 @@ jobs:
   critical:
     name: Critical public-interface journeys
     needs: scope
-    if: ${{ needs.scope.outputs.tier == 'full' }}
+    if: ${{ needs.scope.outputs.tier == 'full' || needs.scope.outputs.tier == 'focused' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
@@ -346,7 +368,20 @@ jobs:
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
       - name: Require every critical scenario
+        if: ${{ needs.scope.outputs.tier == 'full' }}
         run: bash scripts/critical-tests.sh
+      - name: Require the selected critical scenarios
+        if: ${{ needs.scope.outputs.tier == 'focused' }}
+        env:
+          SELECTION: ${{ needs.scope.outputs.critical }}
+        run: |
+          args=()
+          for item in $SELECTION; do
+            if [[ "$item" == J* ]]; then args+=(--journey "$item"); else args+=(--case "$item"); fi
+          done
+          # Never the whole suite: a focused run with no selection fails.
+          ((${#args[@]})) || exit 1
+          bash scripts/critical-tests.sh "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -447,7 +482,7 @@ jobs:
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
     needs: [source, scope, guards, lint, chart, sql, browser, critical, security, artifact-release, artifact-image]
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
