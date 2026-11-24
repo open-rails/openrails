@@ -334,8 +334,9 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	if err != nil {
 		return false, err
 	}
+	// Each usage order ends after the last: a close never ends where one did.
 	cutoff := now.Add(time.Microsecond)
-	last, err := q.LatestUsageOrderEnd(ctx, gen.LatestUsageOrderEndParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, PeriodStart: from})
+	last, err := q.LatestUsageOrderEndInCurrency(ctx, gen.LatestUsageOrderEndInCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
