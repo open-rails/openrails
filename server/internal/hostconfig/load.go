@@ -379,6 +379,19 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 			vault.SecretsPath = cmp.Or(vault.SecretsPath, secretsDir)
 			databaseConfig.Vault, databaseConfig.Config.Vault = vault.split()
 		}
+		// A purge posts the merchant's unposted usage and deletes it from the
+		// event store.
+		if options.directory && k.Exists("clickhouse") {
+			var clickHouse clickHouseFile
+			if err := k.UnmarshalWithConf("clickhouse", &clickHouse, koanf.UnmarshalConf{
+				DecoderConfig: &mapstructure.DecoderConfig{
+					Result: &clickHouse, WeaklyTypedInput: true, ErrorUnused: true, TagName: "koanf", MatchName: matchField,
+				},
+			}); err != nil {
+				return nil, fmt.Errorf("unmarshaling directory clickhouse config: %w", err)
+			}
+			databaseConfig.ClickHouse, databaseConfig.Config.ClickHouse = clickHouse.split()
+		}
 		return databaseConfig, nil
 	}
 
