@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [master, "rc/**"]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
+  merge_group:
+  push:
+    branches: [master, "rc/**"]
   workflow_dispatch:
     inputs:
       critical:
@@ -16,19 +19,25 @@ permissions:
 
 # Closing or drafting cancels the PR run. Ordinary draft updates use a separate
 # group so a delayed draft event cannot cancel a newer ready-to-review run.
+# Each merge group has its own ref. Pushes queue behind the running one, so
+# each finishes and saves the branch's caches.
 concurrency:
-  group: validate-${{ github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: validate-${{ github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && format('push-{0}', github.ref) || github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GOMAXPROCS: "2"
   GOFLAGS: -p=4
 
-# A PR into rc/** is the light tier: selected suites without the critical
-# journeys. A PR into master is the full tier: every suite, nothing skipped.
-# A dispatch naming critical journeys or scenarios is the focused tier: only
-# those, and no gate.
+# Tiers (scripts/ci-scope.py):
+#   light   a PR into rc/**: the suites its changes reach, no critical journeys.
+#   queue   a merge group of rc/**'s merge queue: the light suites over the
+#           group's combined changes (and every critical journey once switched on).
+#   push    a push to rc/** or master: what the merge changed, plus gosec; it
+#           saves the Go caches PRs restore.
+#   full    a PR into master or a dispatch: every suite and every critical journey.
+#   focused a dispatch naming critical journeys or scenarios: only those, and no gate.
 # Suite selection is deliberately coarse. Shared or unknown inputs fan out.
 jobs:
   source:
@@ -47,7 +56,7 @@ jobs:
 
   scope:
     name: Scope
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -59,66 +68,73 @@ jobs:
       security: ${{ steps.scope.outputs.security }}
       artifacts: ${{ steps.scope.outputs.artifacts }}
       critical: ${{ steps.scope.outputs.critical }}
-      base_ref: ${{ steps.scope.outputs.base_ref }}
+      shards: ${{ steps.scope.outputs.shards }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify the candidate and select suites
+      - name: Verify the candidate and plan its tier
         id: scope
         env:
           EVENT: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           CRITICAL: ${{ inputs.critical }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          if [[ "$EVENT" == workflow_dispatch && -n "$CRITICAL" ]]; then
-            selection=()
-            for item in $CRITICAL; do
-              [[ "$item" =~ ^(J[0-9]{2}|OR-J[0-9]{2}-S[0-9]{2})$ ]] || { echo "Not a journey or scenario: $item" >&2; exit 1; }
-              selection+=("$item")
-            done
-            ((${#selection[@]})) || { echo 'critical names no journey or scenario' >&2; exit 1; }
-            printf 'tier=focused\ncritical=%s\n' "${selection[*]}" >> "$GITHUB_OUTPUT"
-            printf '%s=false\n' core runtime browser chart security artifacts >> "$GITHUB_OUTPUT"
-            echo "Focused critical run: ${selection[*]}" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [[ "$EVENT" == pull_request ]]; then
-            [[ "$GITHUB_REF" == refs/pull/*/merge ]]
-            [[ "$(git rev-list --parents -n 1 HEAD | awk '{print NF}')" == 3 ]]
-            test "$(git rev-parse HEAD^1)" = "$BASE_SHA"
-            test "$(git rev-parse HEAD^2)" = "$HEAD_SHA"
-            git check-ref-format "refs/heads/$BASE_REF"
-            encoded="$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe="/"))' "$BASE_REF")"
-            current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$encoded" --jq .object.sha)"
-            test "$current" = "$BASE_SHA" || { echo 'Base moved; update the PR and rerun.' >&2; exit 1; }
-            printf 'base_ref=%s\nbase_sha=%s\n' "$BASE_REF" "$BASE_SHA" >> "$GITHUB_OUTPUT"
-          fi
-          if [[ "$EVENT" == pull_request && "$BASE_REF" == rc/* ]]; then
-            echo tier=light >> "$GITHUB_OUTPUT"
-            python3 scripts/ci-scope.py --base "$BASE_SHA" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT" | tee "$RUNNER_TEMP/suites.json"
-          else
-            # Nothing heavy starts for a pull request master will refuse.
-            [[ "$EVENT" != pull_request ]] || bash scripts/ci-source-branch.sh "$GITHUB_REPOSITORY" "$HEAD_REPOSITORY" "$HEAD_REF"
-            echo tier=full >> "$GITHUB_OUTPUT"
-            python3 scripts/ci-scope.py --full --github-output "$GITHUB_OUTPUT" | tee "$RUNNER_TEMP/suites.json"
-          fi
-          cat "$RUNNER_TEMP/suites.json" >> "$GITHUB_STEP_SUMMARY"
+          plan=(python3 scripts/ci-scope.py --github-output "$GITHUB_OUTPUT")
+          case "$EVENT" in
+            workflow_dispatch)
+              if [[ -n "$CRITICAL" ]]; then plan+=(--tier focused --critical "$CRITICAL"); else plan+=(--tier full); fi
+              ;;
+            pull_request)
+              [[ "$GITHUB_REF" == refs/pull/*/merge ]]
+              [[ "$(git rev-list --parents -n 1 HEAD | awk '{print NF}')" == 3 ]]
+              test "$(git rev-parse HEAD^1)" = "$BASE_SHA"
+              test "$(git rev-parse HEAD^2)" = "$HEAD_SHA"
+              git check-ref-format "refs/heads/$BASE_REF"
+              echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+              if [[ "$BASE_REF" == rc/* ]]; then
+                plan+=(--tier light --base "$BASE_SHA" --head "$GITHUB_SHA")
+              else
+                # Nothing heavy starts for a pull request master will refuse.
+                bash scripts/ci-source-branch.sh "$GITHUB_REPOSITORY" "$HEAD_REPOSITORY" "$HEAD_REF"
+                plan+=(--tier full)
+              fi
+              ;;
+            merge_group)
+              # The queue builds each group on its base and the groups ahead of it.
+              [[ "$BASE_REF" == refs/heads/rc/* ]] || { echo "Only rc/** has a merge queue: $BASE_REF" >&2; exit 1; }
+              test "$HEAD_SHA" = "$GITHUB_SHA"
+              git merge-base --is-ancestor "$BASE_SHA" HEAD
+              plan+=(--tier queue --base "$BASE_SHA" --head "$GITHUB_SHA")
+              ;;
+            push)
+              # What the merge changed; a new branch or a force push selects every suite.
+              plan+=(--tier push --head "$GITHUB_SHA")
+              if [[ ! "$BASE_SHA" =~ ^0+$ ]] && git merge-base --is-ancestor "$BASE_SHA" HEAD 2>/dev/null; then
+                plan+=(--base "$BASE_SHA")
+              fi
+              ;;
+            *)
+              echo "Unexpected event: $EVENT" >&2
+              exit 1
+              ;;
+          esac
+          "${plan[@]}" | tee "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json" >> "$GITHUB_STEP_SUMMARY"
 
   guards:
     name: Source guards
     needs: scope
     if: ${{ needs.scope.outputs.tier != 'focused' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -127,6 +143,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: plain
       - run: python3 scripts/check-ci-policy.py
       - run: bash scripts/check.sh guards
       - run: bash scripts/scan-injected-code.sh --self-test
@@ -139,44 +159,79 @@ jobs:
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
 
-  lint:
-    name: Build, vet, package tests and lint
+  go:
+    name: Vet and package tests
     needs: scope
     if: ${{ needs.scope.outputs.core == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GOMAXPROCS: "4"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
         with:
           go-version-file: go.mod
           cache: false
       - uses: ./.github/actions/go-cache
         with:
           family: plain
-      # The plain build of every package, which also warms the lint's loads.
-      - run: bash scripts/check.sh build
+      # The package tests compile every untagged package; linking every binary
+      # is left to pushes and the full tier.
+      - name: Build and link every module
+        if: ${{ needs.scope.outputs.tier == 'push' || needs.scope.outputs.tier == 'full' }}
+        run: bash scripts/check.sh build
+      - name: The embedded library links no AuthKit runtime
+        if: ${{ needs.scope.outputs.tier != 'push' && needs.scope.outputs.tier != 'full' }}
+        run: bash scripts/check-embedded-auth-boundary.sh
       - run: bash scripts/check.sh vet
       - run: bash scripts/check.sh unit
+      - uses: ./.github/actions/go-cache
+        if: ${{ !cancelled() }}
+        with:
+          family: plain
+          save: "true"
+
+  lint:
+    name: Lint
+    needs: scope
+    if: ${{ needs.scope.outputs.core == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: "4"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: plain
       - name: Read pinned lint version
         id: tool_versions
         shell: bash
         run: echo "golangci_lint=$(awk -F= '$1 == "GOLANGCI_LINT_VERSION" { print $2 }' tools/versions.conf)" >> "$GITHUB_OUTPUT"
+      # Only pushes save the lint cache; pull requests restore their base's.
       - name: GolangCI-Lint
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
         with:
           version: ${{ steps.tool_versions.outputs.golangci_lint }}
           # config verify downloads the JSON schema from golangci-lint.run and times out.
           verify: false
+          skip-save-cache: ${{ github.event_name != 'push' }}
           args: --timeout=15m --build-tags=integration
       - name: GolangCI-Lint (server module)
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
         with:
           version: ${{ steps.tool_versions.outputs.golangci_lint }}
           verify: false
+          skip-save-cache: ${{ github.event_name != 'push' }}
           working-directory: server
           args: --timeout=15m --config ../.golangci.yaml
       - name: GolangCI-Lint (examples module)
@@ -184,6 +239,7 @@ jobs:
         with:
           version: ${{ steps.tool_versions.outputs.golangci_lint }}
           verify: false
+          skip-save-cache: ${{ github.event_name != 'push' }}
           working-directory: examples
           args: --timeout=15m --config ../.golangci.yaml
       - name: GolangCI-Lint (AuthKit adapter module)
@@ -191,13 +247,9 @@ jobs:
         with:
           version: ${{ steps.tool_versions.outputs.golangci_lint }}
           verify: false
+          skip-save-cache: ${{ github.event_name != 'push' }}
           working-directory: adapters/authkit
           args: --timeout=15m --config ../../.golangci.yaml
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() }}
-        with:
-          family: plain
-          save: "true"
 
   chart:
     name: Helm chart
@@ -207,23 +259,29 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - run: HELM="$(scripts/ci-install-tool.sh helm)" bash scripts/check.sh chart
 
   sql:
     name: SQL bindings and query audit
     needs: scope
     if: ${{ needs.scope.outputs.runtime == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Start PostgreSQL and ClickHouse
         run: bash scripts/ci-services.sh start postgres clickhouse
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: plain
       - name: PostgreSQL and ClickHouse are ready
         run: bash scripts/ci-services.sh ready
       - name: Generated SQL bindings match the queries
@@ -268,9 +326,10 @@ jobs:
       # A pull request that rewrites the migrations (a fold into the baseline)
       # must build the database its base's chain builds: identical pg_dump
       # output in billing and in a relocated schema. pg_dump 18 is the server
-      # container's. It is proven where the rewrite enters its release candidate:
-      # the candidate's own pull request into master also carries the schema
-      # changes merged beside it, so its chain is not its base's.
+      # container's. It is proven where the rewrite enters its release candidate,
+      # against the pull request's own base: a merge group or the candidate's
+      # pull request into master also carries the schema changes merged beside
+      # it, so its chain is not its base's.
       - name: Rewritten migrations build the base's schema
         if: ${{ !cancelled() && needs.scope.outputs.base_sha != '' && needs.scope.outputs.tier == 'light' }}
         env:
@@ -287,11 +346,10 @@ jobs:
             -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
             -pg-dump 'docker exec critical-postgres pg_dump'
 
-  # The light tier's browser check; the full tier builds these inside critical.
   browser:
     name: Browser build
     needs: scope
-    if: ${{ needs.scope.outputs.tier == 'light' && needs.scope.outputs.browser == 'true' }}
+    if: ${{ needs.scope.outputs.browser == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -301,7 +359,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: plain
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/billing-ui/package.json
@@ -315,12 +376,18 @@ jobs:
             web/pay/pnpm-lock.yaml
       - run: bash scripts/check.sh browser
 
+  # The whole suite on CRITICAL_SHARDS runners (scripts/ci-scope.py), or a
+  # focused selection on one.
   critical:
-    name: Critical public-interface journeys
+    name: Critical journeys ${{ matrix.shard }}
     needs: scope
-    if: ${{ needs.scope.outputs.tier == 'full' || needs.scope.outputs.tier == 'focused' }}
+    if: ${{ needs.scope.outputs.critical != '' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: ${{ matrix.shard == 'selected' && 70 || 40 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.scope.outputs.shards) }}
     env:
       OPENRAILS_CRITICAL_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
       OPENRAILS_CRITICAL_REDIS_URL: redis://127.0.0.1:6379/0
@@ -355,40 +422,100 @@ jobs:
             web/billing-ui/pnpm-lock.yaml
             web/console/pnpm-lock.yaml
             web/pay/pnpm-lock.yaml
-      - name: Build and inspect browser artifacts once
-        run: bash scripts/check.sh browser
+      # The browser job checks them; the journeys load the builds.
+      - name: Build the browser artifacts
+        run: bash scripts/check.sh browser-build
       - name: Install the browser used by public client cases
         run: pnpm --dir web/billing-ui exec playwright install --with-deps chromium
       - name: Build the real standalone fixture once
         working-directory: critical/server-fixture
-        run: GOWORK=off go test -tags integration -race -c -p 2 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
+        env:
+          GOMAXPROCS: "4"
+        run: GOWORK=off go test -tags integration -race -c -p 4 -o "$OPENRAILS_CRITICAL_SERVER_BINARY" .
       - name: Build the public operator CLI once
         working-directory: server
-        run: GOWORK=off go build -p 2 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails
+        env:
+          GOMAXPROCS: "4"
+        run: GOWORK=off go build -p 4 -o "$OPENRAILS_CRITICAL_CLI_BINARY" ./cmd/openrails
       - name: Services are ready
         run: bash scripts/ci-services.sh ready
-      - name: Require every critical scenario
-        if: ${{ needs.scope.outputs.tier == 'full' }}
-        run: bash scripts/critical-tests.sh
-      - name: Require the selected critical scenarios
-        if: ${{ needs.scope.outputs.tier == 'focused' }}
+      - name: Require the shard's or the selected critical scenarios
         env:
+          SHARD: ${{ matrix.shard }}
           SELECTION: ${{ needs.scope.outputs.critical }}
         run: |
           args=()
-          for item in $SELECTION; do
-            if [[ "$item" == J* ]]; then args+=(--journey "$item"); else args+=(--case "$item"); fi
-          done
-          # Never the whole suite: a focused run with no selection fails.
-          ((${#args[@]})) || exit 1
+          if [[ "$SHARD" == selected ]]; then
+            for item in $SELECTION; do
+              if [[ "$item" == J* ]]; then args+=(--journey "$item"); else args+=(--case "$item"); fi
+            done
+            # Never the whole suite: a focused run with no selection fails.
+            ((${#args[@]})) || exit 1
+          else
+            [[ "$SELECTION" == all ]]
+            args=(--shard "$SHARD")
+          fi
           bash scripts/critical-tests.sh "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
-          name: critical-results
+          name: ${{ matrix.shard == 'selected' && 'critical-results' || format('critical-results-{0}', strategy.job-index) }}
           path: ${{ runner.temp }}/critical-report/
           if-no-files-found: error
           retention-days: 7
+
+  # The shards' reports together: every scenario of critical/coverage.json ran
+  # and passed exactly once, and no test ran in two shards.
+  critical-coverage:
+    name: Critical coverage
+    needs: [scope, critical]
+    if: ${{ !cancelled() && needs.scope.outputs.critical == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: critical-results-*
+          path: ${{ runner.temp }}/critical
+      - name: Every scenario ran once across the shards
+        env:
+          SHARDS: ${{ needs.scope.outputs.shards }}
+        run: |
+          set -euo pipefail
+          reports=("$RUNNER_TEMP"/critical/*/events.jsonl)
+          expected="$(python3 -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$SHARDS")"
+          ((${#reports[@]} == expected)) || { echo "${#reports[@]} shard reports; expected $expected" >&2; exit 1; }
+          python3 scripts/critical-results.py critical/coverage.json "${reports[@]}"
+
+  # A push saves the critical build cache the shards restore.
+  critical-cache:
+    name: Critical build cache
+    needs: scope
+    if: ${{ needs.scope.outputs.tier == 'push' && (needs.scope.outputs.core == 'true' || needs.scope.outputs.runtime == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: "4"
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: critical
+      - name: Build the critical package, its fixture and the CLI as the shards do
+        run: |
+          go test -tags=integration -race -c -o "$RUNNER_TEMP/critical.test" ./critical
+          (cd critical/server-fixture && go test -tags integration -race -c -o "$RUNNER_TEMP/fixture.test" .)
+          (cd server && go build -o "$RUNNER_TEMP/openrails" ./cmd/openrails)
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() }}
         with:
@@ -399,7 +526,7 @@ jobs:
     name: Required Security
     needs: scope
     if: ${{ needs.scope.outputs.security == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       GOMAXPROCS: "4"
@@ -408,7 +535,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
         with:
           # As in the builds, go switches to go.mod's toolchain line (GOTOOLCHAIN=auto),
           # so the scan sees the stdlib the binaries ship; its go line is consumers' floor.
@@ -416,9 +542,12 @@ jobs:
           cache: false
       - uses: ./.github/actions/go-cache
         with:
-          family: security
+          family: plain
+      # gosec takes about ten minutes; it runs after every merge (push) and
+      # before every release (full), not on each pull request or merge group.
       # The root module's ./... excludes each nested Go module.
       - name: Go SAST
+        if: ${{ needs.scope.outputs.tier == 'push' || needs.scope.outputs.tier == 'full' }}
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
           for module in . server adapters/authkit examples; do
@@ -444,16 +573,13 @@ jobs:
         env:
           TRIVY_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
         run: bash scripts/ci/security-chart.sh
-      - uses: ./.github/actions/go-cache
-        if: ${{ !cancelled() }}
-        with:
-          family: security
-          save: "true"
 
+  # release.yaml and docker-publish.yaml publish on a push event, so a push
+  # never calls them.
   artifact-release:
     name: Release package smoke
     needs: scope
-    if: ${{ needs.scope.outputs.artifacts == 'true' }}
+    if: ${{ needs.scope.outputs.artifacts == 'true' && github.event_name != 'push' }}
     uses: ./.github/workflows/release.yaml
     with:
       snapshot: true
@@ -466,7 +592,7 @@ jobs:
   artifact-image:
     name: Image smoke
     needs: scope
-    if: ${{ needs.scope.outputs.artifacts == 'true' }}
+    if: ${{ needs.scope.outputs.artifacts == 'true' && github.event_name != 'push' }}
     uses: ./.github/workflows/docker-publish.yaml
     with:
       snapshot: true
@@ -479,70 +605,62 @@ jobs:
       id-token: write
       attestations: write
 
+  # Required as CI Gate on rc/** pull requests and merge groups and on master.
+  # A push reports Post-merge CI instead, so its light result never stands in
+  # for the full tier on a release head.
   gate:
-    name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
-    needs: [source, scope, guards, lint, chart, sql, browser, critical, security, artifact-release, artifact-image]
-    if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    name: ${{ github.event_name == 'push' && 'Post-merge CI' || (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
+    needs: [source, scope, guards, go, lint, chart, sql, browser, critical, critical-coverage, critical-cache, security, artifact-release, artifact-image]
+    if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - name: Require every selected suite and the current base
+      - name: Require every selected suite
         env:
           RESULTS: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           python3 - <<'CHECK'
-          import json, os, re, subprocess
-          from urllib.parse import quote
+          import json, os
           result = json.loads(os.environ['RESULTS'])
+          event, target = os.environ['EVENT_NAME'], os.environ['EVENT_BASE_REF']
           if result['source']['result'] == 'failure':
               raise SystemExit('master takes pull requests only from rc/X.Y.Z and chore/release-vX.Y.Z; see the Source branch job')
           if result['scope']['result'] != 'success':
               raise SystemExit('Scope verification failed or did not run')
           plan = result['scope']['outputs']
-          required = {'guards': None, 'lint': 'core', 'chart': 'chart',
-                      'sql': 'runtime', 'security': 'security',
-                      'artifact-release': 'artifacts', 'artifact-image': 'artifacts'}
-          if plan.get('browser') not in ('true', 'false'):
-              raise SystemExit('Missing browser selection')
-          pull, target = os.environ['EVENT_NAME'] == 'pull_request', os.environ['EVENT_BASE_REF']
-          to_master = pull and target == 'master'
-          tier = 'light' if pull and target.startswith('rc/') else 'full'
-          if pull and not to_master and tier != 'light':
-              raise SystemExit(f'Unexpected target branch: {target}')
-          if plan.get('tier') != tier:
-              raise SystemExit(f"tier: {plan.get('tier')}; expected {tier}")
-          if tier == 'full' and any(plan.get(suite) != 'true' for suite in ('core', 'runtime', 'browser', 'chart', 'security', 'artifacts')):
-              raise SystemExit('A full run skips no suite')
-          tiered = {'source': to_master, 'critical': tier == 'full',
-                    'browser': tier == 'light' and plan['browser'] == 'true'}
-          for job, selected in tiered.items():
-              expected = 'success' if selected else 'skipped'
-              if result[job]['result'] != expected:
-                  raise SystemExit(f"{job}: {result[job]['result']}; expected {expected}")
-          for job, suite in required.items():
-              if suite is not None and plan.get(suite) not in ('true', 'false'):
-                  raise SystemExit(f'Missing suite selection: {suite}')
-              selected = suite is None or plan[suite] == 'true'
-              expected = 'success' if selected else 'skipped'
-              actual = result[job]['result']
-              if actual != expected:
-                  raise SystemExit(f'{job}: {actual}; expected {expected}')
-          if os.environ['EVENT_NAME'] == 'pull_request':
-              ref, base = plan.get('base_ref', ''), plan.get('base_sha', '')
-              if not ref or not re.fullmatch(r'[0-9a-f]{40}', base):
-                  raise SystemExit('Missing tested PR base identity')
-              if ref != os.environ['EVENT_BASE_REF'] or base != os.environ['EVENT_BASE_SHA']:
-                  raise SystemExit('Tested base differs from the PR event')
-              endpoint = f'repos/{os.environ["GITHUB_REPOSITORY"]}/git/ref/heads/{quote(ref, safe="/")}'
-              current = subprocess.check_output(['gh', 'api', endpoint, '--jq', '.object.sha'], text=True).strip()
-              if current != base:
-                  raise SystemExit('Base moved during tests; update the PR and rerun')
+          if event == 'pull_request':
+              tier = 'light' if target.startswith('rc/') else 'full' if target == 'master' else None
+          else:
+              tier = {'merge_group': 'queue', 'push': 'push', 'workflow_dispatch': 'full'}.get(event)
+          if tier is None or plan.get('tier') != tier:
+              raise SystemExit(f"tier: {plan.get('tier')}; expected {tier} for {event} {target}")
+          suites = ('core', 'runtime', 'browser', 'chart', 'security', 'artifacts')
+          if any(plan.get(suite) not in ('true', 'false') for suite in suites):
+              raise SystemExit('Missing suite selection')
+          on = {suite: plan[suite] == 'true' for suite in suites}
+          critical = plan.get('critical', '')
+          if tier == 'full' and not (all(on.values()) and critical == 'all'):
+              raise SystemExit('A full run skips no suite and runs every critical scenario')
+          if critical not in ('', 'all') or (critical and tier not in ('full', 'queue')):
+              raise SystemExit(f'Unexpected critical selection for the {tier} tier: {critical}')
+          if tier == 'push' and on['artifacts']:
+              raise SystemExit('A push never calls the publishing workflows')
+          expected = {
+              'source': event == 'pull_request' and target == 'master',
+              'guards': True, 'go': on['core'], 'lint': on['core'], 'chart': on['chart'],
+              'sql': on['runtime'], 'browser': on['browser'], 'security': on['security'],
+              'artifact-release': on['artifacts'], 'artifact-image': on['artifacts'],
+              'critical': critical == 'all', 'critical-coverage': critical == 'all',
+              'critical-cache': tier == 'push' and (on['core'] or on['runtime']),
+          }
+          for job, selected in expected.items():
+              want = 'success' if selected else 'skipped'
+              if result[job]['result'] != want:
+                  raise SystemExit(f"{job}: {result[job]['result']}; expected {want}")
+          if event == 'pull_request' and plan.get('base_sha') != os.environ['EVENT_BASE_SHA']:
+              raise SystemExit('Tested base differs from the PR event')
           CHECK
