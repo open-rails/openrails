@@ -283,7 +283,7 @@ boot. The ones a deployment sets:
 | `auth.registration.native_user_mode` | local enrollment: `invite_only` by default, `closed` turns it off; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
 | `auth.registration.allow_missing_senders` | run without an email or SMS sender |
 | `auth.sign_in.dpop` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | clients connect directly; behind a proxy set `trusted_proxies` instead (mutually exclusive) |
+| `auth.http.direct_peer_ip` | optional: AuthKit's client IP follows `trusted_proxies` and `cloudflare_proxies`, the socket peer when both are empty; `true` beside either refuses boot |
 | `auth.http.rate_limits` | AuthKit's own buckets |
 | `auth.database.schema` | AuthKit's tables, default `profiles` |
 | `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
@@ -712,12 +712,7 @@ console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks an
 the checkout origin. Give one public origin to `public_billing_base_url`,
 `auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists
-  the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted
-  hops. Without it rate limits, abuse tracking, request logs and webhook source
-  addresses all see the proxy. Use `auth.http.direct_peer_ip: true` only when
-  clients connect directly. Behind Cloudflare, list its ranges in
-  `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Behind Cloudflare, list its ranges in `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.

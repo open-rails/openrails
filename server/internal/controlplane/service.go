@@ -168,8 +168,8 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	if auth.HTTP != nil {
 		http = *auth.HTTP
 	}
-	if !http.DirectPeerIP && len(http.TrustedProxies) == 0 && len(http.CloudflareProxies) == 0 {
-		http.TrustedProxies = cfg.TrustedProxies
+	if err := clientIPPosture(&http, cfg.TrustedProxies); err != nil {
+		return authkit.Config{}, err
 	}
 	if http.Groups == nil {
 		http.Groups = routeGroups(reg.NativeUserMode, auth.Resource.Enabled())
@@ -180,6 +180,32 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	http.RefreshCookie = true
 	auth.HTTP = &http
 	return auth, nil
+}
+
+// clientIPPosture derives AuthKit's client-IP posture from the engine's
+// trusted proxies, its one source: the same proxies, or the direct peer when
+// there are none. AuthKit's own proxies may only split the same set (the
+// Cloudflare ones, whose CF-Connecting-IP it takes); direct_peer_ip beside
+// any proxy is refused.
+func clientIPPosture(h *authkit.HTTPConfig, trusted []string) error {
+	own := append(slices.Clone(h.TrustedProxies), h.CloudflareProxies...)
+	switch {
+	case h.DirectPeerIP && (len(trusted) > 0 || len(own) > 0):
+		return errors.New("controlplane: auth.http.direct_peer_ip says no proxy sits in front, but trusted_proxies or cloudflare_proxies names one; set only the proxies")
+	case len(own) == 0:
+		h.TrustedProxies = slices.Clone(trusted)
+		h.DirectPeerIP = len(trusted) == 0
+	case !sameCIDRs(own, trusted):
+		return errors.New("controlplane: auth.http's proxies differ from trusted_proxies and cloudflare_proxies; declare the proxies once, at the top level")
+	}
+	return nil
+}
+
+func sameCIDRs(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
 // RequireDefaultTenant refuses an unassigned platform account directory.

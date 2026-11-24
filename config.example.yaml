@@ -69,8 +69,9 @@ auth:
   registration:
     allow_missing_senders: true # no email delivery in this local example
   http:
-    # Declare only when AuthKit receives direct client connections. Behind
-    # proxies, the top-level trusted_proxies apply.
+    # Optional: AuthKit's client IP follows the top-level trusted_proxies and
+    # cloudflare_proxies (the socket peer when both are empty); beside either,
+    # true refuses boot.
     direct_peer_ip: true
   # database:
   #   schema: profiles # the server's AuthKit tables
