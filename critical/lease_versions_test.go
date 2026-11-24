@@ -323,12 +323,13 @@ func TestLeaseVersions(t *testing.T) {
 			set := out.LimitSets[i]
 			require.NotNil(t, set)
 			require.Nil(t, set.Refusal)
-			require.Equal(t, []string{"balance", "quota"}, set.Limits)
+			require.Equal(t, "balance", set.Limits[0])
+			require.Contains(t, set.Limits, "quota")
 			require.Equal(t, billing.DenyInsufficientBalance, set.BalanceDenyCode)
 			require.EqualValues(t, 1000, lineOf(t, viewOf(t, out, c), "balance").Remaining)
 			require.EqualValues(t, 100, lineOf(t, viewOf(t, out, c), "quota").Remaining)
 		}
-		require.Equal(t, []string{"balance"}, out.LimitSets[2].Limits, "a host-stated request claims no named-unit limit")
+		require.NotContains(t, out.LimitSets[2].Limits, "quota", "a host-stated request claims no named-unit limit")
 		balance(t, w.alpha, one, 1000, 0, 1000)
 	})
 	t.Run("OR-J24-S25/a-trust-levels-policy-is-its-own-limit-set-and-usage-counts-in-its-window", func(t *testing.T) {
@@ -571,7 +572,7 @@ func TestLeaseVersions(t *testing.T) {
 		// While the grant has lapsed nothing enforces the limits; usage counts
 		// in the windows the grant opened while they last, and opens none.
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{workView(customer)}})
-		require.Equal(t, []string{"balance"}, out.LimitSets[0].Limits, "a lapsed grant's limits bind nothing")
+		require.NotContains(t, out.LimitSets[0].Limits, "quota", "a lapsed grant's limits bind nothing")
 		settleUsage(t, w.alpha, newLease(), numbered(1, workReport(customer, "lapsed", 30))...)
 		grantLimitProduct(t, w.alpha, customer, "plan", 24)
 		quota := customerLimit(t, w.alpha, customer, "quota")

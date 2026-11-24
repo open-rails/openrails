@@ -214,6 +214,9 @@ func (g *gateState) admitHeld(ctx context.Context, gate *Gate, p billing.AdmitPa
 		} else {
 			g.mu.Lock()
 			build := g.builds
+			// A sync built after the hold answers the view that shows it.
+			g.wanted[attrsKey(p)] = viewParams(p)
+			g.active = true
 			g.mu.Unlock()
 			v.pin(takes, build)
 		}
@@ -336,7 +339,8 @@ func (g *gateState) await(ctx context.Context, attrs string, p billing.AdmitPara
 func (g *gateState) capture(ctx context.Context, t *Ticket, u billing.CaptureUsage) error {
 	item := captureItem(t, u, time.Now())
 	if t.held {
-		return g.enqueue(ctx, item, nil, nil, t)
+		// The view that carries the captured hold clears its pin.
+		return g.enqueue(ctx, item, t.view, nil, t)
 	}
 	_, _, pr := g.lookup(attrsKey(t.params), t.params)
 	lines := make([]*lineState, len(t.takes))

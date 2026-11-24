@@ -626,10 +626,12 @@ func TestGate(t *testing.T) {
 		require.Equal(t, 1, out.Gates)
 		// Its stale view decides one request with no sync, and the next waits
 		// for a sync to answer it.
-		gateAdmit(t, g, gateWork(customer, "probe", 1)).Release(t.Context())
+		probe := gateAdmit(t, g, gateWork(customer, "probe", 1))
 		require.Equal(t, quiet, wire.syncs.Load(), "the probe was decided on the stale view")
-		gateAdmit(t, g, gateWork(customer, "next", 1)).Release(t.Context())
+		next := gateAdmit(t, g, gateWork(customer, "next", 1))
 		require.Greater(t, wire.syncs.Load(), quiet, "the next request waited for a sync")
+		require.NoError(t, probe.Release(t.Context()))
+		require.NoError(t, next.Release(t.Context()))
 	})
 
 	t.Run("OR-J23-S41/a-window-that-resets-between-syncs-is-decided-from-the-next-window", func(t *testing.T) {
@@ -654,10 +656,11 @@ func TestGate(t *testing.T) {
 		gateFlush(t, g)
 		time.Sleep(time.Until(*ends) + 200*time.Millisecond)
 		before := wire.syncs.Load()
-		next, err := g.Consume(t.Context(), gateWork(customer, "next-window", 1))
+		next, err := g.Admit(t.Context(), gateWork(customer, "next-window", 1))
 		require.NoError(t, err)
 		require.True(t, next.Allowed(), "the view's next window has room: %+v", next.Refusal())
 		require.Equal(t, before, wire.syncs.Load(), "decided on the view, with no sync")
+		require.NoError(t, next.Capture(t.Context(), workUsage(1)))
 		a.clock.Advance(time.Since(a.clock.Now()))
 		gateFlush(t, g)
 		require.EqualValues(t, 1, customerLimit(t, a.alpha, customer, "tick").Used, "it settles in the window it was admitted in")
