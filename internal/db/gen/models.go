@@ -2008,6 +2008,8 @@ type BillingSubscription struct {
 	DueRecheckAt *time.Time
 	// rail_subscription_id as an identity (billing.rail_subscription_key): every lookup by provider id matches it. A provider contact matching it spelled otherwise rewrites rail_subscription_id to the provider's spelling.
 	RailSubscriptionKey *string
+	// The earliest retry the network's advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.
+	RetryAdvisedAt *time.Time
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

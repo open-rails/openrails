@@ -184,7 +184,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if err != nil {
 			return err
 		}
-		windowEnd, err := policy.CaseEnd(int(terms.PeriodEnd.Sub(terms.PeriodStart)/time.Hour), terms.PeriodStart, failures, sub.NextRetryAt)
+		windowEnd, err := subscriptions.CaseEnd(ctx, d, policy, sub, terms.PeriodStart, int(terms.PeriodEnd.Sub(terms.PeriodStart)/time.Hour))
 		if err != nil {
 			return err
 		}

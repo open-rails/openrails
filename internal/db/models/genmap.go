@@ -234,6 +234,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		TransientRetries:      int(s.TransientRetries),
 		NextRetryAt:           s.NextRetryAt,
 		GraceEndsAt:           s.GraceEndsAt,
+		RetryAdvisedAt:        s.RetryAdvisedAt,
 		CancelFeedback:        s.CancelFeedback,
 		CanceledAt:            s.CanceledAt,
 		DeletionScheduledAt:   s.DeletionScheduledAt,

@@ -123,6 +123,10 @@ COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per 
 DROP TABLE decline_causes;
 DROP TABLE issuer_reasons;
 
+-- A case's retry the network's advice set, or deferred past the next renewal.
+ALTER TABLE billing.subscriptions ADD COLUMN retry_advised_at timestamptz;
+COMMENT ON COLUMN billing.subscriptions.retry_advised_at IS 'The earliest retry the network''s advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.';
+
 -- A saved filter on what used to be declined keeps its meaning: an
 -- authorization's outcome declined then covered every refusal and error, a
 -- rebill's first_outcome declined every refusal but a processing error.

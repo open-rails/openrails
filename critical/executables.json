@@ -1585,6 +1585,12 @@
     ],
     "OR-J45-S12": [
       "TestDeclineCauses/OR-J45-S12/an-issuer-that-keeps-deferring-ends-the-case-at-the-next-renewal"
+    ],
+    "OR-J45-S13": [
+      "TestDeclineCauses/OR-J45-S13/a-late-retry-without-advice-keeps-dunning"
+    ],
+    "OR-J45-S14": [
+      "TestDeclineCauses/OR-J45-S14/advice-past-a-weekly-renewal-keeps-the-case-past-due-until-then"
     ]
   }
 }

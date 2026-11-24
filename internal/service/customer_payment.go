@@ -185,11 +185,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	failures := 0
-	if sub.RetryAttempts != nil {
-		failures = *sub.RetryAttempts
-	}
-	caseEnd, err := policy.CaseEnd(*cycle, *sub.CurrentPeriodEndsAt, failures, sub.NextRetryAt)
+	caseEnd, err := subscriptions.CaseEnd(ctx, s.rt.DB, policy, sub, *sub.CurrentPeriodEndsAt, *cycle)
 	if err != nil {
 		return nil, err
 	}

@@ -91,6 +91,10 @@ type Subscription struct {
 	TransientRetries int        `json:"transient_retries"`
 	NextRetryAt      *time.Time `json:"next_retry_at"` // When to try next rebill
 	GraceEndsAt      *time.Time `json:"grace_ends_at"` // Optional grace window end during dunning (rail-specific)
+	// RetryAdvisedAt is the earliest retry the network's advice allowed, when
+	// that advice set the scheduled retry. At or past the next renewal it
+	// deferred every retry: none is scheduled and the case ends at GraceEndsAt.
+	RetryAdvisedAt *time.Time `json:"retry_advised_at"`
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
@@ -167,6 +171,13 @@ func (s *Subscription) ClearRetrySchedule() {
 	s.TransientRetries = 0
 	s.NextRetryAt = nil
 	s.GraceEndsAt = nil
+	s.RetryAdvisedAt = nil
+}
+
+// AdviceDeferred reports a dunning case the network's advice deferred to the
+// next renewal: no retry runs, and the case ends at GraceEndsAt.
+func (s *Subscription) AdviceDeferred() bool {
+	return s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt != nil && s.GraceEndsAt != nil
 }
 
 // Validate checks activation preconditions. amountCents is integer minor

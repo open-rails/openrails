@@ -172,6 +172,56 @@ func (q *Queries) LatestSettledProviderCycle(ctx context.Context, arg LatestSett
 	return due_at, err
 }
 
+const listAcceptedProviderSchedules = `-- name: ListAcceptedProviderSchedules :many
+SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_order_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
+JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
+WHERE ps.merchant_id = $1::uuid AND ps.subscription_id = $2::uuid
+  AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, $3::text)
+ORDER BY ps.first_due_at ASC, ps.accepted_version ASC
+`
+
+type ListAcceptedProviderSchedulesParams struct {
+	MerchantID        uuid.UUID
+	SubscriptionID    uuid.UUID
+	ProviderReference string
+}
+
+// ListProviderSchedules without its row locks: a read of when the provider
+// bills next.
+func (q *Queries) ListAcceptedProviderSchedules(ctx context.Context, arg ListAcceptedProviderSchedulesParams) ([]BillingProviderSchedule, error) {
+	rows, err := q.db.Query(ctx, listAcceptedProviderSchedules, arg.MerchantID, arg.SubscriptionID, arg.ProviderReference)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingProviderSchedule
+	for rows.Next() {
+		var i BillingProviderSchedule
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.SubscriptionID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.InitialOrderID,
+			&i.AcceptedVersion,
+			&i.SourceReference,
+			&i.ProviderReference,
+			&i.FirstDueAt,
+			&i.CadenceHours,
+			&i.CadenceMonths,
+			&i.AcceptedBill,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProviderSchedules = `-- name: ListProviderSchedules :many
 SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_order_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
 JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id

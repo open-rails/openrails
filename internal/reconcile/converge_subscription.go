@@ -43,6 +43,7 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		GraceEndsAt:        sub.GraceEndsAt,
 		NextRetryScheduled: sub.NextRetryAt != nil,
+		AdviceDeferred:     sub.AdviceDeferred(),
 	}
 }
 

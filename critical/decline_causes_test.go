@@ -385,6 +385,7 @@ func TestDeclineCauses(t *testing.T) {
 		a, p, sub := purchasedMembershipWith(t, 30*24, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
 		enableLifecycleMaintenance(t, a)
 		due := *sub.CurrentPeriodEndsAt
+		renewal := due.Add(30 * 24 * time.Hour)
 		p.core.SetDecline("4242", "insufficient_funds")
 		p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "30", NetworkDeclineCode: "51"})
 		a.clock.Advance(due.Sub(a.clock.Now()))
@@ -397,7 +398,7 @@ func TestDeclineCauses(t *testing.T) {
 			dunned := subscriptionState(t, a, sub.ID, "past_due")
 			require.NotNil(t, dunned.Dunning)
 			require.NotNil(t, dunned.Dunning.NextRetryAt)
-			require.True(t, dunned.Dunning.NextRetryAt.Before(due.Add(30*24*time.Hour)))
+			require.True(t, dunned.Dunning.NextRetryAt.Before(renewal))
 			a.clock.Advance(dunned.Dunning.NextRetryAt.Sub(a.clock.Now()) + time.Minute)
 			runRegistered(t, fleet, "openrails.billing_pass", 1)
 			require.Eventually(t, func() bool {
@@ -406,10 +407,48 @@ func TestDeclineCauses(t *testing.T) {
 				return len(page.Items) == retries
 			}, 20*time.Second, 20*time.Millisecond)
 		}
-		ended := subscriptionState(t, a, sub.ID, "canceled")
-		require.NotNil(t, ended.CancelFeedback)
-		require.Equal(t, "issuer_deferred", *ended.CancelFeedback, "the issuer kept deferring: not a card that failed")
-		require.True(t, a.clock.Now().Before(due.Add(30*24*time.Hour)), "the case ends before the next renewal")
+		awaitDeferredToRenewal(t, a, fleet, sub.ID, renewal, 2)
+	})
+	t.Run("OR-J45-S13/a-late-retry-without-advice-keeps-dunning", func(t *testing.T) {
+		// Two months back, so the late retry is dated in the database's past.
+		a, p, sub := purchasedMembershipWith(t, 30*24, func(w *world) { w.clock.Advance(-60 * 24 * time.Hour) })
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		renewal := due.Add(30 * 24 * time.Hour)
+		p.core.SetDecline("4242", "insufficient_funds")
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		awaitAttempt(t, a, sub.ID, "rebill")
+		dunned := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, dunned.Dunning)
+		require.NotNil(t, dunned.Dunning.NextRetryAt)
+		// Nothing ran for a month: the retry runs after the next renewal and
+		// declines with no advice. The case goes on with the attempts left.
+		a.clock.Advance(renewal.Add(24 * time.Hour).Sub(a.clock.Now()))
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		retry := awaitAttempt(t, a, sub.ID, "dunning_retry")
+		require.True(t, retry.AttemptedAt.After(renewal))
+		late := subscriptionState(t, a, sub.ID, "past_due")
+		require.NotNil(t, late.Dunning)
+		require.NotNil(t, late.Dunning.NextRetryAt, "the policy's next retry stands")
+		require.True(t, late.Dunning.NextRetryAt.After(renewal))
+		require.NotNil(t, late.Dunning.RetriesLeft)
+		require.Positive(t, *late.Dunning.RetriesLeft)
+	})
+	t.Run("OR-J45-S14/advice-past-a-weekly-renewal-keeps-the-case-past-due-until-then", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t, 7*24)
+		enableLifecycleMaintenance(t, a)
+		due := *sub.CurrentPeriodEndsAt
+		renewal := due.Add(7 * 24 * time.Hour)
+		p.core.SetDecline("4242", "insufficient_funds")
+		// Ten days, past the weekly renewal: no retry may run before it.
+		p.core.SetAdvice("4242", stripemock.Advice{NetworkAdviceCode: "30", NetworkDeclineCode: "51"})
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		awaitAttempt(t, a, sub.ID, "rebill")
+		awaitDeferredToRenewal(t, a, fleet, sub.ID, renewal, 0)
 	})
 	t.Run("OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -746,6 +785,31 @@ func TestDeclineCauses(t *testing.T) {
 			"refused/merchant/brand_not_accepted":  1,
 		}, got, "NMI's catch-all 200 is the issuer's code; its 461 is the merchant account's")
 	})
+}
+
+// awaitDeferredToRenewal checks a case the issuer's advice deferred past the
+// next renewal: past due with no retry until renewal, no attempt in between,
+// then ended there as issuer_deferred.
+func awaitDeferredToRenewal(t *testing.T, a *authorityWorld, fleet *river.Client[pgx.Tx], id billing.SubscriptionID, renewal time.Time, retries int) {
+	t.Helper()
+	deferred := subscriptionState(t, a, id, "past_due")
+	require.NotNil(t, deferred.Dunning)
+	require.Nil(t, deferred.Dunning.NextRetryAt, "the advice allows no retry before the renewal")
+	require.NotNil(t, deferred.Dunning.RetriesLeft)
+	require.Zero(t, *deferred.Dunning.RetriesLeft)
+	require.NotNil(t, deferred.Dunning.FinalRetryAt)
+	require.True(t, deferred.Dunning.FinalRetryAt.Equal(renewal), "the case ends at the renewal")
+	a.clock.Advance(renewal.Add(-time.Hour).Sub(a.clock.Now()))
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	subscriptionState(t, a, id, "past_due")
+	page, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: id, Kind: []string{"dunning_retry"}})
+	require.NoError(t, err)
+	require.Len(t, page.Items, retries, "nothing is charged while the issuer defers")
+	a.clock.Advance(renewal.Add(time.Minute).Sub(a.clock.Now()))
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	ended := subscriptionState(t, a, id, "canceled")
+	require.NotNil(t, ended.CancelFeedback)
+	require.Equal(t, "issuer_deferred", *ended.CancelFeedback, "the issuer deferred: not a card that failed")
 }
 
 // nmiEngineMembership buys a weekly OpenRails membership on NMI with a new

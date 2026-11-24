@@ -27,3 +27,25 @@ func (s *SubscriptionLifecycleService) ExpireAwaitingMethod(ctx context.Context,
 		return locked.Status == models.StatusAwaitingMethod && locked.GraceEndsAt != nil && !locked.GraceEndsAt.After(now), nil
 	})
 }
+
+// EndAdviceDeferred ends, at the next renewal, a case the network's advice
+// deferred there: exhausted, its ending issuer_deferred. With the operator's
+// destructive switch off the row keeps waiting, access intact, under a
+// standing finding.
+func (s *SubscriptionLifecycleService) EndAdviceDeferred(ctx context.Context, d *db.DB, sub *models.Subscription, blocked string) (bool, error) {
+	now := s.now()
+	if blocked != "" {
+		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "collection_policy": sub.CollectionPolicy, "status": sub.Status, "refusal": blocked})
+		action := fmt.Sprintf("the issuer deferred every retry of subscription %s past its next renewal, but ending it there was refused (%s); it keeps access. Arm the destructive-action switch or resolve it by hand", sub.ID, blocked)
+		_, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: sub.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: sub.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+		return false, err
+	}
+	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, EffectOptions{EndedReason: PremiumEndReasonExpired}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
+		if !locked.AdviceDeferred() || locked.GraceEndsAt.After(now) {
+			return false, nil
+		}
+		reason := CancelIssuerDeferred
+		locked.CancelFeedback = &reason
+		return true, nil
+	})
+}

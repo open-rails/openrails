@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 488,
+  "scenario_count": 490,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2424,11 +2424,6 @@
       "name": "NMI history months carry each answer's outcome and cause: a catch-all 200 by the issuer's code, 461 as the merchant account's refusal"
     },
     {
-      "id": "OR-J45-S09",
-      "journey": "J45",
-      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, keeps each attempt's action, drops saved widgets naming a dimension it renamed, and widens saved declined filters to what they meant"
-    },
-    {
       "id": "OR-J45-S10",
       "journey": "J45",
       "name": "The system-errors finding counts the rail's own processing errors, not an issuer's failure behind a generic decline"
@@ -2439,9 +2434,24 @@
       "name": "An engine NMI renewal declined with 200 reads the issuer's code after the decline, or from the order read when the answer was lost; a failed read keeps NMI's own code"
     },
     {
+      "id": "OR-J45-S09",
+      "journey": "J45",
+      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, keeps each attempt's action, drops saved widgets naming a dimension it renamed, and widens saved declined filters to what they meant"
+    },
+    {
       "id": "OR-J45-S12",
       "journey": "J45",
-      "name": "An issuer that keeps deferring retries ends the case as exhausted at the next renewal, recorded as issuer_deferred, never later"
+      "name": "An issuer that keeps deferring past the next renewal leaves the case past due with no retry until that renewal, then ends it exhausted as issuer_deferred"
+    },
+    {
+      "id": "OR-J45-S13",
+      "journey": "J45",
+      "name": "A retry that runs late without advice, past the next renewal, keeps dunning with the attempts the policy has left"
+    },
+    {
+      "id": "OR-J45-S14",
+      "journey": "J45",
+      "name": "A weekly plan whose first decline is advised past its renewal (MAC 30) stays past due with no retry, and ends at the renewal as issuer_deferred"
     }
   ]
 }

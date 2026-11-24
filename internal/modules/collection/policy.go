@@ -205,10 +205,10 @@ func (p Policy) Outlook(cycleHours, failures int, next time.Time) (left int, fin
 
 // CaseEnd is when collection of the renewal due at due stops: the window's
 // end, or later, the slack past the last retry the schedule will make from
-// next (Outlook) when the networks' advice delayed a retry, but never past
-// the next renewal's due time. failures counts the case's declines so far;
-// next is its scheduled retry, nil for none.
-func (p Policy) CaseEnd(cycleHours int, due time.Time, failures int, next *time.Time) (time.Time, error) {
+// next (Outlook) when the networks' advice delayed a retry, though that never
+// runs past renewal, the next renewal's due time. failures counts the case's
+// declines so far; next is its scheduled retry, nil for none.
+func (p Policy) CaseEnd(cycleHours int, due, renewal time.Time, failures int, next *time.Time) (time.Time, error) {
 	window, err := p.Window(cycleHours)
 	if err != nil {
 		return time.Time{}, err
@@ -221,12 +221,12 @@ func (p Policy) CaseEnd(cycleHours int, due time.Time, failures int, next *time.
 	if err != nil {
 		return time.Time{}, err
 	}
-	cycle := time.Duration(cycleHours) * time.Hour
-	if last := final.Add(windowSlack(cycle)); last.After(end) {
-		end = last
+	last := final.Add(windowSlack(time.Duration(cycleHours) * time.Hour))
+	if last.After(renewal) {
+		last = renewal
 	}
-	if renewal := due.Add(cycle); end.After(renewal) {
-		end = renewal
+	if last.After(end) {
+		end = last
 	}
 	return end, nil
 }

@@ -59,12 +59,19 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
   (`collection.DeclaredOf`) in `subscriptions.dunning_policy`.
 - `Retry` bumps `transient_retries` or `retry_attempts` and sets
   `next_retry_at`, no sooner than the network advised after the decline
-  (`FailMembershipParams.RetryAfter`). The case then ends at
-  `collection.Policy.CaseEnd`: the window's end, or the slack past the last
-  retry the schedule will make, so a delayed case still makes every attempt
-  its policy allows, but never past the next renewal's due time. A retry
-  advised past it ends the case as exhausted, with cancel feedback
-  `issuer_deferred`. A spent schedule is `lifecycle.DunningExhausted`.
+  (`FailMembershipParams.RetryAfter`, from `DeclinedAt`) or an earlier
+  decline's advice still allows; `retry_advised_at` records an advised retry.
+  The case then ends at `subscriptions.CaseEnd`: the window's end, or the slack
+  past the last retry the schedule will make, so a delayed case still makes
+  every attempt its policy allows, but that slack never runs past the next
+  renewal (`NextRenewalAt`: NMI's own next charge for an NMI schedule whose
+  accepted schedule dates it, else the cycle). Advice that allows no retry
+  before the next renewal leaves the case `past_due` with no retry and
+  `grace_ends_at` at that renewal, where the due pass ends it
+  (`EndAdviceDeferred`). A case whose last scheduled retry the advice set ends
+  exhausted with cancel feedback `issuer_deferred`. A retry late for any other
+  reason keeps the policy's schedule. A spent schedule is
+  `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
@@ -83,7 +90,8 @@ hourly `openrails.billing_pass`. It reads merchant ids
 each merchant's `RunInMerchantScope`. A due row gets one action: an NMI retry
 is enqueued (`ManualRebillHandler.EnqueueScheduled`); an engine renewal is
 admitted ([subscriptions](subscriptions.md)); an expired wait ends
-(`ExpireAwaitingMethod`); a stale row parks `unverified` (`ApplyLocalUnknown`);
+(`ExpireAwaitingMethod`), and so does a case the advice deferred to its renewal
+(`EndAdviceDeferred`); a stale row parks `unverified` (`ApplyLocalUnknown`);
 or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
 provider-billed renewals 48 hours overdue (`AskProviderOverdueRenewal`). A row
 whose processing fails raises `life.due_pass.refused`; every row left unchanged

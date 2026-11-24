@@ -1931,8 +1931,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		heldTerminal := ""
-		// deferred: the issuer's advice still put off the retry at the next
-		// renewal, so the case ends there.
+		// advice: the earliest retry the network's advice allowed, when it set
+		// the case's scheduled retry. A case it set that ends exhausted ends
+		// issuer_deferred.
+		advice := subscription.RetryAdvisedAt
 		deferred := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
@@ -2034,28 +2036,34 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.TerminalHeld{}
 			case terminal:
 				event = lifecycle.DunningExhausted{At: now}
+				deferred = advice != nil && !params.Terminal
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
 				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
 				if err != nil {
 					return err
 				}
-				// The network's earliest retry, from the decline: the case's end
-				// moves with it (collection.Policy.CaseEnd), never past the next
-				// renewal. An issuer still deferring there has not paid this
-				// period: the case ends as exhausted.
-				if advised := declined.Add(params.RetryAfter); ok && params.RetryAfter > 0 && advised.After(nextRetry) {
-					nextRetry = advised
+				// The network's earliest retry, from the decline, or an earlier
+				// decline's that still stands: the case's end moves with it
+				// (CaseEnd). Advice that allows none before the next renewal
+				// defers the case: no retry runs, and it ends then, exhausted.
+				earliest := declined.Add(params.RetryAfter)
+				if advice != nil && advice.After(earliest) {
+					earliest = *advice
 				}
-				if next := periodStart.Add(time.Duration(cycleHours) * time.Hour); ok && !nextRetry.Before(next) {
-					ok, deferred = false, params.RetryAfter > 0
-					if refusal := terminalRefusal(leg); refusal != "" {
-						heldTerminal, event = refusal, lifecycle.TerminalHeld{}
-					} else {
-						event = lifecycle.DunningExhausted{At: now}
+				subscription.NextRetryAt, subscription.RetryAdvisedAt = nil, nil
+				if ok && earliest.After(nextRetry) {
+					renewal, err := NextRenewalAt(ctx, db, subscription, periodStart, cycleHours)
+					if err != nil {
+						return err
+					}
+					nextRetry = earliest
+					subscription.RetryAdvisedAt = &earliest
+					if !nextRetry.Before(renewal) {
+						ok = false
+						subscription.GraceEndsAt = &renewal
 					}
 				}
-				subscription.NextRetryAt = nil
 				if ok {
 					subscription.NextRetryAt = &nextRetry
 				}
