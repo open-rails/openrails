@@ -218,13 +218,13 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 
 var ErrCancellationWriteDisabled = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "provider writes are disabled for this merchant")
 
-// CheckCancellationWritePosture respects explicit readonly operation policy.
+// CheckCancellationWritePosture respects the merchant's readonly write posture.
 // Unrelated findings and provider observation age never hold a cancellation.
 func (s *SubscriptionLifecycleService) CheckCancellationWritePosture(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
 		return nil
 	}
-	if p := (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, sub.MerchantID); s.Config != nil && p.ReadOnly() {
+	if p := (writeposture.View{DB: d}).Posture(ctx, sub.MerchantID); p.ReadOnly() {
 		return fmt.Errorf("%w: %s holds local cancellation", ErrCancellationWriteDisabled, p.Reason)
 	}
 	return nil

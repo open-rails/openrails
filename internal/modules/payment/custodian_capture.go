@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var ErrCardCaptureUnavailable = errors.New("custodian capture is unavailable")
@@ -119,7 +120,7 @@ func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUI
 	if err != nil {
 		return state, nil, nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian)
+	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian, writeposture.View{DB: s.db}.Posture(ctx, owner.UUID()).ReadOnly())
 	return state, client, sealer, err
 }
 func sameCaptureAccount(a, b models.CardCapture) bool {

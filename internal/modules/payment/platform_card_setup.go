@@ -54,7 +54,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 	if !db.IsNotFound(err) {
 		return SavedCard{}, err
 	}
-	if (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
+	if (writeposture.View{DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return SavedCard{}, ProviderWritesDisabled("card setup is unavailable while provider writes are disabled")
 	}
 	cfg, proxy, bt, err := s.CustodianSaleService.basisTheory(ctx, req.PSPID.UUID())

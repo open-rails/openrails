@@ -29,8 +29,8 @@
 // outside the boundary. Open recovery cases keep their saved dunning policy.
 //
 // Cutover is offline: stop every source writer (--source-stopped and
-// --target-stopped are attestations, not checks; readonly mode is not a
-// substitute), prepare the destination identity with
+// --target-stopped are attestations, not checks; a readonly write posture is
+// not a substitute), prepare the destination identity with
 // `openrails billing prepare-target`, and import into an empty book
 // (not_empty otherwise). A successful export leaves the source readonly and an
 // import lands the destination readonly until `openrails merchant arm`; never

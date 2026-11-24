@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -75,8 +74,8 @@ func solanaPlanRefusal(req billing.CreatePriceParams) string {
 // publishSolanaPlan finds or publishes the plan of a recurring price of ours
 // and returns its stored reference. The plan id derives from the stored price
 // id, mint and treasury, so a re-apply after a failed commit reattaches the
-// same plan. Limited and readonly provider_write_mode only attach a plan
-// already published.
+// same plan. A merchant whose write posture is limited or readonly only
+// attaches a plan already published.
 func (s *Service) publishSolanaPlan(ctx context.Context, in solanaPlanContext) (map[string]string, error) {
 	if s.rt == nil || s.rt.SolanaPlanService == nil {
 		return nil, recurring.ErrNoCranker
@@ -114,10 +113,10 @@ func (s *Service) publishSolanaPlan(ctx context.Context, in solanaPlanContext) (
 	}
 	planID := solanaPlanID(in.PriceID, mint, treasury)
 	var handle map[string]string
-	if in.RemoteWritesDisabled {
+	if posture := s.rt.Posture().Posture(ctx, tid.UUID()); posture.Limited() {
 		existing, found := s.findExistingSolanaPlan(ctx, plan, tid, planID, symbol)
 		if !found {
-			return nil, fmt.Errorf("its Solana plan is not published, and provider_write_mode=%s publishes nothing: %w", config.GetProviderWriteMode(s.rt.Config), errRemoteWritesDisabled)
+			return nil, fmt.Errorf("its Solana plan is not published, and %s: %w", posture.Reason, errRemoteWritesDisabled)
 		}
 		handle = existing
 	} else {
@@ -173,7 +172,7 @@ func (s *Service) solanaPlanLink(ctx context.Context, account solanaAccount, req
 		return nil, apperr.Invalidf("an archived price publishes no Solana plan")
 	}
 	ref, err := s.publishSolanaPlan(ctx, solanaPlanContext{PriceID: priceID, UnitAmount: req.UnitAmount, Currency: string(req.Currency),
-		BillingIntervalHours: req.BillingIntervalHours, RemoteWritesDisabled: s.catalogRemoteWritesDisabled()})
+		BillingIntervalHours: req.BillingIntervalHours})
 	if err != nil {
 		return nil, err
 	}

@@ -148,7 +148,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `provider_price_unreadable` | 502 | `api_error` | The provider did not answer for the provider price's terms; retry. |
-| `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture). |
+| `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture). |
 | `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |

@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -32,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/open-rails/openrails/internal/vaulttest"
+	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -146,7 +146,7 @@ func newPSPWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *psp
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		t.Cleanup(transport.CloseIdleConnections)
 		w.deps.StripeTransport = loopbackWire{target: target, wire: transport}
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
 		for i := range w.cfg.Merchants {
@@ -272,8 +272,8 @@ func TestPSPControls(t *testing.T) {
 		// is driven directly, on the production path: a wired factory checks
 		// posture and sends writes through the Stripe fixture as through Stripe.
 		stripe := stripemock.NewUnstarted(stripemock.Options{})
-		factory := stripeapi.NewWiredFactory(stripe)
-		client := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
+		factory := stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+		client := factory.Client(0)
 		suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 		declared, own, foreign := "acct_declared"+suffix, "sk_live_acct_declared"+suffix, "rk_live_acct_other"+suffix
 		write := func(key string) error {
@@ -305,13 +305,7 @@ func TestPSPControls(t *testing.T) {
 	t.Run("OR-J06-S03", func(t *testing.T) {
 		for _, mode := range []string{"readonly", "limited"} {
 			t.Run(mode, func(t *testing.T) {
-				a, p := newPSPWorld(t, func(w *world) {
-					if mode == "readonly" {
-						w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly
-					} else {
-						w.cfg.ProviderWriteMode = openrails.ProviderWritesLimited
-					}
-				})
+				a, p := newPSPWorld(t, func(w *world) { w.posture = mode })
 				_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 				require.NoError(t, err, "read-only credential probes are allowed in both postures")
 				if mode == "readonly" {
@@ -320,6 +314,12 @@ func TestPSPControls(t *testing.T) {
 					require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 					require.Contains(t, string(raw), `"code":"provider_writes_disabled"`)
 					require.Empty(t, p.provider.effects(t))
+					// A posture is one merchant's: alpha armed writes while beta stays readonly.
+					setWritePosture(t, a.world, "full", a.alpha.MerchantID())
+					input.Payment.Token = p.provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+					status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "armed-purchase"})
+					require.Equal(t, http.StatusCreated, status, string(raw))
+					require.Len(t, p.provider.effects(t), 1, "the armed merchant charges beside a readonly one")
 					return
 				}
 				product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "limited-membership", DisplayName: "Limited membership"})
@@ -335,9 +335,28 @@ func TestPSPControls(t *testing.T) {
 				current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
 				require.NoError(t, err)
 				require.Equal(t, sub.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt)
-				require.Len(t, p.provider.effects(t), 1, "automatic renewal must not debit in limited mode")
+				require.Len(t, p.provider.effects(t), 1, "automatic renewal must not debit under a limited posture")
 			})
 		}
+		t.Run("copied-book", func(t *testing.T) {
+			a, p := newPSPWorld(t)
+			_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+			require.NoError(t, err)
+			// The book was armed in another schema: this one is a copy.
+			_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "book_identity"}.Sanitize()+" SET schema_oid = 0")
+			require.NoError(t, err)
+			input := saleInput(t, a, p.provider)
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "copied-book-purchase"})
+			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+			require.Contains(t, string(raw), `"code":"provider_writes_disabled"`)
+			require.Contains(t, string(raw), "copy of the billing book", "a full merchant posture does not lift the copy's fence")
+			require.Empty(t, p.provider.effects(t))
+			hostCLI(t, a.world, "book", "arm", "--by", "critical verified operator")
+			input.Payment.Token = p.provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "armed-book-purchase"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			require.Len(t, p.provider.effects(t), 1, "the armed book charges")
+		})
 	})
 	t.Run("OR-J06-S04/rotation-and-archive-preserve-identity-without-exposing-secrets", func(t *testing.T) {
 		a, p := newPSPWorld(t)

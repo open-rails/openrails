@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // MerchantRPCBuilder resolves one merchant's Solana RPC client at use time for
@@ -23,12 +24,18 @@ import (
 // so a rotated rpc_url takes effect on the next pass. MerchantsFn is
 // late-bound; a nil fn or service arms nothing.
 type MerchantRPCBuilder struct {
-	Config      *config.Config
 	MerchantsFn func() *merchants.Service
 	// Endpoint replaces the network's public endpoint: a sandbox run's
 	// loopback node (provider_sandbox.solana_rpc_url).
 	Endpoint string
+	// Postures is each merchant's write posture: a readonly merchant's client
+	// submits nothing, and so does every client without Postures.
+	Postures writeposture.Reader
 	Log      *slog.Logger
+}
+
+func (b *MerchantRPCBuilder) readOnly(ctx context.Context, mid billing.MerchantID) bool {
+	return b.Postures == nil || b.Postures.Posture(ctx, mid.UUID()).ReadOnly()
 }
 
 func (b *MerchantRPCBuilder) merchants() *merchants.Service {
@@ -68,7 +75,7 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 		Network:   scope.Environment,
 		URL:       rpcURL,
 		PublicURL: b.Endpoint,
-		ReadOnly:  b.Config != nil && config.IsProviderReadOnly(b.Config),
+		ReadOnly:  b.readOnly(ctx, mid),
 	}), nil
 }
 
@@ -92,7 +99,7 @@ func (b *MerchantRPCBuilder) ResolvePSP(ctx context.Context, mid billing.Merchan
 	}
 	return solanarpc.NewRPCClientWithConfig(b.Log, solanarpc.RPCClientConfig{
 		Network: scope.Environment, URL: rpcURL, PublicURL: b.Endpoint,
-		ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config),
+		ReadOnly: b.readOnly(ctx, mid),
 	}), scope.Environment, nil
 }
 

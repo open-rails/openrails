@@ -6,14 +6,10 @@ import (
 )
 
 // Config is the engine's configuration: plain data. Everything that reaches
-// outside the process is in Deps. ProviderWriteMode is required. Whether money
-// is real is each PSP's declared environment, never the deployment's.
+// outside the process is in Deps. Whether money is real is each PSP's
+// declared environment, never the deployment's; how much OpenRails may write
+// to providers is each merchant's write posture.
 type Config struct {
-	// ProviderWriteMode is how much OpenRails may do against payment
-	// providers: ProviderWritesFull (normal operation), ProviderWritesLimited
-	// (no system-initiated provider writes) or ProviderWritesReadOnly (no
-	// provider writes: it never charges anyone). Required.
-	ProviderWriteMode ProviderWriteMode
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
@@ -95,20 +91,6 @@ type Config struct {
 	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
 	WebhookSecretOverlap string
 }
-
-// ProviderWriteMode is how much OpenRails may do against payment providers.
-type ProviderWriteMode string
-
-const (
-	// ProviderWritesFull is normal operation.
-	ProviderWritesFull ProviderWriteMode = "full"
-	// ProviderWritesLimited makes no system-initiated provider writes:
-	// dunning, invoice collection and the other proactive operations wait,
-	// while purchase and customer or staff actions run.
-	ProviderWritesLimited ProviderWriteMode = "limited"
-	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
-	ProviderWritesReadOnly ProviderWriteMode = "readonly"
-)
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
 // The role of the pool New runs with owns every object in them.
@@ -303,7 +285,6 @@ func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 // handles', not the engine's.
 func engineConfig(cfg Config) config.Config {
 	out := config.Config{
-		ProviderWriteMode:       string(cfg.ProviderWriteMode),
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),

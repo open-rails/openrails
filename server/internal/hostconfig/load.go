@@ -144,8 +144,8 @@ type loadOptions struct {
 	directory bool
 }
 
-// WithOverride overlays one koanf config key (e.g. "provider_write_mode")
-// above every other source.
+// WithOverride overlays one koanf config key (e.g. "port") above every other
+// source.
 func WithOverride(key string, value any) LoadOption {
 	return func(o *loadOptions) {
 		if o.overrides == nil {
@@ -328,6 +328,15 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if _, present := os.LookupEnv("ENCRYPTION_MASTER_KEY"); k.Exists("encryption") || present {
 		return nil, fmt.Errorf("encryption / ENCRYPTION_MASTER_KEY was removed: OpenRails keeps no credentials in the database")
 	}
+	// Settings that left the file: an environment variable or a mounted
+	// secret file names one as surely as a key does.
+	for _, retired := range retiredSettings {
+		_, inEnv := os.LookupEnv(retired.env)
+		_, inSecrets := secretFiles[retired.env]
+		if k.Exists(retired.key) || inEnv || inSecrets {
+			return nil, fmt.Errorf("%s / %s was removed: %s", retired.key, retired.env, retired.now)
+		}
+	}
 
 	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
 		_, present := os.LookupEnv(retired)
@@ -402,9 +411,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
 	}
-	// HARD CUT (#710): the deprecated provider_write_mode alias is gone.
 	if k.Exists("mode") || os.Getenv("MODE") != "" || os.Getenv("BILLING_MODE") != "" {
-		return nil, fmt.Errorf("mode was removed: set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
+		return nil, fmt.Errorf("mode was removed: %s", WritePostureHint)
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
@@ -559,6 +567,17 @@ func hasEnvPrefix(prefix string) bool {
 		}
 	}
 	return false
+}
+
+// WritePostureHint is where provider writes are held now.
+const WritePostureHint = "each merchant's write posture decides its provider writes: hold them with `openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`, restore them with `openrails merchant arm`"
+
+// retiredSettings are former settings: a key, its environment variable and
+// what replaced it.
+var retiredSettings = []struct{ key, env, now string }{
+	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
+	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
+	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
 }
 
 // retiredAuthKeys are the server's former auth keys and their replacements.

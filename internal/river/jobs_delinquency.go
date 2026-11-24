@@ -28,7 +28,7 @@ const (
 // (customer_delinquency.next_evaluation_at): a usage order fell due or a grace
 // window ran out. A change to a usage order evaluates its payer inline. It
 // moves no money and calls no provider, so it runs with no charger armed and
-// in limited or readonly mode. A failed evaluation stays due and fails the
+// under a limited or readonly write posture. A failed evaluation stays due and fails the
 // pass once the others are done.
 type DelinquencyWorker struct {
 	DB    *db.DB
