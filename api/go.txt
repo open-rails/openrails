@@ -45,7 +45,7 @@ pkg openrails, method (*Client) CreateTestMessage(context.Context, billing.Creat
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID) error
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID) error
 pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID) error
-pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID) error
+pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, billing.DeleteProductParams) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID) error
 pkg openrails, method (*Client) DismissProposals(context.Context, billing.DismissProposalsParams) (*billing.ProposalResults, error)
 pkg openrails, method (*Client) EventReader() eventlog.Reader
@@ -83,6 +83,7 @@ pkg openrails, method (*Client) LinkPSPImport(context.Context, billing.PSPImport
 pkg openrails, method (*Client) ListAdmissions(context.Context, billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error)
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams) (*billing.ListPage[billing.BalanceTransaction], error)
+pkg openrails, method (*Client) ListChanges(context.Context, billing.LogListParams) (*billing.ListPage[billing.LogEntry], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CreditGrantListParams) (*billing.ListPage[billing.CreditGrant], error)
 pkg openrails, method (*Client) ListCustodians(context.Context) (*billing.ListPage[billing.Custodian], error)
 pkg openrails, method (*Client) ListCustomerLimits(context.Context, billing.CustomerLimitListParams) (*billing.ListPage[billing.CustomerLimit], error)
@@ -780,6 +781,35 @@ pkg openrails/billing, const HostEventPaymentSettled HostEventType = "payment.se
 pkg openrails/billing, const HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
 pkg openrails/billing, const InvokerTypeCustomer InvokerType = "customer"
 pkg openrails/billing, const InvokerTypeDelegated InvokerType = "delegated"
+pkg openrails/billing, const LogActionArchive LogAction = "archive"
+pkg openrails/billing, const LogActionCreate LogAction = "create"
+pkg openrails/billing, const LogActionDelete LogAction = "delete"
+pkg openrails/billing, const LogActionKeyAdd LogAction = "key_add"
+pkg openrails/billing, const LogActionKeyRemove LogAction = "key_remove"
+pkg openrails/billing, const LogActionKeyRename LogAction = "key_rename"
+pkg openrails/billing, const LogActionUnarchive LogAction = "unarchive"
+pkg openrails/billing, const LogActionUpdate LogAction = "update"
+pkg openrails/billing, const LogActorFile LogActor = "file"
+pkg openrails/billing, const LogActorSystem LogActor = "system"
+pkg openrails/billing, const LogActorVault LogActor = "vault"
+pkg openrails/billing, const LogObjectCustodian LogObjectType = "custodian"
+pkg openrails/billing, const LogObjectLimit LogObjectType = "limit"
+pkg openrails/billing, const LogObjectMerchant LogObjectType = "merchant"
+pkg openrails/billing, const LogObjectMessages LogObjectType = "messages"
+pkg openrails/billing, const LogObjectMeter LogObjectType = "meter"
+pkg openrails/billing, const LogObjectPSP LogObjectType = "psp"
+pkg openrails/billing, const LogObjectPrice LogObjectType = "price"
+pkg openrails/billing, const LogObjectProduct LogObjectType = "product"
+pkg openrails/billing, const LogSourceAPI LogSource = "api"
+pkg openrails/billing, const LogSourceCLI LogSource = "cli"
+pkg openrails/billing, const LogSourceCatalogApply LogSource = "catalog_apply"
+pkg openrails/billing, const LogSourceConsole LogSource = "console"
+pkg openrails/billing, const LogSourceCustomer LogSource = "customer"
+pkg openrails/billing, const LogSourceIntent LogSource = "intent"
+pkg openrails/billing, const LogSourceJob LogSource = "job"
+pkg openrails/billing, const LogSourceProviderRead LogSource = "provider_read"
+pkg openrails/billing, const LogSourceReload LogSource = "reload"
+pkg openrails/billing, const LogSourceWebhook LogSource = "webhook"
 pkg openrails/billing, const LowBalanceLineCustomer LowBalanceLineSource = "customer"
 pkg openrails/billing, const LowBalanceLineDefault LowBalanceLineSource = "default"
 pkg openrails/billing, const LowBalanceLineMerchant LowBalanceLineSource = "merchant"
@@ -1011,6 +1041,7 @@ pkg openrails/billing, func ParseDestructiveHoldID(string) (DestructiveHoldID, e
 pkg openrails/billing, func ParseFindingID(string) (FindingID, error)
 pkg openrails/billing, func ParseHostEventID(string) (HostEventID, error)
 pkg openrails/billing, func ParseLeaseID(string) (LeaseID, error)
+pkg openrails/billing, func ParseLogEntryID(string) (LogEntryID, error)
 pkg openrails/billing, func ParseMandateID(string) (MandateID, error)
 pkg openrails/billing, func ParseMerchantConfigurationYAML([]byte) (*UpdateMerchantConfigurationParams, error)
 pkg openrails/billing, func ParseMerchantID(string) (MerchantID, error)
@@ -1061,6 +1092,7 @@ pkg openrails/billing, method (*FindingID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*HostEventID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*LeaseID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*ListPage[T]) UnmarshalJSON([]byte) error
+pkg openrails/billing, method (*LogEntryID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*MandateID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*MerchantID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*MerchantRenameTooSoonError) Error() string
@@ -1142,6 +1174,10 @@ pkg openrails/billing, method (LeaseID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (LeaseID) String() string
 pkg openrails/billing, method (LeaseID) UUID() uuid.UUID
 pkg openrails/billing, method (ListPage[T]) MarshalJSON() ([]byte, error)
+pkg openrails/billing, method (LogEntryID) IsZero() bool
+pkg openrails/billing, method (LogEntryID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (LogEntryID) String() string
+pkg openrails/billing, method (LogEntryID) UUID() uuid.UUID
 pkg openrails/billing, method (MandateID) IsZero() bool
 pkg openrails/billing, method (MandateID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (MandateID) String() string
@@ -1861,6 +1897,7 @@ pkg openrails/billing, type CustomerTokenParams struct, Email string
 pkg openrails/billing, type CustomerTokenParams struct, EmailVerified bool
 pkg openrails/billing, type Dashboard struct
 pkg openrails/billing, type Dashboard struct, IsDefault bool `json:"is_default"`
+pkg openrails/billing, type Dashboard struct, Profile *DashboardProfile `json:"profile"`
 pkg openrails/billing, type Dashboard struct, UpdatedAt *time.Time `json:"updated_at"`
 pkg openrails/billing, type Dashboard struct, UpdatedBy *string `json:"updated_by"`
 pkg openrails/billing, type Dashboard struct, Widgets []DashboardWidget `json:"widgets"`
@@ -1869,6 +1906,11 @@ pkg openrails/billing, type DashboardGrid struct, H int `json:"h"`
 pkg openrails/billing, type DashboardGrid struct, W int `json:"w"`
 pkg openrails/billing, type DashboardGrid struct, X int `json:"x"`
 pkg openrails/billing, type DashboardGrid struct, Y int `json:"y"`
+pkg openrails/billing, type DashboardProfile struct
+pkg openrails/billing, type DashboardProfile struct, CardPayments bool `json:"card_payments"`
+pkg openrails/billing, type DashboardProfile struct, Credits bool `json:"credits"`
+pkg openrails/billing, type DashboardProfile struct, Subscriptions bool `json:"subscriptions"`
+pkg openrails/billing, type DashboardProfile struct, Usage bool `json:"usage"`
 pkg openrails/billing, type DashboardWidget struct
 pkg openrails/billing, type DashboardWidget struct, FixedRange bool `json:"fixed_range"`
 pkg openrails/billing, type DashboardWidget struct, Grid DashboardGrid `json:"grid"`
@@ -2018,6 +2060,8 @@ pkg openrails/billing, type DeclineReason string
 pkg openrails/billing, type DefaultPaymentMethod struct
 pkg openrails/billing, type DefaultPaymentMethod struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type DefaultPaymentMethod struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+pkg openrails/billing, type DeleteProductParams struct
+pkg openrails/billing, type DeleteProductParams struct, ExpectedRevision *int64 `form:"expected_revision"`
 pkg openrails/billing, type DelinquencyHostEvent struct
 pkg openrails/billing, type DelinquencyHostEvent struct, AmountFloor int64 `json:"amount_floor,string"`
 pkg openrails/billing, type DelinquencyHostEvent struct, Currency catalog.Currency `json:"currency"`
@@ -2378,6 +2422,29 @@ pkg openrails/billing, type LinkPSPImportParams struct, Prices []PSPImportPriceL
 pkg openrails/billing, type ListPage struct, Items []T
 pkg openrails/billing, type ListPage struct, Next string
 pkg openrails/billing, type ListPage[T any] struct
+pkg openrails/billing, type LogAction string
+pkg openrails/billing, type LogActor string
+pkg openrails/billing, type LogEntry struct
+pkg openrails/billing, type LogEntry struct, Action LogAction `json:"action"`
+pkg openrails/billing, type LogEntry struct, Actor LogActor `json:"actor"`
+pkg openrails/billing, type LogEntry struct, Changes json.RawMessage `json:"changes"`
+pkg openrails/billing, type LogEntry struct, ID LogEntryID `json:"id"`
+pkg openrails/billing, type LogEntry struct, ObjectID string `json:"object_id"`
+pkg openrails/billing, type LogEntry struct, ObjectType LogObjectType `json:"object_type"`
+pkg openrails/billing, type LogEntry struct, OccurredAt time.Time `json:"occurred_at"`
+pkg openrails/billing, type LogEntry struct, OperationID *string `json:"operation_id"`
+pkg openrails/billing, type LogEntry struct, Reason *string `json:"reason"`
+pkg openrails/billing, type LogEntry struct, RequestID *string `json:"request_id"`
+pkg openrails/billing, type LogEntry struct, Source LogSource `json:"source"`
+pkg openrails/billing, type LogEntryID [16]byte
+pkg openrails/billing, type LogListParams struct
+pkg openrails/billing, type LogListParams struct, ObjectID string `form:"object_id"`
+pkg openrails/billing, type LogListParams struct, ObjectType LogObjectType `form:"object_type"`
+pkg openrails/billing, type LogListParams struct, Since time.Time `form:"since"`
+pkg openrails/billing, type LogListParams struct, Until time.Time `form:"until"`
+pkg openrails/billing, type LogListParams struct, embedded PageRequest
+pkg openrails/billing, type LogObjectType string
+pkg openrails/billing, type LogSource string
 pkg openrails/billing, type LowBalanceLine struct
 pkg openrails/billing, type LowBalanceLine struct, Amount *int64 `json:"amount,string"`
 pkg openrails/billing, type LowBalanceLine struct, Currency catalog.Currency `json:"currency"`
@@ -2661,19 +2728,25 @@ pkg openrails/billing, type MetricsDimension struct
 pkg openrails/billing, type MetricsDimension struct, Description string `json:"description"`
 pkg openrails/billing, type MetricsDimension struct, Name string `json:"name"`
 pkg openrails/billing, type MetricsDimension struct, Values []string `json:"values,omitempty"`
+pkg openrails/billing, type MetricsDirection string
 pkg openrails/billing, type MetricsExample struct
 pkg openrails/billing, type MetricsExample struct, Intent string `json:"intent"`
 pkg openrails/billing, type MetricsExample struct, Query QueryMetricsParams `json:"query"`
+pkg openrails/billing, type MetricsGroup string
 pkg openrails/billing, type MetricsLimits struct
 pkg openrails/billing, type MetricsLimits struct, MaxBuckets int `json:"max_buckets"`
 pkg openrails/billing, type MetricsLimits struct, MaxLimit int `json:"max_limit"`
 pkg openrails/billing, type MetricsMeasure struct
 pkg openrails/billing, type MetricsMeasure struct, Class MetricsClass `json:"class"`
 pkg openrails/billing, type MetricsMeasure struct, Description string `json:"description"`
+pkg openrails/billing, type MetricsMeasure struct, DimValues map[string][]string `json:"dim_values,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Dims []string `json:"dims"`
+pkg openrails/billing, type MetricsMeasure struct, Direction MetricsDirection `json:"direction"`
 pkg openrails/billing, type MetricsMeasure struct, Formula string `json:"formula"`
+pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"group"`
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
+pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
 pkg openrails/billing, type MetricsMeasure struct, Unit string `json:"unit"`
 pkg openrails/billing, type MetricsOrder struct
 pkg openrails/billing, type MetricsOrder struct, Dimension string `json:"dimension,omitempty"`
@@ -2702,6 +2775,9 @@ pkg openrails/billing, type MetricsSchema struct, Grains []string `json:"grains"
 pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"limits"`
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
+pkg openrails/billing, type MetricsThreshold struct
+pkg openrails/billing, type MetricsThreshold struct, Label string `json:"label"`
+pkg openrails/billing, type MetricsThreshold struct, Value float64 `json:"value"`
 pkg openrails/billing, type MigrationFallback string
 pkg openrails/billing, type MyOrderPayURLParams struct
 pkg openrails/billing, type MyOrderPayURLParams struct, Embedded bool `json:"embedded"`

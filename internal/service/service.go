@@ -42,7 +42,12 @@ type Service struct {
 	// catalogApplying marks a document application: it records ownership
 	// itself, as the apply manager.
 	catalogApplying bool
-	Log             *slog.Logger
+	// catalogApplicationID is the application's id, for its history.
+	catalogApplicationID string
+	// catalogRenames are the key renames the mutation made, which history
+	// records as renames, not as a removal and an addition.
+	catalogRenames []catalogKeyRename
+	Log            *slog.Logger
 }
 
 func New(logger *slog.Logger, rt *app.Runtime) (*Service, error) {

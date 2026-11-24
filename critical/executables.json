@@ -1436,6 +1436,38 @@
     ],
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
+    ],
+    "OR-J53-S01": [
+      "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
+    ],
+    "OR-J53-S02": [
+      "TestReporting/OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency"
+    ],
+    "OR-J53-S03": [
+      "TestReporting/OR-J53-S03/money-never-sums-across-currencies"
+    ],
+    "OR-J43-S01": [
+      "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
+    ],
+    "OR-J43-S02": [
+      "TestConfigurationHistory/OR-J43-S02/a-document-apply-records-each-changed-object-once"
+    ],
+    "OR-J43-S03": [
+      "TestConfigurationHistory/OR-J43-S03/a-configuration-change-through-the-api-is-recorded-with-its-actor-and-no-secret"
+    ],
+    "OR-J43-S04": [
+      "TestConfigurationHistory/OR-J43-S04/a-change-made-outside-openrails-is-recorded-once-on-reload",
+      "TestConfigurationHistory/OR-J43-S04/a-change-made-outside-openrails-is-recorded-once-on-reload/vault",
+      "TestConfigurationHistory/OR-J43-S04/a-change-made-outside-openrails-is-recorded-once-on-reload/file"
+    ],
+    "OR-J43-S05": [
+      "TestConfigurationHistory/OR-J43-S05/the-list-filters-by-object-and-time-and-pages-by-cursor"
+    ],
+    "OR-J43-S06": [
+      "TestConfigurationHistory/OR-J43-S06/a-products-revision-moves-with-its-keys-not-its-prices-and-its-entries-carry-it"
+    ],
+    "OR-J43-S07": [
+      "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
     ]
   }
 }

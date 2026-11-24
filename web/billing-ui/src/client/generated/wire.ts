@@ -848,6 +848,7 @@ export type CustomerSettingsResult = {
 export type Dashboard = {
   widgets: DashboardWidget[]
   is_default: boolean
+  profile: DashboardProfile | null
   updated_at: string | null
   updated_by: string | null
 }
@@ -857,6 +858,13 @@ export type DashboardGrid = {
   y: number
   w: number
   h: number
+}
+
+export type DashboardProfile = {
+  subscriptions: boolean
+  card_payments: boolean
+  usage: boolean
+  credits: boolean
 }
 
 export type DashboardWidget = {
@@ -1381,6 +1389,20 @@ export type LinkPSPImportParams = {
   prices?: PSPImportPriceLink[]
 }
 
+export type LogEntry = {
+  id: string
+  occurred_at: string
+  actor: "file" | "system" | "vault"
+  source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
+  object_type: "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
+  object_id: string
+  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "unarchive" | "update"
+  changes: unknown | null
+  reason: string | null
+  request_id: string | null
+  operation_id: string | null
+}
+
 export type LowBalanceLine = {
   currency: string
   amount: string | null
@@ -1539,9 +1561,13 @@ export type MetricsMeasure = {
   name: string
   class: string
   unit: string
+  group: string
+  direction: string
+  thresholds: MetricsThreshold[]
   description: string
   formula: string
   dims: string[]
+  dim_values?: Record<string, string[]>
   money?: boolean
 }
 
@@ -1580,6 +1606,11 @@ export type MetricsSchema = {
   examples: MetricsExample[]
   limits: MetricsLimits
   query_shape: string
+}
+
+export type MetricsThreshold = {
+  value: number
+  label: string
 }
 
 export type MyOrderPayURLParams = {

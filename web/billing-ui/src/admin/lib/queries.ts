@@ -106,6 +106,7 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
     getConfig,
     listWebhooks,
     getDashboard,
+    getMetricsSchema,
     metricsQuery,
   } = api
 
@@ -463,25 +464,22 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
       queryOptions({
         queryKey: [...queryKeys.ops(), "findings", "summary"],
         queryFn: async ({ signal }): Promise<FindingsGauges> => {
-          const row = metricsRow(
-            await metricsQuery(
-              {
-                measures: [
-                  "open_findings",
-                  "orphaned_members",
-                  "freeloaders",
-                  "duplicate_coverage",
-                ],
-                range: { last: "1d" },
-              },
-              signal
-            )
+          const result = await metricsQuery(
+            {
+              measures: ["open_findings"],
+              by: ["finding_group"],
+              range: { last: "1d" },
+            },
+            signal
           )
+          const group: Record<string, number> = {}
+          for (const row of result.rows)
+            group[String(row[0])] = Number(row[1] ?? 0)
           return {
-            total_open: Number(row.open_findings ?? 0),
-            orphaned_members: Number(row.orphaned_members ?? 0),
-            freeloaders: Number(row.freeloaders ?? 0),
-            duplicate_coverage: Number(row.duplicate_coverage ?? 0),
+            total_open: Object.values(group).reduce((n, v) => n + v, 0),
+            orphaned_members: group.orphaned ?? 0,
+            freeloaders: group.freeloader ?? 0,
+            duplicate_coverage: group.duplicate_coverage ?? 0,
           }
         },
         meta: { errorAction: "Load the findings summary" },
@@ -530,6 +528,15 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: queryKeys.dashboard(),
         queryFn: ({ signal }) => getDashboard(signal),
         meta: { errorAction: "Load dashboard" },
+      }),
+    // The registry changes only with a deployment.
+    metricsSchema: (enabled = true) =>
+      queryOptions({
+        queryKey: [...queryKeys.dashboard(), "schema"],
+        queryFn: ({ signal }) => getMetricsSchema(signal),
+        staleTime: Infinity,
+        enabled,
+        meta: { errorAction: "Load the metrics schema" },
       }),
     widgetMetrics: (query?: QueryMetricsParams) =>
       queryOptions({

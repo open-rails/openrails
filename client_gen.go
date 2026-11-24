@@ -185,9 +185,10 @@ func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params
 // reads leave it out, and creating its key again revives it. A product a
 // purchase, subscription, grant, access, purchase, migration, provider
 // write, PSP link or rate card refers to is refused (billing.ErrConflict,
-// code product_in_use): archive it with UpdateProduct instead.
-func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID) error {
-	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}}, nil)
+// code product_in_use): archive it with UpdateProduct instead. A stale
+// ExpectedRevision is refused with revision_mismatch.
+func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, params billing.DeleteProductParams) error {
+	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}, query: params}, nil)
 }
 
 // CreatePrice creates a price on the product named by exactly one of
@@ -925,6 +926,19 @@ func (c *Client) GetMerchantConfiguration(ctx context.Context) (*billing.Merchan
 func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
 	if err := c.send(ctx, routeCall{method: http.MethodPatch, path: "/v1/merchant/configuration", body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListChanges lists the merchant's configuration history, newest first: each
+// change to a product, price, meter or limit and to the merchant, messages,
+// PSP and custodian documents, with who made it and how. A credential reads
+// "changed", never its value. ObjectType and ObjectID narrow it to one
+// object, Since and Until to a time range.
+func (c *Client) ListChanges(ctx context.Context, params billing.LogListParams) (*billing.ListPage[billing.LogEntry], error) {
+	var out billing.ListPage[billing.LogEntry]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/changes", query: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

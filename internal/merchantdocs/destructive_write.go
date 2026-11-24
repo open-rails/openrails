@@ -102,7 +102,7 @@ func configurationRevision(key string) (int64, error) {
 	return strconv.ParseInt(n, 10, 64)
 }
 
-func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name string, next any, cas int64, put func() error) (Set, error) {
+func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name string, next any, cas int64, write func() (int64, error)) (Set, error) {
 	if !c.Writable() {
 		return Set{}, ErrReadOnly
 	}
@@ -120,6 +120,7 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 		return Set{}, err
 	}
 	current, revision := documentValue(before, name)
+	put := func() error { return c.recorded(ctx, id, name, before, next, write) }
 	changes, err := configurationChanges(key, name, current, next)
 	if err != nil {
 		return Set{}, err
@@ -131,7 +132,7 @@ func (c *Cache) admittedWrite(ctx context.Context, id billing.MerchantID, name s
 			return Set{}, err
 		}
 		defer finish()
-		return c.admittedWrite(ctx, id, name, next, cas, put)
+		return c.admittedWrite(ctx, id, name, next, cas, write)
 	}
 	actor, actorErr := destructive.ActorFromContext(ctx)
 	origin, _ := ctx.Value(configurationOriginKey{}).(string)

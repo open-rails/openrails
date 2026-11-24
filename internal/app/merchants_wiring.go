@@ -82,9 +82,13 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 			r.followStripeWebhooks(id, previous, set)
 			r.followMoneyPolicy(id, previous, set)
 			r.recordRefusedDocuments(ctx, id, previous, set)
+			if err := svc.RecordConfigLoad(ctx, id, previous, set); err != nil && ctx.Err() == nil {
+				r.Log.WarnContext(ctx, "merchant config: recording what the load changed failed; a later load records it", logx.Err(err), "merchant_id", id.String())
+			}
 		}
 		return set, err
 	})
+	cache.SetRecord(svc.RecordConfigWrite)
 	cache.SetAnnounce(r.announceMerchantConfig)
 	r.DB.SetMerchantConfig(svc)
 	r.ArmMerchantsService(svc)

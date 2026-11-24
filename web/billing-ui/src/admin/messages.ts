@@ -281,8 +281,8 @@ export const billingAdminMessages = {
   "Change price": "Change price",
   "Change price for ": "Change price for ",
   "Change subscription": "Change subscription",
-  "Change the title, chart type or date range behavior. The query stays the same.":
-    "Change the title, chart type or date range behavior. The query stays the same.",
+  "Pick what it measures, how it is split and how it is drawn.":
+    "Pick what it measures, how it is split and how it is drawn.",
   Channel: "Channel",
   "Charged twice": "Charged twice",
   "Chart type": "Chart type",
@@ -751,6 +751,7 @@ export const billingAdminMessages = {
   "Review batch": "Review batch",
   "Review complete. Applying sends this exact document; this is not a database diff.":
     "Review complete. Applying sends this exact document; this is not a database diff.",
+  Revision: "Revision",
   Revoke: "Revoke",
   "Revoke product access": "Revoke product access",
   "Revoke remaining credit": "Revoke remaining credit",
@@ -1071,4 +1072,26 @@ export const billingAdminMessages = {
   Gone: "Gone",
   Ignored: "Ignored",
   Imported: "Imported",
+  "Add widget": "Add widget",
+  "Compare with": "Compare with",
+  "Nothing to show yet. Add products in ":
+    "Nothing to show yet. Add products in ",
+  " and connect a PSP in ": " and connect a PSP in ",
+  " to start taking payments.": " to start taking payments.",
+  Nothing: "Nothing",
+  Measure: "Measure",
+  And: "And",
+  "Add a measure": "Add a measure",
+  "Over time": "Over time",
+  Grain: "Grain",
+  Auto: "Auto",
+  "Split by": "Split by",
+  "Then by": "Then by",
+  "Only where": "Only where",
+  "(none)": "(none)",
+  "Values, comma separated": "Values, comma separated",
+  Explore: "Explore",
+  "Chart any measure, split by its dimensions, over the range picked.":
+    "Chart any measure, split by its dimensions, over the range picked.",
+  Signals: "Signals",
 } as const

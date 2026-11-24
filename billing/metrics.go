@@ -3,8 +3,9 @@ package billing
 import "time"
 
 // QueryMetricsParams asks the merchant's metrics: measures, grouped By dimensions
-// (and "time" at Grain), over Range, filtered and ordered. GET
-// /v1/metrics/schema lists every measure, dimension and grain.
+// (and "time" at Grain; "auto" picks day, week or month from the range), over
+// Range, filtered and ordered. GET /v1/metrics/schema lists every measure,
+// dimension and grain.
 type QueryMetricsParams struct {
 	Measures []string            `json:"measures"`
 	By       []string            `json:"by"`
@@ -13,7 +14,8 @@ type QueryMetricsParams struct {
 	Filters  map[string][]string `json:"filters"`
 	Order    []MetricsOrder      `json:"order"`
 	Limit    *int                `json:"limit"`
-	// Compare adds the same query over the previous period: "previous_period".
+	// Compare adds the same query over the window before ("previous_period")
+	// or a year before ("previous_year").
 	Compare string `json:"compare"`
 }
 
@@ -63,6 +65,21 @@ type MetricsColumn struct {
 // difference or snapshot.
 type MetricsClass string
 
+// MetricsGroup is the view a measure belongs to: business (the health
+// overview) or ops (operator signals).
+type MetricsGroup string
+
+// MetricsDirection is which way a change of a measure is good news:
+// up_is_good, down_is_good or neutral.
+type MetricsDirection string
+
+// MetricsThreshold is a level drawn across a measure's chart: Value in the
+// measure's unit (a ratio as a fraction), Label naming it.
+type MetricsThreshold struct {
+	Value float64 `json:"value"`
+	Label string  `json:"label"`
+}
+
 // MetricsSchema is every measure, dimension and grain a query may use, with
 // examples: the document a client or a model writes queries from.
 type MetricsSchema struct {
@@ -76,15 +93,21 @@ type MetricsSchema struct {
 	QueryShape string             `json:"query_shape"`
 }
 
-// MetricsMeasure is one measure a query may request.
+// MetricsMeasure is one measure a query may request. DimValues lists the
+// values a dimension takes on this measure where they differ from the
+// dimension's own list (outcome, kind).
 type MetricsMeasure struct {
-	Name        string       `json:"name"`
-	Class       MetricsClass `json:"class"`
-	Unit        string       `json:"unit"`
-	Description string       `json:"description"`
-	Formula     string       `json:"formula"`
-	Dims        []string     `json:"dims"`
-	Money       bool         `json:"money,omitempty"`
+	Name        string              `json:"name"`
+	Class       MetricsClass        `json:"class"`
+	Unit        string              `json:"unit"`
+	Group       MetricsGroup        `json:"group"`
+	Direction   MetricsDirection    `json:"direction"`
+	Thresholds  []MetricsThreshold  `json:"thresholds"`
+	Description string              `json:"description"`
+	Formula     string              `json:"formula"`
+	Dims        []string            `json:"dims"`
+	DimValues   map[string][]string `json:"dim_values,omitempty"`
+	Money       bool                `json:"money,omitempty"`
 }
 
 // MetricsDimension is one axis to group or filter by.
@@ -109,15 +132,28 @@ type MetricsLimits struct {
 // Dashboard is the merchant's widget layout.
 type Dashboard struct {
 	Widgets []DashboardWidget `json:"widgets"`
-	// IsDefault marks the starting layout of a merchant that saved none.
-	IsDefault bool       `json:"is_default"`
-	UpdatedAt *time.Time `json:"updated_at"`
-	UpdatedBy *string    `json:"updated_by"`
+	// IsDefault marks the starting layout of a merchant that saved none;
+	// Profile is what that layout was built for, nil on a saved one.
+	IsDefault bool              `json:"is_default"`
+	Profile   *DashboardProfile `json:"profile"`
+	UpdatedAt *time.Time        `json:"updated_at"`
+	UpdatedBy *string           `json:"updated_by"`
+}
+
+// DashboardProfile is what the merchant's data shows it sells: subscriptions,
+// card payments, metered usage and prepaid credits. All false is a merchant
+// with no activity yet.
+type DashboardProfile struct {
+	Subscriptions bool `json:"subscriptions"`
+	CardPayments  bool `json:"card_payments"`
+	Usage         bool `json:"usage"`
+	Credits       bool `json:"credits"`
 }
 
 // DashboardWidget is one tile: a metrics query, how to draw it, and where.
 // A dashboard shows every widget over the range its viewer picks; a
-// FixedRange widget keeps its query's own range ("today" tiles).
+// FixedRange widget keeps its query's own range. A heading widget is a
+// section title with an empty query.
 type DashboardWidget struct {
 	ID         string             `json:"id"`
 	Title      string             `json:"title"`

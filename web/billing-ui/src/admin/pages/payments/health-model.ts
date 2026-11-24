@@ -76,9 +76,8 @@ const compared = (
 
 const CYCLE_MEASURES = [
   "rebill_first_failure_rate",
-  "rebills_missed",
   "dunning_recovery_rate",
-  "rebill_collection_rate",
+  "rebill_rate",
 ]
 const cycleTiles = (scope: Scope) => compared(CYCLE_MEASURES, scope)
 
@@ -113,9 +112,10 @@ export const TILES: Tile[] = [
   {
     id: "missed",
     title: "Missed rebills",
-    measure: "rebills_missed",
+    measure: "rebills",
     better: "lower",
-    query: cycleTiles,
+    query: (scope) =>
+      compared(["rebills"], scope, { first_outcome: ["missed"] }),
     list: "cycles",
     listFilters: { first_outcome: ["missed"] },
   },
@@ -130,8 +130,8 @@ export const TILES: Tile[] = [
   },
   {
     id: "collection",
-    title: "Rebill collection rate",
-    measure: "rebill_collection_rate",
+    title: "Rebill rate",
+    measure: "rebill_rate",
     better: "higher",
     query: cycleTiles,
     list: "cycles",
@@ -196,10 +196,10 @@ export const trendQueries = (scope: Scope) => {
 }
 
 export const reasonsQuery = (scope: Scope): QueryMetricsParams => ({
-  measures: ["failed_attempts"],
+  measures: ["attempts"],
   by: ["category", "reason", "response_code"],
   range: { last: scope.last },
-  filters: scoped(scope),
+  filters: scoped(scope, { outcome: ["declined"] }),
   compare: "previous_period",
 })
 
@@ -304,16 +304,25 @@ export const RECOVERY_ATTEMPTS = ["1", "2", "3", "4", "5+"]
 export const RECOVERY_DAYS = [1, 3, 7, 14, 30]
 
 export const recoveryQueries = (scope: Scope) => {
-  const q = (measures: string[], by: string[]): QueryMetricsParams => ({
+  const q = (
+    measures: string[],
+    by: string[],
+    filters: Filters
+  ): QueryMetricsParams => ({
     measures,
     by,
     range: { last: scope.last },
-    filters: scoped(scope),
+    filters: scoped(scope, filters),
   })
+  const recovered = { outcome: ["recovered"] }
   return {
-    rate: q(["dunning_recovery_rate", "dunning_recovered"], ["owner"]),
-    byAttempt: q(["dunning_recovered"], ["owner", "recovery_attempt"]),
-    byDays: q(["dunning_recovered"], ["owner", "days_to_recover"]),
+    // The closed cycles whose first rebill failed: recovered or lost.
+    rate: q(["rebills"], ["owner"], {
+      outcome: ["recovered", "lost"],
+      first_outcome: FIRST_FAILED,
+    }),
+    byAttempt: q(["rebills"], ["owner", "recovery_attempt"], recovered),
+    byDays: q(["rebills"], ["owner", "days_to_recover"], recovered),
   }
 }
 
@@ -324,31 +333,26 @@ export interface RecoveryCurve {
 }
 
 // recoveryCurves turns recoveries per step into cumulative shares of failed
-// cycles: a step's share is its recoveries over the owner's closed failed
-// cycles, which is recovered / recovery rate.
+// cycles: a step's share is its recoveries over the owner's closed cycles
+// whose first rebill failed.
 export function recoveryCurves(
-  rate: MetricsResult | undefined,
+  closed: MetricsResult | undefined,
   steps: MetricsResult | undefined,
   dimension: "recovery_attempt" | "days_to_recover"
 ): RecoveryCurve[] {
-  if (!rate || !steps) return []
-  const r = indexColumns(rate.columns)
+  if (!closed || !steps) return []
+  const r = indexColumns(closed.columns)
   const s = indexColumns(steps.columns)
   const rOwner = r.dims.find((d) => d.name === "owner")?.index ?? -1
-  const rRate =
-    r.measures.find((m) => m.name === "dunning_recovery_rate")?.index ?? -1
-  const rCount =
-    r.measures.find((m) => m.name === "dunning_recovered")?.index ?? -1
+  const rCount = r.measures[0]?.index ?? -1
   const sOwner = s.dims.find((d) => d.name === "owner")?.index ?? -1
   const sStep = s.dims.find((d) => d.name === dimension)?.index ?? -1
   const sCount = s.measures[0]?.index ?? -1
-  if ([rOwner, rRate, rCount, sOwner, sStep, sCount].includes(-1)) return []
+  if ([rOwner, rCount, sOwner, sStep, sCount].includes(-1)) return []
   const failed = new Map<string, number>()
-  for (const row of rate.rows) {
-    const recovered = Number(row[rCount] ?? 0)
-    const share = Number(row[rRate] ?? 0)
-    if (recovered > 0 && share > 0)
-      failed.set(String(row[rOwner]), recovered / share)
+  for (const row of closed.rows) {
+    const count = Number(row[rCount] ?? 0)
+    if (count > 0) failed.set(String(row[rOwner]), count)
   }
   const buckets =
     dimension === "recovery_attempt" ? RECOVERY_ATTEMPTS : RECOVERY_DAYS
@@ -374,10 +378,10 @@ export function recoveryCurves(
 }
 
 export const missedQuery = (scope: Scope): QueryMetricsParams => ({
-  measures: ["rebills_missed"],
+  measures: ["rebills"],
   by: ["miss_reason", "psp"],
   range: { last: scope.last },
-  filters: scoped(scope),
+  filters: scoped(scope, { first_outcome: ["missed"] }),
 })
 
 export interface MissedRow {
@@ -480,17 +484,17 @@ export const nmiHistoryQueries = (scope: Scope) => {
   const psp: Filters = scope.psp ? { psp: [scope.psp.id] } : {}
   const range = { last: "25m" }
   const months: QueryMetricsParams = {
-    measures: ["nmi_history_authorizations", "nmi_history_refusal_rate"],
-    by: ["time", "nmi_kind"],
+    measures: ["nmi_history_authorizations"],
+    by: ["time", "nmi_kind", "outcome"],
     grain: "month",
     range,
     filters: scope.psp ? psp : undefined,
   }
   const reasons: QueryMetricsParams = {
-    measures: ["nmi_history_refused"],
+    measures: ["nmi_history_authorizations"],
     by: ["nmi_kind", "category", "reason"],
     range,
-    filters: { ...psp, category: FAILED_CATEGORIES },
+    filters: { ...psp, outcome: ["declined"] },
   }
   // OpenRails' own NMI attempts by month: the first marks where it began.
   const recorded: QueryMetricsParams = {
@@ -538,27 +542,33 @@ export function nmiHistoryMonths(
   if (!result) return []
   const idx = indexColumns(result.columns)
   const kind = idx.dims.find((d) => d.name === "nmi_kind")?.index ?? -1
+  const outcome = idx.dims.find((d) => d.name === "outcome")?.index ?? -1
   const count =
     idx.measures.find((m) => m.name === "nmi_history_authorizations")?.index ??
     -1
-  const rate =
-    idx.measures.find((m) => m.name === "nmi_history_refusal_rate")?.index ?? -1
-  if ([idx.time, kind, count, rate].includes(-1)) return []
+  if ([idx.time, kind, outcome, count].includes(-1)) return []
   const months = new Map<string, NMIHistoryMonth>()
+  const refused = new Map<NMIHistoryCell, number>()
   for (const r of result.rows) {
-    const authorizations = Number(r[count] ?? 0)
-    if (authorizations === 0) continue
+    const n = Number(r[count] ?? 0)
+    if (n === 0) continue
     const month = String(r[idx.time])
     let m = months.get(month)
     if (!m) {
       m = { month, kinds: {}, recorded: since !== null && month >= since }
       months.set(month, m)
     }
-    m.kinds[String(r[kind])] = {
-      authorizations,
-      refusalRate: r[rate] === null ? null : Number(r[rate]),
-    }
+    const cell = (m.kinds[String(r[kind])] ??= {
+      authorizations: 0,
+      refusalRate: null,
+    })
+    cell.authorizations += n
+    if (r[outcome] === "declined")
+      refused.set(cell, (refused.get(cell) ?? 0) + n)
   }
+  for (const m of months.values())
+    for (const cell of Object.values(m.kinds))
+      cell.refusalRate = (refused.get(cell) ?? 0) / cell.authorizations
   return [...months.values()].sort((a, b) => b.month.localeCompare(a.month))
 }
 

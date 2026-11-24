@@ -9,9 +9,10 @@
 // both need merchant:metrics:read (or its root twin), are scoped to the
 // credential's merchant and answer aggregates only, never entity rows.
 //
-// A query takes measures and range (required), by, grain (required with the
-// time dimension), filters (OR within a dimension, AND across), order, limit
-// and compare (previous_period); any other key is refused. range is
+// A query takes measures and range (required), by, grain (auto picks day, week
+// or month from the range), filters (OR within a dimension, AND across),
+// order, limit and compare (previous_period or previous_year); any other key
+// is refused. range is
 // {from, to} as inclusive UTC days or an RFC 3339 half-open interval, or
 // {last: "7d"} ending today on the deployment's clock. product_id and price_id
 // filters take the catalog's typed ids; a bare UUID is invalid_filter_value.
@@ -24,7 +25,10 @@
 // Validation answers 400 metrics_query_invalid with every error at once in
 // metadata.errors, each with its code (unknown_measure, ...), param,
 // did_you_mean and the valid names for that slot, so one corrected retry
-// succeeds. Decline measures group by collection owner and PSP; the
-// nmi_history_* measures come from nmi_history_months and cannot separate
-// first one-off sales from retried rebills.
+// succeeds; a removed measure's error names its replacement. Each measure is
+// in the business or the ops group and says which way a change is good.
+// Funnels (attempts, purchases, rebills, payments) are one measure with an
+// outcome or kind dimension and rates over its slices. nmi_history_authorizations
+// comes from nmi_history_months and cannot separate first one-off sales from
+// retried rebills.
 package metrics
