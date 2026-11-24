@@ -464,6 +464,9 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		if err != nil {
 			return err
 		}
+		if row.Status == string(billing.PSPImportFailed) {
+			return apperr.Conflictf("the import failed: %s; create it again", deref(row.Error))
+		}
 		if busy(row.Status) || row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
 			return apperr.Conflictf("the import is %s; it lands once its pull finished", row.Status)
 		}

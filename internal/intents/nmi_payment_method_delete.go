@@ -378,7 +378,9 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if found && prior.Status == StatusSucceeded {
 		return methodDeleteOutcome(prior), nil
 	}
-	if origin, _ := paymentMethodDeleteAuthority(ctx, pm.CustomerID); origin == OriginUser || origin == OriginAdmin {
+	// Only the customer's own removal spends the customer-action budget; a
+	// staff or host removal is admitted as a staff command below.
+	if origin, _ := paymentMethodDeleteAuthority(ctx, pm.CustomerID); origin == OriginUser {
 		if t.BeforeUserDelete == nil {
 			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("user card deletion limiter is not configured")
 		}

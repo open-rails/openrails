@@ -92,6 +92,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return transition(ctx, database, lc, sub, d, now)
 
 	case TransitionCancel:
+		if book := declaredBookOf(ctx); book != nil {
+			return book.cancel(ctx, database, lc, sub, d, now)
+		}
 		if cancelHeld(ctx, database, sub, d) {
 			if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
 				return false, nil
@@ -166,10 +169,15 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 	// catch-all code would allow.
 	action := decline.ClassifyEvidence(decline.Evidence{Rail: string(sub.Rail), Code: code, IssuerCode: d.Decline.Answer.IssuerCode}).Action
 	certainty, blocked := "", ""
+	book := declaredBookOf(ctx)
 	if action == decline.NonRecoverable {
-		// The same certainty leg and kill switch OpenRails' own rebills use.
+		// The same certainty leg and kill switch OpenRails' own rebills use;
+		// a declared book's terminal decline is one of its admitted cancels.
 		certainty = collection.CertaintyNonRetryableDecline
-		if gate := destructive.New(database).Check(ctx, sub.MerchantID); !gate.Allowed {
+		if book != nil {
+			ctx, blocked = book.effect(ctx, database, sub, true)
+		}
+		if gate := destructive.New(database).Check(ctx, sub.MerchantID); blocked == "" && !gate.Allowed {
 			blocked = gate.Reason
 		}
 	}
@@ -191,7 +199,14 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 			return applied
 		},
 	})
-	return applied && err == nil, err
+	if err != nil || !applied || book == nil || blocked != "" || action != decline.NonRecoverable {
+		return applied && err == nil, err
+	}
+	after, err := subscriptions.NewSubscriptionRepo(database).GetByID(ctx, sub.ID)
+	if err != nil || after.Status != models.StatusCanceled {
+		return true, err
+	}
+	return true, book.finish(ctx, database)
 }
 
 // transition applies one event to the locked row and carries out its

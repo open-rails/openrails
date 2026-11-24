@@ -735,7 +735,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 		return false, nil, fmt.Errorf("failed to check payment method usage: %w", err)
 	}
 	if liveCount > 0 {
-		return false, nil, fmt.Errorf("%w: %d active, pending, or past-due subscription(s)", ErrPaymentMethodInUse, liveCount)
+		return false, nil, fmt.Errorf("%w: %d subscription(s) not canceled", ErrPaymentMethodInUse, liveCount)
 	}
 
 	// #682 shared-vault handling: deleting the remote vault customer destroys
@@ -803,8 +803,7 @@ func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx 
 
 	liveCount := 0
 	for _, sub := range subs {
-		switch sub.Status {
-		case models.StatusActive, models.StatusPending, models.StatusPastDue:
+		if sub.Status.Live() || sub.Status == models.StatusPending {
 			liveCount++
 		}
 	}

@@ -64,7 +64,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalA
 	if err != nil {
 		return err
 	}
-	l := lander{im: im, row: row, scope: scope, prices: prices, pspPrices: pspPrices, asOf: *row.PulledAt}
+	l := lander{im: im, row: row, scope: scope, prices: prices, pspPrices: pspPrices, asOf: *row.PulledAt, actor: approvalActor}
 	if scope.Rail == "nmi" {
 		// Refunds can be unmatched or linked to another customer. Inspect the
 		// whole staged import before landing any standalone charge.
@@ -206,6 +206,8 @@ type lander struct {
 	asOf              time.Time
 	refunds           map[string][]importRefund
 	unqualifiedRefund bool
+	// actor applied the import; the books it lands are its commands.
+	actor *destructive.Actor
 }
 
 // outcome is what landing did to one record.
@@ -257,7 +259,7 @@ func (l *lander) land(ctx context.Context, groups []customerGroup) error {
 	if err != nil {
 		return err
 	}
-	res, err := l.im.importBook(ctx, l.row, d.book)
+	res, err := l.im.importBook(ctx, l.row, d.book, l.actor)
 	var refusal *apperr.Error
 	if errors.As(err, &refusal) && refusal.Status < 500 && len(groups) > 1 {
 		for _, g := range groups {
@@ -284,12 +286,20 @@ func (l *lander) land(ctx context.Context, groups []customerGroup) error {
 	return l.im.writeOutcomes(ctx, l.row, d.outcomes)
 }
 
-func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, book billing.DeclaredBilling) (billing.BillingImportResult, error) {
+func (im *Importer) importBook(ctx context.Context, row gen.BillingPspImport, book billing.DeclaredBilling, actor *destructive.Actor) (billing.BillingImportResult, error) {
 	if len(book.Customers) == 0 {
 		return billing.BillingImportResult{}, nil
 	}
 	return billingimport.Import(ctx, im.Log, billingimport.Options{DB: im.DB, MerchantID: billing.MerchantID(row.MerchantID), Book: book, Clock: im.Clock,
-		Authority: reconcile.ProviderFacts})
+		Authority: reconcile.ProviderFacts, Admissions: im.admissions(), Actor: actor})
+}
+
+// admissions admits what an applied import's books destroy.
+func (im *Importer) admissions() *destructive.Admissions {
+	if im.Proposals == nil {
+		return nil
+	}
+	return im.Proposals.Admissions
 }
 
 // record maps subscription and receipt results onto their staged records.

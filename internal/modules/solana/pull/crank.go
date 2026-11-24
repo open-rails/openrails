@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/failpoint"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/logx"
@@ -230,6 +231,12 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 			if plan.periodEnd == nil {
 				return crankOutcome{}, errors.New("Solana decline has no accepted paid boundary")
 			}
+			// A spent schedule ends the membership only while the operator's
+			// switch allows destructive actions; otherwise it waits past_due.
+			blocked := ""
+			if gate := destructive.New(h.DB).Check(ctx, row.MerchantID); !gate.Allowed {
+				blocked = gate.Reason
+			}
 			start := plan.periodEnd.UTC()
 			accepted := &subscriptions.RenewalTerms{Rail: models.RailSolana, PSPID: row.PspID, SubscriptionID: row.SubscriptionID,
 				CustomerID: plan.customerID, FromPriceID: plan.priceID, FromProductID: plan.productID, PriceID: plan.priceID,
@@ -243,6 +250,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 				FailureCode:     &code,
 				FailureID:       memoLocalID,
 				AttemptRecorded: true,
+				TerminalBlocked: blocked,
 			}); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: fail membership: %w", err)
 			}

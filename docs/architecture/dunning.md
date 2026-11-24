@@ -222,8 +222,8 @@ Solana pull checks no gate). Under `limited`, the due pass holds the end of an
 `subscription_status_transitions` records the actor of each status change.
 
 Checks:
-- The engine, NMI and converge callers pass `TerminalBlocked` from
-  `destructive.Gate`; the Solana crank (`solana/pull/crank.go`) passes none.
+- The engine, NMI, converge and Solana crank callers pass `TerminalBlocked`
+  from `destructive.Gate` (OR-J34-S32).
 - `ExpireAwaitingMethod` keeps a blocked row (OR-J16-S31).
 
 ## Tests

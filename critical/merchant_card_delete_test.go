@@ -165,4 +165,23 @@ func TestMerchantCardRemoval(t *testing.T) {
 			}
 		}
 	})
+	t.Run("OR-J12-S73/a-card-an-unverified-membership-bills-is-kept", func(t *testing.T) {
+		a, journal, sub := nmiMembership(t)
+		// The host's book declares the membership canceled while the switch is
+		// off: it waits unverified, still on its card.
+		asOf := sub.CurrentPeriodStartsAt.Add(time.Hour)
+		_, err := a.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "nmi"}, Customers: []billing.DeclaredCustomer{{Customer: sub.CustomerID}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "known-nmi-membership", Customer: sub.CustomerID, Price: sub.PriceID, Rail: "nmi", RailSubscriptionID: *sub.RailSubscriptionID,
+				StartedAt: *sub.CurrentPeriodStartsAt, PaidThrough: sub.CurrentPeriodEndsAt, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: asOf.Add(-time.Minute)}}}})
+		require.NoError(t, err)
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionUnverified, current.Status)
+		methods, err := a.alpha.ListPaymentMethods(t.Context(), sub.CustomerID, billing.PaymentMethodListParams{})
+		require.NoError(t, err)
+		require.Len(t, methods.Items, 1)
+		status, raw := a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+methods.Items[0].ID.String(), a.aliceToken, nil)
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Len(t, journal.core.Vaults(), 1, "the schedule's vault stays")
+	})
 }

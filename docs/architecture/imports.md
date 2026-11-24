@@ -197,18 +197,24 @@ dismissed. Cancels, past due, refunds and product moves wait for
 `ApproveProposals`, which admits each cancel through the destructive policy
 and spends the actor's allowance. Each Apply is one approval run in its
 requester's name, reversible by `openrails undo-run`. A billing-book import is
-an operator command: its cancels run under `reconcile.WithAdmittedCancels`, and
-absence cancels need `subscriptions_exhaustive` with a matching
-`expected_subscriptions`.
+one command (`reconcile.DeclaredBook`): its cancels and owed provider stops are
+admitted together as the caller's `cancel_subscription` actions, and a cancel
+of a row the book did not create also waits for the destructive switch and its
+PSP's cancellation cap, all or nothing, parking the row `unverified`. Absence
+cancels need `subscriptions_exhaustive` with a matching
+`expected_subscriptions`. A `failed` import is refused; a person creates it
+again.
 
 Checks:
 - `ListPullCorrections` (`internal/db/queries/reconciliation.sql`) selects only access-keeping kinds; OR-J38-S21, S25, S28, S32.
 - OR-J38-S71: proposal cancels spend the allowance once per subscription; a replay spends nothing.
+- OR-J34-S33: a book's cancel waits for the switch and the cap, and records its actor.
+- OR-J38-S73: a `failed` import cannot be applied.
 - `ImportDeclaredSubscriptions` refuses an exhaustive book whose `expected_subscriptions` differs from its count.
 
 ## Tests
 
-- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42.
+- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42; `TestPSPImportSafeguards`: S73, S74.
 - `TestPSPReconcile`: OR-J38-S20 to S29, S35, S71.
 - `TestMerchantConsole`: OR-J38-S30 to S34, S41.
 - `TestCCBillIdentity`: OR-J38-S37 to S40, S43; `TestCardGuard`: S36; `TestManualProviderRefresh`: S72.
@@ -220,4 +226,3 @@ Gaps:
 
 - The billing-book import has no scenario for classification at `as_of` (active, past due, `unverified`, stale cancel); tests use it to set up books.
 - Untested: `subscriptions_exhaustive` absence cancels, `historical_payments`, NMI standalone history through a PSP import, `life.import.no_recurring_anchor`, `life.import.schedule_unresolved`, `life.import.purchase_refused`.
-- The billing-book import records no actor, and its cancels skip the destructive switch and cancel budget without an admission step.

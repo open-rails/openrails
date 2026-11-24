@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 459,
+  "scenario_count": 465,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1549,6 +1549,16 @@
       "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
     },
     {
+      "id": "OR-J38-S73",
+      "journey": "J38",
+      "name": "A failed PSP import cannot be applied"
+    },
+    {
+      "id": "OR-J38-S74",
+      "journey": "J38",
+      "name": "A price picked for an import record is never deleted"
+    },
+    {
       "id": "OR-J38-S35",
       "journey": "J38",
       "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply, never into or out of a chargeback and never for an unpaid Stripe subscription; status, period and access stay byte-identical and the provider sees no write"
@@ -1617,6 +1627,21 @@
       "id": "OR-J34-S31",
       "journey": "J34",
       "name": "Only an in-process handle acts for a named person; a remote handle refuses ActingFor"
+    },
+    {
+      "id": "OR-J34-S32",
+      "journey": "J34",
+      "name": "With the destructive switch off a spent Solana schedule waits past due with access"
+    },
+    {
+      "id": "OR-J34-S33",
+      "journey": "J34",
+      "name": "A billing import cancels only through the destructive switch, the PSP cancellation cap and an admission recording its actor"
+    },
+    {
+      "id": "OR-J34-S34",
+      "journey": "J34",
+      "name": "A staff card removal is a staff admission and spends no customer-action budget"
     },
     {
       "id": "OR-J16-S30",
@@ -2042,6 +2067,11 @@
       "id": "OR-J12-S71",
       "journey": "J12",
       "name": "NMI card erasure completes only after provider confirmation"
+    },
+    {
+      "id": "OR-J12-S73",
+      "journey": "J12",
+      "name": "A card an unverified membership bills cannot be removed"
     },
     {
       "id": "OR-J04-S37",

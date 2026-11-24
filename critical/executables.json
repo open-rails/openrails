@@ -780,6 +780,15 @@
     "OR-J34-S31": [
       "TestDestructiveControls/OR-J34-S31/a-remote-handle-refuses-acting-for"
     ],
+    "OR-J34-S32": [
+      "TestDestructiveSafeguards/OR-J34-S32/a-spent-solana-schedule-waits-past-due-while-the-switch-is-off"
+    ],
+    "OR-J34-S33": [
+      "TestDestructiveSafeguards/OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission"
+    ],
+    "OR-J34-S34": [
+      "TestDestructiveSafeguards/OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget"
+    ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",
@@ -1026,6 +1035,12 @@
     ],
     "OR-J38-S72": [
       "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
+    ],
+    "OR-J38-S73": [
+      "TestPSPImportSafeguards/OR-J38-S73/a-failed-import-is-never-applied"
+    ],
+    "OR-J38-S74": [
+      "TestPSPImportSafeguards/OR-J38-S74/a-price-picked-for-an-import-record-is-never-deleted"
     ],
     "OR-J38-S35": [
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
@@ -1274,6 +1289,9 @@
     ],
     "OR-J12-S71": [
       "TestMerchantCardRemoval/OR-J12-S71/nmi-erasure-requires-confirmed-absence"
+    ],
+    "OR-J12-S73": [
+      "TestMerchantCardRemoval/OR-J12-S73/a-card-an-unverified-membership-bills-is-kept"
     ],
     "OR-J22-S07": [
       "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"

@@ -979,7 +979,11 @@ func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhook
 	return &out, nil
 }
 
-// ImportBilling lands declared billing facts under the bound merchant.
+// ImportBilling lands declared billing facts under the bound merchant. The
+// book's cancels and the provider stops it owes are the caller's destructive
+// actions, admitted together: a cancel of a subscription the book did not
+// create also waits for the destructive-action switch and its PSP's
+// cancellation cap, keeping access meanwhile.
 func (c *Client) ImportBilling(ctx context.Context, params billing.DeclaredBilling) (*billing.BillingImportResult, error) {
 	var out billing.BillingImportResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/billing-import", body: params}, &out); err != nil {

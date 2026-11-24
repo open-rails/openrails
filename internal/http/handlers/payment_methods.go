@@ -548,7 +548,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 		r.Log.With(fields...).InfoContext(r.Request.Context(), "Payment method deletion was not confirmed; explicit retry required", logx.Err(err))
 		r.ErrorCode(billing.CodeServiceUnavailable, "Card removal could not be confirmed. Please try again.")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodInUse):
-		r.ErrorCode(billing.CodeResourceConflict, "Cannot delete payment method linked to an active, pending, or past-due subscription")
+		r.ErrorCode(billing.CodeResourceConflict, "Cannot delete a payment method a subscription that is not canceled still uses")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
 		r.ErrorCode(billing.CodeResourceConflict, "Payment method cannot be deleted safely; contact support")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):

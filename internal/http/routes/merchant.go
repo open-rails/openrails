@@ -70,8 +70,11 @@ var merchantRoutes = []Route{
 	// subscriptions, payments and payment methods wholesale, so it is the
 	// merchant's configuration; the import pins its own merchant connection.
 	{Method: POST, Path: "/v1/merchant/billing-import", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ImportBilling", NoConn: true,
-		Doc:     "ImportBilling lands declared billing facts under the bound merchant.",
-		Request: billingimport.DeclaredBilling{}, Responses: []Reply{{200, billingimport.Result{}}}, Errors: codes("as_of_required", "invalid_param", "invalid_psp_reference", "resource_conflict"), Handler: h(handlers.ImportDeclaredBilling)},
+		Doc: "ImportBilling lands declared billing facts under the bound merchant. The book's cancels and the " +
+			"provider stops it owes are the caller's destructive actions, admitted together: a cancel of a " +
+			"subscription the book did not create also waits for the destructive-action switch and its PSP's " +
+			"cancellation cap, keeping access meanwhile.",
+		Request: billingimport.DeclaredBilling{}, Responses: []Reply{{200, billingimport.Result{}}}, Errors: codes("as_of_required", "invalid_param", "invalid_psp_reference", "rate_limit_exceeded", "resource_conflict"), Handler: h(handlers.ImportDeclaredBilling)},
 
 	// PSP imports: pull a PSP's subscribers read-only, link them to customers
 	// by the merchant's rules and mappings, and land the linked ones through

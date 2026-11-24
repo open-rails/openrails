@@ -110,25 +110,6 @@ func (q *Queries) CountPSPImportRecords(ctx context.Context, arg CountPSPImportR
 	return items, nil
 }
 
-const countPSPLiveSubscriptions = `-- name: CountPSPLiveSubscriptions :one
-SELECT count(*)::int FROM billing.subscriptions
-WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND deleted_at IS NULL
-  AND rail_subscription_id IS NOT NULL AND status IN ('active', 'past_due', 'pending')
-`
-
-type CountPSPLiveSubscriptionsParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-}
-
-// The PSP's live provider subscriptions: what a roster read is weighed against.
-func (q *Queries) CountPSPLiveSubscriptions(ctx context.Context, arg CountPSPLiveSubscriptionsParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countPSPLiveSubscriptions, arg.MerchantID, arg.PspID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const createPSPImport = `-- name: CreatePSPImport :one
 INSERT INTO billing.psp_imports (merchant_id, psp_id, rail, status, history_since, rules)
 VALUES ($1::uuid, $2::uuid, $3::text, 'pulling', $4::timestamptz,

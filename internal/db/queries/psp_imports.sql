@@ -322,10 +322,3 @@ SELECT count(*) FILTER (WHERE status IN ('reconcile_required', 'requires_review'
     count(*) FILTER (WHERE resolution = 'superseded')::int AS superseded
 FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pull_id = sqlc.arg(pull_id)::uuid;
-
--- name: CountPSPLiveSubscriptions :one
--- The PSP's live provider subscriptions: what a roster read is weighed against.
-SELECT count(*)::int FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND deleted_at IS NULL
-  AND rail_subscription_id IS NOT NULL AND status IN ('active', 'past_due', 'pending');
-

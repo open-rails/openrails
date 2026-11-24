@@ -20,9 +20,9 @@ import (
 // re-decision after a concurrent write) is held. Any other caller is a pass of
 // one, held by the destructive switch; one cancel is always within budget. The
 // switch is read again for every cancel, so turning it off stops a running
-// pass. An admitted operator command (a declared book, an approved proposal)
-// carries its own authority. A held cancel parks a live row `unverified`, access
-// kept, for the next read once the gate allows it.
+// pass. An approved proposal carries its own admission, and a declared book
+// admits its cancels itself (DeclaredBook). A held cancel parks a live row
+// `unverified`, access kept, for the next read once the gate allows it.
 
 type cancelPassKey struct{}
 

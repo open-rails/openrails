@@ -74,10 +74,10 @@ an expired-card decline) queues `openrails.stored_card_refresh`, which runs an
 
 ### Removal
 
-`DeletePaymentMethod` is refused while a live subscription, an unresolved
-operation or an in-flight charge uses the card. It spends the customer-action
-budget (`user_destructive_reservations`); a staff removal is also admitted as
-`delete_payment_method`. `FencePaymentMethodDeletion` locks the card (its
+`DeletePaymentMethod` is refused while a subscription that is not canceled (`unverified` and `awaiting_method` included), an unresolved
+operation or an in-flight charge uses the card. The customer's own removal spends the customer-action
+budget (`user_destructive_reservations`); a staff or host removal is admitted as
+`delete_payment_method` instead. `FencePaymentMethodDeletion` locks the card (its
 `park_reason` names the operation), then a request-only operation
 (`nmi_vault_delete`, `hyperswitch_method_delete` or `platform_method_delete`)
 verifies, then executes. Only on the provider's confirmation is the row
@@ -206,8 +206,8 @@ Checks:
 ### 9. Destructive-action safeguards
 
 OpenRails never removes a card on its own: a closed card ends its mandates and
-asks the customer. A removal spends the merchant-wide customer-action budget
-(`destructive.UserActionLimiter`) and, for staff, a destructive admission; it
+asks the customer. A customer's removal spends the merchant-wide customer-action budget
+(`destructive.UserActionLimiter`), a staff one a destructive admission (OR-J34-S34); it
 is attributed by `origin` and `actor`, and a user-origin removal must be the
 signed-in customer's (`validatePaymentMethodDeleteAuthority`).
 
