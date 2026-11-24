@@ -5,7 +5,7 @@
 #   in-repo:   bash scripts/build-payment-page.sh   (builds web/pay/dist,
 #              which web/pay/embed.go go:embeds into the binary)
 #   consumer:  bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-payment-page.sh" <output-dir>
-#              and pass the build as server.Deps.PaymentPageAssets
+#              and pass the build as Deps.CheckoutAssets
 #
 # The Go module cache is read-only, so when the sources aren't writable both
 # are copied to a temp dir, keeping their relative layout, before building.

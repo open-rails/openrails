@@ -20,8 +20,8 @@
 // permanent); resolved reconciliation_findings 12 months; order_attempts that
 // never reached a provider, and unpaid closed orders with none, 90 days;
 // parked_provider_subscriptions 90 days after release; carts 30 days idle;
-// notification_events, host_outbox and the event log 90 days, never before
-// EventRetention; webhook_events 90 days after completion; idempotency_keys and
+// notification_events and host_outbox 90 days, never before EventRetention;
+// the event log at EventRetention; webhook_events 90 days after completion; idempotency_keys and
 // solana_pay_references at expiry (after the 7-day watch);
 // user_destructive_reservations 24 hours; failed_usage_windows when the window
 // ends; meter_period_quantities 100 days; limit_windows 61 days after
