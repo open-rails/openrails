@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 503,
+  "scenario_count": 504,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2517,6 +2517,11 @@
       "id": "OR-J43-S11",
       "journey": "J43",
       "name": "The breaker marks a destructive attempt sent before its provider call, and its phases are written ahead with their actor"
+    },
+    {
+      "id": "OR-J43-S12",
+      "journey": "J43",
+      "name": "A price migration's source archive waits for the catalog lock another writer holds, then is recorded once, as the migration's, with the key's move to nothing"
     }
   ]
 }

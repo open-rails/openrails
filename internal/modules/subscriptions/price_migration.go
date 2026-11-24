@@ -462,10 +462,14 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 
 // archiveSource archives a migrated price and, in its transaction, records it
 // in the configuration history as the catalog writer would: the price's
-// archive and its key's move to nothing.
+// archive and its key's move to nothing. It waits for the catalog lock, so no
+// catalog edit's before and after straddle it.
 func (s *PriceMigrationService) archiveSource(ctx context.Context, mid billing.MerchantID, source *models.Price) error {
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCatalogRevision(ctx, mid.UUID()); err != nil {
+			return err
+		}
 		prices := catalog.NewPriceService(d)
 		if err := prices.SetArchived(ctx, source.ID, true); err != nil {
 			return err

@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -358,4 +359,59 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 			require.Equal(t, "user", op.Origin)
 		}
 	})
+
+	t.Run("OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock", func(t *testing.T) {
+		a, _, sub := purchasedMembership(t)
+		target := migrationPrice(t, a, sub, "held-target", 30_000_000)
+		// Another catalog writer holds the catalog lock.
+		holder, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = holder.Rollback(context.Background()) }()
+		var revision int64
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT catalog_revision FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id = $1 FOR UPDATE",
+			a.alpha.MerchantID().UUID()).Scan(&revision))
+		done := make(chan error, 1)
+		go func() {
+			_, err := a.alphaRemote.CreatePriceMigration(context.Background(), billing.CreatePriceMigrationParams{FromPriceID: sub.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			t.Fatalf("the migration archived its source under another writer's catalog lock: %v", err)
+		case <-time.After(2 * time.Second):
+		}
+		source, err := a.alpha.GetPrice(t.Context(), sub.PriceID)
+		require.NoError(t, err)
+		require.False(t, source.Archived, "the source sells until the lock is free")
+		require.NoError(t, holder.Rollback(t.Context()))
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(20 * time.Second):
+			t.Fatal("the migration never finished once the lock was free")
+		}
+		source, err = a.alpha.GetPrice(t.Context(), sub.PriceID)
+		require.NoError(t, err)
+		require.True(t, source.Archived)
+
+		entries := objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "membership:membership-day")
+		var archives, retired []billing.LogEntry
+		for _, e := range entries {
+			if e.Action == billing.LogActionArchive {
+				archives = append(archives, e)
+			}
+			if e.Action == billing.LogActionMove && changeOf(t, e).Archived {
+				retired = append(retired, e)
+			}
+		}
+		require.Len(t, archives, 1, "the archive is recorded once")
+		require.Len(t, retired, 1, "and the key's move to nothing once")
+		require.Equal(t, []billing.LogAction{billing.LogActionMove, billing.LogActionArchive}, actions(entries[:2]), "both are the migration's latest")
+		for _, e := range []billing.LogEntry{archives[0], retired[0]} {
+			require.True(t, strings.HasPrefix(string(e.Actor), "staff:"), "the migration's own actor: %s", e.Actor)
+			require.EqualValues(t, source.Revision, *changeOf(t, e).Revision)
+		}
+		require.Equal(t, source.ID, changeOf(t, retired[0]).PriceID)
+	})
+
 }

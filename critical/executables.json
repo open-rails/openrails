@@ -1600,6 +1600,9 @@
     ],
     "OR-J43-S11": [
       "TestOperationsHistory/OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call"
+    ],
+    "OR-J43-S12": [
+      "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
     ]
   }
 }

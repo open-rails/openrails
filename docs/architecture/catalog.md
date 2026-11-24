@@ -36,7 +36,7 @@ The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
 row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
 document, which advances it once with `AdvanceCatalogRevision`).
 
-**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration that archives its sources records their archive and move as it writes them. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
+**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration that archives its sources records their archive and move as it writes them, under the catalog lock. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
 
 **Applying a document** (`internal/service/catalog_application.go`):
 
