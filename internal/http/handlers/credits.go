@@ -63,6 +63,7 @@ func billingService(r *httprequest.Request) (*billingservice.Service, bool) {
 // writeMoneyError answers a credit, admission or usage refusal with its
 // registered code.
 func writeMoneyError(r *httprequest.Request, err error, internalMessage string) {
+	setRetryAfter(r, err)
 	if out := moneyRefusal(err); out != nil {
 		r.APIError(out)
 		return

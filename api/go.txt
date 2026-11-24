@@ -278,6 +278,8 @@ pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, ActorPerHour int64
 pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, DeploymentPerHour int64
+pkg openrails, type DestructiveActionLimitsConfig struct, ErasurePerDay int64
+pkg openrails, type DestructiveActionLimitsConfig struct, ErasurePerHour int64
 pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerDay int64
 pkg openrails, type DestructiveActionLimitsConfig struct, MerchantPerHour int64
 pkg openrails, type Email struct

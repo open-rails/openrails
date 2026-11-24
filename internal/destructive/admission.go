@@ -65,6 +65,9 @@ func holdKeys(row gen.BillingDestructiveAction, mid uuid.UUID) []string {
 	case "automation":
 		return []string{automationKey(row.ActorID, mid)}
 	}
+	if Kind(row.Kind) == EraseContact {
+		return []string{erasureKey(mid)}
+	}
 	return scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
 }
 
@@ -121,6 +124,9 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 	for _, c := range commands {
 		if err := c.validate(); err != nil {
 			return nil, err
+		}
+		if c.Kind == EraseContact {
+			return nil, errors.New("an erasure is admitted by AdmitErasure")
 		}
 		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID || c.origin != first.origin {
 			return nil, errors.New("destructive batch must share merchant and actor")
@@ -207,10 +213,10 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			return nil, err
 		}
 		var hourly, daily int64
-		hourSince, daySince := now.Add(-time.Hour), now.Add(-24*time.Hour)
+		hourSince, daySince, reservedSince := now.Add(-time.Hour), now.Add(-24*time.Hour), now.Add(-ReservationLife)
 		switch scope {
 		case ScopeActor:
-			n, err := q.CountDestructiveUnitsForActor(ctx, gen.CountDestructiveUnitsForActorParams{ActorKey: c.Actor.key(), HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+			n, err := q.CountDestructiveUnitsForActor(ctx, gen.CountDestructiveUnitsForActorParams{ActorKey: c.Actor.key(), HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 			if err != nil {
 				return nil, err
 			}
@@ -218,20 +224,20 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 		case ScopeMerchant:
 			if c.origin == "automation" {
 				n, err := q.CountDestructiveUnitsForAutomation(ctx, gen.CountDestructiveUnitsForAutomationParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after,
-					Disputes: c.Actor.ID == DisputeSource})
+					ReservedSince: reservedSince, Disputes: c.Actor.ID == DisputeSource})
 				if err != nil {
 					return nil, err
 				}
 				hourly, daily = n.Hourly, n.Daily
 			} else {
-				n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+				n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 				if err != nil {
 					return nil, err
 				}
 				hourly, daily = n.Hourly, n.Daily
 			}
 		case ScopeDeployment:
-			n, err := q.CountDestructiveUnitsForDeployment(ctx, gen.CountDestructiveUnitsForDeploymentParams{HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+			n, err := q.CountDestructiveUnitsForDeployment(ctx, gen.CountDestructiveUnitsForDeploymentParams{HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 			if err != nil {
 				return nil, err
 			}

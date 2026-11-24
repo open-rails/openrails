@@ -233,6 +233,7 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 			r.InternalError("execution failed and the failure note could not be recorded", errors.Join(execErr, nerr))
 			return nil, false
 		}
+		setRetryAfter(r, execErr)
 		r.APIError(findingActionRefusal(execErr))
 		return nil, false
 	}

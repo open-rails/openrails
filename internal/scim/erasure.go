@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
@@ -14,26 +16,19 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // An erasure (DELETE /Users/{id}, alone or in a Bulk) is a destructive
-// command, destructive.EraseContact: it names the actor the route gate
-// admitted (the provisioning token or the application), spends that actor's,
-// its merchant's and the deployment's destructive budget, and is refused
-// while a hold covers any of them.
+// command, destructive.EraseContact, admitted to the merchant's erasure scope
+// (destructive.AdmitErasure): it names the token or application that asked
+// and runs at once within the scope's budget. Otherwise it waits and is never
+// lost: the User leaves the directory at once (SCIM answers 204, then 404 for
+// it), and its values stay until the queue drains (DrainErasures).
 
-var (
-	errHeld          = errorf(http.StatusTooManyRequests, "", "erasures are held for operator review: the destructive budget is spent")
-	errNoAdmissions  = errorf(http.StatusServiceUnavailable, "", "erasure is not available")
-	errReprovisioned = errorf(http.StatusConflict, "", "the User was provisioned again; send the DELETE again")
-)
+var errNoAdmissions = errorf(http.StatusServiceUnavailable, "", "erasure is not available")
 
-// erasures are a Bulk request's admitted erasures, by command key, and those
-// whose operation ran.
-type erasures struct {
-	actions map[string]destructive.Action
-	ran     map[string]bool
-}
+const erasurePrefix = "scim-erase:"
 
 // erasureCommand erases row's User as it was provisioned: a later
 // provisioning of the same User is another erasure.
@@ -41,15 +36,27 @@ func erasureCommand(ctx context.Context, row gen.BillingCustomerContact) (destru
 	if row.ProvisionedAt == nil {
 		return destructive.Command{}, errors.New("an unprovisioned User has nothing to erase")
 	}
-	user, at := row.CustomerID.String(), row.ProvisionedAt.UTC().Format(time.RFC3339Nano)
-	return destructive.CommandFromContext(ctx, destructive.EraseContact, user, "scim-erase:"+user+":"+at, struct{ User, Provisioned string }{user, at})
+	user, at := row.CustomerID.String(), strconv.FormatInt(row.ProvisionedAt.UnixNano(), 10)
+	return destructive.CommandFromContext(ctx, destructive.EraseContact, user, erasurePrefix+user+":"+at, struct{ User, Provisioned string }{user, at})
+}
+
+// erasureTarget is the User and provisioning an erasure command names.
+func erasureTarget(action destructive.Action) (uuid.UUID, time.Time, bool) {
+	parts := strings.Split(strings.TrimPrefix(action.Key, erasurePrefix), ":")
+	if !strings.HasPrefix(action.Key, erasurePrefix) || len(parts) < 2 {
+		return uuid.Nil, time.Time{}, false
+	}
+	user, err := uuid.Parse(parts[0])
+	nanos, perr := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || perr != nil {
+		return uuid.Nil, time.Time{}, false
+	}
+	return user, time.Unix(0, nanos).UTC(), true
 }
 
 // deleteUser erases the User's contact, notifications and message log, and
-// keeps the customer's billing. The contact row stays, without values, so an
-// older report cannot restore them. batch holds a Bulk request's admissions;
-// any other erasure is admitted here.
-func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string, batch *erasures) *Error {
+// keeps the customer's billing, at once or once its erasure's turn comes.
+func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string) *Error {
 	if s.Admissions == nil {
 		return errNoAdmissions
 	}
@@ -62,106 +69,94 @@ func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id stri
 		s.Log.ErrorContext(ctx, "scim: erasure has no admitted actor", logx.Err(err))
 		return errInternal
 	}
-	if action, ok := batch.prepared(command.Key); ok {
-		ctx = destructive.BindPreparedActions(ctx, []destructive.Action{action})
+	action, err := s.Admissions.AdmitErasure(ctx, command)
+	if err == nil {
+		switch action.State {
+		case destructive.StateStarted, destructive.StateUncertain:
+			err = RunErasure(ctx, s.DB, s.Admissions, action)
+		case destructive.StateReserved:
+			err = withdraw(ctx, s.DB, action)
+		}
 	}
-	now := s.now()
-	err = destructive.RunLocal(ctx, s.DB, s.Admissions, command, func(ctx context.Context, tx pgx.Tx, _ *db.DB) (bool, error) {
-		q := gen.New(tx)
-		locked, err := provisioned(ctx, q, mid, id)
-		if err != nil {
-			return false, err
-		}
-		if !locked.ProvisionedAt.Equal(*row.ProvisionedAt) {
-			return false, errReprovisioned
-		}
-		if _, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
-			MerchantID: locked.MerchantID, CustomerID: locked.CustomerID, DirectoryUpdatedAt: latest(now, locked.DirectoryUpdatedAt),
-		}); err != nil {
-			return false, err
-		}
-		if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: locked.MerchantID, CustomerID: locked.CustomerID}); err != nil {
-			return false, err
-		}
-		return true, q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: locked.MerchantID, CustomerID: locked.CustomerID})
-	})
 	return s.erasureError(ctx, err)
 }
 
-// admitErasures admits a Bulk request's erasures as one batch before any
-// operation runs: over a budget, a hold opens and the request applies
-// nothing. A DELETE of a User the same request creates is admitted when it
-// runs; one of no provisioned User answers its own 404.
-func (s *Server) admitErasures(ctx context.Context, mid billing.MerchantID, list []any) (*erasures, *Error) {
-	batch := &erasures{actions: map[string]destructive.Action{}, ran: map[string]bool{}}
-	var commands []destructive.Command
-	for _, item := range list {
-		obj, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		o := lower(obj)
-		method, _, _ := o.str("method")
-		path, _, _ := o.str("path")
-		resource, id, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
-		if !strings.EqualFold(method, http.MethodDelete) || !strings.EqualFold(resource, "Users") || id == "" || strings.HasPrefix(id, "bulkId:") {
-			continue
-		}
-		row, e := s.getUser(ctx, mid, id)
+// withdraw takes a waiting erasure's User out of the directory at once,
+// keeping its values until the erasure runs, and queues the drain.
+func withdraw(ctx context.Context, d *db.DB, action destructive.Action) error {
+	user, episode, ok := erasureTarget(action)
+	if !ok {
+		return errors.New("scim: an erasure names no User")
+	}
+	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		row, err := q.GetCustomerContactForUpdate(ctx, gen.GetCustomerContactForUpdateParams{MerchantID: action.MerchantID, CustomerID: user})
 		switch {
-		case e == errNotFound:
-			continue
-		case e != nil:
-			return nil, e
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		case row.ProvisionedAt != nil && row.ProvisionedAt.Equal(episode):
+			if _, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
+				MerchantID: row.MerchantID, CustomerID: row.CustomerID, Email: row.Email, DisplayName: row.DisplayName, UserName: row.UserName,
+				Active: row.Active, DirectoryUpdatedAt: latest(action.AdmittedAt, row.DirectoryUpdatedAt),
+			}); err != nil {
+				return err
+			}
 		}
-		command, err := erasureCommand(ctx, row)
+		return d.QueueRiverJobNowTx(ctx, tx, destructive.DrainErasuresArgs{MerchantID: action.MerchantID}, nil)
+	})
+}
+
+// RunErasure runs a started erasure and records its outcome with it: no
+// effect when the User was provisioned again since.
+func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action destructive.Action) error {
+	user, episode, ok := erasureTarget(action)
+	if !ok {
+		return errors.New("scim: an erasure names no User")
+	}
+	ctx = merchant.WithID(ctx, billing.MerchantID(action.MerchantID))
+	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		outcome := destructive.OutcomeNoEffect
+		row, err := q.GetCustomerContactForUpdate(ctx, gen.GetCustomerContactForUpdateParams{MerchantID: action.MerchantID, CustomerID: user})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		case row.ProvisionedAt == nil || row.ProvisionedAt.Equal(episode):
+			if _, err := q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
+				MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(action.AdmittedAt, row.DirectoryUpdatedAt),
+			}); err != nil {
+				return err
+			}
+			if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
+				return err
+			}
+			if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
+				return err
+			}
+			outcome = destructive.OutcomeSucceeded
+		}
+		return a.FinishTx(ctx, tx, action.MerchantID, action.ID, outcome, "")
+	})
+}
+
+// DrainErasures runs the merchant's waiting erasures as far as its erasure
+// scope's budget allows while the scope is unheld. Waiting reports any left
+// for a later pass.
+func DrainErasures(ctx context.Context, d *db.DB, a *destructive.Admissions, mid billing.MerchantID) (bool, error) {
+	for {
+		actions, waiting, err := a.StartErasures(ctx, mid.UUID(), 100)
 		if err != nil {
-			s.Log.ErrorContext(ctx, "scim: erasure has no admitted actor", logx.Err(err))
-			return nil, errInternal
+			return false, err
 		}
-		if _, dup := batch.actions[command.Key]; dup {
-			continue
+		for _, action := range actions {
+			if err := RunErasure(ctx, d, a, action); err != nil {
+				return true, err
+			}
 		}
-		batch.actions[command.Key] = destructive.Action{}
-		commands = append(commands, command)
-	}
-	if len(commands) == 0 {
-		return batch, nil
-	}
-	if s.Admissions == nil {
-		return nil, errNoAdmissions
-	}
-	actions, err := s.Admissions.AdmitBatch(ctx, commands)
-	if err != nil {
-		return nil, s.erasureError(ctx, err)
-	}
-	for _, action := range actions {
-		batch.actions[action.Key] = action
-	}
-	return batch, nil
-}
-
-// prepared is the batch's admission of key, marked as run.
-func (b *erasures) prepared(key string) (destructive.Action, bool) {
-	if b == nil {
-		return destructive.Action{}, false
-	}
-	action, ok := b.actions[key]
-	if ok {
-		b.ran[key] = true
-	}
-	return action, ok
-}
-
-// release ends, as without effect, each admission whose operation never ran
-// (failOnErrors stopped the request first), so it holds no budget.
-func (s *Server) release(ctx context.Context, mid billing.MerchantID, batch *erasures) {
-	for key, action := range batch.actions {
-		if batch.ran[key] || action.Replayed || action.State != destructive.StateReserved {
-			continue
-		}
-		if err := s.Admissions.Finish(ctx, mid.UUID(), action.ID, destructive.OutcomeNoEffect, ""); err != nil {
-			s.Log.WarnContext(ctx, "scim: an erasure that never ran stays reserved", logx.Err(err), "action_id", action.ID.String())
+		if !waiting || len(actions) == 0 {
+			return waiting, nil
 		}
 	}
 }
@@ -174,8 +169,6 @@ func (s *Server) erasureError(ctx context.Context, err error) *Error {
 		return nil
 	case errors.As(err, &refused):
 		return refused
-	case errors.Is(err, destructive.ErrHeld):
-		return errHeld
 	}
 	s.Log.ErrorContext(ctx, "scim: erasure failed", logx.Err(err))
 	return errInternal

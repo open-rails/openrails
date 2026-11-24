@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 529,
+  "scenario_count": 530,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1131,7 +1131,7 @@
     {
       "id": "OR-J07-S08",
       "journey": "J07",
-      "name": "Directory erasures spend the destructive budget and name their actor"
+      "name": "Contact erasures keep a budget and holds of their own, and an erasure past it waits rather than fails"
     },
     {
       "id": "OR-J01-S12",
@@ -1722,6 +1722,11 @@
       "id": "OR-J34-S31",
       "journey": "J34",
       "name": "Only an in-process handle acts for a named person; a remote handle refuses ActingFor"
+    },
+    {
+      "id": "OR-J34-S32",
+      "journey": "J34",
+      "name": "A reservation that never starts, left by a crash or refused at its start, stops holding budget"
     },
     {
       "id": "OR-J16-S30",

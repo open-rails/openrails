@@ -609,7 +609,7 @@ func (s *Server) patchFrom(ctx context.Context, mid billing.MerchantID, id strin
 // DeleteUser serves DELETE /Users/{id}.
 func (s *Server) DeleteUser() http.Handler {
 	return s.serve(func(ctx context.Context, w http.ResponseWriter, r *http.Request, mid billing.MerchantID) {
-		if e := s.deleteUser(ctx, mid, r.PathValue("id"), nil); e != nil {
+		if e := s.deleteUser(ctx, mid, r.PathValue("id")); e != nil {
 			writeError(w, e)
 			return
 		}

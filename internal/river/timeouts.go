@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/balancelook"
 
 	"github.com/open-rails/openrails/internal/convergejob"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -45,6 +46,7 @@ var kinds = map[string]time.Duration{
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
+	destructive.DrainErasuresKind:        DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
 	KindPacedProviderRefresh:             time.Hour,

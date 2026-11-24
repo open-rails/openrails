@@ -3,15 +3,18 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
-// incidentClear requires additional root operator authority. Merchant config
-// permission alone, application identities and delegation cannot clear holds:
-// only a self-acting human, or the person the in-process host names.
+// incidentClear requires additional authority: root operator authority, or
+// for the merchant's own erasure hold its provisioning authority
+// (merchant:provisioning:manage). Merchant config permission alone,
+// application identities and delegation cannot clear holds: only a
+// self-acting human, or the person the in-process host names.
 func incidentClear(e *Env) router.Handler {
 	return func(r *httprequest.Request) {
 		staff, ok := r.Staff()
@@ -26,8 +29,11 @@ func incidentClear(e *Env) router.Handler {
 			return
 		}
 		// A permission the host never declared is held by no one.
-		unlock := asked(e.Auth, Pair{Root: billing.RootAdminRateLimitsUnlock}).Root
-		allowed, err := can(r.Request.Context(), v, root, string(unlock))
+		need := Pair{Root: billing.RootAdminRateLimitsUnlock}
+		if erasureHold(r, staff.Merchant) {
+			need = needProvisioning
+		}
+		allowed, err := holds(r.Request.Context(), v, root, staff.Merchant, asked(e.Auth, need))
 		if err != nil {
 			r.ErrorCode(billing.CodeAuthorizationUnavailable, "")
 			return
@@ -45,4 +51,15 @@ func incidentClear(e *Env) router.Handler {
 func hostNamedPerson(r *httprequest.Request, who billingauth.Identity) bool {
 	host, inProcess := requestauth.HostPrincipalFromContext(r.Request.Context())
 	return inProcess && host.Invoker != nil && who.Issuer == billingauth.HostIssuer && who.Invoker == *host.Invoker
+}
+
+// erasureHold reports whether the hold the path names is the merchant's
+// erasure hold.
+func erasureHold(r *httprequest.Request, mid billing.MerchantID) bool {
+	id, err := billing.ParseDestructiveHoldID(r.Param("id"))
+	if err != nil || r.State == nil || r.State.DestructiveAdmissions == nil {
+		return false
+	}
+	hold, err := r.State.DestructiveAdmissions.GetHold(r.Request.Context(), mid.UUID(), id.UUID())
+	return err == nil && hold.Scope == destructive.ScopeErasure
 }

@@ -81,29 +81,31 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND finding_type='life.destructive
 SELECT EXISTS(SELECT 1 WHERE EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND (state IN ('reserved','started','uncertain') OR (state='succeeded' AND greatest(admitted_at,finished_at)>sqlc.arg(since)::timestamptz)))
  OR EXISTS(SELECT 1 FROM billing.destructive_holds WHERE cleared_at IS NULL AND (scope='deployment' OR merchant_id=sqlc.arg(merchant_id)::uuid OR scope_key IN (SELECT 'actor:'||actor_key FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid))))::boolean AS held;
 
+-- Every budget but the erasures' (CountErasureUnits): a reservation holds
+-- budget only while it may still start (reserved_since).
 -- name: CountDestructiveUnitsForActor :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=sqlc.arg(reserved_since)::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=sqlc.arg(actor_key)::text AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForMerchant :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=sqlc.arg(reserved_since)::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
 
 -- name: CountDestructiveUnitsForDeployment :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=sqlc.arg(reserved_since)::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
@@ -159,9 +161,32 @@ ORDER BY admission_sequence LIMIT 1;
 -- Dispute responses (actor dispute_response) count apart from the merchant's
 -- other autonomous work.
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=sqlc.arg(reserved_since)::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
+
+-- A merchant's contact erasures, apart from every other budget: those
+-- running, and those done since the day began after the scope's last clear.
+-- name: CountErasureUnits :one
+WITH counted AS (
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND kind='erase_contact' AND state IN ('started','uncertain')
+ UNION ALL
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND kind='erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+)
+SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
+ coalesce(sum(units),0)::bigint AS daily FROM counted;
+
+-- The merchant's erasure queue, oldest first: those waiting, and those a
+-- crash left started before stuck_before.
+-- name: ListErasureQueue :many
+SELECT * FROM billing.destructive_actions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND kind='erase_contact'
+ AND (state='reserved' OR (state='started' AND started_at<sqlc.arg(stuck_before)::timestamptz))
+ORDER BY admission_sequence LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ErasureQueuedBefore :one
+SELECT EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND kind='erase_contact'
+ AND state='reserved' AND admission_sequence<sqlc.arg(admission_sequence)::bigint)::boolean AS queued;

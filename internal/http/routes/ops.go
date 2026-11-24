@@ -17,9 +17,10 @@ var opsRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/destructive-holds/{id}/clear", Group: MerchantConfig, Auth: AuthMerchant, Name: "ClearDestructiveHold", Level: LevelUpdate, Request: billing.ClearDestructiveHoldParams{}, Responses: []Reply{{200, billing.DestructiveHold{}}}, Errors: codes("invalid_param", "permission_required", "resource_not_found", "resource_conflict", "service_unavailable"), Bind: incidentClear,
 		Args: []any{billing.DestructiveHoldID{}},
 		Doc: "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other " +
-			"than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant " +
-			"configuration authority: over HTTP a self-acting human's own credential; in process the handle " +
-			"ActingFor names them, once the host has authenticated them."},
+			"than the one whose action opened it, holding merchant configuration authority and " +
+			"root:admin-rate-limits:unlock, or for the merchant's contact-erasure hold " +
+			"merchant:provisioning:manage, whose waiting erasures then run: over HTTP a self-acting human's own " +
+			"credential; in process the handle ActingFor names them, once the host has authenticated them."},
 
 	{Method: GET, Path: "/v1/admin/access", Group: Access, Auth: AuthSignedIn, Name: "GetAdminAccess",
 		Doc: "GetAdminAccess reports what the caller may use of each staff route group at the merchant and its " +

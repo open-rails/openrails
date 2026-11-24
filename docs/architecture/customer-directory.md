@@ -59,7 +59,7 @@ and updates go through `write` (`UpdateCustomerContact`).
 - Newest wins: `directory_updated_at` holds the directory's date
   (`meta.lastModified`, else arrival). A POST or PUT older than it keeps the stored
   values (`newer`). A PATCH is dated by its arrival.
-- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and dates it by its arrival, so an older report cannot restore them. It also erases the customer's notification events (`EraseCustomerNotificationEvents`) and message log (`EraseCustomerMessages`); billing stays. It is a destructive command (`destructive.EraseContact`, see guarantee 9).
+- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and dates it by its arrival, so an older report cannot restore them. It also erases the customer's notification events (`EraseCustomerNotificationEvents`) and message log (`EraseCustomerMessages`); billing stays. It is a destructive command (`destructive.EraseContact`) with a budget of its own, past which it waits (guarantee 9).
 - `userName` is unique per merchant, ignoring case, among provisioned rows
   (`customer_contacts_user_name_key`); a clash is `409 uniqueness`.
 - Bulk applies each operation alone, in order, up to `MaxOperations` (1000) and
@@ -178,11 +178,12 @@ Checks:
 - `SearchCustomerContacts` receives a LIKE pattern escaped by `likeEscaper`.
 
 ### 9. Destructive-action safeguards
-A `DELETE` erases only contact values, notification events and the message log; the customer, its ledger and subscriptions stay. Each erasure is a destructive command (`destructive.EraseContact`, run by `destructive.RunLocal`): it names the token or application that made it, spends that actor's, the merchant's and the deployment's budget (`destructive_action_limits`), and is refused `429` while a hold covers any of them. A Bulk request admits its erasures together before any operation runs (`admitErasures`): over a budget it applies nothing and opens a hold. The command key carries the User's `provisioned_at`, so erasing a User provisioned again is a new command. Erasures do not read the convergence kill switch, which governs automated cancels and provider deletes and is off on a fresh deployment.
+A `DELETE` erases only contact values, notification events and the message log; the customer, its ledger and subscriptions stay. Each erasure is a destructive command, `destructive.EraseContact`, naming the token or application that asked, admitted to the merchant's own erasure scope (`destructive.AdmitErasure`): its budget (`ErasurePerHour`, `ErasurePerDay`, floors that rise to a fiftieth an hour and a tenth a day of the provisioned contacts) and its hold count and hold only erasures, and no other command counts toward or is held by them. Within the budget, with nothing queued before it and no hold, the erasure runs at once (`RunErasure`). Otherwise it waits and is never refused: the answer is still `204`, the User leaves the directory at once (`withdraw` clears `provisioned_at`, keeping the values), and the first erasure past the budget opens the erasure hold. Waiting erasures run oldest first within the budget (`DrainErasures`, job `openrails.contact_erasures`) once a person holding `merchant:provisioning:manage` clears the hold; a new token is under the same hold. The command key carries the User's `provisioned_at`: an erasure of a User provisioned again before it ran has no effect. Erasures do not read the convergence kill switch, which governs automated cancels and provider deletes and is off on a fresh deployment.
 
 Checks:
-- `deleteUser` writes only `customer_contacts`, `notification_events` and `customer_messages`, inside `destructive.RunLocal`.
-- OR-J07-S08: an erasure records `erase_contact` with the token as its actor; a Bulk over the actor's budget erases nothing and opens an actor hold; the held token's next erasure is `429`; another application's erasure runs and names it.
+- `RunErasure` writes only `customer_contacts`, `notification_events` and `customer_messages`, and records its outcome in the same transaction.
+- Every budget query but `CountErasureUnits` leaves out `kind = 'erase_contact'`, and `holdKeys` fences an erasure with its scope's key alone.
+- OR-J07-S08: two erasures run at once and name the token; the third waits, the User gone and its values kept, under an erasure hold; a rotated token's erasure waits too; two actors' revocations still fit the merchant's limit, the third opening the merchant's hold; a configuration-only person cannot clear the erasure hold, a provisioning manager can, and the waiting erasures then run.
 
 ## Tests
 

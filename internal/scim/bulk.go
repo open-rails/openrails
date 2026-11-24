@@ -26,8 +26,8 @@ type BulkOperation struct {
 }
 
 // Bulk serves POST /Bulk: each operation on Users applies on its own, in
-// order, until failOnErrors errors have occurred. Its erasures are admitted
-// together first (admitErasures).
+// order, until failOnErrors errors have occurred. Each erasure runs or waits
+// on its own (deleteUser).
 func (s *Server) Bulk() http.Handler {
 	return s.serve(func(ctx context.Context, w http.ResponseWriter, r *http.Request, mid billing.MerchantID) {
 		raw, e := readBody(w, r)
@@ -62,12 +62,6 @@ func (s *Server) Bulk() http.Handler {
 			}
 			failOnErrors = int(n)
 		}
-		batch, e := s.admitErasures(ctx, mid, list)
-		if e != nil {
-			writeError(w, e)
-			return
-		}
-		defer s.release(ctx, mid, batch)
 		base := baseURL(r, "Bulk")
 		created := map[string]string{}
 		out := BulkResponse{Schemas: []string{BulkResponseSchema}, Operations: []BulkOperation{}}
@@ -76,7 +70,7 @@ func (s *Server) Bulk() http.Handler {
 			if failOnErrors > 0 && failed >= failOnErrors {
 				break
 			}
-			result := s.bulkOperation(ctx, mid, item, base, created, batch)
+			result := s.bulkOperation(ctx, mid, item, base, created)
 			if status, _ := strconv.Atoi(result.Status); status >= 400 {
 				failed++
 			}
@@ -96,7 +90,7 @@ func namesSchema(a attrs, schema string) bool {
 	return false
 }
 
-func (s *Server) bulkOperation(ctx context.Context, mid billing.MerchantID, item any, base string, created map[string]string, batch *erasures) BulkOperation {
+func (s *Server) bulkOperation(ctx context.Context, mid billing.MerchantID, item any, base string, created map[string]string) BulkOperation {
 	obj, ok := item.(map[string]any)
 	if !ok {
 		return failure(BulkOperation{}, errorf(http.StatusBadRequest, "invalidSyntax", "each operation must be an object"))
@@ -161,7 +155,7 @@ func (s *Server) bulkOperation(ctx context.Context, mid billing.MerchantID, item
 		if id == "" {
 			return failure(op, errorf(http.StatusBadRequest, "invalidPath", "DELETE needs /Users/{id}"))
 		}
-		if e := s.deleteUser(ctx, mid, id, batch); e != nil {
+		if e := s.deleteUser(ctx, mid, id); e != nil {
 			return failure(op, e)
 		}
 		op.Status, op.Location = strconv.Itoa(http.StatusNoContent), base+"/Users/"+id

@@ -62,19 +62,20 @@ func (q *Queries) ClearDestructiveHold(ctx context.Context, arg ClearDestructive
 
 const countDestructiveUnitsForActor = `-- name: CountDestructiveUnitsForActor :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=$2::text AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE actor_key=$2::text AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=$3::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=$2::text AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$3::bigint AND greatest(admitted_at,finished_at)>=$4::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE actor_key=$2::text AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$4::bigint AND greatest(admitted_at,finished_at)>=$5::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted
 `
 
 type CountDestructiveUnitsForActorParams struct {
-	HourSince  time.Time
-	ActorKey   string
-	ClearAfter int64
-	DaySince   time.Time
+	HourSince     time.Time
+	ActorKey      string
+	ReservedSince time.Time
+	ClearAfter    int64
+	DaySince      time.Time
 }
 
 type CountDestructiveUnitsForActorRow struct {
@@ -82,10 +83,13 @@ type CountDestructiveUnitsForActorRow struct {
 	Daily  int64
 }
 
+// Every budget but the erasures' (CountErasureUnits): a reservation holds
+// budget only while it may still start (reserved_since).
 func (q *Queries) CountDestructiveUnitsForActor(ctx context.Context, arg CountDestructiveUnitsForActorParams) (CountDestructiveUnitsForActorRow, error) {
 	row := q.db.QueryRow(ctx, countDestructiveUnitsForActor,
 		arg.HourSince,
 		arg.ActorKey,
+		arg.ReservedSince,
 		arg.ClearAfter,
 		arg.DaySince,
 	)
@@ -96,20 +100,21 @@ func (q *Queries) CountDestructiveUnitsForActor(ctx context.Context, arg CountDe
 
 const countDestructiveUnitsForAutomation = `-- name: CountDestructiveUnitsForAutomation :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=$4::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$4::bigint AND greatest(admitted_at,finished_at)>=$5::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$5::bigint AND greatest(admitted_at,finished_at)>=$6::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted
 `
 
 type CountDestructiveUnitsForAutomationParams struct {
-	HourSince  time.Time
-	MerchantID uuid.UUID
-	Disputes   bool
-	ClearAfter int64
-	DaySince   time.Time
+	HourSince     time.Time
+	MerchantID    uuid.UUID
+	Disputes      bool
+	ReservedSince time.Time
+	ClearAfter    int64
+	DaySince      time.Time
 }
 
 type CountDestructiveUnitsForAutomationRow struct {
@@ -124,6 +129,7 @@ func (q *Queries) CountDestructiveUnitsForAutomation(ctx context.Context, arg Co
 		arg.HourSince,
 		arg.MerchantID,
 		arg.Disputes,
+		arg.ReservedSince,
 		arg.ClearAfter,
 		arg.DaySince,
 	)
@@ -134,18 +140,19 @@ func (q *Queries) CountDestructiveUnitsForAutomation(ctx context.Context, arg Co
 
 const countDestructiveUnitsForDeployment = `-- name: CountDestructiveUnitsForDeployment :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=$2::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$2::bigint AND greatest(admitted_at,finished_at)>=$3::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE true AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$3::bigint AND greatest(admitted_at,finished_at)>=$4::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted
 `
 
 type CountDestructiveUnitsForDeploymentParams struct {
-	HourSince  time.Time
-	ClearAfter int64
-	DaySince   time.Time
+	HourSince     time.Time
+	ReservedSince time.Time
+	ClearAfter    int64
+	DaySince      time.Time
 }
 
 type CountDestructiveUnitsForDeploymentRow struct {
@@ -154,7 +161,12 @@ type CountDestructiveUnitsForDeploymentRow struct {
 }
 
 func (q *Queries) CountDestructiveUnitsForDeployment(ctx context.Context, arg CountDestructiveUnitsForDeploymentParams) (CountDestructiveUnitsForDeploymentRow, error) {
-	row := q.db.QueryRow(ctx, countDestructiveUnitsForDeployment, arg.HourSince, arg.ClearAfter, arg.DaySince)
+	row := q.db.QueryRow(ctx, countDestructiveUnitsForDeployment,
+		arg.HourSince,
+		arg.ReservedSince,
+		arg.ClearAfter,
+		arg.DaySince,
+	)
 	var i CountDestructiveUnitsForDeploymentRow
 	err := row.Scan(&i.Hourly, &i.Daily)
 	return i, err
@@ -162,19 +174,20 @@ func (q *Queries) CountDestructiveUnitsForDeployment(ctx context.Context, arg Co
 
 const countDestructiveUnitsForMerchant = `-- name: CountDestructiveUnitsForMerchant :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='staff' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='staff' AND kind<>'erase_contact' AND (state IN ('started','uncertain') OR (state='reserved' AND admitted_at>=$3::timestamptz))
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='staff' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$3::bigint AND greatest(admitted_at,finished_at)>=$4::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='staff' AND kind<>'erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$4::bigint AND greatest(admitted_at,finished_at)>=$5::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted
 `
 
 type CountDestructiveUnitsForMerchantParams struct {
-	HourSince  time.Time
-	MerchantID uuid.UUID
-	ClearAfter int64
-	DaySince   time.Time
+	HourSince     time.Time
+	MerchantID    uuid.UUID
+	ReservedSince time.Time
+	ClearAfter    int64
+	DaySince      time.Time
 }
 
 type CountDestructiveUnitsForMerchantRow struct {
@@ -186,10 +199,47 @@ func (q *Queries) CountDestructiveUnitsForMerchant(ctx context.Context, arg Coun
 	row := q.db.QueryRow(ctx, countDestructiveUnitsForMerchant,
 		arg.HourSince,
 		arg.MerchantID,
+		arg.ReservedSince,
 		arg.ClearAfter,
 		arg.DaySince,
 	)
 	var i CountDestructiveUnitsForMerchantRow
+	err := row.Scan(&i.Hourly, &i.Daily)
+	return i, err
+}
+
+const countErasureUnits = `-- name: CountErasureUnits :one
+WITH counted AS (
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND kind='erase_contact' AND state IN ('started','uncertain')
+ UNION ALL
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND kind='erase_contact' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$3::bigint AND greatest(admitted_at,finished_at)>=$4::timestamptz
+)
+SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
+ coalesce(sum(units),0)::bigint AS daily FROM counted
+`
+
+type CountErasureUnitsParams struct {
+	HourSince  time.Time
+	MerchantID uuid.UUID
+	ClearAfter int64
+	DaySince   time.Time
+}
+
+type CountErasureUnitsRow struct {
+	Hourly int64
+	Daily  int64
+}
+
+// A merchant's contact erasures, apart from every other budget: those
+// running, and those done since the day began after the scope's last clear.
+func (q *Queries) CountErasureUnits(ctx context.Context, arg CountErasureUnitsParams) (CountErasureUnitsRow, error) {
+	row := q.db.QueryRow(ctx, countErasureUnits,
+		arg.HourSince,
+		arg.MerchantID,
+		arg.ClearAfter,
+		arg.DaySince,
+	)
+	var i CountErasureUnitsRow
 	err := row.Scan(&i.Hourly, &i.Daily)
 	return i, err
 }
@@ -446,6 +496,23 @@ func (q *Queries) EnqueueDestructiveHoldEvent(ctx context.Context, arg EnqueueDe
 		arg.DedupeKey,
 	)
 	return err
+}
+
+const erasureQueuedBefore = `-- name: ErasureQueuedBefore :one
+SELECT EXISTS(SELECT 1 FROM billing.destructive_actions WHERE merchant_id=$1::uuid AND kind='erase_contact'
+ AND state='reserved' AND admission_sequence<$2::bigint)::boolean AS queued
+`
+
+type ErasureQueuedBeforeParams struct {
+	MerchantID        uuid.UUID
+	AdmissionSequence int64
+}
+
+func (q *Queries) ErasureQueuedBefore(ctx context.Context, arg ErasureQueuedBeforeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, erasureQueuedBefore, arg.MerchantID, arg.AdmissionSequence)
+	var queued bool
+	err := row.Scan(&queued)
+	return queued, err
 }
 
 const findOpenDestructiveHold = `-- name: FindOpenDestructiveHold :one
@@ -781,6 +848,61 @@ func (q *Queries) ListDestructiveHoldsByIDs(ctx context.Context, arg ListDestruc
 			&i.ClearedByIssuer,
 			&i.ClearedByID,
 			&i.ClearReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listErasureQueue = `-- name: ListErasureQueue :many
+SELECT merchant_id, id, admission_sequence, kind, target, action_key, request_digest, origin, actor_issuer, actor_id, actor_key, credential, units, admitted_at, state, started_at, finished_at, completion_sequence, result FROM billing.destructive_actions
+WHERE merchant_id=$1::uuid AND kind='erase_contact'
+ AND (state='reserved' OR (state='started' AND started_at<$2::timestamptz))
+ORDER BY admission_sequence LIMIT $3::int
+`
+
+type ListErasureQueueParams struct {
+	MerchantID  uuid.UUID
+	StuckBefore time.Time
+	RowLimit    int32
+}
+
+// The merchant's erasure queue, oldest first: those waiting, and those a
+// crash left started before stuck_before.
+func (q *Queries) ListErasureQueue(ctx context.Context, arg ListErasureQueueParams) ([]BillingDestructiveAction, error) {
+	rows, err := q.db.Query(ctx, listErasureQueue, arg.MerchantID, arg.StuckBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingDestructiveAction
+	for rows.Next() {
+		var i BillingDestructiveAction
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.AdmissionSequence,
+			&i.Kind,
+			&i.Target,
+			&i.ActionKey,
+			&i.RequestDigest,
+			&i.Origin,
+			&i.ActorIssuer,
+			&i.ActorID,
+			&i.ActorKey,
+			&i.Credential,
+			&i.Units,
+			&i.AdmittedAt,
+			&i.State,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CompletionSequence,
+			&i.Result,
 		); err != nil {
 			return nil, err
 		}

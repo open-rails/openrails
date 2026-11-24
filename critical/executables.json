@@ -1697,10 +1697,13 @@
       "TestDirectoryAuthority/OR-J07-S07/an-application-without-the-provisioning-permission-is-refused"
     ],
     "OR-J07-S08": [
-      "TestDirectoryAuthority/OR-J07-S08/erasures-spend-the-destructive-budget-and-name-their-actor"
+      "TestDirectoryAuthority/OR-J07-S08/erasures-keep-their-own-budget-and-are-never-lost"
     ],
     "OR-J01-S21": [
       "TestRoutePermissions/OR-J01-S21/a-config-only-credential-cannot-approve-a-refund"
+    ],
+    "OR-J34-S32": [
+      "TestDestructiveReservations/OR-J34-S32/a-reservation-that-never-starts-stops-holding-budget"
     ]
   }
 }

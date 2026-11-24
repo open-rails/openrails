@@ -56,6 +56,9 @@ func (r *Runtime) projectDestructiveHold(ctx context.Context, tx pgx.Tx, hold de
 			return err
 		}
 		action := "Ask an authorized operator to review and explicitly clear this incident."
+		if hold.Scope == destructive.ScopeErasure {
+			action = "Review the directory's contact erasures: they wait, the Users already gone from it, until a person holding merchant:provisioning:manage clears this hold."
+		}
 		if _, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: hold.MerchantID, FindingType: "life.destructive.hold", SubjectKey: hold.ID.String(), Severity: "critical", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
 			return fmt.Errorf("project destructive finding: %w", err)
 		}
@@ -68,6 +71,11 @@ func (r *Runtime) projectDestructiveHold(ctx context.Context, tx pgx.Tx, hold de
 		at = *hold.ClearedAt
 		if err := q.ResolveDestructiveHoldFinding(ctx, gen.ResolveDestructiveHoldFindingParams{MerchantID: hold.MerchantID, HoldID: hold.ID.String(), Now: at, Actor: hold.ClearedBy.Issuer + ":" + hold.ClearedBy.ID, Reason: hold.ClearReason}); err != nil {
 			return err
+		}
+		if hold.Scope == destructive.ScopeErasure {
+			if err := r.DB.QueueRiverJobNowTx(ctx, tx, destructive.DrainErasuresArgs{MerchantID: hold.MerchantID}, nil); err != nil {
+				return fmt.Errorf("queue the erasure drain: %w", err)
+			}
 		}
 	}
 	data, err := json.Marshal(billing.DestructiveHoldEvent{HoldID: billing.DestructiveHoldID(hold.ID), Scope: string(hold.Scope)})

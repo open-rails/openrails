@@ -200,7 +200,7 @@
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth auth.Authenticator\n\n\tResolve func(*http.Request, auth.Verified) (CustomerBinding, error)\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n\n\tSkipMigrations bool\n\n\tLeaseConns int\n}",
       "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tPostgresSession *pgxpool.Config\n\n\tMerchantGroups billing.MerchantGroupReader\n\n\tRedis redis.UniversalClient\n\n\tVault *vaultapi.Client\n\n\tEmail EmailSender\n\n\tMessageRenderer func(context.Context, billing.MessageData) (billing.MessageContent, bool, error)\n\n\tLogger *slog.Logger\n\n\tUserInfo userinfo.Lookup\n\n\tNotifications *NotificationChannel\n\n\tCheckoutAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tBasisTheoryTransport http.RoundTripper\n\tNMITransport         http.RoundTripper\n\tFXTransport          http.RoundTripper\n\tClock                clockwork.Clock\n}",
-      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n}",
+      "type DestructiveActionLimitsConfig struct {\n\tActorPerHour      int64\n\tActorPerDay       int64\n\tMerchantPerHour   int64\n\tMerchantPerDay    int64\n\tDeploymentPerHour int64\n\tDeploymentPerDay  int64\n\tErasurePerHour    int64\n\tErasurePerDay     int64\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1593,6 +1593,7 @@
       "type Subscription struct {\n\tCollectionPolicy CollectionPolicy `json:\"collection_policy\"`\n\tID               uuid.UUID        `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id,omitempty\"`\n\tProductID  uuid.UUID `json:\"product_id\"`\n\tPriceID    uuid.UUID `json:\"price_id\"`\n\n\tScheduledChange *ScheduledChange `json:\"-\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tAccessDurationHoursSnapshot   *int `json:\"access_duration_hours_snapshot\"`\n\tProviderAccessDefaultSnapshot bool `json:\"provider_access_default_snapshot\"`\n\n\tStatus                SubscriptionStatus `json:\"status\"`\n\tStartedAt             time.Time          `json:\"started_at\"`\n\tEndedAt               *time.Time         `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time         `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time         `json:\"current_period_ends_at\"`\n\n\tRail               Rail   `json:\"rail\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id\"`\n\n\tPaymentMethodID *uuid.UUID `json:\"payment_method_id\"`\n\n\tLastRetryAt   *time.Time `json:\"last_retry_at\"`\n\tRetryAttempts *int       `json:\"retry_attempts\"`\n\n\tTransientRetries int        `json:\"transient_retries\"`\n\tNextRetryAt      *time.Time `json:\"next_retry_at\"`\n\tGraceEndsAt      *time.Time `json:\"grace_ends_at\"`\n\n\tCancelFeedback *string     `json:\"cancel_feedback\"`\n\tCancelType     *CancelType `json:\"cancel_type\"`\n\tCanceledAt     *time.Time  `json:\"canceled_at\"`\n\n\tDeletionScheduledAt *time.Time `json:\"deletion_scheduled_at,omitempty\"`\n\n\tLifecycleRev int64 `json:\"-\"`\n\n\tRowVersion int64 `json:\"-\"`\n\n\tDunningPolicy []byte `json:\"-\"`\n\n\tPrice         *Price         `json:\"price,omitempty\"`\n\tPaymentMethod *PaymentMethod `json:\"payment_method,omitempty\"`\n\n\tProduct *Product `json:\"product,omitempty\"`\n\n\tMetadata json.RawMessage `json:\"gateway_response,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}"
     ],
     "internal/destructive": [
+      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n}",
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/disputejob": [
@@ -2728,6 +2729,17 @@
       "json": "encoding/json",
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/destructive/erasure.go": {
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "river": "github.com/riverqueue/river",
+      "rivertype": "github.com/riverqueue/river/rivertype",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/destructive/user_actions.go": {
       "billing": "github.com/open-rails/openrails/billing",
