@@ -166,7 +166,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 				return err
 			}
 			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-				ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "order_due", merchantID.String(), order.ID.String()),
+				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(order.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), order.ID.String())),
 				MerchantID: merchantID, CustomerID: payerID,
 				EventType: string(models.NotificationOrderDue), Data: data, CreatedAt: now,
 			}); err != nil {

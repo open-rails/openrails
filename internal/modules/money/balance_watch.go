@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // A balance watch is the one stored instant per watched balance (every
@@ -677,7 +678,7 @@ func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ki
 	}
 	customer := event.CustomerID.UUID()
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuid.NewSHA1(customer, []byte(string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout))),
+		ID:         uuidutil.DerivedV7(event.AsOf, customer, string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout)),
 		MerchantID: merchantID, CustomerID: customer, EventType: string(kind), Data: data, CreatedAt: event.AsOf,
 	})
 }

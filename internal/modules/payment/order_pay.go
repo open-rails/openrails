@@ -376,7 +376,7 @@ func (s *OrderAttemptService) TakesOrders(ctx context.Context) error {
 
 // OrderAttemptID is the attempt a key makes on an order.
 func OrderAttemptID(merchantID, orderID uuid.UUID, key string) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:order-attempt:"+merchantID.String()+":"+orderID.String()+":"+key))
+	return uuidutil.DerivedV7(uuidutil.TimeOf(orderID), uuid.NameSpaceURL, "openrails:order-attempt:"+merchantID.String()+":"+orderID.String()+":"+key)
 }
 
 // PayOrder starts (or, for the same key, resumes) one attempt on the order

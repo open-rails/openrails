@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // ApplyDecision moves subscription state for one decider transition through
@@ -162,11 +163,11 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 // declineFailureID is the FailureID of a decline seen at the provider: its
 // transaction, else its time.
 func declineFailureID(subscription uuid.UUID, decline *RemoteTransaction) uuid.UUID {
-	key := "decline:" + strings.TrimSpace(decline.TransactionID)
+	key, at := "decline:"+strings.TrimSpace(decline.TransactionID), uuidutil.TimeOf(subscription)
 	if key == "decline:" {
-		key = "decline_at:" + decline.OccurredAt.UTC().Format(time.RFC3339Nano)
+		key, at = "decline_at:"+decline.OccurredAt.UTC().Format(time.RFC3339Nano), decline.OccurredAt
 	}
-	return uuid.NewSHA1(subscription, []byte(key))
+	return uuidutil.DerivedV7(at, subscription, key)
 }
 
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule

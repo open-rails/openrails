@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // RefundReceiptWindow is how recent a refund the provider reported must be,
@@ -76,7 +77,7 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 		return err
 	}
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuid.NewSHA1(refund.ID, []byte(models.NotificationRefundCompleted)),
+		ID:         uuidutil.ChildV7(refund.ID, string(models.NotificationRefundCompleted)),
 		MerchantID: mid.UUID(), CustomerID: refund.CustomerID, EventType: string(models.NotificationRefundCompleted),
 		Data: raw, CreatedAt: refund.PurchasedAt.UTC(),
 	})
