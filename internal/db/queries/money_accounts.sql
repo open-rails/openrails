@@ -25,9 +25,17 @@ SELECT
              WHERE hp.merchant_id = a.merchant_id AND hp.customer_id = a.customer_id AND hp.limit_key = 'balance'
                AND lh.currency = a.currency AND lh.state = 'open'
                AND hp.hold_created_at >= sqlc.arg(held_since)::timestamptz AND lh.created_at >= sqlc.arg(held_since)::timestamptz
-               AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
+               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
                    ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
+     -- What live gates other than except_lease report in flight of the balance.
+     + COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = a.merchant_id AND f.customer_id = a.customer_id
+               AND f.limit_key = 'balance' AND f.unit = a.currency
+               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
+               AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0)
      -- What pending refunds reserve of a purchased lot, up to its units left.
      -- Retired credit funds its refund from the retired account; an unswept
      -- lapsed lot is entirely unavailable.

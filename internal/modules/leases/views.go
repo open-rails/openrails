@@ -1,0 +1,270 @@
+package leases
+
+import (
+	"cmp"
+	"context"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/admission"
+	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/money"
+)
+
+// A view is where one customer stands on every limit its requests in one
+// currency may claim, read after the sync's usage settled and leaving out the
+// syncing lease's own in-flight report, which its gate counts itself. It
+// reserves nothing. Usage is read only through UsageReader.
+
+type viewKey struct {
+	customer uuid.UUID
+	currency string
+}
+
+// viewBuild is one view as the sync builds it.
+type viewBuild struct {
+	key   viewKey
+	cap   money.AdmissionCapacity
+	view  billing.View
+	lines map[string]bool
+}
+
+// viewing is what one sync's views read.
+type viewing struct {
+	run    *syncRun
+	usage  UsageReader
+	defs   []limits.Definition
+	meters map[string]limits.Meter
+	builds map[viewKey]*viewBuild
+	order  []viewKey
+}
+
+// views answers each ViewParams with its limit set (null once the sync is
+// past its work budget), each customer and currency named with its view, and
+// each currency and event type named with its pricing.
+func (r *syncRun) views() error {
+	if len(r.p.Views) == 0 {
+		return nil
+	}
+	v := &viewing{run: r, usage: pgUsage{q: r.q, money: r.money, merchant: r.merchant, now: r.now, except: r.lease.ID}, builds: map[viewKey]*viewBuild{}}
+	var err error
+	if v.defs, err = limits.Definitions(r.ctx, r.q, r.merchant); err != nil {
+		return err
+	}
+	if len(v.defs) > 0 {
+		if v.meters, err = limits.Meters(r.ctx, r.q, r.merchant); err != nil {
+			return err
+		}
+	}
+	type pricingKey struct{ currency, eventType string }
+	var priced []pricingKey
+	for i, vp := range r.p.Views {
+		over, err := r.pastBudget(workBudget)
+		if err != nil {
+			return err
+		}
+		if over {
+			// The rest are answered null and asked again.
+			break
+		}
+		if r.Allows != nil && !r.Allows(vp.CustomerID) {
+			continue
+		}
+		k := viewKey{vp.CustomerID.UUID(), money.NormalizeCurrency(string(vp.Currency))}
+		b, err := v.build(k)
+		if err != nil {
+			return err
+		}
+		eventType := strings.TrimSpace(deref(vp.EventType))
+		if r.result.LimitSets[i], err = v.limitSet(b, vp, eventType); err != nil {
+			return err
+		}
+		if p := (pricingKey{k.currency, eventType}); eventType != "" && !slices.Contains(priced, p) {
+			priced = append(priced, p)
+		}
+	}
+	for _, k := range v.order {
+		r.result.Views = append(r.result.Views, v.builds[k].view)
+	}
+	for _, p := range priced {
+		out, err := v.pricing(p.currency, p.eventType)
+		if err != nil {
+			return err
+		}
+		r.result.Pricing = append(r.result.Pricing, out)
+	}
+	return nil
+}
+
+// build is the view of one customer and currency: balance, and every
+// declared limit the customer is granted in the currency or a named unit.
+func (v *viewing) build(k viewKey) (*viewBuild, error) {
+	if b := v.builds[k]; b != nil {
+		return b, nil
+	}
+	r := v.run
+	capacity, err := v.usage.Capacity(r.ctx, k.customer, k.currency)
+	if err != nil {
+		return nil, err
+	}
+	recent, err := v.usage.RecentSpend(r.ctx, k.customer, k.currency, r.now.Add(-recentWindow))
+	if err != nil {
+		return nil, err
+	}
+	rates, err := r.q.ListCustomerRunningRates(r.ctx, gen.ListCustomerRunningRatesParams{MerchantID: r.merchant, CustomerID: k.customer})
+	if err != nil {
+		return nil, err
+	}
+	var drain int64
+	for _, rate := range rates {
+		if rate.Currency == k.currency {
+			drain = rate.RatePerHour
+		}
+	}
+	b := &viewBuild{key: k, cap: capacity, lines: map[string]bool{}, view: billing.View{CustomerID: billing.CustomerID(k.customer),
+		Currency: catalog.Currency(k.currency), AsOf: r.now, Limits: []billing.ViewLimit{{Limit: catalog.BalanceLimit, Unit: k.currency,
+			Overrun: catalog.OverrunRequireEstimate, Capacity: capacity.Balance, Held: capacity.Held, Remaining: admission.Available(capacity),
+			DrainPerHour: drain, Settled: r.settled[settledKey{k.customer, balanceKey(k.currency)}], Recent: recent}}}}
+	b.lines[catalog.BalanceLimit] = true
+	if len(v.defs) > 0 {
+		reader := limits.Customer{Q: r.q, MerchantID: r.merchant, CustomerID: k.customer, Now: r.now, ExceptLease: &r.lease.ID,
+			Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
+				return r.money.PricingPeriod(ctx, r.q, r.merchant, k.customer, unit, at)
+			}}
+		claims, err := reader.Windows(r.ctx, v.defs)
+		if err != nil {
+			return nil, err
+		}
+		for _, def := range v.defs {
+			c, ok := claims[def.Key]
+			if !ok || c.Ungranted || syntax.LimitUnitCurrency(def.Unit) && def.Unit != k.currency {
+				continue
+			}
+			next, err := reader.Next(r.ctx, def, c.Window)
+			if err != nil {
+				return nil, err
+			}
+			if c.Opens {
+				next = nil
+			}
+			line, err := v.line(k.customer, c, next, recent)
+			if err != nil {
+				return nil, err
+			}
+			b.view.Limits = append(b.view.Limits, line)
+			b.lines[def.Key] = true
+		}
+	}
+	v.builds[k] = b
+	v.order = append(v.order, k)
+	return b, nil
+}
+
+// line is where one claim's limit stands, as a view line.
+func (v *viewing) line(customer uuid.UUID, c limits.Claim, next *limits.Window, recent int64) (billing.ViewLimit, error) {
+	r := v.run
+	s, resets, err := v.usage.Limit(r.ctx, customer, c)
+	if err != nil {
+		return billing.ViewLimit{}, err
+	}
+	reset := c.Reset
+	out := billing.ViewLimit{Limit: c.Key, Unit: c.Unit, Reset: &reset, Overrun: cmp.Or(c.Overrun, catalog.OverrunRequireEstimate),
+		Capacity: s.Capacity, Used: s.Settled, Held: s.Held, Remaining: s.Remaining(), ResetsAt: resets,
+		Settled: r.settled[settledKey{customer, c.Key}]}
+	if syntax.LimitUnitCurrency(c.Unit) {
+		out.Recent = recent
+	}
+	// A window that ends is the gate's to switch at its end; one that never
+	// ends, or a session not yet open, has none.
+	if c.Window.EndsAt != nil && !c.Opens && c.Reset.Kind != catalog.ResetRolling {
+		start, end := c.Window.StartsAt, *c.Window.EndsAt
+		out.WindowStartsAt, out.WindowEndsAt = &start, &end
+	}
+	if next != nil {
+		out.Next = &billing.ViewWindow{Remaining: c.Capacity}
+		if !next.StartsAt.IsZero() {
+			start := next.StartsAt
+			out.Next.StartsAt, out.Next.EndsAt = &start, next.EndsAt
+		}
+	}
+	return out, nil
+}
+
+// limitSet resolves what a request with the ViewParams' attributes claims,
+// adding its spend windows to the view.
+func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string) (*billing.LimitSet, error) {
+	r := v.run
+	req := admission.AdmitRequest{CustomerID: identity.CustomerID(vp.CustomerID), Invoker: strings.TrimSpace(vp.Invoker),
+		InvokerType: string(cmp.Or(vp.InvokerType, billing.InvokerTypeCustomer)), TrustLevel: strings.TrimSpace(deref(vp.TrustLevel)),
+		Roles: vp.Roles, Resource: strings.TrimSpace(deref(vp.Resource)), Currency: b.key.currency}
+	set, err := r.admitter.ResolveSet(r.ctx, r.q, req, eventType, b.cap, r.now)
+	if err != nil {
+		return nil, err
+	}
+	out := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: catalog.Currency(b.key.currency), Limits: []string{catalog.BalanceLimit}, Capacities: []billing.LimitCapacity{}}
+	if set.Refusal != nil {
+		out.Refusal = &billing.Refusal{DenyCode: set.Refusal.DenyCode}
+		if set.Refusal.RetryAfterSeconds > 0 {
+			retry := set.Refusal.RetryAfterSeconds
+			out.Refusal.RetryAfterSeconds = &retry
+		}
+		return out, nil
+	}
+	out.CreditLine, out.BalanceDenyCode = set.CreditLine, set.BalanceRefusal()
+	recent := b.view.Limits[0].Recent
+	for _, c := range set.Spend {
+		if !b.lines[c.Key] {
+			end := *c.Window.EndsAt
+			next := limits.Window{StartsAt: end, EndsAt: new(end.Add(end.Sub(c.Window.StartsAt)))}
+			line, err := v.line(b.key.customer, c, &next, recent)
+			if err != nil {
+				return nil, err
+			}
+			b.view.Limits = append(b.view.Limits, line)
+			b.lines[c.Key] = true
+		}
+		out.Limits = append(out.Limits, c.Key)
+		out.Capacities = append(out.Capacities, billing.LimitCapacity{Limit: c.Key, Capacity: c.Capacity})
+	}
+	for _, c := range set.Limits {
+		if b.lines[c.Key] {
+			out.Limits = append(out.Limits, c.Key)
+		}
+	}
+	return out, nil
+}
+
+// pricing is how a gate costs a request of eventType in currency: how each
+// named-unit limit counts it, and the money cards in force with their price
+// bounds.
+func (v *viewing) pricing(currency, eventType string) (billing.ViewPricing, error) {
+	r := v.run
+	pinned, err := r.money.PinnedCards(r.ctx, r.q, eventType, currency)
+	if err != nil {
+		return billing.ViewPricing{}, err
+	}
+	cards, bounds, err := money.ViewCards(pinned)
+	if err != nil {
+		return billing.ViewPricing{}, err
+	}
+	out := billing.ViewPricing{Currency: catalog.Currency(currency), EventType: eventType, Counts: []billing.ViewCount{}, RateCards: cards, PriceBounds: bounds}
+	for _, def := range v.defs {
+		if syntax.LimitUnitCurrency(def.Unit) || !limits.Counts(def, v.meters, eventType) {
+			continue
+		}
+		for _, c := range def.Counts {
+			m := v.meters[c.Meter]
+			out.Counts = append(out.Counts, billing.ViewCount{Limit: def.Key, Meter: c.Meter, EventType: m.EventType, ValueProperty: m.ValueProperty,
+				Aggregation: m.Aggregation, GroupBy: m.GroupBy, Filter: c.Filter, Weight: c.Weight, Per: c.Per})
+		}
+	}
+	return out, nil
+}

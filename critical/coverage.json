@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 534,
+  "scenario_count": 528,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -656,7 +656,7 @@
     {
       "id": "OR-J24-S07",
       "journey": "J24",
-      "name": "A dead lease's outbox resend settles each item once and renews nothing"
+      "name": "A dead lease's outbox resend with close settles each item once and releases its request hold"
     },
     {
       "id": "OR-J24-S08",
@@ -671,7 +671,7 @@
     {
       "id": "OR-J24-S10",
       "journey": "J24",
-      "name": "Pricing periods and rate-card revisions are priced in separate groups"
+      "name": "Pricing periods are priced apart; a lease's request hold captures at its pinned cards and other usage at the cards in force"
     },
     {
       "id": "OR-J24-S11",
@@ -679,49 +679,29 @@
       "name": "A day's usage posts once and once more before a top-up, held until then"
     },
     {
-      "id": "OR-J24-S12",
-      "journey": "J24",
-      "name": "Two leases drain one customer without holding past its balance"
-    },
-    {
-      "id": "OR-J24-S13",
-      "journey": "J24",
-      "name": "Capacity another lease holds is capacity_held, and its next syncs give it back"
-    },
-    {
       "id": "OR-J24-S14",
       "journey": "J24",
-      "name": "An occasional customer is decided locally and its idle holds come back near its limit"
-    },
-    {
-      "id": "OR-J24-S15",
-      "journey": "J24",
-      "name": "A hold grows with its traffic within a few syncs"
+      "name": "Views of an occasional customer on ten leases reserve nothing, count every live lease, and show what settled"
     },
     {
       "id": "OR-J24-S16",
       "journey": "J24",
-      "name": "A sync with close settles its usage, returns every hold and ends the lease; later wants are lease_not_held and usage still settles"
-    },
-    {
-      "id": "OR-J24-S17",
-      "journey": "J24",
-      "name": "A smaller hold size is released only once its gate reports the version that carried it applied, never below what its tickets took, and a lost answer comes again"
+      "name": "A sync with close settles its usage, releases the lease's request holds and clears its report; a closed lease owns no new hold and its usage still settles"
     },
     {
       "id": "OR-J24-S18",
       "journey": "J24",
-      "name": "A sync past its lease's lifetime answers live false and renews nothing; readers count its holds through a grace that outlasts any sync"
+      "name": "A lapsed lease's in-flight report and request holds count nowhere until it syncs again"
     },
     {
       "id": "OR-J24-S19",
       "journey": "J24",
-      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close settles and ends an earlier lease"
+      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close ends an earlier lease, which then owns no hold"
     },
     {
       "id": "OR-J24-S20",
       "journey": "J24",
-      "name": "A renewed hold reads the rate cards in force: a price change issues it again at the new price"
+      "name": "A view's pricing follows the cards in force, and gate usage settles at the cards in force when it settles"
     },
     {
       "id": "OR-J24-S21",
@@ -741,22 +721,22 @@
     {
       "id": "OR-J24-S24",
       "journey": "J24",
-      "name": "Wants are answered per customer and limit set, and a host-stated want holds its estimated_amount, never with usage"
+      "name": "Views answer per customer and currency and limit sets per invoker attributes; a host-stated set claims only money"
     },
     {
       "id": "OR-J24-S25",
       "journey": "J24",
-      "name": "A trust level's policy is its own limit set, and its hold renews as the invoker it was resolved for"
+      "name": "A trust level's policy is its own limit set, and usage reported with its attributes counts in its spend window"
     },
     {
       "id": "OR-J24-S26",
       "journey": "J24",
-      "name": "A renewal never opens a session: an ended session's hold with usage is answered empty, and only a want or a use opens the next"
+      "name": "A view never opens a session; the first settled use opens it at its admission, and usage admitted in it counts there after it ends"
     },
     {
       "id": "OR-J24-S27",
       "journey": "J24",
-      "name": "admit_while_positive wants only capacity free beyond their tickets; with none free, capacity other leases hold is capacity_held"
+      "name": "admit_while_positive: the server admits the request that crosses the limit once and refuses the next"
     },
     {
       "id": "OR-J24-S28",
@@ -766,12 +746,7 @@
     {
       "id": "OR-J24-S29",
       "journey": "J24",
-      "name": "Concurrent syncs and admissions on the same customers never deadlock and never hold past capacity"
-    },
-    {
-      "id": "OR-J24-S30",
-      "journey": "J24",
-      "name": "A window that closes for every customer at once renews a bounded number of holds per sync, most urgent first, and the next syncs renew the rest"
+      "name": "Concurrent syncs (usage, reports, views) and lease admissions on the same customers never deadlock and settle every report once"
     },
     {
       "id": "OR-J24-S31",
@@ -781,7 +756,7 @@
     {
       "id": "OR-J24-S32",
       "journey": "J24",
-      "name": "Trust levels whose spend windows share a key but not a cap resolve to different limit sets, each refused by its own cap"
+      "name": "Trust levels whose spend windows share a key but not a cap carry their own capacities and are each refused by their own cap"
     },
     {
       "id": "OR-J24-S33",
@@ -794,14 +769,19 @@
       "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
-      "id": "OR-J24-S35",
-      "journey": "J24",
-      "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
-    },
-    {
       "id": "OR-J24-S36",
       "journey": "J24",
       "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, its own merchant's settlement waits for its transaction, and another merchant's usage settles while it is open"
+    },
+    {
+      "id": "OR-J24-S37",
+      "journey": "J24",
+      "name": "A batch reporter's usage-only sync (lease id and numbered usage) answers through_n, refused and receipts as before"
+    },
+    {
+      "id": "OR-J24-S38",
+      "journey": "J24",
+      "name": "Usage counts in the spend windows of the invoker attributes it reports, batch usage with none in the customer's own"
     },
     {
       "id": "OR-J25-S01",
@@ -1271,17 +1251,17 @@
     {
       "id": "OR-J23-S19",
       "journey": "J23",
-      "name": "Remote and embedded gates decide with the same code; a warm decision needs no I/O and holds while OpenRails is unreachable"
+      "name": "Remote and embedded gates decide with the same code; a warm decision needs no I/O and a view keeps deciding while OpenRails is unreachable"
     },
     {
       "id": "OR-J23-S20",
       "journey": "J23",
-      "name": "Racing requests on two limits never take more than either hold; holding 80 of 100 and capturing 30 leaves 70"
+      "name": "Racing requests on two limits never take more than either limit; eighty taken of a hundred and thirty captured leaves seventy"
     },
     {
       "id": "OR-J23-S21",
       "journey": "J23",
-      "name": "A lost sync reply and a restart with unsent usage converge once, with and without an outbox; a dead lease's holds never reopen"
+      "name": "A lost sync reply and a restart with unsent usage converge once, with and without an outbox; a stopped lease holds nothing"
     },
     {
       "id": "OR-J23-S22",
@@ -1289,54 +1269,19 @@
       "name": "A gate ticket lives across many syncs without a deadline and its capture settles in the session it was admitted in"
     },
     {
-      "id": "OR-J23-S23",
-      "journey": "J23",
-      "name": "Processes sharing Redis form one gate: warm on each other, never past the hold, syncing handed over without loss, own leases while Redis is down"
-    },
-    {
       "id": "OR-J23-S24",
       "journey": "J23",
-      "name": "Gate refusals are verdicts (limit_reached with its reset, capacity_held waited out or refused); OpenRails down is ErrUnavailable"
-    },
-    {
-      "id": "OR-J23-S25",
-      "journey": "J23",
-      "name": "With usage_gate_safe_spend a hold's safe is its money size; a gate spends it only while OpenRails is unreachable, and never for units"
+      "name": "Gate refusals are verdicts (limit_reached with its reset); near the limit the server decides as a request hold of the lease; OpenRails down is ErrUnavailable for a cold customer"
     },
     {
       "id": "OR-J23-S26",
       "journey": "J23",
-      "name": "An admission that fits only were gates' lease holds returned is capacity_held (Admit and AdmitTx, limits and balance) and takes those holds back at their next sync"
+      "name": "A gate's in-flight report counts as held for admissions (Admit and AdmitTx, limits and balance) while its lease lives; an empty report clears it"
     },
     {
       "id": "OR-J23-S27",
       "journey": "J23",
-      "name": "Closing a gate ends its lease and returns its holds at once; with Redis the group lease lives while a process remains and ends with the last"
-    },
-    {
-      "id": "OR-J23-S28",
-      "journey": "J23",
-      "name": "With Redis, a units-only plan's zero-cost money parts are taken, released, captured and settled, and every released unit comes back"
-    },
-    {
-      "id": "OR-J23-S29",
-      "journey": "J23",
-      "name": "A sync reply lost after a shrink releases nothing until the gate has applied the shrink, and the capacity then reaches the gate that waited"
-    },
-    {
-      "id": "OR-J23-S30",
-      "journey": "J23",
-      "name": "A lease a sync answers dead is closed and its holds free at once, in process and through Redis; its hold never decides again"
-    },
-    {
-      "id": "OR-J23-S31",
-      "journey": "J23",
-      "name": "A Redis usage write whose reply was lost posts once when retried, before or after it settled; a Record repeated with its source and source_id posts once"
-    },
-    {
-      "id": "OR-J23-S32",
-      "journey": "J23",
-      "name": "A Redis gate names a window to the microsecond: a ticket open across a subscription-anchored window's rollover keeps its take held in its own window and its capture settles there"
+      "name": "Closing a gate settles its usage, releases its request holds and clears its in-flight report before its lease would lapse"
     },
     {
       "id": "OR-J23-S33",
@@ -1357,6 +1302,31 @@
       "id": "OR-J23-S36",
       "journey": "J23",
       "name": "A catalog naming a limit's rate_cards is refused with their rename to counts, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
+    },
+    {
+      "id": "OR-J23-S37",
+      "journey": "J23",
+      "name": "Four gates racing a small balance with steady traffic overshoot at most one request each, and every admitted request settles once"
+    },
+    {
+      "id": "OR-J23-S38",
+      "journey": "J23",
+      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share"
+    },
+    {
+      "id": "OR-J23-S39",
+      "journey": "J23",
+      "name": "Near zero every request is decided on the server, one at a time: two gates racing for the last unit admit exactly one"
+    },
+    {
+      "id": "OR-J23-S40",
+      "journey": "J23",
+      "name": "An idle gate stops syncing and its lease lapses out of the gate count; its stale view decides one request and the next waits for a sync"
+    },
+    {
+      "id": "OR-J23-S41",
+      "journey": "J23",
+      "name": "A fixed window that resets between syncs is decided from the view's next window with no sync, and settles there"
     },
     {
       "id": "OR-J29-S07",

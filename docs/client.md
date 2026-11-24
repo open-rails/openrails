@@ -351,7 +351,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -809,30 +809,32 @@ Refusals are verdicts, not errors:
 | Deny code | Means |
 |---|---|
 | `limit_reached` | the limit is spent until `resets_at` |
-| `capacity_held` | it would fit but for capacity other gates hold; retry after `retry_after_seconds` |
 | `insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached` | the built-in `balance` limit: prepaid balance, credit line, unpaid arrears |
 | `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
 | `delinquent_unpaid_order` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
 
 **The Gate** admits in your process over any `*Client` whose credential holds
-`merchant:usage:manage` and `merchant:usage:read`. It keeps one lease and holds
-of each served customer's capacity, sized from traffic: a warm decision makes no
-network call and continues while OpenRails is unreachable; a cold one waits for
-one `SyncLeases` round trip or is `openrails.ErrUnavailable`. Nothing tunes it.
+`merchant:usage:manage` and `merchant:usage:read`. Each sync of its lease answers
+views: where each customer it serves stands on its limits, reserving nothing. A
+warm decision takes the request's cost from the view, less what the gate has in
+flight, with no network call. Near a limit the request is decided on OpenRails,
+exactly, as a request hold of the gate's lease. A customer with no view waits for
+one `SyncLeases` round trip. Nothing tunes it.
+
+A limit may be overshot by a small, bounded amount: what other gates (and
+admissions and batch jobs) add for the customer within about four sync intervals,
+less the margin the gate keeps from what its views show others adding; steady
+traffic overshoots by nothing. While OpenRails is unreachable a gate keeps
+deciding on its views, spending at most its share of what each had left (the
+remaining divided by the merchant's live gates), so the gates together never
+spend more than was left; a request no share covers, or for a customer with no
+view, is `openrails.ErrUnavailable`. A gate with nothing to do stops syncing and
+its lease lapses; its next request is decided on its last view, and the next
+waits for a sync.
 
 ```go guide:gate-new
-var deps openrails.GateDeps
-if url := os.Getenv("REDIS_URL"); url != "" {
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rdb := redis.NewClient(opts)
-	defer rdb.Close()
-	deps.Redis = rdb
-}
-gate, err := openrails.NewGate(client, deps)
+gate, err := openrails.NewGate(client, openrails.GateDeps{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -879,18 +881,16 @@ if err := ticket.Capture(r.Context(), billing.CaptureUsage{Dimensions: map[strin
 | `Gate.Record` | report usage no admission held |
 | `Gate.ListCustomerLimits` | a customer's lines less usage not yet sent, for display |
 | `Gate.Flush` | sync now and wait for settlement |
-| `Gate.Close` | send pending usage and close the lease, returning its holds |
+| `Gate.Close` | send pending usage and close the lease, releasing its request holds |
 
 Usage is never refused for money: the work happened, and admission is the check
-before it. A Gate with neither Redis nor an outbox keeps captured usage in memory
-until it is sent: a crash loses it, never billed. `GateDeps.Outbox` stores it
-before `Capture` returns; with `GateDeps.Redis`, your processes sharing that
-Redis are one gate (one lease, warm everywhere; during an upgrade that changes
-the gate's Redis layout, old and new processes are two gates until the old
-stop) and a retried `Capture` or `Record` posts once, on any of them. `usage_gate_safe_spend: true` lets a gate spend each hold's
-money size again while OpenRails is unreachable.
+before it. A Gate without an outbox keeps captured usage in memory until it is
+sent: a crash loses it, never billed. `GateDeps.Outbox` stores it before
+`Capture` returns, and a restarted process resends it. Each process is its own
+gate with its own lease.
 
 **Admissions** are holds owned by one request, for a backend without a gate.
+They count what gates report in flight as held.
 `Admit` prices the estimate with the current rate cards and pins them, checks
 `balance`, spend windows and limits in that order, and holds it everywhere or
 nowhere; the durable `request_id` owns replay, and a changed term conflicts.
@@ -913,10 +913,14 @@ own row.
 
 `SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
 it for you. A batch job picks one `lse_` lease id for its stream and sends up to
-1,000 numbered items per sync, in order; the lease's highest settled number makes
+1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes
 a resend harmless, a changed item is `422 idempotency_key_reused`, a gap
 `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item
-may be up to 35 days old. A priced meter that cannot price an item refuses it
+may be up to 35 days old. Usage counts toward every limit that applies to it: in
+the windows current when its request was admitted (`admitted_at`, else when it
+settles), and in the spend windows of the invoker attributes it reports
+(`trust_level`, `roles`, `resource`; the customer's own trust level when absent).
+It is priced by the rate cards in force when it settles. A priced meter that cannot price an item refuses it
 alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up
 to the policy's `bad_spend_windows`, never charged to a delegated invoker.
 

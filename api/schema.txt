@@ -14,6 +14,7 @@ migration 0010_credit_grants.up.sql sha256:fdab284c9d4a8a721620c8b9c9bd34796ccbe
 migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d67d9a518e821b8da68451f
 migration 0012_operation_log.up.sql sha256:230a94a136e3e0229505fbc58dbc87a052b9b6d3112ac24ae08795870e55b9e7
 migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d3474023d1bb165d6942b0c2a8bcd81d8
+migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -910,6 +911,23 @@ table billing.idempotency_keys
   index CREATE INDEX idempotency_keys_expires_at_idx ON billing.idempotency_keys USING btree (expires_at)
   index CREATE UNIQUE INDEX idempotency_keys_pkey ON billing.idempotency_keys USING btree (merchant_id, operation, idempotency_key)
 
+table billing.lease_in_flight
+  column merchant_id uuid NOT NULL
+  column lease_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column limit_key text NOT NULL
+  column unit text NOT NULL
+  column amount bigint NOT NULL
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint lease_in_flight_amount_check CHECK ((amount > 0))
+  constraint lease_in_flight_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint lease_in_flight_lease_id_fkey FOREIGN KEY (merchant_id, lease_id) REFERENCES billing.leases(merchant_id, id) ON DELETE CASCADE
+  constraint lease_in_flight_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
+  constraint lease_in_flight_pkey PRIMARY KEY (merchant_id, customer_id, limit_key, unit, lease_id)
+  constraint lease_in_flight_unit_check CHECK (((unit ~ '^[a-z][a-z0-9_]{0,63}$'::text) OR (unit ~ '^[A-Z0-9]{3,12}$'::text)))
+  index CREATE INDEX lease_in_flight_lease_id_idx ON billing.lease_in_flight USING btree (merchant_id, lease_id)
+  index CREATE UNIQUE INDEX lease_in_flight_pkey ON billing.lease_in_flight USING btree (merchant_id, customer_id, limit_key, unit, lease_id)
+
 table billing.leases
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL
@@ -918,9 +936,7 @@ table billing.leases
   column settled_through_n bigint NOT NULL
   column closed_at timestamp with time zone
   column receipts jsonb NOT NULL
-  column hold_version bigint NOT NULL
   constraint leases_closed_at_check CHECK (((closed_at IS NULL) OR (closed_at >= created_at)))
-  constraint leases_hold_version_check CHECK ((hold_version >= 0))
   constraint leases_last_sync_at_check CHECK ((last_sync_at >= created_at))
   constraint leases_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint leases_pkey PRIMARY KEY (merchant_id, id)
@@ -1028,18 +1044,11 @@ table billing.limit_hold_parts PARTITION BY RANGE (hold_created_at)
   column window_starts_at timestamp with time zone NOT NULL
   column window_ends_at timestamp with time zone
   column held bigint NOT NULL
-  column request_units bigint
-  column used_units bigint
-  column contended_at timestamp with time zone
-  column answered_units bigint
-  constraint limit_hold_parts_answered_units_check CHECK ((answered_units >= 0))
   constraint limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint limit_hold_parts_held_check CHECK ((held >= 0))
   constraint limit_hold_parts_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
   constraint limit_hold_parts_pkey PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at)
-  constraint limit_hold_parts_request_units_check CHECK ((request_units >= 0))
   constraint limit_hold_parts_unit_check CHECK (((unit ~ '^[a-z][a-z0-9_]{0,63}$'::text) OR (unit ~ '^[A-Z0-9]{3,12}$'::text)))
-  constraint limit_hold_parts_used_units_check CHECK ((used_units >= 0))
   constraint limit_hold_parts_window_check CHECK (((window_ends_at IS NULL) OR (window_ends_at > window_starts_at)))
   index CREATE UNIQUE INDEX limit_hold_parts_pkey ON ONLY billing.limit_hold_parts USING btree (merchant_id, hold_id, limit_key, hold_created_at)
   index CREATE INDEX limit_hold_parts_window_idx ON ONLY billing.limit_hold_parts USING btree (merchant_id, customer_id, limit_key, window_starts_at)
@@ -1051,11 +1060,10 @@ table billing.limit_holds PARTITION BY RANGE (created_at)
   column customer_id uuid NOT NULL
   column currency text NOT NULL
   column lease_id uuid
-  column limit_set text
-  column request_id text
-  column estimated_amount bigint
-  column available_amount bigint
-  column terms jsonb
+  column request_id text NOT NULL
+  column estimated_amount bigint NOT NULL
+  column available_amount bigint NOT NULL
+  column terms jsonb NOT NULL
   column estimate_usage jsonb
   column rate_cards jsonb
   column requested_expires_at timestamp with time zone
@@ -1067,8 +1075,6 @@ table billing.limit_holds PARTITION BY RANGE (created_at)
   column released_at timestamp with time zone
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column captured_charges jsonb
-  column version bigint
-  column applied_version bigint
   constraint limit_holds_available_amount_check CHECK ((available_amount >= 0))
   constraint limit_holds_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
   constraint limit_holds_captured_charges_check CHECK (((captured_charges IS NULL) OR ((state = 'captured'::text) AND (jsonb_typeof(captured_charges) = 'array'::text))))
@@ -1078,20 +1084,18 @@ table billing.limit_holds PARTITION BY RANGE (created_at)
   constraint limit_holds_estimated_amount_check CHECK ((estimated_amount >= 0))
   constraint limit_holds_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))
   constraint limit_holds_hold_lifetime_check CHECK (((expires_at IS NULL) OR (expires_at <= (created_at + '720:00:00'::interval))))
-  constraint limit_holds_lease_id_fkey FOREIGN KEY (merchant_id, lease_id) REFERENCES billing.leases(merchant_id, id) ON DELETE CASCADE
-  constraint limit_holds_limit_set_check CHECK (((octet_length(limit_set) >= 1) AND (octet_length(limit_set) <= 255)))
-  constraint limit_holds_owner_check CHECK ((((request_id IS NOT NULL) AND (lease_id IS NULL) AND (limit_set IS NULL) AND (estimated_amount IS NOT NULL) AND (available_amount IS NOT NULL) AND (terms IS NOT NULL) AND ((estimate_usage IS NULL) = (rate_cards IS NULL))) OR ((lease_id IS NOT NULL) AND (limit_set IS NOT NULL) AND (request_id IS NULL) AND (estimated_amount IS NULL) AND (available_amount IS NULL) AND (terms IS NOT NULL) AND (estimate_usage IS NULL) AND (requested_expires_at IS NULL) AND (expires_at IS NULL) AND (state <> 'captured'::text))))
+  constraint limit_holds_lease_id_check CHECK (((lease_id IS NULL) OR ((requested_expires_at IS NULL) AND (expires_at IS NULL))))
   constraint limit_holds_pkey PRIMARY KEY (merchant_id, id, created_at)
+  constraint limit_holds_rate_cards_check CHECK (((estimate_usage IS NULL) = (rate_cards IS NULL)))
   constraint limit_holds_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 255)))
-  constraint limit_holds_requested_expires_at_check CHECK ((((requested_expires_at IS NULL) OR (requested_expires_at > created_at)) AND ((request_id IS NULL) OR (estimated_amount = 0) OR (requested_expires_at IS NOT NULL))))
+  constraint limit_holds_requested_expires_at_check CHECK ((((requested_expires_at IS NULL) OR (requested_expires_at > created_at)) AND ((lease_id IS NOT NULL) OR (estimated_amount = 0) OR (requested_expires_at IS NOT NULL))))
   constraint limit_holds_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'captured'::text])))
   constraint limit_holds_state_fields_check CHECK ((((state = 'open'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NULL)) OR ((state = 'released'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NOT NULL)) OR ((state = 'captured'::text) AND (capture_terms IS NOT NULL) AND (captured_amount IS NOT NULL) AND (captured_amount >= 0) AND (captured_at IS NOT NULL))))
   constraint limit_holds_terms_check CHECK (((jsonb_typeof(terms) = 'object'::text) AND (octet_length((terms)::text) <= 65536)))
-  constraint limit_holds_version_check CHECK ((((version IS NULL) = (lease_id IS NULL)) AND ((applied_version IS NULL) = (lease_id IS NULL)) AND (applied_version >= 0) AND (applied_version <= version)))
   index CREATE INDEX limit_holds_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
   index CREATE INDEX limit_holds_customer_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
   index CREATE INDEX limit_holds_customer_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id)
-  index CREATE INDEX limit_holds_lease_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, lease_id, customer_id, limit_set) WHERE (lease_id IS NOT NULL)
+  index CREATE INDEX limit_holds_lease_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, lease_id) WHERE ((lease_id IS NOT NULL) AND (state = 'open'::text))
   index CREATE INDEX limit_holds_open_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX limit_holds_pkey ON ONLY billing.limit_holds USING btree (merchant_id, id, created_at)
   index CREATE INDEX limit_holds_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, request_id, created_at DESC) WHERE (request_id IS NOT NULL)
@@ -4007,6 +4011,7 @@ function billing.guard_billing_restore_receipt()
                     'grants',
                     'host_outbox',
                     'idempotency_keys',
+                    'lease_in_flight',
                     'leases',
                     'ledger_accounts',
                     'ledger_transfers',

@@ -92,13 +92,9 @@ type AdjustCustomerLimitParams struct {
 type DenyCode string
 
 const (
-	// DenyLimitReached: the request would not fit a limit even if every other
-	// hold were returned. The refusal names the limit and when it resets.
+	// DenyLimitReached: the request does not fit a limit. The refusal names
+	// the limit and when it resets.
 	DenyLimitReached DenyCode = "limit_reached"
-	// DenyCapacityHeld: the request would fit but for capacity gates' lease
-	// holds keep; they shrink at their next sync. Retry after
-	// RetryAfterSeconds. A gate's want and an admission alike.
-	DenyCapacityHeld DenyCode = "capacity_held"
 	// DenyInsufficientBalance: the prepaid balance does not cover the request.
 	DenyInsufficientBalance DenyCode = "insufficient_balance"
 	// DenyInsufficientCredit: the request does not fit the credit line.

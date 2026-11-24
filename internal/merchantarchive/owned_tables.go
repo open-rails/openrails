@@ -42,6 +42,7 @@ var ownedTables = []string{
 	"grants",
 	"host_outbox",
 	"idempotency_keys",
+	"lease_in_flight",
 	"leases",
 	"ledger_accounts",
 	"ledger_transfers",

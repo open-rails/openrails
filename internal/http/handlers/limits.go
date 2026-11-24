@@ -121,10 +121,10 @@ func AdjustCustomerLimit(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// SyncLeases is a gate's lease sync: its usage settles in order, each want
-// is answered with a hold or a refusal, and returned holds are taken back.
-// The sync answers 200; each refused item and undecided want carries its own
-// error.
+// SyncLeases is a gate's lease sync: its usage settles in order, its
+// in-flight report is replaced, the request holds it releases are released
+// and each view it names is answered. The sync answers 200; each refused item
+// carries its own error.
 func SyncLeases(r *httprequest.Request) {
 	var params billing.SyncLeasesParams
 	if !r.BindJSON(&params) {
@@ -145,11 +145,6 @@ func SyncLeases(r *httprequest.Request) {
 	for i := range out.Usage.Refused {
 		if out.Usage.Refused[i].Error != nil {
 			out.Usage.Refused[i].Error.RequestID = r.RequestID()
-		}
-	}
-	for i := range out.Wants {
-		if out.Wants[i].Error != nil {
-			out.Wants[i].Error.RequestID = r.RequestID()
 		}
 	}
 	r.JSON(http.StatusOK, out)
