@@ -43,7 +43,8 @@
 //     the schedule's next billing time (so a forced early charge can postdate
 //     the clock); a failed charge advances without retrying.
 //     rebill_subscription charges the schedule amount without moving it.
-//   - No webhooks, batching or chargebacks; Settle settles one sale.
+//   - No webhooks, batching or chargebacks; Settle settles one sale. A
+//     settled or voided sale's report lists its settle or void action.
 //     Currency is whatever the request names (USD for schedule charges).
 //     Authentication is not checked.
 package nmimock

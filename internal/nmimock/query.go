@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,8 +66,8 @@ type xmlTransaction struct {
 	Email      string `xml:"email"`
 	Currency   string `xml:"currency"`
 	// MDF is merchant-defined field 20, present when the transaction carries one.
-	MDF    []xmlMDF  `xml:"merchant_defined_field"`
-	Action xmlAction `xml:"action"`
+	MDF     []xmlMDF    `xml:"merchant_defined_field"`
+	Actions []xmlAction `xml:"action"`
 }
 
 type xmlMDF struct {
@@ -97,7 +98,7 @@ func cardTransaction(id, condition, order, vault, currency string, c Card, a xml
 		a.NetworkTokenUsed = "1"
 	}
 	return xmlTransaction{TransactionID: id, TransactionType: "cc", Condition: condition, OrderID: order, CCNumber: maskedNumber(c), CCBin: binFor(c), CCType: c.Brand,
-		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, CustomerID: vault, Currency: currency, Action: a}
+		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, CustomerID: vault, Currency: currency, Actions: []xmlAction{a}}
 }
 
 func binFor(c Card) string {
@@ -142,7 +143,7 @@ func (m *Mock) search(form url.Values) string {
 	var rows []xmlTransaction
 	add := func(t xmlTransaction, at time.Time, schedule string) {
 		if !match("order_id", t.OrderID) || !match("order_description", t.OrderDescription) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
-			!match("action_type", t.Action.ActionType) || !match("subscription_id", schedule) || !inRange(at) {
+			!slices.ContainsFunc(t.Actions, func(a xmlAction) bool { return match("action_type", a.ActionType) }) || !match("subscription_id", schedule) || !inRange(at) {
 			return
 		}
 		rows = append(rows, t)
@@ -171,7 +172,14 @@ func (m *Mock) search(form url.Values) string {
 		txn.PartialPaymentBalance = s.PartialBalance
 		txn.MDF = bookField(s.Book)
 		if s.Declined != "" && s.IssuerCode != "" {
-			txn.Action.ProcessorResponseCode, txn.Action.ProcessorResponseText = s.IssuerCode, "DECLINE"
+			txn.Actions[0].ProcessorResponseCode, txn.Actions[0].ProcessorResponseText = s.IssuerCode, "DECLINE"
+		}
+		// Later actions are NMI's own lines after the sale's.
+		if !s.SettledAt.IsZero() {
+			txn.Actions = append(txn.Actions, xmlAction{Amount: s.Amount, ActionType: "settle", Date: s.SettledAt.UTC().Format(queryTime), Success: "1", Source: "internal", ResponseText: "ACCEPTED", ResponseCode: "100"})
+		}
+		if !s.VoidedAt.IsZero() {
+			txn.Actions = append(txn.Actions, xmlAction{Amount: s.Amount, ActionType: "void", Date: s.VoidedAt.UTC().Format(queryTime), Success: "1", Source: "api", ResponseText: "Transaction Void Successful", ResponseCode: "100"})
 		}
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email

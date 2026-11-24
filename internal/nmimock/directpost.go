@@ -307,7 +307,7 @@ func (m *Mock) void(txID string) string {
 	if s == nil || !s.Approved() || s.Voided || s.RefundedCents > 0 {
 		return "Transaction not found or not voidable"
 	}
-	s.Voided, s.Changed = true, m.now()
+	s.Voided, s.Changed, s.VoidedAt = true, m.now(), m.now()
 	return ""
 }
 

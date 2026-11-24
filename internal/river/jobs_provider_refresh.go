@@ -484,9 +484,11 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		engine.Notifier = w.Alerts // nil-check: see runConvergence
 	}
 	// A run reads the account's whole roster, so one run covers the batch: a
-	// run per day would read the roster once per day of backlog.
+	// run per day would read the roster once per day of backlog. NMI selects
+	// transactions by last change, so any window's read reaches now: one run
+	// reads its backlog to the horizon once.
 	until := since.Add(w.batch())
-	if until.After(horizon) {
+	if provider == reconcile.ProviderNMI || until.After(horizon) {
 		until = horizon
 	}
 	params := reconcile.RunParams{

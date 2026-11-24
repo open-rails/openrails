@@ -190,7 +190,7 @@ func (m *Mock) Settle(txID string) {
 	if s == nil || !s.Approved() || s.Voided {
 		panic("nmimock: settle of " + txID + ": not an unvoided approved sale")
 	}
-	s.Condition, s.Changed = "complete", m.now()
+	s.Condition, s.Changed, s.SettledAt = "complete", m.now(), m.now()
 }
 
 // Void voids an approved, unsettled sale outside OpenRails (a dashboard

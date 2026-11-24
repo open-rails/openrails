@@ -227,31 +227,51 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 }
 
 // fetchTransactions reads the charges, declines and refunds NMI dated in
-// [Since, Until]. NMI's start_date and end_date select a transaction by its
-// last change, which a later action (settlement, refund, void) moves past any
-// window: the read has no end and keeps the actions dated inside the window.
-// No condition or action_type is sent, so declines are included.
+// [Since, Until], and the voids made in it. NMI's start_date and end_date
+// select a transaction by its last change, which a later action (settlement,
+// refund, void) moves past any window: the read has no end and keeps, page by
+// page, the actions dated inside the window. No condition or action_type is
+// sent, so declines are included.
 func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
 	if !params.Since.IsZero() {
 		filter.StartDate = params.Since.UTC().Format(nmi.QueryTimeFormat)
 	}
 	since, until := params.Since.Truncate(time.Second), params.Until
-	txns, err := f.readTransactions(ctx, filter)
-	if err != nil {
-		return nil, err
+	in := func(at time.Time) bool {
+		return !at.IsZero() && (params.Since.IsZero() || !at.Before(since)) && (until.IsZero() || !at.After(until))
 	}
-	out := txns[:0]
-	for _, t := range txns {
-		if (params.Since.IsZero() || !t.OccurredAt.Before(since)) && (until.IsZero() || !t.OccurredAt.After(until)) {
-			out = append(out, t)
+	return f.readTransactions(ctx, filter, func(t nmi.QueryTransaction, txn RemoteTransaction) bool {
+		return in(txn.OccurredAt) || txn.Type == TransactionTypeVoid && in(nmiVoidedAt(t))
+	})
+}
+
+// nmiVoidedAt dates a voided transaction's void by its own action, or by the
+// transaction's last action when the report shows only the canceled
+// condition. A void record keeps its sale's date (normalizeNMITransaction).
+func nmiVoidedAt(t nmi.QueryTransaction) time.Time {
+	var voided, last time.Time
+	for _, action := range t.Actions {
+		at, ok := action.At()
+		if !ok {
+			continue
+		}
+		if at.After(last) {
+			last = at
+		}
+		if action.Is("void") && action.Succeeded() {
+			voided = at
 		}
 	}
-	return out, nil
+	if voided.IsZero() {
+		return last
+	}
+	return voided
 }
 
 // readTransactions pages the transaction report filter selects, each
-// transaction's actions normalized.
-func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
+// transaction's actions normalized, keeping those keep accepts (nil keeps
+// every one) as each page arrives.
+func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilter, keep func(nmi.QueryTransaction, RemoteTransaction) bool) ([]RemoteTransaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -281,7 +301,11 @@ func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilte
 			if err := qualifyNMITransaction(t); err != nil {
 				return nil, err
 			}
-			out = append(out, normalizeNMITransaction(t)...)
+			for _, txn := range normalizeNMITransaction(t) {
+				if keep == nil || keep(t, txn) {
+					out = append(out, txn)
+				}
+			}
 		}
 		if len(parsed.Transactions) < nmiQueryPageLimit {
 			break
@@ -302,7 +326,7 @@ func NMIChangedTransactions(ctx context.Context, client *nmi.NMIClient, since, u
 	if !until.IsZero() {
 		filter.EndDate = until.UTC().Add(-time.Second).Format(nmi.QueryTimeFormat) // end_date is inclusive
 	}
-	return NewNMIFetcher(client).readTransactions(ctx, filter)
+	return NewNMIFetcher(client).readTransactions(ctx, filter, nil)
 }
 
 // NMISubscriptionTransactions reads one subscription's transactions dated

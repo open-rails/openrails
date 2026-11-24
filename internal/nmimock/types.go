@@ -115,7 +115,9 @@ type Sale struct {
 	At     time.Time
 	// Changed is the transaction's last change (a settlement, refund or
 	// void); zero is At. The Query API's start_date and end_date select by it.
-	Changed time.Time
+	// SettledAt and VoidedAt date the settle and void actions it reports.
+	Changed             time.Time
+	SettledAt, VoidedAt time.Time
 	// Hidden keeps the sale out of the Query API until Reveal.
 	Hidden bool
 }

@@ -176,40 +176,48 @@ func TestProviderTime(t *testing.T) {
 		require.Len(t, converges(), 1, "another event under that nonce applies")
 	})
 
-	t.Run("OR-J15-S73/prune-keeps-an-nmi-sale-settled-after-its-window", func(t *testing.T) {
-		a, p, _ := nmiMembership(t)
-		sales := p.core.Sales()
-		require.Len(t, sales, 1)
-		sale := sales[0]
-		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
-		require.NoError(t, err)
-		require.Len(t, receipts.Items, 1)
-		receipt := receipts.Items[0]
-		require.Equal(t, sale.TransactionID, receipt.TransactionID)
-		// NMI also holds a sale OpenRails does not, inside the window.
-		p.core.AddSale(nmimock.Sale{Vault: sale.Vault, Amount: "5.00", At: sale.At.Add(-30 * time.Minute)})
-		since, until := sale.At.Add(-time.Hour), sale.At.Add(time.Hour)
-		excess := func(res reconcile.PruneResult) []uuid.UUID {
-			t.Helper()
-			require.Empty(t, res.PaymentSkipReason, "NMI's read of the window is complete")
-			return append(append([]uuid.UUID{}, res.PaymentIDs...), res.SkippedPaymentIDs...)
+	t.Run("OR-J15-S73/prune-keeps-an-nmi-sale-settled-refunded-or-voided-after-its-window", func(t *testing.T) {
+		for name, later := range map[string]func(p *nmiJournal, sale string){
+			"settled":  func(p *nmiJournal, sale string) { p.core.Settle(sale) },
+			"refunded": func(p *nmiJournal, sale string) { p.core.Refund(sale, 500) },
+			"voided":   func(p *nmiJournal, sale string) { p.core.Void(sale) },
+		} {
+			t.Run(name, func(t *testing.T) {
+				a, p, _ := nmiMembership(t)
+				sales := p.core.Sales()
+				require.Len(t, sales, 1)
+				sale := sales[0]
+				customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+				receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+				require.NoError(t, err)
+				require.Len(t, receipts.Items, 1)
+				receipt := receipts.Items[0]
+				require.Equal(t, sale.TransactionID, receipt.TransactionID)
+				// NMI also holds a sale OpenRails does not, inside the window.
+				p.core.AddSale(nmimock.Sale{Vault: sale.Vault, Amount: "5.00", At: sale.At.Add(-30 * time.Minute)})
+				since, until := sale.At.Add(-time.Hour), sale.At.Add(time.Hour)
+				excess := func(res reconcile.PruneResult) []uuid.UUID {
+					t.Helper()
+					require.Empty(t, res.PaymentSkipReason, "NMI's read of the window is complete")
+					return append(append([]uuid.UUID{}, res.PaymentIDs...), res.SkippedPaymentIDs...)
+				}
+				// NMI's report proves absence in the window: a receipt it does
+				// not list is excess.
+				p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
+				require.Equal(t, []uuid.UUID{receipt.ID.UUID()}, excess(nmiPrune(t, a, since, until, nil)))
+				p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = false })
+				// Changed after the window, the sale's last change is outside
+				// it; the read reaches it and the receipt stays.
+				a.clock.Advance(2 * time.Hour)
+				later(p, sale.TransactionID)
+				require.Empty(t, excess(nmiPrune(t, a, since, until, nil)))
+				zero := 0
+				require.Zero(t, nmiPrune(t, a, since, until, &zero).Payments)
+				kept, err := a.alpha.GetPayment(t.Context(), receipt.ID)
+				require.NoError(t, err)
+				require.Equal(t, sale.TransactionID, kept.TransactionID)
+			})
 		}
-		// NMI's report proves absence in the window: a receipt it does not
-		// list is excess.
-		p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
-		require.Equal(t, []uuid.UUID{receipt.ID.UUID()}, excess(nmiPrune(t, a, since, until, nil)))
-		p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Hidden = false })
-		// Settled after the window, the sale's last change is outside it; the
-		// read reaches it and the receipt stays.
-		a.clock.Advance(2 * time.Hour)
-		p.core.Settle(sale.TransactionID)
-		require.Empty(t, excess(nmiPrune(t, a, since, until, nil)))
-		zero := 0
-		require.Zero(t, nmiPrune(t, a, since, until, &zero).Payments)
-		kept, err := a.alpha.GetPayment(t.Context(), receipt.ID)
-		require.NoError(t, err)
-		require.Equal(t, sale.TransactionID, kept.TransactionID)
 	})
 
 	t.Run("OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing", func(t *testing.T) {
