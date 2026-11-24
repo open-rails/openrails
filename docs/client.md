@@ -1120,7 +1120,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 | Method | Use it to |
 |---|---|
 | `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
-| `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `QueryMetrics` | cash, payment, recurring revenue, retention, renewal, usage and ops measures, grouped and bucketed |
 | `ListDisputePrograms` | each card PSP's standing in the dispute monitoring programs (Visa VAMP, Mastercard's excessive chargeback and fraud programs, Stripe's guidance, the PSP's `dispute_ratio_limit`) for a month: ratio so far, projected, level and thresholds |
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
@@ -1133,7 +1133,7 @@ return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
 })
 ```
 
-A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`; rates such as `refund_rate` and `rebill_rate` divide its slices. `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
+A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`, `mrr_movements` and `subscriber_movements` by `movement`; rates such as `refund_rate` and `rebill_rate` divide its slices. Recurring measures (`mrr`, `subscribers`, `subscriber_churn_rate`, `nrr`, `grr`, `cohort_retention`, `arpa`, `ltv`, `scheduled_mrr`) read the MRR rollups; churn, NRR and GRR read monthly with grain `month`, and `scheduled_mrr` looks ahead with `range.next` (`{"next": "12w"}`). `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
 
 An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself; a removed measure's error names its replacement.
 
