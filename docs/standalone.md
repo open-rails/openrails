@@ -576,6 +576,8 @@ vault write -f transit/keys/openrails-solana-cranker type=ed25519 exportable=fal
 **Purge.** `openrails merchant purge` queues the `openrails.merchant_secret_cleanup`
 job, which deletes every document under the merchant's id and retries until the
 subtree is empty; a changed Vault address or mount is refused until restored.
+With an event store attached it also queues `openrails.merchant_usage_purge`,
+which deletes the merchant's usage there and retries until the store takes it.
 
 ## Auth and trust
 

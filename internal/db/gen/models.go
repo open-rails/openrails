@@ -219,6 +219,10 @@ type BillingCreditGrant struct {
 	// Units pending refunds of the lot's payment will withdraw: its share of the refunds' cash, rounded up. Available is remaining - units_reserved.
 	UnitsReserved int64
 	CreatedAt     time.Time
+	// Money of the lot's price the general ledger deferred: legs crediting its customer's deferred_revenue_credit in paid_currency (in unit for a lot given back at face, a usage reversal) that name the lot. Kept by ledger_transfers_apply_lot_deferred.
+	DeferredCredited int64
+	// Money of the lot released from deferral: spent, broken, forfeited or refunded. deferred_credited - deferred_debited is what its remaining units are worth at its rate.
+	DeferredDebited int64
 }
 
 // Append-only revocations and reinstatements of credit lots; each sets or clears its lot's revoked_at. The units they move are ledger transfers. Retention: permanent, never pruned.
@@ -232,19 +236,8 @@ type BillingCreditGrantEvent struct {
 	Reason      *string
 	Actor       *string
 	CreatedAt   time.Time
-}
-
-// Each settled reversal of a merchant unit pack's payment as it applied to the pack's lot: the credit line's share of the payment it returned (a refund or chargeback) or restored (a recovery, naming the reversal in reverses_id), and the units that moved. A money lot keeps the same in its cash legs; a unit has none. Later reversals and recoveries read what each one took, never recompute it. Retention: permanent, never pruned.
-type BillingCreditGrantReversal struct {
-	MerchantID    uuid.UUID
-	CreditGrantID uuid.UUID
-	ReversalID    uuid.UUID
-	ReversesID    *uuid.UUID
-	// The credit line's share of the reversal, in the lot's paid_currency.
-	Cash int64
-	// The lot's units the reversal took, or the recovery restored.
-	Units     int64
-	CreatedAt time.Time
+	// The Idempotency-Key the event was made under, if any: a retry under it replays the event.
+	RequestKey *string
 }
 
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
@@ -793,9 +786,11 @@ type BillingLedgerTransfer struct {
 	OrderLineID *uuid.UUID
 	// The product a general-ledger transfer belongs to. No foreign key (ledger purity).
 	ProductID *uuid.UUID
+	// The revenue schedule whose deferred revenue a general-ledger transfer funds, recognises or reduces. No foreign key (ledger purity).
+	RevenueScheduleID *uuid.UUID
 }
 
-// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters; settling it raises books.sign_breach when it crosses that account's sign rule, and never refuses the commit. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
 type BillingLedgerTypeTotal struct {
 	MerchantID    uuid.UUID
 	Book          string
@@ -2185,6 +2180,41 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
+// One row per paid order line whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
+type BillingRevenueSchedule struct {
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Currency        string
+	OrderID         uuid.UUID
+	OrderLineID     uuid.UUID
+	SubscriptionID  *uuid.UUID
+	ProductAccessID *uuid.UUID
+	ProductID       *uuid.UUID
+	PriceID         *uuid.UUID
+	Method          string
+	// The general-ledger revenue account recognition credits.
+	RevenueAccount string
+	// The net transaction price allocated to the line: cash applied and non-cash settlement, less later reductions.
+	Funded int64
+	// What recognition has moved from deferred_revenue to revenue_account, less refund catch-ups.
+	RecognizedNet   int64
+	ServiceStartsAt time.Time
+	ServiceEndsAt   time.Time
+	// For service sold in calendar months: their number. Each month recognises an equal share, linear within it; NULL recognises by elapsed time over the whole service.
+	ServiceMonths *int32
+	// When the service ended before service_ends_at (an immediate cancellation, a revocation): what remains unrecognised then is forfeited to revenue.
+	EndedAt *time.Time
+	// The instant recognition has reached: the application, or the last boundary posted.
+	RecognizedThroughAt time.Time
+	// When the schedule is next due to the revenue_recognition job; NULL once fully recognised. An early end makes it due then.
+	NextRecognitionAt *time.Time
+	// How many forfeits an undone end took back: the generation of the schedule's termination and reinstatement coordinates, so an end repeated at one instant posts again.
+	Reinstatements int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.
 type BillingRunningCharge struct {
 	ID         uuid.UUID
@@ -2308,6 +2338,20 @@ type BillingStoredCardCheck struct {
 	MerchantID      uuid.UUID
 	PaymentMethodID uuid.UUID
 	DueAt           time.Time
+}
+
+// A Stripe charge, refund or dispute whose balance transactions the general ledger has yet to read for their fees: queued by the payment or dispute that records it, read by the billing pass's stripe_fees scan, deleted once its fees post.
+type BillingStripeFeeRead struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	// The Stripe object as the payment or dispute names it: a charge, payment intent or invoice for a payment, a refund, or a dispute.
+	Ref  string
+	Kind string
+	// When it is read next; a failed read waits longer each time, and after eight failures waits (infinity) until its books.fee.unread finding is fixed; a dispute whose status changes is read again at once.
+	DueAt     time.Time
+	Attempts  int32
+	LastError *string
+	CreatedAt time.Time
 }
 
 // Core subscription records tracking user billing relationships
@@ -2482,6 +2526,8 @@ type BillingUsagePosting struct {
 	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}].
 	Lines     []byte
 	CreatedAt time.Time
+	// The latest ingestion among the usage the posting read before its cut, or an earlier posting's when later: a later posting counts usage that occurred before cut_at and was ingested by then at no less than what posted.
+	IngestedThrough time.Time
 	// Of amount, what the ledger did not take: usage in a merchant's unit its lots could not cover, never owed (positive); a reversal's share that took back forgiveness rather than credit (negative). Zero in a registry currency.
 	Forgiven int64
 	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.

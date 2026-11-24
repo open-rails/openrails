@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -51,7 +51,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if additional <= 0 {
 			return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
 		}
-		returned, err := returnedCash(ctx, q, grant)
+		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: grant.ID})
 		if err != nil {
 			return err
 		}
@@ -59,7 +59,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
-		open, err := openCreditCash(paid, returned)
+		open, err := openCreditCash(paid, net.Cash)
 		if err != nil {
 			return err
 		}
@@ -107,12 +107,13 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err != nil {
 			return err
 		}
-		// A pack of a merchant's unit is paid in money: its reversals are in
-		// that currency, and no cash leg is in the unit.
-		currency, paidCurrency := g.Unit, g.Unit
-		unit := g.PaidCurrency != nil && *g.PaidCurrency != g.Unit
-		if unit {
-			paidCurrency = *g.PaidCurrency
+		// The lot's units are in its unit; its money, and every payment of
+		// it, in its paid currency (a merchant's own unit is bought with
+		// money).
+		currency := g.Unit
+		paidCurrency, err := fundingCurrency(g)
+		if err != nil {
+			return err
 		}
 		if _, _, err := s.lockBalance(ctx, q, mid.UUID(), g.CustomerID, currency); err != nil {
 			return err
@@ -132,24 +133,9 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err != nil {
 			return err
 		}
-		// What the credit line's earlier reversals returned: a money lot's
-		// cash legs, a unit pack's recorded shares.
-		var net int64
-		var book unitReversals
-		if unit {
-			if book, err = loadUnitReversals(ctx, q, g); err != nil {
-				return err
-			}
-			if _, applied := book.share[reversalID]; applied {
-				return nil
-			}
-			net = book.net
-		} else {
-			state, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID})
-			if err != nil {
-				return err
-			}
-			net = state.Cash
+		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID})
+		if err != nil {
+			return err
 		}
 		restoring := reversal.Amount > 0
 		// cashDelta is the credit line's part of the reversal.
@@ -160,7 +146,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			if reversesID != nil || reversal.Amount == (-1<<63) {
 				return fmt.Errorf("invalid negative credit reversal")
 			}
-			open, err := openCreditCash(paid, net)
+			open, err := openCreditCash(paid, net.Cash)
 			if err != nil {
 				return err
 			}
@@ -182,9 +168,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			if origin, err = q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
 				return err
 			}
-			if unit {
-				origin.Cash, recovered = book.share[*reversesID], book.recovered[*reversesID]
-			} else if recovered, err = q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
+			if recovered, err = q.GetPurchasedCreditRecoveryTotal(ctx, gen.GetPurchasedCreditRecoveryTotalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID, ReversalID: reversesID.String()}); err != nil {
 				return err
 			}
 			if origin.Cash < 0 || recovered < 0 || recovered > origin.Cash {
@@ -220,7 +204,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		cashSource := "cash"
 		lossSource := "consumed_credit"
 		if !restoring {
-			faceDelta = proportional(face, net+cashDelta, paid, false) - proportional(face, net, paid, false)
+			faceDelta = proportional(face, net.Cash+cashDelta, paid, false) - proportional(face, net.Cash, paid, false)
 			withdrawn = min(max(remaining, 0), faceDelta)
 			retiredBalance, err := q.GetPurchasedCreditRetiredBalance(ctx, gen.GetPurchasedCreditRetiredBalanceParams{MerchantID: mid.UUID(), CreditGrantID: g.ID})
 			if err != nil {
@@ -246,6 +230,16 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			revoked = recoveredPart(origin.Revoked, origin.Withdrawn+origin.Expired, after) - recoveredPart(origin.Revoked, origin.Withdrawn+origin.Expired, before)
 			prior := origin.Withdrawn + origin.Expired + origin.Revoked
 			repaid = recoveredPart(origin.Repaid, prior, after) - recoveredPart(origin.Repaid, prior, before)
+			// Owed is repaid again only while it is outstanding: what was
+			// repaid since returns to the balance, as units withdrawn.
+			outstanding, err := ledger.New(q, mid.UUID()).OutstandingOwed(ctx, g.CustomerID, currency)
+			if err != nil {
+				return err
+			}
+			if repaid > outstanding {
+				withdrawn += repaid - outstanding
+				repaid = outstanding
+			}
 			pastExpiry := g.ExpiresAt != nil && !g.ExpiresAt.After(s.now())
 			if g.RevokedAt != nil || pastExpiry {
 				retired, withdrawn = withdrawn, 0
@@ -258,84 +252,185 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			lossSource = "consumed_credit_restore:" + reversesID.String()
 		}
 		l := ledger.New(q, mid.UUID())
-		clearing, err := l.EnsureSystemAccount(ctx, ledger.UnitsRefundClearing, currency)
+		units := unitsMoved{withdrawn: withdrawn, retired: retired, expired: expired, revoked: revoked, repaid: repaid,
+			consumed: faceDelta - withdrawn - retired - expired - revoked - repaid, retiredAccount: retiredAccount}
+		if !books.CreditLotOf(g).Booked() {
+			// A lot from before the credit books keeps its reversals' cash in
+			// the units book until the books are rebuilt.
+			return postLegacyReversal(ctx, l, g, reversalID, reversesID, restoring, cashDelta, faceDelta, units, source, cashSource, lossSource)
+		}
+		leg := func(from, to ledger.AccountType, amount int64, kind ledger.TransferType, label string) error {
+			return postUnits(ctx, l, g, reversalID, from, to, amount, kind, label)
+		}
+		gl := books.New(q, mid.UUID())
+		at := s.now()
+		// The cash returns to, and is recovered into, where the lot's
+		// payment brought it.
+		bought, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: paymentID})
 		if err != nil {
 			return err
 		}
-		post := func(account ledger.AccountType, amount int64, kind ledger.TransferType, incoming bool, label string) error {
-			if amount == 0 {
-				return nil
-			}
-			var id uuid.UUID
-			var err error
-			var customer *uuid.UUID
-			switch account {
-			case ledger.CustomerUnits:
-				id, err = l.EnsureCustomerBalance(ctx, g.CustomerID, currency)
-				customer = &g.CustomerID
-			case ledger.CustomerOwed:
-				id, err = l.EnsureCustomerArrears(ctx, g.CustomerID, currency)
-				customer = &g.CustomerID
-			default:
-				id, err = l.EnsureSystemAccount(ctx, account, currency)
-			}
-			if err != nil {
+		account := books.CashAccount(bought)
+		if !restoring {
+			// Every unit the reversal takes goes to units_refunded, from where
+			// it was; its money is the general ledger's.
+			if err := leg(ledger.CustomerUnits, ledger.UnitsRefunded, units.withdrawn, ledger.CreditRefund, source); err != nil {
 				return err
 			}
-			debit, credit := id, clearing
-			if !incoming {
-				debit, credit = clearing, id
+			for _, from := range []struct {
+				account ledger.AccountType
+				amount  int64
+				label   string
+			}{{ledger.UnitsExpired, units.expired, "expired_credit"}, {ledger.UnitsRevoked, units.revoked, "revoked_credit"},
+				{ledger.CustomerOwed, units.repaid, "repaid_owed"}, {ledger.UnitsRedeemed, units.consumed, lossSource}} {
+				if err := leg(from.account, ledger.UnitsRefunded, from.amount, ledger.CreditRefundFunding, from.label); err != nil {
+					return err
+				}
 			}
-			_, err = l.Apply(ctx, ledger.Transfer{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: kind, Coord: ledger.Coord{Operation: "purchased_credit_refund", Source: label, SourceID: reversalID.String()}, CreditGrantID: &g.ID, Customer: customer})
-			return err
-		}
-		balanceType, cashType := ledger.CreditRefund, ledger.CreditRefundCash
-		if restoring {
-			balanceType, cashType = ledger.CreditRefundRestore, ledger.CreditRefundCashRestore
-		}
-		if err := post(ledger.CustomerUnits, withdrawn, balanceType, !restoring, source); err != nil {
-			return err
-		}
-		if err := post(retiredAccount, retired, ledger.CreditRefundFunding, false, "retired_"+source); err != nil {
-			return err
-		}
-		expiredSource, revokedSource, repaidSource := "expired_credit", "revoked_credit", "repaid_owed"
-		if restoring {
-			expiredSource += "_restore:" + reversesID.String()
-			revokedSource += "_restore:" + reversesID.String()
-			repaidSource += "_restore:" + reversesID.String()
-		}
-		if err := post(ledger.UnitsExpired, expired, ledger.CreditRefundFunding, !restoring, expiredSource); err != nil {
-			return err
-		}
-		if err := post(ledger.UnitsRevoked, revoked, ledger.CreditRefundFunding, !restoring, revokedSource); err != nil {
-			return err
-		}
-		if err := post(ledger.CustomerOwed, repaid, ledger.CreditRefundFunding, !restoring, repaidSource); err != nil {
-			return err
-		}
-		if err := post(ledger.UnitsRefundLoss, faceDelta-withdrawn-retired-expired-revoked-repaid, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
-			return err
-		}
-		if unit {
-			// The share is recorded as it applies, even one that moves no
-			// whole unit: a later reversal reads it, never recomputes it.
-			// The units go back to the account that issued them.
-			if err := q.InsertCreditGrantReversal(ctx, gen.InsertCreditGrantReversalParams{MerchantID: mid.UUID(), CreditGrantID: g.ID,
-				ReversalID: reversalID, ReversesID: reversesID, Cash: cashDelta, Units: faceDelta}); err != nil {
+			if g, err = lots.Get(ctx, g.ID); err != nil {
 				return err
 			}
-			return post(ledger.UnitsSold, faceDelta, ledger.CreditRefundFunding, restoring, "units_returned"+strings.TrimPrefix(cashSource, "cash"))
+			return gl.ReverseCredit(ctx, books.CreditLotOf(g), books.CreditReversal{
+				Reversal: reversalID, Chargeback: reversal.ReversalKind != nil && *reversal.ReversalKind == reversalChargeback,
+				Cash: cashDelta, CashAccount: account, Repaid: units.repaid, At: at,
+			})
 		}
-		if err := post(ledger.UnitsSold, cashDelta, cashType, restoring, cashSource); err != nil {
+		restore := ":" + reversesID.String()
+		if err := leg(ledger.UnitsRefunded, ledger.CustomerUnits, units.withdrawn, ledger.CreditRefundRestore, source); err != nil {
 			return err
 		}
-		if faceDelta > cashDelta {
-			return post(ledger.UnitsGranted, faceDelta-cashDelta, ledger.CreditRefundFunding, restoring, "promotion")
+		for _, to := range []struct {
+			account ledger.AccountType
+			amount  int64
+			label   string
+		}{{units.retiredAccount, units.retired, "retired_" + source}, {ledger.UnitsExpired, units.expired, "expired_credit_restore" + restore},
+			{ledger.UnitsRevoked, units.revoked, "revoked_credit_restore" + restore}, {ledger.CustomerOwed, units.repaid, "repaid_owed_restore" + restore},
+			{ledger.UnitsRedeemed, units.consumed, lossSource}} {
+			if err := leg(ledger.UnitsRefunded, to.account, to.amount, ledger.CreditRefundFunding, to.label); err != nil {
+				return err
+			}
 		}
-		return post(ledger.UnitsRedeemed, cashDelta-faceDelta, ledger.CreditRefundFunding, !restoring, "revenue")
+		original, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: *reversesID})
+		if err != nil {
+			return err
+		}
+		if g, err = lots.Get(ctx, g.ID); err != nil {
+			return err
+		}
+		lot := books.CreditLotOf(g)
+		if err := gl.RecoverCredit(ctx, lot, books.CreditRecovery{
+			Recovery: reversalID, Origin: *reversesID, Chargeback: original.ReversalKind != nil && *original.ReversalKind == reversalChargeback,
+			Cash: cashDelta, CashAccount: account, Repaid: units.repaid, Retired: units.retired, At: at,
+		}); err != nil {
+			return err
+		}
+		if units.retired == 0 {
+			return nil
+		}
+		// Units restored to a revoked or lapsed lot are retired at once, their
+		// money with them.
+		if g, err = lots.Get(ctx, g.ID); err != nil {
+			return err
+		}
+		kind := books.CreditRevoked
+		if units.retiredAccount == ledger.UnitsExpired {
+			kind = books.CreditExpired
+		}
+		return gl.MoveCredit(ctx, books.CreditLotOf(g), books.CreditMove{Kind: kind, At: at,
+			Coord: books.Coord{Operation: books.OpCreditRefund, Source: "money_retired_restore" + restore, SourceID: reversalID.String()}})
 	})
 	return posted && err == nil, err
+}
+
+// reversalChargeback is payments.ReversalChargeback (payments imports this
+// package).
+const reversalChargeback = "chargeback"
+
+// unitsMoved is how a reversal's face splits across where the lot's units
+// were.
+type unitsMoved struct {
+	withdrawn, retired, expired, revoked, repaid, consumed int64
+	retiredAccount                                         ledger.AccountType
+}
+
+// postUnits posts one units-book leg of a reversal, naming the lot and, on a
+// customer's account, the customer.
+func postUnits(ctx context.Context, l *ledger.Ledger, g gen.BillingCreditGrant, reversalID uuid.UUID, from, to ledger.AccountType, amount int64, kind ledger.TransferType, label string) error {
+	if amount == 0 {
+		return nil
+	}
+	var customer *uuid.UUID
+	account := func(t ledger.AccountType) (uuid.UUID, error) {
+		switch t {
+		case ledger.CustomerUnits:
+			customer = &g.CustomerID
+			return l.EnsureCustomerBalance(ctx, g.CustomerID, g.Unit)
+		case ledger.CustomerOwed:
+			customer = &g.CustomerID
+			return l.EnsureCustomerArrears(ctx, g.CustomerID, g.Unit)
+		}
+		return l.EnsureSystemAccount(ctx, t, g.Unit)
+	}
+	debit, err := account(from)
+	if err != nil {
+		return err
+	}
+	credit, err := account(to)
+	if err != nil {
+		return err
+	}
+	_, err = l.Apply(ctx, ledger.Transfer{Debit: debit, Credit: credit, Amount: amount, Currency: g.Unit, Type: kind,
+		Coord: ledger.Coord{Operation: books.OpCreditRefund, Source: label, SourceID: reversalID.String()}, CreditGrantID: &g.ID, Customer: customer})
+	return err
+}
+
+// postLegacyReversal posts a reversal of a lot from before the credit books
+// as the units book did then: every leg through units_refund_clearing, the
+// cash beside them and the difference between face and cash to promotion or
+// revenue.
+func postLegacyReversal(ctx context.Context, l *ledger.Ledger, g gen.BillingCreditGrant, reversalID uuid.UUID, reversesID *uuid.UUID, restoring bool, cashDelta, faceDelta int64, units unitsMoved, source, cashSource, lossSource string) error {
+	post := func(account ledger.AccountType, amount int64, kind ledger.TransferType, incoming bool, label string) error {
+		from, to := account, ledger.UnitsRefundClearing
+		if !incoming {
+			from, to = to, from
+		}
+		return postUnits(ctx, l, g, reversalID, from, to, amount, kind, label)
+	}
+	balanceType, cashType := ledger.CreditRefund, ledger.CreditRefundCash
+	if restoring {
+		balanceType, cashType = ledger.CreditRefundRestore, ledger.CreditRefundCashRestore
+	}
+	if err := post(ledger.CustomerUnits, units.withdrawn, balanceType, !restoring, source); err != nil {
+		return err
+	}
+	if err := post(units.retiredAccount, units.retired, ledger.CreditRefundFunding, false, "retired_"+source); err != nil {
+		return err
+	}
+	expiredSource, revokedSource, repaidSource := "expired_credit", "revoked_credit", "repaid_owed"
+	if restoring {
+		expiredSource += "_restore:" + reversesID.String()
+		revokedSource += "_restore:" + reversesID.String()
+		repaidSource += "_restore:" + reversesID.String()
+	}
+	if err := post(ledger.UnitsExpired, units.expired, ledger.CreditRefundFunding, !restoring, expiredSource); err != nil {
+		return err
+	}
+	if err := post(ledger.UnitsRevoked, units.revoked, ledger.CreditRefundFunding, !restoring, revokedSource); err != nil {
+		return err
+	}
+	if err := post(ledger.CustomerOwed, units.repaid, ledger.CreditRefundFunding, !restoring, repaidSource); err != nil {
+		return err
+	}
+	if err := post(ledger.UnitsRefundLoss, units.consumed, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
+		return err
+	}
+	if err := post(ledger.UnitsSold, cashDelta, cashType, restoring, cashSource); err != nil {
+		return err
+	}
+	if faceDelta > cashDelta {
+		return post(ledger.UnitsGranted, faceDelta-cashDelta, ledger.CreditRefundFunding, restoring, "promotion")
+	}
+	return post(ledger.UnitsRedeemed, cashDelta-faceDelta, ledger.CreditRefundFunding, !restoring, "revenue")
 }
 
 // openCreditCash is what of the credit line's payment no reversal has returned.
@@ -347,46 +442,19 @@ func openCreditCash(paid, reversed int64) (int64, error) {
 }
 
 func fundingAmount(lot gen.BillingCreditGrant) (int64, error) {
-	if lot.PaidAmount == nil || *lot.PaidAmount <= 0 || lot.PaidCurrency == nil {
-		return 0, fmt.Errorf("purchased credit lacks its payment funding")
+	if _, err := fundingCurrency(lot); err != nil {
+		return 0, err
 	}
 	return *lot.PaidAmount, nil
 }
 
-// returnedCash is what of a purchased lot's paid amount settled reversals
-// returned: its cash legs for credit in its payment's currency, a unit pack's
-// recorded shares.
-func returnedCash(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant) (int64, error) {
-	if *lot.PaidCurrency == lot.Unit {
-		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
-		return net.Cash, err
+// fundingCurrency is the currency a bought lot was paid in: its unit, or the
+// money a merchant's own unit was bought with.
+func fundingCurrency(lot gen.BillingCreditGrant) (string, error) {
+	if lot.PaidAmount == nil || *lot.PaidAmount <= 0 || lot.PaidCurrency == nil || *lot.PaidCurrency == "" {
+		return "", fmt.Errorf("purchased credit lacks its payment funding")
 	}
-	book, err := loadUnitReversals(ctx, q, lot)
-	return book.net, err
-}
-
-// unitReversals are the settled reversals of a unit pack's payment as they
-// applied (credit_grant_reversals): each one's share of the credit line's
-// cash, what recoveries restored of each reversal, and what the line has
-// returned net.
-type unitReversals struct {
-	share, recovered map[uuid.UUID]int64
-	net              int64
-}
-
-func loadUnitReversals(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant) (unitReversals, error) {
-	out := unitReversals{share: map[uuid.UUID]int64{}, recovered: map[uuid.UUID]int64{}}
-	rows, err := q.ListCreditGrantReversals(ctx, gen.ListCreditGrantReversalsParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
-	for _, r := range rows {
-		out.share[r.ReversalID] = r.Cash
-		if r.ReversesID == nil {
-			out.net += r.Cash
-		} else {
-			out.recovered[*r.ReversesID] += r.Cash
-			out.net -= r.Cash
-		}
-	}
-	return out, err
+	return *lot.PaidCurrency, nil
 }
 
 // proportional uses integer arithmetic without int64 multiplication overflow.

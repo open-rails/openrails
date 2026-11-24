@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -28,7 +29,8 @@ func InMerchantUnit(code string) bool { return currency.IsUnitCode(code) }
 // payFromBalance pays a locked open order in a merchant's unit from its
 // customer's balance in that unit, then settles it: each line draws the live
 // lots, soonest expiry first, one credit_spend per lot at (order,
-// order_line, line), naming the order. Usage the customer accrued draws the
+// order_line, line), naming the order, and its money moves into the line's
+// deferred revenue at each lot's rate. Usage the customer accrued draws the
 // balance first; what holds and pending refunds keep is not spent.
 func (s *Service) payFromBalance(ctx context.Context, d *db.DB, order *Order) (Outcome, error) {
 	q := d.Gen(ctx)
@@ -52,7 +54,8 @@ func (s *Service) payFromBalance(ctx context.Context, d *db.DB, order *Order) (O
 			continue
 		}
 		coord := ledger.Coord{Operation: ledger.OpOrder, Source: "order_line", SourceID: line.ID.String()}
-		if _, err := lots.SpendOrder(ctx, order.CustomerID, order.Currency, line.Amount, order.ID, coord); err != nil {
+		into := &books.Line{Order: order.ID, OrderLine: line.ID, Product: line.ProductID}
+		if _, err := lots.SpendInto(ctx, order.CustomerID, order.Currency, line.Amount, order.CustomerID.String(), "order", coord, into); err != nil {
 			if errors.Is(err, credits.ErrInsufficientCredits) {
 				return "", ErrBalanceShort
 			}

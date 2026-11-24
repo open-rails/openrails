@@ -31,6 +31,12 @@ SELECT count(*) FROM billing.disputes WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsDisputes :exec
 DELETE FROM billing.disputes WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsStripeFeeReads :one
+SELECT count(*) FROM billing.stripe_fee_reads WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsStripeFeeReads :exec
+DELETE FROM billing.stripe_fee_reads WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsFraudReports :one
 SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1;
 

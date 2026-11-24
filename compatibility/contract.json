@@ -119,10 +119,11 @@
       "func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsParams) (*billing.MetricsResult, error)",
       "func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (*billing.Payment, error)",
       "func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id billing.PaymentID, params billing.RefundPaymentParams) (*billing.Payment, error)",
+      "func (c *Client) ReinstateCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error)",
-      "func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)",
+      "func (c *Client) RevokeCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams) error",
       "func (c *Client) SetCustodian(ctx context.Context, key string, params billing.SetCustodianParams) (*billing.Custodian, error)",
       "func (c *Client) SetDashboard(ctx context.Context, params billing.SetDashboardParams) (*billing.Dashboard, error)",
@@ -1129,6 +1130,7 @@
       "type RefundPaymentParams struct {\n\tAmount       int64        `json:\"amount,omitempty,string\"`\n\tFull         bool         `json:\"full,omitempty\"`\n\tReason       string       `json:\"reason,omitempty\"`\n\tRefundReason RefundReason `json:\"refund_reason,omitempty\"`\n\tRevokeAccess bool         `json:\"revoke_access,omitempty\"`\n}",
       "type RefundReason string",
       "type Refusal struct {\n\tDenyCode          DenyCode   `json:\"deny_code\"`\n\tLimit             *string    `json:\"limit\"`\n\tResetsAt          *time.Time `json:\"resets_at\"`\n\tRetryAfterSeconds *int64     `json:\"retry_after_seconds\"`\n}",
+      "type ReinstateCreditGrantParams struct {\n\tReason string `json:\"reason\"`\n}",
       "type ReleaseAdmissionBatchParams struct {\n\tRequestIDs []string `json:\"request_ids\"`\n}",
       "type RenameMerchantParams struct {\n\tName string `json:\"name\"`\n}",
       "type Renewal struct {\n\tID             RenewalID        `json:\"id\"`\n\tSubscriptionID SubscriptionID   `json:\"subscription_id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tPSPID          PSPID            `json:\"psp_id\"`\n\tRail           Rail             `json:\"rail\"`\n\tOwner          string           `json:\"owner\"`\n\tDueAt          time.Time        `json:\"due_at\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tCurrency       catalog.Currency `json:\"currency\"`\n\n\tFirstOutcome string     `json:\"first_outcome\"`\n\tOutcome      string     `json:\"outcome\"`\n\tMissedAt     *time.Time `json:\"missed_at\"`\n\tMissReason   string     `json:\"miss_reason\"`\n\tCollectedAt  *time.Time `json:\"collected_at\"`\n\n\tRecoveredBy string    `json:\"recovered_by\"`\n\tClosesAt    time.Time `json:\"closes_at\"`\n\n\tAttempts []PaymentAttempt `json:\"attempts\"`\n}",
@@ -1772,7 +1774,8 @@
     ],
     "internal/merchants": [
       "type SecretCleanupArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRunID      uuid.UUID `json:\"run_id\" river:\"unique\"`\n}",
-      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}"
+      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
+      "type UsagePurgeArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}"
     ],
     "internal/modules/admission/spendgate": [
       "type Policy struct {\n\tScopes []ScopedWindows `json:\"scopes\"`\n}",
@@ -1843,11 +1846,18 @@
       "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tEventType   string              `json:\"event_type,omitempty\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
+    "internal/modules/money/books": [
+      "type Overapplication struct {\n\tPaymentID string `json:\"payment_id\"`\n\tCurrency  string `json:\"currency\"`\n\tReceived  int64  `json:\"received\"`\n\tApplied   int64  `json:\"applied\"`\n}",
+      "type UnscheduledLine struct {\n\tOrderID     uuid.UUID `json:\"order_id\"`\n\tOrderLineID uuid.UUID `json:\"order_line_id\"`\n\tCurrency    string    `json:\"currency\"`\n\tAmount      int64     `json:\"amount\"`\n\tReason      string    `json:\"reason\"`\n}"
+    ],
+    "internal/modules/money/fees": [
+      "type balanceTransaction struct {\n\tID       string `json:\"id\"`\n\tFee      int64  `json:\"fee\"`\n\tCurrency string `json:\"currency\"`\n\tCreated  int64  `json:\"created\"`\n}"
+    ],
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tBook       string    `json:\"book\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides []SideWarning `json:\"side_warnings\"`\n}",
-      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n}",
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides        []SideWarning           `json:\"side_warnings\"`\n\tApplications []books.Overapplication `json:\"overapplied_payments\"`\n\tUnscheduled  []books.UnscheduledLine `json:\"unscheduled_lines\"`\n\n\tAwaiting []books.UnscheduledLine `json:\"awaiting_lines\"`\n}",
+      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n\n\tStoredDeferredCredited int64 `json:\"stored_deferred_credited\"`\n\tLoggedDeferredCredited int64 `json:\"logged_deferred_credited\"`\n\tStoredDeferredDebited  int64 `json:\"stored_deferred_debited\"`\n\tLoggedDeferredDebited  int64 `json:\"logged_deferred_debited\"`\n}",
       "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
       "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
       "type SignBreach struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}"
@@ -3675,6 +3685,10 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/merchants/usage_purge.go": {
+      "river": "github.com/riverqueue/river",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/modules/admission/spendgate/gate.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "bytes": "bytes",
@@ -3941,6 +3955,37 @@
       "strings": "strings",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/modules/money/books/audit.go": {
+      "context": "context",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "uuid": "github.com/google/uuid"
+    },
+    "internal/modules/money/fees/stripe.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "math": "math",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "recommend": "github.com/open-rails/openrails/internal/reconcile/recommend",
+      "slog": "log/slog",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "time": "time",
+      "url": "net/url",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/modules/money/invoice_profile.go": {
       "context": "context",
       "fmt": "fmt",
@@ -3953,6 +3998,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/ledger/diagnostics.go": {
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
       "context": "context",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -5284,9 +5330,15 @@
       "time": "time"
     },
     "internal/usageerasure/usageerasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/wakejobs/wakejobs.go": {
       "context": "context",

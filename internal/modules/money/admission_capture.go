@@ -227,10 +227,13 @@ func (s *MoneyService) captureItem(ctx context.Context, q *gen.Queries, row gen.
 	for _, p := range parts {
 		hold.Parts = append(hold.Parts, HoldPart{Key: p.LimitKey, Unit: p.Unit, WindowStartsAt: p.WindowStartsAt, WindowEndsAt: p.WindowEndsAt, Held: p.Held})
 	}
+	// A capture occurred when its request was admitted: every attempt names
+	// the same instant, so a retry finds the event an attempt that did not
+	// commit inserted.
 	admitted := row.CreatedAt
 	return UsageItem{EventID: eventstore.RequestEventID(billing.MerchantID(row.MerchantID), row.RequestID), Source: u.Source, SourceID: u.SourceID,
 		Customer: identity.CustomerID(row.CustomerID), Invoker: original.Invoker, Currency: row.Currency, EventType: u.EventType,
-		Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: stated, OccurredAt: s.now(), AdmittedAt: &admitted,
+		Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: stated, OccurredAt: admitted, AdmittedAt: &admitted,
 		Cards: row.RateCards, RequireCards: true, Hold: hold, Capture: &CaptureOf{Row: row, Terms: terms}}, nil
 }
 

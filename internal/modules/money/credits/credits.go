@@ -1,7 +1,9 @@
 // Package credits keeps the credit lots on customers' balances. A lot is a
-// credit_grants row; every movement of its units is a ledger transfer naming
-// it, and the ledger counts the legs on its balance account, so remaining is
-// units_credited - units_debited. Revocations are credit_grant_events.
+// credit_grants row; every movement of its units is a units-book transfer
+// naming it, and the ledger counts the legs on its balance account, so
+// remaining is units_credited - units_debited. A paid lot's money moves with
+// its units in the general ledger (books.MoveCredit). Revocations and
+// reinstatements are credit_grant_events.
 package credits
 
 import (
@@ -11,9 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
@@ -57,12 +60,13 @@ type Lots struct {
 	// liveAt, when set, is the instant Spend's lots must not have lapsed by,
 	// in place of now.
 	liveAt *time.Time
+	books  *books.Books
 }
 
 // New binds a merchant's lots to a query handle and the caller's clock.
 func New(q *gen.Queries, merchant uuid.UUID, now func() time.Time) *Lots {
 	clock := func() time.Time { return now().UTC().Truncate(time.Microsecond) }
-	return &Lots{q: q, merchant: merchant, money: ledger.New(q, merchant).SetClock(clock), now: clock}
+	return &Lots{q: q, merchant: merchant, money: ledger.New(q, merchant).SetClock(clock), now: clock, books: books.New(q, merchant)}
 }
 
 // DrawLiveAt makes Spend draw the lots that had not lapsed by t in place of
@@ -152,8 +156,9 @@ func (l *Lots) Get(ctx context.Context, id uuid.UUID) (gen.BillingCreditGrant, e
 func Remaining(lot gen.BillingCreditGrant) int64 { return lot.UnitsCredited - lot.UnitsDebited }
 
 // Materialize posts what a lot records and its ledger lacks: the deposit of
-// a lot none of whose units posted, or the clawback of a revoked lot's units.
-// Idempotent; run it under the customer's lock.
+// a lot none of whose units posted, with its price's deferral, or the
+// clawback of a revoked lot's units. Idempotent; run it under the customer's
+// lock.
 func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 	lot, err := l.Get(ctx, id)
 	if err != nil {
@@ -169,20 +174,17 @@ func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 	if _, err := l.settleUsage(ctx, lot.CustomerID, lot.Unit, nil); err != nil {
 		return fmt.Errorf("credits: post usage before the deposit: %w", err)
 	}
-	coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.ID.String()}
-	switch {
-	case lot.PaidAmount != nil && *lot.PaidCurrency == lot.Unit:
-		err = l.money.PurchasedDeposit(ctx, lot.CustomerID, lot.Unit, lot.Units, *lot.PaidAmount, coord, lot.ID)
-	case lot.PaidAmount == nil && currency.IsUnitCode(lot.Unit):
-		// A merchant's units nobody paid for were given: issued, not sold.
-		_, err = l.money.GrantedDeposit(ctx, lot.CustomerID, lot.Unit, lot.Units, coord, lot.ID)
-	default:
-		// A pack of a merchant's unit is all bought, its bonus included: the
-		// lot's rate is what was paid over every unit.
-		_, err = l.money.Deposit(ctx, lot.CustomerID, lot.Unit, lot.Units, coord, lot.ID)
+	// A bought lot's units were sold, a gift's granted.
+	from := ledger.UnitsGranted
+	if lot.PaidAmount != nil {
+		from = ledger.UnitsSold
 	}
-	if err != nil {
+	coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.ID.String()}
+	if _, err := l.money.DepositFrom(ctx, from, lot.CustomerID, lot.Unit, lot.Units, coord, lot.ID); err != nil {
 		return fmt.Errorf("credits: deposit lot %s: %w", lot.ID, err)
+	}
+	if err := l.deferPrice(ctx, lot); err != nil {
+		return err
 	}
 	// A lot that lapses is expired by its balance's watch.
 	if lot.ExpiresAt != nil {
@@ -193,10 +195,55 @@ func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// deferPrice defers a paid lot's price from its payment, or an import's declared
+// price from opening balances. A bought lot recorded before its payment (a
+// charge's change) is deferred by Fund once the payment is.
+func (l *Lots) deferPrice(ctx context.Context, lot gen.BillingCreditGrant) error {
+	if lot.PaidAmount == nil {
+		return nil
+	}
+	var payment *gen.BillingPayment
+	if lot.PaymentID != nil {
+		p, err := l.q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: l.merchant, ID: *lot.PaymentID})
+		if err != nil {
+			return fmt.Errorf("credits: load lot %s's payment: %w", lot.ID, err)
+		}
+		payment = &p
+	}
+	err := l.books.IssueCredit(ctx, books.CreditLotOf(lot), payment)
+	if errors.Is(err, books.ErrCreditUnfunded) {
+		return nil
+	}
+	return err
+}
+
+// Fund defers a bought lot's price from the payment recorded after it: the
+// change a charge paid beyond its order. The commit refuses a bought lot left
+// undeferred.
+func (l *Lots) Fund(ctx context.Context, id uuid.UUID, payment gen.BillingPayment) error {
+	lot, err := l.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("credits: load lot %s: %w", id, err)
+	}
+	return l.books.IssueCredit(ctx, books.CreditLotOf(lot), &payment)
+}
+
+// move posts the money of a units-book leg that moved a lot's units.
+func (l *Lots) move(ctx context.Context, lot uuid.UUID, kind books.CreditMoveKind, leg gen.BillingLedgerTransfer, into *books.Line) error {
+	current, err := l.Get(ctx, lot)
+	if err != nil {
+		return fmt.Errorf("credits: reload lot %s: %w", lot, err)
+	}
+	return l.books.MoveCredit(ctx, books.CreditLotOf(current), books.CreditMove{
+		Kind: kind, Units: leg.Amount, At: leg.EffectiveAt, Into: into,
+		Coord: books.Coord{Operation: books.Operation(leg.Operation), Source: leg.Source, SourceID: leg.SourceID},
+	})
+}
+
 // Revoke records the lot's revocation, effective asOf (zero is now), and
-// moves its units left to units_revoked: frozen and reversible, not
-// refunded. What the customer's running charges accrued draws the lot first.
-// actor is who revoked it, "" for none.
+// moves its units left to units_revoked and their money to breakage: frozen
+// and reversible, not refunded. What the customer's running charges accrued
+// draws the lot first. actor is who revoked it, "" for none.
 func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, asOf time.Time) (gen.BillingCreditGrant, error) {
 	lot, err := l.Get(ctx, id)
 	if err != nil {
@@ -205,19 +252,8 @@ func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, a
 	if _, err := l.SettleRunningCharges(ctx, lot.CustomerID, lot.Unit, l.now()); err != nil {
 		return lot, err
 	}
-	effective := asOf
-	if effective.IsZero() {
-		effective = l.now()
-	}
-	event := gen.InsertCreditGrantEventParams{MerchantID: l.merchant, CreditGrantID: id, Event: "revoke", EffectiveAt: effective}
-	if reason != "" {
-		event.Reason = &reason
-	}
-	if actor != "" {
-		event.Actor = &actor
-	}
-	if _, err := l.q.InsertCreditGrantEvent(ctx, event); err != nil {
-		return lot, fmt.Errorf("credits: revoke lot %s: %w", id, err)
+	if _, err := l.event(ctx, id, "revoke", reason, actor, "", asOf); err != nil {
+		return lot, err
 	}
 	if err := l.Materialize(ctx, id); err != nil {
 		return lot, err
@@ -225,24 +261,105 @@ func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, a
 	return l.Get(ctx, id)
 }
 
+// ErrLapsed refuses reinstating a lot past its expiry: it would only expire
+// again.
+var ErrLapsed = errors.New("credits: the lot has lapsed")
+
+// Reinstate reverses a lot's revocation: the units it froze return to the
+// balance from units_revoked (credit_reinstate) and their money from breakage
+// to deferral. A lapsed lot is refused (ErrLapsed). actor is who reinstated
+// it, "" for none; key the caller's idempotency key, "" for none.
+func (l *Lots) Reinstate(ctx context.Context, id uuid.UUID, reason, actor, key string) (gen.BillingCreditGrant, error) {
+	lot, err := l.Get(ctx, id)
+	if err != nil {
+		return lot, fmt.Errorf("credits: load lot %s: %w", id, err)
+	}
+	if lot.ExpiresAt != nil && !lot.ExpiresAt.After(l.now()) {
+		return lot, ErrLapsed
+	}
+	event, err := l.event(ctx, id, "reinstate", reason, actor, key, time.Time{})
+	if err != nil {
+		return lot, err
+	}
+	frozen, err := l.q.GetPurchasedCreditRetiredBalance(ctx, gen.GetPurchasedCreditRetiredBalanceParams{MerchantID: l.merchant, CreditGrantID: id})
+	if err != nil {
+		return lot, fmt.Errorf("credits: read lot %s's revoked units: %w", id, err)
+	}
+	if frozen.Revoked > 0 {
+		revoked, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsRevoked, lot.Unit)
+		if err != nil {
+			return lot, err
+		}
+		lotID, customer := lot.ID, lot.CustomerID
+		leg, err := l.money.Apply(ctx, ledger.Transfer{
+			Debit: revoked, Credit: lot.AccountID, Amount: frozen.Revoked, Currency: lot.Unit, Type: ledger.CreditReinstate,
+			Coord:         ledger.Coord{Operation: ledger.OpCreditReinstate, Source: "grant_reinstate", SourceID: event.ID.String()},
+			CreditGrantID: &lotID, Customer: &customer,
+		})
+		if err != nil {
+			return lot, fmt.Errorf("credits: reinstate lot %s: %w", id, err)
+		}
+		if err := l.move(ctx, id, books.CreditReinstated, leg, nil); err != nil {
+			return lot, err
+		}
+	}
+	return l.Get(ctx, id)
+}
+
+// event appends a revocation or reinstatement, effective at (zero is now),
+// under the caller's key ("" for none).
+func (l *Lots) event(ctx context.Context, id uuid.UUID, kind, reason, actor, key string, at time.Time) (gen.BillingCreditGrantEvent, error) {
+	if at.IsZero() {
+		at = l.now()
+	}
+	params := gen.InsertCreditGrantEventParams{MerchantID: l.merchant, CreditGrantID: id, Event: kind, EffectiveAt: at}
+	if reason != "" {
+		params.Reason = &reason
+	}
+	if actor != "" {
+		params.Actor = &actor
+	}
+	if key != "" {
+		params.RequestKey = &key
+	}
+	event, err := l.q.InsertCreditGrantEvent(ctx, params)
+	if err != nil {
+		return event, fmt.Errorf("credits: %s lot %s: %w", kind, id, err)
+	}
+	return event, nil
+}
+
 // clawback moves a revoked lot's units left DR its balance / CR
-// units_revoked, once at (credit_revoke, grant_revoke, lot).
+// units_revoked, once per revocation at (credit_revoke, grant_revoke, the
+// revocation), and their money to breakage.
 func (l *Lots) clawback(ctx context.Context, lot gen.BillingCreditGrant) error {
 	remaining := Remaining(lot)
 	if remaining <= 0 {
 		return nil
+	}
+	revocation, err := l.q.GetLatestCreditGrantEvent(ctx, gen.GetLatestCreditGrantEventParams{MerchantID: l.merchant, CreditGrantID: lot.ID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("credits: read lot %s's revocation: %w", lot.ID, err)
+	}
+	// A revocation from before the events names its lot.
+	source := lot.ID.String()
+	if err == nil && revocation.Event == "revoke" {
+		source = revocation.ID.String()
 	}
 	revoked, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsRevoked, lot.Unit)
 	if err != nil {
 		return err
 	}
 	id, customer := lot.ID, lot.CustomerID
-	_, err = l.money.Apply(ctx, ledger.Transfer{
+	leg, err := l.money.Apply(ctx, ledger.Transfer{
 		Debit: lot.AccountID, Credit: revoked, Amount: remaining, Currency: lot.Unit, Type: ledger.CreditRevoke,
-		Coord:         ledger.Coord{Operation: ledger.OpCreditRevoke, Source: "grant_revoke", SourceID: lot.ID.String()},
+		Coord:         ledger.Coord{Operation: ledger.OpCreditRevoke, Source: "grant_revoke", SourceID: source},
 		CreditGrantID: &id, Customer: &customer,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return l.move(ctx, lot.ID, books.CreditRevoked, leg, nil)
 }
 
 // SyncReservation writes what the pending refunds of payment reserve of the

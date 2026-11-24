@@ -73,6 +73,8 @@ handed to what they produced, the receipt notice and `order.completed`. A defini
 decline (`Declined`) reopens the order with `last_payment_error`; a challenge
 (`Pending`) waits for `POST …/confirm`, which reads the provider (`ConfirmOrder`).
 
+**Books.** Storing a payment books its money in the general ledger (`cash_received` into `unapplied_cash`). When an order completes, by `Paid`, `RecordRemittance`, a renewal (`RenewalPaid`) or a provider's bill (`observed.Record`), `books.ApplyOrder` applies its money to its lines (`cash_applied`, and `revenue_adjusted` for a provider's non-cash settlement) and gives each line a revenue schedule over the service it sells: a subscription's period, an access window, or delivery at once. A late or second payment stays unapplied. See [books](books.md#cash-and-revenue-recognition).
+
 **Close.** `close` cancels or expires an open order, releases its claims and
 abandons a challenged attempt at the provider (`AbandonOrderAttempt`). An order
 past `expires_at` reads expired at once (`Order.AsOf`); the `openrails.order_expiry`
@@ -182,7 +184,8 @@ Checks:
 Retention classes (`retention.Tables`): `orders` rows (unpaid closed orders that
 never started an attempt go 90 days after closing, `DeleteClosedUnpaidOrders`),
 `order_attempts` rows (expired never-sent attempts after 90 days), `order_lines`
-with their order, `carts` 30 days after the last change, `ownership_claims` state.
+with their order, `carts` 30 days after the last change, `ownership_claims` state,
+`revenue_schedules` permanent.
 None is partitioned. Carts stay out of the merchant archive, and a live order
 attempt refuses an export (`preflightChecks`).
 

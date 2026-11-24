@@ -131,7 +131,7 @@ func TestBalanceLooks(t *testing.T) {
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 300, Source: "critical", SourceID: "kept"}})
 			require.NoError(t, err)
 			before := looks(t, fleet, customer)
-			_, err = w.alpha.RevokeCreditGrant(t.Context(), lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
+			_, err = w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
 			require.NoError(t, err)
 			require.Equal(t, before+1, looks(t, fleet, customer), "the revocation committed the look with its debit")
 			notified(t, w, customer)
@@ -191,6 +191,23 @@ func TestBalanceLooks(t *testing.T) {
 		advanceTo(w, nextHour(w.clock.Now()))
 		require.False(t, runPass(t, fleet))
 		notified(t, w, customer)
+	})
+	t.Run("OR-J25-S43/a-look-at-a-balance-without-unposted-usage-needs-no-event-store", func(t *testing.T) {
+		var conn *downConn
+		w := newWorld(t, lowAt600, func(w *world) {
+			conn = &downConn{Conn: w.deps.ClickHouse}
+			w.deps.ClickHouse = conn
+		})
+		fleet := quietFleet(t, w)
+		lapse := w.clock.Now().Add(time.Hour)
+		customer, lot := watchedCustomer(t, w, fleet, 1000, &lapse)
+		fund(t, w.alpha, customer, "kept", 300)
+		settled(t, fleet, customer)
+		conn.down.Store(true)
+		advanceTo(w, lapse.Add(time.Minute))
+		require.False(t, runPass(t, fleet), "the pass's look reads nothing from ClickHouse")
+		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lot))
+		balance(t, w.alpha, customer, 300, 0, 300)
 	})
 	t.Run("OR-J25-S37/a-pass-that-waited-behind-a-look-leaves-the-watch-it-moved", func(t *testing.T) {
 		w, fleet := setup(t)

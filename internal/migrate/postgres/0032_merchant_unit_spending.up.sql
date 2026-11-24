@@ -19,48 +19,6 @@ ALTER TABLE billing.credit_grants ADD CONSTRAINT credit_grants_paid_currency_reg
     OR paid_currency IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
 COMMENT ON COLUMN billing.credit_grants.paid_amount IS 'What was paid for the lot, in paid_currency (a registry currency); NULL for a gift. A pack of a merchant''s unit is paid in any currency: its rate is paid_amount over units, bonus units included.';
 
--- A pack of a merchant's unit has no cash leg in the unit: each settled
--- reversal of its payment records the credit line's share it returned, and
--- the units that moved, as it applies.
-CREATE TABLE billing.credit_grant_reversals (
-    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
-    credit_grant_id uuid NOT NULL,
-    reversal_id uuid NOT NULL,
-    reverses_id uuid,
-    cash bigint NOT NULL CHECK (cash > 0),
-    units bigint NOT NULL CHECK (units >= 0),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (merchant_id, credit_grant_id, reversal_id),
-    CONSTRAINT credit_grant_reversals_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants (merchant_id, id),
-    CONSTRAINT credit_grant_reversals_reversal_id_fkey FOREIGN KEY (merchant_id, reversal_id) REFERENCES billing.payments (merchant_id, id),
-    CONSTRAINT credit_grant_reversals_reverses_id_check CHECK (reverses_id <> reversal_id)
-);
-COMMENT ON TABLE billing.credit_grant_reversals IS 'Each settled reversal of a merchant unit pack''s payment as it applied to the pack''s lot: the credit line''s share of the payment it returned (a refund or chargeback) or restored (a recovery, naming the reversal in reverses_id), and the units that moved. A money lot keeps the same in its cash legs; a unit has none. Later reversals and recoveries read what each one took, never recompute it. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.credit_grant_reversals.cash IS 'The credit line''s share of the reversal, in the lot''s paid_currency.';
-COMMENT ON COLUMN billing.credit_grant_reversals.units IS 'The lot''s units the reversal took, or the recovery restored.';
-CREATE TRIGGER immutable_credit_grant_reversals BEFORE DELETE OR UPDATE ON billing.credit_grant_reversals FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
-CREATE TRIGGER immutable_credit_grant_reversals_truncate BEFORE TRUNCATE ON billing.credit_grant_reversals FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
-
--- What returned of a lot's payment: a money lot's cash legs, a unit pack's
--- recorded reversals.
-CREATE OR REPLACE FUNCTION billing.credit_grant_reservation(p_merchant uuid, p_lot uuid) RETURNS bigint
-LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-    SELECT COALESCE((
-        SELECT LEAST(g.units, ceil(g.units::numeric * GREATEST(LEAST(pending.amount, g.paid_amount - returned.amount), 0) / g.paid_amount))::bigint
-        FROM billing.credit_grants g
-        CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
-            WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
-              AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
-        CROSS JOIN LATERAL (SELECT
-                (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric
-                 FROM billing.ledger_transfers t
-                 WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund')
-              + (SELECT COALESCE(sum(CASE WHEN v.reverses_id IS NULL THEN v.cash ELSE -v.cash END), 0)::numeric
-                 FROM billing.credit_grant_reversals v
-                 WHERE v.merchant_id = g.merchant_id AND v.credit_grant_id = g.id) AS amount) returned
-        WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
-          AND pending.amount > 0), 0)
-$$;
 -- A posting of usage in a merchant's unit forgives what the lots cannot take,
 -- and a reversal takes back forgiveness before it credits.
 ALTER TABLE billing.usage_postings ADD COLUMN forgiven bigint NOT NULL DEFAULT 0;
@@ -85,11 +43,11 @@ CREATE TABLE billing.ledger_units (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, unit)
 );
-COMMENT ON TABLE billing.ledger_units IS 'A merchant''s own unit as the units book first counted it: written when the book opens its first account in the unit, under the units lock a settings change takes, with the scale the merchant then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.';
+COMMENT ON TABLE billing.ledger_units IS 'A merchant''s own unit as the units book first counted it: written when a catalog write first names it or the book first holds it, under the units lock a settings change takes, with the scale its document in the file or Vault then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.';
 CREATE TRIGGER immutable_ledger_units BEFORE DELETE OR UPDATE ON billing.ledger_units FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 CREATE TRIGGER immutable_ledger_units_truncate BEFORE TRUNCATE ON billing.ledger_units FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
--- The restore guard names the new tables.
+-- The restore guard names the new table.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -129,7 +87,6 @@ BEGIN
                   'catalog_rate_cards',
                   'catalog_restore_receipts',
                   'credit_grant_events',
-                  'credit_grant_reversals',
                   'credit_grants',
                   'custodians',
                   'customer_delinquency',
@@ -209,12 +166,14 @@ BEGIN
                   'rebill_cycles',
                   'reconciliation_findings',
                   'reconciliation_state',
+                  'revenue_schedules',
                   'running_charges',
                   'scheduled_changes',
                   'solana_pay_receipts',
                   'solana_pay_references',
                   'solana_subscriptions',
                   'stored_card_checks',
+                  'stripe_fee_reads',
                   'subscription_billing_changes',
                   'subscription_mrr',
                   'subscription_status_transitions',

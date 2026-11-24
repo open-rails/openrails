@@ -34,6 +34,7 @@ func TestCreditExpiry(t *testing.T) {
 		spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("already-spent", 450)})
 		require.NoError(t, err)
 		require.NoError(t, spent[0].Err())
+		w.clock.Advance(time.Second)
 		_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 500, Source: "critical", SourceID: "lasting"}})
 		require.NoError(t, err)
 		pending := reservation(w, customer, "still-authorized", 400)

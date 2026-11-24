@@ -153,10 +153,13 @@ func TestAdmissionBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, admitted[0].Allowed())
 		reason := billing.RevokeCreditGrantParams{Reason: "Revoke only unused credit"}
-		_, err = w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+		_, err = w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeCreditGrantHeld, held.Code)
+		// The capture occurred when it was admitted: a revocation after it
+		// posts it first.
+		w.clock.Advance(time.Second)
 		type captureResult struct {
 			rows []billing.CaptureResult
 			err  error
@@ -175,7 +178,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			result, err := w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+			result, err := w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 			rch <- revokeResult{result, err}
 		}()
 		close(start)

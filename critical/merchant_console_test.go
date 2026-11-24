@@ -491,7 +491,7 @@ func TestMerchantConsole(t *testing.T) {
 		grants, err := a.alpha.CreateCreditGrants(t.Context(), in)
 		require.NoError(t, err)
 		for _, grant := range grants {
-			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), "", grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 		}
 		require.Error(t, err, "the sixth revoke is held")
 		holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})

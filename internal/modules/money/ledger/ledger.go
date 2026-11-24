@@ -38,8 +38,10 @@ const (
 	// UnitsRevoked holds the unspent remainder clawed back when a credit grant
 	// is revoked (UnitsExpired is time-lapse): frozen and reversible, not
 	// refunded; a refund moves it out to UnitsSold.
-	UnitsRevoked        = books.UnitsRevoked
-	UnitsGranted        = books.UnitsGranted
+	UnitsRevoked = books.UnitsRevoked
+	UnitsGranted = books.UnitsGranted
+	// UnitsRefunded is where a refunded lot's units go.
+	UnitsRefunded       = books.UnitsRefunded
 	UnitsRefundClearing = books.UnitsRefundClearing
 	UnitsRefundLoss     = books.UnitsRefundLoss
 )
@@ -51,13 +53,20 @@ const (
 type TransferType = books.TransferType
 
 const (
-	DepositBonus            TransferType = "deposit_bonus" // merchant-funded credit, not processor cash
-	CreditPurchaseRevenue   TransferType = "credit_purchase_revenue"
-	CreditRefund            TransferType = "credit_refund"
-	CreditRefundRestore     TransferType = "credit_refund_restore"
+	// DepositBonus and CreditPurchaseRevenue are history: a pack's bonus is
+	// part of its rate now, its money the general ledger's.
+	DepositBonus          TransferType = "deposit_bonus"
+	CreditPurchaseRevenue TransferType = "credit_purchase_revenue"
+	// CreditRefund takes a refunded lot's units left to units_refunded, and
+	// CreditRefundFunding its units already retired, owed or consumed;
+	// CreditRefundRestore and CreditRefundFunding return them.
+	CreditRefund        TransferType = "credit_refund"
+	CreditRefundRestore TransferType = "credit_refund_restore"
+	CreditRefundFunding TransferType = "credit_refund_funding"
+	// CreditRefundCash and CreditRefundCashRestore are history: a refund's
+	// cash is the general ledger's.
 	CreditRefundCash        TransferType = "credit_refund_cash"
 	CreditRefundCashRestore TransferType = "credit_refund_cash_restore"
-	CreditRefundFunding     TransferType = "credit_refund_funding"
 	Deposit                 TransferType = "deposit"       // units_sold -> customer_units
 	CreditSpend             TransferType = "credit_spend"  // customer_units -> units_redeemed
 	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
@@ -88,8 +97,9 @@ var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseReven
 var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
-// ledger_transfers_credit_grant_id_transfer_type_key.
-var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
+// ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be
+// revoked again.
+var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire}
 
 // Operation is the kind of money write that posted a transfer, part of the
 // idempotency coordinate. The engine composes it and a caller supplies only
@@ -432,21 +442,13 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// Deposit credits the customer's balance from the rail-clearing account
-// (DR units_sold / CR customer_units). grantID attributes the deposit
-// to its credit lot (uuid.Nil for a non-lot deposit).
-func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	return l.depositFrom(ctx, UnitsSold, customer, currency, amount, coord, grantID)
-}
-
-// GrantedDeposit credits the customer's balance with units the merchant gave
-// (DR units_granted / CR customer_units): a gift lot of a merchant's
-// unit, which no cash bought.
-func (l *Ledger) GrantedDeposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	return l.depositFrom(ctx, UnitsGranted, customer, currency, amount, coord, grantID)
-}
-
-func (l *Ledger) depositFrom(ctx context.Context, from AccountType, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+// DepositFrom credits the customer's balance from units_sold (a lot bought)
+// or units_granted (a lot given). grantID attributes the deposit to its
+// credit lot (uuid.Nil for a non-lot deposit).
+func (l *Ledger) DepositFrom(ctx context.Context, from AccountType, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	if from != UnitsSold && from != UnitsGranted {
+		return gen.BillingLedgerTransfer{}, fmt.Errorf("ledger: a deposit's units are sold or granted, not %s", from)
+	}
 	clearing, err := l.EnsureSystemAccount(ctx, from, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err

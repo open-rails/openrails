@@ -497,7 +497,9 @@ func unitUsage(t *testing.T) {
 	require.EqualValues(t, 250, verdict.Admission.EstimatedAmount, "2.50 credits for 2,500 tokens")
 	captureUsage(t, a.alpha, "tokens", "completion", map[string]int64{"tokens": 2500}, nil)
 
-	// A top-up posts the usage first: the lot expiring soonest pays.
+	// A top-up posts the usage first: the lot expiring soonest pays. Usage
+	// at a movement's instant is not before its cut: a second passes.
+	a.clock.Advance(time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
 		{CustomerID: customer, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post-gold"},
 		{CustomerID: customer, Currency: "CREDITS", Amount: 1, Source: "critical", SourceID: "post-credits"},
@@ -519,6 +521,7 @@ func unitUsage(t *testing.T) {
 	verdict = admitImages(t, a, thin, "over", 2)
 	require.True(t, verdict.Allowed())
 	captureUsage(t, a.alpha, "over", "image", map[string]int64{"images": 4}, nil)
+	a.clock.Advance(time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: thin, Currency: "GOLD", Amount: 5, Source: "critical", SourceID: "after"}})
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, thin, "GOLD", 5, 0, 5)
@@ -563,6 +566,7 @@ func unitOverrun(t *testing.T) {
 	require.EqualValues(t, 20, receipt.Amount, "a capture prices its usage in full")
 	receipt = captureUsage(t, a.alpha, "second", "image", map[string]int64{"images": 2}, nil)
 	require.EqualValues(t, 8, receipt.Amount)
+	a.clock.Advance(time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post"}})
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
@@ -730,19 +734,21 @@ func unitRefundByLot(t *testing.T) {
 	for _, leg := range unitLegs(t, a, "GOLD") {
 		if leg.Lot != nil && *leg.Lot == lot.ID.UUID() && leg.Type != "deposit" && leg.Type != "credit_spend" {
 			sources[leg.Source] += leg.Amount
+			require.Equal(t, string(ledger.UnitsRefunded), leg.Credit, "a reversal's units go to units_refunded")
 			require.NotEqual(t, "credit_refund_cash", leg.Type, "a unit has no cash leg")
 		}
 	}
-	require.Equal(t, map[string]int64{"credit": 300, "consumed_credit": 100, "units_returned": 400}, sources)
+	require.Equal(t, map[string]int64{"credit": 300, "consumed_credit": 100}, sources)
+	require.Equal(t, []int64{5_000_000, 15_000_000}, reversalCash(t, a, lot.ID.UUID()), "each reversal's cash is the general ledger's, in dollars")
 
 	dispute["status"] = "won"
 	notice("evt_gold_dispute_won", "charge.dispute.closed", dispute)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 200, 0, 200)
 	lot = lots(t, a.alpha, s.alice, "GOLD")[0]
 	require.EqualValues(t, 200, lot.RemainingAmount, "the won dispute returns what the chargeback took, not the refund's units")
-	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundClearing), "the clearing account nets to zero")
-	require.EqualValues(t, 0, systemBalance(t, a, "GOLD", ledger.UnitsRefundLoss), "the consumed units are no loss once the money is back")
-	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.UnitsSold), "400 sold, 100 returned with the refund")
+	require.EqualValues(t, 100, systemBalance(t, a, "GOLD", ledger.UnitsRefunded), "the refund's 100 stay refunded; the dispute's 300 came back")
+	require.EqualValues(t, -400, systemBalance(t, a, "GOLD", ledger.UnitsSold))
+	require.Equal(t, []int64{5_000_000, 15_000_000, -15_000_000}, reversalCash(t, a, lot.ID.UUID()))
 }
 
 func unitReversalsAsSettled(t *testing.T) {
@@ -816,33 +822,38 @@ func unitReversalsAsSettled(t *testing.T) {
 			sources[leg.Source] += leg.Amount
 		}
 	}
-	require.Equal(t, map[string]int64{"credit": 400, "units_returned": 400}, sources, "the two reversals take the 400 once, none of it consumed")
-	type share struct{ cash, units int64 }
-	shares := func() []share {
-		rows, err := a.pool.Query(t.Context(), "SELECT cash, units FROM "+pgx.Identifier{a.schema, "credit_grant_reversals"}.Sanitize()+
-			" WHERE merchant_id = $1 AND credit_grant_id = $2 ORDER BY created_at, reversal_id", a.alpha.MerchantID().UUID(), lot.ID.UUID())
-		require.NoError(t, err)
-		defer rows.Close()
-		var out []share
-		for rows.Next() {
-			var r share
-			require.NoError(t, rows.Scan(&r.cash, &r.units))
-			out = append(out, r)
-		}
-		require.NoError(t, rows.Err())
-		return out
-	}
-	require.Equal(t, []share{{15_000_000, 300}, {5_000_000, 100}}, shares(), "each reversal's share as it settled")
+	require.Equal(t, map[string]int64{"credit": 400}, sources, "the two reversals take the 400 once, none of it consumed")
+	require.Equal(t, []int64{15_000_000, 5_000_000}, reversalCash(t, a, lot.ID.UUID()), "each reversal's share as it settled, recorded once in the general ledger")
 
 	// Winning R2's dispute restores what R2 took: the line has $15 open,
 	// 300 GOLD.
 	dispute["status"] = "won"
 	notice("evt_order_dispute_won", "charge.dispute.closed", dispute)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 300, 0, 300)
-	require.Equal(t, []share{{15_000_000, 300}, {5_000_000, 100}, {15_000_000, 300}}, shares())
-	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.UnitsSold), "400 sold, 400 returned, 300 restored")
-	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundLoss))
-	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundClearing))
+	require.Equal(t, []int64{15_000_000, 5_000_000, -15_000_000}, reversalCash(t, a, lot.ID.UUID()))
+	require.EqualValues(t, 100, systemBalance(t, a, "GOLD", ledger.UnitsRefunded), "400 refunded, 300 restored")
+}
+
+// reversalCash is the cash each reversal of lot's payment returned, in the
+// general ledger, in the order they applied: a recovery's is negative.
+func reversalCash(t *testing.T, a *authorityWorld, lot uuid.UUID) []int64 {
+	t.Helper()
+	transfers, accounts := pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize(), pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()
+	rows, err := a.pool.Query(t.Context(), "SELECT sum(CASE WHEN c.account_type IN ('cash_clearing', 'external_receipts') THEN t.amount ELSE -t.amount END)::bigint FROM "+transfers+" t"+
+		" JOIN "+accounts+" d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id JOIN "+accounts+" c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id"+
+		" WHERE t.merchant_id = $1 AND t.credit_grant_id = $2 AND t.book = 'general' AND t.operation = 'purchased_credit_refund'"+
+		" AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))"+
+		" GROUP BY t.source_id ORDER BY min(t.created_at), min(t.id::text)", a.alpha.MerchantID().UUID(), lot)
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var cash int64
+		require.NoError(t, rows.Scan(&cash))
+		out = append(out, cash)
+	}
+	require.NoError(t, rows.Err())
+	return out
 }
 
 func unitPriceFalls(t *testing.T) {
@@ -866,6 +877,7 @@ func unitPriceFalls(t *testing.T) {
 	require.True(t, admitImages(t, a, s.alice, "five", 2).Allowed())
 	captureUsage(t, a.alpha, "five", "image", map[string]int64{"images": 5}, nil)
 	// Five images cost 20: the posting takes the 10 and forgives 10.
+	a.clock.Advance(time.Second)
 	grant("post", 1)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
 	// A sixth brings the period's price to 6: it posted 20.

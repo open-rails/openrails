@@ -20,8 +20,12 @@ func (s *Store) mutate(ctx context.Context, what, stmt string) error {
 
 // EraseCustomer clears the invoker and metadata of a customer's usage events
 // and folds its history's invokers into one: quantities, charges and what
-// posted stay. Usage history rolled up by invoker is copied without it, then
-// the rows naming one are deleted.
+// posted stay. The caller holds the customer's lock, so no intake adds to the
+// history meanwhile. A run stopped part way is run again to the same end: the
+// events' update is idempotent; the fold inserts, for each invoker's history
+// rows that still sum to anything, their negation and their sum under no
+// invoker, in one insert; then the rows naming an invoker, all folded, are
+// deleted.
 func (s *Store) EraseCustomer(ctx context.Context, customer billing.CustomerID) error {
 	mid, err := s.merchant(ctx)
 	if err != nil {
@@ -38,8 +42,12 @@ func (s *Store) EraseCustomer(ctx context.Context, customer billing.CustomerID) 
 	}
 	keys := "merchant_id, customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at"
 	if err := fail("erase usage history", s.conn.Exec(ctx, s.resolve(`INSERT INTO {database}.usage_history (`+keys+`, invoker, outcome, requests, quantity, stated, charged, forgiven)
-SELECT `+keys+`, '', outcome, sum(requests), sum(quantity), sum(stated), sum(charged), sum(forgiven)
-FROM {database}.usage_history WHERE `+who+` AND invoker != '' GROUP BY `+keys+`, outcome`))); err != nil {
+SELECT `+keys+`, fold.1, outcome, fold.2 * r, fold.2 * q, fold.2 * st, fold.2 * c, fold.2 * f
+FROM (SELECT `+keys+`, invoker, outcome, sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st, sum(charged) AS c, sum(forgiven) AS f
+      FROM {database}.usage_history WHERE `+who+` AND invoker != '' GROUP BY `+keys+`, invoker, outcome
+      HAVING r != 0 OR q != 0 OR st != 0 OR c != 0 OR f != 0)
+ARRAY JOIN [(invoker, toInt64(-1)), ('', toInt64(1))] AS fold
+SETTINGS max_insert_threads = 1`))); err != nil {
 		return err
 	}
 	return s.mutate(ctx, "erase usage history", "ALTER TABLE {database}.usage_history DELETE WHERE "+who+" AND invoker != ''")

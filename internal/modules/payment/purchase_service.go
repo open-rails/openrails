@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
@@ -417,6 +418,9 @@ func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.Re
 		if err := s.grantPurchasedCredits(ctx, existingPayment, product.ID); err != nil {
 			return nil, err
 		}
+		if err := applyGrantedPurchase(ctx, s.transactionDB, existingPayment.OrderID); err != nil {
+			return nil, err
+		}
 		s.Log.InfoContext(ctx, "purchase already registered; repaired access if needed", "payment_id", existingPayment.ID, "user_id", req.UserID, "price_id", req.PriceID, "rail", req.Rail, "transaction_id", req.TransactionID)
 		return &payments.RegisterPurchaseResponse{PaymentID: existingPayment.ID, Entitlements: nonNilKeys(product.Entitlements), Eligibility: string(eligibility.Status)}, nil
 	}
@@ -440,6 +444,9 @@ func (s *FulfillmentService) applyPurchase(ctx context.Context, req *payments.Re
 		}
 	}
 	if err := s.grantPurchasedCredits(ctx, payment, product.ID); err != nil {
+		return nil, err
+	}
+	if err := applyGrantedPurchase(ctx, s.transactionDB, payment.OrderID); err != nil {
 		return nil, err
 	}
 	if req.SubscriptionID == nil {
@@ -495,6 +502,15 @@ func (s *FulfillmentService) grantPurchaseAccess(ctx context.Context, userID str
 		return err
 	}
 	return nil
+}
+
+// applyGrantedPurchase applies a purchase's order again once its access is
+// granted: a timed line's revenue is recognised over the window it got.
+func applyGrantedPurchase(ctx context.Context, d *db.DB, order *uuid.UUID) error {
+	if order == nil || d == nil {
+		return nil
+	}
+	return books.ApplyOrder(ctx, d, *order, nil)
 }
 
 func nonNilKeys(keys []string) []string {

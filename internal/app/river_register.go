@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/fees"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
@@ -175,9 +176,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	// A merchant purge's Vault cleanup, queued with the purge.
+	// A merchant purge's Vault cleanup and event store deletion, queued with
+	// the purge.
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.MerchantUsagePurgeWorker{DB: r.DB}); err != nil {
+		return fmt.Errorf("add merchant usage purge worker: %w", err)
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
@@ -214,6 +219,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
 	closing := &riverjobs.UsageCloseWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
+	// Deferred revenue recognised at each month boundary in the merchant's
+	// accounting timezone, at each schedule's end and at an early end.
+	recognition := &riverjobs.RevenueRecognitionWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	scans := []riverjobs.Scan{
 		// A month's usage posts once its month ends, before anything bills it.
 		{Kind: riverjobs.KindUsageClose, Run: closing.Pass, DueBy: closing.DueBy},
@@ -222,6 +230,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
 		{Kind: riverjobs.KindDelinquency, Run: delinquency.Pass, DueBy: delinquency.DueBy},
 		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
+		{Kind: riverjobs.KindRevenueRecognition, Run: recognition.Pass, DueBy: recognition.DueBy},
 	}
 	if r.declares(riverjobs.WithUsageBilling) {
 		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy})
@@ -234,6 +243,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Cancellations at period end leave MRR at their end.
 		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
+		// Stripe's fees on the charges, refunds and disputes recorded since.
+		riverjobs.Scan{Kind: riverjobs.KindStripeFees, Run: (&fees.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)

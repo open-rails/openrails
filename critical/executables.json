@@ -91,15 +91,6 @@
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
     ],
-    "OR-J05-S10": [
-      "TestMerchantCurrencies/OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale"
-    ],
-    "OR-J05-S11": [
-      "TestMerchantCurrencies/OR-J05-S11/a-catalog-that-names-a-unit-counts-it"
-    ],
-    "OR-J05-S12": [
-      "TestMerchantCurrencies/OR-J05-S12/a-units-first-count-reads-its-declaration-where-it-is-stored"
-    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],
@@ -776,6 +767,9 @@
     ],
     "OR-J32-S06": [
       "TestMerchantHost/OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens"
+    ],
+    "OR-J32-S07": [
+      "TestMerchantHost/OR-J32-S07/a-purge-the-event-store-refused-to-delete-from-is-retried-by-its-job"
     ],
     "OR-J34-S01": [
       "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
@@ -1454,6 +1448,9 @@
     "OR-J25-S05": [
       "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
     ],
+    "OR-J25-S43": [
+      "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-unposted-usage-needs-no-event-store"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ],
@@ -1938,6 +1935,33 @@
     "OR-J24-S57": [
       "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
     ],
+    "OR-J24-S58": [
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts",
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-capture-retried-after-a-lost-commit-charges-once",
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once"
+    ],
+    "OR-J24-S59": [
+      "TestUsageRecovery/OR-J24-S59/a-resent-item-counts-in-the-session-its-first-attempt-opened"
+    ],
+    "OR-J24-S60": [
+      "TestUsageRecovery/OR-J24-S60/an-insert-whose-caller-gave-up-finishes-before-the-resend-looks"
+    ],
+    "OR-J24-S61": [
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse",
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse/usage-after-the-lapse-holds-back-nothing",
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse/a-running-charge-posted-at-the-lapse-draws-it-too"
+    ],
+    "OR-J24-S62": [
+      "TestUsageRecovery/OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell"
+    ],
+    "OR-J24-S63": [
+      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-keeps-history-whole"
+    ],
+    "OR-J24-S64": [
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/a-print-a-card-in-force-names-is-recorded-again",
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/one-nothing-names-is-left-out"
+    ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",
@@ -2042,6 +2066,115 @@
     ],
     "OR-J40-S24": [
       "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
+    ],
+    "OR-J40-S40": [
+      "TestProcessorFees/OR-J40-S40/a-stripe-charge-fee-and-a-dispute-fee-post-once-exactly"
+    ],
+    "OR-J40-S41": [
+      "TestProcessorFees/OR-J40-S41/a-prevention-refund-reads-through-its-dispute"
+    ],
+    "OR-J41-S01": [
+      "TestRevenueRecognition/OR-J41-S01/a-monthly-plan-bought-mid-month-books-cash-per-psp-and-recognises-at-the-boundary-and-the-end"
+    ],
+    "OR-J41-S02": [
+      "TestRevenueRecognition/OR-J41-S02/an-annual-calendar-plan-recognises-a-twelfth-a-month-and-a-zone-boundary-follows-dst"
+    ],
+    "OR-J41-S03": [
+      "TestRevenueRecognition/OR-J41-S03/lifetime-access-at-once-a-pass-ratable-and-seats-funded-per-seat"
+    ],
+    "OR-J41-S04": [
+      "TestRevenueRecognition/OR-J41-S04/provider-bills-book-cash-to-their-psp-and-non-cash-to-revenue-adjustments"
+    ],
+    "OR-J41-S05": [
+      "TestRevenueRecognition/OR-J41-S05/a-seat-increase-defers-its-charge-over-the-rest-of-the-period"
+    ],
+    "OR-J41-S06": [
+      "TestRevenueRecognition/OR-J41-S06/an-idle-pass-locks-no-schedule-and-a-replayed-boundary-posts-once"
+    ],
+    "OR-J41-S07": [
+      "TestRevenueRecognition/OR-J41-S07/an-external-payment-books-to-external-receipts-and-a-payment-beyond-the-bill-stays-unapplied"
+    ],
+    "OR-J41-S08": [
+      "TestRevenueRecognition/OR-J41-S08/an-immediate-cancellation-without-a-refund-forfeits-the-remainder"
+    ],
+    "OR-J41-S09": [
+      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable"
+    ],
+    "OR-J41-S10": [
+      "TestRevenueRecognition/OR-J41-S10/revoked-access-ends-its-schedule-and-an-undone-revocation-takes-the-forfeit-back"
+    ],
+    "OR-J41-S11": [
+      "TestRevenueRecognition/OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied"
+    ],
+    "OR-J41-S12": [
+      "TestRevenueRecognition/OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-order-with-no-schedule"
+    ],
+    "OR-J41-S13": [
+      "TestRevenueRecognition/OR-J41-S13/a-prune-that-hides-booked-money-or-a-recognising-subscription-raises-a-finding-its-undo-resolves"
+    ],
+    "OR-J41-S14": [
+      "TestRevenueRecognition/OR-J41-S14/an-end-before-the-schedule-exists-reaches-it"
+    ],
+    "OR-J41-S15": [
+      "TestRevenueRecognition/OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line"
+    ],
+    "OR-J41-S16": [
+      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again"
+    ],
+    "OR-J41-S17": [
+      "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
+    ],
+    "OR-J40-S10": [
+      "TestCreditBooks/OR-J40-S10/a-pack-releases-its-price-at-its-rate-and-the-last-credit-the-remainder"
+    ],
+    "OR-J40-S11": [
+      "TestCreditBooks/OR-J40-S11/expiry-and-revocation-are-breakage-and-reinstatement-reverses-it"
+    ],
+    "OR-J40-S12": [
+      "TestCreditBooks/OR-J40-S12/a-gift-spend-grosses-up-and-owed-is-repaid-at-face"
+    ],
+    "OR-J40-S13": [
+      "TestCreditBooks/OR-J40-S13/refunds-of-unspent-and-spent-credit-and-a-won-dispute"
+    ],
+    "OR-J40-S14": [
+      "TestCreditBooksEdges/OR-J40-S14/an-archive-with-a-reinstated-pack-and-a-pack-from-before-the-books-restores"
+    ],
+    "OR-J40-S15": [
+      "TestCreditBooksEdges/OR-J40-S15/a-won-dispute-repays-again-only-owed-still-outstanding"
+    ],
+    "OR-J40-S16": [
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact/without-owed",
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact/with-reopened-owed",
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact"
+    ],
+    "OR-J40-S17": [
+      "TestCreditBooksEdges/OR-J40-S17/owed-from-before-the-books-is-repaid-as-revenue-beside-the-receivable"
+    ],
+    "OR-J40-S18": [
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency/pieces",
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency/merchant-unit",
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency"
+    ],
+    "OR-J40-S19": [
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/idempotency-key",
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/idempotency-key-after-the-lot-is-spent",
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/lapsed",
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated"
+    ],
+    "OR-J40-S25": [
+      "TestCreditBooksEdges/OR-J40-S25/a-lot-applied-beyond-its-payments-cash-fails-ledger-audit"
+    ],
+    "OR-J40-S26": [
+      "TestCreditBooksEdges/OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding"
+    ],
+    "OR-J05-S10": [
+      "TestMerchantCurrencies/OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale"
+    ],
+    "OR-J05-S11": [
+      "TestMerchantCurrencies/OR-J05-S11/a-catalog-that-names-a-unit-counts-it"
+    ],
+    "OR-J05-S12": [
+      "TestMerchantCurrencies/OR-J05-S12/a-units-first-count-reads-its-declaration-where-it-is-stored"
     ],
     "OR-J48-S01": [
       "TestMerchantUnits/OR-J48-S01/packs-buy-units-at-their-own-rates"

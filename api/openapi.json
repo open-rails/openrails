@@ -6057,7 +6057,7 @@
           "admin"
         ],
         "operationId": "RevokeCreditGrant",
-        "description": "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with Replayed set.",
+        "description": "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with Replayed set, as does a retry under the same idempotencyKey, even after the grant was reinstated. Without a key, revoking a reinstated grant revokes it again.",
         "parameters": [
           {
             "name": "id",
@@ -6074,6 +6074,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -6113,6 +6120,84 @@
         },
         "x-openrails-errors": [
           "credit_grant_held",
+          "credit_grant_not_found",
+          "credit_grant_unavailable",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/credit-grants/{id}/reinstate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "ReinstateCreditGrant",
+        "description": "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. Reinstating a live grant returns it with Replayed set, as does a retry under the same idempotencyKey, even after a later revocation; a lapsed grant is refused.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReinstateCreditGrantParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:manage",
+          "root": "root:customer:manage"
+        },
+        "x-openrails-errors": [
           "credit_grant_not_found",
           "credit_grant_unavailable",
           "invalid_param"
@@ -26254,6 +26339,14 @@
           "resets_at",
           "retry_after_seconds"
         ]
+      },
+      "ReinstateCreditGrantParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
       },
       "ReleaseAdmissionBatchParams": {
         "type": "object",

@@ -43,7 +43,10 @@ import (
 // Intake is two steps in the caller's transaction, under the customers'
 // locks: PrepareUsageTx validates, prices and locates, writing nothing; then
 // CommitUsageTx inserts the events (skipping those an earlier attempt
-// inserted), waits until they read back, and writes the PostgreSQL side.
+// inserted), waits until they read back, and writes the PostgreSQL side. An
+// event's identity never depends on a clock read per attempt: a capture
+// occurred when its request was admitted, and an item an earlier attempt
+// inserted keeps the instants that attempt stamped.
 
 // ErrUsageOutsideIngestWindow refuses usage dated before the ingest window or
 // ahead of the clock.
@@ -239,7 +242,7 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 		if b.Results[i].Err != nil {
 			continue
 		}
-		keys = append(keys, eventstore.UsageKey{CustomerID: billing.CustomerID(it.Customer.UUID()), OccurredAt: it.OccurredAt, EventID: it.EventID})
+		keys = append(keys, eventstore.UsageKey{CustomerID: billing.CustomerID(it.Customer.UUID()), EventID: it.EventID})
 		a := account{it.Customer.UUID(), it.Currency}
 		if !seen[a] {
 			seen[a] = true
@@ -271,9 +274,17 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 		}
 		anchors[a] = anchor
 	}
-	// What an earlier attempt inserted is not inserted again.
+	// What an earlier attempt inserted is not inserted again, and keeps the
+	// instants it was taken in with: its pricing period and the session and
+	// first-use windows it opened.
 	if b.existing, err = store.ExistingUsage(ctx, keys); err != nil {
 		return nil, err
+	}
+	for i := range items {
+		if prior, ok := b.existing[items[i].EventID]; ok && b.Results[i].Err == nil {
+			admitted := prior.AdmittedAt
+			items[i].OccurredAt, items[i].AdmittedAt = prior.OccurredAt, &admitted
+		}
 	}
 	defs, err := limits.Definitions(ctx, q, merchantID)
 	if err != nil {
@@ -780,9 +791,13 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	if it.Delegated {
 		invokerType = string(billing.InvokerTypeDelegated)
 	}
+	period := p.period
+	if prior, ok := b.existing[it.EventID]; ok {
+		period = prior.PeriodStartsAt
+	}
 	e := &eventstore.UsageEvent{EventID: it.EventID, CustomerID: billing.CustomerID(it.Customer.UUID()), Currency: it.Currency, EventType: it.EventType,
 		Invoker: it.Invoker, InvokerType: invokerType, Outcome: outcome, Source: it.Source, SourceID: it.SourceID, LeaseID: it.LeaseID,
-		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: p.period,
+		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: period,
 		Dimensions: it.Dimensions, Metadata: metadata, Amount: amount, Stated: it.Amount, Charged: charged, Forgiven: forgiven, Limits: p.limits}
 	for _, c := range p.charges {
 		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated})

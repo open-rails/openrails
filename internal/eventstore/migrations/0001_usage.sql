@@ -3,11 +3,12 @@
 -- leads with merchant_id. Times are UTC microseconds.
 
 -- Raw usage. event_id is the intake identity (merchant, lease, n) or the
--- request id, so a copy only reaches the table through a resend, which FINAL
--- and merges collapse. amount is the provisional price limits and the
--- accrual-rate meter count; charges are the priced meter cells, frozen at
--- intake with the card print and pricing period; limits are the windows that
--- count the item, located at admitted_at.
+-- request id, and with the customer the whole sorting key: a resend finds an
+-- earlier attempt's copy by key at any occurred_at, and FINAL and merges
+-- collapse any copy in the same month. amount is the provisional price limits
+-- and the accrual-rate meter count; charges are the priced meter cells, frozen
+-- at intake with the card print and pricing period; limits are the windows
+-- that count the item, located at admitted_at.
 CREATE TABLE IF NOT EXISTS {database}.usage_events (
     merchant_id UUID,
     event_id UUID,
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS {database}.usage_events (
     limits Nested(key String, window_starts_at DateTime64(6, 'UTC'), window_ends_at Nullable(DateTime64(6, 'UTC')), units Int64)
 ) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(occurred_at)
-ORDER BY (merchant_id, customer_id, occurred_at, event_id)
+ORDER BY (merchant_id, customer_id, event_id)
 TTL toDateTime(occurred_at) + INTERVAL 100 DAY;
 
 -- Units per limit window (fixed, session, billing period, lifetime, a rolling
@@ -102,7 +103,8 @@ FROM {database}.usage_events;
 -- Usage history per 15-minute UTC bucket, which every zone's days and
 -- months are made of: each event once with meter '', and each of its charges
 -- under its meter, cell and card print in its pricing period, which price
--- the bucket's share of the period's total at read.
+-- the bucket's share of the period's total at read. Sums are signed: an
+-- erasure folds an invoker's rows into '' by inserting their negation.
 CREATE TABLE IF NOT EXISTS {database}.usage_history (
     merchant_id UUID,
     customer_id UUID,
@@ -115,7 +117,7 @@ CREATE TABLE IF NOT EXISTS {database}.usage_history (
     period_starts_at DateTime64(6, 'UTC'),
     invoker String,
     outcome Enum8('succeeded' = 1, 'failed' = 2),
-    requests UInt64,
+    requests Int64,
     quantity Int64,
     stated Int64,
     charged Int64,
@@ -127,13 +129,13 @@ SETTINGS index_granularity = 1024;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_history_events_mv TO {database}.usage_history AS
 SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, '' AS meter, '' AS cell,
-       '' AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests, toInt64(0) AS quantity,
+       '' AS print, period_starts_at, invoker, outcome, toInt64(1) AS requests, toInt64(0) AS quantity,
        ifNull(stated, 0) AS stated, charged, forgiven
 FROM {database}.usage_events;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_history_charges_mv TO {database}.usage_history AS
 SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, charges.meter AS meter,
-       charges.cell AS cell, charges.print AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests,
+       charges.cell AS cell, charges.print AS print, period_starts_at, invoker, outcome, toInt64(1) AS requests,
        charges.quantity AS quantity, charges.stated AS stated, toInt64(0) AS charged, toInt64(0) AS forgiven
 FROM {database}.usage_events
 ARRAY JOIN charges;

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"testing"
@@ -160,9 +161,17 @@ func TestMerchantHost(t *testing.T) {
 	})
 	t.Run("OR-J32-S05/cli-purge-queues-its-vault-cleanup", func(t *testing.T) {
 		a, _ := newPSPWorld(t)
-		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
 		merchant := a.alpha.MerchantID().UUID()
+		feeReads := func() int {
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "stripe_fee_reads"}.Sanitize()+" WHERE merchant_id=$1", merchant).Scan(&n))
+			return n
+		}
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "stripe_fee_reads"}.Sanitize()+" (merchant_id, psp_id, ref, kind, due_at) VALUES ($1, $2, 'ch_purged', 'payment', 'infinity')",
+			merchant, psp.ID.UUID())
+		require.NoError(t, err)
 		documents := func() []any {
 			listed, err := a.deps.Vault.Logical().ListWithContext(t.Context(), a.cfg.Vault.KVMount+"/metadata/openrails/merchants/"+merchant.String()+"/psps")
 			require.NoError(t, err)
@@ -198,6 +207,8 @@ func TestMerchantHost(t *testing.T) {
 		require.NoError(t, purge(&purged, append(confirm, "--expect-rows", strconv.Itoa(inventory.TotalRows))...))
 		require.True(t, purged.CleanupQueued)
 		require.Equal(t, inventory.TotalRows, purged.Rows)
+		require.Equal(t, 1, inventory.RowCounts["stripe_fee_reads"])
+		require.Zero(t, feeReads(), "a fee read waiting on its PSP goes with the merchant")
 		var deleted bool
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT deleted_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id=$1", merchant).Scan(&deleted))
 		require.True(t, deleted, "the purge tombstones the merchant")
@@ -213,6 +224,57 @@ func TestMerchantHost(t *testing.T) {
 		}
 		require.Eventually(t, func() bool { return run() == "completed" && len(documents()) == 0 },
 			30*time.Second, 100*time.Millisecond, "the job queued with the purge deletes the merchant's Vault configuration")
+	})
+	t.Run("OR-J32-S07/a-purge-the-event-store-refused-to-delete-from-is-retried-by-its-job", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		usageMeter(t, a.alpha, 100)
+		customer := billing.CustomerID(uuid.New())
+		fund(t, a.alpha, customer, "purged-funds", 1000)
+		settleUsage(t, a.alpha, newLease(), numbered(1, usageInput(customer, "purged", 2))...)
+		enableLifecycleMaintenance(t, a)
+		overlay := map[string]any{
+			"vault":      map[string]any{"address": a.deps.Vault.Address(), "token": a.deps.Vault.Token(), "kv_mount": a.cfg.Vault.KVMount},
+			"clickhouse": map[string]string{"addr": os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR"), "database": a.schema},
+		}
+		purge := func(out any, args ...string) error {
+			stdout, err := hostCLICommand(t, a.world, overlay, append([]string{"merchant", "purge", "--merchant", "alpha", "--by", "critical operator"}, args...)...).Output()
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return fmt.Errorf("%w: %s", err, exit.Stderr)
+			}
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(stdout, out)
+		}
+		rows := func(tables ...string) uint64 {
+			t.Helper()
+			var total uint64
+			for _, table := range tables {
+				var n uint64
+				require.NoError(t, a.deps.ClickHouse.QueryRow(t.Context(), "SELECT count() FROM `"+a.schema+"`."+table+" WHERE merchant_id = toUUID(?)",
+					a.alpha.MerchantID().String()).Scan(&n))
+				total += n
+			}
+			return total
+		}
+		var inventory billing.MerchantPurgeInventory
+		require.NoError(t, purge(&inventory))
+		// The store refuses the deletion from one of its tables.
+		store := "`" + a.schema + "`"
+		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".usage_minutes TO "+store+".usage_minutes_away"))
+		var purged billing.MerchantPurge
+		require.NoError(t, purge(&purged, "--inventory", inventory.ID.String(), "--confirm", inventory.ConfirmPhrase, "--expect-rows", strconv.Itoa(inventory.TotalRows)),
+			"the purge commits; the store's deletion is its job's")
+		require.NotZero(t, rows("usage_history"), "the store kept the merchant's usage")
+		require.NoError(t, a.deps.ClickHouse.Exec(t.Context(), "RENAME TABLE "+store+".usage_minutes_away TO "+store+".usage_minutes"))
+
+		fleet := hostFleet(t, a.world)
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		require.Eventually(t, func() bool {
+			return rows("usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history") == 0
+		}, 60*time.Second, 200*time.Millisecond, "the job queued with the purge deletes the merchant's usage from the store")
 	})
 	t.Run("OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens", func(t *testing.T) {
 		a, _ := newPSPWorld(t, func(w *world) { w.deps.UserInfo = nil })

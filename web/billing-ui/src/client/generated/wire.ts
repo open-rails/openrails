@@ -2448,6 +2448,10 @@ export type Refusal = {
   retry_after_seconds: number | null
 }
 
+export type ReinstateCreditGrantParams = {
+  reason?: string
+}
+
 export type ReleaseAdmissionBatchParams = {
   request_ids?: string[]
 }

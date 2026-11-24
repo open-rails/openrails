@@ -720,11 +720,14 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 A `credit_grant` may count one of the merchant's own units (`settings.currencies`) instead of money: it then names its `amount` (never `from_payment`), and every price of the product buys that many units, in whatever currency the price is in, so a $50 pack of 55 credits is a product beside a $20 pack of 20. Each lot records its units, what was paid and in what currency. `CreateCreditGrants` gives units, and a recurring price's `credit_grant` in a unit is a plan's allowance, delivered each paid cycle. Units are spent by usage a rate card prices in the unit, by admissions in it, and by a one-off price in it: `POST /v1/me/orders` (with an `Idempotency-Key` and no `payment`) or `CreateOrder` pays such an order from the customer's balance as it is created, soonest-expiring lot first, or refuses it with `insufficient_credits`. A unit is never owed: an admission holds its estimate against the unit balance, and one that holds nothing is refused once the balance is all held. Usage in a unit is reported by capturing an admission (a gate's views and lease syncs take registry currencies). Its posting takes what the lots hold and forgives the rest, shown as `usage_charged` with `charge: forgiven`. `GET /v1/me/usage` reads usage in a unit at its price. Refunding a pack's payment takes the lot's share of its units, those left first. The amount shorthand (`50 GOLD`) cannot know a unit's scale: a price in a unit names `currency` and `unit_amount` in native units.
 
+A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ credits, a pack's bonus included) as its credit is spent; what lapses or is revoked is breakage, and a reinstatement reverses it. Granted credit is promotional: spending it counts as usage revenue offset by promotional credit. See [prepaid credits](architecture/prepaid-credits.md).
+
 | Method | Use it to |
 |---|---|
 | `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
 | `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
-| `RevokeCreditGrant` | take back what remains of a lot |
+| `RevokeCreditGrant` | take back what remains of a lot; a retry under the same idempotency key replays, even after a reinstatement |
+| `ReinstateCreditGrant` | reverse a revocation: what it took returns to the balance; a retry under the same idempotency key replays, even after a later revocation |
 
 ```go guide:credit-grant
 _, err := shop.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{
