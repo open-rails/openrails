@@ -208,7 +208,7 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 		}
 		// Direct Post names no issuer code: NMI's 200 can hide one after which
 		// the card is never charged again.
-		declined := intents.RecurringDecline{ResponseCode: refusal.ResponseCode, Reference: reference, Issuer: intents.ReadNMIIssuerAnswer(ctx, h.Log, in, h.Resolver, reference, p.Initiator == charge.InitiatorCustomer)}
+		declined := intents.RecurringDecline{ResponseCode: refusal.ResponseCode, Reference: reference, At: h.now(), Issuer: intents.ReadNMIIssuerAnswer(ctx, h.Log, in, h.Resolver, reference, p.Initiator == charge.InitiatorCustomer)}
 		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, declined); err != nil {
 			return intents.Ambiguous("retain engine refusal: " + err.Error())
 		}

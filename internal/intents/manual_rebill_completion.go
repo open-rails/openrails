@@ -45,8 +45,8 @@ type RecurringDecline struct {
 	ResponseCode int
 	Reference    string
 	Issuer       decline.Evidence
-	// At is when NMI declined the charge, as an order read dates it; zero
-	// when the decline was answered at once.
+	// At is when the charge was declined: when NMI answered, or the time an
+	// order read reports.
 	At time.Time
 }
 
