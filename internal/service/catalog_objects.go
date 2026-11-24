@@ -88,7 +88,8 @@ type catalogObjectState struct {
 	fields    map[string]json.RawMessage
 	hidden    json.RawMessage
 	productID uuid.UUID
-	priceID   uuid.UUID // a price key's current version
+	priceID   uuid.UUID       // a price key's current version
+	publicID  billing.PriceID // and its public id
 }
 
 type catalogState map[catalogObject]*catalogObjectState
@@ -243,7 +244,7 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 		if p.SellVia != nil {
 			sellVia = catalogJSON(p.SellVia)
 		}
-		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
+		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, publicID: billing.PriceID(p.PublicID), hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
 			"currency":                catalogJSON(p.Currency),
 			"unit_amount":             catalogMoney(p.Amount),
 			"access_duration_hours":   catalogOptionalHours(p.AccessDurationHours),

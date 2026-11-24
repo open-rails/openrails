@@ -52,7 +52,7 @@ var excludedTables = map[string]string{
 	"provisioning_tokens":           "credentials; the destination mints its own",
 	"merchant_destructive_policy":   "deployment safety policy",
 	"carts":                         "a customer's basket, not billing history: priced live, it holds no money and the customer fills it again at the destination",
-	"provider_mutation_logs":        "operator evidence; raw bodies excluded",
+	"operation_log":                 "the source deployment's record of the provider operations it ran: operator evidence, never moved",
 	"reconciliation_findings":       "operator observations",
 	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
@@ -110,7 +110,7 @@ var excludedColumns = map[string]string{
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
 	"notification_issue_revisions":  "merchant_id customer_id issue_key revision withdrawn source_event",
 	"notification_channel_state":    "merchant_id restore_required",
-	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
+	"operation_log":                 "merchant_id id occurred_at actor source object_type object_id action changes reason request_id operation_id rail psp_id custodian_id subscription_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"stored_card_checks":            "merchant_id payment_method_id due_at",
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
@@ -141,7 +141,8 @@ var omittedColumns = map[string]string{
 	"order_attempts":   "destructive_run_class",
 	"product_access":   "destructive_run_class",
 	"maintenance_runs": "run_class coverage affected note summary inventory_manifest inventory_total_rows",
-	"provider_intents": "destructive_run_class destructive_action_id",
+	// The breaker's sent attempt: the destination's breaker counts its own.
+	"provider_intents": "destructive_run_class destructive_action_id sent_attempt",
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open order is not found by it.
 	"orders": "lines_digest",

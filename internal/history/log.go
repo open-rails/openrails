@@ -20,21 +20,41 @@ import (
 // operation.
 type Log string
 
-// ChangeLog is configuration history: the catalog and merchant
-// configuration.
-const ChangeLog Log = "change_log"
+const (
+	// ChangeLog is configuration history: the catalog and merchant
+	// configuration.
+	ChangeLog Log = "change_log"
+	// OperationLog is operations history: what OpenRails did to the outside
+	// world, each phase of each provider operation.
+	OperationLog Log = "operation_log"
+)
 
 // Entry is one object's change.
 type Entry struct {
 	ObjectType billing.LogObjectType
 	ObjectID   string
 	Action     billing.LogAction
-	// Changes is the action's payload: Fields, Keys or KeyRename.
+	// Changes is the action's payload: Fields, Keys, KeyRename, Move or
+	// Operation.
 	Changes any
+	// Address is where an operation entry's operation was sent; only the
+	// operation log has one.
+	Address *Address
+}
+
+// Address is the account an operation was sent to, and the subscription it
+// acted on.
+type Address struct {
+	Rail           string
+	PSPID          *uuid.UUID
+	CustodianID    *uuid.UUID
+	SubscriptionID *uuid.UUID
 }
 
 // Provenance is who made a set of changes, how and when.
 type Provenance struct {
+	// At is when; zero stamps the database's clock as each entry is written,
+	// which orders an operation's entries with the holds SQL records.
 	At          time.Time
 	Actor       billing.LogActor
 	Source      billing.LogSource
@@ -60,31 +80,41 @@ func WriteAhead(ctx context.Context, pool *db.Pool, log Log, merchantID uuid.UUI
 }
 
 func write(ctx context.Context, q *gen.Queries, log Log, merchantID uuid.UUID, p Provenance, entries []Entry) error {
-	if log != ChangeLog {
+	if log != ChangeLog && log != OperationLog {
 		return fmt.Errorf("history: unknown log %q", log)
 	}
-	if err := p.valid(); err != nil {
-		return err
+	if p.Actor == "" || p.Source == "" {
+		return fmt.Errorf("history: a change needs its actor and source")
+	}
+	var at *time.Time
+	if !p.At.IsZero() {
+		at = new(p.At.UTC())
 	}
 	for _, e := range entries {
+		if (log == OperationLog) != (e.Address != nil) {
+			return fmt.Errorf("history: %s %s: an operation entry, and only one, names its address", e.ObjectType, e.ObjectID)
+		}
 		raw, err := json.Marshal(e.Changes)
 		if err != nil {
 			return fmt.Errorf("history: %s %s: %w", e.ObjectType, e.ObjectID, err)
 		}
-		if err := q.InsertChangeLogEntry(ctx, gen.InsertChangeLogEntryParams{
-			MerchantID: merchantID, OccurredAt: p.At, Actor: string(p.Actor), Source: string(p.Source),
-			ObjectType: string(e.ObjectType), ObjectID: e.ObjectID, Action: string(e.Action), Changes: raw,
-			Reason: optional(p.Reason), RequestID: optional(p.RequestID), OperationID: p.OperationID,
-		}); err != nil {
+		if log == OperationLog {
+			err = q.InsertOperationLogEntry(ctx, gen.InsertOperationLogEntryParams{
+				MerchantID: merchantID, OccurredAt: at, Actor: string(p.Actor), Source: string(p.Source),
+				ObjectType: string(e.ObjectType), ObjectID: e.ObjectID, Action: string(e.Action), Changes: raw,
+				Reason: optional(p.Reason), RequestID: optional(p.RequestID), OperationID: p.OperationID,
+				Rail: e.Address.Rail, PspID: e.Address.PSPID, CustodianID: e.Address.CustodianID, SubscriptionID: e.Address.SubscriptionID,
+			})
+		} else {
+			err = q.InsertChangeLogEntry(ctx, gen.InsertChangeLogEntryParams{
+				MerchantID: merchantID, OccurredAt: at, Actor: string(p.Actor), Source: string(p.Source),
+				ObjectType: string(e.ObjectType), ObjectID: e.ObjectID, Action: string(e.Action), Changes: raw,
+				Reason: optional(p.Reason), RequestID: optional(p.RequestID), OperationID: p.OperationID,
+			})
+		}
+		if err != nil {
 			return fmt.Errorf("history: record %s %s: %w", e.ObjectType, e.ObjectID, err)
 		}
-	}
-	return nil
-}
-
-func (p Provenance) valid() error {
-	if p.At.IsZero() || p.Actor == "" || p.Source == "" {
-		return fmt.Errorf("history: a change needs its time, actor and source")
 	}
 	return nil
 }

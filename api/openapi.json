@@ -20524,6 +20524,7 @@
               "key_add",
               "key_remove",
               "key_rename",
+              "move",
               "unarchive",
               "update"
             ]

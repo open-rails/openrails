@@ -379,7 +379,7 @@ var jsonRules = map[string]jsonRule{
 		"fields": dictionary(func(v any) bool {
 			return v == "changed" || object(map[string]jsonRule{"before": historyValue, "after": historyValue})(v)
 		}),
-		"keys": array(textValue), "from": textValue, "to": textValue}),
+		"keys": array(textValue), "from": textValue, "to": textValue, "price_id": textValue, "archived": booleanValue}),
 	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,

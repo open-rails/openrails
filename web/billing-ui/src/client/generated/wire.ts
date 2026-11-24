@@ -1448,7 +1448,7 @@ export type LogEntry = {
   source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
   object_type: "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
   object_id: string
-  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "unarchive" | "update"
+  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "move" | "unarchive" | "update"
   changes: unknown | null
   reason: string | null
   request_id: string | null

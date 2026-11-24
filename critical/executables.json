@@ -1689,6 +1689,24 @@
     ],
     "OR-J46-S13": [
       "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
+    ],
+    "OR-J43-S08": [
+      "TestOperationsHistory/OR-J43-S08/an-operation-is-recorded-before-its-provider-call-and-survives-a-crash"
+    ],
+    "OR-J43-S09": [
+      "TestOperationsHistory/OR-J43-S09/a-subscriptions-history-reads-its-operations-from-the-operations-history"
+    ],
+    "OR-J43-S10": [
+      "TestOperationsHistory/OR-J43-S10/a-price-keys-moves-are-configuration-history-with-their-revisions"
+    ],
+    "OR-J43-S11": [
+      "TestOperationsHistory/OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call"
+    ],
+    "OR-J43-S12": [
+      "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
+    ],
+    "OR-J43-S13": [
+      "TestOperationsHistory/OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent"
     ]
   }
 }

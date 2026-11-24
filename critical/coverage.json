@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 525,
+  "scenario_count": 531,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2627,6 +2627,36 @@
       "id": "OR-J46-S07",
       "journey": "J46",
       "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the deployment's destructive switch it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; the merchant's own stop holds it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J43-S08",
+      "journey": "J43",
+      "name": "An operation's attempting entry is written before its provider call and outlives the process dying mid-call; recovery only appends"
+    },
+    {
+      "id": "OR-J43-S09",
+      "journey": "J43",
+      "name": "A subscription's history reads its provider operations from the operations history, each entry once with its phase, kind, attempt and attribution"
+    },
+    {
+      "id": "OR-J43-S10",
+      "journey": "J43",
+      "name": "A price key's moves to a new version, an archive and back are configuration history entries with the key's revision, and a price's history reads them"
+    },
+    {
+      "id": "OR-J43-S11",
+      "journey": "J43",
+      "name": "The breaker marks a destructive attempt sent before its provider call, and its phases are written ahead with their actor"
+    },
+    {
+      "id": "OR-J43-S12",
+      "journey": "J43",
+      "name": "A price migration's source archive waits for the catalog lock another writer holds, then is recorded once, as the migration's, with the key's move to nothing"
+    },
+    {
+      "id": "OR-J43-S13",
+      "journey": "J43",
+      "name": "A parked or stale claim never counts as sent: a stale executor marks nothing, and a park of an admitted attempt clears its mark"
     }
   ]
 }

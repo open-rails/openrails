@@ -588,8 +588,8 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 }
 
 // pruneEvidenceKeys are the result-pointer keys a slim succeeded tombstone
-// keeps by default. The rest of the evidence is already in
-// provider_mutation_logs, unless the handler's PrunePolicy keeps it.
+// keeps by default. The rest of the evidence is already in the operations
+// history (operation_log), unless the handler's PrunePolicy keeps it.
 var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 
 // PruneSucceeded slims a just-succeeded intent to a dedupe tombstone: the

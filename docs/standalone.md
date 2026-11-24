@@ -1030,16 +1030,7 @@ caps for webhooks).
 
 ## Provider intents
 
-Every outbound provider mutation is first a row in `billing.provider_intents`:
-an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets
-and a relevance window. Its own job (`openrails.provider_operation`) claims it
-under a lease, rechecks relevance, gates on mode and origin, executes and
-classifies the outcome; every attempt is appended to
-`billing.provider_mutation_logs`. A blocked intent (provider down, write mode,
-credentials that do not arm) stays pending with its reason and drains when the
-blocker lifts; one past its relevance window is superseded or expires instead of
-firing stale. An ambiguous money movement is resolved by reading the provider
-before any retry; deletes verify, then execute.
+Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on mode and origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write mode, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
 
 Intents follow the PSP id, not its key: they never execute against another
 account. To move to another account, declare a new PSP and archive the old one
@@ -1170,7 +1161,7 @@ destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
 |---|---|
 | `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
 | `usage_daily` | 24 months after its usage was billed, about 26 months after the month began |
-| `subscription_status_transitions`, `subscription_billing_changes`, `provider_mutation_logs`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
 | `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
@@ -1205,13 +1196,7 @@ Back up PostgreSQL and the merchant configuration (Vault with its
 `keys.json` and `totp.key` in your secret manager. PostgreSQL holds no
 credential, so a database alone cannot charge anyone.
 
-Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an
-off-host `archive_command`, periodic base backups). PITR is whole-cluster: right
-for disaster, wrong for one damaged merchant. A restore never undoes what
-happened at a provider; it creates divergence that convergence repairs. Money is
-reversed by compensating entries, never deletion; the append-only tables (the
-ledger, grants, status and mutation logs, `webhook_events`, findings) are
-restored whole or not at all.
+Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an off-host `archive_command`, periodic base backups). PITR is whole-cluster: right for disaster, wrong for one damaged merchant. A restore never undoes what happened at a provider; it creates divergence that convergence repairs. Money is reversed by compensating entries, never deletion; the append-only tables (the ledger, grants, status transitions, the operations and configuration histories, `webhook_events`, findings) are restored whole or not at all.
 
 1. Stop and drain the source writers and disable their restart.
 2. Restore PostgreSQL; make the configuration available.

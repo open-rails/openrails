@@ -14,7 +14,7 @@
 //
 // Row periods: usage_daily 24 months after its usage was billed (about 26
 // after the month began); subscription_status_transitions,
-// subscription_billing_changes, provider_mutation_logs, payment_attempts,
+// subscription_billing_changes, operation_log, payment_attempts,
 // rebill_cycles and nmi_history_months 25 months; instruction-only
 // provider_intents 25 months after they last changed (the rest are
 // permanent); resolved reconciliation_findings 12 months; order_attempts that

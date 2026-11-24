@@ -61,7 +61,6 @@ var Tables = map[string]Table{
 	"destructive_run_before_images": {Permanent, permanent},
 	"payment_method_versions":       {Permanent, permanent},
 	"mandates":                      {Permanent, permanent},
-	"price_key_movements":           {Permanent, permanent},
 	"price_migrations":              {Permanent, permanent},
 	"scheduled_changes":             {Permanent, permanent},
 
@@ -71,7 +70,7 @@ var Tables = map[string]Table{
 	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"provider_intents":                {Rows, "finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent."},
-	"provider_mutation_logs":          {Rows, "rows are deleted 25 months (761 days) after created_at."},
+	"operation_log":                   {Rows, "rows are deleted 25 months (761 days) after occurred_at."},
 	"reconciliation_findings":         {Rows, "resolved findings are deleted 12 months (366 days) after they were resolved and last seen."},
 	"order_attempts":                  {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
 	"parked_provider_subscriptions":   {Rows, "released parks are deleted 90 days after released_at."},
