@@ -19,6 +19,11 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 SELECT * FROM billing.destructive_actions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid FOR UPDATE;
 
+-- name: LockDestructiveActionNowait :one
+-- The command, unless another transaction holds it: then 55P03 at once.
+SELECT * FROM billing.destructive_actions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid FOR UPDATE NOWAIT;
+
 -- name: CreateDestructiveAction :one
 INSERT INTO billing.destructive_actions(merchant_id,id,kind,target,action_key,request_digest,origin,actor_issuer,actor_id,actor_key,credential,units,admitted_at,state)
 VALUES(sqlc.arg(merchant_id),sqlc.arg(id),sqlc.arg(kind),sqlc.arg(target),sqlc.arg(action_key),sqlc.arg(request_digest),sqlc.arg(origin),sqlc.arg(actor_issuer),sqlc.arg(actor_id),sqlc.arg(actor_key),sqlc.narg(credential),sqlc.arg(units),sqlc.arg(admitted_at),'reserved') RETURNING *;

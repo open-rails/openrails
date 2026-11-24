@@ -3809,7 +3809,7 @@
           "catalog"
         ],
         "operationId": "CreatePriceMigration",
-        "description": "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to another price at each one's renewal.",
+        "description": "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to another price at each one's renewal. It admits every subscriber it counts before reading any and reaches them a page at a time: preparing is true until the last page.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -3857,12 +3857,16 @@
         },
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
+          "catalog_revision_conflict",
+          "idempotency_key_reused",
           "invalid_param",
           "price_change_currency_mismatch",
           "price_change_target_archived",
           "price_key_not_found",
+          "price_migration_in_progress",
           "price_not_found",
-          "product_not_found"
+          "product_not_found",
+          "rate_limit_exceeded"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5653,6 +5657,7 @@
         },
         "x-openrails-errors": [
           "invalid_cursor",
+          "invalid_param",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -19407,6 +19412,7 @@
               "price_increase_notice_too_short",
               "price_key_cadence_conflict",
               "price_key_not_found",
+              "price_migration_in_progress",
               "price_migration_not_found",
               "price_not_found",
               "price_not_sellable",
@@ -24859,6 +24865,15 @@
                 "type": "null"
               }
             ]
+          },
+          "preparing": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -24876,7 +24891,9 @@
           "canceled",
           "blocked",
           "created_at",
-          "canceled_at"
+          "canceled_at",
+          "preparing",
+          "warnings"
         ]
       },
       "PriceMigrationCancel": {
@@ -24962,6 +24979,9 @@
           "matched": {
             "type": "integer"
           },
+          "classified": {
+            "type": "integer"
+          },
           "scheduled": {
             "type": "integer"
           },
@@ -25002,6 +25022,7 @@
           "to_price_id",
           "effective_at",
           "matched",
+          "classified",
           "scheduled",
           "skipped",
           "blocked",
@@ -25525,6 +25546,7 @@
               "price_increase_notice_too_short",
               "price_key_cadence_conflict",
               "price_key_not_found",
+              "price_migration_in_progress",
               "price_migration_not_found",
               "price_not_found",
               "price_not_sellable",
@@ -30215,6 +30237,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No price holds this key."
+    },
+    "price_migration_in_progress": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The same price migration is being created by another request; retry once it answers."
     },
     "price_migration_not_found": {
       "status": 404,
