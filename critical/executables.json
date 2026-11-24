@@ -735,6 +735,11 @@
     "OR-J31-S15": [
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-termination-that-is-not-a-revocation",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-paid-amount-without-a-payment",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-an-amount-on-a-grant-that-is-not-a-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
     ],
     "OR-J31-S12": [
@@ -1098,8 +1103,8 @@
     "OR-J26-S58": [
       "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
     ],
-    "OR-J26-S61": [
-      "TestCreditLotCounters/OR-J26-S61/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+    "OR-J26-S62": [
+      "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
     ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"

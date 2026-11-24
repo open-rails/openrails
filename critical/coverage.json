@@ -961,7 +961,7 @@
     {
       "id": "OR-J31-S15",
       "journey": "J31",
-      "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave, and a lot drawn before its deposit refuses the migration"
+      "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
     },
     {
       "id": "OR-J31-S09",
@@ -1789,7 +1789,7 @@
       "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
-      "id": "OR-J26-S61",
+      "id": "OR-J26-S62",
       "journey": "J26",
       "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
     },

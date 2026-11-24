@@ -27,7 +27,7 @@ func TestCreditLotCounters(t *testing.T) {
 	t.Run("OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding", refundedPackRaisesNoGrantFinding)
 	t.Run("OR-J40-S04/unposted-deposit-is-not-spendable", unpostedDepositNotSpendable)
 	t.Run("OR-J22-S13/lapsed-lots-expire-only-what-they-hold", lapsedLotsExpireWhatTheyHold)
-	t.Run("OR-J26-S61/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot", usageOrderChangeIsBought)
+	t.Run("OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot", usageOrderChangeIsBought)
 }
 
 // lotMatchesLedger reads a lot and checks its counters against its legs on
@@ -273,8 +273,9 @@ func unpostedDepositNotSpendable(t *testing.T) {
 }
 
 // Two lots lapse before their expiry runs. Usage settled at the first lapse
-// is drawn from the lots live then, the second among them; the second then
-// expires only what is left of it.
+// is drawn from the lots live just before it: all of the first, then the
+// second. The second then expires only what is left of it; read stale, it
+// would expire more than it holds.
 func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 	w := newWorld(t)
 	meterForCapture(t, w)
@@ -304,14 +305,15 @@ func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 	require.NoError(t, err)
 
 	early := lotMatchesLedger(t, w, first)
-	require.EqualValues(t, 1000, early.ExpiredAmount, "the first lot lapsed before the usage posted")
+	require.EqualValues(t, 1000, early.SpentAmount, "the usage drew the first lot, live just before its lapse")
+	require.Zero(t, early.ExpiredAmount, "nothing was left of it to expire")
 	late := lotMatchesLedger(t, w, second)
-	require.EqualValues(t, 1000, late.SpentAmount, "the usage drew the second lot, live at the first lapse")
-	require.Zero(t, late.ExpiredAmount, "nothing was left of it to expire")
+	require.EqualValues(t, 500, late.SpentAmount, "then the second")
+	require.EqualValues(t, 500, late.ExpiredAmount, "which expires only what is left of it")
 	rest := lotMatchesLedger(t, w, lasting)
-	require.EqualValues(t, 500, rest.SpentAmount)
-	require.EqualValues(t, 4500, rest.RemainingAmount)
-	balance(t, w.alpha, customer, 4500, 0, 4500)
+	require.Zero(t, rest.SpentAmount)
+	require.EqualValues(t, 5000, rest.RemainingAmount)
+	balance(t, w.alpha, customer, 5000, 0, 5000)
 	require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 }
 

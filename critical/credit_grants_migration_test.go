@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,10 @@ import (
 func TestCreditGrantsMigration(t *testing.T) {
 	t.Run("OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders", func(t *testing.T) {
 		t.Run("moves-every-lot", migrateCreditLots)
-		t.Run("refuses-a-lot-drawn-before-its-deposit", refuseOverdrawnLot)
+		for _, refusal := range migrationRefusals {
+			t.Run("refuses-"+refusal.name, func(t *testing.T) { refuseMigration(t, refusal) })
+		}
+		t.Run("a-migrated-purchase-deposit-replays", migratedPurchaseDepositReplays)
 	})
 }
 
@@ -130,12 +134,14 @@ func (d *seed) lot(customer uuid.UUID, sourceType, sourceID string, payment, pro
 }
 
 // revoke is the termination row terminate appended to a lot.
-func (d *seed) revoke(lot uuid.UUID) (uuid.UUID, time.Time) {
+func (d *seed) revoke(lot uuid.UUID) (uuid.UUID, time.Time) { return d.terminate(lot, "revoke") }
+
+func (d *seed) terminate(lot uuid.UUID, event string) (uuid.UUID, time.Time) {
 	id, at := uuid.New(), d.at.Add(time.Hour)
 	d.exec("INSERT INTO "+d.s.table("grants")+" (id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id,"+
 		" spec_snapshot, starts_at, amount, currency, reason, actor)"+
-		" SELECT $1, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, 'revoke', id, spec_snapshot, $3, amount, currency, 'abuse', 'staff'"+
-		" FROM "+d.s.table("grants")+" WHERE merchant_id = $2 AND id = $4", id, d.m, at, lot)
+		" SELECT $1, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, $5, id, spec_snapshot, $3, amount, currency, 'abuse', 'staff'"+
+		" FROM "+d.s.table("grants")+" WHERE merchant_id = $2 AND id = $4", id, d.m, at, lot, event)
 	return id, at
 }
 
@@ -151,6 +157,23 @@ func (d *seed) sale(customer, product, price uuid.UUID, amount int64, interval *
 	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
 		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", d.m, payment, customer, order, "sale-"+payment.String(), amount, d.at)
 	return payment, line
+}
+
+// reversal is a refund, chargeback or won dispute of payment.
+func (d *seed) reversal(customer, payment uuid.UUID, amount int64, status, kind string) uuid.UUID {
+	id := uuid.New()
+	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind)"+
+		" SELECT merchant_id, $3, customer_id, order_id, 'manual', $4, $5, list_amount, currency, $6, purchased_at, id, $7"+
+		" FROM "+d.s.table("payments")+" WHERE merchant_id = $1 AND id = $2", d.m, payment, id, "reversal-"+id.String(), amount, status, kind)
+	return id
+}
+
+// catalog is a credit product and its price.
+func (d *seed) catalog() (product, price uuid.UUID) {
+	product, price = uuid.New(), uuid.New()
+	d.exec("INSERT INTO "+d.s.table("products")+" (merchant_id, id, key, display_name, tier_rank, archived, ownership) VALUES ($1, $2, $3, 'Credit pack', 0, false, 'consumable')", d.m, product, "pack-"+product.String()[:8])
+	d.exec("INSERT INTO "+d.s.table("prices")+" (merchant_id, id, product_id, key, amount, currency, archived) VALUES ($1, $2, $3, 'pack', 10000000, 'USD', false)", d.m, price, product)
+	return product, price
 }
 
 func (d *seed) commit() {
@@ -231,10 +254,10 @@ func migrateCreditLots(t *testing.T) {
 	promotion := d.account("promotional_funding", nil)
 	revenue := d.account("platform_revenue", nil)
 	revokedCredits := d.account("revoked_credits", nil)
-	product := uuid.New()
-	d.exec("INSERT INTO "+s.table("products")+" (merchant_id, id, key, display_name, tier_rank, archived, ownership) VALUES ($1, $2, 'pack', 'Credit pack', 0, false, 'consumable')", d.m, product)
-	price := uuid.New()
-	d.exec("INSERT INTO "+s.table("prices")+" (merchant_id, id, product_id, key, amount, currency, archived) VALUES ($1, $2, $3, 'pack', 10000000, 'USD', false)", d.m, price, product)
+	expiredCredits := d.account("expired_credits", nil)
+	refundClearing := d.account("credit_refund_clearing", nil)
+	owed := d.account("arrears_liability", &customer)
+	product, price := d.catalog()
 	deposit := func(lot uuid.UUID, from uuid.UUID, kind string, amount int64) {
 		d.leg(from, balance, amount, kind, "deposit", "grant", lot.String(), lot, &customer)
 	}
@@ -275,6 +298,44 @@ func migrateCreditLots(t *testing.T) {
 	unclawedRevoke, unclawedAt := d.revoke(unclawed)
 	// A grant whose deposit never posted, for a customer with no balance yet.
 	unposted := d.lot(unfunded, "admin", "unposted", nil, nil, 1_000_000, spec("support", "staff", ""), nil)
+	// A lot that lapsed, and one that repaid owed.
+	lapsed := d.lot(customer, "admin", "lapsed", nil, nil, 2_000_000, spec("support", "staff", ""), nil)
+	deposit(lapsed, clearing, "deposit", 2_000_000)
+	d.leg(balance, expiredCredits, 1_500_000, "credit_expire", "credit_expire", "credit_expiry", lapsed.String(), lapsed, &customer)
+	repaid := d.lot(customer, "admin", "repaid", nil, nil, 3_000_000, spec("support", "staff", ""), nil)
+	deposit(repaid, clearing, "deposit", 3_000_000)
+	d.leg(balance, owed, 1_000_000, "owed_repayment", "deposit", "grant", repaid.String(), repaid, &customer)
+	// Paid more than its face: the excess is revenue, on no balance.
+	overpaidPayment, _ := d.sale(customer, product, price, 10_000_000, nil)
+	overpaid := d.lot(customer, "purchase", overpaidPayment.String(), &overpaidPayment, &product, 8_000_000, spec("payment", customer.String(), "10000000"), nil)
+	deposit(overpaid, clearing, "deposit", 8_000_000)
+	d.leg(clearing, revenue, 2_000_000, "credit_purchase_revenue", "deposit", "grant", overpaid.String(), overpaid, nil)
+	refundLegs := func(lot, reversal uuid.UUID, amount int64, restore string) {
+		withdraw, cash := "credit_refund", "credit_refund_cash"
+		debit, credit, source, cashSource := balance, refundClearing, "credit", "cash"
+		cashDebit, cashCredit := refundClearing, clearing
+		if restore != "" {
+			withdraw, cash = "credit_refund_restore", "credit_refund_cash_restore"
+			debit, credit, source, cashSource = refundClearing, balance, "credit_restore:"+restore, "cash_restore:"+restore
+			cashDebit, cashCredit = clearing, refundClearing
+		}
+		d.leg(debit, credit, amount, withdraw, "purchased_credit_refund", source, reversal.String(), lot, &customer)
+		d.leg(cashDebit, cashCredit, amount, cash, "purchased_credit_refund", cashSource, reversal.String(), lot, nil)
+	}
+	// $4 of a $10 pack refunded, then $8 more pending: the reservation is the
+	// $6 no reversal returned, not the $8 asked.
+	reversedPayment, _ := d.sale(customer, product, price, 10_000_000, nil)
+	reversed := d.lot(customer, "purchase", reversedPayment.String(), &reversedPayment, &product, 10_000_000, spec("payment", customer.String(), "10000000"), nil)
+	deposit(reversed, clearing, "deposit", 10_000_000)
+	refundLegs(reversed, d.reversal(customer, reversedPayment, -4_000_000, "succeeded", "refund"), 4_000_000, "")
+	d.reversal(customer, reversedPayment, -8_000_000, "pending", "refund")
+	// A chargeback, then its won dispute.
+	disputedPayment, _ := d.sale(customer, product, price, 5_000_000, nil)
+	disputed := d.lot(customer, "purchase", disputedPayment.String(), &disputedPayment, &product, 5_000_000, spec("payment", customer.String(), "5000000"), nil)
+	deposit(disputed, clearing, "deposit", 5_000_000)
+	chargeback := d.reversal(customer, disputedPayment, -5_000_000, "succeeded", "chargeback")
+	refundLegs(disputed, chargeback, 5_000_000, "")
+	refundLegs(disputed, d.reversal(customer, disputedPayment, 5_000_000, "succeeded", "dispute_reversal"), 5_000_000, chargeback.String())
 	// History that stays a grant.
 	history := uuid.New()
 	d.exec("INSERT INTO "+s.table("grants")+" (id, merchant_id, customer_id, kind, source_type, source_id, event, spec_snapshot, starts_at)"+
@@ -283,21 +344,33 @@ func migrateCreditLots(t *testing.T) {
 
 	remaining := readByLot(t, s, strings.ReplaceAll(strings.ReplaceAll(oldRemaining, "%[1]s", s.table("ledger_transfers")), "%[2]s", s.table("grants")), d.m)
 	reserved := readByLot(t, s, strings.ReplaceAll(strings.ReplaceAll(oldReserved, "%[1]s", s.table("payments")), "%[2]s", s.table("grants")), d.m)
-	require.Len(t, remaining, 7)
+	require.Len(t, remaining, 12)
 
 	require.NoError(t, s.apply(t.Context(), s.full))
 
 	lots := readMigratedLots(t, s, d.m)
-	require.Len(t, lots, 7, "every lot moved, with its id")
+	require.Len(t, lots, 12, "every lot moved, with its id")
 	for id, lot := range lots {
 		require.Equal(t, lot.loggedCredited, lot.credited, "lot %s credits are its legs on its balance", id)
 		require.Equal(t, lot.loggedDebited, lot.debited, "lot %s debits are its legs on its balance", id)
-		require.Equal(t, reserved[id], lot.reserved, "lot %s reserves the old pending-refund share", id)
+		require.LessOrEqual(t, lot.debited, lot.credited)
+		if id != reversed {
+			require.Equal(t, reserved[id], lot.reserved, "lot %s reserves the old pending-refund share", id)
+		}
 		if id == unposted {
 			continue
 		}
 		require.Equal(t, remaining[id], lot.credited-lot.debited, "lot %s keeps the old remainder", id)
 	}
+	require.EqualValues(t, 500_000, lots[lapsed].credited-lots[lapsed].debited)
+	require.EqualValues(t, 2_000_000, lots[repaid].credited-lots[repaid].debited)
+	require.EqualValues(t, 8_000_000, lots[overpaid].credited, "the excess paid is revenue, not the lot's")
+	require.EqualValues(t, 10_000_000, *lots[overpaid].paidAmount)
+	require.EqualValues(t, 6_000_000, lots[reversed].credited-lots[reversed].debited)
+	require.EqualValues(t, 8_000_000, reserved[reversed], "the old share ignored the refund already settled")
+	require.EqualValues(t, 6_000_000, lots[reversed].reserved, "the pending $8 reserves the $6 of the line no reversal returned")
+	require.EqualValues(t, 10_000_000, lots[disputed].credited, "the restore credits the lot again")
+	require.EqualValues(t, 5_000_000, lots[disputed].credited-lots[disputed].debited)
 	require.EqualValues(t, 12_500_000, lots[pack].reserved, "the pending $5 of the $10 line reserves half the pack")
 	require.EqualValues(t, 21_000_000, lots[pack].credited-lots[pack].debited)
 
@@ -352,25 +425,84 @@ func migrateCreditLots(t *testing.T) {
 	require.ErrorContains(t, err, "credit grant facts are immutable", "the ledger alone moves a lot's counters")
 }
 
-// A lot revoked before its deposit posted was drawn beyond what it credited:
-// nothing repairs it, so the migration refuses and changes nothing.
-func refuseOverdrawnLot(t *testing.T) {
+// migrationRefusal is old data the migration refuses with nothing moved:
+// what it cannot place without guessing.
+type migrationRefusal struct {
+	name, message string
+	seed          func(d *seed, customer, balance, clearing uuid.UUID)
+}
+
+var migrationRefusals = []migrationRefusal{
+	{"a-lot-drawn-before-its-deposit", "drawn beyond what they credited", func(d *seed, customer, balance, _ uuid.UUID) {
+		overdrawn := d.lot(customer, "admin", "overdrawn", nil, nil, 1_000_000, `{"deposit":{"source":"support","invoker":"staff"}}`, nil)
+		d.revoke(overdrawn)
+		d.leg(balance, d.account("revoked_credits", nil), 1_000_000, "credit_revoke", "credit_revoke", "grant_revoke", overdrawn.String(), overdrawn, &customer)
+	}},
+	{"a-termination-that-is-not-a-revocation", "terminations are not revocations", func(d *seed, customer, _, _ uuid.UUID) {
+		lot := d.lot(customer, "admin", "expired-by-event", nil, nil, 1_000_000, `{"deposit":{"source":"support","invoker":"staff"}}`, nil)
+		d.terminate(lot, "expire")
+	}},
+	{"a-paid-amount-without-a-payment", "disagree on their payment and paid amount", func(d *seed, customer, _, _ uuid.UUID) {
+		d.lot(customer, "purchase", "unpaid", nil, nil, 1_000_000, `{"deposit":{"source":"payment","invoker":"staff","paid_amount":"1000000"}}`, nil)
+	}},
+	{"an-amount-on-a-grant-that-is-not-a-lot", "grants that are not credit lots carry an amount", func(d *seed, customer, _, _ uuid.UUID) {
+		d.exec("INSERT INTO "+d.s.table("grants")+" (merchant_id, customer_id, kind, source_type, source_id, event, starts_at, amount, currency)"+
+			" VALUES ($1, $2, 'entitlement', 'purchase', 'priced-history', 'grant', $3, 5, 'USD')", d.m, customer, d.at)
+	}},
+	{"a-transfer-naming-another-customers-lot", "ledger transfers name a lot that is not theirs", func(d *seed, customer, _, clearing uuid.UUID) {
+		other := d.customer()
+		otherBalance := d.account("customer_balance", &other)
+		lot := d.lot(customer, "admin", "not-theirs", nil, nil, 1_000_000, `{"deposit":{"source":"support","invoker":"staff"}}`, nil)
+		d.leg(clearing, otherBalance, 1_000_000, "deposit", "deposit", "grant", lot.String(), lot, &other)
+	}},
+}
+
+// refuseMigration seeds one funded lot and the refused data; the migration
+// fails with its message and moves nothing.
+func refuseMigration(t *testing.T, refusal migrationRefusal) {
 	s := newLegacySchema(t)
 	d := s.seed(t)
 	customer := d.customer()
 	balance := d.account("customer_balance", &customer)
 	clearing := d.account("processor_clearing", nil)
-	revokedCredits := d.account("revoked_credits", nil)
 	funded := d.lot(customer, "admin", "funded", nil, nil, 5_000_000, `{"deposit":{"source":"support","invoker":"staff"}}`, nil)
 	d.leg(clearing, balance, 5_000_000, "deposit", "deposit", "grant", funded.String(), funded, &customer)
-	overdrawn := d.lot(customer, "admin", "overdrawn", nil, nil, 1_000_000, `{"deposit":{"source":"support","invoker":"staff"}}`, nil)
-	d.revoke(overdrawn)
-	d.leg(balance, revokedCredits, 1_000_000, "credit_revoke", "credit_revoke", "grant_revoke", overdrawn.String(), overdrawn, &customer)
+	refusal.seed(d, customer, balance, clearing)
 	d.commit()
 
 	err := s.apply(t.Context(), s.full)
-	require.ErrorContains(t, err, "drawn beyond what they credited")
+	require.ErrorContains(t, err, refusal.message)
 	var lots int
 	require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+s.table("grants")+" WHERE merchant_id = $1 AND kind = 'credit' AND event = 'grant'", d.m).Scan(&lots))
-	require.Equal(t, 2, lots, "the refused migration moved nothing")
+	require.GreaterOrEqual(t, lots, 1, "the refused migration moved nothing")
+	var moved bool
+	require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT to_regclass($1) IS NOT NULL", s.schema+".credit_grants").Scan(&moved))
+	require.False(t, moved)
+}
+
+// A host deposit labelled a purchase moved as a purchase lot. Its caller's
+// identical retry, which names no funding source, replays it; one naming
+// another funding source is a changed request.
+func migratedPurchaseDepositReplays(t *testing.T) {
+	w := newWorld(t)
+	customer := billing.CustomerID(uuid.New())
+	opening, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "opening"}})
+	require.NoError(t, err)
+	migrated := uuid.New()
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+
+		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at)"+
+		" SELECT merchant_id, $3, customer_id, account_id, unit, 2000, 'purchase', 2000, 'USD', 'pack_purchase', 'pack-42', 'host', starts_at"+
+		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
+		w.alpha.MerchantID().UUID(), opening[0].ID.UUID(), migrated)
+	require.NoError(t, err)
+	retry := billing.CreateCreditGrantParams{CustomerID: customer, Currency: "USD", Amount: 2000, Source: "pack_purchase", SourceID: "pack-42", Invoker: "host"}
+	replayed, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{retry})
+	require.NoError(t, err)
+	require.Len(t, replayed, 1)
+	require.True(t, replayed[0].Replayed)
+	require.Equal(t, migrated, replayed[0].ID.UUID())
+	require.Equal(t, billing.CreditFundingPurchase, replayed[0].FundingSource)
+	retry.FundingSource = billing.CreditGrantFundingGrant
+	_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{retry})
+	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 }
