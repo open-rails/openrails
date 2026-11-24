@@ -19,11 +19,11 @@ One page per OpenRails system: what it does, how it works, and how it keeps the 
 | Cards and payment methods | Card vaults, saved cards, charge agreements, the card-number firewall | [payment-methods.md](payment-methods.md) |
 | Imports | Subscribers from a PSP, legacy billing books | [imports.md](imports.md) |
 | Customer directory (SCIM) | Customer contacts, pushed over SCIM or read in process | [customer-directory.md](customer-directory.md) |
-| Merchant configuration | Registration, configuration (file or Vault), PSPs and custodians, archive and restore | [merchant-configuration.md](merchant-configuration.md) |
+| Merchant configuration | Registration, configuration (file or Vault, including merchant-defined currencies) and its change history, PSPs and custodians, archive and restore | [merchant-configuration.md](merchant-configuration.md) |
 | Events | The event log and host events | [events.md](events.md) |
 | Customer messages | Email to customers, the account inbox, templates, per-event settings, the delivery log | [customer-messages.md](customer-messages.md) |
 | Findings and alerts | The staff review queue (findings, proposals, parking) and alert delivery | [findings.md](findings.md) |
-| Reporting | The metrics engine and the merchant dashboard | [reporting.md](reporting.md) |
+| Reporting | The metrics engine and its measures, the dashboard and its health overview | [reporting.md](reporting.md) |
 | UI library | `@openrails/billing-ui`: admin pages and customer self-service | [billing-ui.md](billing-ui.md) |
 | Standalone server | The `openrails` binary, CLI, configuration, the AuthKit control plane, the console | [standalone-server.md](standalone-server.md) |
 
