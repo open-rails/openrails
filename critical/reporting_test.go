@@ -183,8 +183,7 @@ func consolidatedMeasures(t *testing.T) {
 	require.Equal(t, int64(2), int64(len(listed.Items))-answered["approved"])
 	attempts := query([]string{"attempts"}, closed, "outcome")
 	require.Equal(t, answered, split(t, attempts, "outcome", "attempts"))
-	rates = only(t, query([]string{"attempt_failure_rate", "authorization_rate"}, closed))
-	require.InDelta(t, 2/float64(len(listed.Items)), fraction(t, rates["attempt_failure_rate"]), 1e-12)
+	rates = only(t, query([]string{"authorization_rate"}, closed))
 	require.InDelta(t, float64(answered["approved"])/float64(answered["approved"]+answered["declined"]), fraction(t, rates["authorization_rate"]), 1e-12)
 
 	// purchases by outcome are what failed_purchases, purchase_recovery_rate
@@ -197,15 +196,13 @@ func consolidatedMeasures(t *testing.T) {
 	require.GreaterOrEqual(t, purchases["approved"], int64(3), "the membership and two orders were approved at once")
 	total := whole(t, only(t, query([]string{"purchases"}, closed))["purchases"])
 	require.Equal(t, purchases["approved"]+2, total)
-	require.InDelta(t, 1/float64(total), fraction(t, only(t, query([]string{"purchase_failure_rate"}, closed))["purchase_failure_rate"]), 1e-12)
 
 	// rebills is rebills_due; by outcome and first_outcome it is
 	// rebills_open, rebills_missed and rebill_first_failures.
 	require.Equal(t, map[string]int64{"open": 1}, split(t, query([]string{"rebills"}, inDunning, "outcome"), "outcome", "rebills"))
 	require.Equal(t, map[string]int64{"missed": 1}, split(t, query([]string{"rebills"}, inDunning, "first_outcome"), "first_outcome", "rebills"))
-	open := only(t, query([]string{"rebills", "rebill_rate", "rebill_first_failure_rate", "first_try_rebill_approval_rate"}, inDunning))
+	open := only(t, query([]string{"rebills", "rebill_rate", "first_try_rebill_approval_rate"}, inDunning))
 	require.Nil(t, open["rebill_rate"], "no renewal has closed")
-	require.InDelta(t, 1.0, fraction(t, open["rebill_first_failure_rate"]), 1e-12)
 	require.Nil(t, open["first_try_rebill_approval_rate"], "a missed renewal had no first attempt")
 	require.Equal(t, map[string]int64{"lost": 1}, split(t, query([]string{"rebills"}, closed, "outcome"), "outcome", "rebills"))
 	lost := only(t, query([]string{"rebill_rate", "dunning_recovery_rate"}, closed))
@@ -213,10 +210,12 @@ func consolidatedMeasures(t *testing.T) {
 	require.InDelta(t, 0.0, fraction(t, lost["dunning_recovery_rate"]), 1e-12)
 
 	// A removed measure is refused with what replaces it; so is attempt_kind.
-	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue", "rebills_missed", "nmi_history_refused"},
+	_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"net_revenue", "rebills_missed", "nmi_history_refused",
+		"attempt_failure_rate", "purchase_failure_rate", "rebill_first_failure_rate"},
 		Filters: map[string][]string{"attempt_kind": {"renewal"}}, Range: &billing.MetricsRange{Last: "30d"}})
 	refusals := metricRefusals(t, err)
-	for param, replacement := range map[string]string{"measures[0]": "cash", "measures[1]": "rebills", "measures[2]": "nmi_history_authorizations", "filters.attempt_kind": "kind"} {
+	for param, replacement := range map[string]string{"measures[0]": "cash", "measures[1]": "rebills", "measures[2]": "nmi_history_authorizations",
+		"measures[3]": "authorization_rate", "measures[4]": "purchases", "measures[5]": "first_try_rebill_approval_rate", "filters.attempt_kind": "kind"} {
 		refusal, ok := refusals[param]
 		require.True(t, ok, "%s is refused: %v", param, refusals)
 		require.Equal(t, replacement, refusal["did_you_mean"], param)
@@ -260,7 +259,7 @@ func healthOverview(t *testing.T) {
 	require.Equal(t, map[string]bool{"Revenue and cash": true, "Recurring": true, "Retention": true, "Payment health": true}, sections,
 		"no credits or usage section without credits or usage")
 	require.Equal(t, "kpi", board.Widgets[0].Viz)
-	require.Equal(t, []string{"cash"}, board.Widgets[0].Query.Measures)
+	require.Equal(t, []string{"mrr"}, board.Widgets[0].Query.Measures, "a subscription business leads with MRR")
 
 	// The currency switch lists each currency with cash, apart, and filters
 	// every widget to one: no widget's money ever adds the other currency.
@@ -307,8 +306,8 @@ func healthOverview(t *testing.T) {
 	require.Len(t, saved.Widgets, len(dashboard.DefaultWidgets(all)))
 	overviewAnswers(t, a.beta, saved.Widgets, "")
 
-	// Nothing saves a removed measure, and the migration that retired them
-	// drops the widgets that named one; a layout left empty is deleted.
+	// Nothing saves a removed measure, and the migrations that retired them
+	// drop the widgets that named one; a layout left empty is deleted.
 	stale := billing.DashboardWidget{ID: "net", Title: "Net revenue", Viz: "stat", Grid: billing.DashboardGrid{W: 3, H: 2},
 		Query: billing.QueryMetricsParams{Measures: []string{"net_revenue"}, Range: &billing.MetricsRange{Last: "30d"}}}
 	_, err = a.beta.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: []billing.DashboardWidget{stale}})
@@ -318,17 +317,23 @@ func healthOverview(t *testing.T) {
 	kept := board.Widgets[0]
 	byKind := billing.DashboardWidget{ID: "renewals", Title: "Renewals", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
 		Query: billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"time", "attempt_kind"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
-	storeLayout(t, a, a.alpha.MerchantID(), stale, kept, byKind)
-	storeLayout(t, a, a.beta.MerchantID(), stale)
-	names, err := fs.Glob(postgresmigrations.FS, "*_dashboard_retired_measures.up.sql")
+	churn := billing.DashboardWidget{ID: "churn", Title: "Churn", Viz: "line", Grid: billing.DashboardGrid{W: 6, H: 4},
+		Query: billing.QueryMetricsParams{Measures: []string{"churn_rate"}, By: []string{"time"}, Grain: "month", Range: &billing.MetricsRange{Last: "6m"}}}
+	byStatus := billing.DashboardWidget{ID: "by-status", Title: "Subscriptions by status", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
+		Query: billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time", "status"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
+	storeLayout(t, a, a.alpha.MerchantID(), stale, kept, byKind, churn, byStatus)
+	storeLayout(t, a, a.beta.MerchantID(), stale, churn)
+	names, err := fs.Glob(postgresmigrations.FS, "*_dashboard_retired_*measures.up.sql")
 	require.NoError(t, err)
-	require.Len(t, names, 1)
-	migration, err := fs.ReadFile(postgresmigrations.FS, names[0])
-	require.NoError(t, err)
-	relocated, err := sqlschema.Rewrite(string(migration), a.schema)
-	require.NoError(t, err)
-	_, err = a.pool.Exec(t.Context(), relocated)
-	require.NoError(t, err)
+	require.Len(t, names, 2, "the consolidation's and the MRR measures'")
+	for _, name := range names {
+		migration, err := fs.ReadFile(postgresmigrations.FS, name)
+		require.NoError(t, err)
+		relocated, err := sqlschema.Rewrite(string(migration), a.schema)
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), relocated)
+		require.NoError(t, err, name)
+	}
 	cleaned, err := a.alpha.GetDashboard(t.Context())
 	require.NoError(t, err)
 	require.False(t, cleaned.IsDefault)

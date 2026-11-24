@@ -1560,6 +1560,9 @@
     "OR-J42-S23": [
       "TestMRRRisk/OR-J42-S23/canceled-at-period-end-a-card-update-clears-card-expiring-and-recovers-the-case"
     ],
+    "OR-J42-S30": [
+      "TestReportingMRR/OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],
@@ -1708,6 +1711,12 @@
     ],
     "OR-J53-S05": [
       "TestReporting/OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day"
+    ],
+    "OR-J53-S06": [
+      "TestReportingMRR/OR-J53-S06/recurring-measures-over-four-months-equal-the-movements"
+    ],
+    "OR-J53-S07": [
+      "TestReportingMRR/OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels"
     ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
