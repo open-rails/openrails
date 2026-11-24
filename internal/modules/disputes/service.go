@@ -123,8 +123,9 @@ func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) 
 		if r.Amount > 0 && r.Currency != "" {
 			params.Amount, params.Currency = &r.Amount, &r.Currency
 		}
+		// A case reported as a chargeback is one from when it opened.
 		if r.Kind == billing.DisputeChargeback {
-			params.ChargebackAt = &at
+			params.ChargebackAt = &disputedAt
 		}
 		if closes(r.Status) {
 			params.ClosedAt = &at

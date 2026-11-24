@@ -28,6 +28,7 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings", disputeMonitor)
 	t.Run("OR-J46-S09/mastercard-divides-by-the-previous-months-sales", disputeMastercardLag)
 	t.Run("OR-J46-S10/the-program-in-force-is-the-months", disputeProgramDates)
+	t.Run("OR-J46-S11/a-charged-back-card-is-never-charged-again", disputeBlockedCard)
 	t.Run("OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio", disputeRefundReasons)
 }
 
@@ -55,7 +56,7 @@ func newDisputedMembership(t *testing.T, configure ...func(*world)) *disputedMem
 // dispute is a Stripe dispute of the membership's whole charge.
 func (m *disputedMembership) dispute(id, status, caseType, reason string) stripemock.Object {
 	return stripemock.Object{"id": id, "object": "dispute", "amount": int64(1000), "currency": "usd", "charge": m.charge, "payment_intent": m.intent,
-		"status": status, "reason": reason, "created": time.Now().Unix(),
+		"status": status, "reason": reason, "created": m.a.clock.Now().Unix(),
 		"payment_method_details": map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": caseType, "network_reason_code": "10.4"}}}
 }
 
@@ -311,7 +312,7 @@ func disputeCCBill(t *testing.T) {
 func (m *disputedMembership) fraudWarning(t *testing.T, id string) {
 	t.Helper()
 	m.notice(t, "evt_"+id, "radar.early_fraud_warning.created", stripemock.Object{"id": id, "object": "radar.early_fraud_warning", "charge": m.charge,
-		"payment_intent": m.intent, "fraud_type": "made_with_stolen_card", "actionable": true, "created": time.Now().Unix(), "livemode": false})
+		"payment_intent": m.intent, "fraud_type": "made_with_stolen_card", "actionable": true, "created": m.a.clock.Now().Unix(), "livemode": false})
 }
 
 // An actionable early fraud warning is a fraud report Visa counts; it refunds
@@ -390,7 +391,7 @@ func (s *sales) chargeback(t *testing.T, payment billing.PaymentID, id string) {
 	t.Helper()
 	ch := s.charges[payment]
 	d := stripemock.Object{"id": id, "object": "dispute", "amount": int64(1000), "currency": "usd", "charge": ch[0], "payment_intent": ch[1],
-		"status": "needs_response", "reason": "fraudulent", "created": time.Now().Unix(),
+		"status": "needs_response", "reason": "fraudulent", "created": s.a.clock.Now().Unix(),
 		"payment_method_details": map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": "chargeback", "network_reason_code": "10.4"}}}
 	body := stripeNotice(t, "evt_"+id, "charge.dispute.created", d)
 	status, raw := callback(t, s.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
@@ -534,4 +535,37 @@ func disputeRefundReasons(t *testing.T) {
 	require.Zero(t, standing(t, s.a, billing.ProgramStripe, now).Count)
 	require.Zero(t, standing(t, s.a, billing.ProgramVisaVAMP, now).Count)
 	require.EqualValues(t, 3, standing(t, s.a, billing.ProgramVisaVAMP, now).Denominator, "three settled sales")
+}
+
+// A charged-back card is never charged again: the customer's other engine
+// subscription on it waits for another card at renewal.
+func disputeBlockedCard(t *testing.T) {
+	m := newDisputedMembership(t)
+	enableLifecycleMaintenance(t, m.a)
+	methods, err := m.a.alpha.ListPaymentMethods(t.Context(), m.sub.CustomerID, billing.PaymentMethodListParams{})
+	require.NoError(t, err)
+	require.Len(t, methods.Items, 1)
+	product, err := m.a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "extra", DisplayName: "Extra", Entitlements: []string{"extra:paid"}})
+	require.NoError(t, err)
+	price, err := m.a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "extra-day", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+	require.NoError(t, err)
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(5_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &methods.Items[0].ID}}
+	status, raw := m.a.request(t, http.MethodPost, "/v1/me/orders", m.a.aliceToken, input, map[string]string{"Idempotency-Key": "extra-purchase"})
+	require.Equal(t, http.StatusCreated, status, string(raw))
+	var order billing.Order
+	require.NoError(t, json.Unmarshal(raw, &order))
+	require.NotNil(t, order.Lines[0].SubscriptionID)
+	extra := *order.Lines[0].SubscriptionID
+	charges := len(m.p.effects(t))
+
+	m.notice(t, "evt_blocked_card", "charge.dispute.created", m.dispute("dp_blocked_card", "needs_response", "chargeback", "fraudulent"))
+	require.Contains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
+	current, err := m.a.alpha.GetSubscription(t.Context(), extra)
+	require.NoError(t, err)
+	require.Equal(t, "active", string(current.Status), "its paid period stands")
+	m.a.clock.Advance(current.CurrentPeriodEndsAt.Sub(m.a.clock.Now()))
+	fleet := startFleet(t, m.a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 2)
+	subscriptionState(t, m.a, extra, "awaiting_method")
+	require.Len(t, m.p.effects(t), charges, "the disputed card is not charged")
 }

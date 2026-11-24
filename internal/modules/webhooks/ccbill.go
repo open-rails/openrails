@@ -1339,6 +1339,10 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				}
 			}
 		} else {
+			// Counted although no charge it names is known.
+			if err := s.recordCCBillChargeback(ctx, txdb, data, nil, nil, int64(moneyutil.CentsToMicros(moneyutil.Cents(chargebackAmountCents))), currency); err != nil {
+				return err
+			}
 			ledgerErr = fmt.Errorf("resolve original payment for CCBill chargeback ledger reversal")
 			s.Log.WarnContext(ctx, "Unable to resolve original payment for CCBill chargeback ledger reversal", "subscription_id", sub.ID, "rail_subscription_id", pSubscriptionID, "chargeback_transaction_id", chargebackTransactionID)
 		}
@@ -1407,8 +1411,12 @@ func (s *CCBillWebhookService) recordCCBillChargeback(ctx context.Context, d *db
 	if service == nil {
 		service = disputes.New(s.DB, s.Clock)
 	}
+	var network billing.CardNetwork
+	if strings.TrimSpace(data.CardType) != "" {
+		network = disputerules.Network(data.CardType)
+	}
 	rec, err := service.Record(ctx, d, disputes.Report{PSPID: psp, Rail: models.RailCCBill, ProviderRef: ref, Payment: original,
-		Kind: billing.DisputeChargeback, Status: billing.DisputeUnreported, Network: disputerules.Network(data.CardType),
+		Kind: billing.DisputeChargeback, Status: billing.DisputeUnreported, Network: network,
 		ProviderReason: data.Reason, Amount: amount, Currency: currency})
 	if err != nil || reversal == nil {
 		return err

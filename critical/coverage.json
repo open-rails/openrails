@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 469,
+  "scenario_count": 470,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2347,6 +2347,11 @@
       "id": "OR-J46-S14",
       "journey": "J46",
       "name": "A staff refund carries its reason, requested_by_customer unless named; a Stripe dashboard refund carries Stripe's; refunds count in no dispute ratio"
+    },
+    {
+      "id": "OR-J46-S11",
+      "journey": "J46",
+      "name": "After a chargeback the card is never charged again: the customer's other engine subscription on it keeps its paid period and waits for another card at renewal"
     }
   ]
 }

@@ -1504,6 +1504,9 @@
     ],
     "OR-J46-S14": [
       "TestDisputes/OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio"
+    ],
+    "OR-J46-S11": [
+      "TestDisputes/OR-J46-S11/a-charged-back-card-is-never-charged-again"
     ]
   }
 }
