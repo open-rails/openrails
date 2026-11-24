@@ -115,7 +115,7 @@ is a `provider_intents` row enqueued in the book's transaction
 
 Checks:
 - `internal/pspimport/pull.go` sets `ReadOnly` on the NMI and DataLink clients and reads Stripe through `ReadOnlyClient`.
-- Every `TestPSPImport` case asserts `stripe.Mutations("")` and `ccbill.Mutations()` are empty and NMI saw no write; OR-J38-S35 asserts the same for an applied correction.
+- Every `TestPSPImport` case asserts the `stripemock` and `ccbillmock` fakes record no `Mutations` and NMI saw no write; OR-J38-S35 asserts the same for an applied correction.
 
 ### 2. Agreement with providers
 

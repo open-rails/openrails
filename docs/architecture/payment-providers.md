@@ -152,10 +152,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant hold`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `provider_write_mode`, `webhook_secret_overlap`,
-  `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
-  probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs:
-  [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
+- **Configuration**: `provider_write_mode`, `webhook_secret_overlap`, `provider_sandbox.ccbill_webhook_sources`, `solana.crankers`, each PSP's `environment`; probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 
 ## Guarantees
 
@@ -264,13 +261,7 @@ Checks:
 
 ### 8. Abuse protection
 
-Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail
-body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned,
-mis-signed and stale deliveries are refused and counted in
-`webhook_health_daily`. CCBill is accepted from its published ranges, or from
-`ccbill_webhook_ip_allowlist` only for an account proven non-live. Customer
-declines from charge operations feed the card-testing ledger
-(`Runner.recordOrderCardDecline`).
+Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `provider_sandbox.ccbill_webhook_sources` only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordOrderCardDecline`).
 
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
@@ -307,8 +298,7 @@ Critical scenarios:
 - J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestOrderExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
 
-Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only
-package test here is `internal/reconcile/solana_discovery_test.go`.
+Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only package tests here are `internal/reconcile/solana_discovery_test.go` and the fake's own `openrailstest/nmimock/nmimock_test.go`.
 
 Gaps:
 

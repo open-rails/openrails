@@ -12,8 +12,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
 - **Merchant**: a `billing.merchants` row: `id` (the identity), `slug` (a renamable
   name), `status` (`active`, `deleted`), optional `permission_group_id` (its AuthKit
   group, equal to `id`) and `tenant_id`. Global by design.
-- **Declaration**: `openrails.MerchantDeclaration`, an entry of `Config.Merchants` or
-  of the standalone manifest.
+- **Declaration**: `billing.MerchantDeclaration`, an entry of `Config.Merchants` or of the standalone manifest.
 - **Documents**: `merchantdocs.Merchant`, `merchantdocs.PSP`, `merchantdocs.Custodian`;
   a `merchantdocs.Set` is one merchant's, with revisions and those it does not serve
   (`Rejected`).
@@ -131,9 +130,7 @@ answers `503`, so the provider retries.
 
 ## Interfaces
 
-- Go: `Client.GetMerchantConfiguration`, `UpdateMerchantConfiguration`, the alert
-  webhook, PSP and custodian methods, `ExportBillingArchive`, `ImportBillingArchive`;
-  `openrails.MerchantDeclaration`, `openrails.PSPConfig`, `billing.MerchantBinding`.
+- Go: `Client.GetMerchantConfiguration`, `UpdateMerchantConfiguration`, the alert webhook, PSP and custodian methods, `ExportBillingArchive`, `ImportBillingArchive`; `billing.MerchantDeclaration`, `billing.PSPConfig`, `billing.MerchantBinding`.
 - HTTP (`RouteGroups.MerchantConfig`): `/v1/merchant/configuration`,
   `/v1/merchant/alert-webhooks`, `/v1/merchant/psps`, `/v1/merchant/custodians`,
   `/v1/merchant/billing-archive`. No route creates or deletes a merchant.

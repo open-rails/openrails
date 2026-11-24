@@ -85,23 +85,14 @@ verifies, then executes. Only on the provider's confirmation is the row
 
 ### Card-number firewall
 
-`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible
-grouping, Luhn-valid and in an issued range. Unknown request fields are
-refused, and named fields are scanned: billing details on custodian saves and
-server-entered cards, tokens, idempotency keys, external transaction ids and
-declared books. The typed `card` field (`cardguard.Card`) is admitted only on a
-`card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the
-merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is
-read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last
-four and expiry are kept.
+`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range. Unknown request fields are refused, and named fields are scanned: billing details on custodian saves and server-entered cards, tokens, idempotency keys, external transaction ids and declared books. The typed `card` field (`billing.Card`) is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
 
 Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 `custodians`, `psp_customers`, `stored_card_checks`.
 
 ## Interfaces
 
-- **Go** (`*Client`): `ListPaymentMethods`, `DeletePaymentMethod`,
-  `SetSubscriptionPaymentMethod`, `ListCustodians`, `PutCustodian`.
+- **Go** (`*Client`): `ListPaymentMethods`, `DeletePaymentMethod`, `SetSubscriptionPaymentMethod`, `ListCustodians`, `SetCustodian`.
 - **HTTP**: `/v1/me/payment-methods` (GET, POST), `/v1/me/payment-methods/{id}`
   (PATCH, DELETE), `POST /v1/me/payment-methods/{id}/confirm`,
   `PUT /v1/me/default-payment-methods/{currency}`, `GET /v1/me/agreements`,
@@ -222,7 +213,7 @@ Checks:
 - Custody and imports: OR-J06-S06 (`TestMerchantCustodyConfiguration`), OR-J38-S36 (`TestCardGuard`).
 - Agreements: OR-J14-S06 (`TestRenewalAgreements`), OR-J17-S04 (`TestCancellationRecoveryContracts`), OR-J26-S58 (`TestUsageBillingContracts`), OR-J16-S02 (`TestDunning`: a healthy card does not revive a terminal decline).
 
-The only package test is `internal/integrations/basistheory/accountupdater_test.go`.
+The only package tests are `internal/integrations/basistheory/accountupdater_test.go` and `billing/card_test.go` (the card's redaction).
 
 Gaps:
 

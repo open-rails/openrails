@@ -17,8 +17,7 @@ pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
 - **Directory**: `identity.Directory`, what every reader calls: `Contacts(ctx,
   merchantID, ids)` and `Search(ctx, merchantID, query, limit)`. A customer
   without a contact is absent, never an error.
-- **Live directory**: `identity.Live` over `Deps.UserInfo` (`openrails.UserInfo`,
-  AuthKit's `userinfo.Lookup`). Nothing is copied.
+- **Live directory**: `identity.Live` over `Deps.UserInfo` (AuthKit's `userinfo.Lookup`). Nothing is copied.
 - **Kept copy**: `identity.Kept` over `billing.customer_contacts`, written by SCIM.
 - **Provisioning token**: a merchant's SCIM bearer secret (`orscim_…`), kept as its
   SHA-256 in `billing.provisioning_tokens`.
