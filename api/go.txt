@@ -415,6 +415,7 @@ pkg openrails/adapters/gin, func MountRoutes(*gin.Engine, []openrails.Route) err
 pkg openrails/adapters/gin, func PaymentRequest(*gin.Context) bool
 pkg openrails/adapters/gin, func RedactLog(gin.LogFormatter) gin.LogFormatter
 pkg openrails/adapters/http, func Mount(any, *openrails.Engine, openrails.Routes) error
+pkg openrails/adapters/smtpmail, func EmailSender(*smtp.Sender) openrails.EmailSender
 pkg openrails/billing, const AccessNone AccessLevel = "none"
 pkg openrails/billing, const AccessRead AccessLevel = "read"
 pkg openrails/billing, const AccessUpdate AccessLevel = "update"
