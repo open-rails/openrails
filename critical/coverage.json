@@ -1129,7 +1129,7 @@
       "name": "Exact payment key reads its own retained outcome without attributing another payment"
     },
     {
-      "id": "OR-J10-S06",
+      "id": "OR-J10-S07",
       "journey": "J10",
       "name": "A merchant order's Idempotency-Key names one order per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
     },
@@ -1589,7 +1589,7 @@
       "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
-      "id": "OR-J38-S44",
+      "id": "OR-J38-S75",
       "journey": "J38",
       "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
     },

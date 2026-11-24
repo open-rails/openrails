@@ -304,7 +304,7 @@ func TestCCBillIdentity(t *testing.T) {
 		})
 	})
 
-	t.Run("OR-J38-S44/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
+	t.Run("OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
 		alice := customerOf(a.alice)

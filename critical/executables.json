@@ -833,8 +833,8 @@
     "OR-J10-S05": [
       "TestOrderPaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
     ],
-    "OR-J10-S06": [
-      "TestPaymentReplay/OR-J10-S06/a-merchant-order-key-names-one-order-whichever-customer"
+    "OR-J10-S07": [
+      "TestPaymentReplay/OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer"
     ],
     "OR-J12-S06": [
       "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/merchant-owned-vault",
@@ -1209,8 +1209,8 @@
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
     ],
-    "OR-J38-S44": [
-      "TestCCBillIdentity/OR-J38-S44/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
+    "OR-J38-S75": [
+      "TestCCBillIdentity/OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
     ],
     "OR-J27-S10": [
       "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"

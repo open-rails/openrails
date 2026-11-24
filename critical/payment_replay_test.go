@@ -131,7 +131,7 @@ func TestPaymentReplay(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 30_000_000, persisted.Total)
 	})
-	t.Run("OR-J10-S06/a-merchant-order-key-names-one-order-whichever-customer", func(t *testing.T) {
+	t.Run("OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
