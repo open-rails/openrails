@@ -48,7 +48,7 @@ continuations. The other scan names label work inside the pass.
 
 | Scan | What it looks for |
 | --- | --- |
-| `openrails.usage_accruals` | Customers' days of usage that ended unposted; each posts as one deduction. The read is indexed on the day. [Source](../internal/river/jobs_usage_accruals.go) |
+| `openrails.usage_accruals` | Posts each customer's usage from finished UTC days to the ledger: one deduction per customer, currency and day. Until then the day's usage is held, not posted. The read is indexed on the day. [Source](../internal/river/jobs_usage_accruals.go) |
 | `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |

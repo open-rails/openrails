@@ -74,7 +74,7 @@ if err := bill.Start(ctx); err != nil {
 |---|---|
 | `Engine.Start(ctx, opts...)` | runs OpenRails' River workers, or binds them to your fleet (`WithRiverClient`, [below](#river)). A second `Start` is refused. |
 | `Engine.Ready(ctx)` | nil once PostgreSQL, the merchants and a local River consumer serve. Register it as your readiness check. |
-| `Engine.Probes()` | named checks of the optional parts, for your supervisor: `openrails_vault`, `openrails_psp_posture`, `openrails_configuration`, `openrails_job_progress`, … |
+| `Engine.Probes()` | named checks of the optional parts, for your supervisor: `openrails_psp_posture`, `openrails_configuration`, `openrails_solana_crankers`, `openrails_job_progress` |
 | `Engine.Close(ctx)` | stops what `Start` started. Close the engine before your pool; OpenRails never closes `Deps.Postgres`. |
 
 `New` fails only on what it cannot serve without: PostgreSQL and its migrations,

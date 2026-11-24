@@ -28,6 +28,12 @@ type link struct {
 	Line   int
 }
 
+// heading is an ATX heading: its 0-based line, level and text.
+type heading struct {
+	Line, Level int
+	Text        string
+}
+
 // doc is a parsed markdown file.
 type doc struct {
 	Path    string
@@ -35,6 +41,7 @@ type doc struct {
 	Fences  []fence
 	Spans   []span
 	Links   []link
+	Heads   []heading
 	Anchors map[string]bool
 }
 
@@ -92,6 +99,7 @@ func parseDoc(path, text string) *doc {
 		prose[i] = line
 		if m := atxRe.FindStringSubmatch(line); m != nil {
 			addHeading(m[2])
+			d.Heads = append(d.Heads, heading{i, len(m[1]), m[2]})
 		} else if i > 0 && setextRe.MatchString(line) && prose[i-1] != "" && !strings.HasPrefix(strings.TrimSpace(prose[i-1]), "|") &&
 			!strings.HasPrefix(strings.TrimSpace(prose[i-1]), "- ") && atxRe.FindString(prose[i-1]) == "" && strings.TrimSpace(line)[0] == '=' {
 			addHeading(prose[i-1])
