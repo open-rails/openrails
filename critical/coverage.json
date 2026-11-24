@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 449,
+  "scenario_count": 456,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2247,6 +2247,41 @@
       "id": "OR-J39-S25",
       "journey": "J39",
       "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
+    },
+    {
+      "id": "OR-J43-S01",
+      "journey": "J43",
+      "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
+    },
+    {
+      "id": "OR-J43-S02",
+      "journey": "J43",
+      "name": "A catalog document records one entry for each object it changes, with its revision and application; a replay records nothing and a removed key is recorded"
+    },
+    {
+      "id": "OR-J43-S03",
+      "journey": "J43",
+      "name": "A configuration change through the API is recorded with its actor, and a credential only as changed, never its value"
+    },
+    {
+      "id": "OR-J43-S04",
+      "journey": "J43",
+      "name": "A Vault document written outside OpenRails is recorded once as Vault's when several replicas load it, and an edited file once as the file's however many processes start on it"
+    },
+    {
+      "id": "OR-J43-S05",
+      "journey": "J43",
+      "name": "The configuration history lists one merchant's entries newest first, by object and time, a page at a time, to merchant configuration readers only"
+    },
+    {
+      "id": "OR-J43-S06",
+      "journey": "J43",
+      "name": "A product's revision shows on its reads, advances on a key change and never on a price change, and its entries carry it"
+    },
+    {
+      "id": "OR-J43-S07",
+      "journey": "J43",
+      "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
     }
   ]
 }
