@@ -2205,6 +2205,9 @@
     ],
     "OR-J47-S03": [
       "TestCheckoutFunnel/OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened"
+    ],
+    "OR-J47-S10": [
+      "TestCheckoutFunnel/OR-J47-S10/the-customer-type-is-new-returning-or-reactivated"
     ]
   }
 }

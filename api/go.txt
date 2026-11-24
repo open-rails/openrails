@@ -724,6 +724,9 @@ pkg openrails/billing, const CreditGrantRevoked CreditGrantState = "revoked"
 pkg openrails/billing, const CreditGrantScheduled CreditGrantState = "scheduled"
 pkg openrails/billing, const CreditGrantSpent CreditGrantState = "spent"
 pkg openrails/billing, const CustomerGroupPersona untyped string = "customer"
+pkg openrails/billing, const CustomerTypeNew CustomerType = "new"
+pkg openrails/billing, const CustomerTypeReactivated CustomerType = "reactivated"
+pkg openrails/billing, const CustomerTypeReturning CustomerType = "returning"
 pkg openrails/billing, const DeclineAuthenticationRequired DeclineReason = "authentication_required"
 pkg openrails/billing, const DeclineBlockedByPSP DeclineReason = "blocked_by_psp"
 pkg openrails/billing, const DeclineBrandNotAccepted DeclineReason = "brand_not_accepted"
@@ -2020,6 +2023,7 @@ pkg openrails/billing, type CustomerTokenParams struct
 pkg openrails/billing, type CustomerTokenParams struct, CustomerID CustomerID
 pkg openrails/billing, type CustomerTokenParams struct, Email string
 pkg openrails/billing, type CustomerTokenParams struct, EmailVerified bool
+pkg openrails/billing, type CustomerType string
 pkg openrails/billing, type Dashboard struct
 pkg openrails/billing, type Dashboard struct, IsDefault bool `json:"is_default"`
 pkg openrails/billing, type Dashboard struct, Profile *DashboardProfile `json:"profile"`
@@ -3071,6 +3075,7 @@ pkg openrails/billing, type OrderCheckout struct, BillingCountry *string `json:"
 pkg openrails/billing, type OrderCheckout struct, CardCountry *string `json:"card_country"`
 pkg openrails/billing, type OrderCheckout struct, Country *string `json:"country"`
 pkg openrails/billing, type OrderCheckout struct, CountrySource *CountrySource `json:"country_source"`
+pkg openrails/billing, type OrderCheckout struct, CustomerType CustomerType `json:"customer_type"`
 pkg openrails/billing, type OrderCheckout struct, IPCountry *string `json:"ip_country"`
 pkg openrails/billing, type OrderCheckout struct, Language *string `json:"language"`
 pkg openrails/billing, type OrderCheckout struct, OpenedAt *time.Time `json:"opened_at"`

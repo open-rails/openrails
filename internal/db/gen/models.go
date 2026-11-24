@@ -1367,6 +1367,8 @@ type BillingOrder struct {
 	LinesDigest []byte
 	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
 	Embedded *bool
+	// Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.
+	CustomerType *string
 	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other order and on checkouts created before it was recorded.
 	PurchaseNumber *int32
 	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.

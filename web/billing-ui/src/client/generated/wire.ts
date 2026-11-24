@@ -1693,6 +1693,7 @@ export type OrderAttribution = {
 }
 
 export type OrderCheckout = {
+  customer_type: "new" | "reactivated" | "returning"
   purchase_number: number
   opened_at: string | null
   submitted_at: string | null

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 func TestCheckAttribution(t *testing.T) {
@@ -55,4 +56,20 @@ func TestCountry(t *testing.T) {
 	require.Equal(t, "DE", Country(" de "))
 	require.Empty(t, Country("DEU"))
 	require.Empty(t, Country("D1"))
+}
+
+func TestCustomerType(t *testing.T) {
+	for _, c := range []struct {
+		row  gen.GetCheckoutCustomerRow
+		want billing.CustomerType
+	}{
+		{gen.GetCheckoutCustomerRow{}, billing.CustomerTypeNew},
+		{gen.GetCheckoutCustomerRow{Purchases: 1}, billing.CustomerTypeReturning},
+		{gen.GetCheckoutCustomerRow{Purchases: 2, HadMrr: true, HasMrr: true}, billing.CustomerTypeReturning},
+		{gen.GetCheckoutCustomerRow{HadMrr: true, HasMrr: true}, billing.CustomerTypeReturning},
+		{gen.GetCheckoutCustomerRow{Purchases: 1, HadMrr: true}, billing.CustomerTypeReactivated},
+		{gen.GetCheckoutCustomerRow{HadMrr: true}, billing.CustomerTypeReactivated},
+	} {
+		require.Equal(t, c.want, customerType(c.row), "%+v", c.row)
+	}
 }

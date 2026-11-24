@@ -88,6 +88,7 @@ total, no recurring line, replayed by `transaction_id`.
 
 **Checkout facts** (`internal/modules/orders/checkout.go`). A checkout is an order `Create` makes for a customer to pay (origin `customer` or `merchant`); renewals, usage orders and provider bills are not. Each records, on the order:
 
+- `customer_type`: `reactivated` when the customer had MRR with the merchant (`customer_mrr`) and has none now, `new` on a first purchase without MRR history, `returning` otherwise; read with `purchase_number` (`GetCheckoutCustomer`).
 - `purchase_number`: 1 + the customer's paid purchases (complete checkouts, refunded ones included, and observed initial enrollments) when it was created, counted under the same lock. Two checkouts open at once share the number neither has paid yet.
 - `opened_at`: the customer's first read of the open order in person (`MarkCheckoutOpened`): billing-ui's `OrderPayment` and the payment page both read it on load. A merchant creating a pay URL, staff reads and later reads change nothing.
 - `submitted_at`: the first pay request (`MarkCheckoutSubmitted`). On `POST /v1/me/orders/{id}/pay` a route step writes it right after the customer gate (`SubmitsCheckout`), before the pay URL limit, the attack captcha, card-attempt limits or the provider can refuse the request; a request the deployment's rate limiter refuses before authentication is not recorded. A one-call buy is opened and submitted when it is created. Both stamps write only to an open, unexpired checkout, and nothing when nothing would change.
@@ -245,7 +246,7 @@ Journeys:
   refused lines and stale totals, settled orders survive cancel and expiry.
 - OR-J09-S01 to S06, S70: one-off charge, challenge, decline, rollback, lost
   answer, partial approval, expiry during a challenge.
-- OR-J47-S01, S02, S04 to S09: checkout steps where they happen (an attack captcha's refusal included), purchase number, country, language, attribution, renewals naming their checkout, and retention.
+- OR-J47-S01, S02, S04 to S10: checkout steps where they happen (an attack captcha's refusal included), purchase number, customer type, country, language, attribution, renewals naming their checkout, and retention.
 - Also: OR-J05-S05, OR-J10-S01 to S05, OR-J21-S01 to S03, OR-J28-S04, OR-J28-S08,
   OR-J04-S04, OR-J04-S37, OR-J04-S46, OR-J29-S02, OR-J29-S08, OR-J31-S09,
   OR-J37-S70, OR-J38-S43.

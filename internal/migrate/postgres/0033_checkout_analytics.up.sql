@@ -1,5 +1,5 @@
--- Checkout facts on the order: which purchase it is for its customer, how far
--- they got, where they are and which language they read, and the host's
+-- Checkout facts on the order: who its customer is and which purchase it is
+-- for them, how far they got, where they are and which language they read, and the host's
 -- attribution. A subscription names the checkout that bought it, and each of
 -- its bills names that checkout too.
 --
@@ -7,6 +7,7 @@
 -- one transaction (migratekit's default), so indexes are built in it, not
 -- concurrently.
 ALTER TABLE billing.orders
+    ADD COLUMN customer_type text,
     ADD COLUMN purchase_number integer,
     ADD COLUMN opened_at timestamptz,
     ADD COLUMN submitted_at timestamptz,
@@ -26,6 +27,8 @@ ALTER TABLE billing.subscriptions ADD COLUMN checkout_order_id uuid;
 
 ALTER TABLE billing.orders ADD CONSTRAINT orders_purchase_number_check
     CHECK (purchase_number IS NULL OR (purchase_number >= 1 AND origin IN ('customer', 'merchant'))) NOT VALID;
+ALTER TABLE billing.orders ADD CONSTRAINT orders_customer_type_check
+    CHECK (customer_type IN ('new', 'returning', 'reactivated') AND (customer_type IS NULL) = (purchase_number IS NULL)) NOT VALID;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_checkout_facts_check CHECK (
     purchase_number IS NOT NULL
     OR (opened_at IS NULL AND submitted_at IS NULL AND billing_country IS NULL AND card_country IS NULL AND ip_country IS NULL
@@ -53,6 +56,7 @@ ALTER TABLE billing.subscriptions ADD CONSTRAINT subscriptions_checkout_order_id
     FOREIGN KEY (merchant_id, checkout_order_id) REFERENCES billing.orders (merchant_id, id) ON DELETE SET NULL (checkout_order_id) DEFERRABLE INITIALLY DEFERRED NOT VALID;
 
 ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_purchase_number_check;
+ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_customer_type_check;
 ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_checkout_facts_check;
 ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_submitted_check;
 ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_country_check;
@@ -63,6 +67,7 @@ ALTER TABLE billing.orders VALIDATE CONSTRAINT orders_checkout_order_id_fkey;
 ALTER TABLE billing.subscriptions VALIDATE CONSTRAINT subscriptions_checkout_order_id_fkey;
 
 COMMENT ON TABLE billing.orders IS 'One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 397 days after they closed; every other order is permanent.';
+COMMENT ON COLUMN billing.orders.customer_type IS 'Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.';
 COMMENT ON COLUMN billing.orders.purchase_number IS 'Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer''s paid purchases when it was created. Two checkouts open at once can share one. NULL on every other order and on checkouts created before it was recorded.';
 COMMENT ON COLUMN billing.orders.opened_at IS 'When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.';
 COMMENT ON COLUMN billing.orders.submitted_at IS 'When the customer first asked to pay the checkout, whatever the answer.';
@@ -122,3 +127,28 @@ END;
 $$;
 CREATE TRIGGER assign_checkout_order BEFORE INSERT ON billing.orders
     FOR EACH ROW WHEN (NEW.origin = 'subscription' AND NEW.checkout_order_id IS NULL) EXECUTE FUNCTION billing.assign_checkout_order();
+
+-- Saved dashboards drop every widget naming subscriber_type, which
+-- customer_type replaced; a layout left without widgets is deleted, so its
+-- merchant gets the health overview.
+WITH widgets AS (
+    SELECT c.merchant_id, w.widget, w.position,
+        COALESCE(w.widget #> '{query,by}' ? 'subscriber_type', false)
+            OR COALESCE(w.widget #> '{query,filters}' ? 'subscriber_type', false) AS stale
+    FROM billing.dashboard_configs c
+    CROSS JOIN LATERAL jsonb_array_elements(c.layout) WITH ORDINALITY AS w(widget, position)
+    WHERE jsonb_typeof(c.layout) = 'array'
+), cleaned AS (
+    SELECT merchant_id, COALESCE(jsonb_agg(widget ORDER BY position) FILTER (WHERE NOT stale), '[]'::jsonb) AS layout
+    FROM widgets
+    GROUP BY merchant_id
+    HAVING bool_or(stale)
+), emptied AS (
+    DELETE FROM billing.dashboard_configs c
+    USING cleaned k
+    WHERE c.merchant_id = k.merchant_id AND k.layout = '[]'::jsonb
+)
+UPDATE billing.dashboard_configs c
+SET layout = k.layout, updated_at = now()
+FROM cleaned k
+WHERE c.merchant_id = k.merchant_id AND k.layout <> '[]'::jsonb;

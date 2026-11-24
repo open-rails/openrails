@@ -265,7 +265,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		for _, w := range board.Widgets {
 			ids[w.ID] = true
 		}
-		for _, id := range []string{"kpi-checkout-conversion", "section-checkouts", "checkout-funnel", "checkouts-abandoned", "customers-by-purchase", "repeat-purchase-rate", "sales-by-country", "sales-by-source"} {
+		for _, id := range []string{"kpi-checkout-conversion", "section-checkouts", "checkout-funnel", "checkouts-abandoned", "customers-by-type", "repeat-purchase-rate", "sales-by-country", "sales-by-source"} {
 			require.True(t, ids[id], id)
 		}
 		overviewAnswers(t, a.alpha, board.Widgets, "USD")
@@ -542,6 +542,56 @@ func TestCheckoutFunnel(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, renewed, "the upgraded membership's renewal")
+	})
+	t.Run("OR-J47-S10/the-customer-type-is-new-returning-or-reactivated", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		card := func() string { return p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}) }
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "type-membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
+		require.NoError(t, err)
+		daily, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "type-membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+		require.NoError(t, err)
+		_, book := publicSale(t, a, "type-book", 5_000_000, nil)
+		_, extra := publicSale(t, a, "type-extra", 6_000_000, nil)
+
+		// A first purchase by a customer who never subscribed is new.
+		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: daily.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.OrderPaymentParams{Token: card()}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "type-membership"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var joined billing.Order
+		require.NoError(t, json.Unmarshal(raw, &joined))
+		require.Nil(t, joined.Checkout, "the customer never reads its own type")
+		require.Equal(t, billing.CustomerTypeNew, checkoutOf(t, a, joined.ID).CustomerType)
+		require.NotNil(t, joined.Lines[0].SubscriptionID)
+		sub := *joined.Lines[0].SubscriptionID
+
+		// A subscriber buying more is returning.
+		more := publicPurchase(t, a, p, book.ID, 1, 5_000_000, "type-more")
+		require.Equal(t, billing.CustomerTypeReturning, checkoutOf(t, a, more.ID).CustomerType)
+
+		// Once its subscription ended, a former subscriber's purchase reactivates it.
+		_, err = a.alpha.CancelSubscription(t.Context(), sub, billing.CancelSubscriptionParams{Reason: "Membership ends now", RevokeAccess: true})
+		require.NoError(t, err)
+		back := publicPurchase(t, a, p, extra.ID, 1, 6_000_000, "type-back")
+		require.Equal(t, billing.CustomerTypeReactivated, checkoutOf(t, a, back.ID).CustomerType)
+
+		// Another customer's first checkout is new, whoever started it.
+		bob, err := a.alphaRemote.CreateOrder(t.Context(), "type-bob", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.bob.ID)), Lines: []billing.OrderLineParams{{PriceID: book.ID}}})
+		require.NoError(t, err)
+		require.Equal(t, billing.CustomerTypeNew, bob.Checkout.CustomerType)
+
+		// Sales, their cash and new subscriptions split by it.
+		now := a.clock.Now()
+		window := &billing.MetricsRange{From: now.Add(-48 * time.Hour).Format(time.DateOnly), To: now.Add(48 * time.Hour).Format(time.DateOnly)}
+		byType := func(measure string, filters map[string][]string) map[string]int64 {
+			return split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{measure}, By: []string{"customer_type"}, Filters: filters, Range: window}), "customer_type", measure)
+		}
+		require.Equal(t, map[string]int64{"new": 1, "returning": 1, "reactivated": 1}, byType("sales", nil))
+		require.Equal(t, map[string]int64{"new": 10_000_000, "returning": 5_000_000, "reactivated": 6_000_000},
+			byType("cash", map[string][]string{"currency": {"USD"}, "cash_kind": {"payment"}}))
+		require.Equal(t, map[string]int64{"new": 1}, byType("new_subscriptions", nil))
+		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"new_subscriptions"}, By: []string{"subscriber_type"}, Range: window})
+		require.Equal(t, "customer_type", metricRefusals(t, err)["by[0]"]["did_you_mean"])
 	})
 }
 

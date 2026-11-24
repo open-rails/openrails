@@ -28,7 +28,7 @@ migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc
 migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
 migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
-migration 0033_checkout_analytics.up.sql sha256:17aa67a5a4433412d96fbbac7802ecd12b643cc7a78dbd5482dfedc525a5a47a
+migration 0033_checkout_analytics.up.sql sha256:2b1ae55e3db30c3a529442fee3f54e466b93f21a427a8d7e45403a39d753432b
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1938,6 +1938,7 @@ table billing.orders
   column subscription_bill_kind text
   column lines_digest bytea
   column embedded boolean
+  column customer_type text
   column purchase_number integer
   column opened_at timestamp with time zone
   column submitted_at timestamp with time zone
@@ -1969,6 +1970,7 @@ table billing.orders
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
+  constraint orders_customer_type_check CHECK (((customer_type = ANY (ARRAY['new'::text, 'returning'::text, 'reactivated'::text])) AND ((customer_type IS NULL) = (purchase_number IS NULL))))
   constraint orders_expired_check CHECK (((status <> 'expired'::text) OR (expired_at IS NOT NULL)))
   constraint orders_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
   constraint orders_language_check CHECK ((language ~ '^[a-z]{2,3}(-([A-Z]{2}|[0-9]{3}))?$'::text))

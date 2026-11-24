@@ -4,7 +4,7 @@
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
     idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at,
-    purchase_number, ip_country, language,
+    customer_type, purchase_number, ip_country, language,
     attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content,
     attribution_referrer, attribution_affiliate
 ) VALUES (
@@ -12,18 +12,26 @@ INSERT INTO billing.orders (
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
     sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
-    sqlc.arg(purchase_number)::int,
+    sqlc.arg(customer_type)::text, sqlc.arg(purchase_number)::int,
     sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
     sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
     sqlc.narg(attribution_term)::text, sqlc.narg(attribution_content)::text, sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
 );
 
--- name: CountCustomerPurchases :one
--- The customer's paid purchases: complete checkouts and observed initial
--- enrollments.
-SELECT count(*)::int AS purchases FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial');
+-- name: GetCheckoutCustomer :one
+-- Who a new checkout's customer is: their paid purchases (complete checkouts
+-- and observed initial enrollments), whether they ever had MRR with the
+-- merchant, and whether they have any now.
+SELECT
+    (SELECT count(*) FROM billing.orders
+     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial'))::int AS purchases,
+    EXISTS (SELECT 1 FROM billing.customer_mrr
+            WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+              AND first_active_at IS NOT NULL)::boolean AS had_mrr,
+    EXISTS (SELECT 1 FROM billing.customer_mrr
+            WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+              AND mrr > 0)::boolean AS has_mrr;
 
 -- name: MarkCheckoutOpened :execrows
 -- The customer's first read of the open checkout in person; a later read

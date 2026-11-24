@@ -265,7 +265,7 @@ const (
 	orderPayURLColumns   = 5
 	orderRenewalColumns  = 5
 	orderUsageColumns    = 10
-	orderCheckoutColumns = 15
+	orderCheckoutColumns = 16
 )
 
 // hostedIfPayURL is embedded for an order archived before it had one: false

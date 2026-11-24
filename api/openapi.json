@@ -22009,6 +22009,14 @@
       "OrderCheckout": {
         "type": "object",
         "properties": {
+          "customer_type": {
+            "type": "string",
+            "enum": [
+              "new",
+              "reactivated",
+              "returning"
+            ]
+          },
           "purchase_number": {
             "type": "integer"
           },
@@ -22104,6 +22112,7 @@
           }
         },
         "required": [
+          "customer_type",
           "purchase_number",
           "opened_at",
           "submitted_at",

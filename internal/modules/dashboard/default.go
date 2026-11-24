@@ -140,7 +140,7 @@ func DefaultWidgets(p Profile) []Widget {
 			chart("checkout-funnel", "Checkout funnel", Funnel, metrics.Query{Measures: []string{"checkouts"}, By: []string{"step"}}),
 			chart("checkouts-abandoned", "Abandoned checkouts by step", "bar", withFilters(series([]string{"checkouts"}, "step"), map[string][]string{"outcome": {"abandoned"}})),
 			chart("checkout-conversion", "Checkout conversion by surface", "line", series([]string{"checkout_conversion_rate"}, "surface")),
-			chart("customers-by-purchase", "Customers by purchase number", "bar", series([]string{"sales_customers"}, "purchase_number")),
+			chart("customers-by-type", "Customers by type", "bar", series([]string{"sales_customers"}, "customer_type")),
 			chart("repeat-purchase-rate", "Repeat purchase rate", "line", series([]string{"repeat_purchase_rate"})),
 			top("sales-by-country", "Sales and cash by country", "country"),
 			top("sales-by-language", "Sales and cash by language", "language"),

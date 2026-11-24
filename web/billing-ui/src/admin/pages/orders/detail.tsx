@@ -319,6 +319,10 @@ function CheckoutFacts({ checkout }: { checkout: OrderCheckout }) {
       </CardHeader>
       <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
         <p>
+          <AdminMessage id={"Customer type: "} />
+          {checkout.customer_type}
+        </p>
+        <p>
           <AdminMessage id={"Purchase number: "} />
           {checkout.purchase_number}
         </p>

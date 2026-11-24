@@ -1098,6 +1098,7 @@ export const billingAdminMessages = {
     "Chart any measure, split by its dimensions, over the range picked.",
   Signals: "Signals",
   Checkout: "Checkout",
+  "Customer type: ": "Customer type: ",
   "Purchase number: ": "Purchase number: ",
   "Opened: ": "Opened: ",
   "Submitted: ": "Submitted: ",

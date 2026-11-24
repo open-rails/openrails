@@ -155,12 +155,27 @@ const (
 	CountrySourceIP CountrySource = "ip"
 )
 
+// CustomerType is who a checkout's customer was when it was created.
+type CustomerType string
+
+const (
+	// CustomerTypeNew is a first purchase by a customer who never
+	// subscribed.
+	CustomerTypeNew CustomerType = "new"
+	// CustomerTypeReturning bought before, or subscribes now.
+	CustomerTypeReturning CustomerType = "returning"
+	// CustomerTypeReactivated subscribed before and subscribes to nothing
+	// now.
+	CustomerTypeReactivated CustomerType = "reactivated"
+)
+
 // OrderCheckout is what OpenRails recorded of a checkout (an order it
 // started for its customer to pay): which purchase it is for the customer,
 // how far they got, where they are, the language they read and the
 // merchant's attribution. Countries are ISO 3166-1 alpha-2; Country is the
 // billing address's, else the card's, else the IP's, as CountrySource says.
 type OrderCheckout struct {
+	CustomerType CustomerType `json:"customer_type"`
 	// PurchaseNumber is 1 + the customer's paid purchases with the merchant
 	// when the checkout was created.
 	PurchaseNumber int `json:"purchase_number"`

@@ -231,7 +231,7 @@ var Dimensions = []Dimension{
 	{Name: "rate_card", Description: "metered event type (the usage's event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); authorization_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
-	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
+	{Name: "customer_type", Description: "who bought, when the checkout was created: new (a first purchase, never a subscriber) | returning (bought before, or subscribes now) | reactivated (subscribed before, to nothing now); on cash, the payment's own checkout's, empty for renewals; on new_subscriptions, the checkout that bought it (empty when none did)", Values: []string{"", "new", "returning", "reactivated"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
@@ -293,7 +293,8 @@ var (
 // A checkout's facts as dimensions of the order aliased o.
 func checkoutFacts(o string) map[string]string {
 	return map[string]string{
-		"country": `COALESCE(` + o + `.billing_country, ` + o + `.card_country, ` + o + `.ip_country, '')`,
+		"customer_type": `COALESCE(` + o + `.customer_type, '')`,
+		"country":       `COALESCE(` + o + `.billing_country, ` + o + `.card_country, ` + o + `.ip_country, '')`,
 		"country_source": `CASE WHEN ` + o + `.billing_country IS NOT NULL THEN 'billing_address' WHEN ` + o + `.card_country IS NOT NULL THEN 'card'
 			WHEN ` + o + `.ip_country IS NOT NULL THEN 'ip' ELSE '' END`,
 		"language":              `COALESCE(split_part(` + o + `.language, '-', 1), '')`,
@@ -388,6 +389,8 @@ func paymentDimExprs() map[string]string {
 		"payment_kind":  fmt.Sprintf(reversalKindOf, "sale"),
 		"network":       `billing.card_network(p.card_brand)`,
 		"refund_reason": `COALESCE(p.refund_reason, '')`,
+		// A renewal's payment bought nothing new: no customer type.
+		"customer_type": `COALESCE(CASE WHEN co.id = paid_order.id THEN co.customer_type END, '')`,
 	} {
 		out[k] = v
 	}
@@ -505,6 +508,7 @@ var families = map[Family]familySpec{
 			"currency":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 			"price_id":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"customer_type": `LEFT JOIN billing.orders sco ON sco.merchant_id = s.merchant_id AND sco.id = s.checkout_order_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -513,11 +517,7 @@ var families = map[Family]familySpec{
 			"product_id":    `'prod_' || s.product_id::text`,
 			"price_id":      `COALESCE(pr.public_id, '')`,
 			"billing_cycle": billingCycleExpr,
-			"subscriber_type": `CASE WHEN EXISTS (
-				SELECT 1 FROM billing.subscriptions s2
-				WHERE s2.merchant_id = s.merchant_id AND s2.customer_id = s.customer_id
-				  AND s2.id <> s.id AND s2.ended_at IS NOT NULL AND s2.ended_at <= s.started_at
-			) THEN 'returning' ELSE 'first_time' END`,
+			"customer_type": `COALESCE(sco.customer_type, '')`,
 		},
 	},
 	FamSubsCanceled: {
@@ -885,7 +885,7 @@ var (
 	disputeDims  = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
 	networkDims  = []string{"rail", "psp"}
 	// A checkout's facts, on checkouts, sales and the cash they brought.
-	checkoutFactDims = []string{"country", "country_source", "language", "attribution_source", "attribution_medium", "attribution_campaign", "attribution_term", "attribution_content", "attribution_referrer", "attribution_affiliate"}
+	checkoutFactDims = []string{"customer_type", "country", "country_source", "language", "attribution_source", "attribution_medium", "attribution_campaign", "attribution_term", "attribution_content", "attribution_referrer", "attribution_affiliate"}
 	checkoutDims     = append([]string{"currency", "origin", "surface", "purchase_number", "product_id", "price_id"}, checkoutFactDims...)
 	usageDims        = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
 	creditDims       = []string{"currency", "product_id", "customer"}
@@ -1062,7 +1062,7 @@ var declared = []Measure{
 		// A subscription whose first charge failed is past_due or canceled;
 		// only pending still means never-activated.
 		Expr: `COUNT(*) FILTER (WHERE s.status <> 'pending')`,
-		Dims: []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
+		Dims: []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "customer_type"}},
 	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count", Direction: DownIsGood,
 		Description: "subscriptions canceled in the bucket, by cancel_type",
 		Formula:     "COUNT(subscriptions canceled in the bucket)",
@@ -1301,7 +1301,7 @@ var Removed = map[string]Retired{
 }
 
 // RemovedDimensions names each retired dimension's replacement.
-var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause"}
+var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause", "subscriber_type": "customer_type"}
 
 // Deferred names the measures later phases build (MRR movements, retention,
 // the books, trials); naming one is refused as planned.

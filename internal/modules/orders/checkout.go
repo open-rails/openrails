@@ -220,6 +220,19 @@ func MarkCheckoutSubmitted(ctx context.Context, d *db.DB, merchantID, customerID
 	return err
 }
 
+// customerType is who a checkout's customer is: reactivated when they had
+// MRR and have none now, new on a first purchase without MRR history,
+// returning otherwise.
+func customerType(c gen.GetCheckoutCustomerRow) billing.CustomerType {
+	switch {
+	case c.HadMrr && !c.HasMrr:
+		return billing.CustomerTypeReactivated
+	case c.Purchases == 0 && !c.HadMrr:
+		return billing.CustomerTypeNew
+	}
+	return billing.CustomerTypeReturning
+}
+
 // Checkout is what was recorded of the order as a checkout; nil when it is
 // not one.
 func (o *Order) Checkout() *billing.OrderCheckout {
@@ -230,6 +243,9 @@ func (o *Order) Checkout() *billing.OrderCheckout {
 		BillingCountry: o.BillingCountry, CardCountry: o.CardCountry, IPCountry: o.IpCountry, Language: o.Language,
 		Attribution: billing.OrderAttribution{Source: o.AttributionSource, Medium: o.AttributionMedium, Campaign: o.AttributionCampaign,
 			Term: o.AttributionTerm, Content: o.AttributionContent, Referrer: o.AttributionReferrer, Affiliate: o.AttributionAffiliate}}
+	if o.CustomerType != nil {
+		out.CustomerType = billing.CustomerType(*o.CustomerType)
+	}
 	for _, evidence := range []struct {
 		country *string
 		source  billing.CountrySource
