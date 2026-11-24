@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 553,
+  "scenario_count": 558,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -797,6 +797,31 @@
       "id": "OR-J24-S41",
       "journey": "J24",
       "name": "GET /v1/config reports usage true with ClickHouse and false without"
+    },
+    {
+      "id": "OR-J24-S42",
+      "journey": "J24",
+      "name": "A view request no admission would take, or whose customer's policy cannot be resolved, is refused alone: the sync settles its usage (in no spend window for that customer) and answers its other views"
+    },
+    {
+      "id": "OR-J24-S43",
+      "journey": "J24",
+      "name": "Usage counts in the spend window current at its admission to the millisecond: items admitted either side of a window's end in one second count apart"
+    },
+    {
+      "id": "OR-J24-S44",
+      "journey": "J24",
+      "name": "A request hold a lapsed lease makes counts at once for every other admission, and stops when the lease never syncs again"
+    },
+    {
+      "id": "OR-J24-S45",
+      "journey": "J24",
+      "name": "A sync whose in-flight report first names a customer another transaction holds the spend lock of commits without waiting for it"
+    },
+    {
+      "id": "OR-J24-S46",
+      "journey": "J24",
+      "name": "The view of a sync that captures a lease's request hold settles what the capture moved past the hold's estimate"
     },
     {
       "id": "OR-J25-S01",

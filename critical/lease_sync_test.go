@@ -3,8 +3,11 @@
 package critical_test
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,4 +347,155 @@ func TestLeaseSyncs(t *testing.T) {
 		require.EqualValues(t, 300, lineOf(t, v, free).Used)
 		require.EqualValues(t, 200, lineOf(t, v, golden).Used)
 	})
+
+	t.Run("OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands", func(t *testing.T) {
+		// The gold tier's spend window is in yen and FX is down: its policy
+		// cannot be resolved in dollars.
+		w := newWorld(t, func(w *world) {
+			w.deps.FXTransport = failingFX{}
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "window_spend_cap", PolicyCurrency: "JPY",
+				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000}}}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen", Tier: "gold"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		usageMeter(t, w.alpha, 100)
+		plain, _ := fundedCustomer(t, w)
+		gold, _ := fundedCustomer(t, w)
+		btc := computeView(plain)
+		btc.Currency = "BTC"
+		agent := computeView(plain)
+		agent.InvokerType = "agent"
+		goldView := computeView(gold)
+		goldView.TrustLevel = ptr("gold")
+		goldWork := usageInput(gold, "gold", 2)
+		goldWork.TrustLevel = ptr("gold")
+		lease := newLease()
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, usageInput(plain, "plain", 1), goldWork),
+			Views: []billing.ViewParams{btc, agent, goldView, computeView(plain)}})
+		// Usage settles, the gold customer's in no spend window, and the
+		// plain customer's view is answered.
+		require.EqualValues(t, 2, out.Usage.ThroughN)
+		require.Empty(t, out.Usage.Refused)
+		balance(t, w.alpha, plain, 900, 100, 1000)
+		balance(t, w.alpha, gold, 800, 200, 1000)
+		require.NotNil(t, out.LimitSets[3])
+		viewOf(t, out, plain)
+		// Each refused request is answered alone, as Admit would answer it.
+		require.Len(t, out.RefusedViews, 3)
+		for i, want := range []struct {
+			status int
+			code   billing.ErrorCode
+			param  string
+		}{{http.StatusBadRequest, billing.CodeCurrencyUnsupported, "views[0].currency"}, {http.StatusBadRequest, billing.CodeInvalidParam, "views[1].invoker_type"},
+			{http.StatusInternalServerError, billing.CodeInternalError, ""}} {
+			refused := out.RefusedViews[i]
+			require.Equal(t, i, refused.Index)
+			require.Nil(t, out.LimitSets[i])
+			require.Equal(t, want.status, refused.Status)
+			require.Equal(t, want.code, refused.Error.Code)
+			if want.param != "" {
+				require.Equal(t, want.param, *refused.Error.Param)
+			}
+		}
+	})
+
+	t.Run("OR-J24-S43/usage-counts-in-the-spend-window-of-its-admission-to-the-millisecond", func(t *testing.T) {
+		w := newWorld(t, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "hourly", Kind: "window_spend_cap",
+				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 1_000_000, Currency: "USD"}}}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "hourly"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		usageMeter(t, w.alpha, 100)
+		// A window whose end falls inside a second: its offset is the
+		// customer's.
+		var customer billing.CustomerID
+		var window string
+		var end time.Time
+		for {
+			customer, _ = fundedCustomer(t, w)
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+			window = out.LimitSets[0].Limits[1]
+			end = *lineOf(t, viewOf(t, out, customer), window).WindowEndsAt
+			if end.Nanosecond() != 0 {
+				break
+			}
+		}
+		w.clock.Advance(end.Sub(w.clock.Now()) + 2*time.Second)
+		before, after := usageInput(customer, "before", 1), usageInput(customer, "after", 2)
+		before.AdmittedAt, after.AdmittedAt = ptr(end.Add(-time.Millisecond)), ptr(end)
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, before, after), Views: []billing.ViewParams{computeView(customer)}})
+		require.Empty(t, out.Usage.Refused)
+		line := lineOf(t, viewOf(t, out, customer), window)
+		require.True(t, line.WindowStartsAt.Equal(end), "the view is of the window that starts at the end")
+		require.EqualValues(t, 200, line.Used, "only the item admitted at the end counts in the next window")
+	})
+
+	t.Run("OR-J24-S44/a-hold-made-under-a-lapsed-lease-counts-at-once", func(t *testing.T) {
+		w := newWorld(t)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		lease := newLease()
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
+		// The gate went idle and its lease lapsed; its next near-zero request
+		// is held on the server before the gate syncs again.
+		w.clock.Advance(limits.LeaseLifetime + time.Second)
+		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "lapsed", "compute", map[string]int64{"units": 3}, nil)).Allowed())
+		balance(t, w.alpha, customer, 700, 300, 1000)
+		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "other", 800)), billing.DenyInsufficientBalance)
+		// A lease that never syncs again stops holding it.
+		w.clock.Advance(limits.LeaseLifetime + time.Second)
+		balance(t, w.alpha, customer, 1000, 0, 1000)
+	})
+
+	t.Run("OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait", func(t *testing.T) {
+		w := newWorld(t)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		lease := newLease()
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
+		// A host transaction holds the customer's spend lock.
+		tx, err := w.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback(context.Background()) //nolint:errcheck
+		admitted, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{reservation(w, customer, "host", 100)})
+		require.NoError(t, err)
+		require.True(t, admitted[0].Allowed())
+		// A sync reporting the customer in flight for the first time takes no
+		// lock of the customer and so commits at once.
+		started := time.Now()
+		_, err = w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: lease,
+			InFlight: []billing.InFlight{{CustomerID: customer, Limit: catalog.BalanceLimit, Unit: "USD", Amount: 200}}})
+		require.NoError(t, err)
+		require.Less(t, time.Since(started), time.Second)
+		require.NoError(t, tx.Commit(t.Context()))
+		balance(t, w.alpha, customer, 700, 300, 1000)
+	})
+
+	t.Run("OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate", func(t *testing.T) {
+		w := newWorld(t)
+		customer, _ := fundedCustomer(t, w)
+		usageMeter(t, w.alpha, 100)
+		lease := newLease()
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
+		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "near", "compute", map[string]int64{"units": 3}, nil)).Allowed())
+		held := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
+		require.EqualValues(t, 700, lineOf(t, viewOf(t, held, customer), catalog.BalanceLimit).Remaining)
+		// The hold already took 300: capturing 100 moves balance by -200.
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, spentOn(customer, "near", "near", 1)),
+			Views: []billing.ViewParams{computeView(customer)}})
+		require.Empty(t, out.Usage.Refused)
+		line := lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit)
+		require.EqualValues(t, 900, line.Remaining)
+		require.EqualValues(t, -200, line.Settled)
+	})
+}
+
+// failingFX is an FX wire that is down.
+type failingFX struct{}
+
+func (failingFX) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 }

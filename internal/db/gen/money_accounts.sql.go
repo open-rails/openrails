@@ -23,7 +23,7 @@ SELECT
                AND lh.currency = a.currency AND lh.state = 'open'
                AND hp.hold_created_at >= $1::timestamptz AND lh.created_at >= $1::timestamptz
                AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $2::timestamptz
-                   ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+                   ELSE lh.created_at > $3::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz) END), 0)
      -- What live gates other than except_lease report in flight of the balance.
      + COALESCE((SELECT SUM(f.amount)

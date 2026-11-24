@@ -1779,6 +1779,21 @@
     ],
     "OR-J01-S26": [
       "TestRoutePermissions/OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed"
+    ],
+    "OR-J24-S42": [
+      "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"
+    ],
+    "OR-J24-S43": [
+      "TestLeaseSyncs/OR-J24-S43/usage-counts-in-the-spend-window-of-its-admission-to-the-millisecond"
+    ],
+    "OR-J24-S44": [
+      "TestLeaseSyncs/OR-J24-S44/a-hold-made-under-a-lapsed-lease-counts-at-once"
+    ],
+    "OR-J24-S45": [
+      "TestLeaseSyncs/OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait"
+    ],
+    "OR-J24-S46": [
+      "TestLeaseSyncs/OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate"
     ]
   }
 }
