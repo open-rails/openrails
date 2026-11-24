@@ -207,6 +207,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 		require.Len(t, methods.Items, 1)
 		status, raw := a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+methods.Items[0].ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), "add a new card first", "the customer is told what to do")
 		require.Len(t, journal.core.Vaults(), 1, "the schedule's vault stays")
 	})
 }

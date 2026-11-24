@@ -2,6 +2,9 @@ package alerting
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -88,7 +91,8 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	if subject == "" {
 		subject = strings.Join([]string{provider, operation, transaction}, ":")
 		if transaction == "" {
-			subject += ":" + uuid.NewString()
+			// The same unbookable event is the same finding.
+			subject += ":" + repairDigest(evidence["customer_id"], evidence["original_payment_id"], evidence["subscription_id"], evidence["error"])
 		}
 	}
 	action := strings.TrimSpace(provider + " " + operation)
@@ -108,6 +112,13 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	}
 	alertRaised(ctx, database, rec, now)
 	return nil
+}
+
+// repairDigest names an unbookable event by what it is about.
+func repairDigest(parts ...any) string {
+	raw, _ := json.Marshal(parts)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:12])
 }
 
 // alertRaised tells the merchant's operator of a finding a person must look
