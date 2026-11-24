@@ -18,6 +18,8 @@ func TestCatalogApplicationReceiptString(t *testing.T) {
 		Changes: []billing.CatalogChange{
 			{Object: billing.CatalogObjectProduct, Key: "pro", Fields: []string{"display_name", "entitlements_spec"}, Revision: 4},
 			{Object: billing.CatalogObjectPrice, Key: "monthly", ProductKey: &pro, Fields: []string{"unit_amount"}, Revision: 2},
+			{Object: billing.CatalogObjectProduct, Key: "credits-pack", Fields: []string{}, Revision: 3, Deleted: true},
+			{Object: billing.CatalogObjectPrice, Key: "weekly", ProductKey: &pro, Fields: []string{}, Revision: 2, Deleted: true},
 		},
 		Conflicts: []billing.CatalogConflict{
 			{Object: billing.CatalogObjectPrice, Key: "yearly", ProductKey: &pro, Currency: (*catalog.Currency)(&usd), Fields: []billing.CatalogFieldConflict{
@@ -36,6 +38,8 @@ func TestCatalogApplicationReceiptString(t *testing.T) {
 	want := `cap_1: catalog revision 3 -> 5
   changed product pro (display_name, entitlements_spec), now revision 4
   changed price monthly of product pro (unit_amount), now revision 2
+  deleted product credits-pack
+  deleted price weekly of product pro
   price yearly of product pro skipped: unit_amount: the file says 99.00 USD, an edit set 89.00 USD (console:alice, 2026-11-01T12:00:00Z); access_duration_hours: the file says 30 days, an edit set none (console:alice, 2026-11-01T12:00:00Z)
   meter tokens skipped: display_name: the file says "Tokens", an edit set "AI tokens" (api:bob, 2026-11-01T12:00:00Z)
   refused price quarterly of product pro: no Solana PSP configured

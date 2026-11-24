@@ -27,7 +27,8 @@ var catalogRoutes = []Route{
 		Doc: "ApplyCatalog applies a catalog document as the apply manager. Each product, price key and meter in " +
 			"it applies whole, unless a field it names was set differently by an edit: that object is skipped and " +
 			"listed in the receipt's Conflicts, the rest applies, and the document is not recorded as applied, so " +
-			"applying it again retries the skipped objects. params.Force overwrites those fields instead. A " +
+			"applying it again retries the skipped objects. params.Force overwrites those fields instead. The " +
+			"receipt lists deleted objects in Changes with Deleted true, empty Fields and their last Revision before deletion. A " +
 			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",

@@ -53,6 +53,10 @@ func (r *CatalogApplicationReceipt) String() string {
 		fmt.Fprintf(&b, "%s: catalog revision %d -> %d\n", r.ApplicationID, r.BaseRevision, r.AppliedRevision)
 	}
 	for _, c := range r.Changes {
+		if c.Deleted {
+			fmt.Fprintf(&b, "  deleted %s\n", catalogObjectName(c.Object, c.Key, c.ProductKey))
+			continue
+		}
 		fmt.Fprintf(&b, "  changed %s (%s), now revision %d\n", catalogObjectName(c.Object, c.Key, c.ProductKey), strings.Join(c.Fields, ", "), c.Revision)
 	}
 	for _, c := range r.Conflicts {
@@ -102,12 +106,15 @@ const (
 
 // CatalogChange is one object a document changed: the fields it set and the
 // object's revision after. ProductKey names a price's product.
+// Deleted marks an object removed by the apply: Fields is empty and Revision
+// is its last revision before deletion.
 type CatalogChange struct {
 	Object     CatalogObjectKind `json:"object"`
 	Key        string            `json:"key"`
 	ProductKey *string           `json:"product_key"`
 	Fields     []string          `json:"fields"`
 	Revision   int64             `json:"revision"`
+	Deleted    bool              `json:"deleted"`
 }
 
 // CatalogConflict is one object a document skipped: none of its changes

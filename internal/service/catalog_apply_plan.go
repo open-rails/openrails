@@ -292,12 +292,18 @@ func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, mercha
 		return nil, err
 	}
 	changes := []billing.CatalogChange{}
-	for _, obj := range slices.SortedFunc(maps.Keys(d.changed), compareCatalogObjects) {
+	objects := append(slices.Collect(maps.Keys(d.changed)), d.gone...)
+	slices.SortFunc(objects, compareCatalogObjects)
+	for _, obj := range objects {
 		fields := d.changed[obj]
 		if fields == nil {
 			fields = []string{}
 		}
-		changes = append(changes, billing.CatalogChange{Object: obj.kind, Key: obj.ownKey(), ProductKey: obj.productKey(), Fields: fields, Revision: revisions[obj]})
+		revision, deleted := revisions[obj], after[obj] == nil
+		if deleted {
+			revision = before[obj].revision
+		}
+		changes = append(changes, billing.CatalogChange{Object: obj.kind, Key: obj.ownKey(), ProductKey: obj.productKey(), Fields: fields, Revision: revision, Deleted: deleted})
 	}
 	return changes, nil
 }
