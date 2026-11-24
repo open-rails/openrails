@@ -10,9 +10,8 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Catalog handlers serve both the merchant's catalog routes
-// (/v1/catalog) and a creator's own (/v1/catalog); the owner scope on
-// the request selects which catalog they act on.
+// Catalog handlers serve the merchant's catalog routes (/v1/catalog); the
+// merchant the request is bound to selects the catalog they act on.
 
 func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bool) {
 	svc, err := billingservice.New(r.Log, r.State)
