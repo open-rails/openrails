@@ -1482,6 +1482,9 @@
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
     ],
+    "OR-J28-S16": [
+      "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
+    ],
     "OR-J53-S01": [
       "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"
     ],

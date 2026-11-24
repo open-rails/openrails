@@ -231,6 +231,36 @@ func TestProviderTime(t *testing.T) {
 		require.Equal(t, 1, converges(), "a delivery of its own time applies")
 	})
 
+	t.Run("OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch", func(t *testing.T) {
+		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
+		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, receipts.Items, 1)
+		receipt := receipts.Items[0]
+		batch := func(id string) {
+			t.Helper()
+			status, raw := nmiSignedDelivery(t, a, map[string]any{"event_id": id, "event_type": "chargeback.batch.complete", "event_body": map[string]any{
+				"merchant": map[string]string{"id": "critical-gateway"}, "batch": map[string]any{"count": 1, "total_amount": "10.00"},
+				"chargebacks": []map[string]string{{"id": "cb_won_1", "date": receipt.CreatedAt.UTC().Format(time.DateOnly), "cc_number": "************4242", "amount": "10.00", "reason_code": "10.4", "reason": "Fraud"}}}}, uuid.NewString())
+			require.Equal(t, http.StatusOK, status, raw)
+		}
+		a.clock.Advance(24 * time.Hour)
+		batch("evt_chargeback_first")
+		require.False(t, entitledTo(t, a.alpha, sub.CustomerID, "nmi:member"), "the chargeback ends access")
+		// The merchant wins the dispute and gives the member back access.
+		_, err = a.alpha.CreateProductAccess(t.Context(), "dispute-won", []billing.CreateProductAccessParams{{CustomerID: sub.CustomerID, ProductID: sub.ProductID, Hours: ptr(24 * 30), Reason: billing.GrantReasonComp}})
+		require.NoError(t, err)
+		require.True(t, entitledTo(t, a.alpha, sub.CustomerID, "nmi:member"))
+		// The batch again, under another event id: the reversal is booked, so
+		// nothing is reversed or revoked twice.
+		batch("evt_chargeback_replayed")
+		require.True(t, entitledTo(t, a.alpha, sub.CustomerID, "nmi:member"), "the restored access survives the replay")
+		read, err := a.alpha.GetPayment(t.Context(), receipt.ID)
+		require.NoError(t, err)
+		require.Len(t, read.Refunds, 1, "the chargeback is booked once")
+	})
+
 	t.Run("OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied", func(t *testing.T) {
 		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
