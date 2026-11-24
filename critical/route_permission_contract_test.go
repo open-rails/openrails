@@ -671,7 +671,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NoError(t, err)
 		for i, grant := range grants {
 			staff := a.remote(t, a.alpha.MerchantID(), roleKey(t, a, "support-"+strconv.Itoa(i), billing.MerchantCustomerManage))
-			_, err := staff.RevokeCreditGrant(t.Context(), grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err := staff.RevokeCreditGrant(t.Context(), "", grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			if i < 2 {
 				require.NoError(t, err)
 				continue

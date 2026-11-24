@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -133,8 +134,10 @@ func (s *MoneyService) GetCreditGrant(ctx context.Context, grantID uuid.UUID) (*
 
 // RevokeCreditGrant removes the unspent remainder under the payer money lock,
 // respecting the same durable reservation total as admission and spending.
-// actor is the staff subject the revoke event names, "" for none.
-func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID, reason, actor string) (*billing.CreditGrant, error) {
+// idempotencyKey, when set, is the caller's key for this revocation: a retry
+// under it replays, even after the grant was reinstated. actor is the staff
+// subject the revoke event names, "" for none.
+func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -158,15 +161,32 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	current := creditGrantFromRow(addressed, s.now())
-	if current.State == billing.CreditGrantRevoked {
-		current.Replayed = true
-		return &current, nil
+	// Without a key, a revoked grant replays and one with nothing left is
+	// refused here; under a key, the command first finds its own replay.
+	if current := creditGrantFromRow(addressed, s.now()); idempotencyKey == "" {
+		if current.State == billing.CreditGrantRevoked {
+			current.Replayed = true
+			return &current, nil
+		}
+		if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+			return nil, ErrCreditGrantUnavailable
+		}
 	}
-	if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
-		return nil, ErrCreditGrantUnavailable
+	// The caller's key names one revocation; without one, a grant reinstated
+	// since its last revocation is revoked anew.
+	key := "credit-revoke:" + grantID.String()
+	terms := struct{ Reason string }{reason}
+	var command destructive.Command
+	if idempotencyKey != "" {
+		command, err = destructive.CommandFromContextExplicit(ctx, destructive.RevokeCredit, grantID.String(), key+":key:"+idempotencyKey, terms)
+	} else {
+		if last, lerr := s.db.Gen(ctx).GetLatestCreditGrantEvent(ctx, gen.GetLatestCreditGrantEventParams{MerchantID: mid.UUID(), CreditGrantID: grantID}); lerr == nil {
+			key += ":after:" + last.ID.String()
+		} else if !errors.Is(lerr, pgx.ErrNoRows) {
+			return nil, lerr
+		}
+		command, err = destructive.CommandFromContext(ctx, destructive.RevokeCredit, grantID.String(), key, terms)
 	}
-	command, err := destructive.CommandFromContext(ctx, destructive.RevokeCredit, grantID.String(), "credit-revoke:"+grantID.String(), struct{ Reason string }{reason})
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +211,8 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 				return err
 			}
 			current := creditGrantFromRow(row, s.now())
-			if current.State == billing.CreditGrantRevoked {
+			// A revoked grant, or a revocation its key already made, replays.
+			if action, ok := destructive.ActionFromContext(ctx); current.State == billing.CreditGrantRevoked || ok && action.State == destructive.StateSucceeded {
 				current.Replayed = true
 				result = &current
 				return nil
@@ -248,6 +269,75 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	return result, err
 }
 
+// ReinstateCreditGrant reverses a grant's revocation under the payer's money
+// lock: the units the revocation froze return to its balance and their money
+// to deferral. Reinstating a live grant returns it with Replayed set, as does
+// a retry under idempotencyKey, even after a later revocation. actor is the
+// staff subject the event names, "" for none.
+func (s *MoneyService) ReinstateCreditGrant(ctx context.Context, grantID uuid.UUID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if grantID == uuid.Nil {
+		return nil, ErrCreditGrantNotFound
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" || utf8.RuneCountInString(reason) > 500 {
+		return nil, fmt.Errorf("reason is required (maximum 500 characters)")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	args := gen.GetCreditGrantParams{MerchantID: mid.UUID(), ID: grantID}
+	addressed, err := s.db.Gen(ctx).GetCreditGrant(ctx, args)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCreditGrantNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var result *billing.CreditGrant
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: addressed.CustomerID}); err != nil {
+			return err
+		}
+		row, err := q.GetCreditGrant(ctx, args)
+		if err != nil {
+			return err
+		}
+		made := false
+		if idempotencyKey != "" {
+			_, kerr := q.GetCreditGrantEventByKey(ctx, gen.GetCreditGrantEventByKeyParams{MerchantID: mid.UUID(), CreditGrantID: grantID, RequestKey: idempotencyKey})
+			if kerr != nil && !errors.Is(kerr, pgx.ErrNoRows) {
+				return kerr
+			}
+			made = kerr == nil
+		}
+		if made || row.RevokedAt == nil {
+			current := creditGrantFromRow(row, s.now())
+			current.Replayed = true
+			result = &current
+			return nil
+		}
+		// Reinstating a lapsed lot would only expire it again.
+		if row.ExpiresAt != nil && !row.ExpiresAt.After(s.now()) {
+			return ErrCreditGrantUnavailable
+		}
+		if _, err := s.creditLots(q, mid.UUID()).Reinstate(ctx, grantID, reason, actor, idempotencyKey); err != nil {
+			return err
+		}
+		if row, err = q.GetCreditGrant(ctx, args); err != nil {
+			return err
+		}
+		reinstated := creditGrantFromRow(row, s.now())
+		result = &reinstated
+		return nil
+	})
+	return result, err
+}
+
 // sourceRef is a lot's source id, a bought lot's prefixed as its payment's,
 // or nil when it has none.
 func sourceRef(funding credits.FundingSource, id *string) *string {
@@ -259,4 +349,20 @@ func sourceRef(funding credits.FundingSource, id *string) *string {
 		ref = catalogrules.SourceRef("purchase", *id)
 	}
 	return &ref
+}
+
+// fundChange defers the price of change a charge paid beyond its order, a
+// lot recorded before its payment, from that payment. nil change is none.
+func (s *MoneyService) fundChange(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, change *models.MoneyTransaction, paymentID uuid.UUID) error {
+	if change == nil {
+		return nil
+	}
+	payment, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: merchantID, ID: paymentID})
+	if err != nil {
+		return fmt.Errorf("load the change's payment: %w", err)
+	}
+	if err := s.creditLots(q, merchantID).Fund(ctx, change.ID, payment); err != nil {
+		return fmt.Errorf("defer the change's price: %w", err)
+	}
+	return nil
 }

@@ -219,6 +219,10 @@ type BillingCreditGrant struct {
 	// Units pending refunds of the lot's payment will withdraw: its share of the refunds' cash, rounded up. Available is remaining - units_reserved.
 	UnitsReserved int64
 	CreatedAt     time.Time
+	// Money of the lot's price the general ledger deferred: legs crediting its customer's deferred_revenue_credit in paid_currency (in unit for a lot given back at face, a usage reversal) that name the lot. Kept by ledger_transfers_apply_lot_deferred.
+	DeferredCredited int64
+	// Money of the lot released from deferral: spent, broken, forfeited or refunded. deferred_credited - deferred_debited is what its remaining units are worth at its rate.
+	DeferredDebited int64
 }
 
 // Append-only revocations and reinstatements of credit lots; each sets or clears its lot's revoked_at. The units they move are ledger transfers. Retention: permanent, never pruned.
@@ -232,6 +236,8 @@ type BillingCreditGrantEvent struct {
 	Reason      *string
 	Actor       *string
 	CreatedAt   time.Time
+	// The Idempotency-Key the event was made under, if any: a retry under it replays the event.
+	RequestKey *string
 }
 
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.

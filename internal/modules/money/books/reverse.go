@@ -68,7 +68,7 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	if err != nil {
 		return err
 	}
-	receipt, ok := ReceiptOf(p)
+	_, ok := ReceiptOf(p)
 	if !ok {
 		return nil
 	}
@@ -88,7 +88,7 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	if err != nil {
 		return err
 	}
-	w := reverser{b: New(q, mid.UUID()), q: q, d: d, merchant: mid.UUID(), reversal: r, cash: receipt.cash(),
+	w := reverser{b: New(q, mid.UUID()), q: q, d: d, merchant: mid.UUID(), reversal: r, cash: CashAccount(p),
 		at: r.PurchasedAt.UTC().Truncate(time.Microsecond), now: now.UTC().Truncate(time.Microsecond)}
 	switch {
 	case *r.ReversalKind == "refund" && r.Amount < 0 && usage:
@@ -107,14 +107,6 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 		return w.restore(ctx, r.Amount, pb)
 	}
 	return nil
-}
-
-// cash is the account a receipt's money is held in.
-func (r Receipt) cash() Ref {
-	if r.PSP != nil {
-		return Ref{Type: CashClearing, PSP: r.PSP}
-	}
-	return Ref{Type: ExternalReceipts}
 }
 
 // taken is what a reversal took from one schedule: from its deferred

@@ -163,6 +163,7 @@ BEGIN
                   'solana_pay_references',
                   'solana_subscriptions',
                   'stored_card_checks',
+                  'stripe_fee_reads',
                   'subscription_billing_changes',
                   'subscription_mrr',
                   'subscription_status_transitions',

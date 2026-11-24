@@ -718,11 +718,14 @@ grants what was paid, with a `customer_amount` price whose amount the buyer name
 on the order line. A recurring price with a `credit_grant` grants its credit after
 each paid renewal. A voluntary refund needs the lot unused and unheld.
 
+A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ credits, a pack's bonus included) as its credit is spent; what lapses or is revoked is breakage, and a reinstatement reverses it. Granted credit is promotional: spending it counts as usage revenue offset by promotional credit. See [prepaid credits](architecture/prepaid-credits.md).
+
 | Method | Use it to |
 |---|---|
 | `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
 | `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
-| `RevokeCreditGrant` | take back what remains of a lot |
+| `RevokeCreditGrant` | take back what remains of a lot; a retry under the same idempotency key replays, even after a reinstatement |
+| `ReinstateCreditGrant` | reverse a revocation: what it took returns to the balance; a retry under the same idempotency key replays, even after a later revocation |
 
 ```go guide:credit-grant
 _, err := shop.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{

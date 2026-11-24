@@ -45,8 +45,8 @@ var verbs = []string{
 	"Get", "List", "Create", "Update", "Delete", "Set", "Ensure", "Verify",
 	"Adjust", "Admit", "Apply", "Approve", "Cancel", "Capture", "Change", "Check",
 	"Clear", "Dismiss", "Export", "Extend", "Import", "Link", "Mark", "Preview",
-	"Query", "Record", "Refund", "Release", "Resolve", "Resume", "Revoke", "Start",
-	"Stop", "Sync", "Waive",
+	"Query", "Record", "Refund", "Reinstate", "Release", "Resolve", "Resume", "Revoke",
+	"Start", "Stop", "Sync", "Waive",
 }
 
 // stringParams are the names a *Client method's positional string may have.

@@ -88,13 +88,17 @@ type LotDrift struct {
 	LoggedDebited    int64     `json:"logged_debited"`
 	StoredReserved   int64     `json:"stored_reserved"`
 	ExpectedReserved int64     `json:"expected_reserved"`
+	// The lot's money in its paid currency: legs on its deferred account.
+	StoredDeferredCredited int64 `json:"stored_deferred_credited"`
+	LoggedDeferredCredited int64 `json:"logged_deferred_credited"`
+	StoredDeferredDebited  int64 `json:"stored_deferred_debited"`
+	LoggedDeferredDebited  int64 `json:"logged_deferred_debited"`
 }
 
 func (d LotDrift) String() string {
-	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%s logged=%s, debited stored=%s logged=%s, reserved stored=%s expected=%s",
-		d.CreditGrantID, moneyutil.FormatAmount(d.StoredCredited, d.Unit), moneyutil.FormatAmount(d.LoggedCredited, d.Unit),
-		moneyutil.FormatAmount(d.StoredDebited, d.Unit), moneyutil.FormatAmount(d.LoggedDebited, d.Unit),
-		moneyutil.FormatAmount(d.StoredReserved, d.Unit), moneyutil.FormatAmount(d.ExpectedReserved, d.Unit))
+	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%d logged=%d, debited stored=%d logged=%d, reserved stored=%d expected=%d, deferred credited stored=%d logged=%d, deferred debited stored=%d logged=%d",
+		d.CreditGrantID, d.StoredCredited, d.LoggedCredited, d.StoredDebited, d.LoggedDebited, d.StoredReserved, d.ExpectedReserved,
+		d.StoredDeferredCredited, d.LoggedDeferredCredited, d.StoredDeferredDebited, d.LoggedDeferredDebited)
 }
 
 // RollupDrift is one ledger_type_totals row (Bucket nil) or ledger_daily
@@ -274,6 +278,8 @@ func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDr
 			StoredCredited: row.StoredCredited, LoggedCredited: row.LoggedCredited,
 			StoredDebited: row.StoredDebited, LoggedDebited: row.LoggedDebited,
 			StoredReserved: row.StoredReserved, ExpectedReserved: row.ExpectedReserved,
+			StoredDeferredCredited: row.StoredDeferredCredited, LoggedDeferredCredited: row.LoggedDeferredCredited,
+			StoredDeferredDebited: row.StoredDeferredDebited, LoggedDeferredDebited: row.LoggedDeferredDebited,
 		})
 	}
 	return out, nil
