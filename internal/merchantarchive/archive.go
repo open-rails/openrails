@@ -322,6 +322,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.SeedMRR(ctx, gen.SeedMRRParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
 			return err
 		}
+		// An archive from before the lots' reversal shares records them from
+		// their legs, as the migration did.
+		if err := q.SeedCreditReversalShares(ctx, id.UUID()); err != nil {
+			return err
+		}
 		// The source's queued risk changes stay there: every customer whose
 		// MRR could be at risk is re-evaluated.
 		if err := q.QueueRestoredMRRRisk(ctx, gen.QueueRestoredMRRRiskParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {

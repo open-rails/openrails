@@ -97,11 +97,29 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			unbooked += l.Amount
 			continue
 		}
+		// A credit line is its lot's to apply (books.Books.IssueCredit): it
+		// takes nothing here, and what its lot applied of a payment counts
+		// as used.
+		credit, err := creditLine(ctx, q, l)
+		if err != nil {
+			return err
+		}
+		if credit {
+			// Nor does a provider's discount reach it: the lot's price is
+			// its own.
+			done[i] = true
+			continue
+		}
 		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
 	}
+	// What each payment's earlier applications and reversals took of it.
 	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
 	for i, p := range receipts {
-		paid[i], before[i] = p.Amount, applied["payment:"+p.ID.String()]
+		pb, err := paymentBooksOf(ctx, q, mid.UUID(), p.ID)
+		if err != nil {
+			return err
+		}
+		paid[i], before[i] = p.Amount, pb.used()
 	}
 	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
 	// The bill is paid when the last money it took arrived, and applied when
@@ -133,13 +151,6 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		if funded <= 0 {
 			continue
 		}
-		credit, err := creditLine(ctx, q, line)
-		if err != nil {
-			return err
-		}
-		if credit {
-			continue
-		}
 		plan, ready, err := planLine(ctx, q, order, line, services, at)
 		if err != nil {
 			return fmt.Errorf("books: order line %s: %w", line.ID, err)
@@ -164,6 +175,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
 			Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
 			ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
+			Forfeited: s.forfeited,
 		}
 		if plan.service.Months > 1 {
 			months := int32(plan.service.Months) // #nosec G115 -- a calendar interval is at most 1200 months

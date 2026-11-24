@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -94,7 +95,10 @@ func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) er
 			if err := scoped.insert(ctx, payment); err != nil {
 				return err
 			}
-			return scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID)
+			if err := scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID, payment.ID); err != nil {
+				return err
+			}
+			return books.PostReversal(ctx, d, payment.ID, s.now())
 		})
 	}
 	return s.insert(ctx, payment)
@@ -130,8 +134,9 @@ func (s *PaymentService) RefundObservedWithReason(ctx context.Context, originalP
 }
 
 // RecordObservedRefund retains the provider's occurrence time and provenance.
-// Local accounting effects use the service clock; they are never backdated.
-// A replay returns the first accepted facts without rewriting their metadata.
+// The general ledger dates the reversal's legs at that time, when it settled;
+// access and other local effects use the service clock. A replay returns the
+// first accepted facts without rewriting their metadata.
 func (s *PaymentService) RecordObservedRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (*models.Payment, error) {
 	if occurredAt.IsZero() {
 		return nil, errors.New("observed refund requires its provider occurrence time")
@@ -188,13 +193,17 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 				return err
 			}
 		}
-		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID); err != nil {
+		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID, refund.ID); err != nil {
 			return err
 		}
 		if reversalKind == ReversalRefund && refund.Metadata["admin_refund_idempotency_key"] == nil {
-			err = scoped.ApplyRefundAccessPolicy(ctx, originalPaymentID)
+			if err := scoped.ApplyRefundAccessPolicy(ctx, originalPaymentID); err != nil {
+				return err
+			}
 		}
-		return err
+		// Booked after the access policy: access it ended makes the refund
+		// take unrecognised revenue first.
+		return books.PostReversal(ctx, transactionDB, refund.ID, s.now())
 	})
 	return refund, err
 }
@@ -398,9 +407,12 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 			return err
 		}
 		if reservation.RefundedPaymentID != nil {
-			if err := scoped.syncPurchasedCreditRefund(ctx, *reservation.RefundedPaymentID); err != nil {
+			if err := scoped.syncPurchasedCreditRefund(ctx, *reservation.RefundedPaymentID, reservationID); err != nil {
 				return err
 			}
+		}
+		if err := books.PostReversal(ctx, d, reservationID, s.now()); err != nil {
+			return err
 		}
 		if result, err = scoped.GetByID(ctx, reservationID); err != nil {
 			return err
@@ -413,58 +425,62 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 // syncPurchasedCreditRefund uses each settled reversal's identity. A dispute
 // recovery may restore only the credit withdrawn by that dispute; aggregating
 // cash reversals would accidentally undo unrelated voluntary refunds.
-func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentID uuid.UUID) error {
+func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentID, current uuid.UUID) error {
 	rows, err := s.ListRefunds(ctx, paymentID)
 	if err != nil {
 		return err
 	}
 	purchased := purchasedcredits.New(s.db, s.clock)
-	// ListRefunds is newest first. Apply negative events oldest first, then
-	// their positive recoveries, so every recovery finds its exact effect.
-	// A reversal that took no credit is applied again on every pass: passes
-	// repeat until none posts, so credit a recovery reopens is settled now,
-	// not by whichever later event syncs next.
-	for {
-		posted := false
-		for i := len(rows) - 1; i >= 0; i-- {
-			row := rows[i]
-			if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
-				p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, nil)
-				if err != nil {
-					return err
-				}
-				posted = posted || p
-			}
+	// ListRefunds is newest first. Each settled reversal's share of the lot
+	// is decided once, the first time it is seen: negative events oldest
+	// first, then their recoveries, so every recovery finds its reversal's.
+	// One decided here other than current is booked here too; the caller
+	// books current where its own effects put it.
+	var decided []uuid.UUID
+	apply := func(row *models.Payment, reversed *uuid.UUID) error {
+		d, err := purchased.ApplyReversal(ctx, paymentID, row.ID, reversed)
+		if d && row.ID != current {
+			decided = append(decided, row.ID)
 		}
-		for i := len(rows) - 1; i >= 0; i-- {
-			row := rows[i]
-			if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
-				continue
-			}
-			var reversed *uuid.UUID
-			if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
-				id, err := uuid.Parse(raw)
-				if err != nil || id == uuid.Nil {
-					return errors.New("dispute recovery has invalid reversal identity")
-				}
-				reversed = &id
-			}
-			p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, reversed)
-			if err != nil {
+		return err
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
+			if err := apply(row, nil); err != nil {
 				return err
 			}
-			posted = posted || p
-		}
-		if !posted {
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return err
-			}
-			// What the payment's pending refunds reserve of its lot follows
-			// every settled reversal.
-			return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
 		}
 	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
+			continue
+		}
+		var reversed *uuid.UUID
+		if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
+			id, err := uuid.Parse(raw)
+			if err != nil || id == uuid.Nil {
+				return errors.New("dispute recovery has invalid reversal identity")
+			}
+			reversed = &id
+		}
+		if err := apply(row, reversed); err != nil {
+			return err
+		}
+	}
+	for _, id := range decided {
+		if err := books.PostReversal(ctx, s.db, id, s.now()); err != nil {
+			return err
+		}
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	// What the payment's pending refunds reserve of its lot follows every
+	// settled reversal.
+	return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {
@@ -555,7 +571,10 @@ func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, ori
 		if err := scoped.linkRefundedPayment(ctx, paymentID, originalPaymentID); err != nil {
 			return err
 		}
-		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
+		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID, paymentID); err != nil {
+			return err
+		}
+		return books.PostReversal(ctx, d, paymentID, s.now())
 	})
 }
 
