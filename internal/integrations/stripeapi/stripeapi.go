@@ -95,9 +95,20 @@ func SetIdempotencyKey(req *http.Request, key string) {
 // Factory owns the immutable HTTP dependency for one runtime. The injected
 // transport is borrowed: closing a runtime never closes a host-owned transport.
 // A nil factory uses the ordinary default transport.
-type Factory struct{ base http.RoundTripper }
+type Factory struct {
+	base http.RoundTripper
+	// wired: base is a test wire that exempts nothing (NewWiredFactory).
+	wired bool
+}
 
+// NewFactory sends Stripe's requests to base when it is set: a fake provider,
+// where a test key's writes need no posture and a live key's are refused.
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
+
+// NewWiredFactory sends every request to wire and exempts nothing: posture is
+// checked through wire and every write is gated as against Stripe (a test
+// seam, as nmi.NMIClient.UseTransport is).
+func NewWiredFactory(wire http.RoundTripper) *Factory { return &Factory{base: wire, wired: true} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
 	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), timeout)
@@ -129,15 +140,16 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
+	fixture := false
 	if f != nil {
-		base = f.base
+		base, fixture = f.base, f.base != nil && !f.wired
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, fixture: base != nil, base: base},
+		Transport: &guardTransport{readOnly: readOnly, fixture: fixture, base: base},
 	}
 }
 

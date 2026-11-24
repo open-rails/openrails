@@ -10,7 +10,7 @@ import (
 // is acct_<name>'s, any other acct_e2e's.
 func accountOf(r *http.Request) string {
 	key := secretOf(r)
-	for _, prefix := range []string{"sk_test_acct_", "sk_live_acct_"} {
+	for _, prefix := range []string{"sk_test_acct_", "sk_live_acct_", "rk_test_acct_", "rk_live_acct_"} {
 		if name, ok := strings.CutPrefix(key, prefix); ok {
 			return "acct_" + name
 		}

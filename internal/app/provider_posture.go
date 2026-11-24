@@ -195,7 +195,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 			r.Log.With(fields...).ErrorContext(ctx, "provider posture: Stripe credentials unavailable; PSP disarmed", logx.Err(err))
 			return r.refuseCredentials(mid, scope, err)
 		}
-		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
+		status, check = r.StripeClients.VerifyPosture(ctx, mid.UUID(), scope.ID, scope.AccountID, secret), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
 	case string(models.RailSolana):
 		if r.SolanaRPCResolver == nil {
 			return true
@@ -248,6 +248,7 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 	if len(changed) == 0 {
 		return
 	}
+	r.registerStripePosture(mid, current, changed)
 	r.Go("provider posture follow", func(ctx context.Context) {
 		ctx = merchant.WithID(ctx, mid)
 		scopes, err := r.Merchants.LivePSPScopes(ctx, mid)
@@ -273,6 +274,25 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 			cancel()
 		}
 	})
+}
+
+// registerStripePosture registers the posture check of every changed Stripe
+// PSP the configuration declares, archived ones too (their refunds and
+// cancels still write), before the configuration is served: a write with a
+// key waits only for its PSP's first check, in every process that loads the
+// merchant.
+func (r *Runtime) registerStripePosture(mid billing.MerchantID, current merchantdocs.Set, changed map[string]bool) {
+	if r.StripeClients == nil {
+		return
+	}
+	for key, doc := range current.PSPs {
+		p := doc.Value
+		secret := strings.TrimSpace(p.Secrets["secret_key"])
+		if !changed[key] || p.Rail != string(models.RailStripe) || secret == "" {
+			continue
+		}
+		r.StripeClients.RegisterPosture(mid.UUID(), merchants.PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, secret)
+	}
 }
 
 // PSPPostureDisarmed reports whether pspID failed its posture verification.

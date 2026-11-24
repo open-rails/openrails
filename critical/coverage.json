@@ -1371,7 +1371,7 @@
     {
       "id": "OR-J06-S09",
       "journey": "J06",
-      "name": "A live Stripe key of another account than the declared one is Mismatched and its writes are refused"
+      "name": "A live Stripe key of the declared account passes the production write gate; one of another account is Mismatched and writes nothing"
     },
     {
       "id": "OR-J12-S08",

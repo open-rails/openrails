@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
@@ -267,35 +268,39 @@ func TestPSPControls(t *testing.T) {
 		require.Len(t, p.provider.effects(t), 1)
 	})
 	t.Run("OR-J06-S09/a-live-stripe-key-of-another-account-is-mismatched-and-never-armed", func(t *testing.T) {
-		// A live PSP never runs beside a fake provider in an engine, so the
-		// check it loads with is driven directly against the Stripe fixture,
-		// and its write gate with Stripe's own address.
+		// A live PSP never runs beside a fake provider in an engine, so its gate
+		// is driven directly, on the production path: a wired factory checks
+		// posture and sends writes through the Stripe fixture as through Stripe.
 		stripe := stripemock.NewUnstarted(stripemock.Options{})
-		const declared, own, foreign = "acct_declared", "sk_live_acct_declared", "sk_live_acct_other"
-		verdict, err := stripeapi.PostureCheck(stripe, own, "", declared)(t.Context())
-		require.NoError(t, err)
-		require.Equal(t, providerposture.Live, verdict, "the declared account's live key is proven live")
-		status := providerposture.Process().Verify(t.Context(), stripeapi.PostureKey(foreign, stripeapi.APIBase, ""), stripeapi.PostureCheck(stripe, foreign, "", declared))
-		require.Equal(t, providerposture.Mismatched, status.Verdict)
-		require.False(t, status.Armed())
-		require.ErrorIs(t, status.Error(), providerposture.ErrDisarmed)
-		require.Equal(t, 2, stripe.Reads("/v1/account"))
-		require.Equal(t, 1, stripe.Reads("/v1/balance"), "a key of another account is refused at its account read")
-
-		// Its writes are refused before any bytes leave. The context is already
-		// canceled, so a write the gate let through would end at the dial.
-		canceled, cancel := context.WithCancel(t.Context())
-		cancel()
-		write, err := http.NewRequestWithContext(canceled, http.MethodPost, stripeapi.APIBase+"/v1/customers", strings.NewReader("email=alice%40critical.invalid"))
-		require.NoError(t, err)
-		write.Header.Set("Authorization", "Bearer "+foreign)
-		write.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		response, err := stripeapi.NewFactory(nil).Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0).Do(write)
-		if response != nil {
-			_ = response.Body.Close()
+		factory := stripeapi.NewWiredFactory(stripe)
+		client := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
+		suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+		declared, own, foreign := "acct_declared"+suffix, "sk_live_acct_declared"+suffix, "rk_live_acct_other"+suffix
+		write := func(key string) error {
+			t.Helper()
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, stripeapi.APIBase+"/v1/customers", strings.NewReader("email=alice%40critical.invalid"))
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response, err := client.Do(req)
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			return err
 		}
+		// Each key is registered as its PSP's configuration loads it.
+		merchant := uuid.New()
+		factory.RegisterPosture(merchant, uuid.New(), declared, own)
+		factory.RegisterPosture(merchant, uuid.New(), declared, foreign)
+		require.NoError(t, write(own), "the declared account's live key goes through the gate")
+		require.Len(t, stripe.Submitted("/v1/customers"), 1)
+		err := write(foreign)
 		require.ErrorIs(t, err, providerposture.ErrDisarmed)
+		require.ErrorContains(t, err, "mismatched")
 		require.NotContains(t, err.Error(), foreign)
+		require.Len(t, stripe.Submitted("/v1/customers"), 1, "a key of another account writes nothing")
+		require.Equal(t, 2, stripe.Reads("/v1/account"))
+		require.Zero(t, stripe.Reads("/v1/balance"), "a live key's mode is its prefix")
 	})
 	t.Run("OR-J06-S03", func(t *testing.T) {
 		for _, mode := range []string{"readonly", "limited"} {

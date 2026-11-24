@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -26,8 +27,8 @@ import (
 // ErrDisarmed refuses a provider mutation before any bytes are sent.
 var ErrDisarmed = errors.New("PSP disarmed: provider posture is not verified")
 
-// ErrPending refuses, with ErrDisarmed, a mutation whose credential has no
-// verdict from its PSP's load yet: a later attempt may pass.
+// ErrPending refuses, with ErrDisarmed, a mutation whose credential no loaded
+// PSP has registered: a later attempt may pass.
 var ErrPending = errors.New("provider posture not verified yet")
 
 // Verdict is what a provider's authoritative signal says about a credential.
@@ -42,6 +43,9 @@ const (
 	// Unsupported: the provider exposes no authoritative test signal, so the
 	// credential can never be armed under sandbox posture.
 	Unsupported
+	// Refused: the provider refused the credential, or the read that proves
+	// it; it never arms until the credential changes.
+	Refused
 )
 
 func (v Verdict) String() string {
@@ -54,6 +58,8 @@ func (v Verdict) String() string {
 		return "mismatched"
 	case Unsupported:
 		return "unsupported"
+	case Refused:
+		return "refused"
 	default:
 		return "unknown"
 	}
@@ -71,6 +77,10 @@ type Key struct {
 	// Expect is the verdict that arms this key: Simulated (zero value) under
 	// sandbox posture, Live under live posture.
 	Expect Verdict
+	// Lasting marks a verdict that stands until the key changes (a Stripe
+	// key's account and mode never do): an armed one is never proven again,
+	// nor undone by a check the provider did not answer.
+	Lasting bool
 }
 
 func (k Key) expected() Verdict {
@@ -132,15 +142,15 @@ type entry struct {
 	retryAt  time.Time
 	// flight is closed when the running check has recorded its verdict.
 	flight chan struct{}
-	// check is the check Verify last ran, and checked is closed once Verify
-	// has named one: RequireVerified checks with nothing else.
-	check   Check
-	checked chan struct{}
+	// check is the check Register or Verify named for the key: the one
+	// RequireCredential checks with.
+	check Check
 }
 
 // VerdictTTL is how long an arming verdict stands. An account's environment
 // can change after it was proven (NMI's test mode is a dashboard toggle), so
-// the first mutation after it proves it again; there is no sweep.
+// the first mutation after it proves it again; there is no sweep. A Lasting
+// key's stands.
 const VerdictTTL = time.Hour
 
 // DefaultTimeout bounds one posture check, whatever the provider client's own
@@ -161,6 +171,8 @@ type Registry struct {
 	clock   atomic.Pointer[func() time.Time]
 	mu      sync.Mutex
 	entries map[Key]*entry
+	// credentials are the keys each credential is registered under.
+	credentials map[credentialKey][]Key
 }
 
 // NewRegistry returns an empty registry retrying unknown verdicts after backoff.
@@ -200,51 +212,105 @@ func (r *Registry) entry(k Key) *entry {
 	}
 	e := r.entries[k]
 	if e == nil {
-		e = &entry{checked: make(chan struct{})}
+		e = &entry{}
 		r.entries[k] = e
 	}
 	return e
 }
 
 // Verify checks k now (joining a check already running) and records the
-// verdict, replacing any prior one.
+// verdict, replacing any prior one; check becomes k's.
 func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
-	e := r.entry(k)
-	e.mu.Lock()
-	e.check = check
-	select {
-	case <-e.checked:
-	default:
-		close(e.checked)
-	}
-	e.mu.Unlock()
+	r.name(k, check)
 	return r.resolve(ctx, k, check, true)
 }
 
-// RequireVerified is Require for a credential only its PSP's load can check
-// (a Stripe key's declared account is not in the request using it): it never
-// checks with a check of its own. Until Verify has named the key's check it
-// waits, at most wait, then refuses with ErrPending; after that a stale or
-// Unknown verdict is checked again with Verify's check, as Require would.
-func (r *Registry) RequireVerified(ctx context.Context, k Key, wait time.Duration) error {
+// Register names check as k's and starts verifying k when it has no verdict
+// and no check is running: a credential is checked as soon as the PSP that
+// declares it loads, archived or not, and RequireCredential finds it.
+func (r *Registry) Register(k Key, check Check) {
+	e := r.name(k, check)
+	e.mu.Lock()
+	var flight chan struct{}
+	if !e.done && e.flight == nil {
+		flight = make(chan struct{})
+		e.flight = flight
+	}
+	e.mu.Unlock()
+	if flight != nil {
+		go r.record(context.Background(), e, k, check, flight)
+	}
+}
+
+// name records check as k's and indexes k under its credential.
+func (r *Registry) name(k Key, check Check) *entry {
 	e := r.entry(k)
-	select {
-	case <-e.checked:
-	default:
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		select {
-		case <-e.checked:
-		case <-timer.C:
-			return fmt.Errorf("%w: %s: %w", ErrDisarmed, k, ErrPending)
-		case <-ctx.Done():
-			return fmt.Errorf("%w: %s: %w: %w", ErrDisarmed, k, ErrPending, ctx.Err())
+	r.mu.Lock()
+	if r.credentials == nil {
+		r.credentials = map[credentialKey][]Key{}
+	}
+	ck := credentialKey{k.Rail, k.Endpoint, k.Credential}
+	if !slices.Contains(r.credentials[ck], k) {
+		r.credentials[ck] = append(r.credentials[ck], k)
+	}
+	r.mu.Unlock()
+	e.mu.Lock()
+	e.check = check
+	e.mu.Unlock()
+	return e
+}
+
+// credentialKey is one credential at one endpoint of a rail.
+type credentialKey struct {
+	rail, endpoint string
+	credential     [sha256.Size]byte
+}
+
+// RequireCredential returns nil only when every key the credential is
+// registered under is armed: a request carries the credential, not the PSP
+// it acts for. It never checks with a check of its own. A credential no PSP
+// has registered is refused at once with ErrPending; a first check still
+// running is waited for, bounded by ctx; a stale or Unknown verdict is checked
+// again with the registered check.
+func (r *Registry) RequireCredential(ctx context.Context, rail, endpoint string, credential [sha256.Size]byte) error {
+	r.mu.Lock()
+	keys := slices.Clone(r.credentials[credentialKey{rail, endpoint, credential}])
+	r.mu.Unlock()
+	if len(keys) == 0 {
+		return fmt.Errorf("%w: %s credential for %s: %w", ErrDisarmed, rail, endpoint, ErrPending)
+	}
+	for _, k := range keys {
+		e := r.entry(k)
+		e.mu.Lock()
+		check := e.check
+		e.mu.Unlock()
+		if err := r.resolve(ctx, k, check, false).Error(); err != nil {
+			return err
 		}
 	}
-	e.mu.Lock()
-	check := e.check
-	e.mu.Unlock()
-	return r.resolve(ctx, k, check, false).Error()
+	return nil
+}
+
+// CredentialRefusal is what RequireCredential would refuse from recorded
+// verdicts alone, never asking the provider: nil while a write may pass or a
+// check is still to run.
+func (r *Registry) CredentialRefusal(rail, endpoint string, credential [sha256.Size]byte) error {
+	r.mu.Lock()
+	keys := slices.Clone(r.credentials[credentialKey{rail, endpoint, credential}])
+	r.mu.Unlock()
+	if len(keys) == 0 {
+		return fmt.Errorf("%w: %s credential for %s: %w", ErrDisarmed, rail, endpoint, ErrPending)
+	}
+	for _, k := range keys {
+		e := r.entry(k)
+		e.mu.Lock()
+		settled, status := r.settled(e), e.status
+		e.mu.Unlock()
+		if settled && !status.Armed() {
+			return status.Error()
+		}
+	}
+	return nil
 }
 
 // Require returns nil only for an armed key. An unseen key is verified, an
@@ -268,7 +334,7 @@ func (r *Registry) settled(e *entry) bool {
 	case e.status.Verdict == Unknown:
 		return now.Before(e.retryAt)
 	case e.status.Armed():
-		return now.Before(e.status.CheckedAt.Add(VerdictTTL))
+		return e.status.Key.Lasting || now.Before(e.status.CheckedAt.Add(VerdictTTL))
 	default:
 		return true
 	}
@@ -318,6 +384,11 @@ func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check, fli
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := r.now()
+	if verdict == Unknown && k.Lasting && e.done && e.status.Armed() {
+		e.flight = nil
+		close(flight)
+		return
+	}
 	e.status = Status{Key: k, Verdict: verdict, Err: err, CheckedAt: now}
 	e.done = true
 	if verdict == Unknown {
