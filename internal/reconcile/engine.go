@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
@@ -552,9 +553,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
+	var dunning collection.Policy
+	if e.Local != nil {
+		dunning = merchantDunningPolicy(ctx, e.Local.DB)
+	}
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
+		Dunning:       dunning,
 	})
 	for i := range findings {
 		finding := &findings[i]

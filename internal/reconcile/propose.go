@@ -87,7 +87,7 @@ func Propose(ctx context.Context, d *db.DB, p ProposeParams) (ProposeResult, err
 		}
 	}
 	now := p.Now.UTC()
-	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), Pull: true})
+	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), Dunning: merchantDunningPolicy(ctx, d), Pull: true})
 	bindApplyActions(findings, p.Binding.ID, p.RunID)
 
 	subs := make(map[uuid.UUID]*LocalSubscription, len(local.Subscriptions))

@@ -1156,6 +1156,9 @@
     "OR-J16-S54": [
       "TestDunningSchedule/OR-J16-S54/a-declared-failure-inside-the-merchants-longer-schedule-stays-in-dunning"
     ],
+    "OR-J16-S55": [
+      "TestDunningSchedule/OR-J16-S55/a-declared-failure-past-its-own-cycles-window-is-not-dunned"
+    ],
     "OR-J15-S70": [
       "TestDueWork/OR-J15-S70/an-nmi-renewal-the-probe-cannot-settle-is-read-by-id-after-its-grace"
     ],

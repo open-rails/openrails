@@ -127,7 +127,7 @@ Checks:
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
-`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge judges a provider-declared failure against the subscription's case policy (`reconcile.DefaultDunningWindow` only where the provider retries). A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
+`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
 - `manual_rebill_completion.go` and `subscription_collection_intent.go` check
@@ -213,7 +213,7 @@ Checks:
 ## Tests
 
 Journeys:
-- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54 (converge's window is the case policy's).
+- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
 - OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55, S59 (usage collection, delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
   S70, and OR-J12-S08 to S11 (expired-card refresh).
