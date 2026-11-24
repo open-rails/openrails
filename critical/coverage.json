@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 711,
+  "scenario_count": 712,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -172,6 +172,11 @@
       "id": "OR-J05-S13",
       "journey": "J05",
       "name": "Prune keeps a price refused during preparation live with its ownership unchanged, prunes an omitted file-owned price, and does not record the document as applied"
+    },
+    {
+      "id": "OR-J05-S14",
+      "journey": "J05",
+      "name": "Meter edits preserve exact document keys, refuse invalid keys with 400, and accept nonbilling aggregations with the same billing support reporting"
     },
     {
       "id": "OR-J06-S01",

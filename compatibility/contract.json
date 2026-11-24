@@ -4024,6 +4024,7 @@
       "maps": "maps",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"

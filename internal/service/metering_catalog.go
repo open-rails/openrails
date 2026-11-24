@@ -31,7 +31,7 @@ func (s *Service) ListUsageMeters(ctx context.Context, page billing.PageRequest)
 	return s.moneyService().ListUsageMeters(ctx, page)
 }
 
-// GetUsageMeter returns one merchant meter by canonical key.
+// GetUsageMeter returns one merchant meter by its exact key.
 func (s *Service) GetUsageMeter(ctx context.Context, meterKey string) (*billing.Meter, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

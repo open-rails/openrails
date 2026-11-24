@@ -9,7 +9,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -47,6 +49,82 @@ func publicPurchase(t *testing.T, a *authorityWorld, p *providerLedger, price bi
 }
 
 func TestPublicCatalog(t *testing.T) {
+	t.Run("OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"event_type":"x","aggregation":"count"},"maximum":{"event_type":"x","value_property":"units","aggregation":"max"}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Len(t, receipt.Changes, 2)
+		require.Empty(t, receipt.Conflicts)
+
+		path := "/v1/catalog/meters/" + url.PathEscape("Mixed Case")
+		status, raw := a.request(t, http.MethodGet, path, a.alphaKey.Secret, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var meter billing.Meter
+		require.NoError(t, json.Unmarshal(raw, &meter))
+		require.Equal(t, "Mixed Case", meter.Key)
+		require.True(t, meter.BillingSupported)
+		originalRevision := meter.Revision
+		params := billing.SetMeterParams{EventType: "edited", Aggregation: catalog.AggregationCount, ExpectedRevision: &originalRevision}
+		status, raw = a.request(t, http.MethodPut, path, a.alphaKey.Secret, params)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &meter))
+		require.Equal(t, "Mixed Case", meter.Key)
+		require.Equal(t, "edited", meter.EventType)
+		require.Greater(t, meter.Revision, originalRevision)
+		read, err := a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, meter, *read)
+		_, err = a.alphaRemote.GetMeter(t.Context(), "mixed-case")
+		require.ErrorIs(t, err, billing.ErrNotFound, "editing must not create a normalized alias")
+
+		// The optional card operations use the same exact meter key.
+		product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "meter-card", DisplayName: "Meter card"})
+		require.NoError(t, err)
+		params.ExpectedRevision = nil
+		params.RateCard = catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}})
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.NotNil(t, read.RateCard)
+		params.RateCard = catalog.Null[billing.MeterRateCardParams]()
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Nil(t, read.RateCard)
+
+		for _, key := range []string{strings.Repeat("m", 300), strings.Repeat("é", 128), " padded "} {
+			_, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"meters":{%q:{"event_type":"x","aggregation":"count"}}}`, key)))
+			require.Error(t, err)
+			for _, method := range []string{http.MethodGet, http.MethodPut} {
+				status, raw := a.request(t, method, "/v1/catalog/meters/"+url.PathEscape(key), a.alphaKey.Secret, billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
+				require.Equal(t, http.StatusBadRequest, status, string(raw))
+				var failure struct {
+					Error billing.ErrorDetails `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &failure))
+				require.Equal(t, billing.CodeInvalidParam, failure.Error.Code)
+				require.Equal(t, ptr("key"), failure.Error.Param)
+			}
+		}
+		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
+		require.NoError(t, err)
+		require.Equal(t, "has space", read.Key)
+
+		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
+		require.NoError(t, err)
+		require.False(t, read.BillingSupported)
+		read, err = a.alphaRemote.SetMeter(t.Context(), "maximum", billing.SetMeterParams{EventType: "edited", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.NoError(t, err)
+		require.Equal(t, catalog.AggregationMax, read.Aggregation)
+		require.False(t, read.BillingSupported)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
+		require.NoError(t, err)
+		require.Equal(t, "edited", read.EventType)
+		require.False(t, read.BillingSupported)
+		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})
+		require.NoError(t, err)
+		require.Len(t, meters.Items, 3, "invalid keys and aliases must leave no extra meters")
+	})
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		product, price := publicSale(t, a, "exact-usd", 9_990_000, nil)

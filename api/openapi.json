@@ -1763,6 +1763,7 @@
         },
         "x-openrails-errors": [
           "default_rate_card_not_found",
+          "invalid_param",
           "meter_in_use",
           "meter_rate_card_conflict",
           "rate_card_product_not_found",
@@ -1839,6 +1840,7 @@
         "x-openrails-errors": [
           "currency_unsupported",
           "default_rate_card_not_found",
+          "invalid_param",
           "meter_in_use",
           "meter_rate_card_conflict",
           "rate_card_product_not_found",
