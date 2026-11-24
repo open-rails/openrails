@@ -22,8 +22,8 @@ func summarize(r *Results) string {
 	p("PostgreSQL: %s.", strings.Join(settings, ", "))
 	p("")
 	plan := r.Plan
-	p("Workload: %d gate processes per world, each with one gate per merchant. Hot merchant %d customers at %.0f events/s (ramped %v), %d other merchants at %.0f events/s each; requests of %d to %d units at %d micros a unit; tickets open %.0f ms on average, %.0f%% for 2 to 6 s; %d draining customers a merchant funded %d micros at %.0f requests/s across every process.",
-		plan.Processes, plan.Hot.Customers, plan.Hot.Rate, plan.Ramp, len(plan.Normal), firstRate(plan), plan.Units[0], plan.Units[1], plan.UnitPrice, plan.WorkMeanMS, 100*plan.LongShare, plan.DrainCustomers, plan.DrainFunding, plan.DrainRate)
+	p("Workload: %d gate processes per world, each with one gate per merchant and every customer spread over all of them. Hot merchant at %.0f events/s from %d customers (%.1f requests/s each), ramped through %v with its active customers growing at that rate up to %d; %d other merchants at %.0f events/s each from all their customers; requests of %d to %d units at %d micros a unit; tickets open %.0f ms on average, %.0f%% for 2 to 6 s; %d draining customers a merchant funded %d micros at %.0f requests/s.",
+		plan.Processes, plan.Hot.Rate, plan.active(plan.Hot, plan.Hot.Rate), plan.CustomerRate, plan.Ramp, plan.Hot.Customers, len(plan.Normal), firstRate(plan), plan.Units[0], plan.Units[1], plan.UnitPrice, plan.WorkMeanMS, 100*plan.LongShare, plan.DrainCustomers, plan.DrainFunding, plan.DrainRate)
 	p("")
 	if len(r.Errors) > 0 {
 		p("Run errors: %s", strings.Join(r.Errors, "; "))
@@ -83,14 +83,14 @@ func summarize(r *Results) string {
 		if len(w.Steps) > 0 {
 			p("### Ramp of the hot merchant")
 			p("")
-			p("| hot events/s | offered | decided/s | hot p50 ms | hot p99 ms | sync p99 ms | syncs/s | backlog start → end | machine CPU | largest consumers (cores) | saturated |")
-			p("|---|---|---|---|---|---|---|---|---|---|---|")
+			p("| hot events/s | hot customers | offered | decided/s | hot p50 ms | hot p99 ms | sync p99 ms | syncs/s | backlog start → end | machine CPU | largest consumers (cores) | saturated |")
+			p("|---|---|---|---|---|---|---|---|---|---|---|---|")
 			for _, s := range w.Steps {
-				p("| %d | %.0f | %.0f | %s | %s | %s | %.0f | %d → %d | %.0f%% | %s | %s |", s.Rate, s.Offered, s.Achieved, ms(s.HotP50US), ms(s.HotP99US), ms(s.SyncP99US), s.SyncsPerSecond,
+				p("| %d | %d | %.0f | %.0f | %s | %s | %s | %.0f | %d → %d | %.0f%% | %s | %s |", s.Rate, s.Customers, s.Offered, s.Achieved, ms(s.HotP50US), ms(s.HotP99US), ms(s.SyncP99US), s.SyncsPerSecond,
 					s.BacklogStart, s.BacklogEnd, 100*s.MachineBusy, topCores(s.Cores, 4), strings.Join(s.Reasons, "; "))
 			}
 			p("")
-			p("Saturation: %s.", w.Saturation)
+			p("Saturation: %s. Back at the base rates, the settlement backlog settled in %.0f s (-1: not within four minutes).", w.Saturation, w.CooldownSeconds)
 			p("")
 		}
 		if o := w.Overshoot; o != nil {
@@ -105,7 +105,7 @@ func summarize(r *Results) string {
 			p("")
 		}
 		if w.BillingPass != nil {
-			p("Billing pass after the lots lapsed: %s in %.1f s %s.", w.BillingPass.State, w.BillingPass.Seconds, w.BillingPass.Error)
+			p("Billing pass after the lots lapsed (attempt %d): %s in %.1f s %s.", w.BillingPass.Attempts, w.BillingPass.State, w.BillingPass.Seconds, w.BillingPass.Error)
 			p("")
 		}
 		if w.Outage != nil || len(w.Crash) > 0 || w.Counters != nil && hasPhase(w, "lost-replies") {
@@ -141,7 +141,7 @@ func summarize(r *Results) string {
 			p("Errors: %s", strings.Join(pr.Errors, "; "))
 			p("")
 		}
-		p("- Ingest as a batch reporter: %d customers x %d events in %.1f s (%.0f events/s); sync p50 %s ms, p99 %s ms.", pr.Customers, pr.Events, pr.IngestSeconds, pr.IngestRate, ms(pr.Syncs.Q(0.5)), ms(pr.Syncs.Q(0.99)))
+		p("- Ingest as a batch reporter (one lease): events in time order across %d customers %.0f events/s; grouped by customer %.0f events/s; sync p50 %s ms, p99 %s ms.", pr.Customers, pr.IngestRate, pr.GroupedRate, ms(pr.Syncs.Q(0.5)), ms(pr.Syncs.Q(0.99)))
 		p("- Heavy customer: %d events in its month (copied in ClickHouse in %.1f s).", pr.HeavyRows, pr.CloneSeconds)
 		p("- Posting before a top-up: light customers p50 %s ms, max %s ms; heavy customer %.0f ms.", ms(pr.TopUpLight.Q(0.5)), ms(pr.TopUpLight.Max), pr.TopUpHeavyMS)
 		if pr.Close != nil {

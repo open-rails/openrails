@@ -26,6 +26,8 @@ type PostingResult struct {
 	HeavyRows      int64                 `json:"heavy_rows"`
 	IngestSeconds  float64               `json:"ingest_seconds"`
 	IngestRate     float64               `json:"ingest_events_per_second"`
+	GroupedSeconds float64               `json:"grouped_ingest_seconds"`
+	GroupedRate    float64               `json:"grouped_ingest_events_per_second"`
 	Syncs          *Hist                 `json:"syncs"`
 	CloneSeconds   float64               `json:"heavy_clone_seconds"`
 	TopUpLight     *Hist                 `json:"top_up_light"`
@@ -99,9 +101,13 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 		items = append(items, billing.LeaseUsage{N: int64(len(items) + 1), CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
 			EventType: "compute", Dimensions: map[string]int64{"units": units}, Source: "load", SourceID: fmt.Sprintf("post-%d", len(items)+1)})
 	}
-	for range plan.PostingEvents {
+	units := func() int64 { return plan.Units[0] + rand.Int64N(plan.Units[1]-plan.Units[0]+1) }
+	// Half the events in time order across customers, half grouped by
+	// customer: a sync settles at most so many customers.
+	half := plan.PostingEvents / 2
+	for range half {
 		for _, cu := range light {
-			item(cu, plan.Units[0]+rand.Int64N(plan.Units[1]-plan.Units[0]+1))
+			item(cu, units())
 		}
 	}
 	item(heavy, 1)
@@ -115,7 +121,21 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 	}
 	r.IngestSeconds = time.Since(start).Seconds()
 	r.IngestRate = float64(len(items)) / r.IngestSeconds
-	logf("[posting] ingested %d events in %.1fs", len(items), r.IngestSeconds)
+	logf("[posting] ingested %d interleaved events in %.1fs", len(items), r.IngestSeconds)
+	first := len(items)
+	for _, cu := range light {
+		for range plan.PostingEvents - half {
+			item(cu, units())
+		}
+	}
+	start = time.Now()
+	if err := e.syncAll(ctx, c, lease, items[first:], r.Syncs); err != nil {
+		r.fail("grouped ingest: %v", err)
+		return r
+	}
+	r.GroupedSeconds = time.Since(start).Seconds()
+	r.GroupedRate = float64(len(items)-first) / r.GroupedSeconds
+	logf("[posting] ingested %d grouped events in %.1fs", len(items)-first, r.GroupedSeconds)
 
 	if plan.HeavyRows > 1 {
 		start = time.Now()
@@ -148,6 +168,8 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 		r.fail("river: %v", err)
 		return r
 	}
+	// Only the run's own passes: a periodic one would make them exit.
+	fleet.PeriodicJobs().Clear()
 	if err := eng.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 		r.fail("start: %v", err)
 		return r
@@ -246,7 +268,7 @@ func (e *env) cloneHeavy(ctx context.Context, database string, merchant billing.
 		"occurred_at,", fmt.Sprintf("occurred_at - toIntervalSecond(number %% %d),", spread),
 		"admitted_at,", fmt.Sprintf("admitted_at - toIntervalSecond(number %% %d),", spread),
 	).Replace(cols)
-	q := fmt.Sprintf("INSERT INTO `%s`.usage_events (%s) SELECT %s FROM `%s`.usage_events AS src, numbers(%d) WHERE src.merchant_id = toUUID('%s') AND src.customer_id = toUUID('%s')",
+	q := fmt.Sprintf("INSERT INTO `%s`.usage_events (%s) SELECT %s FROM `%s`.usage_events AS src CROSS JOIN numbers(%d) AS num WHERE src.merchant_id = toUUID('%s') AND src.customer_id = toUUID('%s')",
 		database, cols, exprs, database, n, merchant, customer)
 	return e.ch.Exec(ctx, q)
 }

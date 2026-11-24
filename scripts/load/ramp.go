@@ -13,6 +13,7 @@ import (
 // quarters.
 type Step struct {
 	Rate           int                `json:"rate"`
+	Customers      int                `json:"hot_customers"`
 	Seconds        float64            `json:"seconds"`
 	Offered        float64            `json:"offered"`
 	Achieved       float64            `json:"achieved"`
@@ -36,7 +37,7 @@ func (e *env) rampStep(ctx context.Context, f *fleet, w *WorldResult, schema str
 	plan := e.plan
 	f.setPhase(fmt.Sprintf("ramp-%d", rate))
 	f.rates(float64(rate))
-	st := Step{Rate: rate, Offered: f.offered(float64(rate))}
+	st := Step{Rate: rate, Customers: plan.active(plan.Hot, float64(rate)), Offered: f.offered(float64(rate))}
 	secs := max(plan.StepSeconds, 8)
 	sleepCtx(ctx, time.Duration(secs/4)*time.Second)
 	backlog := func() int64 {
@@ -84,8 +85,8 @@ func (e *env) rampStep(ctx context.Context, f *fleet, w *WorldResult, schema str
 		st.Reasons = append(st.Reasons, fmt.Sprintf("%d unavailable and %d errors", st.Unavailable, st.Errors))
 	}
 	st.Saturated = len(st.Reasons) > 0
-	logf("[%s] step %d/s: decided %.0f/s, hot p99 %.2f ms, sync p99 %.1f ms, backlog %d→%d, machine %.0f%% %v",
-		w.Name, rate, st.Achieved, float64(st.HotP99US)/1000, float64(st.SyncP99US)/1000, b0, b1, 100*st.MachineBusy, st.Reasons)
+	logf("[%s] step %d/s from %d customers: decided %.0f/s, hot p99 %.2f ms, sync p99 %.1f ms, backlog %d→%d, machine %.0f%% %v",
+		w.Name, rate, st.Customers, st.Achieved, float64(st.HotP99US)/1000, float64(st.SyncP99US)/1000, b0, b1, 100*st.MachineBusy, st.Reasons)
 	return st
 }
 

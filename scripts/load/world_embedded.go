@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // runEmbedded is the embedded shape: each gate process runs its own engine
@@ -93,6 +94,14 @@ func (e *env) runEmbedded(ctx context.Context) *WorldResult {
 	if w.Saturation == "" && len(plan.EmbeddedRamp) > 0 {
 		w.Saturation = fmt.Sprintf("not saturated up to %d events/s", plan.EmbeddedRamp[len(plan.EmbeddedRamp)-1])
 	}
+	f.rates(plan.Hot.Rate)
+	f.setPhase("cooldown")
+	var ids []billing.MerchantID
+	for _, m := range ms {
+		ids = append(ids, seeds[m.Slug].id)
+	}
+	w.CooldownSeconds = f.cooldown(ctx, schema, ids, time.Duration(plan.CooldownSeconds)*time.Second)
+	logf("[embedded] backlog settled %.0fs after the ramp", w.CooldownSeconds)
 	f.endPhase()
 	logf("[embedded] stopping gate processes")
 	f.stopAll()

@@ -20,9 +20,12 @@ type Plan struct {
 	// has one gate per merchant and serves every customer of it.
 	Processes int `json:"processes"`
 	// Hot is the busy merchant whose rate is ramped; Normal merchants keep
-	// their rate throughout.
-	Hot    MerchantPlan   `json:"hot"`
-	Normal []MerchantPlan `json:"normal"`
+	// their rate throughout. The hot merchant's active customers grow with
+	// its rate, each making CustomerRate requests a second, up to all of
+	// them; past that each customer is busier.
+	Hot          MerchantPlan   `json:"hot"`
+	Normal       []MerchantPlan `json:"normal"`
+	CustomerRate float64        `json:"customer_rate"`
 
 	// A request costs Units[0]..Units[1] units at UnitPrice micros a unit.
 	Units     [2]int64 `json:"units"`
@@ -46,6 +49,9 @@ type Plan struct {
 	SteadySeconds int   `json:"steady_seconds"`
 	Ramp          []int `json:"ramp"`
 	StepSeconds   int   `json:"step_seconds"`
+	// CooldownSeconds at the base rates follow the ramp, so the faults start
+	// from a settled fleet.
+	CooldownSeconds int `json:"cooldown_seconds"`
 
 	LostReplyShare  float64 `json:"lost_reply_share"`
 	FaultSeconds    int     `json:"fault_seconds"`
@@ -75,37 +81,39 @@ type MerchantPlan struct {
 func defaultPlan() Plan {
 	return Plan{
 		Processes:    4,
-		Hot:          MerchantPlan{Slug: "hot", Customers: 2500, Rate: 1000},
-		Normal:       []MerchantPlan{{Slug: "n1", Customers: 500, Rate: 200}, {Slug: "n2", Customers: 500, Rate: 200}, {Slug: "n3", Customers: 500, Rate: 200}},
+		Hot:          MerchantPlan{Slug: "hot", Customers: 2500, Rate: 200},
+		Normal:       []MerchantPlan{{Slug: "n1", Customers: 250, Rate: 100}, {Slug: "n2", Customers: 250, Rate: 100}, {Slug: "n3", Customers: 250, Rate: 100}},
+		CustomerRate: 0.4,
 		Units:        [2]int64{10, 300},
 		UnitPrice:    1000,
 		WorkMeanMS:   300,
 		LongShare:    0.05,
 		ReleaseShare: 0.03,
 
-		DrainCustomers: 20,
-		DrainFunding:   20_000_000,
-		DrainRate:      5,
+		DrainCustomers: 10,
+		DrainFunding:   10_000_000,
+		DrainRate:      4,
 		TopUps:         20,
 		Expiring:       20,
 
-		WarmSeconds:   15,
-		SteadySeconds: 75,
-		Ramp:          []int{2000, 4000, 8000, 16000},
-		StepSeconds:   40,
+		WarmSeconds:     15,
+		SteadySeconds:   75,
+		Ramp:            []int{400, 1000, 2000, 4000},
+		StepSeconds:     40,
+		CooldownSeconds: 20,
 
 		LostReplyShare:  0.05,
 		FaultSeconds:    30,
-		CrashRate:       100,
-		CrashCustomers:  200,
+		CrashRate:       25,
+		CrashCustomers:  100,
 		OutageSeconds:   30,
 		RecoverySeconds: 30,
 
 		EmbeddedSteadySeconds: 45,
-		EmbeddedRamp:          []int{2000, 4000},
+		EmbeddedRamp:          []int{400, 1000, 2000},
 
 		PostingCustomers: 2000,
-		PostingEvents:    20,
+		PostingEvents:    10,
 		HeavyRows:        26_000_000,
 
 		Worlds: []string{"http", "embedded", "posting"},
@@ -115,6 +123,15 @@ func defaultPlan() Plan {
 func (p Plan) merchants() []MerchantPlan { return append([]MerchantPlan{p.Hot}, p.Normal...) }
 
 func (p Plan) maxCost() int64 { return p.Units[1] * p.UnitPrice }
+
+// active is how many of m's customers a rate keeps busy: the hot
+// merchant's grow with its rate; every other merchant's are all of them.
+func (p Plan) active(m MerchantPlan, rate float64) int {
+	if m.Slug != p.Hot.Slug || p.CustomerRate <= 0 {
+		return m.Customers
+	}
+	return max(1, min(m.Customers, int(rate/p.CustomerRate+0.5)))
+}
 
 func (p Plan) validate() error {
 	switch {

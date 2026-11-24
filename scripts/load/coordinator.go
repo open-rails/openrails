@@ -42,30 +42,33 @@ type Results struct {
 // WorldResult is one world: the standalone server over HTTP, or embedded
 // engines.
 type WorldResult struct {
-	Name        string                `json:"name"`
-	Mode        string                `json:"mode"`
-	Phases      []Span                `json:"phases"`
-	Decisions   map[string]*Hist      `json:"decisions"`
-	Syncs       map[string]*Hist      `json:"syncs"`
-	Counters    map[string]int64      `json:"counters"`
-	Steps       []Step                `json:"steps"`
-	Saturation  string                `json:"saturation"`
-	TopUps      *Hist                 `json:"top_ups,omitempty"`
-	BillingPass *PassResult           `json:"billing_pass,omitempty"`
-	Checks      []Check               `json:"checks"`
-	Overshoot   *Overshoot            `json:"overshoot,omitempty"`
-	Storage     []TableStorage        `json:"clickhouse_storage"`
-	Queries     map[string]QueryStats `json:"clickhouse_queries"`
-	Rows        *RowStats             `json:"rows,omitempty"`
-	Samples     []Sample              `json:"samples"`
-	Outage      *OutageResult         `json:"outage,omitempty"`
-	Crash       []CrashResult         `json:"crash,omitempty"`
-	ProcErrors  []string              `json:"process_errors"`
-	Errors      []string              `json:"errors"`
-	smu         sync.Mutex
-	captured    map[string]map[string]int64 // merged, by merchant slug and customer
-	amounts     map[string]map[string]int64
-	admissions  []admission
+	Name       string           `json:"name"`
+	Mode       string           `json:"mode"`
+	Phases     []Span           `json:"phases"`
+	Decisions  map[string]*Hist `json:"decisions"`
+	Syncs      map[string]*Hist `json:"syncs"`
+	Counters   map[string]int64 `json:"counters"`
+	Steps      []Step           `json:"steps"`
+	Saturation string           `json:"saturation"`
+	// CooldownSeconds is how long the settlement backlog took to settle at
+	// the base rates after the ramp; -1 when it did not within four minutes.
+	CooldownSeconds float64               `json:"cooldown_seconds"`
+	TopUps          *Hist                 `json:"top_ups,omitempty"`
+	BillingPass     *PassResult           `json:"billing_pass,omitempty"`
+	Checks          []Check               `json:"checks"`
+	Overshoot       *Overshoot            `json:"overshoot,omitempty"`
+	Storage         []TableStorage        `json:"clickhouse_storage"`
+	Queries         map[string]QueryStats `json:"clickhouse_queries"`
+	Rows            *RowStats             `json:"rows,omitempty"`
+	Samples         []Sample              `json:"samples"`
+	Outage          *OutageResult         `json:"outage,omitempty"`
+	Crash           []CrashResult         `json:"crash,omitempty"`
+	ProcErrors      []string              `json:"process_errors"`
+	Errors          []string              `json:"errors"`
+	smu             sync.Mutex
+	captured        map[string]map[string]int64 // merged, by merchant slug and customer
+	amounts         map[string]map[string]int64
+	admissions      []admission
 }
 
 type Span struct {
@@ -81,6 +84,7 @@ type Check struct {
 }
 
 type PassResult struct {
+	Attempts   int       `json:"attempts"`
 	EnqueuedAt time.Time `json:"enqueued_at"`
 	Seconds    float64   `json:"seconds"`
 	State      string    `json:"state"`
@@ -347,12 +351,35 @@ func (f *fleet) endPhase() {
 // evenly over the main processes.
 func (f *fleet) rates(hot float64) {
 	n := float64(f.e.plan.Processes)
-	r := map[string]float64{}
+	r, active := map[string]float64{}, map[string]int{}
 	for _, m := range f.ms {
 		r[m.Slug] = m.Rate / n
+		active[m.Slug] = f.e.plan.active(m, m.Rate)
 	}
 	r[f.ms[0].Slug] = hot / n
-	f.send(control{Op: "rates", Rates: r})
+	active[f.ms[0].Slug] = f.e.plan.active(f.ms[0], hot)
+	f.send(control{Op: "rates", Rates: r, Active: active})
+}
+
+// cooldown holds the base rates for least, then until the main
+// merchants' settlement backlog is under two seconds of their traffic, at
+// most four minutes in all; it returns how long the backlog took to settle.
+func (f *fleet) cooldown(ctx context.Context, schema string, ids []billing.MerchantID, least time.Duration) float64 {
+	start := time.Now()
+	sleepCtx(ctx, least)
+	limit := int64(2 * f.offered(f.e.plan.Hot.Rate))
+	for time.Since(start) < 4*time.Minute && ctx.Err() == nil {
+		var captured int64
+		for _, m := range f.ms {
+			captured += f.totals().Captured[m.Slug]
+		}
+		stored, err := f.e.countEvents(ctx, schema, ids...)
+		if err == nil && captured-stored <= limit {
+			return time.Since(start).Seconds()
+		}
+		sleepCtx(ctx, 2*time.Second)
+	}
+	return -1
 }
 
 // offered is every main merchant's rate with the hot one's at hot.
@@ -414,7 +441,7 @@ func (f *fleet) stopAll() {
 			continue
 		}
 		wg.Go(func() {
-			if err := c.stop(4 * time.Minute); err != nil {
+			if err := c.stop(6 * time.Minute); err != nil {
 				f.world.fail("%s: %v", c.name, err)
 			}
 		})

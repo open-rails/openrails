@@ -129,7 +129,7 @@ func (e *env) runHTTP(ctx context.Context) *WorldResult {
 			at = expiring[0].ExpiresAt.Add(15 * time.Second)
 		}
 		sleepCtx(ctx, time.Until(at))
-		passDone <- e.billingPass(ctx, schema)
+		passDone <- e.lapseLots(ctx, w, schema, admin, seeds, expiring)
 	}()
 	sleepCtx(ctx, time.Duration(plan.SteadySeconds)*time.Second)
 	f.send(control{Op: "drain", Rate: 0})
@@ -150,7 +150,14 @@ func (e *env) runHTTP(ctx context.Context) *WorldResult {
 	if w.Saturation == "" && len(plan.Ramp) > 0 {
 		w.Saturation = fmt.Sprintf("not saturated up to %d events/s", plan.Ramp[len(plan.Ramp)-1])
 	}
+	var mains []billing.MerchantID
+	for _, m := range plan.merchants() {
+		mains = append(mains, seeds[m.Slug].id)
+	}
 	f.rates(plan.Hot.Rate)
+	f.setPhase("cooldown")
+	w.CooldownSeconds = f.cooldown(ctx, schema, mains, time.Duration(plan.CooldownSeconds)*time.Second)
+	logf("[http] backlog settled %.0fs after the ramp", w.CooldownSeconds)
 
 	f.setPhase("lost-replies")
 	f.send(control{Op: "drop", Rate: plan.LostReplyShare})
@@ -161,10 +168,6 @@ func (e *env) runHTTP(ctx context.Context) *WorldResult {
 	crashSpecs := e.crash(ctx, f, w, seeds[crashSlug], ready.URL, schema)
 
 	f.setPhase("ch-outage")
-	var mains []billing.MerchantID
-	for _, m := range plan.merchants() {
-		mains = append(mains, seeds[m.Slug].id)
-	}
 	w.Outage = e.outage(ctx, f, schema, mains)
 	f.setPhase("recovery")
 	sleepCtx(ctx, time.Duration(plan.RecoverySeconds)*time.Second)
@@ -242,6 +245,26 @@ func (e *env) topUps(ctx context.Context, w *WorldResult, admin map[string]*open
 		h.Add(time.Since(start))
 	}
 	return h
+}
+
+// lapseLots runs billing passes until the expiring lots have lapsed: a pass
+// that finds the previous one (the server's own, hourly) still running exits
+// at once. It gives up after four passes.
+func (e *env) lapseLots(ctx context.Context, w *WorldResult, schema string, admin map[string]*openrails.Client, seeds map[string]*seeded, lots []billing.CreditGrant) *PassResult {
+	var out *PassResult
+	for try := range 4 {
+		out = e.billingPass(ctx, schema)
+		out.Attempts = try + 1
+		if len(lots) == 0 || len(e.plan.Normal) == 0 {
+			return out
+		}
+		got, err := admin[e.plan.Normal[0].Slug].GetCreditGrant(ctx, lots[0].ID)
+		if err == nil && (got.ExpiredAmount > 0 || got.RemainingAmount == 0) {
+			return out
+		}
+		sleepCtx(ctx, 10*time.Second)
+	}
+	return out
 }
 
 type registeredJob struct {

@@ -115,7 +115,7 @@ func TestSummaryRendersAWorld(t *testing.T) {
 	r := &Results{Plan: defaultPlan(), Host: map[string]string{"cpus": "4"}, Worlds: map[string]*WorldResult{"http": w},
 		Posting: &PostingResult{Syncs: newHist(), TopUpLight: newHist(), Close: &PassResult{State: "completed", Seconds: 12}}}
 	out := summarize(r)
-	for _, want := range []string{"| http | stored-once/hot | yes |", "| hot | local | allowed | 1 | 50.00%", "| 2000 | 2600 | 2590 |", "Month-end close", "| usage_events | 10 |"} {
+	for _, want := range []string{"| http | stored-once/hot | yes |", "| hot | local | allowed | 1 | 50.00%", "| 2000 | 0 | 2600 | 2590 |", "Month-end close", "| usage_events | 10 |"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
 		}

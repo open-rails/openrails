@@ -62,10 +62,11 @@ type gateMerchant struct {
 
 // control is a command from the coordinator, one JSON line on stdin.
 type control struct {
-	Op    string             `json:"op"`
-	Phase string             `json:"phase,omitempty"`
-	Rates map[string]float64 `json:"rates,omitempty"`
-	Rate  float64            `json:"rate,omitempty"`
+	Op     string             `json:"op"`
+	Phase  string             `json:"phase,omitempty"`
+	Rates  map[string]float64 `json:"rates,omitempty"`
+	Active map[string]int     `json:"active,omitempty"`
+	Rate   float64            `json:"rate,omitempty"`
 }
 
 // live is what a process reports each second on stdout.
@@ -166,6 +167,7 @@ type mrun struct {
 	gateMerchant
 	gate      *openrails.Gate
 	rate      atomic.Uint64
+	active    atomic.Int64
 	drainRate atomic.Uint64
 	seen      sync.Map
 	syncs     atomic.Int64
@@ -279,9 +281,9 @@ func gatesCmd(ctx context.Context, args []string) error {
 	done := make(chan struct{})
 	go w.report(done)
 	for _, m := range w.ms {
-		go w.arrivals(m, m.Customers, &m.rate, false)
+		go w.arrivals(m, m.Customers, &m.rate, &m.active, false)
 		for _, c := range m.Drains {
-			go w.arrivals(m, []billing.CustomerID{c}, &m.drainRate, true)
+			go w.arrivals(m, []billing.CustomerID{c}, &m.drainRate, nil, true)
 		}
 	}
 	w.controls(os.Stdin)
@@ -294,18 +296,28 @@ func gatesCmd(ctx context.Context, args []string) error {
 		w.noteErr(errors.New("requests still open 30s after stop"))
 	}
 	var flushErrs []string
+	var fmu sync.Mutex
+	var fwg sync.WaitGroup
 	for _, m := range w.ms {
-		fctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		if err := m.gate.Flush(fctx); err != nil {
-			flushErrs = append(flushErrs, m.Slug+" flush: "+err.Error())
-		}
-		cancel()
-		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := m.gate.Close(cctx); err != nil {
-			flushErrs = append(flushErrs, m.Slug+" close: "+err.Error())
-		}
-		cancel()
+		fwg.Go(func() {
+			note := func(what string, err error) {
+				fmu.Lock()
+				flushErrs = append(flushErrs, m.Slug+" "+what+": "+err.Error())
+				fmu.Unlock()
+			}
+			fctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			if err := m.gate.Flush(fctx); err != nil {
+				note("flush", err)
+			}
+			cancel()
+			cctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			if err := m.gate.Close(cctx); err != nil {
+				note("close", err)
+			}
+			cancel()
+		})
 	}
+	fwg.Wait()
 	close(done)
 	w.pmu.Lock()
 	w.cmu.Lock()
@@ -415,6 +427,9 @@ func (w *worker) controls(in io.Reader) {
 				if r, ok := c.Rates[m.Slug]; ok {
 					storeFloat(&m.rate, r)
 				}
+				if n, ok := c.Active[m.Slug]; ok {
+					m.active.Store(int64(n))
+				}
 			}
 		case "drain":
 			for _, m := range w.ms {
@@ -428,9 +443,10 @@ func (w *worker) controls(in io.Reader) {
 	}
 }
 
-// arrivals starts requests for customers at the rate rate holds, as a
-// Poisson process on an absolute schedule: a late wake-up catches up.
-func (w *worker) arrivals(m *mrun, customers []billing.CustomerID, rate *atomic.Uint64, drain bool) {
+// arrivals starts requests for the first active customers (all, without a
+// count) at the rate rate holds, as a Poisson process on an absolute
+// schedule: a late wake-up catches up.
+func (w *worker) arrivals(m *mrun, customers []billing.CustomerID, rate *atomic.Uint64, active *atomic.Int64, drain bool) {
 	if len(customers) == 0 {
 		return
 	}
@@ -453,9 +469,15 @@ func (w *worker) arrivals(m *mrun, customers []billing.CustomerID, rate *atomic.
 			w.shed.Add(1)
 			continue
 		}
+		n := len(customers)
+		if active != nil {
+			if a := int(active.Load()); a > 0 && a < n {
+				n = a
+			}
+		}
 		w.inflight.Add(1)
 		w.wg.Add(1)
-		go w.request(m, customers[rand.IntN(len(customers))], drain)
+		go w.request(m, customers[rand.IntN(n)], drain)
 	}
 }
 
