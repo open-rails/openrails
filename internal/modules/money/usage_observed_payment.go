@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -272,7 +273,8 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 			payer := identity.CustomerID(order.CustomerID)
 			roundingKey := "invoice-observed-rounding:" + key
 			description := "Rounding credit from recovered order " + billing.OrderID(orderID).String()
-			if _, err := s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Currency: order.Currency, Amount: surplus, Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description}); err != nil {
+			if _, err := s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: order.Currency, Amount: surplus,
+				Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description, Funding: credits.Purchase}); err != nil {
 				return err
 			}
 		}

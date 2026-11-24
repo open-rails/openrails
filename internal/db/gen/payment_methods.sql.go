@@ -899,7 +899,7 @@ func (q *Queries) ListCustomerPaymentMethodsByIDs(ctx context.Context, arg ListC
 
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (a.payment_method_id)
-    a.payment_method_id, a.attempted_at, a.category
+    a.payment_method_id, a.attempted_at, a.outcome
 FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid AND a.payment_method_id = ANY($2::uuid[]) AND a.kind <> 'verify'
 ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC
@@ -913,7 +913,7 @@ type ListLatestChargeByPaymentMethodIDsParams struct {
 type ListLatestChargeByPaymentMethodIDsRow struct {
 	PaymentMethodID *uuid.UUID
 	AttemptedAt     time.Time
-	Category        string
+	Outcome         string
 }
 
 // #589 derived health: each payment method's most recent charge attempt
@@ -927,7 +927,7 @@ func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, arg Li
 	var items []ListLatestChargeByPaymentMethodIDsRow
 	for rows.Next() {
 		var i ListLatestChargeByPaymentMethodIDsRow
-		if err := rows.Scan(&i.PaymentMethodID, &i.AttemptedAt, &i.Category); err != nil {
+		if err := rows.Scan(&i.PaymentMethodID, &i.AttemptedAt, &i.Outcome); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

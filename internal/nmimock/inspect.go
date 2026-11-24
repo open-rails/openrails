@@ -188,6 +188,13 @@ func (m *Mock) Reads() map[string]int {
 	return out
 }
 
+// Searches are the transaction report queries served, in order.
+func (m *Mock) Searches() []url.Values {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]url.Values(nil), m.searches...)
+}
+
 // Unexpected lists requests the mock does not model; tests assert it empty.
 func (m *Mock) Unexpected() []string {
 	m.mu.Lock()

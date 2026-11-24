@@ -38,12 +38,21 @@ func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 
 func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
 	t.Helper()
+	a, p, customer := usageBillingAccount(t, enabled, manual, configure...)
+	usageMeter(t, a.alpha, 10_000_000)
+	return a, p, customer
+}
+
+// usageBillingAccount is alice with a saved card and a $30 USD credit line,
+// billed on the 25th.
+func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
+	t.Helper()
 	changes := append([]func(*world){func(w *world) {
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
 		w.cfg.UsageBillingEnabled = enabled
 		m := cfgMerchant(w.cfg, "alpha")
-		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
-		m.ArrearsGraceDays, m.ArrearsDelinquencyFloor = ptr(0), ptr(int64(0))
+		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000, DelinquencyFloor: ptr(int64(0))}}}
+		m.ArrearsGraceDays = ptr(0)
 		setCfgMerchant(&w.cfg, "alpha", m)
 	}}, configure...)
 	a, p := newNMIWorld(t, changes...)
@@ -61,7 +70,6 @@ func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*wo
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice})})
 		require.NoError(t, err)
 	}
-	usageMeter(t, a.alpha, 10_000_000)
 	return a, p, customer
 }
 
@@ -461,11 +469,85 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.EqualValues(t, 30_000_000, revoked.UsageOrder.Total)
 		require.Equal(t, revoked.UsageOrder.ID, oneUsageOrder(t, a, customer).ID)
 	})
+	t.Run("OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy", func(t *testing.T) {
+		// Every tier's first retry differs from the built-in schedule's (1 and 2 days).
+		a, p, customer := usageBillingWorld(t, true, false, dunningPolicy(billing.DunningPolicy{Tiers: []billing.DunningTier{
+			{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{12, 36}}, {RetryAfterHours: []int{36, 84, 132, 204}},
+		}}))
+		p.core.SetDecline("4242", "202")
+		oneUsage(t, a.alpha, usageInput(customer, "declined-collection", 3))
+		fleet := startFleet(t, a.world)
+		declinedAt := a.clock.Now()
+		runUsageDue(t, fleet)
+		var order billing.Order
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			if err != nil || len(rows.Items) != 1 || rows.Items[0].Usage == nil {
+				return false
+			}
+			order = rows.Items[0]
+			return order.Payment.LastPaymentError != nil
+		}, 15*time.Second, 20*time.Millisecond, "the collection is declined")
+		require.Equal(t, billing.OrderOpen, order.Status, "a retryable decline keeps the order open")
+		retry := 12 * time.Hour
+		if cycle := order.Usage.PeriodEndsAt.Sub(order.Usage.PeriodStartsAt); cycle >= 672*time.Hour {
+			retry = 36 * time.Hour
+		}
+		require.NotNil(t, order.Usage.NextCollectionAttemptAt)
+		require.Equal(t, declinedAt.Add(retry), *order.Usage.NextCollectionAttemptAt, "the merchant's schedule sets the retry")
+	})
+	t.Run("OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency", func(t *testing.T) {
+		// The policy's floor is a million euros; the debt is in dollars.
+		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "euro-floor", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000,
+				DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(1_000_000_000_000)), PolicyCurrency: "EUR"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("euro-floor")})
+		require.NoError(t, err)
+		oneUsage(t, a.alpha, usageInput(customer, "overdue-in-dollars", 3))
+		fleet := startFleet(t, a.world)
+		postUsageDay(t, a.world, fleet)
+		runUsageDue(t, fleet)
+		a.clock.Advance(24 * time.Hour)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "dollar debt is held to the dollar floor, not the policy's euro one")
+	})
+	t.Run("OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money", func(t *testing.T) {
+		// A yen policy caps debt at ¥1,000 and collects at ¥1,000; the dollar
+		// account has its own $5,000 line and collects at $30.
+		a, p, customer := usageBillingWorld(t, true, false, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.UsageBilling.Currencies = []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 5_000_000_000, MinimumInvoiceAmount: 1_000_000,
+				CollectionThreshold: ptr(int64(30_000_000)), DelinquencyFloor: ptr(int64(0))}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "outstanding_cap", PolicyCurrency: "JPY", OutstandingCapAmount: 10_000_000, CollectionThresholdAmount: ptr(int64(10_000_000))}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		// $30 of dollar usage reaches the dollar threshold and is collected at
+		// once: the yen threshold, at the fixture's rate of 1 $1,000, withholds
+		// nothing.
+		oneUsage(t, a.alpha, usageInput(customer, "dollar-work", 3))
+		fleet := startFleet(t, a.world)
+		runUsageDue(t, fleet)
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+		}, 15*time.Second, 20*time.Millisecond, "the dollar threshold collects")
+		require.EqualValues(t, 30_000_000, oneUsageOrder(t, a, customer).Total)
+		p.money(t, 1, 3000)
+		// A $1,500 request is within the dollar line, which the yen cap does
+		// not bind.
+		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "past-the-yen-cap", 1_500_000_000)})
+		require.NoError(t, err)
+		require.True(t, results[0].Allowed(), "%+v", results[0].Admission)
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
-			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0))}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0)), PolicyCurrency: "USD"}}
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("strict")})

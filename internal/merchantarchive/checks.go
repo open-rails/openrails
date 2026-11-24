@@ -37,11 +37,13 @@ var excludedTables = map[string]string{
 	"solana_crankers":               "the deployment's Solana cranker pins",
 	"destructive_action_switch":     "deployment-wide safety switch",
 	"book_identity":                 "the deployment's database identity",
+	"event_store":                   "the deployment's event store identity",
 	"merchant_write_posture":        "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":                "telemetry", "webhook_health_daily": "telemetry",
 	"failed_usage_windows":          "live grace and cutoff windows; the destination counts afresh",
 	"limit_hold_parts":              "what holds set aside of each limit: open holds refuse the archive, and the destination counts windows afresh",
 	"leases":                        "gate leases: a live one refuses the archive, and gates sync new ones at the destination",
+	"lease_in_flight":               "what live gates report in flight: a live lease refuses the archive, and gates report afresh at the destination",
 	"usage_minutes":                 "per-minute spend the rate measures read, kept a day; the destination measures afresh",
 	"payment_attempts":              "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":                 "rebill analytics: expected rebills, derived from subscriptions",
@@ -52,7 +54,7 @@ var excludedTables = map[string]string{
 	"provisioning_tokens":           "credentials; the destination mints its own",
 	"merchant_destructive_policy":   "deployment safety policy",
 	"carts":                         "a customer's basket, not billing history: priced live, it holds no money and the customer fills it again at the destination",
-	"provider_mutation_logs":        "operator evidence; raw bodies excluded",
+	"operation_log":                 "the source deployment's record of the provider operations it ran: operator evidence, never moved",
 	"reconciliation_findings":       "operator observations",
 	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
@@ -63,16 +65,15 @@ var excludedTables = map[string]string{
 	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
-	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
-	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
-	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
-	"balance_watches":                   "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
-	"psp_imports":                       "import working state: the destination pulls its PSPs again",
-	"psp_import_records":                "import working state: copies of provider objects, pulled again",
-	"psp_import_basis":                  "import working state: the row versions a pull read, read again",
-	"psp_import_mappings":               "the merchant's own identifiers; it maps them again for an import",
-	"provider_catalog_objects":          "provider observations; the destination observes again",
-	"parked_provider_subscriptions":     "converge working state: the next provider event parks again",
+	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
+	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
+	"psp_imports":                   "import working state: the destination pulls its PSPs again",
+	"psp_import_records":            "import working state: copies of provider objects, pulled again",
+	"psp_import_basis":              "import working state: the row versions a pull read, read again",
+	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
+	"provider_catalog_objects":      "provider observations; the destination observes again",
+	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -88,18 +89,20 @@ var excludedColumns = map[string]string{
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at book_id tagging_started_at",
+	"event_store":                   "singleton store_id attached_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"periodic_leases":               "kind holder expires_at claimed_at",
 	"solana_crankers":               "name public_key pinned_at",
-	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
+	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
-	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held request_units used_units contended_at answered_units",
-	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts hold_version",
+	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held",
+	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
+	"lease_in_flight":               "merchant_id lease_id customer_id limit_key unit amount updated_at",
 	"usage_minutes":                 "merchant_id customer_id currency minute_at amount",
-	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id outcome decline_cause advice_code network_advice_code",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity probe_failed_at next_probe_at",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"carts":                         "merchant_id customer_id lines last_changed_at created_at",
@@ -111,21 +114,20 @@ var excludedColumns = map[string]string{
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
 	"notification_issue_revisions":  "merchant_id customer_id issue_key revision withdrawn source_event",
 	"notification_channel_state":    "merchant_id restore_required",
-	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
+	"operation_log":                 "merchant_id id occurred_at actor source object_type object_id action changes reason request_id operation_id rail psp_id custodian_id subscription_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"stored_card_checks":            "merchant_id payment_method_id due_at",
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
-	"nmi_history_months":            "merchant_id psp_id month_at kind category reason authorizations",
+	"nmi_history_months":            "merchant_id psp_id month_at kind reason authorizations outcome decline_cause",
 	"nmi_history_reads":             "merchant_id psp_id read_at",
 	"solana_pay_references":         "merchant_id reference order_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
 	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
-	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
-	"price_keys":                        "merchant_id product_id key revision created_at updated_at",
-	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"price_keys":             "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
+	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -137,14 +139,16 @@ var omittedColumns = map[string]string{
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
-	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
-	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
-	"customers":        "access_version",
+	"psps":          "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
+	"subscriptions": "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
+	// Generated from the recorded columns.
+	"subscription_mrr": "dirty",
 	"payments":         "destructive_run_class",
 	"order_attempts":   "destructive_run_class",
 	"product_access":   "destructive_run_class",
 	"maintenance_runs": "run_class coverage affected note summary inventory_manifest inventory_total_rows",
-	"provider_intents": "destructive_run_class destructive_action_id",
+	// The breaker's sent attempt: the destination's breaker counts its own.
+	"provider_intents": "destructive_run_class destructive_action_id sent_attempt",
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open order is not found by it.
 	"orders": "lines_digest",
@@ -294,10 +298,10 @@ var preflightChecks = []rowCheck{
 	// subscription; restore queues its wake.
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable') AND NOT (intent_type='solana_pull' AND status='pending' AND attempts=0 AND result_evidence IS NULL)"},
 	{"payments", "status='pending'"},
-	// An open request hold, or a live gate lease, sets capacity aside the
-	// archive would drop.
-	{"limit_holds", "state='open' AND request_id IS NOT NULL"},
-	{"leases", fmt.Sprintf("closed_at IS NULL AND last_sync_at > now() - make_interval(secs => %d)", int((limits.LeaseLifetime+limits.LeaseGrace)/time.Second))},
+	// An open request hold, or a live gate lease (with its holds and
+	// in-flight report), sets capacity aside the archive would drop.
+	{"limit_holds", "state='open' AND lease_id IS NULL"},
+	{"leases", fmt.Sprintf("closed_at IS NULL AND last_sync_at > now() - make_interval(secs => %d)", int(limits.LeaseLifetime/time.Second))},
 	{"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','prune','approval','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','approval','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
@@ -332,26 +336,25 @@ var referenceChecks = []rowCheck{
 	// A native lot retains its payment's accepted promise. The product's current
 	// benefit is deliberately irrelevant to previously purchased credit.
 	{"payments", `credit_grant_snapshot IS NOT NULL AND status='succeeded' AND NOT EXISTS (
-  SELECT 1 FROM billing.grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
-  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.kind='credit' AND g.event='grant'
-    AND g.source_type='purchase' AND g.source_id=payments.id::text
+  SELECT 1 FROM billing.credit_grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
+  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
     AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
-    AND g.currency=payments.currency AND g.amount=(payments.credit_grant_snapshot->>'amount')::bigint
-    AND (g.spec_snapshot->'deposit'->>'paid_amount')::bigint=payments.amount AND payments.amount>0
+    AND g.unit=payments.currency AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
+    AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
-    AND g.ends_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
+    AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
 	// An order's lot keeps its line's promise instead: the frozen benefit per
 	// unit, and the line's amount as what was paid for it.
-	{"grants", `kind='credit' AND event='grant' AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL AND NOT EXISTS (
-  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=grants.payment_id
-    AND p.status='succeeded' AND p.customer_id=grants.customer_id AND p.currency=grants.currency
+	{"credit_grants", `payment_id IS NOT NULL AND NOT EXISTS (
+  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=credit_grants.payment_id
+    AND p.status='succeeded' AND p.customer_id=credit_grants.customer_id AND p.currency=credit_grants.paid_currency
     AND ((p.credit_grant_snapshot IS NOT NULL
-        AND (p.credit_grant_snapshot->>'amount')::bigint=grants.amount
-        AND p.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)
+        AND (p.credit_grant_snapshot->>'amount')::bigint=credit_grants.units
+        AND p.amount=credit_grants.paid_amount)
       OR EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=p.order_id
-        AND l.product_id=grants.product_id AND l.credit_grant IS NOT NULL
-        AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=grants.amount
-        AND l.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)))`},
+        AND l.product_id=credit_grants.product_id AND l.credit_grant IS NOT NULL
+        AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=credit_grants.units
+        AND l.amount=credit_grants.paid_amount)))`},
 
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
@@ -386,11 +389,10 @@ var referenceChecks = []rowCheck{
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
-	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g
-   WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND (
+	 OR (credit_grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.credit_grants g
+   WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
      g.customer_id=ledger_transfers.customer_id OR (
-       ledger_transfers.customer_id IS NULL AND g.kind='credit'
-       AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
+       ledger_transfers.customer_id IS NULL AND g.paid_amount IS NOT NULL
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))

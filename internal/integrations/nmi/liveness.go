@@ -127,25 +127,30 @@ type SaleAction struct {
 	At            time.Time // zero when the report garbled the date
 	Amount        string
 	Currency      string
+	// Vault is the customer vault the sale charged; empty when the report
+	// names none.
+	Vault string
 	// Evidence is the answer and the card, as the report gives them.
 	Evidence decline.Evidence
 }
 
-// saleActions is the transaction's sale actions on or after since. An action
-// with an unparseable date still counts: the server already filtered by date.
+// saleActions is the transaction's sale actions on or after since, to NMI's
+// whole second. An action with an unparseable date still counts: the server
+// already filtered by date.
 func saleActions(txn QueryTransaction, since time.Time) []SaleAction {
 	var out []SaleAction
+	since = since.Truncate(time.Second)
 	for _, action := range txn.Actions {
 		if !action.Is("sale") {
 			continue
 		}
 		at, _ := action.At()
-		if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
+		if !since.IsZero() && !at.IsZero() && at.Before(since) {
 			continue
 		}
 		out = append(out, SaleAction{
 			TransactionID: strings.TrimSpace(txn.TransactionID), Success: action.Succeeded(), At: at,
-			Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency), Evidence: txn.Evidence(action),
+			Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency), Vault: txn.Vault(), Evidence: txn.Evidence(action),
 		})
 	}
 	return out
@@ -212,6 +217,7 @@ func (c *NMIClient) ReadCycleTransactions(ctx context.Context, scope CycleScope,
 	}
 	seen := map[string]bool{}
 	var out []CycleTransaction
+	since = since.Truncate(time.Second) // NMI dates whole seconds
 	for _, filter := range filters {
 		if !since.IsZero() {
 			filter.StartDate = since.UTC().Format(QueryTimeFormat)

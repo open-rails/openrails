@@ -32,7 +32,8 @@ pricing period, meter cell and rate card (`cardPrint`). With Q the period's
 quantity so far (`meter_period_quantities`), a group of q is charged
 `R(Q+q) − R(Q)` (`marginalPrice`), and `share` splits it to the items exactly; a
 `dynamic` card charges each item its stated amount.
-Usage decided against a hold is priced by the cards the hold pinned. A failed
+A capture of a request hold is priced by the cards it pinned; other usage by the
+cards in force when it settles. A failed
 item is never rated: its grace windows (`failed_usage_windows`) forgive it or
 charge it with its own ledger legs. Then `SettleUsageTx`: `settleLimitsTx` adds
 units to their limit windows; `accrueTx` adds amounts to `usage_accruals`;
@@ -40,14 +41,17 @@ units to their limit windows; `accrueTx` adds amounts to `usage_accruals`;
 
 **Posting.** An accrual posts once its UTC day ends (`UsageAccrualWorker`, the
 first scan of the hourly billing pass), or before any other movement of that
-balance (`grants.PostUsageAccruals`): balance first, one `credit_spend` per lot,
+balance (`credits.PostUsageAccruals`): balance first, one `credit_spend` per lot,
 the rest one `owed_accrual` dated on its day (`owedAt`), so the usage order of
 that period bills it. Until then the unposted amount counts as held.
 
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. A running charge's accrual is
+collections as `order_collection` operations. The threshold is its currency's
+`usage_billing` `collection_threshold`, else its credit limit; a billing policy's
+outstanding cap and `collection_threshold_amount` bind only an account in the
+policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 
@@ -159,16 +163,11 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J24**, settlement: OR-J24-S01, S02, S04 to S11, S21, S22 (replay, pricing on
-  totals, daily posting, owed dating, lots). Its lease scenarios are in
-  [entitlements and limits](entitlements.md).
-- **J25**, running charges and balance looks: OR-J25-S01 to S04, S37, S40 to S42.
+- **J24**, settlement: OR-J24-S01, S02, S04 to S11, S21, S22, S36 (replay, pricing on totals, daily posting, owed dating, lots). Its lease scenarios are in [entitlements and limits](entitlements.md).
+- **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
 
 Other tests: `internal/modules/money/rating_test.go` prices every accepted model.
 
 Gaps:
 - Nothing checks that `retention.Tables` matches the schema; it is review-only.
-- A meter correction locks all of `usage_daily`
-  (`LockUsageDailyForMeterCorrection`), every merchant's settlement included,
-  until its catalog transaction commits.

@@ -42,8 +42,8 @@ const (
 	EventLog = 90 * Day
 	// SubscriptionTransitions keeps a subscription status change 25 months.
 	SubscriptionTransitions = 761 * Day
-	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and a
-	// mutation log entry 25 months.
+	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and an
+	// operation log entry 25 months.
 	ProviderWrites = 761 * Day
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
@@ -156,6 +156,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",
+	"stripe_resume_subscription",
 	"ccbill_cancel_subscription",
 	"nmi_payment_method_update",
 	"nmi_payment_source_update",

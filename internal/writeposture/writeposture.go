@@ -6,6 +6,7 @@ package writeposture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -95,6 +96,26 @@ func (v View) Posture(ctx context.Context, merchantID uuid.UUID) Posture {
 		return Posture{ReadOnly, fmt.Sprintf("write posture unreadable (%v)", err)}
 	}
 	return effective(process, row)
+}
+
+// Read is merchantID's effective posture; an unreadable posture is an error
+// to retry, not a posture.
+func (v View) Read(ctx context.Context, merchantID uuid.UUID) (Posture, error) {
+	if v.Config == nil {
+		return Posture{}, errors.New("operating mode is unknown (no config wired)")
+	}
+	process, _ := ParseMode(config.GetProviderWriteMode(v.Config))
+	if process == ReadOnly {
+		return Posture{ReadOnly, "provider_write_mode=readonly blocks all provider writes: set provider_write_mode to full (or limited)"}, nil
+	}
+	if v.DB == nil {
+		return Posture{}, errors.New("write posture unreadable (no database wired)")
+	}
+	row, err := v.DB.Gen(ctx).GetWritePosture(ctx, merchantID)
+	if err != nil {
+		return Posture{}, fmt.Errorf("read write posture: %w", err)
+	}
+	return effective(process, row), nil
 }
 
 func effective(process Mode, row gen.GetWritePostureRow) Posture {

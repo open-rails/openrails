@@ -6,10 +6,11 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// PaymentAttempt is one authorization a PSP answered (#1110): a card
-// verification, a sale, a rebill or a retry, approved or not. Category,
-// Reason and Action are the one decline classifier's; the codes and texts
-// are the PSP's verbatim. Amount is native units ("0" for a verification).
+// PaymentAttempt is one authorization a PSP answered: a card verification, a
+// sale, a rebill or a retry, approved or not. Outcome, DeclineCause, Reason
+// and Action are the one decline classifier's (DeclineCause and Reason are
+// empty on approvals); the codes and texts are the PSP's verbatim. Amount is
+// native units ("0" for a verification).
 type PaymentAttempt struct {
 	ID PaymentAttemptID `json:"id"`
 	// Kind is verify, initial, upgrade, rebill, dunning_retry, customer_retry
@@ -22,19 +23,25 @@ type PaymentAttempt struct {
 	CardEntry string `json:"card_entry"`
 	// Source is openrails, provider_schedule or external; ObservedVia is how
 	// OpenRails learned the answer: response, webhook or pull.
-	Source       string        `json:"source"`
-	ObservedVia  string        `json:"observed_via"`
-	Category     string        `json:"category"`
-	Reason       DeclineReason `json:"reason"`
-	Action       string        `json:"action"`
-	ResponseCode string        `json:"response_code"`
-	ResponseText string        `json:"response_text"`
+	Source       string         `json:"source"`
+	ObservedVia  string         `json:"observed_via"`
+	Outcome      AttemptOutcome `json:"outcome"`
+	DeclineCause DeclineCause   `json:"decline_cause"`
+	Reason       DeclineReason  `json:"reason"`
+	Action       string         `json:"action"`
+	ResponseCode string         `json:"response_code"`
+	ResponseText string         `json:"response_text"`
 	// IssuerCode and IssuerText are the issuer's raw answer, when the PSP's
 	// transaction report supplied them.
 	IssuerCode string `json:"issuer_code"`
 	IssuerText string `json:"issuer_text"`
-	AVSResult  string `json:"avs_result"`
-	CVVResult  string `json:"cvv_result"`
+	// AdviceCode is the PSP's advice on a refusal (Stripe's advice_code), and
+	// NetworkAdviceCode the card network's (Mastercard's Merchant Advice
+	// Code), verbatim.
+	AdviceCode        string `json:"advice_code"`
+	NetworkAdviceCode string `json:"network_advice_code"`
+	AVSResult         string `json:"avs_result"`
+	CVVResult         string `json:"cvv_result"`
 	// Card is the card the PSP answered for; CardBIN its leading digits.
 	Card          *CardDetails     `json:"card"`
 	CardBIN       string           `json:"card_bin"`
@@ -70,7 +77,8 @@ type PaymentAttemptListParams struct {
 	IDs            []PaymentAttemptID `form:"ids,comma"`
 	Kind           []string           `form:"kind,comma"`
 	Owner          []string           `form:"owner,comma"`
-	Category       []string           `form:"category,comma"`
+	Outcome        []AttemptOutcome   `form:"outcome,comma"`
+	DeclineCause   []DeclineCause     `form:"decline_cause,comma"`
 	Reason         []string           `form:"reason,comma"`
 	ResponseCode   []string           `form:"response_code,comma"`
 	CardEntry      []string           `form:"card_entry,comma"`
@@ -102,7 +110,8 @@ type Renewal struct {
 	DueAt          time.Time        `json:"due_at"`
 	Amount         int64            `json:"amount,string"`
 	Currency       catalog.Currency `json:"currency"`
-	// FirstOutcome is approved, declined, error, missed or pending.
+	// FirstOutcome is the first attempt's outcome (approved, declined,
+	// refused or error), else missed or pending.
 	FirstOutcome string     `json:"first_outcome"`
 	Outcome      string     `json:"outcome"`
 	MissedAt     *time.Time `json:"missed_at"`

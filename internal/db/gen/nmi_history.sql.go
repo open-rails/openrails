@@ -14,8 +14,8 @@ import (
 
 const deleteNMIHistoryMonthsBefore = `-- name: DeleteNMIHistoryMonthsBefore :execrows
 DELETE FROM billing.nmi_history_months
-WHERE (merchant_id, psp_id, month_at, kind, category, reason) IN (
-    SELECT h.merchant_id, h.psp_id, h.month_at, h.kind, h.category, h.reason
+WHERE (merchant_id, psp_id, month_at, kind, reason) IN (
+    SELECT h.merchant_id, h.psp_id, h.month_at, h.kind, h.reason
     FROM billing.nmi_history_months h
     WHERE h.merchant_id = $1::uuid
       AND h.month_at < $2::timestamptz
@@ -57,20 +57,21 @@ func (q *Queries) DeleteNMIHistoryMonthsFrom(ctx context.Context, arg DeleteNMIH
 }
 
 const insertNMIHistoryMonths = `-- name: InsertNMIHistoryMonths :exec
-INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month_at, kind, category, reason, authorizations)
-SELECT $1::uuid, $2::uuid, c.month_at, c.kind, c.category, c.reason, c.authorizations
+INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month_at, kind, reason, authorizations, outcome, decline_cause)
+SELECT $1::uuid, $2::uuid, c.month_at, c.kind, c.reason, c.authorizations, c.outcome, NULLIF(c.decline_cause, '')
 FROM unnest($3::timestamptz[], $4::text[], $5::text[],
-    $6::text[], $7::bigint[]) AS c(month_at, kind, category, reason, authorizations)
+    $6::bigint[], $7::text[], $8::text[]) AS c(month_at, kind, reason, authorizations, outcome, decline_cause)
 `
 
 type InsertNMIHistoryMonthsParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	Months     []time.Time
-	Kinds      []string
-	Categories []string
-	Reasons    []string
-	Counts     []int64
+	MerchantID    uuid.UUID
+	PspID         uuid.UUID
+	Months        []time.Time
+	Kinds         []string
+	Reasons       []string
+	Counts        []int64
+	Outcomes      []string
+	DeclineCauses []string
 }
 
 func (q *Queries) InsertNMIHistoryMonths(ctx context.Context, arg InsertNMIHistoryMonthsParams) error {
@@ -79,9 +80,10 @@ func (q *Queries) InsertNMIHistoryMonths(ctx context.Context, arg InsertNMIHisto
 		arg.PspID,
 		arg.Months,
 		arg.Kinds,
-		arg.Categories,
 		arg.Reasons,
 		arg.Counts,
+		arg.Outcomes,
+		arg.DeclineCauses,
 	)
 	return err
 }

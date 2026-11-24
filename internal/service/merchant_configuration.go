@@ -76,6 +76,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if params.ExpectedRevision != nil && *params.ExpectedRevision < 0 {
 		return nil, apperr.Invalidf("expected_revision must not be negative").WithParam("expected_revision")
 	}
+	if err := s.refuseUsageSettings(params.MerchantSettings); err != nil {
+		return nil, err
+	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -226,12 +229,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.UsageBilling != nil {
 		current.UsageBilling = patch.UsageBilling
 	}
-	if patch.CollectionThreshold != nil {
-		current.CollectionThreshold = patch.CollectionThreshold
-	}
-	if patch.MonthlyFloor != nil {
-		current.MonthlyFloor = patch.MonthlyFloor
-	}
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}
@@ -250,11 +247,11 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.ProviderRefundAccess != nil {
 		current.ProviderRefundAccess = patch.ProviderRefundAccess
 	}
+	if patch.FraudWarningRefund != nil {
+		current.FraudWarningRefund = patch.FraudWarningRefund
+	}
 	if patch.ArrearsGraceDays != nil {
 		current.ArrearsGraceDays = patch.ArrearsGraceDays
-	}
-	if patch.ArrearsDelinquencyFloor != nil {
-		current.ArrearsDelinquencyFloor = patch.ArrearsDelinquencyFloor
 	}
 	if patch.PSPRouting != nil {
 		current.PSPRouting = patch.PSPRouting
@@ -265,11 +262,11 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.Checkout != nil {
 		current.Checkout = patch.Checkout
 	}
+	if patch.Accounting != nil {
+		current.Accounting = patch.Accounting
+	}
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices
-	}
-	if patch.UsageGateSafeSpend != nil {
-		current.UsageGateSafeSpend = patch.UsageGateSafeSpend
 	}
 	if patch.BillingPolicies != nil {
 		current.BillingPolicies = patch.BillingPolicies

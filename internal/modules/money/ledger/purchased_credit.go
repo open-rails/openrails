@@ -42,6 +42,6 @@ func (l *Ledger) PurchasedDeposit(ctx context.Context, customer uuid.UUID, curre
 		return err
 	}
 	_, err = l.Apply(ctx, Transfer{Debit: debit, Credit: credit, Amount: amount,
-		Currency: currency, Type: kind, Coord: coord, GrantID: &grantID, Customer: balanceCustomer})
+		Currency: currency, Type: kind, Coord: coord, CreditGrantID: &grantID, Customer: balanceCustomer})
 	return err
 }

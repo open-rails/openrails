@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,7 +66,8 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 			{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
 		},
 	}
-	w.deps = openrails.Deps{Postgres: pool, Clock: w.clock, FXTransport: fixedFX(t)}
+	w.deps = openrails.Deps{Postgres: pool, Clock: w.clock, FXTransport: fixedFX(t), ClickHouse: criticalClickHouse(t, w.schema)}
+	w.cfg.ClickHouse.Database = w.schema
 	for _, change := range configure {
 		change(w)
 	}
@@ -79,6 +82,26 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	require.NoError(t, err)
 	return w
 }
+
+// criticalClickHouse is a connection to the owned ClickHouse; the world's
+// event store is database, dropped with the world.
+func criticalClickHouse(t *testing.T, database string) driver.Conn {
+	t.Helper()
+	addr := os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR")
+	require.NotEmpty(t, addr, "OPENRAILS_CRITICAL_CLICKHOUSE_ADDR must name a disposable ClickHouse; critical scenarios never skip")
+	conn, err := clickhouse.Open(&clickhouse.Options{Addr: []string{addr}})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, conn.Exec(ctx, "DROP DATABASE IF EXISTS `"+database+"` SYNC"))
+		require.NoError(t, conn.Close())
+	})
+	return conn
+}
+
+// withoutEventStore runs the world without ClickHouse: usage is off.
+func withoutEventStore(w *world) { w.deps.ClickHouse = nil }
 
 // declaredMerchant is the handle of the merchant engine declares under slug.
 func declaredMerchant(engine *openrails.Engine, slug string) (*openrails.Client, error) {

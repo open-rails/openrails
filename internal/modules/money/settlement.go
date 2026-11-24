@@ -62,9 +62,14 @@ type UsageItem struct {
 	Cards []byte
 	// RequireCards refuses an item no card prices: a capture settles money.
 	RequireCards bool
-	// Hold is the hold the item was decided against; nil settles in the
-	// limits' current windows.
+	// Hold is the request hold the item captures: it settles in the hold's
+	// windows.
 	Hold *SettleHold
+	// AdmittedAt places an item with no hold in the windows current when its
+	// request was admitted; nil, in those current at settlement.
+	AdmittedAt *time.Time
+	// Spend are the billing policy's spend windows the item counts toward.
+	Spend []limits.Claim
 	// FailedWindows are the windows a failed item counts toward: its grace,
 	// or its delegated invoker's cutoff.
 	FailedWindows []FailedUsageWindow
@@ -72,14 +77,11 @@ type UsageItem struct {
 	FailedKey IdempotencyKey
 }
 
-// SettleHold is the hold an item settles into: its parts' windows, and for a
-// live lease's hold what the item takes from it.
+// SettleHold is the request hold an item settles into: its parts' windows.
 type SettleHold struct {
 	ID        uuid.UUID
 	CreatedAt time.Time
 	Parts     []HoldPart
-	// Consume takes the item's units from the parts: a live lease's hold.
-	Consume bool
 }
 
 // HoldPart is what a hold set aside of one limit, in the window it was
@@ -120,7 +122,7 @@ type pricedItem struct {
 	periodEnd time.Time
 	charges   []itemCharge
 	// units are what the item counts toward each named-unit limit whose
-	// rate cards read it.
+	// counts read it.
 	units map[string]int64
 }
 
@@ -222,7 +224,7 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 		// A lot that lapsed is expired first, after the usage before it posts
 		// from it: what this batch accrues never draws a lapsed lot.
-		if _, err := s.grantLedger(q, merchantID).ExpireLapsedBy(ctx, a.customer, a.currency, now); err != nil {
+		if _, err := s.creditLots(q, merchantID).ExpireLapsedBy(ctx, a.customer, a.currency, now); err != nil {
 			return nil, err
 		}
 		anchor, err := s.periodAnchorFor(ctx, q, merchantID, a.customer, a.currency)
@@ -481,9 +483,8 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 }
 
 // SettleUsageTx settles a priced batch in the caller's transaction: the
-// accruals, rollups and per-minute spend take its amounts, live lease holds
-// give up what their usage took, and the limits take it in full, never
-// clamped.
+// accruals, rollups and per-minute spend take its amounts, and the limits
+// take it in full, never clamped.
 func (s *MoneyService) SettleUsageTx(ctx context.Context, q *gen.Queries, b *UsageBatch) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -649,6 +650,15 @@ func rollUpTx(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b *Usag
 				strings.Compare(x.invoker, y.invoker), strings.Compare(x.outcome, y.outcome))
 		})
 		arg := gen.UpsertUsageDailyParams{MerchantID: merchantID, Now: b.now}
+		var eventTypes []string
+		for _, k := range keys {
+			if !slices.Contains(eventTypes, k.eventType) {
+				eventTypes = append(eventTypes, k.eventType)
+			}
+		}
+		if err := q.ShareUsageEventTypes(ctx, gen.ShareUsageEventTypesParams{MerchantID: merchantID, EventTypes: eventTypes}); err != nil {
+			return err
+		}
 		for _, k := range keys {
 			r := days[k]
 			arg.CustomerIds = append(arg.CustomerIds, k.customer)
@@ -690,13 +700,12 @@ func rollUpTx(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b *Usag
 	return nil
 }
 
-// settleLimitsTx takes each item's units from the hold it was decided
-// against and settles them, with what the customer's other declared limits
-// count of it, into their windows: the hold's for a limit it holds, the
-// current window for the rest.
+// settleLimitsTx settles each item's units, with what the customer's other
+// declared limits count of it, into their windows: a request hold's for a
+// limit it holds, the windows current when the item was admitted for the
+// rest, and the item's spend windows.
 func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b *UsageBatch) error {
 	defs := b.defs
-	var err error
 	byCustomer := map[uuid.UUID][]int{}
 	var customers []uuid.UUID
 	for i, it := range b.items {
@@ -710,22 +719,30 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 		byCustomer[c] = append(byCustomer[c], i)
 	}
 	slices.SortFunc(customers, compareUUID)
-	type consumed struct {
-		hold   uuid.UUID
-		at     time.Time
-		key    string
-		amount int64
-	}
 	for _, customer := range customers {
 		reader := limits.Customer{Q: q, MerchantID: merchantID, CustomerID: customer, Now: b.now,
 			Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 				return s.PricingPeriod(ctx, q, merchantID, customer, unit, at)
 			}}
-		var current map[string]limits.Claim
-		if len(defs) > 0 {
-			if current, err = reader.Windows(ctx, defs); err != nil {
-				return err
+		// Windows by the instant they are located at: settlement's own, and
+		// each admission instant outside them.
+		located := map[time.Time]map[string]limits.Claim{}
+		windowsAt := func(at time.Time) (map[string]limits.Claim, error) {
+			if len(defs) == 0 {
+				return nil, nil
 			}
+			if w, ok := located[at]; ok {
+				return w, nil
+			}
+			r := reader
+			r.Now = at
+			w, err := r.Windows(ctx, defs)
+			located[at] = w
+			return w, err
+		}
+		current, err := windowsAt(b.now)
+		if err != nil {
+			return err
 		}
 		type windowKey struct {
 			key   string
@@ -733,7 +750,6 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 		}
 		settled := map[windowKey]*limits.Settlement{}
 		var order []windowKey
-		var takes []consumed
 		settle := func(st limits.Settlement) {
 			if st.Units == 0 {
 				return
@@ -773,15 +789,26 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 						continue
 					}
 					res.Units[p.Key] = units
-					if it.Hold.Consume && units > 0 {
-						takes = append(takes, consumed{it.Hold.ID, it.Hold.CreatedAt, p.Key, units})
+				}
+			} else {
+				for _, c := range it.Spend {
+					if amount == 0 {
+						break
 					}
+					settle(limits.Settlement{Key: c.Key, Reset: c.Reset, Window: c.Window, Capacity: c.Capacity, Units: amount})
+					res.Units[c.Key] = amount
 				}
 			}
-			// A limit the hold does not name takes the usage in its current
-			// window: a granted one's, or an ungranted one's row that exists.
+			windows := current
+			if it.Hold == nil && it.AdmittedAt != nil && !covers(current, it.AdmittedAt.UTC()) {
+				if windows, err = windowsAt(it.AdmittedAt.UTC().Truncate(time.Second)); err != nil {
+					return err
+				}
+			}
+			// A limit the hold does not name takes the usage in its window: a
+			// granted one's, or an ungranted one's row that exists.
 			for _, def := range defs {
-				c, ok := current[def.Key]
+				c, ok := windows[def.Key]
 				if held[def.Key] || !ok {
 					continue
 				}
@@ -796,13 +823,6 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 				res.Units[def.Key] = units
 			}
 		}
-		// What the usage took leaves its live hold before the windows are
-		// settled, so it is not counted twice.
-		for _, t := range takes {
-			if err := q.ConsumeLeaseHoldPart(ctx, gen.ConsumeLeaseHoldPartParams{Units: t.amount, MerchantID: merchantID, HoldID: t.hold, HoldCreatedAt: t.at, LimitKey: t.key}); err != nil {
-				return err
-			}
-		}
 		list := make([]limits.Settlement, 0, len(order))
 		for _, k := range order {
 			list = append(list, *settled[k])
@@ -812,6 +832,21 @@ func (s *MoneyService) settleLimitsTx(ctx context.Context, q *gen.Queries, merch
 		}
 	}
 	return nil
+}
+
+// covers reports whether every located window that resets contains at: an
+// item admitted then settles in them. A rolling limit's bucket only decides
+// when the usage ages out, so it never sends an item elsewhere.
+func covers(windows map[string]limits.Claim, at time.Time) bool {
+	for _, c := range windows {
+		if c.Reset.Kind == catalog.ResetRolling {
+			continue
+		}
+		if c.Opens || at.Before(c.Window.StartsAt) || c.Window.EndsAt != nil && !at.Before(*c.Window.EndsAt) {
+			return false
+		}
+	}
+	return true
 }
 
 func findDef(defs []limits.Definition, key string) (limits.Definition, bool) {

@@ -6,6 +6,9 @@ import (
 	"net/mail"
 	"net/url"
 	"strings"
+	"time"
+	// Zone names validate the same wherever the binary runs.
+	_ "time/tzdata"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/currency"
@@ -44,6 +47,26 @@ func mailbox(s string) (string, bool) {
 		return "", false
 	}
 	return a.Address, true
+}
+
+// DefaultAccountingTimezone dates a merchant's books that names no zone.
+const DefaultAccountingTimezone = "UTC"
+
+// NormalizeAccountingTimezone validates accounting.timezone: an IANA zone
+// name; empty is UTC.
+func NormalizeAccountingTimezone(zone string) (string, error) {
+	zone = strings.TrimSpace(zone)
+	if zone == "" {
+		return DefaultAccountingTimezone, nil
+	}
+	// Local is the host's zone, not a merchant's.
+	if zone == "Local" {
+		return "", fmt.Errorf("accounting.timezone must be an IANA zone name, not Local")
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return "", fmt.Errorf("accounting.timezone %q is not an IANA zone", zone)
+	}
+	return zone, nil
 }
 
 // Settings is a merchant's settings, validated: the configuration readers
@@ -104,17 +127,19 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("profile.statement_descriptor must be at most 64 characters")
 		}
 	}
-	for name, v := range map[string]*int64{"collection_threshold": in.CollectionThreshold, "monthly_floor": in.MonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
-		if v != nil && *v < 0 {
-			return Settings{}, fmt.Errorf("%s must be >= 0", name)
-		}
-	}
 	for name, v := range map[string]*int{"reprice_notice_window_days": in.RepriceNoticeWindowDays, "arrears_grace_days": in.ArrearsGraceDays} {
 		if v != nil && *v < 0 {
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	cfg.CollectionThreshold, cfg.MonthlyFloor, cfg.ArrearsDelinquencyFloor = in.CollectionThreshold, in.MonthlyFloor, in.ArrearsDelinquencyFloor
+	cfg.AccountingTimezone = DefaultAccountingTimezone
+	if in.Accounting != nil {
+		zone, err := NormalizeAccountingTimezone(in.Accounting.Timezone)
+		if err != nil {
+			return Settings{}, err
+		}
+		cfg.AccountingTimezone = zone
+	}
 	cfg.RepriceNoticeWindowDays, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.ArrearsGraceDays
 	if in.BillingPeriodBoundary != "" {
 		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
@@ -131,15 +156,20 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			cfg.AlertEmail = address
 		}
 	}
-	if in.UsageGateSafeSpend != nil {
-		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend
-	}
 	if in.ProviderRefundAccess != nil {
 		policy, err := NormalizeProviderRefundAccess(billing.ProviderRefundAccess(strings.TrimSpace(string(*in.ProviderRefundAccess))))
 		if err != nil {
 			return Settings{}, err
 		}
 		cfg.ProviderRefundAccess = policy
+	}
+	if in.FraudWarningRefund != nil {
+		switch policy := billing.FraudWarningRefund(strings.TrimSpace(string(*in.FraudWarningRefund))); policy {
+		case "", billing.FraudWarningRefundCharge, billing.FraudWarningRecord:
+			cfg.FraudWarningRefund = policy
+		default:
+			return Settings{}, fmt.Errorf("fraud_warning_refund must be %q or %q", billing.FraudWarningRefundCharge, billing.FraudWarningRecord)
+		}
 	}
 	if in.DunningPolicy != nil {
 		if _, err := collection.PolicyOf(in.DunningPolicy); err != nil {

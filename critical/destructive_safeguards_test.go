@@ -27,7 +27,7 @@ import (
 )
 
 func TestDestructiveSafeguards(t *testing.T) {
-	t.Run("OR-J34-S32/a-spent-solana-schedule-waits-past-due-while-the-switch-is-off", func(t *testing.T) {
+	t.Run("OR-J34-S39/a-spent-solana-schedule-waits-past-due-while-the-switch-is-off", func(t *testing.T) {
 		// This policy retries no weekly renewal: the first refused pull spends it.
 		s := newSolanaWorld(t, true, solanaFixtureOptions{dunning: &billing.DunningPolicy{Tiers: []billing.DunningTier{{}}}})
 		_, sub := s.subscribe(t)
@@ -53,7 +53,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.True(t, s.entitled(t, sub.CustomerID, "chain:paid"), "and the member keeps access")
 	})
 
-	t.Run("OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission", func(t *testing.T) {
+	t.Run("OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission", func(t *testing.T) {
 		t.Run("host", func(t *testing.T) {
 			b := newNMIBook(t)
 			members := make([]billing.CustomerID, 6)

@@ -62,7 +62,7 @@ var nmiCodes = map[int]nmiCode{
 	440: {billing.DeclineInvalidRequest, "processor_format_error", "Processor format error."},
 	441: {billing.DeclineInvalidRequest, "invalid_transaction_information", "Invalid transaction information."},
 	460: {billing.DeclineInvalidRequest, "processor_feature_not_available", "Processor feature not available."},
-	461: {billing.DeclineCardNotSupported, "unsupported_card_type", "Unsupported card type."},
+	461: {billing.DeclineBrandNotAccepted, "unsupported_card_type", "Unsupported card type."},
 }
 
 var nmiByLocalization = func() map[string]int {
@@ -109,6 +109,7 @@ func NMIMessage(code int) string { return nmiCodes[code].message }
 var stripeCodes = map[string]billing.DeclineReason{
 	"generic_decline":                       billing.DeclineGeneric,
 	"card_declined":                         billing.DeclineGeneric,
+	"do_not_try_again":                      billing.DeclineGeneric, // advised: never charged again
 	"do_not_honor":                          billing.DeclineDoNotHonor,
 	"no_action_taken":                       billing.DeclineDoNotHonor,
 	"call_issuer":                           billing.DeclineCallIssuer,
@@ -138,10 +139,13 @@ var stripeCodes = map[string]billing.DeclineReason{
 	"online_or_offline_pin_required":        billing.DeclineInvalidPIN,
 	"transaction_not_allowed":               billing.DeclineTransactionNotAllowed,
 	"not_permitted":                         billing.DeclineTransactionNotAllowed,
+	"service_not_allowed":                   billing.DeclineTransactionNotAllowed,
 	"card_not_supported":                    billing.DeclineCardNotSupported,
 	"currency_not_supported":                billing.DeclineCurrencyNotSupported,
 	"authentication_required":               billing.DeclineAuthenticationRequired,
 	"payment_intent_authentication_failure": billing.DeclineAuthenticationRequired,
+	"mobile_device_authentication_required": billing.DeclineAuthenticationRequired,
+	"new_account_information_available":     billing.DeclineUpdateCardholderData,
 	"pickup_card":                           billing.DeclinePickupCard,
 	"lost_card":                             billing.DeclineLostCard,
 	"stolen_card":                           billing.DeclineStolenCard,
@@ -150,9 +154,18 @@ var stripeCodes = map[string]billing.DeclineReason{
 	"revocation_of_authorization":           billing.DeclineStopRecurring,
 	"revocation_of_all_authorizations":      billing.DeclineStopRecurring,
 	"merchant_blacklist":                    billing.DeclineBlockedByPSP,
-	"processing_error":                      billing.DeclineProcessingError,
-	"issuer_not_available":                  billing.DeclineIssuerUnavailable,
-	"duplicate_transaction":                 billing.DeclineDuplicateTransaction,
+	// Radar's block reasons (a charge's outcome.reason when its type is
+	// blocked): the charge never reached the network.
+	"highest_risk_level":               billing.DeclineBlockedByPSP,
+	"elevated_risk_level":              billing.DeclineBlockedByPSP,
+	"rule":                             billing.DeclineBlockedByPSP,
+	"low_probability_of_authorization": billing.DeclineBlockedByPSP,
+	"blocked":                          billing.DeclineBlockedByPSP, // any other block reason
+	"processing_error":                 billing.DeclineProcessingError,
+	"issuer_not_available":             billing.DeclineIssuerUnavailable,
+	"duplicate_transaction":            billing.DeclineDuplicateTransaction,
+	"invalid_amount":                   billing.DeclineInvalidRequest,
+	"testmode_decline":                 billing.DeclineInvalidRequest,
 }
 
 // ccbillCodes is CCBill's own BE-nnn vocabulary

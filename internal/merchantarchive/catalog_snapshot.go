@@ -203,7 +203,7 @@ func RestoreCatalog(ctx context.Context, database *db.DB, id billing.MerchantID,
 			return err
 		}
 		var revision int64
-		if err := tx.QueryRow(ctx, `SELECT catalog_revision FROM billing.merchants WHERE id=$1 FOR UPDATE`, id.UUID()).Scan(&revision); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT catalog_revision FROM billing.merchants WHERE id=$1 FOR NO KEY UPDATE`, id.UUID()).Scan(&revision); err != nil {
 			return err
 		}
 		var digest string

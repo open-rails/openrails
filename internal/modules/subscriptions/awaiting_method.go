@@ -51,3 +51,24 @@ func (s *SubscriptionLifecycleService) raiseTerminalHeld(ctx context.Context, d 
 	}
 	return nil
 }
+
+// EndAdviceDeferred ends, at the next renewal, a case the network's advice
+// deferred there: exhausted, its ending issuer_deferred. With the operator's
+// destructive switch off the row keeps waiting, access intact, under a
+// standing finding.
+func (s *SubscriptionLifecycleService) EndAdviceDeferred(ctx context.Context, d *db.DB, sub *models.Subscription, blocked string) (bool, error) {
+	now := s.now()
+	if blocked != "" {
+		held := TerminalHold{Reason: blocked, Remedy: SwitchRemedy}
+		action := fmt.Sprintf("the issuer deferred every retry of subscription %s past its next renewal, but ending it there was refused (%s); it keeps access. %s", sub.ID, blocked, SwitchRemedy)
+		return false, s.raiseTerminalHeld(ctx, d, sub, held, action, nil, now)
+	}
+	return s.Decide(ctx, d, sub.ID, lifecycle.DunningExhausted{At: now}, EffectOptions{EndedReason: PremiumEndReasonExpired}, func(_ context.Context, _ *db.DB, locked *models.Subscription) (bool, error) {
+		if !locked.AdviceDeferred() || locked.GraceEndsAt.After(now) {
+			return false, nil
+		}
+		reason := CancelIssuerDeferred
+		locked.CancelFeedback = &reason
+		return true, nil
+	})
+}

@@ -14,7 +14,7 @@
 //
 // Row periods: usage_daily 24 months after its usage was billed (about 26
 // after the month began); subscription_status_transitions,
-// subscription_billing_changes, provider_mutation_logs, payment_attempts,
+// subscription_billing_changes, operation_log, payment_attempts,
 // rebill_cycles and nmi_history_months 25 months; instruction-only
 // provider_intents 25 months after they last changed (the rest are
 // permanent); resolved reconciliation_findings 12 months; order_attempts that
@@ -25,9 +25,14 @@
 // solana_pay_references at expiry (after the 7-day watch);
 // user_destructive_reservations 24 hours; failed_usage_windows when the window
 // ends; meter_period_quantities 100 days; limit_windows 61 days after
-// window_ends_at (lifetime and rate limits stay); leases with their holds and
-// limit_adjustments 61 days after the last sync; usage_minutes 25 hours;
+// window_ends_at (lifetime and rate limits stay); leases with their in-flight
+// reports, and limit_adjustments, 61 days after the last sync; usage_minutes 25 hours;
 // webhook_health_daily 13 months; periodic_leases after 30 days unscheduled.
+//
+// The event store's ClickHouse tables expire by their TTLs: usage_events 100
+// days after occurred_at, usage_quantities 100 days after the period start,
+// usage_minutes 2 days, usage_days 25 months, limit_usage 61 days after its
+// window ends (a window without an end stays).
 //
 // The cleanup job (openrails.cleanup_expired_data) creates partitions two
 // months ahead, drops expired ones (giving up after 2 s rather than queue

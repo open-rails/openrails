@@ -52,45 +52,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, Log: r.Log},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
 	}
-	// An operator request runs bounded window pulls, CCBill DataLink and
-	// reconciliation for the merchant.
-	if err := addWorker(workers, &riverjobs.ProviderRefreshWorker{
-		StripeClients: r.StripeClients,
-		DB:            r.DB,
-		Config:        r.Config,
-		Clock:         clock,
-		Merchants:     r.Merchants, // per-merchant store-armed pulls
-		DeferDelete:   r.DeferredDeletes,
-		Contacts:      r.Contacts,
-		Alerts:        r.AlertService, // requires_review findings -> operator notifications
-		NMIClients:    r.NMIClients,
-		Verifier:      r.Verifier,
-		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return err
-			}
-			receipt, err := money.ReadObservedNMIUsageReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
-			if err != nil {
-				return err
-			}
-			_, err = r.MoneyService.RecoverObservedUsagePayment(ctx, receipt)
-			var owned *money.UsageRecoveryOperationOwned
-			if errors.As(err, &owned) {
-				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
-					return wakeErr
-				}
-			}
-			return err
-		},
-		Log: r.Log,
-	}); err != nil {
+	refresh, paced := r.refreshWorkers(clock)
+	if err := addWorker(workers, refresh); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
+	}
+	if err := addWorker(workers, paced); err != nil {
+		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
 	eventRetention, err := config.EventRetentionDuration(r.Config)
@@ -125,6 +97,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
 	}); err != nil {
 		return fmt.Errorf("add customer converge worker: %w", err)
+	}
+	// A PSP's dispute monitoring programs, queued by each chargeback and
+	// fraud report, and by a sale while one of its findings is open.
+	if err := addWorker(workers, &riverjobs.DisputeMonitorWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute monitor worker: %w", err)
+	}
+	// What a chargeback or fraud report calls for, once the gates admit it.
+	if err := addWorker(workers, &riverjobs.DisputeResponseWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute response worker: %w", err)
 	}
 	// Health findings and timed access lapses, for merchants with activity.
 	if err := addWorker(workers, &riverjobs.MerchantHealthWorker{
@@ -203,6 +184,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
+	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
+		return fmt.Errorf("add contact erasure worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -241,6 +225,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
+		// Cancellations at period end leave MRR at their end.
+		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
@@ -301,6 +287,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
+		intents.NewStripeResumeHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
 		rebill,
 		// Order collection rides the intent ledger like every other money
@@ -460,4 +447,45 @@ func (r *Runtime) findingNotifier() reconcile.FindingNotifier {
 		return nil
 	}
 	return r.AlertService
+}
+
+// refreshWorkers are the provider refresh's workers: an operator request runs
+// bounded window pulls, CCBill DataLink and reconciliation for the merchant,
+// and a paced PSP's refresh (a live CCBill account) reads a request per slot
+// of the runtime's DataLinkPacing.
+func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefreshWorker, *riverjobs.PacedProviderRefreshWorker) {
+	refresh := &riverjobs.ProviderRefreshWorker{
+		StripeClients:  r.StripeClients,
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Merchants:      r.Merchants, // per-merchant store-armed pulls
+		DeferDelete:    r.DeferredDeletes,
+		Contacts:       r.Contacts,
+		Alerts:         r.AlertService, // requires_review findings -> operator notifications
+		NMIClients:     r.NMIClients,
+		DataLinkPacing: r.DataLinkPacing(),
+		Verifier:       r.Verifier,
+		Disputes:       r.Disputes,
+		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			receipt, err := money.ReadObservedNMIUsageReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
+			if err != nil {
+				return err
+			}
+			_, err = r.MoneyService.RecoverObservedUsagePayment(ctx, receipt)
+			var owned *money.UsageRecoveryOperationOwned
+			if errors.As(err, &owned) {
+				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
+					return wakeErr
+				}
+			}
+			return err
+		},
+		Log: r.Log,
+	}
+	return refresh, &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}
 }

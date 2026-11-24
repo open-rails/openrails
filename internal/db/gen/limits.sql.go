@@ -134,7 +134,7 @@ func (q *Queries) EnsureLimitWindow(ctx context.Context, arg EnsureLimitWindowPa
 }
 
 const getCatalogLimit = `-- name: GetCatalogLimit :one
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = $1::uuid AND key = $2::text
 `
@@ -151,7 +151,7 @@ type GetCatalogLimitRow struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 	Revision      int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -167,7 +167,7 @@ func (q *Queries) GetCatalogLimit(ctx context.Context, arg GetCatalogLimitParams
 		&i.WindowSeconds,
 		&i.ResetAnchor,
 		&i.Overrun,
-		&i.RateCards,
+		&i.Counts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -376,7 +376,7 @@ func (q *Queries) ListCatalogLimitProducts(ctx context.Context, arg ListCatalogL
 }
 
 const listCatalogLimits = `-- name: ListCatalogLimits :many
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = $1::uuid
 ORDER BY key
@@ -389,7 +389,7 @@ type ListCatalogLimitsRow struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 	Revision      int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -411,7 +411,7 @@ func (q *Queries) ListCatalogLimits(ctx context.Context, merchantID uuid.UUID) (
 			&i.WindowSeconds,
 			&i.ResetAnchor,
 			&i.Overrun,
-			&i.RateCards,
+			&i.Counts,
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -428,9 +428,9 @@ func (q *Queries) ListCatalogLimits(ctx context.Context, merchantID uuid.UUID) (
 
 const listCatalogLimitsUsingMeters = `-- name: ListCatalogLimitsUsingMeters :many
 SELECT DISTINCT l.key
-FROM billing.catalog_limits l, jsonb_array_elements(l.rate_cards) card
+FROM billing.catalog_limits l, jsonb_array_elements(l.counts) entry
 WHERE l.merchant_id = $1::uuid
-  AND card->>'meter' = ANY($2::text[])
+  AND entry->>'meter' = ANY($2::text[])
 ORDER BY l.key
 `
 
@@ -690,7 +690,7 @@ func (q *Queries) ListLimitWindowsFrom(ctx context.Context, arg ListLimitWindows
 }
 
 const pageCatalogLimits = `-- name: PageCatalogLimits :many
-SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards, revision, created_at, updated_at
+SELECT key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts, revision, created_at, updated_at
 FROM billing.catalog_limits
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR key > $2::text)
@@ -711,7 +711,7 @@ type PageCatalogLimitsRow struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 	Revision      int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -733,7 +733,7 @@ func (q *Queries) PageCatalogLimits(ctx context.Context, arg PageCatalogLimitsPa
 			&i.WindowSeconds,
 			&i.ResetAnchor,
 			&i.Overrun,
-			&i.RateCards,
+			&i.Counts,
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -783,14 +783,14 @@ func (q *Queries) RecordLimitAdjustment(ctx context.Context, arg RecordLimitAdju
 }
 
 const upsertCatalogLimit = `-- name: UpsertCatalogLimit :exec
-INSERT INTO billing.catalog_limits (merchant_id, key, unit, reset_kind, window_seconds, reset_anchor, overrun, rate_cards)
+INSERT INTO billing.catalog_limits (merchant_id, key, unit, reset_kind, window_seconds, reset_anchor, overrun, counts)
 VALUES (
     $1::uuid, $2::text, $3::text, $4::text,
     $5::int, $6::text, $7::text, $8::jsonb
 )
 ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit, reset_kind = EXCLUDED.reset_kind,
     window_seconds = EXCLUDED.window_seconds, reset_anchor = EXCLUDED.reset_anchor, overrun = EXCLUDED.overrun,
-    rate_cards = EXCLUDED.rate_cards, updated_at = now()
+    counts = EXCLUDED.counts, updated_at = now()
 `
 
 type UpsertCatalogLimitParams struct {
@@ -801,7 +801,7 @@ type UpsertCatalogLimitParams struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 }
 
 func (q *Queries) UpsertCatalogLimit(ctx context.Context, arg UpsertCatalogLimitParams) error {
@@ -813,7 +813,7 @@ func (q *Queries) UpsertCatalogLimit(ctx context.Context, arg UpsertCatalogLimit
 		arg.WindowSeconds,
 		arg.ResetAnchor,
 		arg.Overrun,
-		arg.RateCards,
+		arg.Counts,
 	)
 	return err
 }

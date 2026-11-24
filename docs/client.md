@@ -116,6 +116,7 @@ its role's permissions. Grant only what the backend needs:
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
+| push the customer directory over SCIM, or mint its provisioning tokens | `merchant:provisioning:read`, `merchant:provisioning:manage` |
 
 Each permission also has a `root:` name, held in your auth's root scope for
 every merchant; `billing.Permissions()` lists them and roles should be built
@@ -196,15 +197,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's.
-Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your
-own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to
-`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token;
-`externalId` is the user's UUID, and the newest write wins. On a standalone
-server or the hosted platform, your issuer pushes to the server's directory
-(`/directory/scim/v2`), and verified contact claims in customer tokens fill in
-as they are used. OpenRails emails a customer only at an address that was
-verified.
+**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -223,11 +216,11 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `UpdatePSP` | rotate credentials, change settings or archive; archiving the last active PSP of a rail is `409 psp_last_active` |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
-| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
+| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha, and `usage`, whether the deployment serves usage |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
 
-Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when. A price key's `move` entries say which of its prices it named from when, or none once archived; `ListPriceHistory` reads them.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:
@@ -271,16 +264,7 @@ several documents, anchors and tags are refused, and so are the retired keys
 committed file: an overlay or Vault supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
-**Environments.** Each PSP declares whether it moves real money; omitted, it is
-the rail's real-money one, so production declares none. NMI: `live`, `test` (an
-account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key
-prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`,
-`testnet`. A merchant may mix them. OpenRails asks the provider before arming a
-PSP and again once that proof is an hour old: NMI's `test_mode_status`, Stripe's
-key prefix and `api.stripe.com/v1/account` against `account_id`, Solana's genesis hash on
-every RPC endpoint. A PSP whose answer disagrees stays disarmed: reads work,
-writes fail before any byte is sent, and the `openrails_psp_posture` probe
-reports it. CCBill's sandbox has no signal, so its writes are always refused.
+**Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
 **Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}`
 (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or
@@ -289,6 +273,10 @@ joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
 the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
+
+A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
+acquirer's limit on a month's chargebacks over settled sales as a percentage
+(`"0.9%"`): it is monitored like the card networks' programs.
 
 ### NMI
 
@@ -310,13 +298,18 @@ and enable exactly these 14 events:
 - `acu.summary.automaticallyupdated`, `.closedaccount`, `.contactcustomer` (with
   NMI's Automatic Card Updater)
 
+NMI sends `chargeback.batch.complete` only for processors that report
+chargebacks: confirm yours does, or a PSP's dispute ratio reads 0% with no data
+behind it (`ListDisputePrograms` says whether any dispute was reported).
+
 Each NMI decline costs a fee; OpenRails retries renewals sparsely. A legacy NMI
 schedule keeps billing at NMI; OpenRails mirrors it and retries its declines.
 
 ### Stripe
 
-`account_id` is your `acct_…`; the key is checked against it, and a key of another
-account never arms. `secret_key` may be a restricted key. OpenRails registers the
+`account_id` is your `acct_…`; the key is checked against it, and a key of another account never arms. `secret_key` may be a restricted key with read access to its own account (`api.stripe.com/v1/account`; Stripe's refusal, which the posture probe reports, names the permission) and these permissions: `customer_write`, `payment_intent_write`, `setup_intent_write`, `payment_method_write`, `charge_write` (refunds), `subscription_write`, `invoice_write`, `checkout_session_write`, `customer_portal_write`, `webhook_write`, `payment_method_domain_write`, `product_read`, `plan_read` (prices), `dispute_read`, `event_read`, and `balance_read` on a test key.
+
+OpenRails registers the
 webhook endpoint itself when the configuration is in Vault, pinned to its Stripe
 API version, and keeps its events current. With a file it cannot keep the new
 signing secret, so register the endpoint once in the dashboard at
@@ -351,17 +344,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile`
-(`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`,
-`terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault`
-and `charge_psps` (where new cards are saved and which PSPs take new charges),
-`psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their
-bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
-`monthly_floor`, `collection_threshold`, `billing_period_boundary`),
-`reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and
-`alert_email` are each one mailbox, bare or named. Beside the settings, the
-merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports count in; default UTC). `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -658,14 +641,16 @@ return nil
 |---|---|
 | `ListPayments`, `GetPayment` | payments and refunds, with their order |
 | `ListPaymentAttempts`, `GetPaymentAttempt` | each provider attempt, with its decline |
-| `RefundPayment` | refund through the PSP, in full or in part; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
+| `ListDisputes`, `GetDispute` | each provider dispute (inquiry, chargeback or prevented), with its network, reason family, code, dates and outcome |
+| `RefundPayment` | refund through the PSP, in full or in part; `RefundReason` says why (default `requested_by_customer`), `Reason` in the merchant's words; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
 | `RecordExternalPayment` | money received outside OpenRails against a usage order, idempotent on its transaction id, at most what it owes (`409 payment_exceeds_due`) |
 
 ```go guide:refund
 // key: one per refund decision; a retry with it refunds once
 return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 	Full:         true,
-	Reason:       "requested_by_customer",
+	RefundReason: billing.RefundRequestedByCustomer,
+	Reason:       "cancelled within the first day",
 	RevokeAccess: true,
 })
 ```
@@ -673,6 +658,14 @@ return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 A refund through CCBill or Solana is `refund_unsupported`. Refunds and
 chargebacks revoke the access their payment bought. Staff never start a card
 charge.
+
+**Disputes.** A chargeback ends what its charge paid for and the card is never
+charged again (`disputed`): the customer's other subscriptions on it wait for
+another card, or end at period end where a provider bills them. An inquiry
+moves no money and ends nothing. A Stripe early fraud warning refunds its charge
+in full and ends what it paid for, unless the merchant setting
+`fraud_warning_refund` is `record`. Each chargeback raises a
+`life.disputes.customer_review` finding.
 
 **Saved cards.** A method is `{id, rail, psp_id, card, billing_details, health,
 default_currencies}`; only `active` ones are charged. Renewals and usage
@@ -702,11 +695,11 @@ limits:
     unit: units
     reset: {kind: rolling, window_seconds: 3600}
     overrun: admit_while_positive
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}] # adds quantity × weight ÷ per; both default to 1
   monthly:
     unit: units
     reset: {kind: billing_period}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   starter: {display_name: Starter, limits: {hourly: "1000", monthly: "100000"}}
   usage:
@@ -727,8 +720,8 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
-| `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
+| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
+| `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
 ```go guide:credit-grant
@@ -802,35 +795,30 @@ is `fixed`, `billing_period`, `session`, `rolling`, `rate` or `lifetime`;
 `require_estimate` admits only an estimate that fits. Late usage settles in full,
 never clamped.
 
+A named-unit limit counts meters: each of its `counts` (`catalog.LimitCount`) adds an event's quantity × `weight` ÷ `per`, rounded half up, when its meter reads the event and its optional `filter` admits the event's dimensions; `weight` and `per` default to 1, so `counts: [{meter: tokens}]` counts tokens one to one. Several counts weight a mix: `[{meter: input-tokens, per: 1000}, {meter: output-tokens, weight: 4, per: 1000}, {meter: output-tokens, weight: 6, per: 1000, filter: {model: [large]}}]` counts thousands of input tokens, output at four times that and a large model's output at ten. A currency limit counts the rated amount and has no counts; rate cards price money only.
+
 Refusals are verdicts, not errors:
 
 | Deny code | Means |
 |---|---|
 | `limit_reached` | the limit is spent until `resets_at` |
-| `capacity_held` | it would fit but for capacity other gates hold; retry after `retry_after_seconds` |
 | `insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached` | the built-in `balance` limit: prepaid balance, credit line, unpaid arrears |
 | `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
 | `delinquent_unpaid_order` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
 
 **The Gate** admits in your process over any `*Client` whose credential holds
-`merchant:usage:manage` and `merchant:usage:read`. It keeps one lease and holds
-of each served customer's capacity, sized from traffic: a warm decision makes no
-network call and continues while OpenRails is unreachable; a cold one waits for
-one `SyncLeases` round trip or is `openrails.ErrUnavailable`. Nothing tunes it.
+`merchant:usage:manage` and `merchant:usage:read`. Each sync of its lease answers
+views: where each customer it serves stands on its limits, reserving nothing. A
+warm decision takes the request's cost from the view, less what the gate has in
+flight, with no network call. Near a limit the request is decided on OpenRails,
+exactly, as a request hold of the gate's lease. A customer with no view waits for
+one `SyncLeases` round trip. Nothing tunes it.
+
+A limit may be overshot by a small, bounded amount: what other gates (and admissions and batch jobs) add for the customer within about four sync intervals, less the margin the gate keeps from what its views show others adding; steady traffic overshoots by nothing. While OpenRails is unreachable a gate keeps deciding on the views it had when the outage began, spending at most its share of what each had left (the remaining under the request's credit line and caps, less what running charges drain, divided by the merchant's live gates), so the gates together never spend more than was left; a request no share covers, or for a customer with no such view, is `openrails.ErrUnavailable`. A gate with nothing to do stops syncing and its lease lapses; its next request is decided on its last view, and the next waits for a sync. A request whose view OpenRails refuses (a currency or invoker type it does not take, or a billing policy it cannot resolve now) gets that error alone; the gate's other customers and usage go on. A near-limit request whose answer is lost is released by the next sync unless a retry under its request id takes it first.
 
 ```go guide:gate-new
-var deps openrails.GateDeps
-if url := os.Getenv("REDIS_URL"); url != "" {
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rdb := redis.NewClient(opts)
-	defer rdb.Close()
-	deps.Redis = rdb
-}
-gate, err := openrails.NewGate(client, deps)
+gate, err := openrails.NewGate(client, openrails.GateDeps{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -877,18 +865,16 @@ if err := ticket.Capture(r.Context(), billing.CaptureUsage{Dimensions: map[strin
 | `Gate.Record` | report usage no admission held |
 | `Gate.ListCustomerLimits` | a customer's lines less usage not yet sent, for display |
 | `Gate.Flush` | sync now and wait for settlement |
-| `Gate.Close` | send pending usage and close the lease, returning its holds |
+| `Gate.Close` | send pending usage and close the lease, releasing its request holds |
 
 Usage is never refused for money: the work happened, and admission is the check
-before it. A Gate with neither Redis nor an outbox keeps captured usage in memory
-until it is sent: a crash loses it, never billed. `GateDeps.Outbox` stores it
-before `Capture` returns; with `GateDeps.Redis`, your processes sharing that
-Redis are one gate (one lease, warm everywhere; during an upgrade that changes
-the gate's Redis layout, old and new processes are two gates until the old
-stop) and a retried `Capture` or `Record` posts once, on any of them. `usage_gate_safe_spend: true` lets a gate spend each hold's
-money size again while OpenRails is unreachable.
+before it. A Gate without an outbox keeps captured usage in memory until it is
+sent: a crash loses it, never billed. `GateDeps.Outbox` stores it before
+`Capture` returns, and a restarted process resends it. Each process is its own
+gate with its own lease.
 
 **Admissions** are holds owned by one request, for a backend without a gate.
+They count what gates report in flight as held.
 `Admit` prices the estimate with the current rate cards and pins them, checks
 `balance`, spend windows and limits in that order, and holds it everywhere or
 nowhere; the durable `request_id` owns replay, and a changed term conflicts.
@@ -905,25 +891,13 @@ own row.
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
-**Spend limits.** A billing policy (merchant settings) caps unpaid arrears
-(`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate
-(`accrual_rate_cap`, admission takes your `AccrualRateDeltaPerHour`); bindings
-choose the merchant default or a trust tier, and a customer's own
-`billing_policy` wins. **Delinquency**: an unpaid usage order past
-`arrears_grace_days` and above the floor refuses admissions; OpenRails never
-revokes access or cancels for it. Act on the `delinquency.grace`,
-`delinquency.entered` and `delinquency.cleared` events.
+**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges; admission takes your `AccrualRateDeltaPerHour`). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in admission and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage order past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses admissions; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
 
 ## Usage and running charges
 
-`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
-it for you. A batch job picks one `lse_` lease id for its stream and sends up to
-1,000 numbered items per sync, in order; the lease's highest settled number makes
-a resend harmless, a changed item is `422 idempotency_key_reused`, a gap
-`409 usage_out_of_order`, and items past `usage.through_n` are resent. An item
-may be up to 35 days old. A priced meter that cannot price an item refuses it
-alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up
-to the policy's `bad_spend_windows`, never charged to a delegated invoker.
+Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, admissions, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage orders still work.
+
+`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends it for you. A batch job picks one `lse_` lease id for its stream and sends up to 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes a resend harmless, a changed item is `422 idempotency_key_reused`, a gap `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item may be up to 35 days old. Usage counts toward every limit that applies to it: in the windows current when its request was admitted (`admitted_at`, else when it settles), and in the spend windows of the invoker attributes it reports (`trust_level`, `roles`, `resource`; the customer's own trust level when absent; none while their billing policy cannot be resolved, as in an FX outage). It is priced by the rate cards in force when it settles. A priced meter that cannot price an item refuses it alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up to the policy's `bad_spend_windows`, never charged to a delegated invoker.
 
 A sync prices batches exactly (a period's charges always sum to the rate card's
 price of its total, however batched) and adds them to the customer's accrual for
@@ -1119,10 +1093,7 @@ return f.Close()
 
 ## Proposals and findings
 
-A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the
-provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A
-`pull.*` finding with a change is a proposal: approving it applies that change.
-Findings need merchant configuration authority, not customer support's.
+A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A `pull.*` finding with a change is a proposal: approving it applies that change. Findings need merchant configuration authority. Approving a finding whose recommendation refunds, cancels, or grants or revokes a product, or a proposal whose change refunds, revokes, cancels, collects a renewal or corrects a subscription's price or terms, also needs `merchant:customer:manage`, as that action's own route does, and spends that route's operation limit once per request, however many changes it carries; a proposal that only records what the provider already did and billed needs the configuration alone. Applying a PSP import approves only the corrections its approver may approve, and is refused while one they may not is open.
 
 | Method | Use it to |
 |---|---|
@@ -1155,6 +1126,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 |---|---|
 | `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
 | `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `ListDisputePrograms` | each card PSP's standing in the dispute monitoring programs (Visa VAMP, Mastercard's excessive chargeback and fraud programs, Stripe's guidance, the PSP's `dispute_ratio_limit`) for a month: ratio so far, projected, level and thresholds |
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
 ```go guide:metrics
@@ -1192,18 +1164,13 @@ return err
 
 ## Destructive holds
 
-Refunds, cancellations, card removals, access and credit revocations, write-offs
-and substantive catalog or configuration changes share one admission policy per
-staff member or application: by default 5 an hour and 15 a day per actor, with
-merchant and deployment ceilings that grow with active customers. A breach is a
-**hold**: denied `429`, and held until a person reviews and clears it; waiting,
-restarting or rotating a key does not release it. The in-process host's own
-calls spend nothing; a call made for a person through `ActingFor` is theirs.
+Refunds, cancellations, card removals, access and credit revocations, write-offs and substantive catalog or configuration changes share one admission policy per staff member or application: by default 5 an hour and 15 a day per actor, with merchant and deployment ceilings that grow with active customers. A breach is a **hold**: denied `429` with `Retry-After`, and held until a person reviews and clears it; waiting, restarting or rotating a key does not release it. An admitted action that never starts stops counting after 15 minutes. SCIM contact erasures keep their own per-merchant budget and hold, apart from all of these ([contacts](#customers)). The in-process host's own calls spend nothing; a call made for a person through `ActingFor` is theirs.
 
 | Method | Use it to |
 |---|---|
 | `ListDestructiveHolds` | the merchant's incidents |
 | `ClearDestructiveHold` | clear one after review, with a reason |
+| `ClearErasureHold` | clear the merchant's contact-erasure hold, with `merchant:provisioning:manage` alone |
 
 ```go guide:destructive-holds
 page, err := reviewer.ListDestructiveHolds(ctx, billing.DestructiveHoldListParams{})
@@ -1274,6 +1241,7 @@ default: // no answer, or a 5xx: it may have committed; retry with the same key 
   `403 captcha_required`: solve and send `X-Captcha-Token`.
 - `409 idempotency_key_in_use`, `payment_in_progress`: the original is still
   running. `provider_outcome_unknown`: read before retrying.
+- `409 event_store_required` (`billing.ErrEventStoreRequired`): the deployment has no event store, so usage is off ([usage](#usage-and-running-charges)); `param` and `metadata.paths` name what a refused document or setting declared. Retrying does not help.
 - `429` with `Retry-After`: the customer routes allow 10 purchases, 20
   subscription writes and 40 payment-method writes a minute; never retry
   purchases in a loop. `429 card_attempts_blocked`: too many recent declines.

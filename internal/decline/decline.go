@@ -1,34 +1,16 @@
 // Package decline is the one table for payment refusals: every rail code maps
-// to one billing.DeclineReason, and this package fixes each reason's category
-// and dunning action. Nothing else in OpenRails maps a decline code.
+// to one billing.DeclineReason, and this package fixes each reason's cause
+// (and so its outcome) and dunning action. Nothing else in OpenRails maps a
+// decline code.
 package decline
 
 import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
-)
-
-// Category is what failed.
-type Category string
-
-const (
-	// Approved is not a refusal; attempts use it for approvals.
-	Approved Category = "approved"
-	// CardData: the details don't match an open, valid account (typo, expired,
-	// closed or reissued card).
-	CardData Category = "card_data"
-	// IssuerSoft: the issuer declined a well-formed request that may pass later.
-	IssuerSoft Category = "issuer_soft"
-	// IssuerHard: the issuer will not approve this card for this purchase.
-	IssuerHard Category = "issuer_hard"
-	// GatewayRule: the PSP's own rule refused it; the issuer never saw it.
-	GatewayRule Category = "gateway_rule"
-	// SystemError: gateway, processor, configuration or comms failure.
-	SystemError Category = "system_error"
-	Unknown     Category = "unknown"
 )
 
 // Action is the dunning decision. The zero value retries: missing evidence
@@ -76,14 +58,20 @@ type Result struct {
 	// response_code).
 	Code      string
 	Reason    billing.DeclineReason
-	Category  Category
+	Cause     billing.DeclineCause
 	Action    Action
 	Transient bool
 	Coverage  Coverage
 	// NoReattempt: the network or issuer forbids charging this card again
 	// (advice.go).
 	NoReattempt bool
+	// RetryAfter is the network's earliest next attempt after this decline
+	// (Mastercard's MAC 24 to 30); zero for none.
+	RetryAfter time.Duration
 }
+
+// Outcome is the refusal's outcome, by its cause.
+func (r Result) Outcome() billing.AttemptOutcome { return r.Cause.Outcome() }
 
 // NeedsMapping reports a code the rail's table does not know.
 func (r Result) NeedsMapping() bool { return r.Coverage == Unmapped }
@@ -124,11 +112,12 @@ func ReasonFor(rail, code string) string {
 	return string(Classify(rail, code).Reason)
 }
 
-// ClassifyEvidence classifies a refusal with its AVS/CVV results and the
-// networks' advice: a security code mismatch is the reason whatever the code
-// said, and a postal code that did not match explains a generic decline. A
-// postal code that matched is no address failure: AVS answers a street it was
-// never sent as unmatched. Advice then stops a retry (advised).
+// ClassifyEvidence classifies a refusal with the issuer's code, its AVS/CVV
+// results and the networks' advice: the issuer's code names the cause of a
+// generic decline (issued), a security code mismatch is the reason whatever
+// the code said, and a postal code that did not match explains a generic
+// decline. A postal code that matched is no address failure: AVS answers a
+// street it was never sent as unmatched. Advice then stops a retry (advised).
 func ClassifyEvidence(e Evidence) Result {
 	r := lookup(e.Rail, e.Code, e.Text)
 	if r.Coverage != Mapped && strings.TrimSpace(e.FallbackCode) != "" {
@@ -136,6 +125,7 @@ func ClassifyEvidence(e Evidence) Result {
 			r = fb
 		}
 	}
+	r = r.issued(e.IssuerCode)
 	if !r.Reason.FraudSignal() {
 		generic := r.Reason == billing.DeclineGeneric || r.Reason == billing.DeclineDoNotHonor || r.Reason == billing.DeclineIncorrectNumber || r.Coverage != Mapped
 		switch {
@@ -150,7 +140,7 @@ func ClassifyEvidence(e Evidence) Result {
 
 func (r Result) with(reason billing.DeclineReason) Result {
 	spec := reasons[reason]
-	r.Reason, r.Category, r.Action, r.Transient = reason, spec.category, spec.action, spec.transient
+	r.Reason, r.Cause, r.Action, r.Transient = reason, spec.cause, spec.action, spec.transient
 	return r
 }
 

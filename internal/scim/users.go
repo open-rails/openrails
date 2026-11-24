@@ -399,7 +399,12 @@ func (s *Server) createUser(ctx context.Context, mid billing.MerchantID, in user
 		case row.ProvisionedAt != nil:
 			return errorf(http.StatusConflict, "uniqueness", "the User %s exists", id)
 		}
-		// Claims or an erasure came first: the newer report wins.
+		// An erasure dated after this report wins: the User stays deleted.
+		erased := row.Email == nil && row.DisplayName == nil && row.UserName == nil && row.DirectoryUpdatedAt != nil
+		if erased && !newer(at, row.DirectoryUpdatedAt) {
+			return errorf(http.StatusConflict, "", "the User %s was deleted after this report", id)
+		}
+		// Claims came first: the newer report wins.
 		c := in.contact
 		if !newer(at, row.DirectoryUpdatedAt) {
 			c = contactOf(row)
@@ -479,29 +484,6 @@ func (s *Server) patchUser(ctx context.Context, mid billing.MerchantID, id strin
 		return err
 	})
 	return out, e
-}
-
-// deleteUser erases the User's contact, notifications and message log, and
-// keeps the customer's billing. The contact row stays, without values, so an
-// older report cannot restore them.
-func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string) *Error {
-	now := s.now()
-	return s.tx(ctx, func(q *gen.Queries) error {
-		row, err := provisioned(ctx, q, mid, id)
-		if err != nil {
-			return err
-		}
-		_, err = q.UpdateCustomerContact(ctx, gen.UpdateCustomerContactParams{
-			MerchantID: row.MerchantID, CustomerID: row.CustomerID, DirectoryUpdatedAt: latest(now, row.DirectoryUpdatedAt),
-		})
-		if err != nil {
-			return err
-		}
-		if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID}); err != nil {
-			return err
-		}
-		return q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID})
-	})
 }
 
 func (s *Server) getUser(ctx context.Context, mid billing.MerchantID, raw string) (gen.BillingCustomerContact, *Error) {

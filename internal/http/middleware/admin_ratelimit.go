@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -49,8 +50,9 @@ var adminRateLimitPolicies = map[AdminOperation][]adminRateLimitWindow{
 	AdminOperationOffChannel: {
 		{name: "minute", duration: time.Minute, limit: 10},
 	},
+	// Grants are counted by item: one full batch a minute.
 	AdminOperationGrant: {
-		{name: "minute", duration: time.Minute, limit: 10},
+		{name: "minute", duration: time.Minute, limit: billing.MaxBatchItems},
 	},
 }
 
@@ -96,67 +98,90 @@ func NewAdminOperationLimiter(logger *slog.Logger, state *abusestate.Store) *Adm
 func (l *AdminOperationLimiter) AdminRateLimitMW(operation AdminOperation) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
-			if l == nil {
-				next(r)
-				return
-			}
-			staff, ok := r.Staff()
-			if !ok {
+			err := l.Admit(r, operation)
+			var limited *AdminRateLimitError
+			switch {
+			case errors.As(err, &limited):
+				r.SetHeader("Retry-After", fmt.Sprintf("%d", limited.RetryAfterSeconds()))
+				r.APIError(limited.APIError())
+			case err != nil:
 				r.AbortCode(billing.CodeAuthenticationRequired, "")
-				return
-			}
-			// An application acting itself keeps its own admission controls;
-			// a user, or anyone acting on a subject's behalf, is metered as
-			// its invoker.
-			if staff.SubjectKind == billingauth.SubjectApplication && billingauth.SelfActing(staff.Identity) {
+			default:
 				next(r)
-				return
 			}
-			userID := adminActorKey(staff.Invoker.Issuer, staff.Invoker.ID)
-			decision := l.evaluate(r.Request.Context(), userID, operation, requestItems(r))
-			event := AdminRateLimitEvent{
-				UserID:     userID,
-				Operation:  operation,
-				Counts:     decision.counts,
-				RetryAfter: decision.retryAfter,
-				RequestID:  r.RequestID(),
-			}
-			if mid, found := merchant.FromContext(r.Request.Context()); found {
-				event.MerchantID = mid.String()
-			}
-
-			if !decision.allowed {
-				if decision.wasLocked {
-					event.Kind = "blocked"
-				} else {
-					event.Kind = "lockout"
-				}
-				l.emit(r.Request.Context(), event)
-				retrySeconds := int64(math.Ceil(decision.retryAfter.Seconds()))
-				if retrySeconds < 1 {
-					retrySeconds = 1
-				}
-				r.SetHeader("Retry-After", fmt.Sprintf("%d", retrySeconds))
-				r.APIError(&api.APIError{
-					HTTPStatus: http.StatusTooManyRequests,
-					Type:       api.ErrorTypeRateLimit,
-					Code:       api.CodeRateLimitExceeded,
-					Message:    "administrative operation rate limit exceeded",
-				})
-				return
-			}
-
-			event.Kind = "allowed"
-			l.emit(r.Request.Context(), event)
-			for _, window := range decision.thresholds {
-				thresholdEvent := event
-				thresholdEvent.Kind = "threshold"
-				thresholdEvent.Counts = map[string]int64{window: decision.counts[window]}
-				l.emit(r.Request.Context(), thresholdEvent)
-			}
-			next(r)
 		}
 	}
+}
+
+// AdminRateLimitError refuses an administrator past an operation's limit,
+// locked out for RetryAfter.
+type AdminRateLimitError struct{ RetryAfter time.Duration }
+
+func (e *AdminRateLimitError) Error() string {
+	return "administrative operation rate limit exceeded"
+}
+
+// RetryAfterSeconds is RetryAfter in whole seconds, at least one.
+func (e *AdminRateLimitError) RetryAfterSeconds() int64 {
+	return max(int64(math.Ceil(e.RetryAfter.Seconds())), 1)
+}
+
+// APIError is the refusal's answer.
+func (e *AdminRateLimitError) APIError() *api.APIError {
+	return &api.APIError{HTTPStatus: http.StatusTooManyRequests, Type: api.ErrorTypeRateLimit, Code: api.CodeRateLimitExceeded, Message: e.Error()}
+}
+
+// Admit meters operation for the staff member the gate admitted to r: nil
+// within its limits, an *AdminRateLimitError past them. An application
+// acting itself keeps its own admission controls; a user, or anyone acting
+// on a subject's behalf, is metered as its invoker. A request the gate
+// admitted nobody to is an error.
+func (l *AdminOperationLimiter) Admit(r *request.Request, operation AdminOperation) error {
+	return l.AdmitWeighted(r, operation, requestItems(r))
+}
+
+// AdmitWeighted is Admit for weight operations at once: a handler running
+// another route's effect on several objects spends one per object.
+func (l *AdminOperationLimiter) AdmitWeighted(r *request.Request, operation AdminOperation, weight int64) error {
+	if l == nil {
+		return nil
+	}
+	staff, ok := r.Staff()
+	if !ok {
+		return errors.New("no staff member was admitted")
+	}
+	if staff.SubjectKind == billingauth.SubjectApplication && billingauth.SelfActing(staff.Identity) {
+		return nil
+	}
+	userID := adminActorKey(staff.Invoker.Issuer, staff.Invoker.ID)
+	decision := l.evaluate(r.Request.Context(), userID, operation, weight)
+	event := AdminRateLimitEvent{
+		UserID:     userID,
+		Operation:  operation,
+		Counts:     decision.counts,
+		RetryAfter: decision.retryAfter,
+		RequestID:  r.RequestID(),
+	}
+	if mid, found := merchant.FromContext(r.Request.Context()); found {
+		event.MerchantID = mid.String()
+	}
+	if !decision.allowed {
+		event.Kind = "lockout"
+		if decision.wasLocked {
+			event.Kind = "blocked"
+		}
+		l.emit(r.Request.Context(), event)
+		return &AdminRateLimitError{RetryAfter: decision.retryAfter}
+	}
+	event.Kind = "allowed"
+	l.emit(r.Request.Context(), event)
+	for _, window := range decision.thresholds {
+		thresholdEvent := event
+		thresholdEvent.Kind = "threshold"
+		thresholdEvent.Counts = map[string]int64{window: decision.counts[window]}
+		l.emit(r.Request.Context(), thresholdEvent)
+	}
+	return nil
 }
 
 // Unlock clears the active lockout and current counters for userID. The actor
@@ -188,7 +213,9 @@ func (l *AdminOperationLimiter) Unlock(ctx context.Context, userID, actorID stri
 
 // requestItems is how many operations a request carries: the length of its
 // JSON body's "items" batch, else one. Limits count operations, so a batch
-// never buys more than the same calls one at a time.
+// never buys more than the same calls one at a time. A batch past
+// billing.MaxBatchItems counts as the most it may carry: it is refused
+// unrun.
 func requestItems(r *request.Request) int64 {
 	var batch struct {
 		Items []json.RawMessage `json:"items"`
@@ -196,7 +223,7 @@ func requestItems(r *request.Request) int64 {
 	if r.PeekJSON(&batch) != nil || len(batch.Items) == 0 {
 		return 1
 	}
-	return int64(len(batch.Items))
+	return int64(min(len(batch.Items), billing.MaxBatchItems))
 }
 
 func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, operation AdminOperation, weight int64) adminRateLimitDecision {

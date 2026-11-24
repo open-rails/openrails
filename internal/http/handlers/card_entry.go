@@ -13,13 +13,23 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
+// refuseCardNumber writes the PAN firewall's refusal of a request body with a
+// card number in any field but the typed `card`, and reports whether it did.
+func refuseCardNumber(r *httprequest.Request, body any) bool {
+	field := cardguard.PANField(body)
+	if field == "" {
+		return false
+	}
+	r.APIError(api.Coded(billing.CodeInvalidParam, "a card number is accepted only in a card field").WithParam(field))
+	return true
+}
+
 // cardFieldAdmitted applies the request-level rules for the typed `card` field,
-// writing the refusal when one fails: never beside a payment_token, never over
-// plain HTTP unless the merchant has no live card PSP, and no card number in
-// any other field.
+// writing the refusal when one fails: never beside a payment_token, and never
+// over plain HTTP unless the merchant has no live card PSP.
 // Whether the PSP takes cards on the server is decided where the PSP is
 // resolved.
-func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) bool {
+func cardFieldAdmitted(r *httprequest.Request, hasToken bool) bool {
 	if hasToken {
 		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())
 		return false
@@ -27,12 +37,6 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 	if !r.SecureTransport() && !noLivePSP(r) {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodeCardRequiresHTTPS, "a card is accepted only over HTTPS"))
 		return false
-	}
-	for _, value := range others {
-		if cardguard.ContainsPAN(value) {
-			r.ErrorCode(billing.CodeInvalidParam, "a card number is accepted only in the card field")
-			return false
-		}
 	}
 	return true
 }

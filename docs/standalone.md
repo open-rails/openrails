@@ -14,6 +14,7 @@ process instead, see [the embedded guide](embedded.md).
 | Service | Needed | Holds | Losing it |
 |---|---|---|---|
 | PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`profiles`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
+| ClickHouse 26.8 LTS | for usage | the event store usage needs: usage reporting, the gate, meters, limits and usage history ([event store](#event-store)) | a ClickHouse without the store's identity is refused at boot: restore its backup |
 | Redis 6.2+ or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana crankers | without a KV mount the merchant manifest is the configuration, read-only |
 | SMTP | optional | billing and operator mail, the server's own sign-in codes | no email; operator alerts still reach webhooks |
@@ -188,7 +189,7 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 `usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `db`, `database`, `redis`,
+`cloudflare_proxies`, `db`, `database`, `clickhouse`, `redis`,
 `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
 `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
 `rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
@@ -252,11 +253,19 @@ SQL is authored in `billing`; another schema is reached by one token-aware
 rewrite of schema qualifiers, never other strings. The server's AuthKit keeps its
 own schema (`auth.database.schema`, default `profiles`).
 
+**Event store**
+
+| Key | Meaning |
+|---|---|
+| `clickhouse.addr` | `host:port` of ClickHouse's native protocol. Set, the server waits for it at boot like the database; unset, usage is off |
+| `clickhouse.database` | the event store's database, created or upgraded at boot; default `openrails` |
+| `clickhouse.username`, `clickhouse.password` | the user (default `default`) and its password |
+
 **Redis**
 
 | Key | Meaning |
 |---|---|
-| `redis.addr` | `host:port` |
+| `redis.addr` | `host:port`. While a declared Redis does not answer, a DPoP proof or a JWT-bearer or client assertion is refused (503): another replica could not see it spent |
 | `redis.url` | instead of `addr`: `redis://` or `rediss://` with user, password and database |
 | `redis.username`, `redis.password`, `redis.db` | ACL user, password, database number |
 | `redis.tls`, `redis.ca_cert` | TLS against the system roots, or this PEM bundle (which implies TLS) |
@@ -273,9 +282,10 @@ boot. The ones a deployment sets:
 | Key | Meaning |
 |---|---|
 | `auth.default_tenant_id` | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
-| `auth.token.issuer` | required; the server's own issuer. No billing URL stands in for it |
+| `auth.token.issuer` | required; the server's own issuer, https (http only on a loopback host). No billing URL stands in for it |
+| `auth.token.refresh_token_duration` | how long a session lasts from its sign-in: 30 days when unset; negative lasts until revoked |
 | `auth.token.allow_private_network_jwks` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`); file-watched |
+| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 | `auth.keys.allow_ephemeral_dev_keys` | generate keys under `auth.keys.path`; one instance, local only |
 | `auth.keys.verify_only` | verify tokens, mint none |
 | `auth.resource.id` | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
@@ -347,6 +357,7 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 | `destructive_action_limits.actor_per_hour`, `.actor_per_day` | 5, 15 | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
 | `destructive_action_limits.merchant_per_hour`, `.merchant_per_day` | 15, 25 | per merchant, floors that rise with active customers |
 | `destructive_action_limits.deployment_per_hour`, `.deployment_per_day` | 50, 100 | per deployment, likewise |
+| `destructive_action_limits.erasure_per_hour`, `.erasure_per_day` | 100, 1000 | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
 The example file sets the shipped buckets explicitly:
 
@@ -442,6 +453,7 @@ mounted file or the environment, named like its key's variable.
 |---|---|
 | database URL | `DB_URL` (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL` or `REDIS_PASSWORD`, `REDIS_CA_CERT` |
+| ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
 | LLM | `LLM_API_KEY` |
@@ -672,9 +684,7 @@ refused on `/v1/app` (`403 application_required`).
 `local_sign_in`, with the server's own accounts. The console exchanges the
 person's token for one bound to the chosen merchant (RFC 8693 through the
 server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie
-(`__Host-authkit_rt` on HTTPS); a revoked session answers
-`401 credential_revoked` at once. `admin_console.disabled` omits it.
+session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
 
 ### Customer contacts
 
@@ -748,6 +758,12 @@ JWKS, `llm.base_url`):
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
 | `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
+## Event store
+
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant and are named in one log line at boot.
+
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead.
+
 ## Scaling and Redis
 
 Any number of instances can serve one book: `openrails run-server` replicas,
@@ -778,8 +794,7 @@ count, primary or sticky session.
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
-  its `db.lease_conns` lease pool, and one connection per instance with Vault
-  configuration (it listens for edits).
+  its `db.lease_conns` lease pool, and one connection per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
@@ -816,6 +831,7 @@ its own, as a deploy step; `openrails migrate status [--json]` compares the
 applied ledger with the binary's chain and exits non-zero on any mismatch. With
 `database.skip_migrations`, startup only checks and is refused with
 `ErrMigrationsRequired` until the step has run for the build.
+With `clickhouse`, the same step creates or upgrades the event store's database, and startup checks it too.
 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
@@ -1019,16 +1035,7 @@ caps for webhooks).
 
 ## Provider intents
 
-Every outbound provider mutation is first a row in `billing.provider_intents`:
-an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets
-and a relevance window. Its own job (`openrails.provider_operation`) claims it
-under a lease, rechecks relevance, gates on mode and origin, executes and
-classifies the outcome; every attempt is appended to
-`billing.provider_mutation_logs`. A blocked intent (provider down, write mode,
-credentials that do not arm) stays pending with its reason and drains when the
-blocker lifts; one past its relevance window is superseded or expires instead of
-firing stale. An ambiguous money movement is resolved by reading the provider
-before any retry; deletes verify, then execute.
+Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on mode and origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write mode, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
 
 Intents follow the PSP id, not its key: they never execute against another
 account. To move to another account, declare a new PSP and archive the old one
@@ -1063,12 +1070,24 @@ It answers `job_id`, `merchant_id`, `river_schema` and `queue`; `already_queued`
 is true when a refresh for that merchant is outstanding. Track the job with
 `openrails workers` or in `river_job` ([River jobs](river-jobs.md#inspect-a-running-deployment)).
 The job reads each PSP in bounded windows from its watermark
-(`billing.psp_refresh_watermarks`) to five minutes ago, NMI and Stripe with a
+(`billing.psp_refresh_watermarks`) to five minutes ago (NMI's by last change,
+the last reading through now), NMI and Stripe with a
 24-hour overlap for late indexing, and retries incomplete reads up to five
 attempts; a later request resumes from the saved watermarks. A watermark
 advances only after a complete read. Before each Stripe window a separate read
 records refunds and disputes that match existing payments, up to eight days
 back, even when the full read fails.
+
+CCBill's DataLink answers a live account once every 60 minutes. A live CCBill
+PSP's refresh is its own job, `openrails.paced_provider_refresh`, which the
+merchant's queues and which makes one DataLink request per hour: a day of transactions, advancing the watermark day by day,
+then the roster once the days are read to within two hours. A backlog catches
+up a day an hour; 90 days take about four days. A PSP import of a live account
+reads its history a day an hour the same way, its `history_through` showing how
+far it got. A request waiting for its hour, or one CCBill refuses for coming
+within it, waits and resumes; it never fails the job. The hour is kept per
+CCBill account in the abuse state (Redis), so every instance shares it; a
+sandbox account is not paced.
 
 Refresh reads run in every write mode. Overwrites and lifecycle repairs need an
 armed merchant, the kill switch on and a posture above `readonly`. Unverified
@@ -1136,18 +1155,13 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's
-`event_retention`. Each table's comment states its class: **permanent** (the
-ledger, grants, payments, owed usage, usage accruals, receipts, operation
-authorizations, refusals, running charges, maintenance runs, the before-images of
-destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
-(deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage accruals, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
 | `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
 | `usage_daily` | 24 months after its usage was billed, about 26 months after the month began |
-| `subscription_status_transitions`, `subscription_billing_changes`, `provider_mutation_logs`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
 | `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
@@ -1182,13 +1196,7 @@ Back up PostgreSQL and the merchant configuration (Vault with its
 `keys.json` and `totp.key` in your secret manager. PostgreSQL holds no
 credential, so a database alone cannot charge anyone.
 
-Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an
-off-host `archive_command`, periodic base backups). PITR is whole-cluster: right
-for disaster, wrong for one damaged merchant. A restore never undoes what
-happened at a provider; it creates divergence that convergence repairs. Money is
-reversed by compensating entries, never deletion; the append-only tables (the
-ledger, grants, status and mutation logs, `webhook_events`, findings) are
-restored whole or not at all.
+Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an off-host `archive_command`, periodic base backups). PITR is whole-cluster: right for disaster, wrong for one damaged merchant. A restore never undoes what happened at a provider; it creates divergence that convergence repairs. Money is reversed by compensating entries, never deletion; the append-only tables (the ledger, grants, status transitions, the operations and configuration histories, `webhook_events`, findings) are restored whole or not at all.
 
 1. Stop and drain the source writers and disable their restart.
 2. Restore PostgreSQL; make the configuration available.
@@ -1263,7 +1271,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation and counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |

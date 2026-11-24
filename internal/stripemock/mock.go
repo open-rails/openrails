@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,9 +65,11 @@ type Mock struct {
 	methods         map[string]Object
 	declines        map[string]string
 	advice          map[string]Advice
+	blocks          map[string]string
 	intents         map[string]Object
 	order           []string
 	charges         map[string]Object
+	disputes        map[string]Object
 	refunds         map[string]Object
 	refundOrder     []string
 	subs            map[string]Object
@@ -115,8 +118,8 @@ func NewUnstarted(opts Options) *Mock {
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
-	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{},
-		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
+	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{}, blocks: map[string]string{},
+		intents: map[string]Object{}, charges: map[string]Object{}, disputes: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
@@ -299,7 +302,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	case p == "/v1/account":
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
-		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+		return 200, Object{"object": "balance", "livemode": liveKey(r), "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/core/events/"):
 		if event, ok := m.thinEvents[strings.TrimPrefix(p, "/v2/core/events/")]; ok {
 			return 200, event
@@ -431,6 +434,11 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, pi
 	case r.Method == http.MethodGet && seg[0] == "payment_intents" && len(seg) == 2:
 		if pi, ok := m.intents[seg[1]]; ok {
+			if ch, ok := m.charges[fmt.Sprint(pi["latest_charge"])]; ok && slices.Contains(q["expand[]"], "latest_charge") {
+				expanded := clone(pi)
+				expanded["latest_charge"] = ch
+				return 200, expanded
+			}
 			return 200, pi
 		}
 		return 404, stripeErr("resource_missing")
@@ -442,7 +450,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	case r.Method == http.MethodGet && p == "/v1/charges":
 		return 200, stripeList(m.charges, q)
 	case r.Method == http.MethodGet && p == "/v1/disputes":
-		return 200, Object{"object": "list", "data": []any{}, "has_more": false}
+		return 200, stripeList(m.disputes, q)
 	case r.Method == http.MethodPost && p == "/v1/refunds":
 		return m.createRefund(form)
 	case r.Method == http.MethodGet && seg[0] == "refunds" && len(seg) == 2:
@@ -586,7 +594,11 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 	m.intents[pi["id"].(string)] = pi
 	m.visibleAt[pi["id"].(string)] = m.now().Add(m.visibilityDelay)
 	m.order = append(m.order, pi["id"].(string))
-	switch decline := m.declines[pm]; decline {
+	decline, blocked := m.declines[pm], m.blocks[pm]
+	if blocked != "" {
+		decline = "fraudulent" // Stripe answers a Radar block as a fraudulent decline
+	}
+	switch decline {
 	case "":
 		m.chargeLocked(pi)["created"] = m.now().Unix()
 		return 200, pi
@@ -597,6 +609,7 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		// Stripe detaches the refused method from the intent; it survives
 		// only on last_payment_error.
 		pi["status"], pi["payment_method"] = "requires_payment_method", nil
+		pi["latest_charge"] = m.failedChargeLocked(pi, pm, decline, blocked)["id"]
 		refusal := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
 		m.advice[pm].on(refusal)
 		pi["last_payment_error"] = refusal
@@ -604,6 +617,30 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		m.advice[pm].on(answer)
 		return 402, Object{"error": answer}
 	}
+}
+
+// failedChargeLocked records the failed charge of a refused attempt on pm. Its
+// outcome says whether the issuer declined it or Radar (blocked, a block
+// reason) stopped it before the network, with the network's advice.
+func (m *Mock) failedChargeLocked(pi Object, pm, decline, blocked string) Object {
+	outcome := Object{"type": "issuer_declined", "network_status": "declined_by_network", "reason": decline}
+	if blocked != "" {
+		outcome = Object{"type": "blocked", "network_status": "not_sent_to_network", "reason": blocked}
+	} else {
+		m.advice[pm].on(outcome)
+	}
+	card := Object{"country": "US"}
+	if method, ok := m.methods[pm]; ok {
+		for key, value := range method["card"].(Object) {
+			card[key] = value
+		}
+	}
+	ch := Object{"object": "charge", "id": m.id("ch"), "amount": pi["amount"], "amount_captured": int64(0), "currency": pi["currency"], "customer": pi["customer"], "payment_method": pm,
+		"payment_intent": pi["id"], "status": "failed", "paid": false, "captured": false, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false,
+		"created": m.now().Unix(), "failure_code": "card_declined", "failure_message": "Your card was declined.", "outcome": outcome,
+		"payment_method_details": Object{"type": "card", "card": card}}
+	m.charges[ch["id"].(string)] = ch
+	return ch
 }
 
 // chargeLocked settles a payment intent with one succeeded charge; one that

@@ -26,7 +26,8 @@ type BulkOperation struct {
 }
 
 // Bulk serves POST /Bulk: each operation on Users applies on its own, in
-// order, until failOnErrors errors have occurred.
+// order, until failOnErrors errors have occurred. Each erasure runs or waits
+// on its own (deleteUser).
 func (s *Server) Bulk() http.Handler {
 	return s.serve(func(ctx context.Context, w http.ResponseWriter, r *http.Request, mid billing.MerchantID) {
 		raw, e := readBody(w, r)

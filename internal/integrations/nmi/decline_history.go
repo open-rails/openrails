@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 )
 
@@ -27,20 +28,22 @@ var HistoryNotes = []string{
 }
 
 // HistoryCount is how many authorizations of one kind NMI answered in one
-// month with one outcome: category approved, or a refusal's category and
-// reason from the one decline classifier.
+// month with one answer: an approval (Reason ""), or a refusal's reason, and
+// its outcome and cause, from the one decline classifier.
 type HistoryCount struct {
 	// Month is the month's first instant, UTC.
-	Month            time.Time
-	Kind             string
-	Category, Reason string
-	Count            int
+	Month   time.Time
+	Kind    string
+	Outcome billing.AttemptOutcome
+	Cause   billing.DeclineCause
+	Reason  string
+	Count   int
 }
 
 // DeclineHistory is the authorizations NMI answered in [Since, Until).
 type DeclineHistory struct {
 	Since, Until time.Time
-	// Counts are ordered by month, kind, category and reason.
+	// Counts are ordered by month, kind and reason.
 	Counts []HistoryCount
 	// Undated authorizations carry a date NMI garbled; no month holds them.
 	Undated int
@@ -48,8 +51,9 @@ type DeclineHistory struct {
 
 // DeclineHistory counts the card verifications, one-off sales and scheduled
 // rebills NMI answered in [since, until), once each in the month made. Read
-// only. The Query API selects by last change, so until should be now; it reads
-// one calendar month per query, oldest first, in pages of QueryPageLimit.
+// only. The Query API selects by last change, which a later action moves
+// past until, so it reads the changes of one calendar month per query, oldest
+// first, the last through now, in pages of QueryPageLimit.
 func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) (DeclineHistory, error) {
 	h := DeclineHistory{Since: since.UTC(), Until: until.UTC()}
 	counts := map[HistoryCount]int{}
@@ -59,7 +63,7 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 		if to.After(h.Until) {
 			to = h.Until
 		}
-		if err := c.readHistoryWindow(ctx, from, to, &h, counts, seen); err != nil {
+		if err := c.readHistoryWindow(ctx, from, to, !to.Before(h.Until), &h, counts, seen); err != nil {
 			return DeclineHistory{}, err
 		}
 		from = to
@@ -69,35 +73,27 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 		h.Counts = append(h.Counts, k)
 	}
 	slices.SortFunc(h.Counts, func(a, b HistoryCount) int {
-		return cmp.Or(a.Month.Compare(b.Month), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Category, b.Category), cmp.Compare(a.Reason, b.Reason))
+		return cmp.Or(a.Month.Compare(b.Month), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Reason, b.Reason))
 	})
 	return h, nil
 }
 
-// readHistoryWindow pages the transactions last changed in [from, to).
-func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
-	// end_date is inclusive, to the second.
-	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat), EndDate: to.Add(-time.Second).Format(QueryTimeFormat), ResultLimit: QueryPageLimit}
-	firsts := map[string]bool{}
-	for filter.PageNumber = 0; ; filter.PageNumber++ {
-		batch, err := c.TransactionReport(ctx, filter)
-		if err != nil {
-			return fmt.Errorf("nmi transactions from %s, page %d: %w", from.Format(time.DateOnly), filter.PageNumber, err)
-		}
-		if len(batch.Transactions) > 0 {
-			first := strings.TrimSpace(batch.Transactions[0].TransactionID)
-			if firsts[first] {
-				return fmt.Errorf("nmi transaction pagination repeated page starting at %s", first)
-			}
-			firsts[first] = true
-		}
-		for _, t := range batch.Transactions {
+// readHistoryWindow pages the transactions last changed in [from, to), or
+// since from when last.
+func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, last bool, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
+	filter, asOf := QueryFilter{StartDate: from.Format(QueryTimeFormat)}, to
+	if !last {
+		filter.EndDate, asOf = to.Add(-time.Second).Format(QueryTimeFormat), time.Time{} // end_date is inclusive
+	}
+	if err := c.PageTransactions(ctx, filter, asOf, func(page []QueryTransaction) error {
+		for _, t := range page {
 			h.count(t, counts, seen)
 		}
-		if len(batch.Transactions) < QueryPageLimit {
-			return nil
-		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("nmi transactions from %s: %w", from.Format(time.DateOnly), err)
 	}
+	return nil
 }
 
 // count adds a transaction's authorization once, in its month, when it was
@@ -117,7 +113,7 @@ func (h *DeclineHistory) count(t QueryTransaction, counts map[HistoryCount]int, 
 	if at.Before(h.Since) || !at.Before(h.Until) {
 		return
 	}
-	key := HistoryCount{Month: MonthStart(at), Kind: HistoryOneOffSale, Category: string(decline.Approved)}
+	key := HistoryCount{Month: MonthStart(at), Kind: HistoryOneOffSale, Outcome: billing.AttemptApproved}
 	switch {
 	case action.Is("validate"):
 		key.Kind = HistoryVerification
@@ -126,7 +122,7 @@ func (h *DeclineHistory) count(t QueryTransaction, counts map[HistoryCount]int, 
 	}
 	if !action.Succeeded() {
 		verdict := decline.ClassifyEvidence(t.Evidence(action))
-		key.Category, key.Reason = string(verdict.Category), string(verdict.Reason)
+		key.Outcome, key.Cause, key.Reason = verdict.Outcome(), verdict.Cause, string(verdict.Reason)
 	}
 	counts[key]++
 }

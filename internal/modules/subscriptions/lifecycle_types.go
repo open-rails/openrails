@@ -1,11 +1,13 @@
 package subscriptions
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
@@ -100,6 +102,10 @@ type ReactivateMembershipParams struct {
 
 type ResumeMembershipParams struct {
 	SubscriptionID uuid.UUID
+	// Within runs in the resume's transaction, after the row is resumed: the
+	// provider write the resume needs commits with it. canceledAt is when the
+	// locked row was canceled.
+	Within func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error
 }
 
 var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")
@@ -162,6 +168,11 @@ func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
 	return uuid.NewSHA1(sub.ID, []byte(key))
 }
 
+// CancelIssuerDeferred is the cancel feedback of a case the issuer's advice
+// kept deferring until the next renewal: not paid, rather than a card that
+// failed.
+const CancelIssuerDeferred = "issuer_deferred"
+
 type FailMembershipParams struct {
 	// Prepared preserves the accepted engine charge cadence for retry policy.
 	// Native provider failures leave this nil.
@@ -179,6 +190,12 @@ type FailMembershipParams struct {
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.
 	DeclinedAt time.Time
+	// RetryAfter is the network's earliest retry after the decline
+	// (Mastercard's MAC 24 to 30); zero for none. It delays the next retry,
+	// and the case's end moves with it (collection.Policy.CaseEnd), so every
+	// attempt the merchant's policy allows still runs, up to the next renewal:
+	// a retry advised past it ends the case as exhausted (issuer_deferred).
+	RetryAfter time.Duration
 	// Terminal requests immediate cancellation (entitlements revoked, no
 	// further retries) without incrementing the retry count. It is a request:
 	// without TerminalCertainty the row parks as `unknown` instead.
@@ -239,11 +256,8 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription.Status != models.StatusCanceled {
 		return "", false
 	}
-	if subscription.CancelType != nil {
-		switch *subscription.CancelType {
-		case models.CancelTypeChargeback, models.CancelTypeUser, models.CancelTypeMerchant:
-			return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
-		}
+	if subscription.CancelType != nil && subscription.CancelType.Terminal() {
+		return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
 	}
 	return "", false
 }

@@ -133,7 +133,11 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	cancels := 0
 	for _, sub := range subs {
 		if snap := snaps[sub.ID]; snap != nil {
-			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0).Kind == TransitionCancel {
+			window, err := dunningWindowOf(ctx, database, sub)
+			if err != nil {
+				return fmt.Errorf("verify %s: %w", sub.ID, err)
+			}
+			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, window).Kind == TransitionCancel {
 				cancels++
 			}
 		}
@@ -240,7 +244,7 @@ func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error
 		return RemoteTransaction{}, err
 	}
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
+		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence, CustomerRef: sale.Vault}
 	if !sale.Success {
 		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}
@@ -351,7 +355,7 @@ func (v *Verifier) bulkReadPSP(ctx context.Context, mid billing.MerchantID, psp 
 	for page := cp.next; ; page++ {
 		// The durable checkpoint stores a one-based ordinal; NMI Query
 		// page_number is zero-based. Preserve the stored ordinal convention.
-		sales, n, err := client.SalesPage(ctx, cp.since, cp.until, page-1)
+		sales, n, err := client.SalesPage(ctx, cp.since, page-1)
 		if err != nil {
 			return fmt.Errorf("nmi transaction page %d: %w", page, err)
 		}
@@ -487,17 +491,17 @@ func recordedCharges(ctx context.Context, database *db.DB, mid billing.MerchantI
 }
 
 type bulkCheckpoint struct {
-	since, until time.Time
-	next         int
+	since time.Time
+	next  int
 }
 
 // loadCheckpoint resumes an interrupted bulk read, or starts a new one.
 func loadCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, since, until time.Time) (bulkCheckpoint, error) {
 	row, err := database.Gen(ctx).StartNMIBulkCheckpoint(ctx, gen.StartNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp, WindowStartsAt: since, WindowEndsAt: until})
 	if err != nil {
-		return bulkCheckpoint{since: since, until: until, next: 1}, fmt.Errorf("verify: bulk checkpoint: %w", err)
+		return bulkCheckpoint{since: since, next: 1}, fmt.Errorf("verify: bulk checkpoint: %w", err)
 	}
-	return bulkCheckpoint{since: row.WindowStartsAt, until: row.WindowEndsAt, next: int(row.NextPage)}, nil
+	return bulkCheckpoint{since: row.WindowStartsAt, next: int(row.NextPage)}, nil
 }
 
 func saveCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, next int) error {

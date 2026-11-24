@@ -12,19 +12,12 @@ type MerchantConfiguration struct {
 
 	// Usage billing settings: the billing period and collection knobs.
 	// Missing values use money service defaults.
-	CollectionThreshold   *int64 `json:"collection_threshold,omitempty"`
-	MonthlyFloor          *int64 `json:"monthly_floor,omitempty"`
 	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
 	// ArrearsGraceDays is how many days past a usage order's due_at a payer keeps
 	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
 	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
-
-	// ArrearsDelinquencyFloor (micros) is the smallest overdue balance that can
-	// make a payer delinquent. Nil ⇒ derived from MonthlyFloor, else
-	// delinquency.DefaultAmountFloor.
-	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
 
 	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
 	// delegated invokers. Missing or empty windows use the service default.
@@ -49,6 +42,10 @@ type MerchantConfiguration struct {
 	// ("" default), revoke_on_any or keep.
 	ProviderRefundAccess billing.ProviderRefundAccess `json:"provider_refund_access,omitempty"`
 
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// refund ("" default) or record.
+	FraudWarningRefund billing.FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+
 	// DunningPolicy replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.
 	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
@@ -60,9 +57,9 @@ type MerchantConfiguration struct {
 	// BalanceNotices are the customers' default low-balance lines.
 	BalanceNotices BalanceNoticeConfiguration `json:"balance_notices,omitempty"`
 
-	// UsageGateSafeSpend: a lease's holds name their money size as safe,
-	// which their gate may spend while OpenRails is unreachable.
-	UsageGateSafeSpend bool `json:"usage_gate_safe_spend,omitempty"`
+	// AccountingTimezone is the IANA zone the merchant's books are dated in;
+	// never empty (UTC by default).
+	AccountingTimezone string `json:"accounting_timezone,omitempty"`
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance

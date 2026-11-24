@@ -35,11 +35,6 @@ func serviceCustomerScopeAllows(r *httprequest.Request, _ billing.CustomerID) bo
 	return ok
 }
 
-// StaffCan asks whether the caller would pass the guard of another staff
-// route (its key), on the merchant the route already authorized; nil is yes.
-// A handler that offers actions (an invoice's) takes one.
-type StaffCan func(r *http.Request, routeKey string) error
-
 // requireMerchantRoutePrincipal is a merchant handler's own check that the
 // staff gate authorized the request.
 func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
@@ -63,6 +58,7 @@ func billingService(r *httprequest.Request) (*billingservice.Service, bool) {
 // writeMoneyError answers a credit, admission or usage refusal with its
 // registered code.
 func writeMoneyError(r *httprequest.Request, err error, internalMessage string) {
+	setRetryAfter(r, err)
 	if out := moneyRefusal(err); out != nil {
 		r.APIError(out)
 		return

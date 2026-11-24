@@ -27,6 +27,8 @@ const tones: Record<string, string> = {
   delinquent: failed,
   failed,
   declined: failed,
+  refused: failed,
+  error: failed,
   lost: failed,
   refunded,
   partially_refunded: refunded,

@@ -61,9 +61,12 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		}
 		dl := ccbill.NewDataLinkClient(im.Log, &config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
 			Sandbox: scope.Environment == config.EnvironmentSandbox})
-		dl.ReadOnly = true
+		dl.ReadOnly, dl.Pacing = true, im.DataLinkPacing
 		if im.CCBillDataLinkURL != "" {
 			dl.BaseURL, dl.LoopbackFixture = im.CCBillDataLinkURL, true
+		}
+		if im.WireDataLink != nil {
+			im.WireDataLink(dl)
 		}
 		return &ccbillSource{dl: dl}, nil
 	},
@@ -201,12 +204,16 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 	if err != nil {
 		return err
 	}
+	window := historyWindow
+	if w, ok := src.(interface{ window() time.Duration }); ok {
+		window = w.window()
+	}
 	for through := *row.HistoryThrough; through.Before(*row.PulledAt); {
-		until := through.Add(historyWindow)
+		until := through.Add(window)
 		if until.After(*row.PulledAt) {
 			until = *row.PulledAt
 		}
-		recs, err := src.history(ctx, through, until)
+		recs, err := src.history(ctx, through, until, !until.Before(*row.PulledAt))
 		if err != nil {
 			return err
 		}
@@ -446,7 +453,7 @@ func notReadable(err error) error {
 }
 
 // Run runs one step of the import in ctx's merchant scope.
-func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.PSPImportID, step Step, approvalActor *destructive.Actor) error {
+func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.PSPImportID, step Step, approvalActor *destructive.Actor, approved []billing.ChangeKind) error {
 	return im.DB.RunInMerchantScope(ctx, mid, "psp import "+string(step), func(ctx context.Context) error {
 		if _, err := merchant.Require(ctx); err != nil {
 			return err
@@ -457,7 +464,7 @@ func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.
 		case StepRelink:
 			return im.Pull(ctx, id, true)
 		case StepApply:
-			return im.Apply(ctx, id, approvalActor)
+			return im.Apply(ctx, id, approvalActor, approved)
 		}
 		return Permanent(fmt.Errorf("unknown step %q", step))
 	})

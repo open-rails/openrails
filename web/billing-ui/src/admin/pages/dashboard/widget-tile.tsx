@@ -35,7 +35,13 @@ import {
 import { cn } from "#orck/admin/lib/utils"
 
 import { deepLinkFor } from "./lib"
-import { sparkQuery, widgetQuery, type DashboardView } from "./range"
+import { ProgramsView } from "./programs"
+import {
+  rangeDates,
+  sparkQuery,
+  widgetQuery,
+  type DashboardView,
+} from "./range"
 import type { Registry } from "./registry"
 import { WidgetVizView } from "./widget-viz"
 
@@ -52,10 +58,40 @@ interface TileProps {
 }
 
 export function WidgetTile(props: TileProps) {
-  return props.widget.viz === "heading" ? (
-    <HeadingTile {...props} />
-  ) : (
-    <QueryTile {...props} />
+  if (props.widget.viz === "heading") return <HeadingTile {...props} />
+  if (props.widget.viz === "programs") return <ProgramsTile {...props} />
+  return <QueryTile {...props} />
+}
+
+// ProgramsTile is the dispute program standings for the month the page's
+// range ends in.
+function ProgramsTile({
+  widget,
+  view,
+  empty = false,
+  editable = true,
+  onEdit,
+  onDelete,
+}: TileProps) {
+  return (
+    <Card
+      className="group/tile @container/tile relative h-full gap-2"
+      data-widget={widget.id}
+    >
+      <Toolbar editable={editable} onEdit={onEdit} onDelete={onDelete} />
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
+        <span className="line-clamp-2 text-sm font-medium" title={widget.title}>
+          {widget.title}
+        </span>
+        <div className="min-h-0 flex-1">
+          {empty ? (
+            <div className="text-2xl font-semibold tabular-nums">—</div>
+          ) : (
+            <ProgramsView at={`${rangeDates(view.range).to}T00:00:00Z`} />
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

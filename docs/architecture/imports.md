@@ -197,7 +197,7 @@ Apply approves only corrections that keep access, never one a person dismissed. 
 Checks:
 - `ListPullCorrections` (`internal/db/queries/reconciliation.sql`) selects only access-keeping kinds; OR-J38-S21, S25, S28, S32.
 - OR-J38-S71: proposal cancels spend the allowance once per subscription; a replay spends nothing.
-- OR-J34-S33: a book's cancel waits for the switch and the cap, spends the merchant's budget and records its actor, by the host or staff, and a book too large for the budget is refused for later; OR-J34-S35: a declined charge that spends dunning is an admitted cancel; OR-J34-S36: a lost admission answer counts nothing; OR-J34-S37: a merchant's books land one at a time; OR-J34-S38: an abandon stalls no other admission.
+- OR-J34-S40: a book's cancel waits for the switch and the cap, spends the merchant's budget and records its actor, by the host or staff, and a book too large for the budget is refused for later; OR-J34-S35: a declined charge that spends dunning is an admitted cancel; OR-J34-S36: a lost admission answer counts nothing; OR-J34-S37: a merchant's books land one at a time; OR-J34-S38: an abandon stalls no other admission.
 - OR-J38-S76: a `failed` import cannot be applied.
 - `ImportDeclaredSubscriptions` refuses an exhaustive book whose `expected_subscriptions` differs from its count.
 

@@ -16,7 +16,8 @@ const (
 	QueuePSPImport = pspimport.JobQueue
 )
 
-// PSPImportWorker runs PSP import steps on their own queue. A failing step
+// PSPImportWorker runs PSP import steps on their own queue. A step waiting for
+// its PSP's next request slot snoozes until it opens. A failing step
 // retries, waiting attempt⁴ seconds and at most an hour: one a provider, Vault
 // or the database did not answer for, up to the step's attempts; any other
 // failure RetryBudget times. A step that cannot succeed (the provider refused
@@ -40,7 +41,10 @@ func (w *PSPImportWorker) Work(ctx context.Context, job *river.Job[pspimport.Job
 		return errors.New("psp import: importer not wired")
 	}
 	mid, id := billing.MerchantID(job.Args.MerchantID), billing.PSPImportID(job.Args.ImportID)
-	err := im.Run(ctx, mid, id, job.Args.Step, job.Args.ApprovalActor)
+	err := im.Run(ctx, mid, id, job.Args.Step, job.Args.ApprovalActor, job.Args.ApprovedKinds)
+	if wait, paced := pspimport.Paced(err); paced {
+		return river.JobSnooze(wait)
+	}
 	var permanent pspimport.PermanentError
 	if err == nil || !errors.As(err, &permanent) && job.Attempt < job.MaxAttempts && (pspimport.Transient(err) || job.Attempt < pspimport.RetryBudget) {
 		return err

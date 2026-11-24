@@ -478,3 +478,24 @@ func stepGrain(t time.Time, grain string) time.Time {
 	}
 	return t
 }
+
+// ReadsUsage reports a plan whose measures, or their components, read usage
+// (the usage and usage_charged families): the event store's.
+func (p *Plan) ReadsUsage() bool {
+	var reads func(m *Measure, depth int) bool
+	reads = func(m *Measure, depth int) bool {
+		if m == nil || depth > 8 {
+			return false
+		}
+		if m.Family == FamUsage || m.Family == FamUsageCharged {
+			return true
+		}
+		return reads(measureByName[m.Num], depth+1) || reads(measureByName[m.Den], depth+1)
+	}
+	for _, m := range p.Measures {
+		if reads(m, 0) {
+			return true
+		}
+	}
+	return false
+}

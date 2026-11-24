@@ -103,10 +103,16 @@ func resolveActorIdentity(r *httprequest.Request) string {
 // the subject for good (notes required). A failed run leaves the finding open
 // with the error in its notes; the next sweep re-measures, so a fix that did
 // not take reopens by re-detection. A pull.* finding is a proposal, resolved
-// only through internal/proposals.
+// only through internal/proposals. Approving a recommendation that acts on a
+// customer's money or access also needs what its own staff routes need
+// (FindingActionRoutes), asked of can.
 //
 //	POST /v1/merchant/findings/{id}/resolve
-func AdminResolveFinding(r *httprequest.Request) {
+func AdminResolveFinding(can StaffCan) func(r *httprequest.Request) {
+	return func(r *httprequest.Request) { resolveFinding(r, can) }
+}
+
+func resolveFinding(r *httprequest.Request, can StaffCan) {
 	store, ok := findingsStore(r)
 	if !ok {
 		return
@@ -152,7 +158,7 @@ func AdminResolveFinding(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "notes are required to ignore a finding (permanent silence for this subject)").WithParam("notes"))
 		return
 	}
-	execution, ok := resolveFindingOutcome(r, store, finding, string(outcome), notes, req.OverrideParams)
+	execution, ok := resolveFindingOutcome(r, store, finding, string(outcome), notes, req.OverrideParams, can)
 	if !ok {
 		return
 	}
@@ -169,7 +175,7 @@ func AdminResolveFinding(r *httprequest.Request) {
 
 // resolveFindingOutcome ignores (notes required) or approves one open finding,
 // returning the completed execution effects; on a refusal it has answered.
-func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, finding reconcile.FindingRecord, outcome, notes string, overrideParams json.RawMessage) (map[string]any, bool) {
+func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, finding reconcile.FindingRecord, outcome, notes string, overrideParams json.RawMessage, can StaffCan) (map[string]any, bool) {
 	ctx := r.Request.Context()
 	id := finding.ID
 	actor := resolveActorIdentity(r)
@@ -190,6 +196,15 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 	rec, hasRec := recommend.FromEvidence(finding.Evidence)
 	if !hasRec {
 		r.ErrorCode(billing.CodeFindingNotActionable, "")
+		return nil, false
+	}
+	keys, known := FindingActionRoutes[rec.Action]
+	if !known {
+		r.ErrorCode(billing.CodeFindingNotActionable, "the recommendation names an action this version does not authorize")
+		return nil, false
+	}
+	if err := staffCanAll(r, can, keys, 1); err != nil {
+		refuseStaffCan(r, err)
 		return nil, false
 	}
 	overrides, err := recommend.DecodeParams(overrideParams)
@@ -213,6 +228,7 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 			r.InternalError("execution failed and the failure note could not be recorded", errors.Join(execErr, nerr))
 			return nil, false
 		}
+		setRetryAfter(r, execErr)
 		r.APIError(findingActionRefusal(execErr))
 		return nil, false
 	}

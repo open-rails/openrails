@@ -110,6 +110,11 @@ func dunningOf(ctx context.Context, d *db.DB, sub *models.Subscription, price *m
 	}
 	out.RetriesLeft = &left
 	switch {
+	case sub.AdviceDeferred():
+		// The network's advice allows no retry before the next renewal: none
+		// is left, and the case ends then.
+		none, deadline := 0, sub.GraceEndsAt.UTC()
+		out.RetriesLeft, out.FinalRetryAt = &none, &deadline
 	case out.WaitingForNewCard && sub.GraceEndsAt != nil:
 		// No card, no charge: the case ends at the deadline.
 		deadline := sub.GraceEndsAt.UTC()

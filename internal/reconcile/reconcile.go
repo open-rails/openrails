@@ -222,8 +222,10 @@ type RemoteSnapshot struct {
 	Subscriptions  []RemoteSubscription  `json:"subscriptions"`
 	Transactions   []RemoteTransaction   `json:"transactions"`
 	PaymentMethods []RemotePaymentMethod `json:"vault_entries"`
-	Capabilities   Capabilities          `json:"capabilities"`
-	Coverage       SnapshotCoverage      `json:"coverage"`
+	// Disputes are the dispute cases read, of every kind.
+	Disputes     []json.RawMessage `json:"-"`
+	Capabilities Capabilities      `json:"capabilities"`
+	Coverage     SnapshotCoverage  `json:"coverage"`
 }
 
 // SnapshotCoverage says which provider domains were exhaustively covered by a
@@ -276,7 +278,31 @@ type FetchParams struct {
 	// SkipSolanaPlanDiscovery skips per-plan subscription enumeration when a
 	// read is catching up transaction windows or comparing known subscriptions.
 	SkipSolanaPlanDiscovery bool
+	// TransactionsOnly reads only the window's transactions, not the roster:
+	// a paced read (Paced) takes them a request at a time.
+	TransactionsOnly bool
+	// Chain places the window in a refresh's chain of windows to its horizon.
+	Chain Chain
 }
+
+// Chain places a window in the chain of windows a refresh reads to its
+// horizon, one job run each, its watermark advanced as each completes. NMI
+// selects transactions by last change, so a link lists the transactions last
+// changed in it, each with every action: a cursor, never an absence proof. A
+// transaction is listed by the link holding its last change when that link
+// is read; one changed after is read by a later link or the end.
+type Chain int
+
+const (
+	// Unchained is a window read alone (prune, a probe): the actions dated
+	// in it.
+	Unchained Chain = iota
+	// ChainLink ends before the horizon, at Until.
+	ChainLink
+	// ChainEnd reaches the horizon. NMI reads it through now, keeping every
+	// action dated up to Until, so it also holds every action dated in it.
+	ChainEnd
+)
 
 // isReversal is a refund, void or dispute: money going back, which no
 // deadline probe backstops.
@@ -307,6 +333,17 @@ type RailFetcher interface {
 type keyedFetcher struct {
 	RailFetcher
 	key string
+}
+
+func (k keyedFetcher) Paced() bool { return Paced(k.RailFetcher) }
+
+// Paced reports whether f's provider answers its account one request at a
+// time (a live CCBill account's DataLink, an hour apart): its roster and
+// each day of transactions are separate reads, and a read that waits for its
+// slot fails with ccbill.PacedError.
+func Paced(f RailFetcher) bool {
+	p, ok := f.(interface{ Paced() bool })
+	return ok && p.Paced()
 }
 
 // rawJSON marshals v into a json.RawMessage for the Raw forensics fields,

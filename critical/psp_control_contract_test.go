@@ -18,15 +18,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/shared/httpx"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -262,6 +266,41 @@ func TestPSPControls(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "armed-processor"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Len(t, p.provider.effects(t), 1)
+	})
+	t.Run("OR-J06-S09/a-live-stripe-key-of-another-account-is-mismatched-and-never-armed", func(t *testing.T) {
+		// A live PSP never runs beside a fake provider in an engine, so its gate
+		// is driven directly, on the production path: a wired factory checks
+		// posture and sends writes through the Stripe fixture as through Stripe.
+		stripe := stripemock.NewUnstarted(stripemock.Options{})
+		factory := stripeapi.NewWiredFactory(stripe)
+		client := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
+		suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+		declared, own, foreign := "acct_declared"+suffix, "sk_live_acct_declared"+suffix, "rk_live_acct_other"+suffix
+		write := func(key string) error {
+			t.Helper()
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, stripeapi.APIBase+"/v1/customers", strings.NewReader("email=alice%40critical.invalid"))
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response, err := client.Do(req)
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			return err
+		}
+		// Each key is registered as its PSP's configuration loads it.
+		merchant := uuid.New()
+		factory.RegisterPosture("own", merchant, uuid.New(), declared, own)
+		factory.RegisterPosture("foreign", merchant, uuid.New(), declared, foreign)
+		require.NoError(t, write(own), "the declared account's live key goes through the gate")
+		require.Len(t, stripe.Submitted("/v1/customers"), 1)
+		err := write(foreign)
+		require.ErrorIs(t, err, providerposture.ErrDisarmed)
+		require.ErrorContains(t, err, "mismatched")
+		require.NotContains(t, err.Error(), foreign)
+		require.Len(t, stripe.Submitted("/v1/customers"), 1, "a key of another account writes nothing")
+		require.Equal(t, 2, stripe.Reads("/v1/account"))
+		require.Zero(t, stripe.Reads("/v1/balance"), "a live key's mode is its prefix")
 	})
 	t.Run("OR-J06-S03", func(t *testing.T) {
 		for _, mode := range []string{"readonly", "limited"} {
@@ -657,7 +696,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
 	t.Helper()
 	w := newWorld(t, func(w *world) {
-		declareCCBill(w, nil)
+		declareCCBill(w, "")
 		m := cfgMerchant(w.cfg, "alpha")
 		m.AlertEmail = ptr("ops@alpha.example")
 		setCfgMerchant(&w.cfg, "alpha", m)

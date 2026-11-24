@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // DataLink Subscription Management System: per-subscription read
@@ -58,10 +56,6 @@ const maxSubscriptionManagementResponseBytes = 1 << 20
 // expirationDate (when access ended).
 var subscriptionStatusExpiryFields = []string{"nextBillingDate", "expirationDate"}
 
-// subscriptionStatusDateLayouts are the accepted expiry encodings: YYYYMMDDHHMMSS
-// (expirationDate/signupDate/cancelDate) and YYYYMMDD (nextBillingDate).
-var subscriptionStatusDateLayouts = []string{"20060102150405", "20060102"}
-
 // SubscriptionStatusResult is one parsed viewSubscriptionStatus answer.
 // RawStatus is the verbatim <subscriptionStatus> value (required — a response
 // without it is an error, never a defaulted struct); Fields preserves every
@@ -105,20 +99,18 @@ func (r SubscriptionStatusResult) Active() (bool, error) {
 }
 
 // ExpiresAt returns the parsed expiry/paid-through instant when the response
-// carried one (end-of-day UTC for date-only values, matching the webhook
-// convention). ok=false when absent or unparseable — never a fabricated date.
+// carried one: YYYYMMDDHHMMSS (expirationDate, signupDate, cancelDate) or
+// YYYYMMDD (nextBillingDate), the end of its day when it names only a day,
+// as webhook dates read. ok=false when absent or unparseable — never a
+// fabricated date.
 func (r SubscriptionStatusResult) ExpiresAt() (time.Time, bool) {
 	for _, field := range subscriptionStatusExpiryFields {
-		raw := strings.TrimSpace(r.Fields[field])
-		if raw == "" {
-			continue
-		}
-		parsed, err := timeutil.ParseFirstUTC(raw, subscriptionStatusDateLayouts...)
+		parsed, err := ParseTime(r.Fields[field])
 		if err != nil {
 			continue
 		}
-		if parsed.Hour() == 0 && parsed.Minute() == 0 && parsed.Second() == 0 {
-			parsed = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
+		if parsed.Equal(dayStart(parsed)) {
+			parsed = DayEnd(parsed)
 		}
 		return parsed, true
 	}

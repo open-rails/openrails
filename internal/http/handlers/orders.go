@@ -171,7 +171,7 @@ func PreviewMyOrder(r *httprequest.Request) {
 // cards, so only the merchant's own signed-in person asks for one.
 func CreateMyOrder(r *httprequest.Request) {
 	var body billing.CreateMyOrderParams
-	if !r.BindJSON(&body) {
+	if !r.BindJSON(&body) || refuseCardNumber(r, body) {
 		return
 	}
 	if body.PayURL != nil && !signedInPerson(r) {
@@ -205,7 +205,7 @@ func CreateMyOrder(r *httprequest.Request) {
 // PayMyOrder handles POST /v1/me/orders/{id}/pay.
 func PayMyOrder(r *httprequest.Request) {
 	var body billing.PayOrderParams
-	if !r.BindJSON(&body) {
+	if !r.BindJSON(&body) || refuseCardNumber(r, body) {
 		return
 	}
 	if !payURLPayment(r, body) {

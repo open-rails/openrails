@@ -72,7 +72,11 @@ type MerchantFetcherBuilder struct {
 	// NMIClients is the runtime's shared NMI client factory; its transport
 	// (the fake-provider seam) carries over to pull clients.
 	NMIClients *railresolve.NMIFactory
-	Log        *slog.Logger
+	// DataLinkPacing paces live CCBill accounts' DataLink requests.
+	DataLinkPacing ccbill.Pacing
+	// WireDataLink adjusts each DataLink client the builder arms (test seam).
+	WireDataLink func(*ccbill.DataLinkClient)
+	Log          *slog.Logger
 }
 
 // Build resolves the merchant's pull credentials and returns the armed plane.
@@ -287,9 +291,13 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 		Sandbox:          scope.Environment == config.EnvironmentSandbox,
 	})
 	dl.ReadOnly = b.readOnly()
+	dl.Pacing = b.DataLinkPacing
 	if sandbox := config.SandboxCCBillDataLinkURL(b.Config); sandbox != "" {
 		dl.BaseURL = sandbox
 		dl.LoopbackFixture = true
+	}
+	if b.WireDataLink != nil {
+		b.WireDataLink(dl)
 	}
 	out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(dl), key: scope.AccountID}
 	out.Probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: dl}

@@ -1,6 +1,10 @@
 package billing
 
-import "time"
+import (
+	"time"
+
+	"github.com/open-rails/openrails/catalog"
+)
 
 // SubscriptionStatus is a subscription's lifecycle state: whether it will
 // rebill.
@@ -56,6 +60,10 @@ type SubscriptionListParams struct {
 	CanceledAfter  time.Time `form:"canceled_after"`
 	CanceledBefore time.Time `form:"canceled_before"`
 	ExpiresBefore  time.Time `form:"expires_before"`
+	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
+	// change by then: a cancellation at period end, or a scheduled price or
+	// seat change, effective at or before it.
+	ScheduledChangeBefore time.Time `form:"scheduled_change_before"`
 }
 
 // Subscription is one subscription's lifecycle and recovery state. The
@@ -79,7 +87,11 @@ type Subscription struct {
 	PriceID         PriceID          `json:"price_id"`
 	// Quantity is the seats of a per-seat price: each period bills the unit
 	// amount times Quantity. Null unless the price is sold per seat.
-	Quantity           *int               `json:"quantity"`
+	Quantity *int `json:"quantity"`
+	// MRR is what the subscription adds to monthly recurring revenue, with
+	// its scheduled change; the merchant routes fill it, the customer's own
+	// routes leave it null.
+	MRR                *SubscriptionMRR   `json:"mrr"`
 	PSPID              PSPID              `json:"psp_id"`
 	Rail               Rail               `json:"rail"`
 	RailSubscriptionID *string            `json:"rail_subscription_id"`
@@ -119,6 +131,40 @@ type Subscription struct {
 	NextAction *NextAction `json:"next_action"`
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
+// SubscriptionMRR is a subscription's monthly recurring revenue: its price's
+// list amount normalised to a month, times its seats, in the price's
+// currency. A pending subscription, one in a trial and one that has ended add
+// zero; one canceled at period end adds its MRR until the end.
+type SubscriptionMRR struct {
+	Amount   int64            `json:"amount,string"`
+	Currency catalog.Currency `json:"currency"`
+	// Scheduled is the change waiting for a date, or null.
+	Scheduled *ScheduledMRR `json:"scheduled"`
+}
+
+// ScheduledMRRKind is what a scheduled change does to MRR.
+type ScheduledMRRKind string
+
+const (
+	// ScheduledMRRChurn is a cancellation at period end: the subscription
+	// leaves MRR at its end.
+	ScheduledMRRChurn ScheduledMRRKind = "churn"
+	// ScheduledMRRContraction is a scheduled change to a lower price or fewer
+	// seats, from the renewal it applies at.
+	ScheduledMRRContraction ScheduledMRRKind = "contraction"
+	// ScheduledMRRExpansion is a scheduled change to a higher price or more
+	// seats.
+	ScheduledMRRExpansion ScheduledMRRKind = "expansion"
+)
+
+// ScheduledMRR is a change of a subscription's MRR waiting for EffectiveAt.
+// Amount is the change: negative for churn and contraction.
+type ScheduledMRR struct {
+	Kind        ScheduledMRRKind `json:"kind"`
+	Amount      int64            `json:"amount,string"`
+	EffectiveAt time.Time        `json:"effective_at"`
 }
 
 // SubscriptionDunning is a declined renewal's collection. Attempts counts

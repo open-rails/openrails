@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -129,5 +130,23 @@ func TestPaymentReplay(t *testing.T) {
 		persisted, err := a.alpha.GetOrder(t.Context(), first.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 30_000_000, persisted.Total)
+	})
+	t.Run("OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		input := saleInput(t, a, p)
+		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
+		first, err := a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: alice, Lines: input.Lines})
+		require.NoError(t, err)
+		replayed, err := a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: alice, Lines: input.Lines})
+		require.NoError(t, err)
+		require.Equal(t, first.ID, replayed.ID, "the same request answers its order")
+		_, err = a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: bob, Lines: input.Lines})
+		requireCode(t, err, billing.CodeIdempotencyKeyReused)
+		bobs, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: bob})
+		require.NoError(t, err)
+		require.Empty(t, bobs.Items, "the key made no second order")
+		var orders int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "orders"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&orders))
+		require.Equal(t, 1, orders)
 	})
 }

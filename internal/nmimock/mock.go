@@ -31,6 +31,10 @@ type Options struct {
 	// PlanFallback answers reads of plans the account has but the mock was
 	// never given (plans a legacy system created long ago).
 	PlanFallback func(id string) (Plan, bool)
+	// OrderByChange lists a transaction report by last change, oldest first,
+	// as NMI might (its guide names no date), so a change moves a
+	// transaction to the end.
+	OrderByChange bool
 }
 
 // Mock is a stateful NMI gateway. It is an http.Handler (for a listener) and
@@ -55,9 +59,11 @@ type Mock struct {
 	validations []*Validation
 	calls       []Call
 	reads       map[string]int
+	searches    []url.Values
 	odd         []string
 	recent      []recentCharge
 	partials    map[string]string
+	issuers     map[string]string
 
 	refusedSaves              int
 	declineValid              int
@@ -90,7 +96,7 @@ func NewUnstarted(opts Options) *Mock {
 		opts.Clock = time.Now
 	}
 	return &Mock{opts: opts, tokens: map[string]Card{}, issued: map[string]Card{}, numbers: map[string]*Card{}, vaults: map[string]*Vault{}, plans: map[string]*Plan{},
-		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}, partials: map[string]string{}}
+		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}, partials: map[string]string{}, issuers: map[string]string{}}
 }
 
 // URL is the loopback gateway root; OpenRails' provider_sandbox.nmi_gateway_url.
@@ -252,6 +258,9 @@ func (m *Mock) serve(r *http.Request, body []byte) *httptest.ResponseRecorder {
 		_, _ = rec.WriteString(m.directPost(form))
 	case routeQuery:
 		m.reads["query:"+form.Get("report_type")]++
+		if t := form.Get("report_type"); t == "" || t == "transaction" {
+			m.searches = append(m.searches, form)
+		}
 		m.query(rec, form)
 	default:
 		m.odd = append(m.odd, r.Method+" "+r.URL.Path)

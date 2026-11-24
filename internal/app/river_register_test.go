@@ -8,10 +8,14 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -88,5 +92,34 @@ func TestAddWorkerWhileMerchantConfigLoads(t *testing.T) {
 				require.NoError(t, addWorker(&workerSet{river: river.NewWorkers()}, &configWorker{Config: cache, Log: logger}))
 			}
 		})
+	}
+}
+
+// The registered refresh and import read a live CCBill account's DataLink a
+// request per slot of the runtime's abuse state, on its clock.
+func TestRegisteredWorkersPaceLiveDataLink(t *testing.T) {
+	clock := clockwork.NewFakeClock()
+	r := &Runtime{AbuseState: abusestate.New(slog.Default(), nil), Clock: clock, Log: slog.Default(), DB: &db.DB{Log: slog.Default()}}
+	refresh, paced := r.refreshWorkers(clock)
+	if paced.Refresh != refresh {
+		t.Fatal("the paced refresh runs another refresh's reads")
+	}
+	for name, pacing := range map[string]ccbill.Pacing{"refresh": refresh.DataLinkPacing, "import": r.PSPImporter().DataLinkPacing} {
+		if pacing.Slots != ccbill.Slots(r.AbuseState) {
+			t.Errorf("%s: slots %v, want the runtime's abuse state", name, pacing.Slots)
+		}
+		if pacing.Now == nil || !pacing.Now().Equal(clock.Now()) {
+			t.Errorf("%s: pacing is not on the runtime's clock", name)
+		}
+	}
+	if refresh.WireDataLink != nil || r.PSPImporter().WireDataLink != nil {
+		t.Error("a registered worker carries the test seam")
+	}
+	workers := &workerSet{river: river.NewWorkers()}
+	if err := addWorker(workers, refresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := addWorker(workers, paced); err != nil {
+		t.Fatal(err)
 	}
 }

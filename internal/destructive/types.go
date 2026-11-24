@@ -24,12 +24,18 @@ const (
 	Refund              Kind = "refund"
 	CancelSubscription  Kind = "cancel_subscription"
 	DeletePaymentMethod Kind = "delete_payment_method"
+	// BlockPaymentMethod keeps a charged-back or fraud-reported card from
+	// being charged again; the card stays.
+	BlockPaymentMethod  Kind = "block_payment_method"
 	RevokeCredit        Kind = "revoke_credit"
 	RevokeAccess        Kind = "revoke_access"
 	WaiveOrder          Kind = "waive_order"
 	MarkUncollectible   Kind = "mark_uncollectible"
 	CatalogChange       Kind = "catalog_change"
 	ConfigurationChange Kind = "configuration_change"
+	// EraseContact is a directory's erasure of a customer's contact (SCIM
+	// DELETE).
+	EraseContact Kind = "erase_contact"
 )
 
 // Actor is verified command attribution. Credential is audit only; rotation
@@ -127,12 +133,17 @@ func (c Command) validate() error {
 		return errors.New("destructive command requires a SHA256 digest")
 	}
 	switch c.Kind {
-	case Refund, CancelSubscription, DeletePaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange:
+	case Refund, CancelSubscription, DeletePaymentMethod, BlockPaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange, EraseContact:
 	default:
 		return fmt.Errorf("unknown destructive command kind %q", c.Kind)
 	}
 	return c.Actor.validate()
 }
+
+// ReservationLife is how long an admitted command may wait to start while it
+// still holds budget: one a crash or an abandoned batch left reserved stops
+// counting after it. A started one counts until it finishes.
+const ReservationLife = 15 * time.Minute
 
 type State string
 
@@ -211,8 +222,13 @@ var (
 	ErrSelfClear   = errors.New("the triggering actor cannot clear a destructive hold")
 )
 
+// HeldRetryAfter is the Retry-After of a held command's 429: a hold lasts
+// until a person clears it, so it names when to look again, not a deadline.
+const HeldRetryAfter = time.Hour
+
 // HeldError is returned only after an existing or newly created incident is
-// durably committed. HTTP maps it to 429; it has no automatic retry deadline.
+// durably committed. HTTP maps it to 429 with HeldRetryAfter; it has no
+// automatic retry deadline.
 type HeldError struct{ Hold Hold }
 
 func (e *HeldError) Error() string        { return ErrHeld.Error() }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,9 +28,9 @@ limits:
     unit: usage_units
     reset: {kind: session, window_seconds: 18000}
     overrun: admit_while_positive
-    rate_cards:
-    - meter: input-tokens
-      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+    counts:
+    - {meter: input-tokens, per: 1000, filter: {model: [small]}}
+    - {meter: input-tokens, weight: 5, per: 1000, filter: {model: [large]}}
   weekly:
     unit: usage_units
     reset: {kind: fixed, window_seconds: 604800, anchor: first_use}
@@ -117,11 +118,10 @@ func TestUsageLimits(t *testing.T) {
 		require.Equal(t, "usage_units", five.Unit)
 		require.Equal(t, catalog.LimitReset{Kind: catalog.ResetSession, WindowSeconds: 18000}, five.Reset)
 		require.Equal(t, catalog.OverrunAdmitWhilePositive, five.Overrun)
-		require.Len(t, five.RateCards, 1)
-		require.Equal(t, "input-tokens", five.RateCards[0].Meter)
-		require.EqualValues(t, 1000, five.RateCards[0].Price.PerUnit.DivideBy)
-		require.Equal(t, catalog.RoundHalfUp, five.RateCards[0].Price.PerUnit.Round, "a rate card is stored as it prices")
-		require.EqualValues(t, 5, five.RateCards[0].Price.PerUnit.Matrix.Cells["large"].UnitAmount)
+		require.Equal(t, []catalog.LimitCount{
+			{Meter: "input-tokens", Weight: 1, Per: 1000, Filter: map[string][]string{"model": {"small"}}},
+			{Meter: "input-tokens", Weight: 5, Per: 1000, Filter: map[string][]string{"model": {"large"}}},
+		}, five.Counts, "a count is stored with its weight and per")
 		require.Equal(t, []billing.LimitProduct{{ProductID: limitProduct(t, a.alphaRemote, "pro"), ProductKey: "pro", Capacity: 1000}}, five.Products)
 		weekly, err := a.alphaRemote.GetLimit(t.Context(), "weekly")
 		require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestUsageLimits(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, catalog.OverrunRequireEstimate, daily.Overrun, "an edit's overrun defaults to the safe one")
 		require.EqualValues(t, 1, daily.Revision)
-		require.Empty(t, daily.RateCards)
+		require.Empty(t, daily.Counts)
 		require.Empty(t, daily.Products)
 		_, err = a.alphaRemote.SetLimit(t.Context(), "daily", billing.SetLimitParams{Unit: "messages", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, ExpectedRevision: ptr(int64(0))})
 		requireCode(t, err, billing.CodeRevisionMismatch)
@@ -169,7 +169,8 @@ func TestUsageLimits(t *testing.T) {
 
 		for _, invalid := range []string{
 			"schema_version: 1\nlimits:\n  balance: {unit: credits, reset: {kind: lifetime}}\n",
-			"schema_version: 1\nlimits:\n  spend: {unit: USD, reset: {kind: lifetime}, rate_cards: [{meter: input-tokens, price: {model: per_unit, per_unit: {unit_amount: \"1\"}}}]}\n",
+			"schema_version: 1\nlimits:\n  spend: {unit: USD, reset: {kind: lifetime}, counts: [{meter: input-tokens}]}\n",
+			"schema_version: 1\nlimits:\n  tokens: {unit: requests, reset: {kind: lifetime}, counts: [{meter: input-tokens, per: -1}]}\n",
 			"schema_version: 1\nlimits:\n  hourly: {unit: requests, reset: {kind: fixed, window_seconds: 3600}}\n",
 			"schema_version: 1\nlimits:\n  forever: {unit: requests, reset: {kind: lifetime, window_seconds: 60}}\n",
 			"schema_version: 1\nproducts:\n  pro: {limits: {weekly: \"-1\"}}\n",
@@ -179,9 +180,10 @@ func TestUsageLimits(t *testing.T) {
 		}
 		for key, params := range map[string]billing.SetLimitParams{
 			"balance":   {Unit: "credits", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}},
-			"spend":     {Unit: "USD", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, RateCards: []catalog.LimitRateCard{{Meter: "input-tokens", Price: catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1}}}}},
-			"unmetered": {Unit: "requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, RateCards: []catalog.LimitRateCard{{Meter: "undeclared", Price: catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1}}}}},
-			"priced":    {Unit: "requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, RateCards: []catalog.LimitRateCard{{Meter: "input-tokens", Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 1}}}}},
+			"spend":     {Unit: "USD", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, Counts: []catalog.LimitCount{{Meter: "input-tokens"}}},
+			"unmetered": {Unit: "requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, Counts: []catalog.LimitCount{{Meter: "undeclared"}}},
+			"negative":  {Unit: "requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, Counts: []catalog.LimitCount{{Meter: "input-tokens", Weight: -2}}},
+			"elsewhere": {Unit: "requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}, Counts: []catalog.LimitCount{{Meter: "input-tokens", Filter: map[string][]string{"region": {"eu"}}}}},
 			"shouting":  {Unit: "Requests", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}},
 		} {
 			_, err := a.alphaRemote.SetLimit(t.Context(), key, params)
@@ -204,6 +206,28 @@ func TestUsageLimits(t *testing.T) {
 		foreign, err := a.betaRemote.ListLimits(t.Context(), billing.PageRequest{})
 		require.NoError(t, err)
 		require.Empty(t, foreign.Items, "another merchant's catalog declares none of them")
+	})
+
+	t.Run("OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		const document = "schema_version: 1\nmeters:\n  tokens: {event_type: chat, value_property: tokens, aggregation: sum}\nlimits:\n  weekly:\n    unit: usage_units\n    reset: {kind: lifetime}\n    rate_cards: [{meter: tokens, price: {model: per_unit, per_unit: {unit_amount: \"1\"}}}]\n"
+		_, err := catalog.ParseApplicationYAML([]byte(document))
+		require.ErrorContains(t, err, "limit rate_cards are now counts")
+		status, raw := a.request(t, http.MethodPost, "/v1/catalog/apply", a.alphaKey.Secret, json.RawMessage(`{"schema_version": 1,
+			"meters": {"tokens": {"event_type": "chat", "value_property": "tokens", "aggregation": "sum"}},
+			"limits": {"weekly": {"unit": "usage_units", "reset": {"kind": "lifetime"}, "rate_cards": [{"meter": "tokens", "price": {"model": "per_unit", "per_unit": {"unit_amount": "1"}}}]}}}`))
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Contains(t, string(raw), "limit rate_cards are now counts", "the refusal names the replacement")
+		_, err = a.alphaRemote.GetLimit(t.Context(), "weekly")
+		requireCode(t, err, billing.CodeLimitNotFound)
+		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})
+		require.NoError(t, err)
+		require.Empty(t, meters.Items, "the refused document applied nothing")
+
+		applyLimits(t, a.alphaRemote, strings.Replace(document, `rate_cards: [{meter: tokens, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]`, "counts: [{meter: tokens}]", 1))
+		weekly, err := a.alphaRemote.GetLimit(t.Context(), "weekly")
+		require.NoError(t, err)
+		require.Equal(t, []catalog.LimitCount{{Meter: "tokens", Weight: 1, Per: 1}}, weekly.Counts, "the one-to-one count")
 	})
 
 	t.Run("OR-J23-S08/capacity-sums-the-customers-live-products", func(t *testing.T) {

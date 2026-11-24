@@ -22,34 +22,23 @@ func (q *Queries) CountMerchantRowsCustomerContacts(ctx context.Context, merchan
 	return count, err
 }
 
-const countMerchantRowsEntitlementCache = `-- name: CountMerchantRowsEntitlementCache :one
-SELECT count(*) FROM billing.customer_entitlement_cache WHERE merchant_id = $1
+const countMerchantRowsDisputes = `-- name: CountMerchantRowsDisputes :one
+SELECT count(*) FROM billing.disputes WHERE merchant_id = $1
 `
 
-func (q *Queries) CountMerchantRowsEntitlementCache(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsEntitlementCache, merchantID)
+func (q *Queries) CountMerchantRowsDisputes(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsDisputes, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countMerchantRowsEntitlementCacheStamps = `-- name: CountMerchantRowsEntitlementCacheStamps :one
-SELECT count(*) FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1
+const countMerchantRowsFraudReports = `-- name: CountMerchantRowsFraudReports :one
+SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1
 `
 
-func (q *Queries) CountMerchantRowsEntitlementCacheStamps(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsEntitlementCacheStamps, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsExternalProviderMutationLogs, merchantID)
+func (q *Queries) CountMerchantRowsFraudReports(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsFraudReports, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -86,6 +75,28 @@ SELECT count(*) FROM billing.nmi_history_months WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsNMIHistoryMonths, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsNetworkActivity = `-- name: CountMerchantRowsNetworkActivity :one
+SELECT count(*) FROM billing.network_activity_daily WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsNetworkActivity(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsNetworkActivity, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsOperationLog = `-- name: CountMerchantRowsOperationLog :one
+SELECT count(*) FROM billing.operation_log WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsOperationLog, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -243,30 +254,21 @@ func (q *Queries) PurgeMerchantRowsCustomerContacts(ctx context.Context, merchan
 	return err
 }
 
-const purgeMerchantRowsEntitlementCache = `-- name: PurgeMerchantRowsEntitlementCache :exec
-DELETE FROM billing.customer_entitlement_cache WHERE merchant_id = $1
+const purgeMerchantRowsDisputes = `-- name: PurgeMerchantRowsDisputes :exec
+DELETE FROM billing.disputes WHERE merchant_id = $1
 `
 
-func (q *Queries) PurgeMerchantRowsEntitlementCache(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlementCache, merchantID)
+func (q *Queries) PurgeMerchantRowsDisputes(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsDisputes, merchantID)
 	return err
 }
 
-const purgeMerchantRowsEntitlementCacheStamps = `-- name: PurgeMerchantRowsEntitlementCacheStamps :exec
-DELETE FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1
+const purgeMerchantRowsFraudReports = `-- name: PurgeMerchantRowsFraudReports :exec
+DELETE FROM billing.fraud_reports WHERE merchant_id = $1
 `
 
-func (q *Queries) PurgeMerchantRowsEntitlementCacheStamps(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlementCacheStamps, merchantID)
-	return err
-}
-
-const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsExternalProviderMutationLogs, merchantID)
+func (q *Queries) PurgeMerchantRowsFraudReports(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsFraudReports, merchantID)
 	return err
 }
 
@@ -294,6 +296,24 @@ DELETE FROM billing.nmi_history_months WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsNMIHistoryMonths, merchantID)
+	return err
+}
+
+const purgeMerchantRowsNetworkActivity = `-- name: PurgeMerchantRowsNetworkActivity :exec
+DELETE FROM billing.network_activity_daily WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsNetworkActivity(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsNetworkActivity, merchantID)
+	return err
+}
+
+const purgeMerchantRowsOperationLog = `-- name: PurgeMerchantRowsOperationLog :exec
+DELETE FROM billing.operation_log WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsOperationLog, merchantID)
 	return err
 }
 

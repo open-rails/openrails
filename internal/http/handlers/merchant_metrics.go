@@ -30,6 +30,12 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 		var plan *metrics.Plan
 		plan, verr = metrics.ValidateAt(q, r.Clock.Now().UTC())
 		if verr == nil {
+			if plan.ReadsUsage() {
+				if err := r.State.RequireEventStore("a usage measure"); err != nil {
+					writeRefusal(r, err, "metrics query refused")
+					return
+				}
+			}
 			res, err := svc.Execute(r.Request.Context(), plan)
 			if err != nil {
 				r.InternalError("metrics query failed", err)

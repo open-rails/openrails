@@ -27,6 +27,10 @@ type Config struct {
 	DB DBConfig
 	// Redis is the redis section; nil declares none.
 	Redis *RedisConfig
+	// ClickHouse is the clickhouse section's connection, the event store
+	// usage needs; nil declares none, and usage is off. Its database is
+	// the engine's Config.ClickHouse.
+	ClickHouse *ClickHouseLogin
 	// SMTP is the email_smtp section; nil sends no email.
 	SMTP *SMTPConfig
 	// Vault is the vault section's login; nil logs in to no Vault. Its
@@ -109,6 +113,7 @@ type fileConfig struct {
 	Database                databaseFile                          `koanf:"database"`
 	DB                      *DBConfig                             `koanf:"db"`
 	Redis                   *RedisConfig                          `koanf:"redis"`
+	ClickHouse              *clickHouseFile                       `koanf:"clickhouse"`
 	Logger                  LoggerConfig                          `koanf:"logger"`
 	EmailSMTP               *SMTPConfig                           `koanf:"email_smtp"`
 	RateLimits              billing.RateLimitsConfig              `koanf:"rate_limits"`
@@ -247,6 +252,35 @@ type RedisConfig struct {
 	CACert string `koanf:"ca_cert"`
 }
 
+// clickHouseFile is the clickhouse section: the connection and the engine's
+// database.
+type clickHouseFile struct {
+	ClickHouseLogin `koanf:",squash"`
+	// Database is the event store's database; empty is "openrails".
+	Database string `koanf:"database"`
+}
+
+// ClickHouseLogin is how the server connects to ClickHouse, over its native
+// protocol. The password is a secret: CLICKHOUSE_PASSWORD, from the
+// environment or a mounted secret file.
+type ClickHouseLogin struct {
+	// Addr is host:port of the native protocol, 9000 by default.
+	Addr     string `koanf:"addr"`
+	Username string `koanf:"username"`
+	Password string `koanf:"password"`
+}
+
+// split is the server's login and the engine's database; an empty section
+// declares none.
+func (c *clickHouseFile) split() (*ClickHouseLogin, billing.ClickHouseConfig) {
+	if c == nil || strings.TrimSpace(c.Addr) == "" {
+		return nil, billing.ClickHouseConfig{}
+	}
+	login := c.ClickHouseLogin
+	login.Addr = strings.TrimSpace(login.Addr)
+	return &login, billing.ClickHouseConfig{Database: strings.TrimSpace(c.Database)}
+}
+
 // SMTPConfig is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
 // every app uses; an empty host sends no email. From is one RFC 5322
 // mailbox: "Shop <noreply@shop.example>".
@@ -367,6 +401,7 @@ func (f *fileConfig) config() (*Config, error) {
 		return nil, err
 	}
 	login, mounts := f.Vault.split()
+	clickHouse, eventStore := f.ClickHouse.split()
 	db := DBConfig{}
 	if f.DB != nil {
 		db = *f.DB
@@ -380,6 +415,7 @@ func (f *fileConfig) config() (*Config, error) {
 				Schema: f.Database.Schema, RiverSchema: f.Database.RiverSchema,
 				SkipMigrations: f.Database.SkipMigrations, LeaseConns: db.LeaseConns,
 			},
+			ClickHouse:              eventStore,
 			PublicBillingBaseURL:    f.PublicBillingBaseURL,
 			RateLimits:              f.RateLimits,
 			UserActionRateLimit:     f.UserActionRateLimit,
@@ -400,6 +436,7 @@ func (f *fileConfig) config() (*Config, error) {
 		},
 		DB:                       db,
 		Redis:                    redisSection(f.Redis),
+		ClickHouse:               clickHouse,
 		SMTP:                     smtpSection(f.EmailSMTP),
 		Vault:                    login,
 		Proxies:                  Proxies{Trusted: f.TrustedProxies, Cloudflare: f.CloudflareProxies},

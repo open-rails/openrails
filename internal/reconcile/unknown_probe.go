@@ -305,7 +305,8 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 		switch {
 		case rebilling:
 			sub.Status = SubscriptionStatusActive
-		case res.RawStatus == "1":
+		case res.RawStatus == ccbillStatusNotRebilling:
+			// Not rebilling, paid time kept (stoppedRebillingOnly).
 			sub.Status = SubscriptionStatusCanceled
 		default:
 			sub.Status = SubscriptionStatusExpired

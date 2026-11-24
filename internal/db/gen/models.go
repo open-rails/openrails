@@ -90,11 +90,11 @@ type BillingCatalogFieldOwner struct {
 	SetAt time.Time
 }
 
-// Usage limits the merchant declares: what a limit counts (its unit and rate cards), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
+// Usage limits the merchant declares: what a limit counts (its unit and counts), when its window resets, and how a request that crosses it is admitted. Capacity comes from products (catalog_product_limits) or a customer override. The built-in limit balance is never declared.
 type BillingCatalogLimit struct {
 	MerchantID uuid.UUID
 	Key        string
-	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no rate cards.
+	// A named unit (lowercase) or a currency code. A currency limit counts the rated amount and has no counts.
 	Unit      string
 	ResetKind string
 	// The window of a fixed, session, rolling or rate limit; null for billing_period and lifetime.
@@ -102,12 +102,12 @@ type BillingCatalogLimit struct {
 	// What a fixed window tiles from: the customer's subscription or its first use; null for every other reset.
 	ResetAnchor *string
 	Overrun     string
-	// How usage counts toward the limit: rate cards (meter, filter, price) priced in the limit's unit, in declaration order.
-	RateCards []byte
 	// Advances on every change to the limit.
 	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// How usage counts toward the limit: each count (meter, weight, per, filter) adds an event's quantity × weight ÷ per, rounded half up, in declaration order.
+	Counts []byte
 }
 
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
@@ -183,6 +183,57 @@ type BillingChangeLog struct {
 	OperationID *uuid.UUID
 }
 
+// Credit lots: units of a currency or merchant unit credited to a customer's balance, spent soonest expiry first. Every movement of a lot's units is a ledger transfer naming it; units_credited and units_debited count the legs on its balance account. Retention: permanent, never pruned.
+type BillingCreditGrant struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	// The customer's balance account the lot's units sit in; only legs on it move the lot's counters.
+	AccountID uuid.UUID
+	// What the lot counts: a registry currency, or a merchant-defined unit.
+	Unit  string
+	Units int64
+	// purchase and recurring were paid (a one-off order line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
+	FundingSource string
+	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift.
+	PaidAmount   *int64
+	PaidCurrency *string
+	// The label the funding named, part of its once-only key.
+	Source string
+	// The funding's own id: the caller's key, or the payment that bought the lot. Unique per customer.
+	SourceID *string
+	// Who funded the lot: the customer, or the staff or host that granted it.
+	Invoker     string
+	ProductID   *uuid.UUID
+	OrderLineID *uuid.UUID
+	PaymentID   *uuid.UUID
+	Description *string
+	StartsAt    time.Time
+	ExpiresAt   *time.Time
+	// When the lot's live revocation took effect; kept by its credit_grant_events.
+	RevokedAt *time.Time
+	// Units the ledger credited to the lot on its balance account: deposits, bonuses, restores and reinstatements. Kept by ledger_transfers_apply_lot_counters.
+	UnitsCredited int64
+	// Units the ledger debited from the lot on its balance account: spends, repayments, expiries, revocations and refunds. Remaining is units_credited - units_debited.
+	UnitsDebited int64
+	// Units pending refunds of the lot's payment will withdraw: its share of the refunds' cash, rounded up. Available is remaining - units_reserved.
+	UnitsReserved int64
+	CreatedAt     time.Time
+}
+
+// Append-only revocations and reinstatements of credit lots; each sets or clears its lot's revoked_at. The units they move are ledger transfers. Retention: permanent, never pruned.
+type BillingCreditGrantEvent struct {
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	CreditGrantID uuid.UUID
+	Event         string
+	// When the event takes effect (valid time); created_at is when it was recorded.
+	EffectiveAt time.Time
+	Reason      *string
+	Actor       *string
+	CreatedAt   time.Time
+}
+
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -206,8 +257,6 @@ type BillingCustomer struct {
 	Issuer     *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
-	// Steps with every statement that changes the customer's product access: a cached key set from an older version is stale.
-	AccessVersion int64
 	// The billing policy staff assigned this customer, by its name in the merchant's settings; NULL follows the tier, then the default.
 	BillingPolicy *string
 }
@@ -248,31 +297,6 @@ type BillingCustomerDelinquency struct {
 	UpdatedAt     time.Time
 	// The next instant time alone changes this payer's delinquency in the currency: a usage order falling due or its grace window running out. Null: only a change to its usage orders or policy does.
 	NextEvaluationAt *time.Time
-}
-
-// A heavy buyer's keys as of their stamps row: the keys of the products they hold. Derived; rebuilt on read.
-type BillingCustomerEntitlementCache struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	// The most seats of the key a held per-seat product gives; NULL when none is per seat.
-	Quantity *int32
-}
-
-// When a heavy buyer's cached keys are valid: built at entitlement_generation and access_version, for instants in [valid_from, valid_until), the next start or end of one of their windows. Derived; rebuilt on read.
-type BillingCustomerEntitlementCacheStamp struct {
-	ID                    uuid.UUID
-	MerchantID            uuid.UUID
-	CustomerID            uuid.UUID
-	EntitlementGeneration int64
-	AccessVersion         int64
-	ValidFrom             time.Time
-	ValidUntil            *time.Time
-	Keys                  int32
-	HeldProducts          int32
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
 }
 
 // Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
@@ -331,6 +355,17 @@ type BillingCustomerMessage struct {
 	SentAt    *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Each customer's MRR in each currency, as its movements left it: the sum of its subscriptions' recorded MRR, how many add to it, and when it first had any (its cohort).
+type BillingCustomerMrr struct {
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	Currency      string
+	Mrr           int64
+	Subscriptions int32
+	// When the customer first had MRR in the currency: its cohort.
+	FirstActiveAt *time.Time
 }
 
 // Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|heading), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
@@ -415,6 +450,51 @@ type BillingDestructiveRunBeforeImage struct {
 	AfterLifecycleRev *int64
 }
 
+// One provider dispute case: an issuer's inquiry, a chargeback, or a dispute resolved before it was filed. Its money is the payments mirror rows it names. Retention: permanent, never pruned.
+type BillingDispute struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	// The case as its rail names it: a Stripe dispute id, an NMI chargeback id (else the charge's transaction id) or a CCBill transaction id (else the subscription id); its reversal's transaction id is chargeback:<provider_ref> on NMI and CCBill.
+	ProviderRef string
+	CustomerID  *uuid.UUID
+	// The disputed charge; NULL when the rail's report matched no single charge (customer_id is NULL with it).
+	PaymentID *uuid.UUID
+	// inquiry (the issuer asked; nothing was withdrawn), chargeback, prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block), or unknown (a status the rail had not reported before: nothing is booked). Only a chargeback counts in a network ratio.
+	Kind string
+	// The card network, as billing.card_network names it.
+	Network string
+	// The reason family the network code or the provider's reason belongs to.
+	Reason string
+	// The network's reason code (Visa 10.4, Mastercard 4853), verbatim.
+	ReasonCode *string
+	// The provider's reason, verbatim.
+	ProviderReason *string
+	// The disputed amount in native units of currency; both are NULL when the report named no currency it could be matched in.
+	Amount   *int64
+	Currency *string
+	// open (awaiting the decision), won, lost, closed (an inquiry or prevention that never became a chargeback), or unreported (the rail reports chargebacks but never their outcome).
+	Status     string
+	DisputedAt time.Time
+	// When the case became a chargeback: when it opened, or when the issuer escalated its inquiry. It dates the chargeback in the network ratios.
+	ChargebackAt  *time.Time
+	EvidenceDueAt *time.Time
+	ClosedAt      *time.Time
+	// The negative payments row that reversed the charge.
+	ReversalPaymentID *uuid.UUID
+	// The positive payments row that returned the money of a won dispute.
+	RecoveryPaymentID *uuid.UUID
+	// The provider refund an RDR resolution took as its own (Stripe's re_ id), so each refund is booked once.
+	AbsorbedRefundRef *string
+	// How OpenRails first learned of the case: notice (a provider's notice) or pull (a reconcile pull); a case a pull found is acted on only once the merchant is armed.
+	ObservedVia string
+	// When the chargeback's automatic response finished: the charged card blocked and the customer's other provider-billed subscriptions on it canceled at period end. NULL while it waits.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type BillingEventLog struct {
 	MerchantID  *uuid.UUID
 	Position    int64
@@ -437,6 +517,13 @@ type BillingEventLogStream struct {
 	PrunedThrough int64
 	PrunedID      string
 	RecordedAt    time.Time
+}
+
+// Global by design, one row: the identity of the ClickHouse event store this database's usage lives in, recorded when one first attaches. New refuses a store with another identity: an empty or different ClickHouse.
+type BillingEventStore struct {
+	Singleton  bool
+	StoreID    uuid.UUID
+	AttachedAt time.Time
 }
 
 // Shared retained merchant facts. Retention: events expire after the configured event retention, independently of reader progress.
@@ -505,13 +592,43 @@ type BillingFailedUsageWindow struct {
 	Amount      int64
 }
 
-// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
+// An issuer's report that a charge was fraud (Visa TC40, Mastercard SAFE) as its rail passes it on: a Stripe early fraud warning. Visa counts each in its monitoring ratio, refunded or not. Retention: permanent, never pruned.
+type BillingFraudReport struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	// The report as its rail names it: a Stripe early fraud warning id.
+	ProviderRef string
+	CustomerID  uuid.UUID
+	PaymentID   uuid.UUID
+	Network     string
+	// The kind of fraud the issuer reported, as Stripe names it.
+	FraudType string
+	// Whether the charge could still be refunded to head off a dispute when the report arrived.
+	Actionable bool
+	// The reported charge's amount, in native units of currency.
+	Amount     int64
+	Currency   string
+	ReportedAt time.Time
+	// What OpenRails decided: pending (an actionable report the merchant refunds, not yet answered), recorded (the report only: unactionable, or received while the merchant recorded reports only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).
+	Action          string
+	RefundPaymentID *uuid.UUID
+	// When the charge was refunded, what it paid for ended and its card blocked; NULL until then.
+	EndedAt *time.Time
+	// When the response finished: with the end, the customer's other provider-billed subscriptions on the card canceled at period end. NULL while it waits.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Append-only grant ledger. Immutable events (grant/revoke/expire/supersede); the live product access windows and ownership are DERIVED projections folded from this log. Credit lots are credit_grants. Retention: permanent, never pruned.
 type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	ProductID  *uuid.UUID
-	// access: a product for a window, whose keys are read from the product at check time; credit: a credit lot. entitlement and ownership are history from before product access.
+	// access: a product for a window, whose keys are read from the product at check time. entitlement and ownership are history from before product access.
 	Kind       string
 	SourceType string
 	SourceID   *string
@@ -519,12 +636,10 @@ type BillingGrant struct {
 	// Grant roots a grant; revoke/expire/supersede are new rows referencing it via supersedes_id. The grant row is never updated.
 	Event        string
 	SupersedesID *uuid.UUID
-	// Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.
+	// The keys a historical entitlement grant carried; NULL on access grants.
 	SpecSnapshot []byte
 	StartsAt     time.Time
 	EndsAt       *time.Time
-	Amount       *int64
-	Currency     *string
 	Reason       *string
 	CreatedAt    time.Time
 	// Who granted a free product: the operator or credential. Required on grant-sourced access grants.
@@ -573,7 +688,7 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
-// One gate's lease: a running process, or the processes that share one Redis. It is live while it is not closed and its gate synced within the lease lifetime; its holds live and die with it. Retention: rows are deleted 61 days after last_sync_at.
+// One gate's lease, or a batch job's usage stream: its numbered usage, its in-flight report and the request holds its gate admitted. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
 type BillingLease struct {
 	MerchantID uuid.UUID
 	// The UUID the client chose; lse_ on the wire.
@@ -582,12 +697,23 @@ type BillingLease struct {
 	LastSyncAt time.Time
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
-	// When a sync with close ended the lease and returned its holds. A closed lease takes no want; usage against it still settles.
+	// When a sync with close ended the lease, released its request holds and cleared its in-flight report. Usage against it still settles.
 	ClosedAt *time.Time
 	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the numbers and codes of the items it refused.
 	Receipts []byte
-	// The latest version the lease's hold answers carry: each sync that answers a hold a new size takes the next one.
-	HoldVersion int64
+}
+
+// What a gate has had in flight for one customer's limit across at least one sync: open tickets and usage a sync left unsettled. Other gates' views and admissions count it as held in the limit's current window while its lease is live. Retention: rows; each sync replaces its lease's rows, close clears them, and they go with the lease.
+type BillingLeaseInFlight struct {
+	MerchantID uuid.UUID
+	LeaseID    uuid.UUID
+	CustomerID uuid.UUID
+	// balance, a declared limit's key, or a spend window's spend:<identity>.
+	LimitKey string
+	// The limit's unit: balance's currency.
+	Unit      string
+	Amount    int64
+	UpdatedAt time.Time
 }
 
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
@@ -623,13 +749,13 @@ type BillingLedgerTransfer struct {
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source   string
 	SourceID string
-	// Credit-lot attribution. grant_id/order_id/customer_id deliberately carry no FKs (ledger purity): the append-only ledger never blocks or cascades on business rows.
-	GrantID    *uuid.UUID
-	CustomerID *uuid.UUID
-	InvokerID  *string
-	Resource   *string
-	OrderID    *uuid.UUID
-	CreatedAt  time.Time
+	// The credit lot the leg moves units of, or attributes money to. order_id and customer_id carry no foreign keys: the append-only ledger never blocks or cascades on business rows.
+	CreditGrantID *uuid.UUID
+	CustomerID    *uuid.UUID
+	InvokerID     *string
+	Resource      *string
+	OrderID       *uuid.UUID
+	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
 }
@@ -645,23 +771,22 @@ type BillingLimitAdjustment struct {
 	CreatedAt      time.Time
 }
 
-// Capacity set aside for one customer, in one currency: an admitted request's hold (request_id, until it is captured, released or reaches expires_at) or a gate lease's hold for one limit set (live while its lease is). What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.
+// Capacity set aside for one admitted request of one customer, in one currency, until it is captured, released or reaches expires_at; a gate's hold (lease_id) has no deadline and counts while its lease is live. What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.
 type BillingLimitHold struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
-	// When the hold was issued; the partition key. A hold row is live at most 30 days past it: a request's deadline is at most that, and a lease's hold is issued again before then. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.
+	// When the hold was issued; the partition key. A hold row is live at most 30 days past it. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.
 	CreatedAt  time.Time
 	CustomerID uuid.UUID
 	Currency   string
-	LeaseID    *uuid.UUID
-	// A lease's hold: the opaque key of the limits that apply to its invokers after policy resolution; invokers with the same limit set share the hold.
-	LimitSet  *string
-	RequestID *string
+	// The gate lease that admitted the request near its limit: the hold counts while the lease is live, is captured by the lease's usage and released by its sync or close.
+	LeaseID   *uuid.UUID
+	RequestID string
 	// A request's hold: its money estimate, the host's or what its usage estimate was priced at.
-	EstimatedAmount *int64
+	EstimatedAmount int64
 	// A request's hold: what the customer could spend when it was admitted, before the hold.
-	AvailableAmount *int64
-	// A request's admission terms, or the invoker attributes a lease's hold was resolved for ({invoker, invoker_type, trust_level, roles, resource, event_type}), which its renewals resolve again.
+	AvailableAmount int64
+	// The admission terms: {invoker, invoker_type, trust_level, roles, resource, source, accrual_rate_delta_per_hour}.
 	Terms []byte
 	// The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.
 	EstimateUsage []byte
@@ -678,10 +803,6 @@ type BillingLimitHold struct {
 	UpdatedAt      time.Time
 	// What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].
 	CapturedCharges []byte
-	// A lease's hold: the lease's hold_version of its latest answer; null for a request's hold.
-	Version *int64
-	// A lease's hold: the latest version its gate reported applied. Below version, a smaller answered size is not yet released.
-	AppliedVersion *int64
 }
 
 // What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. It has no foreign key to limit_holds, because PostgreSQL cannot drop a partition a foreign key references: every reader joins the part to its hold, so a part whose hold is gone counts nowhere. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds.
@@ -696,14 +817,6 @@ type BillingLimitHoldPart struct {
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
 	Held           int64
-	// A lease's hold: what one request of its customer last cost in the limit; null for a request's hold.
-	RequestUnits *int64
-	// A lease's hold: the units its usage took from the part since the hold was last sized; null for a request's hold.
-	UsedUnits *int64
-	// When an admission or another lease was refused capacity_held for capacity of this limit the part holds: it shrinks on its lease's next sync. Written only under the customer's lock.
-	ContendedAt *time.Time
-	// A lease's hold: the size its latest answer gave, less what usage took since. held stays above it until the gate reports the answer's version applied, and never below what the gate's open tickets took; null for a request's hold.
-	AnsweredUnits *int64
 }
 
 // One customer's use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit's bucket, the one row of a lifetime or rate limit, or a billing policy's spend window (spend:<identity>). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
@@ -772,7 +885,7 @@ type BillingMandate struct {
 	Currency *string
 	// active; requires_reconsent (merchant-initiated charges wait for fresh consent); revoked (the customer withdrew); ended.
 	Status string
-	// Why a revoked or ended mandate stopped: replaced, brand_changed, closed, customer_revoked, subscription_ended or payment_method_removed.
+	// Why a revoked or ended mandate stopped: replaced, brand_changed, closed, customer_revoked, subscription_ended, payment_method_removed or disputed (a charge on the card was charged back).
 	EndReason *string
 	EndedAt   *time.Time
 	// The card brand the agreement was established on.
@@ -807,8 +920,6 @@ type BillingMerchant struct {
 	CatalogRevision         int64
 	// When the merchant was last renamed; NULL if never. The rename interval counts from here.
 	SlugChangedAt *time.Time
-	// Steps with every statement that changes a product's keys: a cached key set from an older generation is stale.
-	EntitlementGeneration int64
 	// Explicit immutable business tenant associated one-to-one with this billing identity. NULL is the legacy unbound mode; never inferred from an issuer, name, default account tenant or request. The matching permission group has this merchant ID.
 	TenantID *uuid.UUID
 }
@@ -885,6 +996,123 @@ type BillingMoneySetting struct {
 	UsageDueAt *time.Time
 }
 
+// Movements per currency of the customers who first had MRR in the 15-minute UTC bucket cohort_at, per 15-minute UTC bucket: a read groups both into the merchant's local months, and a cohort's MRR at a month's end is the sum of its buckets through it.
+type BillingMrrCohortFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	CohortAt   time.Time
+	BucketAt   time.Time
+	Amount     int64
+	Logos      int64
+}
+
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+type BillingMrrFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	BucketAt   time.Time
+	Measure    string
+	Amount     int64
+	Entries    int64
+	Logos      int64
+}
+
+// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import or backfill adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
+type BillingMrrMovement struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Kind       string
+	Delta      int64
+	MrrBefore  int64
+	MrrAfter   int64
+	// 1 when the customer gains MRR from none, -1 when it loses all, 0 otherwise.
+	LogoDelta int32
+	// The customer's first_active_at in the currency: its cohort.
+	CohortAt  time.Time
+	Cause     string
+	Voluntary *bool
+	// Written by a backfill from current state, not when the change happened.
+	Backfilled bool
+	// The business instant of the change: its writer's, or the end a scheduled churn took effect at.
+	OccurredAt time.Time
+	CreatedAt  time.Time
+}
+
+// Each subscription's part of a movement: its product and price, its change of MRR and whether it began or stopped adding to it. Retention: permanent, never pruned.
+type BillingMrrMovementLine struct {
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	MovementID      uuid.UUID
+	SubscriptionID  uuid.UUID
+	ProductID       uuid.UUID
+	PriceID         uuid.UUID
+	Delta           int64
+	MrrBefore       int64
+	MrrAfter        int64
+	SubscriberDelta int32
+	Cause           string
+}
+
+// The change of every product's MRR and subscribers per currency and 15-minute UTC bucket; a product's MRR now is the sum of its buckets.
+type BillingMrrProductFlow struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	BucketAt    time.Time
+	ProductID   uuid.UUID
+	Amount      int64
+	Subscribers int64
+}
+
+// MRR a subscription will lose or gain at a date: churn from a cancellation at period end, contraction or expansion from a scheduled change at its renewal. scheduled until it is effected, reversed (a resume, a canceled change) or superseded (a later cancel or change). At most one is scheduled per subscription. A report counts what was added in a period by scheduled_at and what was reversed, effected or superseded by resolved_at. Retention: permanent, never pruned.
+type BillingMrrScheduled struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	Kind           string
+	// The change of the subscription's MRR it schedules: negative for churn and contraction.
+	MrrDelta int64
+	// When it takes effect: the end a cancellation runs to, or the renewal on or after the scheduled change's date.
+	EffectiveAt       time.Time
+	Cause             string
+	ScheduledChangeID *uuid.UUID
+	Status            string
+	ScheduledAt       time.Time
+	ResolvedAt        *time.Time
+}
+
+// The merchant's MRR now per currency, the customers with any and the subscriptions adding to it: the sums of customer_mrr.
+type BillingMrrTotal struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	Mrr         int64
+	Customers   int64
+	Subscribers int64
+}
+
+// Per card PSP, network, currency and UTC day: settled sales, refunds, chargebacks, fraud chargebacks (reason fraud or unrecognized) and fraud reports, each counted and summed. Triggers on payments, disputes and fraud_reports keep it for every writer, a restore included. currency is empty for a chargeback that named none.
+type BillingNetworkActivityDaily struct {
+	MerchantID            uuid.UUID
+	PspID                 uuid.UUID
+	Rail                  string
+	Network               string
+	Currency              string
+	DayAt                 time.Time
+	Sales                 int64
+	SalesAmount           int64
+	Refunds               int64
+	RefundAmount          int64
+	Chargebacks           int64
+	ChargebackAmount      int64
+	FraudChargebacks      int64
+	FraudChargebackAmount int64
+	FraudReports          int64
+	FraudReportAmount     int64
+}
+
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
 type BillingNmiBulkCheckpoint struct {
 	MerchantID     uuid.UUID
@@ -895,15 +1123,16 @@ type BillingNmiBulkCheckpoint struct {
 	StartedAt      time.Time
 }
 
-// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
+// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and answer: a refusal's reason from the one classifier, with its outcome and decline_cause, or an approval (reason empty). A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
 type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
 	MonthAt        time.Time
 	Kind           string
-	Category       string
 	Reason         string
 	Authorizations int64
+	Outcome        string
+	DeclineCause   *string
 }
 
 // When each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
@@ -938,6 +1167,33 @@ type BillingNotificationIssueRevision struct {
 	Revision    int64
 	Withdrawn   bool
 	SourceEvent *uuid.UUID
+}
+
+// Operations history: each phase of each provider operation OpenRails ran (attempting before the provider call, then its result or a hold), who wanted it and where it was sent. Attempting and result entries are written ahead, on their own, and never rolled back; a hold commits with the intent's transition. Append-only: only retention and a merchant purge delete. Retention: rows are deleted 25 months (761 days) after occurred_at.
+type BillingOperationLog struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	OccurredAt time.Time
+	// Who wanted the operation: staff:<invoker>, customer:<invoker>, provider:<rail>, or system.
+	Actor      string
+	Source     string
+	ObjectType string
+	// The provider intent's id; an entry whose intent was never recorded names itself.
+	ObjectID string
+	Action   string
+	// Version 1: the intent type (kind), attempt, origin, executor, idempotency key, the outcome's scrubbed reason, a hold's reason_code and scrubbed evidence. Never credentials, card data or provider bodies.
+	Changes   []byte
+	Reason    *string
+	RequestID *string
+	// The provider intent the entry belongs to; kept after retention deletes the intent.
+	OperationID *uuid.UUID
+	Rail        string
+	// The PSP the operation was sent to. Required unless it was sent to a custodian (operation_log_addressed_check).
+	PspID *uuid.UUID
+	// The custodian the operation was sent to, for custodian-addressed intents.
+	CustodianID *uuid.UUID
+	// The subscription the operation acted on, for a subscription's history.
+	SubscriptionID *uuid.UUID
 }
 
 // One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
@@ -1171,6 +1427,10 @@ type BillingPayment struct {
 	LedgerTransferID *uuid.UUID
 	// Seats a per-seat subscription payment billed: a period at that many seats, or the seats a mid-period increase added. NULL otherwise.
 	Quantity *int32
+	// Why a refund was made: requested_by_customer, duplicate, fraudulent, fraud_warning (an issuer's fraud report), dispute_prevention (resolved before a dispute was filed), charged_after_cancel, other or unknown (a provider dashboard refund that names none). Set exactly on refund rows.
+	RefundReason *string
+	// The saved card a charge was taken from, when its writer knows it; NULL on reversals, off-rail payments and charges no saved card names.
+	PaymentMethodID *uuid.UUID
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. purchase_id groups one buyer's attempts on one target (purchase_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1185,7 +1445,6 @@ type BillingPaymentAttempt struct {
 	CardEntry      string
 	Source         string
 	ObservedVia    string
-	Category       string
 	Reason         *string
 	Action         *string
 	ResponseCode   *string
@@ -1218,6 +1477,14 @@ type BillingPaymentAttempt struct {
 	// The initial transaction id the attempt sent the provider, verbatim.
 	SentInitialTransactionID *string
 	OrderID                  *uuid.UUID
+	// approved; declined (the issuer said no); refused (the merchant or its gateway refused it before the issuer); error (it did not complete).
+	Outcome string
+	// Who or what refused it: customer, issuer (discretion), fraud, merchant (or its gateway), processing or unknown. Follows the reason; null on approvals.
+	DeclineCause *string
+	// The PSP's advice on the refusal, verbatim (Stripe advice_code).
+	AdviceCode *string
+	// The card network's advice, verbatim (Mastercard's Merchant Advice Code).
+	NetworkAdviceCode *string
 }
 
 // The card account a customer chose, held at one PSP or custodian. Its card is the latest of its payment_method_versions; its issuer may reissue it under the same method.
@@ -1264,7 +1531,7 @@ type BillingPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
-	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
+	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed; disputed (a charge to it was charged back: it is never charged again). The last four are final.
 	Status string
 	// The method that replaced this one, when status is replaced.
 	ReplacedByID *uuid.UUID
@@ -1371,17 +1638,6 @@ type BillingPriceKey struct {
 	Revision   int64
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-}
-
-// Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
-type BillingPriceKeyMovement struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Key         string
-	PriceID     uuid.UUID
-	EffectiveAt time.Time
-	CreatedAt   time.Time
-	Archived    bool
 }
 
 // One move of subscribers from a price (from_price_id), or from every version of a price key but the target (from_product_id, from_price_key), to to_price_id at each subscription's first renewal on or after effective_at. Matched and skipped are facts of creation (a skipped subscription gets no scheduled change); progress is counted from the scheduled_changes that carry price_migration_id. Its command settles when its last move resolves. Retention: permanent, never pruned.
@@ -1598,33 +1854,8 @@ type BillingProviderIntent struct {
 	Credential *string
 	// Original admitted command; recovery and necessary consequences reuse its authority and never spend another unit.
 	DestructiveActionID *uuid.UUID
-}
-
-// Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.
-type BillingProviderMutationLog struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed_check).
-	PspID            *uuid.UUID
-	ProviderIntentID *uuid.UUID
-	IntentType       *string
-	IdempotencyKey   *string
-	Attempt          int32
-	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
-	Phase  string
-	Reason *string
-	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
-	Evidence  []byte
-	CreatedAt time.Time
-	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
-	CustodianID    *uuid.UUID
-	Origin         *string
-	Actor          *string
-	Executor       *string
-	OperationID    *uuid.UUID
-	SubscriptionID *uuid.UUID
-	ReasonCode     *string
+	// The attempt the destructive-volume breaker last admitted to the provider, set under its lock before the call. An in_flight intent counts against the breaker's budget only while this is its current attempt: a claim alone sends nothing.
+	SentAttempt *int32
 }
 
 // Immutable accepted provider schedule versions: first due instant, cadence and the accepted bill a provider-run renewal must match. Retention: permanent, never pruned.
@@ -2029,6 +2260,8 @@ type BillingSubscription struct {
 	DueRecheckAt *time.Time
 	// rail_subscription_id as an identity (billing.rail_subscription_key): every lookup by provider id matches it. A provider contact matching it spelled otherwise rewrites rail_subscription_id to the provider's spelling.
 	RailSubscriptionKey *string
+	// The earliest retry the network's advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.
+	RetryAdvisedAt *time.Time
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
@@ -2056,6 +2289,32 @@ type BillingSubscriptionBillingChange struct {
 	Actor                *string
 	Executor             *string
 	OperationID          *uuid.UUID
+}
+
+// What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's MRR for its seats (billing.price_mrr), while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.
+type BillingSubscriptionMrr struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	ProductID      uuid.UUID
+	PriceID        uuid.UUID
+	Mrr            int64
+	// The subscription counts toward MRR: live, or canceled with its end ahead, and past any trial.
+	Contributes bool
+	// When a cancellation at period end takes the subscription out of MRR; NULL when none is scheduled.
+	EndsAt *time.Time
+	// When time alone next changes the row; openrails.mrr_due takes it then by this column's index.
+	NextChangeAt *time.Time
+	// The business instant of the change not yet recorded, or of the last one recorded: the writer's updated_at, or the end a due change took effect at.
+	ChangedAt time.Time
+	// Why the row last changed; the movement it settles into takes the cause of its largest change.
+	Cause             string
+	RecordedCurrency  string
+	RecordedProductID uuid.UUID
+	RecordedPriceID   uuid.UUID
+	RecordedMrr       int64
+	Dirty             bool
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

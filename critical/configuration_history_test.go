@@ -51,6 +51,8 @@ type loggedChange struct {
 	Keys          []string                   `json:"keys"`
 	From          string                     `json:"from"`
 	To            string                     `json:"to"`
+	PriceID       billing.PriceID            `json:"price_id"`
+	Archived      bool                       `json:"archived"`
 }
 
 func changeOf(t *testing.T, e billing.LogEntry) loggedChange {
@@ -100,11 +102,11 @@ func TestConfigurationHistory(t *testing.T) {
 			require.NotNil(t, e.RequestID)
 		}
 		priced := objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "solo:monthly")
-		require.Len(t, priced, 1)
-		require.Equal(t, billing.LogActionCreate, priced[0].Action)
-		_, amount := fieldSides(t, changeOf(t, priced[0]), "unit_amount")
+		require.Equal(t, []billing.LogAction{billing.LogActionMove, billing.LogActionCreate}, actions(priced), "a new price moves its key to it")
+		_, amount := fieldSides(t, changeOf(t, priced[1]), "unit_amount")
 		require.Equal(t, "5000000", amount)
-		require.EqualValues(t, price.Revision, *changeOf(t, priced[0]).Revision)
+		require.EqualValues(t, price.Revision, *changeOf(t, priced[1]).Revision)
+		require.Equal(t, price.ID, changeOf(t, priced[0]).PriceID)
 
 		// A second recurring product granting hd outside a tier group is
 		// refused after the price row and its entry were written: both roll
@@ -154,14 +156,14 @@ products:
 			require.True(t, strings.HasPrefix(string(e.Actor), "staff:"), e.Actor)
 			c := changeOf(t, e)
 			require.NotNil(t, c.Revision, "every entry carries its object's revision")
-			if e.Action != billing.LogActionKeyAdd {
+			if e.Action != billing.LogActionKeyAdd && e.Action != billing.LogActionMove {
 				require.Equal(t, first.ApplicationID, c.ApplicationID)
 			}
 			seen[string(e.ObjectType)+" "+e.ObjectID+" "+string(e.Action)]++
 		}
 		require.Equal(t, map[string]int{
 			"product basic create": 1, "product basic key_add": 1, "product plus create": 1, "product plus key_add": 1,
-			"price basic:monthly create": 1, "meter tokens create": 1, "limit daily create": 1,
+			"price basic:monthly create": 1, "price basic:monthly move": 1, "meter tokens create": 1, "limit daily create": 1,
 		}, seen)
 
 		replay, err := a.alphaRemote.ApplyCatalog(t.Context(), document(`{display_name: Plus, entitlements: [hd]}`, "sd"), billing.ApplyCatalogParams{})
@@ -394,10 +396,10 @@ products:
 		require.EqualValues(t, keyed.Revision, *added.Revision, "revision %d added hd", keyed.Revision)
 		require.EqualValues(t, show.Revision, *changeOf(t, entries[2]).Revision)
 		prices := objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "show:once")
-		require.Equal(t, []billing.LogAction{billing.LogActionArchive, billing.LogActionCreate}, actions(prices))
+		require.Equal(t, []billing.LogAction{billing.LogActionMove, billing.LogActionArchive, billing.LogActionMove, billing.LogActionCreate}, actions(prices))
 		archived, err := a.alphaRemote.GetPrice(t.Context(), price.ID)
 		require.NoError(t, err)
-		require.EqualValues(t, archived.Revision, *changeOf(t, prices[0]).Revision, "a price's entry carries its key's revision")
+		require.EqualValues(t, archived.Revision, *changeOf(t, prices[1]).Revision, "a price's entry carries its key's revision")
 	})
 
 	t.Run("OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds", func(t *testing.T) {

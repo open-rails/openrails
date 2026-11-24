@@ -24,6 +24,11 @@ type initialMembershipRefusal struct {
 	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
 	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
 	StripeDeclineCode     string         `json:"stripe_decline_code,omitempty"`
+	// The decline's advice: Stripe's advice_code and the network's advice
+	// and response codes.
+	AdviceCode         string `json:"advice_code,omitempty"`
+	NetworkAdviceCode  string `json:"network_advice_code,omitempty"`
+	NetworkDeclineCode string `json:"network_decline_code,omitempty"`
 	// The gateway's answer, kept for the attempt ledger.
 	TransactionID string `json:"transaction_id,omitempty"`
 	AVS           string `json:"avs,omitempty"`
@@ -102,7 +107,7 @@ func (r InitialMembershipRefusal) Declined() (answer decline.Evidence, transacti
 		if code == "" {
 			code = r.data.StripeFailureCode
 		}
-		return decline.Evidence{Code: code}, r.data.StripePaymentIntentID, true
+		return decline.Evidence{Code: code, Advice: r.data.AdviceCode, NetworkAdvice: r.data.NetworkAdviceCode, IssuerCode: r.data.NetworkDeclineCode}, r.data.StripePaymentIntentID, true
 	}
 	return decline.Evidence{}, "", false
 }
@@ -203,7 +208,7 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.BillingPr
 		return errors.New("Stripe decline is still executable")
 	}
 	if result.DeclineCode == "" {
-		result.DeclineCode = s.retainedDecline(ctx, in, result).DeclineCode
+		result = s.retainedDecline(ctx, in, result)
 	}
 	binding, err := collectionBinding(in)
 	if err != nil {
@@ -213,7 +218,8 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.BillingPr
 	if err != nil {
 		return err
 	}
-	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode, StripeDeclineCode: result.DeclineCode}}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode, StripeDeclineCode: result.DeclineCode,
+		AdviceCode: result.AdviceCode, NetworkAdviceCode: result.NetworkAdviceCode, NetworkDeclineCode: result.NetworkDeclineCode}}
 	if err := fact.Validate(current); err != nil {
 		return err
 	}

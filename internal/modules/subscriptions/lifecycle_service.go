@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -1087,6 +1088,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	return nil
 }
 
+// ResumeFailpointKind names a resume's transaction (failpoint.BeforeLock).
+const ResumeFailpointKind = "subscription_resume"
+
 // ResumeMembership restores a reversibly-canceled subscription and its
 // standing entitlement projection in one transaction.
 func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
@@ -1102,6 +1106,9 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 	var resumed *models.Subscription
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := s.DB.NewWithPgxTx(tx)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeLock, Kind: ResumeFailpointKind, Subscription: params.SubscriptionID}); err != nil {
+			return err
+		}
 		if observed.CollectionPolicy == models.CollectionPolicyEngine {
 			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
 				return err
@@ -1161,6 +1168,15 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume engine: %w", err)
 			}
 		}
+		var canceledAt time.Time
+		switch {
+		case subscription.CanceledAt != nil:
+			canceledAt = *subscription.CanceledAt
+		case subscription.EndedAt != nil:
+			canceledAt = *subscription.EndedAt
+		default:
+			return fmt.Errorf("resume membership: canceled subscription %s records no cancel", subscription.ID)
+		}
 		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {
 			return fmt.Errorf("resume membership %s: %w", subscription.ID, err)
 		}
@@ -1176,6 +1192,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		entSvc := s.newLifecycleEntitlementService(txdb)
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
 			if err := pushRenewalGrace(ctx, txdb, entSvc, subscription, *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
+		}
+		if params.Within != nil {
+			if err := params.Within(ctx, tx, subscription, canceledAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}
@@ -1934,6 +1955,12 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		var held TerminalHold
+		// advice: the earliest retry the network's advice allowed, when it set
+		// the case's scheduled retry. A case it set that ends exhausted ends
+		// issuer_deferred.
+		advice := subscription.RetryAdvisedAt
+		adviceDeferred := subscription.AdviceDeferred()
+		deferred := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -2005,6 +2032,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 					}
 					subscription.NextRetryAt = &next
+					// Never before the network's standing advice; a case it
+					// deferred to the next renewal stays deferred.
+					if advice != nil && advice.After(next) {
+						subscription.NextRetryAt = nil
+						if !adviceDeferred {
+							at := *advice
+							subscription.NextRetryAt = &at
+						}
+					}
 					event = nil
 					break
 				}
@@ -2036,13 +2072,34 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.TerminalHeld{}
 			case terminal:
 				event = lifecycle.DunningExhausted{At: now}
+				deferred = advice != nil && !params.Terminal
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
 				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
 				if err != nil {
 					return err
 				}
-				subscription.NextRetryAt = nil
+				// The network's earliest retry, from the decline, or an earlier
+				// decline's that still stands: the case's end moves with it
+				// (CaseEnd). Advice that allows none before the next renewal
+				// defers the case: no retry runs, and it ends then, exhausted.
+				earliest := declined.Add(params.RetryAfter)
+				if advice != nil && advice.After(earliest) {
+					earliest = *advice
+				}
+				subscription.NextRetryAt, subscription.RetryAdvisedAt = nil, nil
+				if ok && earliest.After(nextRetry) {
+					renewal, err := NextRenewalAt(ctx, db, subscription, periodStart, cycleHours)
+					if err != nil {
+						return err
+					}
+					nextRetry = earliest
+					subscription.RetryAdvisedAt = &earliest
+					if !nextRetry.Before(renewal) {
+						ok = false
+						subscription.GraceEndsAt = &renewal
+					}
+				}
 				if ok {
 					subscription.NextRetryAt = &nextRetry
 				}
@@ -2071,6 +2128,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
 				reason = "transaction_failure"
+			}
+			if deferred {
+				reason = CancelIssuerDeferred
 			}
 			subscription.CancelFeedback = &reason
 		}

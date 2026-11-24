@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,5 +84,70 @@ func TestRefunds(t *testing.T) {
 		_, err = a.alpha.RefundPayment(t.Context(), "excess-refund", paymentID, billing.RefundPaymentParams{Amount: 1_000_000, Reason: "Cannot exceed settled value"})
 		require.Error(t, err)
 		require.Len(t, p.effects(t), 3, "over-refund creates no provider economic effect")
+	})
+	t.Run("OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took", func(t *testing.T) {
+		a, p := newPaymentWorld(t)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "disputed-purchase"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.PaymentID)
+		paymentID := *order.Payment.PaymentID
+		paid, err := a.alpha.GetPayment(t.Context(), paymentID)
+		require.NoError(t, err)
+		var charge, intent string
+		for _, effect := range p.effects(t) {
+			if effect.Kind == "charge" && (effect.ID == paid.TransactionID || effect.Operation == paid.TransactionID) {
+				charge, intent = effect.ID, effect.Operation
+			}
+		}
+		require.NotEmpty(t, charge)
+		notice := func(id, kind string, object stripemock.Object) {
+			t.Helper()
+			body := stripeNotice(t, id, kind, object)
+			status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+			require.Equal(t, http.StatusOK, status, raw)
+		}
+		// The charge as its detail and the merchant's list both read it.
+		reads := func(status billing.PaymentStatus, refunded int64) {
+			t.Helper()
+			read, err := a.alpha.GetPayment(t.Context(), paymentID)
+			require.NoError(t, err)
+			require.Equal(t, status, read.Status)
+			require.Equal(t, refunded, read.AmountRefunded)
+			page, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: paid.CustomerID})
+			require.NoError(t, err)
+			found := false
+			for _, listed := range page.Items {
+				if listed.ID == paymentID {
+					found = true
+					require.Equal(t, status, listed.Status)
+					require.Equal(t, refunded, listed.AmountRefunded)
+				}
+			}
+			require.True(t, found, "the charge is listed")
+			for _, filter := range []billing.PaymentStatus{billing.PaymentSucceeded, billing.PaymentPartiallyRefunded, billing.PaymentRefunded} {
+				page, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: paid.CustomerID, Status: filter})
+				require.NoError(t, err)
+				listed := false
+				for _, item := range page.Items {
+					listed = listed || item.ID == paymentID
+				}
+				require.Equal(t, filter == status, listed, "?status=%s", filter)
+			}
+		}
+		dispute := stripemock.Object{"id": "dp_won", "object": "dispute", "amount": 3000, "currency": "usd", "charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"}
+		notice("evt_dispute_opened", "charge.dispute.created", dispute)
+		reads(billing.PaymentRefunded, 30_000_000)
+		dispute["status"] = "won"
+		notice("evt_dispute_won", "charge.dispute.closed", dispute)
+		reads(billing.PaymentSucceeded, 0)
+		// A later partial refund is all that is refunded.
+		_, err = a.alpha.RefundPayment(t.Context(), "after-won-dispute", paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial refund after the dispute"})
+		require.NoError(t, err)
+		reads(billing.PaymentPartiallyRefunded, 10_000_000)
+		read, err := a.alpha.GetPayment(t.Context(), paymentID)
+		require.NoError(t, err)
+		require.Len(t, read.Refunds, 3, "the chargeback, its recovery and the refund")
 	})
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
@@ -52,6 +53,10 @@ type Engine struct {
 	// store. Optional; nil is a no-op. Best-effort: a notify failure is
 	// logged, never fails the run (the finding is already persisted).
 	Notifier FindingNotifier
+
+	// Disputes records the dispute cases each pull read, whatever their kind,
+	// so a missed webhook's case still counts. Nil records none.
+	Disputes DisputeRecorder
 
 	// Policy reads the merchant's evidence-staleness floor. A nil Policy makes
 	// the decider trust only what this pass observed: stricter, never more
@@ -117,6 +122,11 @@ type RunParams struct {
 	// disputes are diffed. It proves no coverage and resolves only reversal
 	// findings it read again.
 	Reversals bool
+	// TransactionsOnly reads the window's transactions without the roster
+	// (FetchParams.TransactionsOnly).
+	TransactionsOnly bool
+	// Chain places the window in a refresh's chain of windows to its horizon.
+	Chain Chain
 }
 
 // LocalMutationPolicy limits a pull's local mirror writes by mutation class.
@@ -305,7 +315,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	runID := uuid.Must(uuid.NewV7())
 	summary := &RunSummary{Mode: params.Mode, Providers: map[string]*ProviderReport{}}
 	result := &RunResult{RunID: runID, Mode: params.Mode, Summary: summary}
-	var providerErrs []string
+	var providerErrs []error
 
 	for _, p := range providers {
 		rep, records, planned, applied, perr := e.runProvider(ctx, runID, p, params)
@@ -315,7 +325,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		result.AppliedChanges = append(result.AppliedChanges, applied...)
 		if perr != nil {
 			rep.Error = perr.Error()
-			providerErrs = append(providerErrs, fmt.Sprintf("%s: %v", p, perr))
+			providerErrs = append(providerErrs, fmt.Errorf("%s: %w", p, perr))
 			e.Log.ErrorContext(ctx, "reconcile: provider run failed", logx.Err(perr), "provider", p)
 		}
 		summary.Totals.Findings += rep.NewFindings + rep.UpdatedFindings
@@ -325,15 +335,10 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		summary.Totals.AutoFixed += rep.AutoFixed
 	}
 
-	status := "completed"
-	runErr := ""
+	result.Status = "completed"
 	if len(providerErrs) > 0 {
-		status = "failed"
-		runErr = strings.Join(providerErrs, "; ")
-	}
-	result.Status = status
-	if runErr != "" {
-		return result, fmt.Errorf("reconcile run %s finished with provider errors: %s", runID, runErr)
+		result.Status = "failed"
+		return result, fmt.Errorf("reconcile run %s finished with provider errors: %w", runID, errors.Join(providerErrs...))
 	}
 	return result, nil
 }
@@ -401,6 +406,11 @@ func (e *Engine) evidenceFloor(ctx context.Context) time.Time {
 	return e.Policy.EvidenceFloor(ctx, mid.UUID())
 }
 
+// DisputeRecorder records the dispute cases a pull read on psp.
+type DisputeRecorder interface {
+	RecordPulledDisputes(ctx context.Context, psp uuid.UUID, provider Provider, cases []json.RawMessage) error
+}
+
 // runProvider fetches, diffs, persists, applies (enforce), and auto-resolves
 // for one provider. A returned error means the provider's reconciliation did
 // not complete (e.g. fetch failure or circuit-breaker abort) and NOTHING was
@@ -437,6 +447,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		AccountID:               binding.AccountID,
 		Reversals:               params.Reversals,
 		SkipSolanaPlanDiscovery: params.SkipSolanaPlanDiscovery,
+		TransactionsOnly:        params.TransactionsOnly,
+		Chain:                   params.Chain,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
@@ -444,6 +456,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	snap.PspID = binding.ID.String()
 	if params.Reversals {
 		narrowToReversals(snap)
+	}
+	if e.Disputes != nil && len(snap.Disputes) > 0 {
+		if err := e.Disputes.RecordPulledDisputes(ctx, binding.ID, provider, snap.Disputes); err != nil {
+			e.Log.WarnContext(ctx, "reconcile: recording pulled disputes failed; the next pull records them", logx.Err(err), "provider", provider)
+		}
 	}
 	// Strip the absence proof when the pass did not read every active PSP on
 	// the rail, or a merchant with two NMI PSPs would have the unread one's
@@ -552,9 +569,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	now := e.now()
+	var dunning collection.Policy
+	if e.Local != nil {
+		dunning = merchantDunningPolicy(ctx, e.Local.DB)
+	}
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
+		Dunning:       dunning,
 	})
 	for i := range findings {
 		finding := &findings[i]

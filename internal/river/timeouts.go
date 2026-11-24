@@ -4,11 +4,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/open-rails/openrails/internal/disputejob"
+
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/internal/balancelook"
 
 	"github.com/open-rails/openrails/internal/convergejob"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -35,14 +38,18 @@ var kinds = map[string]time.Duration{
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,
+	disputejob.MonitorKind:               DefaultTimeout,
+	disputejob.ResponseKind:              DefaultTimeout,
 	alerting.DeliveryKind:                DefaultTimeout,
 	messages.KindSend:                    DefaultTimeout,
 	messages.KindDispatch:                DefaultTimeout,
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
+	destructive.DrainErasuresKind:        DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
+	KindPacedProviderRefresh:             time.Hour,
 	KindMerchantHealth:                   time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,

@@ -24,7 +24,7 @@ type Definition struct {
 	Unit      string
 	Reset     catalog.LimitReset
 	Overrun   catalog.Overrun
-	RateCards []catalog.LimitRateCard
+	Counts    []catalog.LimitCount
 	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -38,7 +38,7 @@ type Row struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 	Revision      int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -54,9 +54,9 @@ func (r Row) Decode() (Definition, error) {
 	if r.ResetAnchor != nil {
 		d.Reset.Anchor = catalog.ResetAnchor(*r.ResetAnchor)
 	}
-	d.RateCards = []catalog.LimitRateCard{}
-	if err := json.Unmarshal(r.RateCards, &d.RateCards); err != nil {
-		return d, fmt.Errorf("limit %q rate cards: %w", r.Key, err)
+	d.Counts = []catalog.LimitCount{}
+	if err := json.Unmarshal(r.Counts, &d.Counts); err != nil {
+		return d, fmt.Errorf("limit %q counts: %w", r.Key, err)
 	}
 	return d, nil
 }
@@ -101,13 +101,15 @@ func Get(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, key string) 
 // named unit's merchant boundary) at an instant.
 type PeriodFunc func(ctx context.Context, unit string, at time.Time) (start, end time.Time, err error)
 
-// Customer reads one customer's limits.
+// Customer reads one customer's limits. ExceptLease leaves one lease's
+// in-flight report out of what it reads as held.
 type Customer struct {
-	Q          *gen.Queries
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Period     PeriodFunc
-	Now        time.Time
+	Q           *gen.Queries
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Period      PeriodFunc
+	Now         time.Time
+	ExceptLease *uuid.UUID
 }
 
 // capacities are the customer's base capacity per limit: an override, else
@@ -305,7 +307,7 @@ func (c Customer) standing(ctx context.Context, def Definition, base int64, newe
 		if def.Reset.Kind == catalog.ResetRolling {
 			from = *line.WindowStartsAt
 		}
-		if line.Held, err = c.holder().Held(ctx, def.Key, from, w.StartsAt, w.EndsAt != nil); err != nil {
+		if line.Held, err = c.holder().Held(ctx, def.Key, from, w.StartsAt, w.EndsAt != nil, true); err != nil {
 			return line, err
 		}
 	}
@@ -314,12 +316,12 @@ func (c Customer) standing(ctx context.Context, def Definition, base int64, newe
 }
 
 func (c Customer) holder() Holder {
-	return Holder{Q: c.Q, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now}
+	return Holder{Q: c.Q, MerchantID: c.MerchantID, CustomerID: c.CustomerID, Now: c.Now, ExceptLease: c.ExceptLease}
 }
 
 // Applies reports whether def counts a request in currency of eventType
 // ("" for a host-stated request): a limit in the currency counts every one,
-// a named-unit limit those its rate cards read. Only a customer some product
+// a named-unit limit those its counts read. Only a customer some product
 // or override gives capacity in is subject to it.
 func Applies(def Definition, meters map[string]Meter, currency, eventType string) bool {
 	if syntax.LimitUnitCurrency(def.Unit) {
@@ -330,7 +332,7 @@ func Applies(def Definition, meters map[string]Meter, currency, eventType string
 
 // Claims are what a request makes of the declared limits the customer is
 // subject to: every limit in its currency claims amount, and every limit
-// whose rate cards read its usage claims the units the usage counts. A
+// whose counts read its usage claims the units the usage counts. A
 // host-stated request with no usage claims no named-unit limit; its capture
 // counts there.
 func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage *Usage) ([]Claim, error) {
@@ -452,6 +454,30 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 		out[def.Key] = claim
 	}
 	return out, nil
+}
+
+// Next is the window after w of a limit whose windows end: the next tile of
+// a fixed (or first-use) or billing-period limit, and for a session one that
+// opens at the first use after w (no start). Nil for a limit whose window
+// never ends.
+func (c Customer) Next(ctx context.Context, def Definition, w Window) (*Window, error) {
+	if w.EndsAt == nil {
+		return nil, nil
+	}
+	width := time.Duration(def.Reset.WindowSeconds) * time.Second
+	switch def.Reset.Kind {
+	case catalog.ResetFixed:
+		next := span(*w.EndsAt, width)
+		return &next, nil
+	case catalog.ResetSession:
+		return &Window{}, nil
+	case catalog.ResetBillingPeriod:
+		at := c
+		at.Now = *w.EndsAt
+		next, err := at.window(ctx, def, nil)
+		return &next, err
+	}
+	return nil, nil
 }
 
 func find(defs []Definition, key string) (Definition, bool) {

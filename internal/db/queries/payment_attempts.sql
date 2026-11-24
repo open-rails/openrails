@@ -2,14 +2,15 @@
 -- Idempotent on the gateway transaction id, else on the operation step.
 INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
-    category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
+    outcome, decline_cause, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
-    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id
+    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id,
+    advice_code, network_advice_code
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
     sqlc.arg(rail)::text, sqlc.arg(kind)::text, sqlc.arg(owner)::text, sqlc.arg(card_entry)::text,
-    sqlc.arg(source)::text, sqlc.arg(observed_via)::text, sqlc.arg(category)::text, sqlc.narg(reason)::text,
+    sqlc.arg(source)::text, sqlc.arg(observed_via)::text, sqlc.arg(outcome)::text, sqlc.narg(decline_cause)::text, sqlc.narg(reason)::text,
     sqlc.narg(action)::text, sqlc.narg(response_code)::text, sqlc.narg(response_text)::text,
     sqlc.narg(transaction_id)::text, sqlc.narg(avs_result)::text, sqlc.narg(cvv_result)::text,
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(token_type)::text,
@@ -19,13 +20,13 @@ INSERT INTO billing.payment_attempts (
     sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid,
     sqlc.narg(card_bin)::text, sqlc.narg(issuer_code)::text, sqlc.narg(issuer_text)::text,
     sqlc.narg(mandate_id)::uuid, sqlc.narg(sent_initial_transaction_id)::text,
-    sqlc.narg(order_id)::uuid
+    sqlc.narg(order_id)::uuid, sqlc.narg(advice_code)::text, sqlc.narg(network_advice_code)::text
 )
 ON CONFLICT DO NOTHING;
 
 -- name: LatestPaymentOrderAttempt :one
 -- The buyer's most recent attempt on one purchase target since a moment.
-SELECT purchase_id::uuid AS purchase_id, kind, category
+SELECT purchase_id::uuid AS purchase_id, kind, outcome
 FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
@@ -43,7 +44,7 @@ SELECT EXISTS (
       AND purchase_target = sqlc.arg(purchase_target)::text
       AND purchase_id = sqlc.arg(purchase_id)::uuid
       AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-      AND kind = 'verify' AND category = 'approved'
+      AND kind = 'verify' AND outcome = 'approved'
 )::boolean AS verified;
 
 -- name: ListPaymentAttempts :many
@@ -54,7 +55,8 @@ FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(kinds)::text[] IS NULL OR a.kind = ANY(sqlc.narg(kinds)::text[]))
   AND (sqlc.narg(owners)::text[] IS NULL OR a.owner = ANY(sqlc.narg(owners)::text[]))
-  AND (sqlc.narg(categories)::text[] IS NULL OR a.category = ANY(sqlc.narg(categories)::text[]))
+  AND (sqlc.narg(outcomes)::text[] IS NULL OR a.outcome = ANY(sqlc.narg(outcomes)::text[]))
+  AND (sqlc.narg(decline_causes)::text[] IS NULL OR a.decline_cause = ANY(sqlc.narg(decline_causes)::text[]))
   AND (sqlc.narg(reasons)::text[] IS NULL OR a.reason = ANY(sqlc.narg(reasons)::text[]))
   AND (sqlc.narg(response_codes)::text[] IS NULL OR a.response_code = ANY(sqlc.narg(response_codes)::text[]))
   AND (sqlc.narg(card_entries)::text[] IS NULL OR a.card_entry = ANY(sqlc.narg(card_entries)::text[]))
@@ -114,5 +116,5 @@ JOIN billing.payment_attempts pa ON pa.merchant_id = c.merchant_id AND pa.cycle_
 WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
   AND c.subscription_id = sqlc.arg(subscription_id)::uuid
   AND c.due_at = sqlc.arg(due_at)::timestamptz
-  AND pa.category <> 'approved'
+  AND pa.outcome <> 'approved'
   AND pa.payment_method_id = sqlc.arg(payment_method_id)::uuid;
