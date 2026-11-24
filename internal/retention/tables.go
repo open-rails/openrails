@@ -155,6 +155,7 @@ var Tables = map[string]Table{
 	"mrr_totals":                  {Class: State},
 	"mrr_product_flows":           {Class: State},
 	"mrr_cohort_flows":            {Class: State},
+	"mrr_streak_flows":            {Class: State},
 	"mrr_risk_flows":              {Class: State},
 	"mrr_risk_totals":             {Class: State},
 	"mrr_risk_due":                {Class: State},

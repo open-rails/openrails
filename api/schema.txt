@@ -24,6 +24,8 @@ migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6
 migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c321d951aac93b728ca4
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
+migration 0029_reporting_mrr.up.sql sha256:a96b8246930740bfce402f6d5a6a57025dba0bb343bcb6bef2ed5fab36a79305
+migration 0030_dashboard_retired_mrr_measures.up.sql sha256:13e5c30106cbadfdfbba559dd6cdb67dee0a84438a453dc53637a63ad8a2f483
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1395,7 +1397,7 @@ table billing.mrr_flows
   column logos bigint NOT NULL
   constraint mrr_flows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint mrr_flows_entries_check CHECK ((entries >= 0))
-  constraint mrr_flows_measure_check CHECK ((measure = ANY (ARRAY['new'::text, 'expansion'::text, 'contraction'::text, 'churn'::text, 'reactivation'::text, 'opening'::text, 'correction'::text, 'churn_voluntary'::text])))
+  constraint mrr_flows_measure_check CHECK ((measure = ANY (ARRAY['new'::text, 'expansion'::text, 'contraction'::text, 'churn'::text, 'reactivation'::text, 'opening'::text, 'correction'::text, 'churn_voluntary'::text, 'churn_chargeback'::text])))
   constraint mrr_flows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint mrr_flows_pkey PRIMARY KEY (merchant_id, currency, bucket_at, measure)
   index CREATE UNIQUE INDEX mrr_flows_pkey ON billing.mrr_flows USING btree (merchant_id, currency, bucket_at, measure)
@@ -1611,6 +1613,20 @@ table billing.mrr_scheduled
   index CREATE INDEX mrr_scheduled_scheduled_change_id_idx ON billing.mrr_scheduled USING btree (merchant_id, scheduled_change_id) WHERE (scheduled_change_id IS NOT NULL)
   index CREATE UNIQUE INDEX mrr_scheduled_subscription_id_key ON billing.mrr_scheduled USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
   trigger CREATE TRIGGER immutable_mrr_scheduled_delete BEFORE DELETE ON billing.mrr_scheduled FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.mrr_streak_flows
+  column merchant_id uuid NOT NULL
+  column currency text NOT NULL
+  column bucket_at timestamp with time zone NOT NULL
+  column streak_at timestamp with time zone NOT NULL
+  column measure text NOT NULL
+  column amount bigint NOT NULL
+  constraint mrr_streak_flows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_streak_flows_measure_check CHECK ((measure = ANY (ARRAY['expansion'::text, 'contraction'::text, 'churn'::text])))
+  constraint mrr_streak_flows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint mrr_streak_flows_order_check CHECK ((streak_at <= bucket_at))
+  constraint mrr_streak_flows_pkey PRIMARY KEY (merchant_id, currency, bucket_at, streak_at, measure)
+  index CREATE UNIQUE INDEX mrr_streak_flows_pkey ON billing.mrr_streak_flows USING btree (merchant_id, currency, bucket_at, streak_at, measure)
 
 table billing.mrr_totals
   column merchant_id uuid NOT NULL
@@ -4524,6 +4540,7 @@ function billing.guard_billing_restore_receipt()
                     'mrr_risk_flows',
                     'mrr_risk_totals',
                     'mrr_scheduled',
+                    'mrr_streak_flows',
                     'mrr_totals',
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',
@@ -5903,11 +5920,13 @@ function billing.settle_mrr(uuid)
              SET mrr = v_after, subscriptions = subscriptions + v_subs, first_active_at = v_first
            WHERE merchant_id = p_merchant AND customer_id = v_pair.customer_id AND currency = v_pair.currency;
       END LOOP;
-      -- The movements by kind; a voluntary churn also counts apart.
+      -- The movements by kind; a voluntary churn and a chargeback's churn also
+      -- count apart.
       INSERT INTO billing.mrr_flows AS f (merchant_id, currency, bucket_at, measure, amount, entries, logos)
       SELECT p_merchant, v.currency, billing.mrr_bucket(v.occurred_at), x.measure, sum(v.delta), count(*), sum(v.logo_delta)
         FROM billing.mrr_movements v
-        CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary) x(measure)
+        CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary
+                           UNION ALL SELECT 'churn_chargeback' WHERE v.kind = 'churn' AND v.cause = 'chargeback') x(measure)
        WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements)
        GROUP BY v.currency, billing.mrr_bucket(v.occurred_at), x.measure
        ORDER BY v.currency, billing.mrr_bucket(v.occurred_at), x.measure
@@ -5921,6 +5940,20 @@ function billing.settle_mrr(uuid)
        ORDER BY v.currency, billing.mrr_bucket(v.cohort_at), billing.mrr_bucket(v.occurred_at)
       ON CONFLICT (merchant_id, currency, cohort_at, bucket_at) DO UPDATE
       SET amount = c.amount + EXCLUDED.amount, logos = c.logos + EXCLUDED.logos;
+      -- The expansion, contraction and churn of each customer's run of MRR, by
+      -- when the run began (its latest movement from none): a period's opening
+      -- base is the runs begun before it.
+      INSERT INTO billing.mrr_streak_flows AS s (merchant_id, currency, bucket_at, streak_at, measure, amount)
+      SELECT p_merchant, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind, sum(v.delta)
+        FROM billing.mrr_movements v
+        CROSS JOIN LATERAL (SELECT max(p.occurred_at) AS began_at FROM billing.mrr_movements p
+                             WHERE p.merchant_id = v.merchant_id AND p.customer_id = v.customer_id AND p.currency = v.currency
+                               AND p.logo_delta = 1 AND (p.occurred_at, p.id) <= (v.occurred_at, v.id)) r
+       WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements) AND v.kind IN ('expansion', 'contraction', 'churn') AND r.began_at IS NOT NULL
+       GROUP BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind
+       ORDER BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind
+      ON CONFLICT (merchant_id, currency, bucket_at, streak_at, measure) DO UPDATE
+      SET amount = s.amount + EXCLUDED.amount;
       -- Each changed subscription moves its products' MRR and subscribers, in
       -- the bucket of its customer's movement in each currency: the latest
       -- change of the customer's rows in that currency.

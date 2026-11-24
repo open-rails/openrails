@@ -368,7 +368,7 @@ type BillingCustomerMrr struct {
 	FirstActiveAt *time.Time
 }
 
-// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|heading), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
+// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
@@ -1022,7 +1022,7 @@ type BillingMrrCohortFlow struct {
 	Logos      int64
 }
 
-// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary and churn_chargeback, parts of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days; MRR at an instant is mrr_totals less the movements of the buckets from it on.
 type BillingMrrFlow struct {
 	MerchantID uuid.UUID
 	Currency   string
@@ -1166,6 +1166,16 @@ type BillingMrrScheduled struct {
 	Status            string
 	ScheduledAt       time.Time
 	ResolvedAt        *time.Time
+}
+
+// Expansion, contraction and churn per currency and 15-minute UTC bucket, by the bucket in which each customer's run of MRR began (its latest movement from none): the customers with MRR when a period began are the runs begun before it, so net and gross revenue retention read this and mrr_totals, never the movements.
+type BillingMrrStreakFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	BucketAt   time.Time
+	StreakAt   time.Time
+	Measure    string
+	Amount     int64
 }
 
 // The merchant's MRR now per currency, the customers with any and the subscriptions adding to it: the sums of customer_mrr.

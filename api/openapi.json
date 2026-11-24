@@ -21342,6 +21342,9 @@
           },
           "last": {
             "type": "string"
+          },
+          "next": {
+            "type": "string"
           }
         }
       },

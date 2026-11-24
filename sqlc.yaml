@@ -26,6 +26,8 @@ sql:
       - "internal/migrate/postgres/0026_books.up.sql"
       - "internal/migrate/postgres/0027_mrr_at_risk.up.sql"
       - "internal/migrate/postgres/0028_usage_posting_watermark.up.sql"
+      - "internal/migrate/postgres/0029_reporting_mrr.up.sql"
+      - "internal/migrate/postgres/0030_dashboard_retired_mrr_measures.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

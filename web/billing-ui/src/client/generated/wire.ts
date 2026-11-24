@@ -1595,6 +1595,7 @@ export type MetricsRange = {
   from?: string
   to?: string
   last?: string
+  next?: string
 }
 
 export type MetricsResult = {

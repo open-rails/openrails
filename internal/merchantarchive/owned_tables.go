@@ -72,6 +72,7 @@ var ownedTables = []string{
 	"mrr_risk_flows",
 	"mrr_risk_totals",
 	"mrr_scheduled",
+	"mrr_streak_flows",
 	"mrr_totals",
 	"network_activity_daily",
 	"nmi_bulk_checkpoints",

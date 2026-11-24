@@ -2903,6 +2903,7 @@ pkg openrails/billing, type MetricsOrder struct, Measure string `json:"measure,o
 pkg openrails/billing, type MetricsRange struct
 pkg openrails/billing, type MetricsRange struct, From string `json:"from,omitempty"`
 pkg openrails/billing, type MetricsRange struct, Last string `json:"last,omitempty"`
+pkg openrails/billing, type MetricsRange struct, Next string `json:"next,omitempty"`
 pkg openrails/billing, type MetricsRange struct, To string `json:"to,omitempty"`
 pkg openrails/billing, type MetricsResult struct
 pkg openrails/billing, type MetricsResult struct, Columns []MetricsColumn `json:"columns"`

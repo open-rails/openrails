@@ -85,7 +85,7 @@ func Schema() SchemaDoc {
 		{
 			Intent: "KPI row: MRR, cash collected and churn this month vs the same month last year",
 			Query: Query{
-				Measures: []string{"mrr", "cash", "churn_rate"},
+				Measures: []string{"mrr", "cash", "subscriber_churn_rate"},
 				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
 				Compare:  "previous_year",
 			},
@@ -200,20 +200,37 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "net member change per week (plot new, canceled)",
+			Intent: "MRR movements per month: new, expansion, contraction, churn and reactivation; the total is net new MRR",
 			Query: Query{
-				Measures: []string{"new_subscriptions", "cancellations"},
-				By:       []string{"time"},
-				Grain:    "week",
-				Range:    &QueryRange{From: "2026-04-01", To: "2026-06-30"},
+				Measures: []string{"mrr_movements"},
+				By:       []string{"time", "movement"},
+				Grain:    "month",
+				Range:    &QueryRange{Last: "12m"},
 			},
 		},
 		{
-			Intent: "current dunning exposure: subscriptions and MRR by status",
+			Intent: "subscriber churn and net revenue retention by month",
 			Query: Query{
-				Measures: []string{"subscriptions", "mrr"},
-				By:       []string{"status"},
-				Range:    &QueryRange{From: "2026-07-01", To: "2026-07-03"},
+				Measures: []string{"subscriber_churn_rate", "nrr", "grr"},
+				By:       []string{"time"},
+				Grain:    "month",
+				Range:    &QueryRange{Last: "12m"},
+			},
+		},
+		{
+			Intent: "cohort retention: each month's new subscribers over the months since",
+			Query: Query{
+				Measures: []string{"cohort_retention"},
+				By:       []string{"cohort", "months_since_start"},
+				Range:    &QueryRange{Last: "12m"},
+			},
+		},
+		{
+			Intent: "MRR at risk now, by why",
+			Query: Query{
+				Measures: []string{"mrr_at_risk"},
+				By:       []string{"risk_reason"},
+				Range:    &QueryRange{Last: "1d"},
 			},
 		},
 	}

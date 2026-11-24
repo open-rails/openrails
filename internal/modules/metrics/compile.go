@@ -22,6 +22,28 @@ type stmt struct {
 	balance  bool
 }
 
+// Statement is one SQL statement Execute runs for a plan, in the billing
+// schema, with its arguments.
+type Statement struct {
+	Family Family
+	SQL    string
+	Args   []any
+}
+
+// Statements are the plan's statements for merchantID, the depletion
+// family's prior read aside: what a plan reads, for EXPLAIN.
+func Statements(plan *Plan, merchantID uuid.UUID) ([]Statement, error) {
+	stmts, err := compile(plan, merchantID, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Statement, len(stmts))
+	for i, st := range stmts {
+		out[i] = Statement{Family: st.family, SQL: st.sql, Args: st.args}
+	}
+	return out, nil
+}
+
 // compile builds one parameterized statement per source family involved.
 // Every SQL fragment comes from the registry; client values ride in args.
 // Usage families are the event store's (usage.go) and compile to none;
@@ -68,6 +90,14 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 			st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
 		case "risk":
 			st, err = compileSnapshot(plan, merchantID, fam, riskSpec(plan, spec), leaves)
+		case "mrr":
+			if byProduct(plan) {
+				st, err = compileSnapshot(plan, merchantID, FamMRRProduct, families[FamMRRProduct], productLeaves(leaves))
+			} else {
+				st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
+			}
+		case "cohort":
+			st, err = compileCohort(plan, merchantID, leaves)
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
@@ -87,10 +117,7 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 // and it anchors the (merchant_id, time) indexes).
 var merchantCols = map[Family]string{
 	FamPayments:       "p.merchant_id",
-	FamSubsNew:        "s.merchant_id",
-	FamSubsCanceled:   "s.merchant_id",
 	FamGrants:         "g.merchant_id",
-	FamTransitions:    "st.merchant_id",
 	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
 	FamEntitlSnapshot: "e.merchant_id",
@@ -108,6 +135,14 @@ var merchantCols = map[Family]string{
 	FamNetworkPrior:   "nap.merchant_id",
 	FamRiskTotals:     "t.merchant_id",
 	FamRiskFlows:      "rf.merchant_id",
+	FamMRR:            "t.merchant_id",
+	FamMRRProduct:     "pf.merchant_id",
+	FamMRRFlows:       "f.merchant_id",
+	FamMRRChurn:       "f.merchant_id",
+	FamMRRStreak:      "sf.merchant_id",
+	FamScheduled:      "ms.merchant_id",
+	FamCohort:         "c.merchant_id",
+	FamCancellations:  "st.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -167,6 +202,14 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	// @to is the range end, for states settled as of the query.
 	if strings.Contains(sql, "@to") {
 		sql = strings.ReplaceAll(sql, "@to", arg(plan.To)+"::timestamptz")
+	}
+	// @period_start is the start of the row's bucket, or of the range.
+	if strings.Contains(sql, "@period_start") {
+		start := arg(plan.From) + "::timestamptz"
+		if plan.HasTime {
+			start = bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))
+		}
+		sql = strings.ReplaceAll(sql, "@period_start", start)
 	}
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: plan.HasTime}, nil
 }
@@ -240,6 +283,89 @@ func calendarBound(t time.Time, zone *time.Location, up bool) time.Time {
 		d++
 	}
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// byProduct reports a query that groups or filters MRR by product: the
+// product flows answer it.
+func byProduct(plan *Plan) bool {
+	return slices.Contains(plan.Dims, "product_id") || plan.Filters["product_id"] != nil
+}
+
+// productLeaves are FamMRR leaves as FamMRRProduct reads them.
+func productLeaves(leaves []*Measure) []*Measure {
+	out := make([]*Measure, len(leaves))
+	for i, m := range leaves {
+		c := *m
+		c.Family, c.Expr = FamMRRProduct, m.ByProduct
+		out[i] = &c
+	}
+	return out
+}
+
+// compileCohort reads mrr_cohort_flows by the cohort month and the months
+// since it, in the merchant's zone: a cohort's value at the end of month k
+// is its flows through that month, its size the flows through its own. The
+// cohorts are the months the range starts.
+func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
+	var args []any
+	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
+	zone := arg(plan.zone().String())
+	where := []string{"c.merchant_id = " + arg(merchantID), "c.cohort_at >= " + arg(plan.From), "c.cohort_at < " + arg(plan.To), "c.bucket_at < " + arg(plan.To)}
+	basis := `'subscribers'`
+	bases := `(VALUES ('subscribers'))`
+	if slices.Contains(plan.Dims, "basis") || plan.Filters["basis"] != nil {
+		bases = `(VALUES ('subscribers'), ('mrr'))`
+		basis = "b.basis"
+	}
+	var filters []string
+	for _, d := range sortedFilterDims(plan.Filters) {
+		col, ok := map[string]string{"currency": "g.currency", "cohort": "g.cohort_label", "months_since_start": "g.n::text", "basis": "b.basis"}[d]
+		if !ok {
+			return stmt{}, fmt.Errorf("metrics: cohort lacks filter dimension %s (registry bug)", d)
+		}
+		filters = append(filters, fmt.Sprintf("%s = ANY(%s)", col, arg(plan.Filters[d])))
+	}
+	sel := []string{}
+	for _, d := range plan.Dims {
+		col, ok := map[string]string{"currency": "g.currency", "cohort": "g.cohort_label", "months_since_start": "g.n::text", "basis": basis}[d]
+		if !ok {
+			return stmt{}, fmt.Errorf("metrics: cohort lacks dimension %s (registry bug)", d)
+		}
+		sel = append(sel, col+" AS dim_"+d)
+	}
+	value := func(through string) string {
+		return `(SELECT COALESCE(SUM(CASE WHEN ` + basis + ` = 'mrr' THEN f.amount ELSE f.logos END), 0)::bigint FROM f
+			WHERE f.currency = g.currency AND f.cohort = g.cohort AND f.month <= ` + through + `)`
+	}
+	for _, m := range leaves {
+		switch m.Name {
+		case "cohort_value":
+			sel = append(sel, value("g.month")+" AS m_cohort_value")
+		case "cohort_size":
+			sel = append(sel, value("g.cohort")+" AS m_cohort_size")
+		default:
+			return stmt{}, fmt.Errorf("metrics: cohort has no leaf %s (registry bug)", m.Name)
+		}
+	}
+	sql := `WITH f AS (
+	SELECT c.currency, date_trunc('month', c.cohort_at, ` + zone + `) AS cohort, date_trunc('month', c.bucket_at, ` + zone + `) AS month,
+	       SUM(c.logos)::bigint AS logos, SUM(c.amount)::bigint AS amount
+	FROM ` + families[FamCohort].From + `
+	WHERE ` + strings.Join(where, " AND ") + `
+	GROUP BY 1, 2, 3
+), g AS (
+	SELECT k.currency, k.cohort, to_char(k.cohort AT TIME ZONE ` + zone + `, 'YYYY-MM') AS cohort_label, m.n,
+	       ((k.cohort AT TIME ZONE ` + zone + `) + make_interval(months => m.n)) AT TIME ZONE ` + zone + ` AS month
+	FROM (SELECT DISTINCT currency, cohort FROM f) k
+	CROSS JOIN LATERAL generate_series(0, 1200) m(n)
+	WHERE ((k.cohort AT TIME ZONE ` + zone + `) + make_interval(months => m.n)) AT TIME ZONE ` + zone + ` < ` + arg(plan.To) + `
+)
+SELECT ` + strings.Join(sel, ",\n       ") + `
+FROM g CROSS JOIN ` + bases + ` b(basis)`
+	if len(filters) > 0 {
+		sql += "\nWHERE " + strings.Join(filters, " AND ")
+	}
+	return stmt{family: FamCohort, sql: sql, args: args, leaves: leaves}, nil
 }
 
 // riskSpec reads the per-reason at-risk rows when the query groups or

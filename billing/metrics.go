@@ -22,11 +22,13 @@ type QueryMetricsParams struct {
 // MetricsRange bounds a query. Date-only values are calendar days in the
 // merchant's accounting timezone, From and To both inclusive; RFC 3339
 // instants are taken as [From, To). Last is a trailing window ending today
-// there ("7d", "12w", "6m", "1y"), instead of From/To.
+// there ("7d", "12w", "6m", "1y"), and Next one starting today (what is
+// scheduled ahead), instead of From/To.
 type MetricsRange struct {
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
 	Last string `json:"last,omitempty"`
+	Next string `json:"next,omitempty"`
 }
 
 // MetricsOrder orders rows by a requested measure or dimension; Dir is asc
