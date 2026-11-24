@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // An order paid on Stripe's hosted page (Stripe Checkout): paying opens an
@@ -262,7 +263,7 @@ func (s *OrderAttemptService) SettleOrderHosted(ctx context.Context, attemptID u
 	if transaction == "" {
 		transaction = sessionID
 	}
-	payment := uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:order-payment:"+attemptID.String()+":"+transaction))
+	payment := uuidutil.DerivedV7(uuidutil.TimeOf(attemptID), uuid.NameSpaceURL, "openrails:order-payment:"+attemptID.String()+":"+transaction)
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := s.orders.Paid(db.WithPSPID(ctx, attempt.PspID), s.db.NewWithPgxTx(tx), *attempt.OrderID, orders.Charge{PaymentID: payment, AttemptID: attemptID, PSPID: attempt.PspID,
 			Rail: string(models.RailStripe), TransactionID: transaction, Amount: *attempt.Amount, Currency: *attempt.Currency, PurchasedAt: s.now().UTC(),

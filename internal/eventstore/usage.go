@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // UsageOutcome is usage_events.outcome.
@@ -24,8 +25,8 @@ const (
 
 // UsageEvent is one settled usage item; its merchant is the context's.
 type UsageEvent struct {
-	// EventID is the intake identity: a UUIDv5 of (merchant, lease, n), or of
-	// the request id.
+	// EventID is the intake identity: LeaseEventID of (merchant, lease, n), or
+	// RequestEventID of the request id.
 	EventID     uuid.UUID          `json:"event_id"`
 	CustomerID  billing.CustomerID `json:"customer_id"`
 	Currency    string             `json:"currency"`
@@ -151,17 +152,22 @@ func limitColumns(in []UsageLimit) limits {
 	return out
 }
 
-// usageNamespace names usage events' intake identities (UUIDv5).
+// usageNamespace names usage events' intake identities.
 var usageNamespace = uuid.MustParse("6f1c5a3e-2b8d-5c4e-9a71-0d3e8b2f4c19")
 
-// LeaseEventID is the identity of a lease's usage item n.
+// LeaseEventID is the identity of a lease's usage item n, timed at the lease.
 func LeaseEventID(mid billing.MerchantID, lease uuid.UUID, n int64) uuid.UUID {
-	return uuid.NewSHA1(usageNamespace, []byte(mid.String()+"/lease/"+lease.String()+"/"+strconv.FormatInt(n, 10)))
+	return uuidutil.DerivedV7(uuidutil.TimeOf(lease), usageNamespace, mid.String()+"/lease/"+lease.String()+"/"+strconv.FormatInt(n, 10))
 }
 
-// RequestEventID is the identity of the capture of an admitted request.
+// RequestEventID is the identity of the capture of an admitted request, timed
+// at the request id when it is a UUIDv7.
 func RequestEventID(mid billing.MerchantID, requestID string) uuid.UUID {
-	return uuid.NewSHA1(usageNamespace, []byte(mid.String()+"/request/"+requestID))
+	parent, err := uuid.Parse(requestID)
+	if err != nil {
+		parent = uuid.Nil
+	}
+	return uuidutil.DerivedV7(uuidutil.TimeOf(parent), usageNamespace, mid.String()+"/request/"+requestID)
 }
 
 // UsageKey locates a usage event by its sorting key.

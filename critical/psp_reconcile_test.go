@@ -333,6 +333,7 @@ func TestPSPReconcile(t *testing.T) {
 		iw.apply(t, imp.ID)
 		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
+		require.NotNil(t, applied.Resolution, "the apply left the correction unresolved; notes %v, evidence %v", applied.Notes, applied.Evidence)
 		require.Equal(t, "approved", *applied.Resolution, "notes %v, evidence %v", applied.Notes, applied.Evidence["resolution"])
 		row := iw.held(t, schedule)
 		require.Equal(t, prices["current19"].ID.String(), row.Price, "the provider's mapped price")

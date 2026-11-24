@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // PurchaseReceipt is a paid one-off purchase: what was bought and what its
@@ -40,7 +41,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 	}
 	amount := r.Amount
 	n := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(r.PaymentID, []byte(models.NotificationOneOffPurchaseCompleted)),
+		ID:         uuidutil.ChildV7(r.PaymentID, string(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, Rail: billing.Rail(r.Rail),
 			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
@@ -72,7 +73,7 @@ func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r Authent
 	}
 	amount := r.Amount
 	n := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(r.AttemptID, []byte(models.NotificationPaymentAuthenticationRequired)),
+		ID:         uuidutil.ChildV7(r.AttemptID, string(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
 	}
