@@ -1404,7 +1404,7 @@
       "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
     ],
     "OR-J22-S09": [
-      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
+      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none"
     ],
     "OR-J22-S12": [
       "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
@@ -2181,6 +2181,66 @@
     ],
     "OR-J40-S26": [
       "TestCreditBooksEdges/OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding"
+    ],
+    "OR-J41-S18": [
+      "TestRevenueReversals/OR-J41-S18/a-partial-refund-while-service-runs-is-a-price-reduction-with-catch-up"
+    ],
+    "OR-J41-S19": [
+      "TestRevenueReversals/OR-J41-S19/a-full-refund-that-revokes-access-takes-unrecognised-revenue-first"
+    ],
+    "OR-J41-S20": [
+      "TestRevenueReversals/OR-J41-S20/a-chargeback-reduces-its-schedule-and-the-won-dispute-restores-it"
+    ],
+    "OR-J41-S21": [
+      "TestRevenueReversals/OR-J41-S21/a-writer-that-skips-the-poster-commits-and-ledger-audit-raises-a-finding"
+    ],
+    "OR-J41-S22": [
+      "TestRevenueReversals/OR-J41-S22/a-duplicate-captures-refund-returns-it-from-unapplied-cash"
+    ],
+    "OR-J41-S23": [
+      "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
+    ],
+    "OR-J41-S24": [
+      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-takes-what-it-left-unapplied-and-its-chargeback-the-cash-side-alone"
+    ],
+    "OR-J41-S25": [
+      "TestRevenueReversals/OR-J41-S25/refunds-in-pieces-each-reduce-the-price-from-where-the-last-left-it"
+    ],
+    "OR-J41-S26": [
+      "TestRevenueReversals/OR-J41-S26/a-refund-of-a-two-line-bill-takes-each-line-pro-rata"
+    ],
+    "OR-J41-S27": [
+      "TestRevenueReversals/OR-J41-S27/a-mixed-credit-orders-reversals-move-each-dollar-once"
+    ],
+    "OR-J41-S28": [
+      "TestRevenueReversals/OR-J41-S28/an-end-undone-after-a-refund-reinstates-no-forfeit-it-never-made"
+    ],
+    "OR-J41-S29": [
+      "TestRevenueReversals/OR-J41-S29/a-refund-the-rail-confirms-later-is-dated-when-it-settled"
+    ],
+    "OR-J41-S30": [
+      "TestRevenueReversals/OR-J41-S30/a-timed-line-refunded-before-its-access-is-not-unscheduled"
+    ],
+    "OR-J41-S31": [
+      "TestRevenueReversals/OR-J41-S31/a-reversals-share-of-a-credit-lot-is-decided-when-it-settles"
+    ],
+    "OR-J41-S32": [
+      "TestRevenueReversals/OR-J41-S32/a-reversal-posted-for-other-cash-than-its-amount-fails-ledger-audit"
+    ],
+    "OR-J41-S33": [
+      "TestRevenueReversals/OR-J41-S33/a-usage-payment-starts-the-books"
+    ],
+    "OR-J41-S34": [
+      "TestRevenueReversals/OR-J41-S34/a-refund-after-an-early-end-takes-the-forfeit-first"
+    ],
+    "OR-J41-S35": [
+      "TestRevenueReversals/OR-J41-S35/a-recovery-naming-no-chargeback-restores-the-oldest-and-never-fails"
+    ],
+    "OR-J41-S36": [
+      "TestRevenueReversals/OR-J41-S36/a-provider-discount-never-reaches-a-credit-line"
+    ],
+    "OR-J41-S37": [
+      "TestRevenueReversals/OR-J41-S37/an-unbooked-unit-packs-refund-withdraws-its-units-and-books-its-cash-against-the-payment"
     ],
     "OR-J04-S80": [
       "TestBillingPass/OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session"

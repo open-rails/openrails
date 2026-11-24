@@ -322,7 +322,7 @@ var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "c
 	"subscription_mrr": true, "customer_mrr": true, "mrr_movements": true, "mrr_movement_lines": true, "mrr_scheduled": true,
 	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true, "mrr_streak_flows": true,
 	"mrr_product_totals": true, "mrr_customer_totals": true, "mrr_customer_flows": true, "subscription_cancellations": true,
-	"mrr_risk_cases": true, "mrr_risk_episodes": true, "mrr_risk_flows": true, "mrr_risk_totals": true, "revenue_schedules": true}
+	"mrr_risk_cases": true, "mrr_risk_episodes": true, "mrr_risk_flows": true, "mrr_risk_totals": true, "revenue_schedules": true, "books_starts": true, "credit_reversal_shares": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}

@@ -2,7 +2,9 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/google/uuid"
 
@@ -86,6 +88,10 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 	if err != nil {
 		return nil, nil, fmt.Errorf("books: schedule check: %w", err)
 	}
+	// An order whose receipts have nothing left unapplied, its money
+	// applied or returned (a refund before a timed line's access), owes its
+	// lines nothing more.
+	spent := map[uuid.UUID]bool{}
 	for _, r := range rows {
 		if CheckCurrency(r.Currency) != nil {
 			continue
@@ -97,10 +103,171 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 		case r.BeforeBooks:
 			line.Reason = LineBeforeBooks
 		default:
-			failing = append(failing, line)
+			done, known := spent[r.OrderID]
+			if !known {
+				if done, err = orderSpent(ctx, gen.New(q), merchant, r.OrderID); err != nil {
+					return nil, nil, err
+				}
+				spent[r.OrderID] = done
+			}
+			if !done {
+				failing = append(failing, line)
+			}
 			continue
 		}
 		warnings = append(warnings, line)
 	}
 	return failing, warnings, nil
+}
+
+// orderSpent reports whether every receipt of an order has nothing left
+// unapplied in the books: none of its money waits for a line.
+func orderSpent(ctx context.Context, q *gen.Queries, merchant, order uuid.UUID) (bool, error) {
+	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: merchant, OrderID: order})
+	if err != nil {
+		return false, err
+	}
+	if len(receipts) == 0 {
+		return false, nil
+	}
+	for _, p := range receipts {
+		pb, err := paymentBooksOf(ctx, q, merchant, p.ID)
+		if err != nil {
+			return false, err
+		}
+		if pb.received == 0 || pb.unapplied() > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// UnpostedFindingType is the finding ledger-audit raises for a payment the
+// general ledger holds no posting of.
+const UnpostedFindingType = "books.entry.missing"
+
+// UnpostedPayment is a receipt, or a settled reversal of one, that the
+// general ledger holds no posting of: its writer stored it past the poster.
+type UnpostedPayment struct {
+	PaymentID uuid.UUID `json:"payment_id"`
+	// Kind is receipt, refund, chargeback or dispute_reversal.
+	Kind     string `json:"kind"`
+	Currency string `json:"currency"`
+	Amount   int64  `json:"amount"`
+}
+
+func (u UnpostedPayment) String() string {
+	return fmt.Sprintf("unposted %s: payment=%s amount=%s", u.Kind, u.PaymentID, moneyutil.FormatAmount(u.Amount, u.Currency))
+}
+
+// CheckPostings returns the merchant's receipts and settled reversals with
+// no general-ledger posting, stored since the books started (a payment from
+// before them waits for their rebuild). An empty slice is the healthy
+// answer.
+func CheckPostings(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]UnpostedPayment, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("books: merchant is required")
+	}
+	rows, err := gen.New(q).ListUnpostedPayments(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("books: posting check: %w", err)
+	}
+	var out []UnpostedPayment
+	for _, r := range rows {
+		if CheckCurrency(r.Currency) != nil {
+			continue
+		}
+		kind := "receipt"
+		if r.ReversalKind != nil {
+			kind = *r.ReversalKind
+		}
+		out = append(out, UnpostedPayment{PaymentID: r.ID, Kind: kind, Currency: r.Currency, Amount: r.Amount})
+	}
+	return out, nil
+}
+
+// MisbalancedFindingType is the finding ledger-audit raises for a reversal
+// whose postings moved other cash than its amount.
+const MisbalancedFindingType = "books.reversal.misbalanced"
+
+// MisbalancedReversal is a settled reversal whose general-ledger cash legs,
+// its own and its credit lot's, do not sum to its amount.
+type MisbalancedReversal struct {
+	PaymentID uuid.UUID `json:"payment_id"`
+	Kind      string    `json:"kind"`
+	Currency  string    `json:"currency"`
+	Amount    int64     `json:"amount"`
+	Moved     int64     `json:"moved"`
+}
+
+func (m MisbalancedReversal) String() string {
+	return fmt.Sprintf("misbalanced %s: payment=%s amount=%s moved=%s", m.Kind, m.PaymentID,
+		moneyutil.FormatAmount(m.Amount, m.Currency), moneyutil.FormatAmount(m.Moved, m.Currency))
+}
+
+// CheckReversalCash returns the merchant's settled reversals, stored since
+// the books started, whose cash legs sum to other than their amount. An empty
+// slice is the healthy answer.
+func CheckReversalCash(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]MisbalancedReversal, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("books: merchant is required")
+	}
+	rows, err := gen.New(q).ListMisbalancedReversals(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("books: reversal cash check: %w", err)
+	}
+	var out []MisbalancedReversal
+	for _, r := range rows {
+		if CheckCurrency(r.Currency) != nil {
+			continue
+		}
+		kind := ""
+		if r.ReversalKind != nil {
+			kind = *r.ReversalKind
+		}
+		out = append(out, MisbalancedReversal{PaymentID: r.ID, Kind: kind, Currency: r.Currency, Amount: r.Amount, Moved: r.Moved})
+	}
+	return out, nil
+}
+
+// SyncPostingFindings raises a finding for each payment the general ledger
+// holds no posting of and each reversal it posted other cash for, and closes
+// those no longer reported. The gap is recorded, never refused.
+func SyncPostingFindings(ctx context.Context, q *gen.Queries, merchant uuid.UUID, unposted []UnpostedPayment, misbalanced []MisbalancedReversal) error {
+	raise := func(typ string, id uuid.UUID, evidence map[string]string, action string) (string, error) {
+		subject := "payment:" + id.String()
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			return "", err
+		}
+		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: merchant, FindingType: typ,
+			SubjectKey: subject, Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw}); err != nil {
+			return "", fmt.Errorf("books: raise %s: %w", typ, err)
+		}
+		return subject, nil
+	}
+	reported := map[string][]string{UnpostedFindingType: {}, MisbalancedFindingType: {}}
+	for _, u := range unposted {
+		subject, err := raise(UnpostedFindingType, u.PaymentID, map[string]string{"payment_id": u.PaymentID.String(), "kind": u.Kind, "currency": u.Currency, "amount": strconv.FormatInt(u.Amount, 10)},
+			"The payment was stored without its general-ledger posting. Find the writer that skipped the poster; the books' rebuild posts the payment.")
+		if err != nil {
+			return err
+		}
+		reported[UnpostedFindingType] = append(reported[UnpostedFindingType], subject)
+	}
+	for _, m := range misbalanced {
+		subject, err := raise(MisbalancedFindingType, m.PaymentID, map[string]string{"payment_id": m.PaymentID.String(), "kind": m.Kind, "currency": m.Currency,
+			"amount": strconv.FormatInt(m.Amount, 10), "moved": strconv.FormatInt(m.Moved, 10)},
+			"The reversal's general-ledger postings moved other cash than its amount. Find the poster that split it twice; the books' rebuild reposts it.")
+		if err != nil {
+			return err
+		}
+		reported[MisbalancedFindingType] = append(reported[MisbalancedFindingType], subject)
+	}
+	for typ, subjects := range reported {
+		if _, err := q.ResolveVanishedBooksFindings(ctx, gen.ResolveVanishedBooksFindingsParams{MerchantID: merchant, FindingType: typ, Reported: subjects}); err != nil {
+			return fmt.Errorf("books: close %s: %w", typ, err)
+		}
+	}
+	return nil
 }
