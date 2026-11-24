@@ -4883,6 +4883,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_undo.go": {

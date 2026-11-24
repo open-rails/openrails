@@ -33,6 +33,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 //go:embed migrations/*.sql
@@ -260,7 +261,7 @@ func (s *Store) migrate(ctx context.Context, logger *slog.Logger) error {
 		logger.InfoContext(ctx, "event store: applied ClickHouse migration", "database", s.database, "migration", m.Name)
 	}
 	// The first to create the view names the store; later ones find it.
-	return s.exec(ctx, fmt.Sprintf("CREATE VIEW IF NOT EXISTS %s.store AS SELECT toUUID('%s') AS id", databaseToken, uuid.New()))
+	return s.exec(ctx, fmt.Sprintf("CREATE VIEW IF NOT EXISTS %s.store AS SELECT toUUID('%s') AS id", databaseToken, uuidutil.NewV7()))
 }
 
 // validate refuses a database Migrate has not prepared for this build.
