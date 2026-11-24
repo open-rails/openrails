@@ -99,9 +99,9 @@ type funnel struct {
 }
 
 var (
-	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined"}}
-	rebillFunnel  = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "error", "missed"},
-		counted: []string{"approved", "declined", "error", "missed"}}
+	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined", "refused", "error"}}
+	rebillFunnel  = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "refused", "error", "missed"},
+		counted: []string{"approved", "declined", "refused", "error", "missed"}}
 )
 
 // shares runs f by PSP and owner over [from, to).
