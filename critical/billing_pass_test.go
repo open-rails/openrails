@@ -193,6 +193,7 @@ func TestBillingPass(t *testing.T) {
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
 		oneUsage(t, a.alpha, usageInput(customer, "owed-past-grace", 3))
+		a.clock.Advance(time.Second)
 		fleet := quietFleet(t, a.world)
 		runUsageDue(t, fleet)
 		order := oneUsageOrder(t, a, customer)

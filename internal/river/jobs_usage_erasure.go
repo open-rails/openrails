@@ -3,10 +3,12 @@ package riverjobs
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/usageerasure"
 )
 
@@ -25,6 +27,8 @@ func (w UsageErasureWorker) Work(ctx context.Context, job *river.Job[usageerasur
 		return nil
 	}
 	return w.DB.RunInMerchantScope(ctx, billing.MerchantID(job.Args.MerchantID), "usage erasure", func(ctx context.Context) error {
-		return store.EraseCustomer(ctx, billing.CustomerID(job.Args.CustomerID))
+		return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return usageerasure.Erase(ctx, gen.New(tx), store, job.Args.MerchantID, job.Args.CustomerID)
+		})
 	})
 }

@@ -1,6 +1,6 @@
 // The Reports page's tables, built from metrics queries over the dashboard's
-// range: subscriptions by UTC day, renewals and churn by UTC month, and the
-// explorer's table of any query.
+// range: subscriptions by day, renewals and churn by month, in the merchant's
+// accounting timezone, and the explorer's table of any query.
 import type {
   MetricsCell,
   QueryMetricsParams,
@@ -46,7 +46,7 @@ export function churnQuery(range: DashboardRange): QueryMetricsParams {
 }
 
 export interface DailyRow {
-  // date is the UTC day, YYYY-MM-DD.
+  // date is the day in the result's timezone, YYYY-MM-DD.
   date: string
   started: number
   canceled: number
@@ -54,7 +54,7 @@ export interface DailyRow {
 }
 
 export interface MonthlyRow {
-  // month is the UTC month, YYYY-MM.
+  // month is the month in the result's timezone, YYYY-MM.
   month: string
   renewals: number
   canceled: number
@@ -63,6 +63,19 @@ export interface MonthlyRow {
 }
 
 const count = (cell: MetricsCell | undefined) => Number(cell ?? 0)
+
+// calendarDate is the YYYY-MM-DD date a bucket's instant falls on in
+// timeZone.
+function calendarDate(iso: string, timeZone = "UTC"): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d)
+}
 
 // cellsByBucket keys each row's measures by its time bucket.
 function cellsByBucket(
@@ -85,7 +98,7 @@ export function dailyRows(result: MetricsResult): DailyRow[] {
   return [...cellsByBucket(result)]
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([bucket, cells]) => ({
-      date: bucket.slice(0, 10),
+      date: calendarDate(bucket, result.timezone),
       started: count(cells.new_subscriptions),
       canceled: count(cells.cancellations),
       net: count(cells.net_new_subscriptions),
@@ -100,10 +113,11 @@ export function monthlyRows(
   const paid = cellsByBucket(renewals)
   const lost = cellsByBucket(churn)
   const buckets = [...new Set([...paid.keys(), ...lost.keys()])].sort()
+  const zone = renewals.timezone ?? churn.timezone
   return buckets.map((bucket) => {
     const rate = lost.get(bucket)?.churn_rate
     return {
-      month: bucket.slice(0, 7),
+      month: calendarDate(bucket, zone).slice(0, 7),
       renewals: count(paid.get(bucket)?.payments),
       canceled: count(lost.get(bucket)?.cancellations),
       churn: rate === null || rate === undefined ? null : Number(rate),

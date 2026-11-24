@@ -48,6 +48,7 @@ var kinds = map[string]time.Duration{
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
+	merchants.UsagePurgeArgs{}.Kind():    DefaultTimeout,
 	destructive.DrainErasuresKind:        DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
@@ -55,6 +56,7 @@ var kinds = map[string]time.Duration{
 	KindMerchantHealth:                   time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
+	KindMRRRisk:                          DefaultTimeout,
 	KindBillingPass:                      BillingPassTimeout(),
 	KindPSPImport:                        2 * time.Hour,
 }

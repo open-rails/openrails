@@ -1418,6 +1418,12 @@ export type LowBalanceLine = {
   runway_hours: number | null
 }
 
+export type MRRRisk = {
+  reasons: ("card_expiring" | "delinquent" | "needs_payment_method" | "past_due" | "unverified")[]
+  entry_reason: "card_expiring" | "delinquent" | "needs_payment_method" | "past_due" | "unverified"
+  since: string
+}
+
 export type Mandate = {
   id: string
   customer_id: string
@@ -1576,6 +1582,7 @@ export type MetricsMeasure = {
   dims: string[]
   dim_values?: Record<string, string[]>
   money?: boolean
+  utc_days?: boolean
 }
 
 export type MetricsOrder = {
@@ -1592,6 +1599,7 @@ export type MetricsRange = {
 
 export type MetricsResult = {
   grain?: string
+  timezone: string
   range: MetricsResultRange
   columns: MetricsColumn[]
   rows: unknown[][]
@@ -2630,6 +2638,7 @@ export type Subscription = {
   price_id: string
   quantity: number | null
   mrr: SubscriptionMRR | null
+  mrr_risk: MRRRisk | null
   psp_id: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id: string | null

@@ -137,6 +137,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if err := normalizePreBooks(p, &r.Values); err != nil {
 			return err
 		}
+		// A usage posting before its watermark read the store as of when it
+		// posted, as migration 0028 records it.
+		if p.Name == "usage_postings" && len(r.Values) == len(p.Columns)-1 {
+			created := value(p, r.Values, "created_at")
+			if created == nil {
+				return fmt.Errorf("archive usage posting without created_at")
+			}
+			r.Values = append(r.Values, new(*created))
+		}
 		// Older exports always carried an explicit credit limit, including
 		// zero. Preserve that meaning; no schedule existed before #1289.
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
@@ -307,7 +316,8 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
 	"usage_card_prints": true, "usage_postings": true, "usage_unposted": true, "stripe_fee_reads": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true,
 	"subscription_mrr": true, "customer_mrr": true, "mrr_movements": true, "mrr_movement_lines": true, "mrr_scheduled": true,
-	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true}
+	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true,
+	"mrr_risk_cases": true, "mrr_risk_episodes": true, "mrr_risk_flows": true, "mrr_risk_totals": true, "revenue_schedules": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}

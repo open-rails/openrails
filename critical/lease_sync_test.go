@@ -211,6 +211,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.NoError(t, released[0].Err())
 
 		// A top-up posts the month so far first.
+		w.clock.Advance(time.Minute)
 		fund(t, w.alpha, customer, "top-up", 500)
 		balance(t, w.alpha, customer, 1300, 0, 1300)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1)

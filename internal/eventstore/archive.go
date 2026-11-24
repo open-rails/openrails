@@ -260,7 +260,7 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 					return err
 				}
 			}
-			if err := batch.Append(merchant, customer, bucket.UTC(), v[2], v[3], v[4], v[5], v[6], period.UTC(), v[8], v[9], uint64(max(n[0], 0)), n[1], n[2], n[3], n[4]); err != nil {
+			if err := batch.Append(merchant, customer, bucket.UTC(), v[2], v[3], v[4], v[5], v[6], period.UTC(), v[8], v[9], n[0], n[1], n[2], n[3], n[4]); err != nil {
 				return fail("restore usage history", err)
 			}
 		}

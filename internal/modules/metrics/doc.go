@@ -13,10 +13,11 @@
 // or month from the range), filters (OR within a dimension, AND across),
 // order, limit and compare (previous_period or previous_year); any other key
 // is refused. range is
-// {from, to} as inclusive UTC days or an RFC 3339 half-open interval, or
-// {last: "7d"} ending today on the deployment's clock. product_id and price_id
-// filters take the catalog's typed ids; a bare UUID is invalid_filter_value.
-// The answer is {grain, range, columns, rows, compare_range, compare_rows}:
+// {from, to} as inclusive days in the merchant's accounting timezone or an
+// RFC 3339 half-open interval, or {last: "7d"} ending today there on the
+// deployment's clock. product_id and price_id filters take the catalog's
+// typed ids; a bare UUID is invalid_filter_value. The answer is {grain,
+// timezone, range, columns, rows, compare_range, compare_rows}:
 // time series zero-fill every bucket, money cells are decimal strings of
 // native units (MoneyCell; an average is rounded to whole units), and money
 // never sums across currencies (currency becomes an implicit group-by). Limits:

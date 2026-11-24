@@ -626,6 +626,7 @@ func TestBooks(t *testing.T) {
 			spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, 400)})
 			require.NoError(t, err)
 			require.NoError(t, spent[0].Err())
+			w.clock.Advance(time.Second)
 			var errs [2]error
 			var group sync.WaitGroup
 			start := make(chan struct{})

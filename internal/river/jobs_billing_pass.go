@@ -151,6 +151,7 @@ var billingScanBudgets = map[string]time.Duration{
 	KindBalanceWatch:                  DefaultTimeout,
 	KindDelinquency:                   DefaultTimeout,
 	KindOrderExpiry:                   DefaultTimeout,
+	KindRevenueRecognition:            DefaultTimeout,
 	money.KindUsageOrders:             DefaultTimeout,
 	KindRebillWatch:                   time.Hour,
 	KindNMIHistory:                    time.Hour,

@@ -768,6 +768,9 @@
     "OR-J32-S06": [
       "TestMerchantHost/OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens"
     ],
+    "OR-J32-S07": [
+      "TestMerchantHost/OR-J32-S07/a-purge-the-event-store-refused-to-delete-from-is-retried-by-its-job"
+    ],
     "OR-J34-S01": [
       "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
     ],
@@ -1445,6 +1448,9 @@
     "OR-J25-S05": [
       "TestRunningChargeContracts/OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap"
     ],
+    "OR-J25-S43": [
+      "TestBalanceLooks/OR-J25-S43/a-look-at-a-balance-without-unposted-usage-needs-no-event-store"
+    ],
     "OR-J29-S37": [
       "TestDueWork/OR-J29-S37/an-operation-scheduled-ahead-is-not-stuck"
     ],
@@ -1517,6 +1523,42 @@
     ],
     "OR-J42-S10": [
       "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
+    ],
+    "OR-J42-S11": [
+      "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"
+    ],
+    "OR-J42-S12": [
+      "TestMRRRisk/OR-J42-S12/a-non-retryable-decline-needs-a-payment-method-a-card-update-moves-it-to-past-due-then-paid"
+    ],
+    "OR-J42-S13": [
+      "TestMRRRisk/OR-J42-S13/a-card-expiring-before-renewal-enters-on-the-period-change-and-leaves-on-an-account-updater-refresh"
+    ],
+    "OR-J42-S14": [
+      "TestMRRRisk/OR-J42-S14/unverified-enters-and-leaves"
+    ],
+    "OR-J42-S15": [
+      "TestMRRRisk/OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it"
+    ],
+    "OR-J42-S16": [
+      "TestMRRRisk/OR-J42-S16/the-risk-drain-and-a-decline-for-one-customer-both-commit-and-the-decline-queued-after-the-claim-is-re-evaluated"
+    ],
+    "OR-J42-S17": [
+      "TestMRRRisk/OR-J42-S17/a-cancel-at-period-end-keeps-the-case-open-a-resume-continues-it-the-end-churns-it-once"
+    ],
+    "OR-J42-S18": [
+      "TestMRRRisk/OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-never-an-nmi-schedule"
+    ],
+    "OR-J42-S19": [
+      "TestMRRRisk/OR-J42-S19/an-upgrade-while-at-risk-supersedes-the-case-and-the-replacement-opens-its-own"
+    ],
+    "OR-J42-S21": [
+      "TestMRRRisk/OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr"
+    ],
+    "OR-J42-S22": [
+      "TestMRRRisk/OR-J42-S22/a-customer-whose-evaluation-fails-alone-is-set-aside-with-a-finding-and-the-rest-drain"
+    ],
+    "OR-J42-S23": [
+      "TestMRRRisk/OR-J42-S23/canceled-at-period-end-a-card-update-clears-card-expiring-and-recovers-the-case"
     ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
@@ -1660,6 +1702,12 @@
     ],
     "OR-J53-S03": [
       "TestReporting/OR-J53-S03/money-never-sums-across-currencies"
+    ],
+    "OR-J53-S04": [
+      "TestReporting/OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day"
+    ],
+    "OR-J53-S05": [
+      "TestReporting/OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day"
     ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
@@ -1887,6 +1935,33 @@
     "OR-J24-S57": [
       "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
     ],
+    "OR-J24-S58": [
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts",
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-capture-retried-after-a-lost-commit-charges-once",
+      "TestUsageRecovery/OR-J24-S58/an-event-keeps-its-identity-across-attempts/a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once"
+    ],
+    "OR-J24-S59": [
+      "TestUsageRecovery/OR-J24-S59/a-resent-item-counts-in-the-session-its-first-attempt-opened"
+    ],
+    "OR-J24-S60": [
+      "TestUsageRecovery/OR-J24-S60/an-insert-whose-caller-gave-up-finishes-before-the-resend-looks"
+    ],
+    "OR-J24-S61": [
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse",
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse/usage-after-the-lapse-holds-back-nothing",
+      "TestUsageRecovery/OR-J24-S61/a-lot-lapsing-mid-month-funds-exactly-the-usage-before-its-lapse/a-running-charge-posted-at-the-lapse-draws-it-too"
+    ],
+    "OR-J24-S62": [
+      "TestUsageRecovery/OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell"
+    ],
+    "OR-J24-S63": [
+      "TestUsageRecovery/OR-J24-S63/an-erasure-run-again-after-stopping-part-way-keeps-history-whole"
+    ],
+    "OR-J24-S64": [
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/a-print-a-card-in-force-names-is-recorded-again",
+      "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/one-nothing-names-is-left-out"
+    ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",
@@ -1997,6 +2072,57 @@
     ],
     "OR-J40-S41": [
       "TestProcessorFees/OR-J40-S41/a-prevention-refund-reads-through-its-dispute"
+    ],
+    "OR-J41-S01": [
+      "TestRevenueRecognition/OR-J41-S01/a-monthly-plan-bought-mid-month-books-cash-per-psp-and-recognises-at-the-boundary-and-the-end"
+    ],
+    "OR-J41-S02": [
+      "TestRevenueRecognition/OR-J41-S02/an-annual-calendar-plan-recognises-a-twelfth-a-month-and-a-zone-boundary-follows-dst"
+    ],
+    "OR-J41-S03": [
+      "TestRevenueRecognition/OR-J41-S03/lifetime-access-at-once-a-pass-ratable-and-seats-funded-per-seat"
+    ],
+    "OR-J41-S04": [
+      "TestRevenueRecognition/OR-J41-S04/provider-bills-book-cash-to-their-psp-and-non-cash-to-revenue-adjustments"
+    ],
+    "OR-J41-S05": [
+      "TestRevenueRecognition/OR-J41-S05/a-seat-increase-defers-its-charge-over-the-rest-of-the-period"
+    ],
+    "OR-J41-S06": [
+      "TestRevenueRecognition/OR-J41-S06/an-idle-pass-locks-no-schedule-and-a-replayed-boundary-posts-once"
+    ],
+    "OR-J41-S07": [
+      "TestRevenueRecognition/OR-J41-S07/an-external-payment-books-to-external-receipts-and-a-payment-beyond-the-bill-stays-unapplied"
+    ],
+    "OR-J41-S08": [
+      "TestRevenueRecognition/OR-J41-S08/an-immediate-cancellation-without-a-refund-forfeits-the-remainder"
+    ],
+    "OR-J41-S09": [
+      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable"
+    ],
+    "OR-J41-S10": [
+      "TestRevenueRecognition/OR-J41-S10/revoked-access-ends-its-schedule-and-an-undone-revocation-takes-the-forfeit-back"
+    ],
+    "OR-J41-S11": [
+      "TestRevenueRecognition/OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied"
+    ],
+    "OR-J41-S12": [
+      "TestRevenueRecognition/OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-order-with-no-schedule"
+    ],
+    "OR-J41-S13": [
+      "TestRevenueRecognition/OR-J41-S13/a-prune-that-hides-booked-money-or-a-recognising-subscription-raises-a-finding-its-undo-resolves"
+    ],
+    "OR-J41-S14": [
+      "TestRevenueRecognition/OR-J41-S14/an-end-before-the-schedule-exists-reaches-it"
+    ],
+    "OR-J41-S15": [
+      "TestRevenueRecognition/OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line"
+    ],
+    "OR-J41-S16": [
+      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again"
+    ],
+    "OR-J41-S17": [
+      "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
     ]
   }
 }

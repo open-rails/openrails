@@ -18,7 +18,8 @@ var preBooksAccounts = map[string][2]string{
 
 // normalizePreBooks reads an account or transfer exported before the books
 // as the units book's, as the migration moved the database: an account by its
-// new name and class, a transfer effective when it posted.
+// new name and class, a transfer effective when it posted. A transfer
+// exported before revenue schedules names none.
 func normalizePreBooks(p Profile, values *[]*string) error {
 	switch {
 	case p.Name == "ledger_accounts" && len(*values) == len(p.Columns)-3:
@@ -32,12 +33,14 @@ func normalizePreBooks(p Profile, values *[]*string) error {
 		}
 		setValue(p, *values, "account_type", now[0])
 		*values = append(*values, new("units"), new(now[1]), nil)
-	case p.Name == "ledger_transfers" && len(*values) == len(p.Columns)-4:
+	case p.Name == "ledger_transfers" && len(*values) == len(p.Columns)-5:
 		created := value(p, *values, "created_at")
 		if created == nil {
 			return fmt.Errorf("archive ledger transfer without created_at")
 		}
-		*values = append(*values, new("units"), new(*created), nil, nil)
+		*values = append(*values, new("units"), new(*created), nil, nil, nil)
+	case p.Name == "ledger_transfers" && len(*values) == len(p.Columns)-1:
+		*values = append(*values, nil)
 	}
 	return nil
 }

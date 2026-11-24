@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 614,
+  "scenario_count": 654,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -879,6 +879,41 @@
       "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
+      "id": "OR-J24-S58",
+      "journey": "J24",
+      "name": "A capture retried after a commit that was lost, and a lease item that names no occurred_at resent after one, each find the event the first attempt inserted and charge once"
+    },
+    {
+      "id": "OR-J24-S59",
+      "journey": "J24",
+      "name": "An item resent after a commit that was lost counts in the session window its first attempt opened, not one opened at the resend"
+    },
+    {
+      "id": "OR-J24-S60",
+      "journey": "J24",
+      "name": "A sync whose caller gives up while its insert is sent still finishes the insert before it lets go of its locks: the resend inserts nothing and the rollups count each item once"
+    },
+    {
+      "id": "OR-J24-S61",
+      "journey": "J24",
+      "name": "A lot lapsing mid-month funds exactly the usage and running charges before its lapse, however much usage came after it; only that usage is owed"
+    },
+    {
+      "id": "OR-J24-S62",
+      "journey": "J24",
+      "name": "Usage the event store lost after it posted is not a price that fell: usage since is charged on top of what posted, and nothing that posted is credited back"
+    },
+    {
+      "id": "OR-J24-S63",
+      "journey": "J24",
+      "name": "A usage erasure that stopped between folding the history and deleting its invokers' rows, run again, leaves each event in the history once"
+    },
+    {
+      "id": "OR-J24-S64",
+      "journey": "J24",
+      "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
       "id": "OR-J25-S01",
       "journey": "J25",
       "name": "Start and stop charge account for the exact known elapsed segment"
@@ -1132,6 +1167,11 @@
       "id": "OR-J32-S06",
       "journey": "J32",
       "name": "Merchant purge removes the directory's contacts and provisioning tokens"
+    },
+    {
+      "id": "OR-J32-S07",
+      "journey": "J32",
+      "name": "A merchant purge whose deletion from the event store fails commits and queues the job that deletes it, which River retries until the store takes it"
     },
     {
       "id": "OR-J34-S01",
@@ -2459,6 +2499,11 @@
       "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
+      "id": "OR-J25-S43",
+      "journey": "J25",
+      "name": "While ClickHouse is out of reach a balance look at a customer without unposted usage expires its lapsed lot"
+    },
+    {
       "id": "OR-J29-S37",
       "journey": "J29",
       "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
@@ -2627,6 +2672,66 @@
       "id": "OR-J42-S10",
       "journey": "J42",
       "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
+    },
+    {
+      "id": "OR-J42-S11",
+      "journey": "J42",
+      "name": "A declined renewal puts the subscription's MRR at risk as past due, listed and in mrr_at_risk; a paid retry closes the case recovered; dunning exhausted on a later renewal closes the next case churned, involuntary; the recovery rate is a half"
+    },
+    {
+      "id": "OR-J42-S12",
+      "journey": "J42",
+      "name": "A non-retryable decline puts MRR at risk as needing a payment method; a new card moves the same case to past due, and the paid retry recovers it"
+    },
+    {
+      "id": "OR-J42-S13",
+      "journey": "J42",
+      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+    },
+    {
+      "id": "OR-J42-S14",
+      "journey": "J42",
+      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+    },
+    {
+      "id": "OR-J42-S15",
+      "journey": "J42",
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
+    },
+    {
+      "id": "OR-J42-S16",
+      "journey": "J42",
+      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+    },
+    {
+      "id": "OR-J42-S17",
+      "journey": "J42",
+      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+    },
+    {
+      "id": "OR-J42-S18",
+      "journey": "J42",
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+    },
+    {
+      "id": "OR-J42-S19",
+      "journey": "J42",
+      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+    },
+    {
+      "id": "OR-J42-S21",
+      "journey": "J42",
+      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
+    },
+    {
+      "id": "OR-J42-S22",
+      "journey": "J42",
+      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+    },
+    {
+      "id": "OR-J42-S23",
+      "journey": "J42",
+      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
     },
     {
       "id": "OR-J28-S09",
@@ -2854,6 +2959,16 @@
       "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
     },
     {
+      "id": "OR-J53-S04",
+      "journey": "J53",
+      "name": "A sale and usage at 23:30 in a merchant's accounting timezone, ten hours behind UTC, count on that local day: date ranges and day buckets start at its midnights and the result names the zone"
+    },
+    {
+      "id": "OR-J53-S05",
+      "journey": "J53",
+      "name": "A day chart across a midnight clock change has one row per local day, the changed day starting at its transition with the sale made on it; the catalogue marks measures read from rollups kept per UTC date"
+    },
+    {
       "id": "OR-J43-S01",
       "journey": "J43",
       "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
@@ -3072,6 +3187,91 @@
       "id": "OR-J45-S15",
       "journey": "J45",
       "name": "A new card on a case the old card's advice deferred is not held to that advice: its plain decline keeps dunning, and the case ends as the card failed, not issuer_deferred"
+    },
+    {
+      "id": "OR-J41-S01",
+      "journey": "J41",
+      "name": "A monthly plan bought mid-month posts its cash to its PSP's clearing account, defers it, and recognises at the month boundary and the period end"
+    },
+    {
+      "id": "OR-J41-S02",
+      "journey": "J41",
+      "name": "An annual calendar plan recognises a twelfth a month across a leap February; a non-UTC accounting zone's boundary follows DST"
+    },
+    {
+      "id": "OR-J41-S03",
+      "journey": "J41",
+      "name": "Lifetime access is recognised at once, a time-limited pass ratably over its window, and seats are funded per seat"
+    },
+    {
+      "id": "OR-J41-S04",
+      "journey": "J41",
+      "name": "A Stripe invoice with non-cash credit, NMI and CCBill rebills and a Solana pull in USDC book cash to their PSPs and recognise from payment"
+    },
+    {
+      "id": "OR-J41-S05",
+      "journey": "J41",
+      "name": "A seat increase defers its charge over the rest of the period"
+    },
+    {
+      "id": "OR-J41-S06",
+      "journey": "J41",
+      "name": "An idle recognition pass takes no schedule; a replayed boundary or order posts once"
+    },
+    {
+      "id": "OR-J41-S07",
+      "journey": "J41",
+      "name": "An external payment books to external_receipts; a payment beyond its bill stays unapplied"
+    },
+    {
+      "id": "OR-J41-S08",
+      "journey": "J41",
+      "name": "An immediate cancellation without a refund forfeits the remainder"
+    },
+    {
+      "id": "OR-J41-S09",
+      "journey": "J41",
+      "name": "A usage order's card and remitted payments book their cash and leave it for the receivable"
+    },
+    {
+      "id": "OR-J41-S10",
+      "journey": "J41",
+      "name": "Revoked access ends its schedule; an undone revocation takes the forfeit back"
+    },
+    {
+      "id": "OR-J41-S11",
+      "journey": "J41",
+      "name": "A late payment on an expired order whose product another order holds stays unapplied"
+    },
+    {
+      "id": "OR-J41-S12",
+      "journey": "J41",
+      "name": "A purchase is applied over the access its grant gives; a replay applies an order with no schedule"
+    },
+    {
+      "id": "OR-J41-S13",
+      "journey": "J41",
+      "name": "A prune that hides booked money or a recognising subscription raises a finding its undo resolves"
+    },
+    {
+      "id": "OR-J41-S14",
+      "journey": "J41",
+      "name": "An end before the schedule exists reaches it: a charge after a cancellation is forfeited at payment"
+    },
+    {
+      "id": "OR-J41-S15",
+      "journey": "J41",
+      "name": "ledger-audit warns of revenue lines completed before the books started and of a provider's tax line, skips a merchant's own unit, and fails a line completed since"
+    },
+    {
+      "id": "OR-J41-S16",
+      "journey": "J41",
+      "name": "An order applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
+    },
+    {
+      "id": "OR-J41-S17",
+      "journey": "J41",
+      "name": "An imported purchase is applied over the access its import grants"
     }
   ]
 }

@@ -13,6 +13,7 @@ var NeverRollbackableTables = map[string]string{
 	"ledger_accounts":    "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
 	"ledger_daily":       "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"ledger_type_totals": "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
+	"revenue_schedules":  "money: what each line funded and recognised, which its transfers posted; rewinding a row desynchronises it from them",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
 	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",
@@ -35,6 +36,10 @@ var NeverRollbackableTables = map[string]string{
 	"mrr_totals":              "MRR rollup of customer_mrr; restoring a row desynchronises it from them",
 	"mrr_product_flows":       "MRR rollup of the movements; restoring a row desynchronises it from them",
 	"mrr_cohort_flows":        "MRR rollup of the movements; restoring a row desynchronises it from them",
+	"mrr_risk_cases":          "MRR risk history: an undo's restored subscriptions open their own cases",
+	"mrr_risk_episodes":       "MRR risk history, with its cases",
+	"mrr_risk_flows":          "MRR risk rollup of the cases; restoring a row desynchronises it from them",
+	"mrr_risk_totals":         "MRR risk rollup of subscription_mrr; restoring a row desynchronises it from them",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

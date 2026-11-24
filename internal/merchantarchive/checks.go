@@ -72,6 +72,7 @@ var excludedTables = map[string]string{
 	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
+	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_daily":                  "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_rollup_pending":         "transaction scratch, empty at commit",
@@ -400,7 +401,9 @@ var referenceChecks = []rowCheck{
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id AND o.currency=ledger_transfers.currency))
 	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
-	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))`},
+	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))
+	 OR (revenue_schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id=$1 AND s.id=ledger_transfers.revenue_schedule_id
+	     AND s.order_line_id=ledger_transfers.order_line_id AND s.customer_id=ledger_transfers.customer_id AND s.currency=ledger_transfers.currency))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier
 	// derivation and product-update guards. Include remaining paid access.
