@@ -656,7 +656,8 @@ LIMIT 1;
 -- A price migration's cohort is every subscription still billing (or still
 -- being dunned) on one of the prices: a past_due one that recovers would
 -- otherwise renew on the old price. It is counted, then walked a page at a
--- time in (price, id) order up to its highest id when counted.
+-- time in (price, id) order up to its highest id when counted, after a
+-- cursor that starts at the nil ids, so the walk is one index range.
 -- name: CountMigrationCohort :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.arg(price_ids)::uuid[])
@@ -677,7 +678,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.
   AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
   AND sub.id <= sqlc.arg(through)::uuid
-  AND (sqlc.narg(after_price_id)::uuid IS NULL OR (sub.price_id, sub.id) > (sqlc.narg(after_price_id)::uuid, sqlc.narg(after_id)::uuid))
+  AND (sub.price_id, sub.id) > (sqlc.arg(after_price_id)::uuid, sqlc.arg(after_id)::uuid)
 ORDER BY sub.price_id, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 

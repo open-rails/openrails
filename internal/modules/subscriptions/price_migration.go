@@ -31,6 +31,7 @@ package subscriptions
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,7 +53,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -277,23 +280,21 @@ func (s *PriceMigrationService) cohortSize(ctx context.Context, plan *migrationP
 	return int(n), through, err
 }
 
-// cohortCursor is where a walk of a cohort stands, in (price, id) order.
+// cohortCursor is where a walk of a cohort stands, in (price, id) order:
+// the zero cursor, the nil ids, is before every subscriber.
 type cohortCursor struct {
 	PriceID uuid.UUID `json:"price_id"`
 	ID      uuid.UUID `json:"id"`
 }
 
 // cohortPage is the plan's next subscribers after the cursor, up to through.
-func cohortPage(ctx context.Context, d *db.DB, plan *migrationPlan, through uuid.UUID, after *cohortCursor) ([]*models.Subscription, error) {
+func cohortPage(ctx context.Context, d *db.DB, plan *migrationPlan, through uuid.UUID, after cohortCursor) ([]*models.Subscription, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	params := gen.ListMigrationCohortPageParams{MerchantID: mid.UUID(), PriceIds: plan.sourceIDs(), Through: through, RowLimit: migrationBatch}
-	if after != nil {
-		params.AfterPriceID, params.AfterID = &after.PriceID, &after.ID
-	}
-	rows, err := d.Gen(ctx).ListMigrationCohortPage(ctx, params)
+	rows, err := d.Gen(ctx).ListMigrationCohortPage(ctx, gen.ListMigrationCohortPageParams{MerchantID: mid.UUID(), PriceIds: plan.sourceIDs(), Through: through,
+		AfterPriceID: after.PriceID, AfterID: after.ID, RowLimit: migrationBatch})
 	if err != nil {
 		return nil, fmt.Errorf("price migration: list subscribers: %w", err)
 	}
@@ -318,7 +319,33 @@ const (
 	capabilityUserAction                            // the provider cannot be moved from here
 )
 
-func (s *PriceMigrationService) capability(ctx context.Context, sub *models.Subscription) migrationCapability {
+// gatewaySchedule: a subscription whose provider-run schedule a migration
+// pushes only when the merchant declares an account reaching its PSP.
+func gatewaySchedule(sub *models.Subscription) bool {
+	return sub.Rail != models.RailCCBill && sub.Rail != models.RailSolana && sub.Rail != models.RailStripe && sub.CollectionPolicy != models.CollectionPolicyEngine
+}
+
+// pushability is, for each PSP of subs' gateway schedules, whether the
+// merchant declares an account reaching it: decided once per PSP, before any
+// transaction, since it reads the merchant's configuration. An error is
+// transient and answers nothing.
+func (s *PriceMigrationService) pushability(ctx context.Context, subs []*models.Subscription) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	for _, sub := range subs {
+		if _, decided := out[sub.PspID]; decided || !gatewaySchedule(sub) || strings.TrimSpace(sub.RailSubscriptionID) == "" {
+			continue
+		}
+		reached, err := s.nmi.CanPush(ctx, sub)
+		if err != nil {
+			return nil, fmt.Errorf("price migration: can the PSP be pushed: %w", err)
+		}
+		out[sub.PspID] = reached
+	}
+	return out, nil
+}
+
+// capabilityOf is sub's capability given its PSP's pushability.
+func capabilityOf(sub *models.Subscription, pushable map[uuid.UUID]bool) migrationCapability {
 	switch {
 	case sub.Rail == models.RailCCBill, sub.Rail == models.RailSolana:
 		// A redirect flow or the customer's on-chain signature.
@@ -327,13 +354,18 @@ func (s *PriceMigrationService) capability(ctx context.Context, sub *models.Subs
 		return capabilityEngine
 	case sub.Rail == models.RailStripe:
 		return capabilityAutoStripe
-	case s.nmi != nil && s.nmi.CanPush(ctx, sub):
+	case pushable[sub.PspID] && strings.TrimSpace(sub.RailSubscriptionID) != "":
 		// A gateway schedule keeps charging its own amount, so it is pushed
 		// even when a stored credential exists.
 		return capabilityAutoNMI
 	default:
 		return capabilityUserAction
 	}
+}
+
+func (s *PriceMigrationService) capability(ctx context.Context, sub *models.Subscription) (migrationCapability, error) {
+	pushable, err := s.pushability(ctx, []*models.Subscription{sub})
+	return capabilityOf(sub, pushable), err
 }
 
 // nmiCyclesCompatible: an NMI amount update never touches the schedule.
@@ -423,18 +455,22 @@ type classified struct {
 
 // classify decides each subscription's disposition without writing, counting
 // it into byRail. noticeDays is the merchant's notice window.
-func (s *PriceMigrationService) classify(ctx context.Context, d *db.DB, plan *migrationPlan, cohort []*models.Subscription, noticeDays int, byRail map[string]*billing.PriceMigrationRailCounts) ([]*classified, error) {
+func (s *PriceMigrationService) classify(ctx context.Context, plan *migrationPlan, cohort []*models.Subscription, noticeDays int, byRail map[string]*billing.PriceMigrationRailCounts) ([]*classified, error) {
 	ids := make([]uuid.UUID, 0, len(cohort))
 	for _, sub := range cohort {
 		ids = append(ids, sub.ID)
 	}
-	pending, err := PendingChanges(ctx, d, ids)
+	pending, err := PendingChanges(ctx, s.db, ids)
+	if err != nil {
+		return nil, err
+	}
+	pushable, err := s.pushability(ctx, cohort)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*classified, 0, len(cohort))
 	for _, sub := range cohort {
-		c := &classified{sub: sub, from: plan.sources[sub.PriceID], capability: s.capability(ctx, sub)}
+		c := &classified{sub: sub, from: plan.sources[sub.PriceID], capability: capabilityOf(sub, pushable)}
 		c.outcome = billing.PriceMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: billing.Rail(sub.Rail)}
 		rail := byRail[string(sub.Rail)]
 		if rail == nil {
@@ -500,13 +536,13 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 	if err != nil {
 		return nil, err
 	}
-	var after *cohortCursor
+	var after cohortCursor
 	for out.Classified < previewLimit {
 		page, err := cohortPage(ctx, s.db, plan, through, after)
 		if err != nil {
 			return nil, err
 		}
-		classes, err := s.classify(ctx, s.db, plan, page, days, out.ByRail)
+		classes, err := s.classify(ctx, plan, page, days, out.ByRail)
 		if err != nil {
 			return nil, err
 		}
@@ -526,29 +562,34 @@ func (s *PriceMigrationService) Preview(ctx context.Context, p billing.CreatePri
 			break
 		}
 		last := page[len(page)-1]
-		after = &cohortCursor{PriceID: last.PriceID, ID: last.ID}
+		after = cohortCursor{PriceID: last.PriceID, ID: last.ID}
 	}
 	return out, nil
 }
 
-// Create admits the migration for every subscriber it counts, before reading
-// any, then records it and reaches its first page in one transaction; a job
-// reaches the rest a page per transaction. It answers the sources to archive,
-// which only the catalog command does.
-func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePriceMigrationParams) (*billing.PriceMigration, []billing.PriceID, error) {
+// PendingMigration is a migration admitted and not yet recorded. Its
+// command's units are the subscribers counted and the sources it archives;
+// the catalog archives Archive under Action before Record.
+type PendingMigration struct {
+	plan   *migrationPlan
+	Action *destructive.Action
+	// Archive are the sources still on sale when it was admitted.
+	Archive []billing.PriceID
+}
+
+// Admit resolves a migration and admits it as one destructive command, a
+// unit for each subscriber counted and each source it archives, before any
+// is read. prior is the migration the same request already recorded.
+func (s *PriceMigrationService) Admit(ctx context.Context, p billing.CreatePriceMigrationParams) (*PendingMigration, *billing.PriceMigration, error) {
 	plan, err := s.resolve(ctx, p, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	var archive []billing.PriceID
+	pending := &PendingMigration{plan: plan}
 	if plan.archive {
 		for _, id := range plan.sourceIDs() {
 			if source := plan.sources[id]; !source.Archived {
-				archive = append(archive, source.PublicID)
+				pending.Archive = append(pending.Archive, source.PublicID)
 			}
 		}
 	}
@@ -556,43 +597,73 @@ func (s *PriceMigrationService) Create(ctx context.Context, p billing.CreatePric
 	if err != nil {
 		return nil, nil, err
 	}
-	action, prior, err := s.admitMigration(ctx, p, plan, matched, through)
-	if err != nil || prior != nil {
-		return prior, archive, err
-	}
-	days, err := s.noticeDays(ctx)
+	var prior *billing.PriceMigration
+	pending.Action, prior, err = s.admitMigration(ctx, p, plan, matched+len(pending.Archive), through)
+	return pending, prior, err
+}
+
+// Record counts the cohort again, its sources no longer selling, so no one
+// who bought since is left behind, then records the migration and reaches
+// its first page in one transaction; a job reaches each further page. A
+// concurrent identical request answers the migration the first recorded.
+func (s *PriceMigrationService) Record(ctx context.Context, pending *PendingMigration) (*billing.PriceMigration, error) {
+	plan := pending.plan
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, nil, s.abandonMigration(ctx, action, err)
+		return nil, err
 	}
-	run := &migrationRun{plan: plan, through: through, noticeDays: days}
+	matched, through, err := s.cohortSize(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	run := &migrationRun{plan: plan, through: through, action: pending.Action}
+	if run.noticeDays, err = s.noticeDays(ctx); err != nil {
+		return nil, err
+	}
 	if run.targetProduct, err = catalog.NewProductService(s.db).GetByID(ctx, plan.target.ProductID); err != nil {
-		return nil, nil, s.abandonMigration(ctx, action, fmt.Errorf("price migration: target product: %w", err))
+		return nil, fmt.Errorf("price migration: target product: %w", err)
+	}
+	page, err := s.readPage(ctx, run, cohortCursor{})
+	if err != nil {
+		return nil, err
 	}
 	var migration uuid.UUID
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := s.db.NewWithPgxTx(tx)
-		params := gen.CreatePriceMigrationParams{MerchantID: mid.UUID(), ToPriceID: plan.target.ID, EffectiveAt: plan.effectiveAt, FallbackPolicy: string(plan.fallback), SubscriptionsMatched: int32(matched)} // #nosec G115 -- admitted units
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		params := gen.CreatePriceMigrationParams{MerchantID: mid.UUID(), ToPriceID: plan.target.ID, EffectiveAt: plan.effectiveAt, FallbackPolicy: string(plan.fallback), SubscriptionsMatched: int32(matched)} // #nosec G115 -- counted subscribers
 		if plan.fromPrice != nil {
 			params.FromPriceID = &plan.fromPrice.ID
 		} else {
 			params.FromProductID, params.FromPriceKey = &plan.product.ID, &plan.key
 		}
-		if action != nil {
-			params.DestructiveActionID = &action.ID
+		if pending.Action != nil {
+			// The command's row orders identical requests: the second finds
+			// the first's migration.
+			if _, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid.UUID(), ID: pending.Action.ID}); err != nil {
+				return err
+			}
+			recorded, err := q.GetPriceMigrationByDestructiveAction(ctx, gen.GetPriceMigrationByDestructiveActionParams{MerchantID: mid.UUID(), DestructiveActionID: pending.Action.ID})
+			if err == nil {
+				migration = recorded.ID
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			params.DestructiveActionID = &pending.Action.ID
 		}
-		row, err := d.Gen(ctx).CreatePriceMigration(ctx, params)
+		row, err := q.CreatePriceMigration(ctx, params)
 		if err != nil {
 			return fmt.Errorf("price migration: create: %w", err)
 		}
-		migration, run.migration, run.action = row.ID, row.ID, action
-		return s.walk(ctx, tx, run, nil)
+		migration, run.migration = row.ID, row.ID
+		return s.reachPage(ctx, tx, run, page)
 	})
 	if err != nil {
-		return nil, nil, s.abandonMigration(ctx, action, err)
+		return nil, err
 	}
-	s.Log.InfoContext(ctx, "price migration created", "price_migration_id", migration, "to_price_id", plan.target.ID, "effective_at", plan.effectiveAt, "matched", matched)
-	out, err := s.Get(ctx, billing.PriceMigrationID(migration))
-	return out, archive, err
+	s.Log.InfoContext(ctx, "price migration recorded", "price_migration_id", migration, "to_price_id", plan.target.ID, "effective_at", plan.effectiveAt, "matched", matched)
+	return s.Get(ctx, billing.PriceMigrationID(migration))
 }
 
 // migrationRun is what reaching a migration's subscribers needs.
@@ -606,70 +677,97 @@ type migrationRun struct {
 	canceled      bool
 }
 
-// walk reaches the run's page after the cursor in tx, the migration's row
-// held: it moves, blocks or skips each subscriber, then queues the next page,
-// or, on the last page or once canceled, records what was skipped and ends
-// the admission's preparation.
-func (s *PriceMigrationService) walk(ctx context.Context, tx pgx.Tx, run *migrationRun, after *cohortCursor) error {
+// migrationPage is a page of a cohort, read and classified before its
+// transaction: classifying reads the merchant's configuration.
+type migrationPage struct {
+	subs    []*models.Subscription
+	classes []*classified
+}
+
+func (s *PriceMigrationService) readPage(ctx context.Context, run *migrationRun, after cohortCursor) (*migrationPage, error) {
+	page := &migrationPage{}
+	if run.through == uuid.Nil {
+		return page, nil
+	}
+	var err error
+	if page.subs, err = cohortPage(ctx, s.db, run.plan, run.through, after); err != nil {
+		return nil, err
+	}
+	page.classes, err = s.classify(ctx, run.plan, page.subs, run.noticeDays, map[string]*billing.PriceMigrationRailCounts{})
+	return page, err
+}
+
+// reachPage records the page in tx, the migration's row held: each
+// subscriber not reached before gets its move, blocked or scheduled with
+// its notice and push. Then it queues the next page, or, after the last or
+// once canceled, ends the walk.
+func (s *PriceMigrationService) reachPage(ctx context.Context, tx pgx.Tx, run *migrationRun, page *migrationPage) error {
 	d := s.db.NewWithPgxTx(tx)
-	var page []*models.Subscription
-	if !run.canceled && run.through != uuid.Nil {
-		var err error
-		if page, err = cohortPage(ctx, d, run.plan, run.through, after); err != nil {
-			return err
-		}
-		classes, err := s.classify(ctx, d, run.plan, page, run.noticeDays, map[string]*billing.PriceMigrationRailCounts{})
-		if err != nil {
-			return err
-		}
-		for _, c := range classes {
+	mid := run.plan.target.MerchantID
+	if run.canceled {
+		return s.finishWalk(ctx, tx, mid, run.migration, run.action)
+	}
+	ids := make([]uuid.UUID, 0, len(page.subs))
+	for _, sub := range page.subs {
+		ids = append(ids, sub.ID)
+	}
+	moved, err := d.Gen(ctx).ListMigrationMoves(ctx, gen.ListMigrationMovesParams{MerchantID: mid, PriceMigrationID: run.migration, SubscriptionIds: ids})
+	if err != nil {
+		return err
+	}
+	for _, c := range page.classes {
+		// One that moved to another source is reached once.
+		if !slices.Contains(moved, c.sub.ID) {
 			if err := s.reach(ctx, d, run, c); err != nil {
 				return err
 			}
 		}
 	}
-	if len(page) == migrationBatch {
-		last := page[len(page)-1]
-		next := PriceMigrationArgs{MerchantID: run.plan.target.MerchantID, MigrationID: run.migration, Sources: run.plan.sourceIDs(), Through: run.through,
-			Acknowledge: run.plan.acknowledge, After: &cohortCursor{PriceID: last.PriceID, ID: last.ID}}
-		opts := next.InsertOpts()
-		_, err := d.InsertRiverJob(ctx, next, &opts)
+	if len(page.subs) < migrationBatch {
+		return s.finishWalk(ctx, tx, mid, run.migration, run.action)
+	}
+	last := page.subs[len(page.subs)-1]
+	next := PriceMigrationArgs{MerchantID: mid, MigrationID: run.migration, Sources: run.plan.sourceIDs(), Through: run.through,
+		Acknowledge: run.plan.acknowledge, After: cohortCursor{PriceID: last.PriceID, ID: last.ID}}
+	opts := next.InsertOpts()
+	_, err = d.InsertRiverJob(ctx, next, &opts)
+	return err
+}
+
+// finishWalk ends a migration's walk in tx: subscribers it made no move for
+// count as skipped, and its command's preparation ends, settling it once no
+// move waits. A walk already ended is left as it is.
+func (s *PriceMigrationService) finishWalk(ctx context.Context, tx pgx.Tx, mid, migration uuid.UUID, action *destructive.Action) error {
+	q := s.db.NewWithPgxTx(tx).Gen(ctx)
+	if _, err := q.SetPriceMigrationSkipped(ctx, gen.SetPriceMigrationSkippedParams{MerchantID: mid, ID: migration}); err != nil {
 		return err
 	}
-	q := d.Gen(ctx)
-	if _, err := q.SetPriceMigrationSkipped(ctx, gen.SetPriceMigrationSkippedParams{MerchantID: run.plan.target.MerchantID, ID: run.migration}); err != nil {
-		return err
-	}
-	if run.action == nil {
+	if action == nil {
 		return nil
 	}
-	if err := s.admissions.FinishTx(ctx, tx, run.action.MerchantID, run.action.ID, destructive.OutcomeUncertain, "migration:"+run.migration.String()+":prepared"); err != nil {
+	locked, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid, ID: action.ID})
+	if err != nil {
+		return err
+	}
+	if locked.State != string(destructive.StateStarted) {
+		return nil
+	}
+	if err := s.admissions.FinishTx(ctx, tx, mid, action.ID, destructive.OutcomeUncertain, "migration:"+migration.String()+":prepared"); err != nil {
 		return err
 	}
 	// Every move may already have resolved.
-	return q.SettlePriceMigration(ctx, gen.SettlePriceMigrationParams{MerchantID: run.action.MerchantID, PriceMigrationID: run.migration, Now: s.now().UTC()})
+	return q.SettlePriceMigration(ctx, gen.SettlePriceMigrationParams{MerchantID: mid, PriceMigrationID: migration, Now: s.now().UTC()})
 }
 
-// reach records one classified subscriber's disposition: a blocked move, or
-// a scheduled one with its notice and provider push. A move that no longer
-// applies is skipped, its savepoint undone.
+// reach records one classified subscriber's move under its lock: blocked, or
+// scheduled with its notice and provider push. One that left the source or
+// stopped billing since it was read, or whose move is refused, is skipped,
+// its savepoint undone.
 func (s *PriceMigrationService) reach(ctx context.Context, d *db.DB, run *migrationRun, c *classified) error {
-	mid := run.plan.target.MerchantID
-	switch c.outcome.Disposition {
-	case billing.MigrationBlocked:
-		_, err := d.Gen(ctx).CreateBlockedScheduledChange(ctx, gen.CreateBlockedScheduledChangeParams{
-			MerchantID: mid, SubscriptionID: c.sub.ID, FromPriceID: c.sub.PriceID, PriceID: run.plan.target.ID,
-			EffectiveAt: run.plan.effectiveAt, PriceMigrationID: run.migration, BlockedReason: *c.outcome.Reason,
-		})
-		if err != nil {
-			return fmt.Errorf("price migration: record blocked %s: %w", c.sub.ID, err)
-		}
-		return nil
-	case billing.MigrationScheduled:
-	default:
+	if c.outcome.Disposition != billing.MigrationBlocked && c.outcome.Disposition != billing.MigrationScheduled {
 		return nil
 	}
-	pushed := c.capability == capabilityAutoStripe || c.capability == capabilityAutoNMI
+	pushed := c.outcome.Disposition == billing.MigrationScheduled && (c.capability == capabilityAutoStripe || c.capability == capabilityAutoNMI)
 	if pushed && s.pushes == nil {
 		return errors.New("price migration: provider pushes are not wired")
 	}
@@ -680,8 +778,15 @@ func (s *PriceMigrationService) reach(ctx context.Context, d *db.DB, run *migrat
 		if err != nil {
 			return err
 		}
-		if sub.PriceID != c.from.ID {
+		if sub.PriceID != c.from.ID || !migratable(sub) {
 			return errChangeNotScheduled
+		}
+		if c.outcome.Disposition == billing.MigrationBlocked {
+			_, err := d.Gen(ctx).CreateBlockedScheduledChange(ctx, gen.CreateBlockedScheduledChangeParams{
+				MerchantID: sub.MerchantID, SubscriptionID: sub.ID, FromPriceID: sub.PriceID, PriceID: target.ID,
+				EffectiveAt: effectiveAt, PriceMigrationID: run.migration, BlockedReason: *c.outcome.Reason,
+			})
+			return err
 		}
 		change, err := ScheduleChange(ctx, d, sub, NewScheduledChange{PriceID: target.ID, EffectiveAt: effectiveAt, Source: billing.ScheduledChangeMigration, PriceMigrationID: &run.migration, AcknowledgedShortNotice: c.acknowledged}, s.now())
 		if err != nil {
@@ -704,53 +809,121 @@ func (s *PriceMigrationService) reach(ctx context.Context, d *db.DB, run *migrat
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("price migration: schedule %s: %w", c.sub.ID, err)
+		return fmt.Errorf("price migration: reach %s: %w", c.sub.ID, err)
 	}
 	return nil
 }
 
-// RunPage reaches one queued page of a migration: the job completes in the
-// page's transaction (complete), so a page is reached once.
+// migratable: a subscription a migration's cohort holds.
+func migratable(sub *models.Subscription) bool {
+	return sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod
+}
+
+// RunPage reaches one queued page of a migration: read and classified first,
+// then recorded in one transaction with the job's completion (complete), so
+// a page is reached once. A migration gone with its merchant is done.
 func (s *PriceMigrationService) RunPage(ctx context.Context, args PriceMigrationArgs, complete func(context.Context, pgx.Tx) error) error {
 	ctx = merchant.WithID(ctx, billing.MerchantID(args.MerchantID))
-	row, err := s.db.Gen(ctx).GetPriceMigration(ctx, gen.GetPriceMigrationParams{MerchantID: args.MerchantID, ID: args.MigrationID})
+	run, err := s.loadRun(ctx, args)
+	if db.IsNotFound(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	m := row.BillingPriceMigration
-	plan := &migrationPlan{sources: map[uuid.UUID]*models.Price{}, effectiveAt: m.EffectiveAt.UTC(), acknowledge: args.Acknowledge}
-	if plan.target, err = s.prices.GetByID(ctx, m.ToPriceID); err != nil {
+	page, err := s.readPage(ctx, run, args.After)
+	if err != nil {
 		return err
-	}
-	for _, id := range args.Sources {
-		if plan.sources[id], err = s.prices.GetByID(ctx, id); err != nil {
-			return err
-		}
-	}
-	run := &migrationRun{migration: m.ID, plan: plan, through: args.Through}
-	if run.targetProduct, err = catalog.NewProductService(s.db).GetByID(ctx, plan.target.ProductID); err != nil {
-		return err
-	}
-	if run.noticeDays, err = s.noticeDays(ctx); err != nil {
-		return err
-	}
-	if m.DestructiveActionID != nil {
-		action, err := s.admissions.GetAction(ctx, m.MerchantID, *m.DestructiveActionID)
-		if err != nil {
-			return err
-		}
-		run.action = &action
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		locked, err := s.db.NewWithPgxTx(tx).Gen(ctx).LockPriceMigration(ctx, gen.LockPriceMigrationParams{MerchantID: m.MerchantID, ID: m.ID})
+		locked, err := s.db.NewWithPgxTx(tx).Gen(ctx).LockPriceMigration(ctx, gen.LockPriceMigrationParams{MerchantID: args.MerchantID, ID: args.MigrationID})
+		if db.IsNotFound(err) {
+			return complete(ctx, tx)
+		}
 		if err != nil {
 			return err
 		}
 		run.canceled = locked.CanceledAt != nil
-		if err := s.walk(ctx, tx, run, args.After); err != nil {
+		if err := s.reachPage(ctx, tx, run, page); err != nil {
 			return err
 		}
 		return complete(ctx, tx)
+	})
+}
+
+// loadRun is a queued page's run: the migration and its admitted terms.
+func (s *PriceMigrationService) loadRun(ctx context.Context, args PriceMigrationArgs) (*migrationRun, error) {
+	row, err := s.db.Gen(ctx).GetPriceMigration(ctx, gen.GetPriceMigrationParams{MerchantID: args.MerchantID, ID: args.MigrationID})
+	if err != nil {
+		return nil, err
+	}
+	m := row.BillingPriceMigration
+	plan := &migrationPlan{sources: map[uuid.UUID]*models.Price{}, effectiveAt: m.EffectiveAt.UTC(), acknowledge: args.Acknowledge}
+	if plan.target, err = s.prices.GetByID(ctx, m.ToPriceID); err != nil {
+		return nil, err
+	}
+	for _, id := range args.Sources {
+		if plan.sources[id], err = s.prices.GetByID(ctx, id); err != nil {
+			return nil, err
+		}
+	}
+	run := &migrationRun{migration: m.ID, plan: plan, through: args.Through}
+	if run.targetProduct, err = catalog.NewProductService(s.db).GetByID(ctx, plan.target.ProductID); err != nil {
+		return nil, err
+	}
+	if run.noticeDays, err = s.noticeDays(ctx); err != nil {
+		return nil, err
+	}
+	if m.DestructiveActionID != nil {
+		action, err := s.admissions.GetAction(ctx, m.MerchantID, *m.DestructiveActionID)
+		if err != nil {
+			return nil, err
+		}
+		run.action = &action
+	}
+	return run, nil
+}
+
+// MigrationStoppedFindingType is the finding of a walk whose page could
+// never be reached: the subscribers left were not moved.
+const MigrationStoppedFindingType = "life.price_migration.stopped"
+
+// StopWalk ends the walk of a page job out of attempts: the subscribers it
+// never reached count as skipped, the command's preparation ends, and a
+// finding tells the operator, so the migration is not left preparing.
+func (s *PriceMigrationService) StopWalk(ctx context.Context, args PriceMigrationArgs, cause error) error {
+	ctx = merchant.WithID(ctx, billing.MerchantID(args.MerchantID))
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.db.NewWithPgxTx(tx)
+		m, err := d.Gen(ctx).LockPriceMigration(ctx, gen.LockPriceMigrationParams{MerchantID: args.MerchantID, ID: args.MigrationID})
+		if db.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var action *destructive.Action
+		if m.DestructiveActionID != nil {
+			action = &destructive.Action{ID: *m.DestructiveActionID, MerchantID: m.MerchantID}
+		}
+		if err := s.finishWalk(ctx, tx, m.MerchantID, m.ID, action); err != nil {
+			return err
+		}
+		public := billing.PriceMigrationID(m.ID).String()
+		evidence, err := json.Marshal(map[string]any{"price_migration_id": public, "cause": cause.Error()})
+		if err != nil {
+			return err
+		}
+		remedy := "A price migration stopped reaching its subscribers after its page failed every attempt; those it had not reached keep their price. Fix the cause, then migrate them again."
+		row, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: m.MerchantID, FindingType: MigrationStoppedFindingType,
+			SubjectKey: public, Severity: "high", Status: "requires_review", RecommendedAction: &remedy, Evidence: evidence})
+		if err != nil {
+			return err
+		}
+		if err := alertjob.Notify(ctx, d, alertjob.FindingOf(row), s.now()); err != nil && ctx.Err() == nil {
+			s.Log.WarnContext(ctx, "alerting the operator of a stopped price migration failed; the finding stays in the console", logx.Err(err), "price_migration_id", m.ID)
+		}
+		return nil
 	})
 }
 
@@ -761,12 +934,12 @@ const KindPriceMigration = "openrails.price_migration"
 // PriceMigrationArgs is one page of a migration: its subscribers on Sources
 // after After, up to Through.
 type PriceMigrationArgs struct {
-	MerchantID  uuid.UUID     `json:"merchant_id"`
-	MigrationID uuid.UUID     `json:"price_migration_id"`
-	Sources     []uuid.UUID   `json:"sources"`
-	Through     uuid.UUID     `json:"through"`
-	Acknowledge bool          `json:"acknowledge_short_notice"`
-	After       *cohortCursor `json:"after"`
+	MerchantID  uuid.UUID    `json:"merchant_id"`
+	MigrationID uuid.UUID    `json:"price_migration_id"`
+	Sources     []uuid.UUID  `json:"sources"`
+	Through     uuid.UUID    `json:"through"`
+	Acknowledge bool         `json:"acknowledge_short_notice"`
+	After       cohortCursor `json:"after"`
 }
 
 func (PriceMigrationArgs) Kind() string { return KindPriceMigration }
@@ -973,7 +1146,7 @@ func priceMigrationView(m gen.BillingPriceMigration, fromID *string, toID string
 		ToPriceID: billing.PriceID(toID), EffectiveAt: m.EffectiveAt.UTC(), FallbackPolicy: billing.MigrationFallback(m.FallbackPolicy),
 		Matched: int(m.SubscriptionsMatched), Skipped: int(m.SubscriptionsSkipped) + int(skipped),
 		Scheduled: int(scheduled), Applied: int(applied), Canceled: int(canceled), Blocked: int(blocked),
-		CreatedAt: m.CreatedAt.UTC(), CanceledAt: m.CanceledAt, Preparing: preparing,
+		CreatedAt: m.CreatedAt.UTC(), CanceledAt: m.CanceledAt, Preparing: preparing, Warnings: []string{},
 	}
 	if m.FromPriceKey != nil {
 		out.ProductKey = productKey
@@ -996,9 +1169,26 @@ func (s *PriceMigrationService) Cancel(ctx context.Context, id billing.PriceMigr
 	if _, err := s.Get(ctx, id); err != nil {
 		return nil, err
 	}
-	// Canceled first: a page reaching subscribers holds the row, so once this
-	// commits no page makes another move, and the list sees every one made.
-	if _, err := s.db.Gen(ctx).CancelPriceMigration(ctx, gen.CancelPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()}); err != nil {
+	// Canceled first, ending the walk: a page reaching subscribers holds the
+	// row, so once this commits no page makes another move, the list sees
+	// every one made, and a walk whose next page never runs is not left
+	// preparing.
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		if _, err := q.CancelPriceMigration(ctx, gen.CancelPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()}); err != nil {
+			return err
+		}
+		m, err := q.LockPriceMigration(ctx, gen.LockPriceMigrationParams{MerchantID: mid.UUID(), ID: id.UUID()})
+		if err != nil {
+			return err
+		}
+		var action *destructive.Action
+		if m.DestructiveActionID != nil {
+			action = &destructive.Action{ID: *m.DestructiveActionID, MerchantID: m.MerchantID}
+		}
+		return s.finishWalk(ctx, tx, m.MerchantID, m.ID, action)
+	})
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.db.Gen(ctx).ListScheduledMigrationChanges(ctx, gen.ListScheduledMigrationChangesParams{MerchantID: mid.UUID(), PriceMigrationID: id.UUID()})

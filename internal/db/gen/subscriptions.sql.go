@@ -158,7 +158,8 @@ type CountMigrationCohortParams struct {
 // A price migration's cohort is every subscription still billing (or still
 // being dunned) on one of the prices: a past_due one that recovers would
 // otherwise renew on the old price. It is counted, then walked a page at a
-// time in (price, id) order up to its highest id when counted.
+// time in (price, id) order up to its highest id when counted, after a
+// cursor that starts at the nil ids, so the walk is one index range.
 func (q *Queries) CountMigrationCohort(ctx context.Context, arg CountMigrationCohortParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countMigrationCohort, arg.MerchantID, arg.PriceIds)
 	var count int64
@@ -1926,7 +1927,7 @@ WHERE sub.merchant_id = $1::uuid AND sub.price_id = ANY($2::uuid[])
   AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
   AND sub.id <= $3::uuid
-  AND ($4::uuid IS NULL OR (sub.price_id, sub.id) > ($4::uuid, $5::uuid))
+  AND (sub.price_id, sub.id) > ($4::uuid, $5::uuid)
 ORDER BY sub.price_id, sub.id
 LIMIT $6::int
 `
@@ -1935,8 +1936,8 @@ type ListMigrationCohortPageParams struct {
 	MerchantID   uuid.UUID
 	PriceIds     []uuid.UUID
 	Through      uuid.UUID
-	AfterPriceID *uuid.UUID
-	AfterID      *uuid.UUID
+	AfterPriceID uuid.UUID
+	AfterID      uuid.UUID
 	RowLimit     int32
 }
 

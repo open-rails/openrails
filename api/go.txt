@@ -3598,6 +3598,7 @@ pkg openrails/billing, type PriceMigration struct, ProductKey *string `json:"pro
 pkg openrails/billing, type PriceMigration struct, Scheduled int `json:"scheduled"`
 pkg openrails/billing, type PriceMigration struct, Skipped int `json:"skipped"`
 pkg openrails/billing, type PriceMigration struct, ToPriceID PriceID `json:"to_price_id"`
+pkg openrails/billing, type PriceMigration struct, Warnings []string `json:"warnings"`
 pkg openrails/billing, type PriceMigrationCancel struct
 pkg openrails/billing, type PriceMigrationCancel struct, Canceled int `json:"canceled"`
 pkg openrails/billing, type PriceMigrationCancel struct, PriceMigration PriceMigration `json:"price_migration"`

@@ -36,16 +36,14 @@ func NewNMIPlanPusher(resolver railresolve.NMIClientResolver) *NMIPlanPusher {
 
 // CanPush reports whether sub is an addressable gateway-native NMI recurring
 // record: the merchant declares an armable NMI account for it and the
-// subscription carries a rail reference.
-func (p *NMIPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) bool {
-	if p == nil || p.resolver == nil || sub == nil {
-		return false
-	}
-	if strings.TrimSpace(sub.RailSubscriptionID) == "" {
-		return false
+// subscription carries a rail reference. An error is a read that failed,
+// which says nothing either way.
+func (p *NMIPlanPusher) CanPush(ctx context.Context, sub *models.Subscription) (bool, error) {
+	if p == nil || p.resolver == nil || sub == nil || strings.TrimSpace(sub.RailSubscriptionID) == "" {
+		return false, nil
 	}
 	_, _, ok, err := NMIClientForExistingSubscription(ctx, p.resolver, sub)
-	return err == nil && ok
+	return ok, err
 }
 
 // PushPlanAmount sets the remote record's plan_amount to amountNative

@@ -13,11 +13,13 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// admitMigration admits a migration of matched subscribers, one unit each,
-// before any is read. The same request again answers the migration it
-// recorded; one whose recording never committed is admitted again.
-func (s *PriceMigrationService) admitMigration(ctx context.Context, request billing.CreatePriceMigrationParams, plan *migrationPlan, matched int, through uuid.UUID) (*destructive.Action, *billing.PriceMigration, error) {
-	if matched == 0 {
+// admitMigration admits a migration's units: its subscribers counted and the
+// sources it archives, before any is read. Holds and ceilings are checked
+// here, once: a hold opened later stops no page, only a cancel does. The
+// same request again answers the migration it recorded; one whose
+// recording never committed is admitted again.
+func (s *PriceMigrationService) admitMigration(ctx context.Context, request billing.CreatePriceMigrationParams, plan *migrationPlan, units int, through uuid.UUID) (*destructive.Action, *billing.PriceMigration, error) {
+	if units == 0 {
 		return nil, nil, nil
 	}
 	if s.admissions == nil {
@@ -39,7 +41,7 @@ func (s *PriceMigrationService) admitMigration(ctx context.Context, request bill
 	}
 	if !found {
 		if action, err = s.admissions.Admit(ctx, destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CatalogChange, Target: target,
-			Key: "price-migration:" + destructive.Digest([]any{digest, plan.sourceIDs(), matched, through}), Digest: digest, Units: int64(matched), Actor: actor}); err != nil {
+			Key: "price-migration:" + destructive.Digest([]any{digest, plan.sourceIDs(), units, through}), Digest: digest, Units: int64(units), Actor: actor}); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -59,18 +61,33 @@ func (s *PriceMigrationService) admitMigration(ctx context.Context, request bill
 	return &action, nil, nil
 }
 
-// abandonMigration ends an admission whose migration was never recorded:
-// recording is one transaction with the first page, so nothing moved. A
-// commit whose answer was lost recorded it, and stands.
-func (s *PriceMigrationService) abandonMigration(ctx context.Context, action *destructive.Action, cause error) error {
-	if action == nil {
+// Abandon ends the command of a migration never recorded: no effect, unless
+// it archived a source. A recording that committed though its answer was
+// lost stands.
+func (s *PriceMigrationService) Abandon(ctx context.Context, pending *PendingMigration, archived bool, cause error) error {
+	if pending == nil || pending.Action == nil {
 		return cause
 	}
+	action := pending.Action
 	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	_, err := s.db.Gen(finish).GetPriceMigrationByDestructiveAction(finish, gen.GetPriceMigrationByDestructiveActionParams{MerchantID: action.MerchantID, DestructiveActionID: action.ID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = s.admissions.Finish(finish, action.MerchantID, action.ID, destructive.OutcomeNoEffect, "")
+	outcome := destructive.OutcomeNoEffect
+	if archived {
+		outcome = destructive.OutcomeSucceeded
 	}
+	err := s.db.MerchantTx(finish, func(ctx context.Context, tx pgx.Tx) error {
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		locked, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: action.MerchantID, ID: action.ID})
+		if err != nil {
+			return err
+		}
+		if locked.State != string(destructive.StateStarted) && locked.State != string(destructive.StateReserved) {
+			return nil
+		}
+		if _, err := q.GetPriceMigrationByDestructiveAction(ctx, gen.GetPriceMigrationByDestructiveActionParams{MerchantID: action.MerchantID, DestructiveActionID: action.ID}); !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		return s.admissions.FinishTx(ctx, tx, action.MerchantID, action.ID, outcome, "")
+	})
 	return errors.Join(cause, err)
 }

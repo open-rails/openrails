@@ -2216,6 +2216,7 @@ export type PriceMigration = {
   created_at: string
   canceled_at: string | null
   preparing: boolean
+  warnings: string[]
 }
 
 export type PriceMigrationCancel = {

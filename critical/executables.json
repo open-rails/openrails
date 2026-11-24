@@ -2158,6 +2158,17 @@
     ],
     "OR-J38-S82": [
       "TestCCBillIdentity/OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain"
+    ],
+    "OR-J19-S15": [
+      "TestPriceMigrationScale/OR-J19-S15/one-short",
+      "TestPriceMigrationScale/OR-J19-S15/exactly",
+      "TestPriceMigrationScale/OR-J19-S15"
+    ],
+    "OR-J19-S16": [
+      "TestPriceMigrationScale/OR-J19-S16/a-cancel-ends-a-walk-whose-next-page-never-ran"
+    ],
+    "OR-J19-S17": [
+      "TestPriceMigrationScale/OR-J19-S17/concurrent-identical-creates-answer-one-migration"
     ]
   }
 }

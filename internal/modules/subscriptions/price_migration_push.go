@@ -111,7 +111,10 @@ func (s *PriceMigrationService) PushMove(ctx context.Context, changeID uuid.UUID
 	if err != nil {
 		return MovePush{}, err
 	}
-	capability := s.capability(ctx, sub)
+	capability, err := s.capability(ctx, sub)
+	if err != nil {
+		return MovePush{}, err
+	}
 	switch capability {
 	case capabilityEngine:
 		// The renewal applies it.

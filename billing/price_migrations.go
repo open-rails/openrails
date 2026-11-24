@@ -74,8 +74,10 @@ const (
 // PriceMigration moves the subscribers of one price, or of every version of
 // a price key, to another price. Each subscription moves at its first renewal
 // on or after EffectiveAt, carrying the move as its scheduled change until
-// then; nothing is prorated or charged early. Creating one admits every
-// subscriber it counts as a destructive unit before reading any.
+// then; nothing is prorated or charged early. Creating one admits, as one
+// destructive command, a unit for every subscriber it counts and every
+// source it archives, before reading any; it archives the sources, then
+// counts the subscribers again and records them.
 type PriceMigration struct {
 	ID PriceMigrationID `json:"id"`
 	// FromPriceID is the price whose subscribers move; or ProductKey and
@@ -100,6 +102,9 @@ type PriceMigration struct {
 	// Preparing is true while the migration still reaches its subscribers, a
 	// page at a time after the first; the counts grow until it is false.
 	Preparing bool `json:"preparing"`
+	// Warnings, on the answer that created it, are what it could not do: a
+	// source still on sale. Empty otherwise.
+	Warnings []string `json:"warnings"`
 }
 
 // CreatePriceMigrationParams names the subscribers to move and where.

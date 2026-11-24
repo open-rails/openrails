@@ -24748,6 +24748,12 @@
           },
           "preparing": {
             "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -24766,7 +24772,8 @@
           "blocked",
           "created_at",
           "canceled_at",
-          "preparing"
+          "preparing",
+          "warnings"
         ]
       },
       "PriceMigrationCancel": {

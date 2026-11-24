@@ -16,6 +16,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/stripemock"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -174,6 +176,132 @@ func TestPriceMigrationScale(t *testing.T) {
 		migrations, err := a.alpha.ListPriceMigrations(t.Context(), billing.PriceMigrationListParams{})
 		require.NoError(t, err)
 		require.Len(t, migrations.Items, 1)
+	})
+
+	t.Run("OR-J19-S15", func(t *testing.T) {
+		// Staff whose hourly ceiling is or is one short of what the migration
+		// spends: two subscribers and the source it archives.
+		for _, c := range []struct {
+			name    string
+			ceiling int64
+		}{{"one-short", 2}, {"exactly", 3}} {
+			t.Run(c.name, func(t *testing.T) {
+				a, p, alice := purchasedMembershipWith(t, 24, func(w *world) {
+					w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: c.ceiling}
+				})
+				bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "ceiling-bob")
+				target := migrationPrice(t, a, alice, "ceiling-target", 30_000_000)
+				migration, err := a.alphaRemote.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true})
+				source, readErr := a.alpha.GetPrice(t.Context(), alice.PriceID)
+				require.NoError(t, readErr)
+				migrations, listErr := a.alpha.ListPriceMigrations(t.Context(), billing.PriceMigrationListParams{})
+				require.NoError(t, listErr)
+				if c.name == "one-short" {
+					var refused *billing.StatusError
+					require.ErrorAs(t, err, &refused)
+					require.Equal(t, http.StatusTooManyRequests, refused.Status)
+					require.Empty(t, migrations.Items, "refused whole: nothing is recorded")
+					require.False(t, source.Archived, "and nothing is archived")
+					for _, sub := range []*billing.Subscription{alice, bob} {
+						current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+						require.NoError(t, err)
+						require.Nil(t, current.ScheduledChange)
+					}
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, 2, migration.Scheduled)
+				require.Empty(t, migration.Warnings)
+				require.True(t, source.Archived, "the source stops selling under the same command")
+				require.Len(t, migrations.Items, 1)
+				require.EqualValues(t, 3, migrationUnits(t, a.world, migration.ID), "one command: two subscribers and the source")
+				holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
+				require.NoError(t, err)
+				require.Empty(t, holds.Items)
+			})
+		}
+	})
+
+	t.Run("OR-J19-S16/a-cancel-ends-a-walk-whose-next-page-never-ran", func(t *testing.T) {
+		const members = 101
+		a := ccbillWebhookWorld(t)
+		source := ccbillMemberPrice(t, a.alpha)
+		price, err := a.alpha.GetPrice(t.Context(), source)
+		require.NoError(t, err)
+		target, err := a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: price.ProductID, Key: "ccbill-monthly-v2", PSP: "ccbill", FlexID: "critical-flex-v2",
+			Currency: "USD", UnitAmount: ptr(int64(12_000_000)), BillingIntervalHours: ptr(720)})
+		require.NoError(t, err)
+		ccbillMembers(t, a, source, members)
+		migration, err := a.alpha.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{FromPriceID: source, ToPriceID: target.ID, AcknowledgeShortNotice: true, ArchiveSource: ptr(false)})
+		require.NoError(t, err)
+		require.True(t, migration.Preparing)
+		// No worker runs: the next page's job waits. The cancel ends the walk.
+		canceled, err := a.alpha.CancelPriceMigration(t.Context(), migration.ID)
+		require.NoError(t, err)
+		require.False(t, canceled.PriceMigration.Preparing)
+		require.Equal(t, 100, canceled.PriceMigration.Blocked)
+		require.Equal(t, 1, canceled.PriceMigration.Skipped, "the one it never reached")
+		require.True(t, migrationSettled(t, a.world, migration.ID))
+		// The page's job, run later, changes nothing.
+		fleet := manualFleet(t, a.world)
+		require.Eventually(t, func() bool {
+			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.price_migration").States(rivertype.JobStateCompleted))
+			return err == nil && len(jobs.Jobs) == 1
+		}, 30*time.Second, 50*time.Millisecond)
+		result, err := a.alpha.GetPriceMigration(t.Context(), migration.ID)
+		require.NoError(t, err)
+		require.False(t, result.Preparing)
+		require.Equal(t, 100, result.Blocked)
+		require.Equal(t, 1, result.Skipped)
+	})
+
+	t.Run("OR-J19-S17/concurrent-identical-creates-answer-one-migration", func(t *testing.T) {
+		a, p, alice := purchasedMembership(t)
+		membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "concurrent-bob")
+		target := migrationPrice(t, a, alice, "concurrent-target", 30_000_000)
+		// Another catalog writer holds the lock: both requests are admitted
+		// and wait to archive the source, then record at once.
+		holder, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = holder.Rollback(context.Background()) }()
+		var revision int64
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT catalog_revision FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id = $1 FOR UPDATE",
+			a.alpha.MerchantID().UUID()).Scan(&revision))
+		var holderPID int
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holderPID))
+		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true}
+		type created struct {
+			migration *billing.PriceMigration
+			err       error
+		}
+		done := make(chan created, 2)
+		for range 2 {
+			go func() {
+				m, err := a.alpha.CreatePriceMigration(context.Background(), params)
+				done <- created{m, err}
+			}()
+		}
+		require.Eventually(t, func() bool {
+			var waiting int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
+			return waiting == 2
+		}, 20*time.Second, 20*time.Millisecond, "both wait on the catalog lock")
+		require.NoError(t, holder.Rollback(t.Context()))
+		var ids []billing.PriceMigrationID
+		for range 2 {
+			select {
+			case r := <-done:
+				require.NoError(t, r.err)
+				ids = append(ids, r.migration.ID)
+			case <-time.After(30 * time.Second):
+				t.Fatal("a create never answered")
+			}
+		}
+		require.Equal(t, ids[0], ids[1], "both answer the one migration")
+		migrations, err := a.alpha.ListPriceMigrations(t.Context(), billing.PriceMigrationListParams{})
+		require.NoError(t, err)
+		require.Len(t, migrations.Items, 1)
+		require.Equal(t, 2, migrations.Items[0].Scheduled)
 	})
 
 	t.Run("OR-J19-S11/a-solana-subscription-is-blocked-and-nothing-is-sent", func(t *testing.T) {

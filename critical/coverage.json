@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 665,
+  "scenario_count": 668,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3327,6 +3327,21 @@
       "id": "OR-J38-S82",
       "journey": "J38",
       "name": "A CCBill postback names its customer by a username more than one search's worth of the host's users contain, not leaving it unattributable"
+    },
+    {
+      "id": "OR-J19-S15",
+      "journey": "J19",
+      "name": "A migration's subscribers and the source it archives are one destructive command: staff one unit short is refused whole, nothing recorded or archived; at exactly the limit it succeeds with no hold"
+    },
+    {
+      "id": "OR-J19-S16",
+      "journey": "J19",
+      "name": "A cancel ends a migration's walk whose next page never ran: it is no longer preparing, the subscriber it never reached counts as skipped, and the page's job, run later, changes nothing"
+    },
+    {
+      "id": "OR-J19-S17",
+      "journey": "J19",
+      "name": "Two identical creates waiting on the catalog lock answer the one migration, recorded once"
     }
   ]
 }
