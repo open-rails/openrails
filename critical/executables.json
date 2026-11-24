@@ -1378,6 +1378,12 @@
     "OR-J28-S12": [
       "TestProviderTime/OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied"
     ],
+    "OR-J38-S73": [
+      "TestProviderTime/OR-J38-S73/a-ccbill-status-read-answering-1-keeps-access-to-ccbills-expiry"
+    ],
+    "OR-J38-S74": [
+      "TestProviderTime/OR-J38-S74/a-ccbill-rebill-and-cancellation-read-together-keep-the-rebilled-period"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

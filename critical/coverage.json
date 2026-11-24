@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 468,
+  "scenario_count": 470,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2167,6 +2167,16 @@
       "id": "OR-J28-S12",
       "journey": "J28",
       "name": "An NMI chargeback batch is booked whatever its sales' dates: a chargeback of a sale 120 days old reverses it and cancels its membership, refused as no replay"
+    },
+    {
+      "id": "OR-J38-S73",
+      "journey": "J38",
+      "name": "A CCBill status read answering 1 for an unverified row whose paid period lapsed cancels it and keeps access through CCBill's expiration date"
+    },
+    {
+      "id": "OR-J38-S74",
+      "journey": "J38",
+      "name": "A CCBill rebill and the member's cancellation read in one export book the rebill, cancel, and keep access through the rebilled period's end"
     },
     {
       "id": "OR-J39-S01",

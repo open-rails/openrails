@@ -128,19 +128,27 @@ func CCBillRemoteSubscription(rec ccbill.CCBillRecord) RemoteSubscription {
 }
 
 // normalizeCCBillTermination is a CANCELLATION or EXPIRE export row. A
-// cancellation only stops rebilling: the member keeps the time paid for, so it
+// cancellation only stops rebilling: the member keeps the time paid for,
+// through its expire date (NextBillingAt, as a status read names it), so it
 // never ends access now. An expiry does.
 func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription {
-	status := SubscriptionStatusCanceled
-	if row.TransactionType == ccbill.DataLinkTxnExpire {
-		status = SubscriptionStatusExpired
-	}
-	return RemoteSubscription{
+	sub := RemoteSubscription{
 		RailSubscriptionID: row.SubscriptionID(),
-		Status:             status,
+		Status:             SubscriptionStatusCanceled,
 		RawStatus:          string(row.TransactionType),
 		Raw:                ccbillRowRaw(row),
 	}
+	if row.TransactionType == ccbill.DataLinkTxnExpire {
+		sub.Status = SubscriptionStatusExpired
+		return sub
+	}
+	if expires, err := ccbill.ParseDate(row.ExpireDate()); err == nil {
+		paid := ccbill.DayEnd(expires)
+		sub.NextBillingAt = &paid
+	} else if expires, err := ccbill.ParseInstant(row.ExpireDate()); err == nil {
+		sub.NextBillingAt = &expires
+	}
+	return sub
 }
 
 // ccbillStatusNotRebilling is a status read's subscriptionStatus for an

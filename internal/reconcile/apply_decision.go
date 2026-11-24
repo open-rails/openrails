@@ -137,8 +137,13 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
 		case d.RemoteGone:
 			// The schedule ended (NMI), or only its rebilling (a CCBill
-			// cancellation): paid time is kept.
-			return lifecycle.ProviderCanceled{At: at}
+			// cancellation): paid time is kept, through the provider's own
+			// paid-through when it states one.
+			ev := lifecycle.ProviderCanceled{At: at}
+			if d.KeepsPaidTime && d.PaidThrough != nil {
+				ev.PaidThrough = d.PaidThrough.UTC()
+			}
+			return ev
 		case d.Certainty == collection.CertaintyNonRetryableDecline:
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
 		default:

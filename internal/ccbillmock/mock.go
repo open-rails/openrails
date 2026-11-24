@@ -15,6 +15,9 @@
 // request has been made within the last 60 minutes." and listing it in
 // Unexpected; test mode is exempt.
 //
+// A status read answers 2 (rebilling) for a member with a rebill date, and 1
+// with its expirationDate for one with an expiry instead, or one canceled.
+//
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
 // exports honor startTime and endTime (CCBill's MST clock), refuse a range
@@ -231,11 +234,14 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := r.Form.Get("subscriptionId")
 		switch r.Form.Get("action") {
 		case "viewSubscriptionStatus":
-			status := "2" // rebilling
+			status, dates := "2", "" // rebilling
+			if mem := m.member(id); mem != nil && mem.Rebill == nil && mem.Expiry != nil {
+				status, dates = "1", "<expirationDate>"+mem.Expiry.UTC().Format("20060102150405")+"</expirationDate>"
+			}
 			if m.cancels[id] > 0 {
 				status = "1" // canceled, access through the paid period
 			}
-			_, _ = io.WriteString(w, "<results><subscriptionStatus>"+status+"</subscriptionStatus></results>")
+			_, _ = io.WriteString(w, "<results><subscriptionStatus>"+status+"</subscriptionStatus>"+dates+"</results>")
 		case "cancelSubscription":
 			m.cancels[id]++
 			_, _ = io.WriteString(w, "<results>1</results>")
@@ -294,6 +300,16 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.odd = append(m.odd, r.Method+" "+r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// member is the roster's member id, or nil.
+func (m *Mock) member(id string) *Member {
+	for i := range m.members {
+		if m.members[i].SubscriptionID == id {
+			return &m.members[i]
+		}
+	}
+	return nil
 }
 
 // admit records a DataLink request; false refuses a live account's within an

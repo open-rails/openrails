@@ -15,8 +15,9 @@ import (
 // public docs omit the DataLink spec, so transactionTypes and column meanings
 // follow long-standing integrations (s2member, aMember): column 0 = type,
 // 3 = subscription id; REBILL 5 = transaction id, 6 = amount; REFUND/CHARGEBACK
-// 5 = amount. Unvalidated against a live account: the typed accessors are
-// best-effort, the verbatim Fields authoritative.
+// 5 = amount; CANCELLATION/EXPIRE 4 = expire date, 5 = cancel date (the
+// DataLink guide's default fields). Unvalidated against a live account: the
+// typed accessors are best-effort, the verbatim Fields authoritative.
 type DataLinkTxnType string
 
 const (
@@ -87,6 +88,17 @@ func (r DataLinkExportRow) SubscriptionID() string { return r.field(3) }
 
 // Timestamp returns the event timestamp column (column 4) verbatim.
 func (r DataLinkExportRow) Timestamp() string { return r.field(4) }
+
+// ExpireDate is a CANCELLATION or EXPIRE row's expire date (column 4), when
+// the time paid for ends; "" for other types.
+func (r DataLinkExportRow) ExpireDate() string {
+	switch r.TransactionType {
+	case DataLinkTxnCancellation, DataLinkTxnExpire:
+		return r.field(4)
+	default:
+		return ""
+	}
+}
 
 // TransactionID returns the per-charge transaction id for REBILL rows
 // (column 5). Empty for other types, which don't carry one.

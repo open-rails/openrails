@@ -212,8 +212,10 @@ type Decision struct {
 	// provider delete.
 	RemoteGone bool
 	// KeepsPaidTime (RemoteGone): the provider only stopped rebilling (a
-	// CCBill cancellation); the member keeps the period paid for.
+	// CCBill cancellation); the member keeps the period paid for, through
+	// PaidThrough when the provider states it.
 	KeepsPaidTime bool
+	PaidThrough   *time.Time
 	// Backfill are the provider's charge-level events for this subscription
 	// at or after the lapsed period end: successes become missing payments,
 	// declines are attempts. Populated whenever a snapshot was consulted,
@@ -573,7 +575,15 @@ func decideFromSnapshot(rail, railSubID string, localStart, localEnd *time.Time,
 	//    rebilling keeps the paid period.
 	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired) {
 		if stoppedRebillingOnly(snap.Provider, remoteSub) {
-			return with(Decision{Kind: TransitionCancel, RemoteGone: true, KeepsPaidTime: true, EvidenceAt: snap.FetchedAt, Reason: "provider_stopped_rebilling"})
+			// CCBill's paid-through, or the period a rebill read with the
+			// cancellation paid when that ends later.
+			paid := remoteSub.NextBillingAt
+			if renewTxn != nil {
+				if _, end := paidPeriod(txns, chargeCutoff, localStart, localEnd, remoteSub); end != nil && (paid == nil || end.After(*paid)) {
+					paid = end
+				}
+			}
+			return with(Decision{Kind: TransitionCancel, RemoteGone: true, KeepsPaidTime: true, PaidThrough: paid, EvidenceAt: snap.FetchedAt, Reason: "provider_stopped_rebilling"})
 		}
 		return with(Decision{Kind: TransitionCancel, RemoteGone: true, EvidenceAt: snap.FetchedAt, Reason: "roster_dead"})
 	}
