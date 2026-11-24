@@ -34,9 +34,9 @@ type mixedSale struct {
 	lines    []billing.OrderLineParams
 }
 
-func newMixedSale(t *testing.T) *mixedSale {
+func newMixedSale(t *testing.T, configure ...func(*world)) *mixedSale {
 	t.Helper()
-	a, p := newPaymentWorld(t)
+	a, p := newPaymentWorld(t, configure...)
 	pack, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "credit-pack", DisplayName: "Credit pack", Ownership: catalog.OwnershipConsumable,
 		CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(25_000_000)), ExpiresAfterDays: ptr(365)}})
 	require.NoError(t, err)
@@ -85,7 +85,9 @@ func (m *mixedSale) notice(t *testing.T, id, kind string, object stripemock.Obje
 }
 
 func mixedPendingRefund(t *testing.T) {
-	m := newMixedSale(t)
+	// Begun an hour ago: the refund settles twenty minutes on, never in the
+	// future.
+	m := newMixedSale(t, func(w *world) { w.clock.Advance(-time.Hour) })
 	a, p := m.a, m.p
 	payment := m.buy(t, "mixed-pending-refund")
 	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
