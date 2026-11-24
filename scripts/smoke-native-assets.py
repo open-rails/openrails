@@ -74,7 +74,7 @@ def main():
             config = {
                 "host": "127.0.0.1", "port": api_port,
                 "db": {"url": owned_dsn}, "redis": {"addr": redis},
-                "provider_write_mode": "readonly", "public_billing_base_url": origin,
+                "public_billing_base_url": origin,
                 "checkout_origin": "http://" + checkout, "route_groups": {"admin": True},
                 "local_sign_in": True,
                 "auth": {
@@ -127,7 +127,7 @@ def main():
                 assert scripts, "checkout HTML references no embedded JavaScript"
                 report.write_text(json.dumps({"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                                               "checkout_html_sha256": hashlib.sha256(html).hexdigest(),
-                                              "scripts": scripts, "provider_write_mode": "readonly"}, indent=2) + "\n")
+                                              "scripts": scripts}, indent=2) + "\n")
                 print("Native checkout HTML and", len(scripts), "embedded JavaScript asset(s) passed")
     finally:
         if child is not None and child.poll() is None:

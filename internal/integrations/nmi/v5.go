@@ -88,7 +88,7 @@ func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
 // ErrV5NotFound so callers can treat "gone at NMI" as a state, not a failure.
 func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body any, out any) (err error) {
 	if method != http.MethodGet && c.ReadOnly {
-		c.Log.WarnContext(ctx, "NMI v5 request blocked: provider is read-only (mode=readonly)", "provider", c.providerName, "method", method, "path", path)
+		c.Log.WarnContext(ctx, "NMI v5 request blocked: provider is read-only (readonly write posture)", "provider", c.providerName, "method", method, "path", path)
 		return ErrProviderReadOnly
 	}
 

@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Only explicit HTTP/authentication refusals permit bounded clean retries.
@@ -58,8 +58,7 @@ func CCBillCancelIdempotencyKey(subscriptionID uuid.UUID) string {
 //   - mode: the runner's origin x mode gate parks first; the client's ReadOnly
 //     transport gate is the backstop (parked, never failed).
 type CCBillCancelHandler struct {
-	DB     *db.DB
-	Config *config.Config
+	DB *db.DB
 	// Rails arms the intent merchant's DataLink client from the armed rail
 	// state at drain time.
 	Rails railresolve.Source
@@ -70,8 +69,8 @@ type CCBillCancelHandler struct {
 	Log             *slog.Logger
 }
 
-func NewCCBillCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *CCBillCancelHandler {
-	return &CCBillCancelHandler{DB: d, Config: cfg, Rails: rails, Clock: clock, Policy: DefaultBackoff, Log: d.Log}
+func NewCCBillCancelHandler(d *db.DB, rails railresolve.Source, clock clockwork.Clock) *CCBillCancelHandler {
+	return &CCBillCancelHandler{DB: d, Rails: rails, Clock: clock, Policy: DefaultBackoff, Log: d.Log}
 }
 
 func (h *CCBillCancelHandler) Type() string { return TypeCCBillCancelSubscription }
@@ -96,12 +95,12 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 }
 
 func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	client, err := ccbillDataLinkForMerchant(ctx, h.Log, h.Config, h.Rails, h.DataLinkBaseURL)
+	client, err := ccbillDataLinkForMerchant(ctx, h.Log, writeposture.View{DB: h.DB}.Posture(ctx, intent.MerchantID).ReadOnly(), h.Rails, h.DataLinkBaseURL)
 	if err != nil {
 		return parkedBeforeEffect("ccbill rail not armable (fail closed): " + err.Error())
 	}
 	if client.ReadOnly {
-		return parkedBeforeEffect("ccbill datalink client is read-only (mode=readonly)")
+		return parkedBeforeEffect("ccbill datalink client is read-only (readonly write posture)")
 	}
 
 	sub, err := h.loadSubscription(ctx, intent)
@@ -133,7 +132,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	if err != nil {
 		switch {
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
-			return parkedBeforeEffect("ccbill provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("ccbill provider writes blocked (readonly write posture)")
 		case errors.Is(err, providerposture.ErrDisarmed):
 			// Refused before the wire: nothing executed, nothing to verify.
 			return parkedBeforeEffect("ccbill cancel held by sandbox posture gate: " + err.Error())
@@ -165,7 +164,7 @@ func (h *CCBillCancelHandler) stopped(ctx context.Context, intent gen.BillingPro
 // cancel (whenever it happened) is done; still-rebilling means it definitely
 // has not happened and the executor may retry.
 func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
-	client, cerr := ccbillDataLinkForMerchant(ctx, h.Log, h.Config, h.Rails, h.DataLinkBaseURL)
+	client, cerr := ccbillDataLinkForMerchant(ctx, h.Log, true, h.Rails, h.DataLinkBaseURL)
 	if cerr != nil {
 		return Ambiguous("ccbill rail not armable; cannot verify: " + cerr.Error())
 	}

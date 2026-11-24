@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
@@ -304,7 +305,11 @@ func (s *PurchaseService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
+	var d *db.DB
+	if s.SubscriptionService != nil {
+		d = s.SubscriptionService.Database()
+	}
+	return &railresolve.NMIFactory{Config: s.Config, Postures: writeposture.View{DB: d}, Log: s.Log}
 }
 
 func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {

@@ -41,18 +41,14 @@ func (s *StripeCatalogService) stripeRail(ctx context.Context) *config.StripeRai
 	return proc.Stripe
 }
 
-// httpClient returns the stripeapi choke-point client: readonly mode rejects
-// mutating requests at the transport. All Stripe HTTP here goes through it.
+// httpClient returns the stripeapi choke-point client: a readonly merchant's
+// mutating requests stop at the transport. All Stripe HTTP here goes through it.
 func (s *StripeCatalogService) httpClient() *http.Client {
-	var cfg *config.Config
-	if s != nil {
-		cfg = s.Config
-	}
 	var clients *stripeapi.Factory
 	if s != nil {
 		clients = s.StripeClients
 	}
-	return clients.Client(cfg, 0)
+	return clients.Client(0)
 }
 
 // stripeListPageLimit is Stripe's List page maximum.

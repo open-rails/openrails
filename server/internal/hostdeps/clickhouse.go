@@ -1,7 +1,6 @@
 package hostdeps
 
 import (
-	"cmp"
 	"fmt"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -15,7 +14,7 @@ import (
 func ClickHouse(c *hostconfig.ClickHouseLogin) (driver.Conn, error) {
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr:        []string{c.Addr},
-		Auth:        clickhouse.Auth{Username: cmp.Or(c.Username, "default"), Password: c.Password},
+		Auth:        clickhouse.Auth{Username: c.Username, Password: c.Password},
 		Compression: &clickhouse.Compression{Method: clickhouse.CompressionLZ4},
 	})
 	if err != nil {

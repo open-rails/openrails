@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -17,9 +16,9 @@ import (
 // publishes for a price is the on-chain Solana plan a recurring price of ours
 // sells on.
 
-// errRemoteWritesDisabled: the operating mode (provider_write_mode limited or
-// readonly) blocks publishing a Solana plan.
-var errRemoteWritesDisabled = errors.New("provider writes are disabled (mode=limited/readonly)")
+// errRemoteWritesDisabled: the merchant's write posture (limited or readonly)
+// blocks publishing a Solana plan.
+var errRemoteWritesDisabled = errors.New("provider writes are held by the merchant's write posture")
 
 // ErrPriceNotSellable refuses a price none of its methods can sell.
 var ErrPriceNotSellable = apperr.New(http.StatusBadRequest, billing.CodePriceNotSellable, "no PSP can sell this price")
@@ -32,11 +31,4 @@ type solanaPlanContext struct {
 	Currency             string
 	BillingCycleDays     *int
 	BillingIntervalHours *int
-	RemoteWritesDisabled bool
-}
-
-// catalogRemoteWritesDisabled reports whether the operating mode blocks
-// publishing provider objects. Reads stay on.
-func (s *Service) catalogRemoteWritesDisabled() bool {
-	return s != nil && s.rt != nil && s.rt.Config != nil && config.IsLimitedMode(s.rt.Config)
 }

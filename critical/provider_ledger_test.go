@@ -220,7 +220,7 @@ func newPaymentWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config), 
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		t.Cleanup(transport.CloseIdleConnections)
 		w.deps.StripeTransport = loopbackWire{target: target, wire: transport}
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		declaration := cfgMerchant(w.cfg, "alpha")
 		declaration.PSPs = billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}
 		declaration.CardVault = "stripe"

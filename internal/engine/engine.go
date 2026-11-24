@@ -228,15 +228,6 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
 func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
-	// Unset would run fail-closed readonly: renewals, retries and refunds
-	// would silently never reach a provider. The host states it.
-	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
-	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
-	case "":
-		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
-	default:
-		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
-	}
 	declarations, refused := config.DeclaredMerchants(cfg)
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {

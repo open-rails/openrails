@@ -90,7 +90,7 @@ func (h *NMIRecurringConfirmationHandler) Execute(ctx context.Context, in gen.Bi
 	if h.Config == nil {
 		return Parked("confirmation execution mode is not configured")
 	}
-	if blocked, reason := GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
 		return Parked(reason)
 	}
 	client, err := h.client(ctx, in)

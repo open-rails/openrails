@@ -121,7 +121,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		return parkedBeforeEffect(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
-		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (readonly write posture)")
 	}
 
 	sub, err := h.loadSubscription(ctx, intent)
@@ -164,7 +164,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	}
 	if err := client.DeleteRecurringSubscription(ctx, psid); err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (readonly write posture)")
 		}
 		// The delete request may or may not have reached NMI — never assume;
 		// the verifier resolves by reading.

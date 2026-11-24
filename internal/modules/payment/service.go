@@ -378,7 +378,7 @@ func (s *PurchaseService) createStripeCheckoutSession(ctx context.Context, param
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout failed: %w", err)

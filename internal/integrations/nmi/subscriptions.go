@@ -172,7 +172,7 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(ctx context.Context, subscri
 // ErrProviderReadOnly is returned by every NMI mutation when the provider is
 // read-only. A reactive operation that needed the write has failed and must
 // surface as an error.
-var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (mode=readonly)")
+var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (readonly write posture)")
 
 // DeleteRecurringSubscription cancels a subscription via
 // DELETE /v5/subscriptions/{id}. A 404 surfaces as ErrV5NotFound — callers on

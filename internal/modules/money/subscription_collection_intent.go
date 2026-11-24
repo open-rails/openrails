@@ -159,7 +159,7 @@ func (h *SubscriptionCollectionHandler) submissionHeld(ctx context.Context, in g
 	if h.Config.EngineAdmissionHold {
 		return "new engine payment submission is held"
 	}
-	if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
 		return reason
 	}
 	if h.Resolver == nil {

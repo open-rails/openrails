@@ -27,10 +27,10 @@ import (
 // by the intent's verified stop, holds the customer's slot while the provider
 // may still bill.
 //
-// origin distinguishes who asked: user-origin intents execute under
-// mode=limited; system-origin intents (dunning exhaustion, unknown-resolution)
-// require mode=full (see GateExecution). Queuing is unconditional; mode gates
-// execution only.
+// origin distinguishes who asked: user-origin intents execute under a
+// limited write posture; system-origin intents (dunning exhaustion,
+// unknown-resolution) require full (see GateExecution). Queuing is
+// unconditional; the posture gates execution only.
 type ProviderCancelScheduler struct {
 	db     *db.DB
 	store  *Store

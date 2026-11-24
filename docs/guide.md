@@ -62,8 +62,7 @@ if err != nil {
 }
 
 cfg := openrails.Config{
-	Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-	ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
+	Database: openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	Merchants: []billing.MerchantDeclaration{{
 		MerchantDocument: merchant,
 		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
@@ -226,7 +225,8 @@ its paid access, and the keys follow the product's current entitlements.
   and a refund or cancel behaves as you expect.
 - Declare the live PSP (`environment` omitted means real money) and register its
   webhook URL and signing secret; OpenRails checks the credentials before arming it.
-- `ProviderWritesFull` charges; `ProviderWritesReadOnly` writes nothing to any provider.
+- A merchant writes to its providers unless its write posture holds it
+  (`openrails merchant hold`, [write safety](standalone.md#write-safety-and-the-kill-switch)).
 - Register `Ready` and `Probes()` with your supervisor ([embedded](embedded.md#health)).
 
 ## Customer messages

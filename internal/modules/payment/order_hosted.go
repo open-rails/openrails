@@ -318,7 +318,7 @@ func (s *OrderAttemptService) stripeCheckoutSession(ctx context.Context, id stri
 	if expire {
 		stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey("expire:"+id))
 	}
-	resp, err := purchase.StripeClients.Client(purchase.Config, 0).Do(req)
+	resp, err := purchase.StripeClients.Client(0).Do(req)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}

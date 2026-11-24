@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type hyperSwitchCollectionAdapter struct {
@@ -79,8 +80,11 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 }
 
 func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
-	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil || config.IsProviderReadOnly(b.Config) {
+	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil {
 		return nil, fmt.Errorf("HyperSwitch usage collection is not armed")
+	}
+	if p := (writeposture.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {
+		return nil, fmt.Errorf("HyperSwitch usage collection is not armed: %s", p.Reason)
 	}
 	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
 	if err != nil {
@@ -93,7 +97,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian)
+	client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian, false)
 	if err != nil {
 		return nil, err
 	}

@@ -170,7 +170,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 	if h.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, current.MerchantID, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: h.DB}, current.MerchantID, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)
