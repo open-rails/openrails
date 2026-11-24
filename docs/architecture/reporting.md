@@ -24,7 +24,9 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 
 ## Measures
 
-Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `disputes`, `dispute_win_rate`, `fraud_reports`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
+Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `disputes`, `dispute_win_rate`, `fraud_reports`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `mrr_at_risk`, `at_risk_recovery_rate`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
+
+`mrr_at_risk` reads `mrr_risk_totals` less the `mrr_risk_flows` buckets from each edge on, so a past day costs the buckets after it, never the subscriptions; without `risk_reason` it counts each subscription once. `at_risk_recovery_rate` sums the cases those flows record as closed.
 
 - `cash` is signed money by `cash_kind`: a payment and a won dispute add, a refund and a chargeback subtract; its total is net cash, gross of processor fees.
 - `payments` counts settled sales and reversals by `payment_kind`, a refund also by `refund_reason`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket, by `network` (`billing.card_network` of the card brand) among others.
@@ -39,7 +41,7 @@ The `ops` group is operator signals, queryable but off the health overview, each
 
 ## Health overview
 
-`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, Renewals in dunning (`rebills` open) and Rebill rate for subscriptions; Chargeback rate and Refund rate for card payments; Usage charged and Active customers for usage; Credits sold for credits. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
+`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, At-risk MRR (`mrr_at_risk`) and Rebill rate for subscriptions; Chargeback rate and Refund rate for card payments; Usage charged and Active customers for usage; Credits sold for credits. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits. Recurring carries at-risk MRR by `risk_reason` and Payment health the at-risk recovery rate by the reason each case entered with. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
 
 The widget kinds are general, so adding a tile or chart is adding a widget to `DefaultWidgets`:
 
@@ -191,7 +193,7 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J53-S02 checks the overview a subscription and card merchant gets, that every widget answers under each currency of the switch with only that currency's cash, that an empty merchant's tiles answer, that every profile's overview saves, that a removed measure cannot be saved, and that the dashboard migration drops saved widgets naming one.
 - OR-J53-S03 checks that every money measure splits by currency unless one is named, by PSP and over time too, and that money beside a measure without currency is refused.
 - OR-J46-S12 checks the dispute measures against their records (disputes by kind, reason, outcome and charge kind, the win rate, the chargeback rate by network and its lines, fraud reports, refunds by reason) and that a card merchant's overview carries the `programs` widget.
-- OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`) and OR-J23-S16 (`limits_reached`) query through the Go client over real PostgreSQL.
+- OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`), OR-J23-S16 (`limits_reached`) and OR-J42-S11 to S15 (`mrr_at_risk`, `at_risk_recovery_rate`) query through the Go client over real PostgreSQL.
 - OR-J38-S41 draws the health overview in the console (its sections, the cash donut and the attempts table naming the PSP by key, tile labels that fit), which reads `GET /v1/metrics/dashboard`.
 - OR-J38-S34 counts `POST /v1/metrics/query` as a read when proving a configuration reader writes nothing.
 - OR-J01-S02 probes the metrics and dashboard routes without a credential.

@@ -37,7 +37,7 @@ func DefaultWidgets(p Profile) []Widget {
 		l.tile("kpi-subscriptions", "Subscriptions", "subscriptions", nil)
 		l.tile("kpi-new-subscriptions", "New subscriptions", "new_subscriptions", nil)
 		l.tile("kpi-cancellations", "Cancellations", "cancellations", nil)
-		l.tile("kpi-dunning", "Renewals in dunning", "rebills", map[string][]string{"outcome": {"open"}})
+		l.tile("kpi-at-risk", "At-risk MRR", "mrr_at_risk", nil)
 		l.tile("kpi-rebill-rate", "Rebill rate", "rebill_rate", nil)
 	}
 	if cards {
@@ -63,6 +63,7 @@ func DefaultWidgets(p Profile) []Widget {
 		l.section("recurring", "Recurring",
 			chart("new-vs-canceled", "New against canceled subscriptions", "line", series([]string{"new_subscriptions", "cancellations"})),
 			chart("cancellations-by-type", "Cancellations by type", "bar", series([]string{"cancellations"}, "cancel_type")),
+			chart("at-risk-by-reason", "At-risk MRR by reason", "area", series([]string{"mrr_at_risk"}, "risk_reason")),
 		)
 		l.section("retention", "Retention",
 			chart("rebill-rate", "Rebill rate", "line", series([]string{"rebill_rate"})),
@@ -73,6 +74,7 @@ func DefaultWidgets(p Profile) []Widget {
 		health = append(health,
 			chart("rebills-by-outcome", "Renewals by outcome", "bar", series([]string{"rebills"}, "outcome")),
 			chart("dunning-recovery", "Dunning recovery rate", "line", series([]string{"dunning_recovery_rate"})),
+			chart("at-risk-recovery", "At-risk MRR recovered, by the reason it entered with", "line", series([]string{"at_risk_recovery_rate"}, "risk_reason")),
 		)
 	}
 	if p.CardPayments {

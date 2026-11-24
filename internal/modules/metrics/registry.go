@@ -78,6 +78,8 @@ const (
 	FamFraudReports   Family = "fraud_reports"   // flow over fraud_reports (reported_at)
 	FamNetwork        Family = "network"         // flow over network_activity_daily (day_at)
 	FamNetworkPrior   Family = "network_prior"   // flow over network_activity_daily, each day counted a month later
+	FamRiskTotals     Family = "risk_totals"     // at-risk MRR totals less the flows after t
+	FamRiskFlows      Family = "risk_flows"      // flow over mrr_risk_flows (bucket_at)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -239,6 +241,7 @@ var Dimensions = []Dimension{
 	{Name: "finding_group", Description: "orphaned (payment without access) | freeloader (access without payment) | duplicate_coverage (the same coverage paid twice) | other", Values: []string{"orphaned", "freeloader", "duplicate_coverage", "other"}},
 	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
 	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
+	{Name: "risk_reason", Description: "why MRR is at risk: past_due | needs_payment_method | unverified | card_expiring (its card expires before the renewal) | delinquent (its customer, in its currency); on at_risk_recovery_rate, the reason the case entered with", Values: riskReasonValues()},
 	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
@@ -263,6 +266,27 @@ var (
 
 // families declares each family's SQL skeleton inputs.
 var families = map[Family]familySpec{
+	// At-risk MRR at t is the total now less the flows of the buckets from t
+	// on; riskSpec picks the per-reason rows or, without risk_reason, the
+	// rows that count each subscription once.
+	FamRiskTotals: {
+		Kind: "risk",
+		From: `billing.mrr_risk_totals t`,
+		DimExprs: map[string]string{
+			"currency":    `t.currency`,
+			"risk_reason": `t.reason`,
+		},
+	},
+	FamRiskFlows: {
+		Kind:      "flow",
+		From:      `billing.mrr_risk_flows rf`,
+		TimeExpr:  `rf.bucket_at`,
+		BaseWhere: `rf.reason <> 'any'`,
+		DimExprs: map[string]string{
+			"currency":    `rf.currency`,
+			"risk_reason": `rf.reason`,
+		},
+	},
 	FamPayments: {
 		Kind:     "flow",
 		From:     `billing.payments p`,
@@ -870,6 +894,20 @@ var declared = []Measure{
 		Formula:     "SUM(billing.price_mrr(price, seats)) over auto-renewing subscriptions at t that were not canceled by t",
 		Expr:        `COALESCE(SUM(` + priceMRRExpr + `) FILTER (WHERE s.canceled_at IS NULL OR s.canceled_at > edge.bucket), 0)::bigint`,
 		Dims:        subscriptionDim},
+	{Name: "mrr_at_risk", Class: ClassSnapshot, Family: FamRiskTotals, Money: true, Unit: UnitMoney, Direction: DownIsGood,
+		Description: "MRR of subscriptions at risk at t, by risk_reason; without it each subscription counts once whatever its reasons",
+		Formula:     "at-risk MRR now − SUM(at-risk MRR flows from t on)",
+		Expr: `COALESCE(SUM(t.mrr - COALESCE((SELECT SUM(f.amount) FROM billing.mrr_risk_flows f
+			WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.reason = t.reason AND f.bucket_at >= edge.bucket), 0)), 0)::bigint`,
+		Dims: []string{"currency", "risk_reason"}},
+	{Name: "at_risk_recovered_mrr", Class: ClassAdditive, Family: FamRiskFlows, Money: true, Unit: UnitMoney, Internal: true,
+		Expr: `COALESCE(SUM(rf.recovered_mrr), 0)::bigint`, Dims: []string{"currency", "risk_reason"}},
+	{Name: "at_risk_closed_mrr", Class: ClassAdditive, Family: FamRiskFlows, Money: true, Unit: UnitMoney, Internal: true,
+		Expr: `COALESCE(SUM(rf.recovered_mrr + rf.churned_mrr), 0)::bigint`, Dims: []string{"currency", "risk_reason"}},
+	{Name: "at_risk_recovery_rate", Class: ClassRatio, Money: true, Unit: "ratio", Direction: UpIsGood, Num: "at_risk_recovered_mrr", Den: "at_risk_closed_mrr",
+		Description: "recovered MRR over recovered and churned MRR of the at-risk cases closed in the bucket, by risk_reason the case entered with",
+		Formula:     "SUM(recovered MRR) / SUM(recovered + churned MRR) of closed cases",
+		Dims:        []string{"currency", "risk_reason"}},
 	// --- payment health: one measure per funnel, its rates slice it ---------------
 	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count", Direction: Neutral,
 		Description: "authorizations a PSP answered (card verifications, sales, rebills and retries), by outcome: approved or declined",
@@ -1061,7 +1099,7 @@ var RemovedDimensions = map[string]string{"attempt_kind": "kind"}
 // authorization health, the books, trials); naming one is refused as planned.
 var Deferred = []string{
 	"mrr_movements", "subscriber_movements", "subscribers", "scheduled_mrr", "subscriber_churn_rate",
-	"nrr", "grr", "cohort_retention", "arpa", "ltv", "mrr_at_risk", "at_risk_recovery_rate",
+	"nrr", "grr", "cohort_retention", "arpa", "ltv",
 	"authorization_rate", "first_try_rebill_approval_rate", "issuer_discretion_decline_rate",
 	"recognized_revenue", "balance", "trials", "trial_conversion_rate", "revenue_nrr",
 }
@@ -1261,6 +1299,15 @@ func (m *Measure) components() []*Measure {
 	var out []*Measure
 	out = append(out, num.components()...)
 	out = append(out, den.components()...)
+	return out
+}
+
+// riskReasonValues are the risk_reason dimension's values.
+func riskReasonValues() []string {
+	var out []string
+	for _, r := range billing.MRRRiskReasons() {
+		out = append(out, string(r))
+	}
 	return out
 }
 

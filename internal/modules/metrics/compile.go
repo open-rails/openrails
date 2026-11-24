@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,6 +59,8 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 			st, err = compileFlow(plan, merchantID, fam, spec, leaves)
 		case "snapshot":
 			st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
+		case "risk":
+			st, err = compileSnapshot(plan, merchantID, fam, riskSpec(plan, spec), leaves)
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
@@ -98,6 +101,8 @@ var merchantCols = map[Family]string{
 	FamFraudReports:   "fr.merchant_id",
 	FamNetwork:        "na.merchant_id",
 	FamNetworkPrior:   "nap.merchant_id",
+	FamRiskTotals:     "t.merchant_id",
+	FamRiskFlows:      "rf.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -206,6 +211,16 @@ func compileSnapshot(plan *Plan, merchantID uuid.UUID, fam Family, spec familySp
 		"\nLEFT JOIN " + joined + " ON " + strings.Join(on, "\n  AND ") +
 		"\nGROUP BY " + strings.Join(group, ", ")
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: true, snapshot: true}, nil
+}
+
+// riskSpec reads the per-reason at-risk rows when the query groups or
+// filters by risk_reason, else the rows that count a subscription once.
+func riskSpec(plan *Plan, spec familySpec) familySpec {
+	spec.BaseWhere = `t.reason = 'any'`
+	if slices.Contains(plan.Dims, "risk_reason") || plan.Filters["risk_reason"] != nil {
+		spec.BaseWhere = `t.reason <> 'any'`
+	}
+	return spec
 }
 
 func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
