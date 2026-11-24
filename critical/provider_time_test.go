@@ -93,17 +93,13 @@ func ccbillRebills(t *testing.T, w *world, dataLink *ccbillmock.Mock, times []ti
 }
 
 // importCCBillMember imports alpha's CCBill member on sub, paid through
-// paid, and answers its customer, sub and paid. A rebill names a charge at
-// paid declared without its amount, which the provider pull records.
-func importCCBillMember(t *testing.T, w *world, sub string, paid time.Time, rebill ...string) (billing.CustomerID, string, time.Time) {
+// paid, and answers its customer, sub and paid.
+func importCCBillMember(t *testing.T, w *world, sub string, paid time.Time) (billing.CustomerID, string, time.Time) {
 	t.Helper()
 	price := ccbillMemberPrice(t, w.alpha)
 	customer := billing.CustomerID(uuid.New())
 	start := paid.Add(-720 * time.Hour)
 	txns := []billing.DeclaredTransaction{{RailSubscriptionID: sub, TransactionID: "08" + sub[2:], Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start}}
-	for _, id := range rebill {
-		txns = append(txns, billing.DeclaredTransaction{RailSubscriptionID: sub, TransactionID: id, Type: "sale", Success: true, Currency: "USD", OccurredAt: paid})
-	}
 	res, err := w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
 		Customers: []billing.DeclaredCustomer{{Customer: customer}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "ccbill-member-" + sub, Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: sub, StartedAt: start, PaidThrough: &paid,
@@ -262,7 +258,9 @@ func TestProviderTime(t *testing.T) {
 	})
 
 	t.Run("OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied", func(t *testing.T) {
-		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		// The sale is made 120 days before the world's present, which stays
+		// behind the database's own: a payment is never dated in its future.
+		a, p := newNMIWorld(t, func(w *world) { w.clock.Advance(-120 * 24 * time.Hour) })
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
@@ -660,17 +658,21 @@ func TestProviderTime(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
 			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			// The world runs a day behind the database's clock, which dates
+			// no payment in its future.
+			w.clock.Advance(-24 * time.Hour)
 		})
 		armWorldDestructive(t, w, true)
 		dataLink.SetClock(w.clock.Now)
-		now := w.clock.Now().Truncate(time.Second)
+		// Paid an hour ahead, the member is active.
+		customer, sub, due := importCCBillMember(t, w, "0223344556600000779", w.clock.Now().Truncate(time.Second).Add(time.Hour))
 		// CCBill rebilled the member when due, and the member canceled ten
 		// minutes later; neither webhook came. One day's export holds both.
-		rebill := "0912233445500000779"
-		customer, sub, due := importCCBillMember(t, w, "0223344556600000779", now.Add(-12*time.Hour), rebill)
+		w.clock.Advance(13 * time.Hour)
+		now := w.clock.Now().Truncate(time.Second)
 		paid := due.Add(720 * time.Hour)
 		dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member", Email: "member@critical.invalid", Signup: due.Add(-720 * time.Hour), Expiry: &paid})
-		dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, TransactionID: rebill, At: due, Amount: "10.00"})
+		rebill := dataLink.AddRebill(ccbillmock.Rebill{SubscriptionID: sub, At: due, Amount: "10.00"})
 		dataLink.AddCancellation(ccbillmock.Cancellation{SubscriptionID: sub, At: due.Add(10 * time.Minute), Expires: paid})
 		psp, _, run := liveCCBillRefresh(t, w)
 		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
@@ -680,7 +682,7 @@ func TestProviderTime(t *testing.T) {
 		}))
 
 		require.Positive(t, drainPaced(t, w, run))
-		require.EqualValues(t, 10_000_000, ccbillPayments(t, w, customer)[rebill], "the pull records the rebill")
+		require.EqualValues(t, 10_000_000, ccbillPayments(t, w, customer)[rebill], "the pull books the rebill")
 		after := onlySubscription(t, w.alpha, customer)
 		require.NotNil(t, after.CanceledAt, "the cancellation is mirrored: status %s", after.Status)
 		require.NotNil(t, after.CurrentPeriodEndsAt)
