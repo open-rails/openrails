@@ -558,6 +558,7 @@ pkg openrails/billing, const CodeLeaseNotHeld ErrorCode = "lease_not_held"
 pkg openrails/billing, const CodeLimitNotFound ErrorCode = "limit_not_found"
 pkg openrails/billing, const CodeMerchantConfigReadOnly ErrorCode = "merchant_config_read_only"
 pkg openrails/billing, const CodeMerchantMismatch ErrorCode = "merchant_mismatch"
+pkg openrails/billing, const CodeMerchantUnitUnsupported ErrorCode = "merchant_unit_unsupported"
 pkg openrails/billing, const CodeMerchantUnresolved ErrorCode = "merchant_unresolved"
 pkg openrails/billing, const CodeMessageSendFailed ErrorCode = "message_send_failed"
 pkg openrails/billing, const CodeMessageTemplateInvalid ErrorCode = "message_template_invalid"
@@ -1793,6 +1794,7 @@ pkg openrails/billing, type CustomerAccount struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type CustomerAccount struct, LowBalanceLines []EffectiveLowBalanceLine `json:"low_balance_lines"`
 pkg openrails/billing, type CustomerConfig struct
 pkg openrails/billing, type CustomerConfig struct, ClientCountry string `json:"client_country"`
+pkg openrails/billing, type CustomerConfig struct, Currencies []MerchantCurrency `json:"currencies"`
 pkg openrails/billing, type CustomerConfig struct, Merchant PublicMerchant `json:"merchant"`
 pkg openrails/billing, type CustomerConfig struct, Payment PaymentConfig `json:"payment"`
 pkg openrails/billing, type CustomerContact struct
@@ -2430,6 +2432,11 @@ pkg openrails/billing, type MerchantConfigurationState struct, DisplayName strin
 pkg openrails/billing, type MerchantConfigurationState struct, PlatformVault PlatformVaultState `json:"platform_vault"`
 pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, embedded MerchantSettings
+pkg openrails/billing, type MerchantCurrency struct
+pkg openrails/billing, type MerchantCurrency struct, Code catalog.Currency `json:"code"`
+pkg openrails/billing, type MerchantCurrency struct, Name string `json:"name"`
+pkg openrails/billing, type MerchantCurrency struct, Scale int `json:"scale"`
+pkg openrails/billing, type MerchantCurrency struct, Symbol string `json:"symbol,omitempty"`
 pkg openrails/billing, type MerchantDeclaration struct
 pkg openrails/billing, type MerchantDeclaration struct, Binding *MerchantBinding `yaml:"-"`
 pkg openrails/billing, type MerchantDeclaration struct, Issuer string `yaml:"-"`
@@ -2520,6 +2527,7 @@ pkg openrails/billing, type MerchantSettings struct, CardVault string `json:"car
 pkg openrails/billing, type MerchantSettings struct, ChargePSPs []string `json:"charge_psps,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CollectionThreshold *int64 `json:"collection_threshold,omitempty,string"`
+pkg openrails/billing, type MerchantSettings struct, Currencies []MerchantCurrency `json:"currencies,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, MonthlyFloor *int64 `json:"monthly_floor,omitempty,string"`

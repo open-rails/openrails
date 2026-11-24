@@ -33,6 +33,7 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 		"billing_policies":                      p.BillingPolicies != nil,
 		"billing_policy_bindings":               p.BillingPolicyBindings != nil,
 		"delegated_invoker_wasted_spend_limits": p.DelegatedInvokerWastedSpendLimits != nil,
+		"currencies":                            p.Currencies != nil,
 	} {
 		if _, exists := document[name]; present && !exists {
 			document[name] = json.RawMessage("[]")

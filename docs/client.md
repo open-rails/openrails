@@ -356,7 +356,7 @@ and `charge_psps` (where new cards are saved and which PSPs take new charges),
 bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
 `monthly_floor`, `collection_threshold`, `billing_period_boundary`),
 `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access` and `usage_gate_safe_spend`. `from_email` and
+`provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and
 `alert_email` are each one mailbox, bare or named. Beside the settings, the
 merchant's `messages` document configures its [customer messages](#customer-messages).
 
@@ -364,6 +364,8 @@ merchant's `messages` document configures its [customer messages](#customer-mess
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
 Without rules: stripe, nmi, ccbill, solana, the first that can serve the price.
 Fallback is pre-charge only: a decline never moves to a second processor.
+
+`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry. It is never money: `CreatePrice`, a catalog's credit grants and rate cards, credit grants, balances, admissions and the money settings above refuse it with `merchant_unit_unsupported`, a catalog document cannot price in it, so nothing is charged or paid in it, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings.
 
 ## Catalog
 
@@ -1343,7 +1345,7 @@ curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/entitlements/check" \
 - **Money** is a decimal string of the currency's native units named `amount`
   beside a `currency` (`{"amount": "9990000", "currency": "USD"}`); a numeric
   amount is refused. Parse with `BigInt` or an exact decimal. `GET /v1/config`'s
-  `currencies` gives each scale.
+  `currencies` gives each scale; a merchant's own units are in `GET /v1/me/config`'s `currencies`.
 - **Ids** are prefixed text accepted only in their own spelling (`prod_`, `sub_`,
   `pay_`, `pm_`, `ord_`, `psp_`, `oat_`, `lse_`, …); customers and merchants are
   UUIDs; a price id is URL-encoded as a path segment.

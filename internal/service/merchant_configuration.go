@@ -280,5 +280,8 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.DelegatedInvokerWastedSpendLimits != nil {
 		current.DelegatedInvokerWastedSpendLimits = patch.DelegatedInvokerWastedSpendLimits
 	}
+	if patch.Currencies != nil {
+		current.Currencies = patch.Currencies
+	}
 	return current
 }
