@@ -582,7 +582,7 @@
       "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
     ],
     "OR-J24-S31": [
-      "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
+      "TestLeaseVersions/OR-J24-S31/a-sync-takes-no-customer-lock-and-one-that-cannot-take-its-locks-in-time-fails-fast"
     ],
     "OR-J24-S32": [
       "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-decide-apart"

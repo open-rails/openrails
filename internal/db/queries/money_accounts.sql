@@ -71,6 +71,51 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND a.account_type = 'customer_units'
 LIMIT 1;
 
+-- name: ListViewCapacities :many
+-- GetAdmissionCapacity for many customers in one currency, as gates' views
+-- start from: one lease's in-flight report left out. A customer with no
+-- balance account has none.
+SELECT
+    c.id::uuid AS customer_id,
+    COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
+    (COALESCE((SELECT SUM(hp.held)
+              FROM billing.limit_hold_parts hp
+              JOIN billing.limit_holds lh ON lh.merchant_id = hp.merchant_id AND lh.id = hp.hold_id AND lh.created_at = hp.hold_created_at
+             WHERE hp.merchant_id = sqlc.arg(merchant_id)::uuid AND hp.customer_id = c.id AND hp.limit_key = 'balance'
+               AND lh.currency = sqlc.arg(currency)::text AND lh.state = 'open'
+               AND hp.hold_created_at >= sqlc.arg(held_since)::timestamptz AND lh.created_at >= sqlc.arg(held_since)::timestamptz
+               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
+                   ELSE lh.created_at > sqlc.arg(lease_live_since)::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+                       AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
+     + COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = c.id
+               AND f.limit_key = 'balance' AND f.unit = sqlc.arg(currency)::text
+               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
+               AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0)
+     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= sqlc.arg(as_of)::timestamptz
+         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
+       FROM billing.credit_grants g
+       WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.customer_id = c.id AND g.unit = sqlc.arg(currency)::text
+         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
+     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+              FROM billing.running_charges rc
+             WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id = c.id AND rc.currency = sqlc.arg(currency)::text AND rc.stopped_at IS NULL), 0))::bigint AS held,
+    CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
+    COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
+    COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
+    COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
+FROM unnest(sqlc.arg(customer_ids)::uuid[]) AS c(id)
+LEFT JOIN billing.ledger_accounts a
+  ON a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = c.id
+ AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_units'
+LEFT JOIN billing.money_settings s
+  ON s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = c.id AND s.currency = sqlc.arg(currency)::text
+LEFT JOIN billing.ledger_accounts ar
+  ON ar.merchant_id = sqlc.arg(merchant_id)::uuid AND ar.customer_id = c.id
+ AND ar.currency = sqlc.arg(currency)::text AND ar.account_type = 'customer_owed';
+
 -- name: LockMoneyAccountSettings :one
 SELECT * FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)

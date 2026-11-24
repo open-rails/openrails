@@ -294,6 +294,42 @@ WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND minute >= toSt
 	return total, err
 }
 
+// MinuteAmounts are MinuteAmount for many customers since one instant, with
+// no upper bound, in one read; a customer with none is absent.
+func (s *Store) MinuteAmounts(ctx context.Context, customers []billing.CustomerID, currency string, since time.Time) (map[billing.CustomerID]int64, error) {
+	out := map[billing.CustomerID]int64{}
+	if len(customers) == 0 {
+		return out, nil
+	}
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sql := fmt.Sprintf(`SELECT customer_id, sum(amount) FROM {database}.usage_minutes
+WHERE merchant_id = %s AND customer_id IN (%s) AND currency = %s AND minute >= toStartOfMinute(%s)
+GROUP BY customer_id`, mid, customerList(customers), stringLiteral(currency), timeLiteral(since))
+	err = s.query(ctx, "read usage minutes", sql, func(rows interface{ Scan(...any) error }) error {
+		var customer uuid.UUID
+		var total int64
+		if err := rows.Scan(&customer, &total); err != nil {
+			return err
+		}
+		out[billing.CustomerID(customer)] = total
+		return nil
+	})
+	return out, err
+}
+
+// customerList is customers as a deduplicated IN list.
+func customerList(customers []billing.CustomerID) string {
+	who := make([]string, 0, len(customers))
+	for _, c := range customers {
+		who = append(who, uuidLiteral(uuid.UUID(c)))
+	}
+	slices.Sort(who)
+	return strings.Join(slices.Compact(who), ", ")
+}
+
 // HistoryBucket is the length of a usage history bucket: every zone's
 // offset is a multiple of it, so buckets fold into any zone's days.
 const HistoryBucket = 15 * time.Minute

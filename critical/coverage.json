@@ -766,7 +766,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the unposted mark) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -781,7 +781,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers in one insert, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
       "id": "OR-J24-S36",
