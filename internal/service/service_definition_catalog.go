@@ -394,11 +394,68 @@ func (s *Service) createPriceCommand(ctx context.Context, req billing.CreatePric
 		return nil, apperr.Invalidf("exactly one of product_id, product_key and product_data is required")
 	}
 	if req.ProductData != nil {
+		// A Solana plan is published here, before the catalog transaction and
+		// its lock; the transaction only binds it.
+		links, err := s.inlinePriceLinks(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
+			scoped.catalogPreparedLinks = links
 			return scoped.createPrice(ctx, req)
 		})
 	}
 	return s.createPrice(ctx, req)
+}
+
+// inlinePriceLinks are the provider links of a price created with its
+// product, made outside any transaction: the product's id follows from its
+// key and the price's from its terms, so neither needs to exist yet.
+func (s *Service) inlinePriceLinks(ctx context.Context, req billing.CreatePriceParams) (map[[2]string]map[string]map[string]string, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	products, prices, err := s.requireCatalogServices()
+	if err != nil {
+		return nil, err
+	}
+	productKey := strings.TrimSpace(req.ProductData.Key)
+	if productKey == "" {
+		return nil, apperr.Invalidf("product_data requires key and display_name")
+	}
+	product, err := products.GetByKey(ctx, productKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		product, err = &models.Product{ID: uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), productKey), Key: productKey}, nil
+	}
+	if err != nil {
+		return nil, productLookup(err)
+	}
+	req.ProductData = nil
+	req.ProductID = billing.ProductID(product.ID)
+	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
+	defaultRecurringAccess(&req)
+	if err := validateCatalogPriceTerms(req); err != nil {
+		return nil, err
+	}
+	key, _ := resolvePriceKey(product, req)
+	priceID := newPriceID(product.ID, key, req)
+	existing, err := prices.FindByTerms(ctx, req, key)
+	if err == nil {
+		priceID = existing.ID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	links, err := s.createPriceLinks(ctx, req, priceID, existing)
+	if err != nil {
+		return nil, err
+	}
+	return map[[2]string]map[string]map[string]string{{productKey, key}: links}, nil
 }
 
 func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
@@ -463,8 +520,11 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		return nil, apperr.Invalidf("price key %q is a provider price; create ours under a key of its own", key)
 	}
 	rails := map[string]map[string]string{}
-	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, req.Key}]; s.localCatalogOnly && ok {
+	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, key}]; ok {
 		rails = cloneRails(prepared)
+	} else if s.catalogWriteLocked {
+		// A provider call never runs under the catalog lock.
+		return nil, fmt.Errorf("price %q has no provider links prepared before the catalog transaction", key)
 	} else if rails, err = s.createPriceLinks(ctx, req, priceID, existing); err != nil {
 		return nil, err
 	}

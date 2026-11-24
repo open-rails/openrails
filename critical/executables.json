@@ -2120,6 +2120,9 @@
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
+    ],
+    "OR-J37-S71": [
+      "TestSolanaCatalog/OR-J37-S71/a-price-created-with-its-product-publishes-its-plan-outside-the-catalog-lock"
     ]
   }
 }
