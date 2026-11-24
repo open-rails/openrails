@@ -456,7 +456,7 @@ products:
 		require.Error(t, err, "usage needs an event store")
 
 		occupied, client := archiveTarget(t, source)
-		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded')",
+		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome, occurred_at, admitted_at, ingested_at) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded', now64(6), now64(6), now64(6))",
 			source.alpha.MerchantID().String(), customer.String()))
 		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.Error(t, err, "a merchant with usage in the store is not empty")
