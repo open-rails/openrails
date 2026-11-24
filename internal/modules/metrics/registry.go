@@ -73,6 +73,8 @@ const (
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
+	FamCheckouts      Family = "checkouts"       // flow over checkouts: orders started for a customer to pay (created_at)
+	FamSales          Family = "sales"           // flow over paid checkouts (completed_at)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -193,7 +195,20 @@ var Dimensions = []Dimension{
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
-	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined; purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; usage succeeded | failed"},
+	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined; purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; checkouts and checkout_customers paid | abandoned | open; usage succeeded | failed"},
+	// Checkouts: from a checkout's creation to its payment, and who paid.
+	{Name: "step", Description: "how far a checkout got as of the range end: created | opened (its payment form loaded) | submitted (its customer asked to pay) | paid", Values: checkoutSteps},
+	{Name: "surface", Description: "where a checkout was paid: direct (the merchant's page, billing-ui or its own) | pay_url (the hosted payment page) | embedded (the payment page framed on the merchant's site)", Values: []string{"direct", "pay_url", "embedded"}},
+	{Name: "origin", Description: "who started a checkout: customer (their own order) | merchant (an order the merchant created for them)", Values: []string{"customer", "merchant"}},
+	{Name: "purchase_number", Description: "which paid purchase a checkout is for its customer: 1 (their first) | 2 | 3 | 4 | 5+", Values: []string{"1", "2", "3", "4", "5+"}},
+	{Name: "country", Description: "the customer's ISO 3166-1 alpha-2 country: the billing address's, else the card's, else the IP's a Cloudflare proxy reported; empty when none. On cash, the country of the checkout that bought the subscription"},
+	{Name: "country_source", Description: "which evidence gave country: billing_address | card | ip (empty when none)", Values: []string{"", "billing_address", "card", "ip"}},
+	{Name: "language", Description: "the customer's preferred language as its ISO 639 subtag (en, pt), empty when none"},
+	{Name: "attribution_source", Description: "where the merchant says the checkout came from (utm_source), empty when none"},
+	{Name: "attribution_medium", Description: "the merchant's attribution medium (utm_medium), empty when none"},
+	{Name: "attribution_campaign", Description: "the merchant's attribution campaign (utm_campaign), empty when none"},
+	{Name: "attribution_referrer", Description: "the host of the referrer the merchant reported, empty when none"},
+	{Name: "attribution_affiliate", Description: "the affiliate the merchant reported, empty when none"},
 	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return)", Values: []string{"payment", "refund", "chargeback", "dispute_won"}},
 	{Name: "payment_kind", Description: "sale | refund | chargeback | dispute_won", Values: []string{"sale", "refund", "chargeback", "dispute_won"}},
 	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
@@ -246,32 +261,132 @@ var (
 	usageOutcomes    = []string{"succeeded", "failed"}
 )
 
+// A checkout's facts as dimensions of the order aliased o.
+func checkoutFacts(o string) map[string]string {
+	return map[string]string{
+		"country": `COALESCE(` + o + `.billing_country, ` + o + `.card_country, ` + o + `.ip_country, '')`,
+		"country_source": `CASE WHEN ` + o + `.billing_country IS NOT NULL THEN 'billing_address' WHEN ` + o + `.card_country IS NOT NULL THEN 'card'
+			WHEN ` + o + `.ip_country IS NOT NULL THEN 'ip' ELSE '' END`,
+		"language":              `COALESCE(split_part(` + o + `.language, '-', 1), '')`,
+		"attribution_source":    `COALESCE(` + o + `.attribution_source, '')`,
+		"attribution_medium":    `COALESCE(` + o + `.attribution_medium, '')`,
+		"attribution_campaign":  `COALESCE(` + o + `.attribution_campaign, '')`,
+		"attribution_referrer":  `COALESCE(` + o + `.attribution_referrer, '')`,
+		"attribution_affiliate": `COALESCE(` + o + `.attribution_affiliate, '')`,
+	}
+}
+
+// checkoutOf is the checkout a payment's money is reported under: its own
+// order when that is a checkout, else the checkout that bought the
+// subscription its order bills.
+const checkoutOf = `LEFT JOIN billing.orders paid_order ON paid_order.merchant_id = p.merchant_id AND paid_order.id = p.order_id
+LEFT JOIN billing.orders co ON co.merchant_id = p.merchant_id
+	AND co.id = COALESCE(paid_order.checkout_order_id, CASE WHEN paid_order.purchase_number IS NOT NULL THEN paid_order.id END)`
+
+// checkoutPriceJoin attributes a checkout to a price when every line names
+// the same one, as payments do.
+const checkoutPriceJoin = `LEFT JOIN LATERAL (
+  SELECT min(l.price_id::text)::uuid AS price_id
+  FROM billing.order_lines l WHERE l.merchant_id=o.merchant_id AND l.order_id=o.id
+  HAVING count(*) = count(l.price_id) AND count(DISTINCT l.price_id)=1
+) checkout_line ON true
+LEFT JOIN billing.prices opr ON opr.merchant_id=o.merchant_id AND opr.id=checkout_line.price_id`
+
+// A checkout's own dimensions, on checkouts and sales.
+func checkoutDimExprs(extra map[string]string) map[string]string {
+	out := checkoutFacts("o")
+	for k, v := range map[string]string{
+		"currency":        `o.currency`,
+		"origin":          `o.origin`,
+		"surface":         `CASE WHEN o.embedded THEN 'embedded' WHEN o.pay_url_secret_hash IS NOT NULL THEN 'pay_url' ELSE 'direct' END`,
+		"purchase_number": `CASE WHEN o.purchase_number >= 5 THEN '5+' ELSE o.purchase_number::text END`,
+		"product_id":      `COALESCE('prod_' || opr.product_id::text, '')`,
+		"price_id":        `COALESCE(opr.public_id, '')`,
+	} {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
+// checkoutSteps is the funnel a checkout goes down, in order.
+var checkoutSteps = []string{"created", "opened", "submitted", "paid"}
+
+// A checkout's furthest step and outcome as of the range end: paid once
+// completed, abandoned once closed or past its expiry, open otherwise.
+const (
+	checkoutStep = `CASE WHEN o.completed_at <= @to THEN 'paid' WHEN o.submitted_at <= @to THEN 'submitted'
+		WHEN o.opened_at <= @to THEN 'opened' ELSE 'created' END`
+	checkoutOutcome = `CASE WHEN o.completed_at <= @to THEN 'paid'
+		WHEN COALESCE(o.canceled_at, o.expired_at, o.expires_at) <= @to THEN 'abandoned' ELSE 'open' END`
+)
+
+func checkoutJoins() map[string]string {
+	return map[string]string{"product_id": checkoutPriceJoin, "price_id": checkoutPriceJoin}
+}
+
+// paymentJoins are the payments family's joins: the price a payment's order
+// sold, and the checkout it is reported under.
+func paymentJoins() map[string]string {
+	out := map[string]string{"product_id": paymentPriceJoin, "price_id": paymentPriceJoin, "billing_cycle": paymentPriceJoin}
+	for d := range checkoutFacts("co") {
+		out[d] = checkoutOf
+	}
+	return out
+}
+
+// paymentDimExprs are the payments family's dimensions, the checkout's facts
+// among them.
+func paymentDimExprs() map[string]string {
+	out := checkoutFacts("co")
+	for k, v := range map[string]string{
+		"currency":      `p.currency`,
+		"rail":          `p.rail`,
+		"psp":           `COALESCE('psp_' || p.psp_id::text, '')`,
+		"stream":        streamExpr,
+		"product_id":    `COALESCE('prod_' || pr.product_id::text, '')`,
+		"price_id":      `pr.public_id`,
+		"billing_cycle": billingCycleExpr,
+		"card_brand":    `COALESCE(p.card_brand, '')`,
+		"token_type":    `COALESCE(p.token_type, 'unknown')`,
+		"kind":          `COALESCE(p.attempt_kind, 'unknown')`,
+		"discount_code": `COALESCE(p.discount_code, '')`,
+		"cash_kind":     fmt.Sprintf(reversalKindOf, "payment"),
+		"payment_kind":  fmt.Sprintf(reversalKindOf, "sale"),
+	} {
+		out[k] = v
+	}
+	return out
+}
+
 // families declares each family's SQL skeleton inputs.
 var families = map[Family]familySpec{
-	FamPayments: {
+	FamCheckouts: {
 		Kind:     "flow",
-		From:     `billing.payments p`,
-		TimeExpr: `p.purchased_at`,
-		DimJoins: map[string]string{
-			"product_id":    paymentPriceJoin,
-			"price_id":      paymentPriceJoin,
-			"billing_cycle": paymentPriceJoin,
-		},
-		DimExprs: map[string]string{
-			"currency":      `p.currency`,
-			"rail":          `p.rail`,
-			"psp":           `COALESCE('psp_' || p.psp_id::text, '')`,
-			"stream":        streamExpr,
-			"product_id":    `COALESCE('prod_' || pr.product_id::text, '')`,
-			"price_id":      `pr.public_id`,
-			"billing_cycle": billingCycleExpr,
-			"card_brand":    `COALESCE(p.card_brand, '')`,
-			"token_type":    `COALESCE(p.token_type, 'unknown')`,
-			"kind":          `COALESCE(p.attempt_kind, 'unknown')`,
-			"discount_code": `COALESCE(p.discount_code, '')`,
-			"cash_kind":     fmt.Sprintf(reversalKindOf, "payment"),
-			"payment_kind":  fmt.Sprintf(reversalKindOf, "sale"),
-		},
+		From:     `billing.orders o`,
+		TimeExpr: `o.created_at`,
+		// Checkouts from their instrumentation, with something to pay.
+		BaseWhere: `o.purchase_number IS NOT NULL AND o.total > 0`,
+		DimJoins:  checkoutJoins(),
+		DimExprs:  checkoutDimExprs(map[string]string{"step": checkoutStep, "outcome": checkoutOutcome}),
+		DimValues: map[string][]string{"outcome": {"paid", "abandoned", "open"}},
+	},
+	FamSales: {
+		Kind:      "flow",
+		From:      `billing.orders o`,
+		TimeExpr:  `o.completed_at`,
+		BaseWhere: `o.purchase_number IS NOT NULL AND o.status = 'complete'`,
+		DimJoins:  checkoutJoins(),
+		DimExprs:  checkoutDimExprs(nil),
+	},
+	FamPayments: {
+		Kind:      "flow",
+		From:      `billing.payments p`,
+		TimeExpr:  `p.purchased_at`,
+		DimJoins:  paymentJoins(),
+		DimExprs:  paymentDimExprs(),
 		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}},
 	},
 	FamSubsNew: {
@@ -646,15 +761,18 @@ func quoted(values []string) string {
 
 // Dimension sets.
 var (
-	attemptDims     = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
-	purchaseDims    = []string{"currency", "rail", "psp", "owner", "card_entry"}
-	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
-	nmiHistDims     = []string{"psp", "nmi_kind", "category", "reason"}
-	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "kind", "discount_code"}
-	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
-	creditDims      = []string{"currency", "product_id", "customer"}
-	webhookDims     = []string{"rail", "psp"}
-	subscriptionDim = []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}
+	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
+	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
+	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
+	nmiHistDims  = []string{"psp", "nmi_kind", "category", "reason"}
+	cashDims     = append([]string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "kind", "discount_code"}, checkoutFactDims...)
+	// A checkout's facts, on checkouts, sales and the cash they brought.
+	checkoutFactDims = []string{"country", "country_source", "language", "attribution_source", "attribution_medium", "attribution_campaign", "attribution_referrer", "attribution_affiliate"}
+	checkoutDims     = append([]string{"currency", "origin", "surface", "purchase_number", "product_id", "price_id"}, checkoutFactDims...)
+	usageDims        = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
+	creditDims       = []string{"currency", "product_id", "customer"}
+	webhookDims      = []string{"rail", "psp"}
+	subscriptionDim  = []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}
 	// What a sale and its reversals both carry.
 	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand"}
 )
@@ -683,6 +801,16 @@ func count(admits string) func(string) string {
 			return `COUNT(*) FILTER (WHERE ` + where + `)`
 		}
 		return `COUNT(*)`
+	}
+}
+
+// distinct counts the distinct values over the rows admits and extra narrow.
+func distinct(value, admits string) func(string) string {
+	return func(extra string) string {
+		if where := both(admits, extra); where != "" {
+			return `COUNT(DISTINCT ` + value + `) FILTER (WHERE ` + where + `)`
+		}
+		return `COUNT(DISTINCT ` + value + `)`
 	}
 }
 
@@ -732,6 +860,51 @@ var declared = []Measure{
 		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp for each PSP's",
 		Formula:     "payments(chargeback) / payments(sale)",
 		Dims:        reversalRateDims},
+	// --- checkouts: from opening a checkout to paying it, and who buys --------------
+	{Name: "checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Direction: Neutral,
+		Description: "checkouts (orders OpenRails started for a customer to pay, with a total) created in the bucket, by the step they reached (created, opened, submitted, paid) and their outcome as of the range end (paid, abandoned, open)",
+		Formula:     "COUNT(checkouts)",
+		Agg:         count(""),
+		Dims:        with(checkoutDims, "step", "outcome")},
+	{Name: "checkout_value", Class: ClassAdditive, Family: FamCheckouts, Money: true, Unit: UnitMoney, Direction: Neutral,
+		Description: "the totals of checkouts created in the bucket; by outcome, the value paid, abandoned or still open",
+		Formula:     "SUM(total) of checkouts",
+		Agg:         sum(`o.total`, ""),
+		Dims:        with(checkoutDims, "step", "outcome")},
+	{Name: "checkout_conversion_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "checkouts", NumSlice: Slice{"outcome": {"paid"}},
+		Den: "checkouts", DenSlice: Slice{"outcome": {"paid", "abandoned"}, "step": {"opened", "submitted", "paid"}},
+		Description: "paid / settled checkouts whose payment form loaded: of the customers who saw it, the share who paid",
+		Formula:     "checkouts(paid) / checkouts(paid, abandoned; opened, submitted, paid)"},
+	{Name: "checkout_submission_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "checkouts", NumSlice: Slice{"outcome": {"paid", "abandoned"}, "step": {"submitted", "paid"}},
+		Den: "checkouts", DenSlice: Slice{"outcome": {"paid", "abandoned"}, "step": {"opened", "submitted", "paid"}},
+		Description: "settled checkouts whose customer asked to pay / those whose payment form loaded; 1 - this is opened and left",
+		Formula:     "checkouts(paid, abandoned; submitted, paid) / checkouts(paid, abandoned; opened, submitted, paid)"},
+	{Name: "checkout_customers", Class: ClassDistinct, Family: FamCheckouts, Unit: "count", Direction: Neutral,
+		Description: "distinct customers with a checkout created in the bucket; by outcome, those who paid one or left one",
+		Formula:     "COUNT(DISTINCT customers) over checkouts",
+		Agg:         distinct(`o.customer_id`, ""),
+		Dims:        with(checkoutDims, "step", "outcome")},
+	{Name: "customer_conversion_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "checkout_customers", NumSlice: Slice{"outcome": {"paid"}},
+		Den: "checkout_customers", DenSlice: Slice{"outcome": {"paid", "abandoned"}, "step": {"opened", "submitted", "paid"}},
+		Description: "customers who paid a checkout / customers with a settled checkout whose payment form loaded: conversion per customer, whatever they retried",
+		Formula:     "checkout_customers(paid) / checkout_customers(paid, abandoned; opened, submitted, paid)"},
+	{Name: "sales", Class: ClassAdditive, Family: FamSales, Unit: "count", Direction: UpIsGood,
+		Description: "checkouts paid in the bucket, dated when paid; by purchase_number, first and repeat purchases",
+		Formula:     "COUNT(paid checkouts)",
+		Agg:         count(""),
+		Dims:        checkoutDims},
+	{Name: "sales_customers", Class: ClassDistinct, Family: FamSales, Unit: "count", Direction: UpIsGood,
+		Description: "distinct customers with a sale in the bucket; by purchase_number, first-time and returning buyers",
+		Formula:     "COUNT(DISTINCT customers) over paid checkouts",
+		Agg:         distinct(`o.customer_id`, ""),
+		Dims:        checkoutDims},
+	{Name: "repeat_purchase_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "sales_customers", NumSlice: Slice{"purchase_number": {"2", "3", "4", "5+"}}, Den: "sales_customers",
+		Description: "customers whose sale in the bucket was not their first purchase / customers with a sale",
+		Formula:     "sales_customers(purchase_number 2+) / sales_customers"},
 	// --- subscriptions ------------------------------------------------------------
 	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count", Direction: UpIsGood,
 		Description: "subscriptions started in the bucket (excludes never-activated pending)",
@@ -975,6 +1148,7 @@ var Caveats = []string{
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
 	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
+	"checkouts and sales count checkouts from their instrumentation (a purchase number set), dated by creation and payment; a zero-total checkout is a sale but not a checkout. Step and outcome are as of the range end; a checkout past its expiry is abandoned. Unpaid checkouts that never reached a payment attempt are kept 397 days, so checkout measures reach back 13 months. Attribution is the merchant's, unverified; country and language are the customer's, never their address",
 }
 
 // registry completes the declared measures: a funnel measure's Expr from its
@@ -1141,6 +1315,12 @@ func (m *Measure) allowsDim(dim string) bool {
 // valuesOf is dim's closed vocabulary on m; nil is open.
 func (m *Measure) valuesOf(dim string) []string {
 	return m.values[dim]
+}
+
+// Values is a dimension's closed vocabulary on the measure, in its order;
+// nil when open.
+func (m *Measure) Values(dim string) []string {
+	return m.valuesOf(dim)
 }
 
 // composite reports whether the measure is computed from two others.

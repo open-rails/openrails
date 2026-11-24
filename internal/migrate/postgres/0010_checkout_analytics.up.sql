@@ -76,6 +76,11 @@ CREATE INDEX orders_checkout_order_id_idx ON billing.orders (merchant_id, checko
     WHERE checkout_order_id IS NOT NULL;
 CREATE INDEX subscriptions_checkout_order_id_idx ON billing.subscriptions (merchant_id, checkout_order_id)
     WHERE checkout_order_id IS NOT NULL;
+-- Checkout measures read checkouts by creation and sales by payment.
+CREATE INDEX orders_checkout_created_at_idx ON billing.orders (merchant_id, created_at)
+    WHERE purchase_number IS NOT NULL;
+CREATE INDEX orders_sale_completed_at_idx ON billing.orders (merchant_id, completed_at)
+    WHERE purchase_number IS NOT NULL AND status = 'complete';
 
 -- Naming its checkout is not a new version of a subscription.
 CREATE OR REPLACE FUNCTION billing.subscriptions_row_version() RETURNS trigger

@@ -17366,13 +17366,17 @@
           },
           "credits": {
             "type": "boolean"
+          },
+          "checkouts": {
+            "type": "boolean"
           }
         },
         "required": [
           "subscriptions",
           "card_payments",
           "usage",
-          "credits"
+          "credits",
+          "checkouts"
         ]
       },
       "DashboardWidget": {

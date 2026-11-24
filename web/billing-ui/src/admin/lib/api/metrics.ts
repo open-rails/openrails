@@ -60,7 +60,15 @@ export interface MetricsResult {
 // A kpi is a tile's value, its change and a sparkline; a heading is a
 // section title with no query.
 export type WidgetViz =
-  "kpi" | "stat" | "line" | "area" | "bar" | "donut" | "table" | "heading"
+  | "kpi"
+  | "stat"
+  | "line"
+  | "area"
+  | "bar"
+  | "donut"
+  | "table"
+  | "funnel"
+  | "heading"
 
 // CHART_VIZ are the vizzes a widget with a query may take.
 export const CHART_VIZ: WidgetViz[] = [
@@ -71,6 +79,7 @@ export const CHART_VIZ: WidgetViz[] = [
   "bar",
   "donut",
   "table",
+  "funnel",
 ]
 
 export interface WidgetGrid {

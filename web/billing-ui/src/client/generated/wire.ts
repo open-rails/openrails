@@ -867,6 +867,7 @@ export type DashboardProfile = {
   card_payments: boolean
   usage: boolean
   credits: boolean
+  checkouts: boolean
 }
 
 export type DashboardWidget = {

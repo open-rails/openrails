@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 507,
+  "scenario_count": 508,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2537,6 +2537,11 @@
       "id": "OR-J47-S08",
       "journey": "J47",
       "name": "A subscription's renewals name the checkout that bought it, whose country and attribution they carry"
+    },
+    {
+      "id": "OR-J47-S03",
+      "journey": "J47",
+      "name": "Checkout measures read the funnel as it happened: checkouts by step and outcome, conversion, submission and customer conversion rates, sales by purchase number, repeat purchase rate, and cash by country and source; the overview's checkout section answers and saves"
     }
   ]
 }

@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -172,6 +173,111 @@ func TestCheckoutFunnel(t *testing.T) {
 		tried := checkoutOf(t, a, order.ID)
 		require.NotNil(t, tried.OpenedAt)
 		require.NotNil(t, tried.SubmittedAt, "abandoned after a submission")
+	})
+	t.Run("OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened", func(t *testing.T) {
+		a, p := newPaymentWorld(t, cloudflareLoopback)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		sale := func(key string) billing.PriceID {
+			_, price := publicSale(t, a, key, 10_000_000, nil)
+			return price.ID
+		}
+		via := func(country string, more map[string]string) map[string]string {
+			out := map[string]string{"CF-IPCountry": country, "X-Forwarded-For": "203.0.113.90"}
+			for k, v := range more {
+				out[k] = v
+			}
+			return out
+		}
+		as := func(token string, method, path string, body any) {
+			status, raw := a.request(t, method, path, token, body)
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		card := func() string { return p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}) }
+
+		// Alice buys at once from France, from a newsletter: her first purchase.
+		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: sale("measures-first")}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.OrderPaymentParams{Token: card()}, Attribution: &billing.OrderAttribution{Source: ptr("newsletter")}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, via("FR", map[string]string{"Idempotency-Key": "measures-first"}))
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		// She opens a second checkout from Germany and pays it.
+		second := openCheckout(t, a, sale("measures-second"), &billing.OrderAttribution{Source: ptr("search")}, via("DE", nil))
+		as(a.aliceToken, http.MethodGet, "/v1/me/orders/"+second.ID.String(), nil)
+		status, _ = payCheckout(t, a, second, billing.OrderPaymentParams{Token: card()}, "measures-second", nil)
+		require.Equal(t, http.StatusOK, status)
+		// Bob opens one and leaves.
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.bobToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: sale("measures-left")}}}, via("FR", nil))
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var left billing.Order
+		require.NoError(t, json.Unmarshal(raw, &left))
+		as(a.bobToken, http.MethodGet, "/v1/me/orders/"+left.ID.String(), nil)
+		as(a.bobToken, http.MethodPost, "/v1/me/orders/"+left.ID.String()+"/cancel", nil)
+		// Alice tries a card that is declined, and leaves.
+		tried := openCheckout(t, a, sale("measures-tried"), nil, nil)
+		as(a.aliceToken, http.MethodGet, "/v1/me/orders/"+tried.ID.String(), nil)
+		status, _ = payCheckout(t, a, tried, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "0002", Decline: "insufficient_funds"})}, "measures-tried", nil)
+		require.Equal(t, http.StatusPaymentRequired, status)
+		as(a.aliceToken, http.MethodPost, "/v1/me/orders/"+tried.ID.String()+"/cancel", nil)
+		// A link the merchant sent her expires unopened.
+		_, err := a.alphaRemote.CreateOrder(t.Context(), "measures-unopened", billing.CreateOrderParams{CustomerID: customer,
+			Lines: []billing.OrderLineParams{{PriceID: sale("measures-unopened")}}, ExpiresAt: ptr(a.clock.Now().Add(time.Hour))})
+		require.NoError(t, err)
+		a.clock.Advance(2 * time.Hour)
+		// One is open, its form loaded.
+		pending := openCheckout(t, a, sale("measures-open"), nil, nil)
+		as(a.aliceToken, http.MethodGet, "/v1/me/orders/"+pending.ID.String(), nil)
+
+		window := &billing.MetricsRange{Last: "7d"}
+		usd := map[string][]string{"currency": {"USD"}}
+		funnel := map[string]int64{}
+		for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"checkouts"}, By: []string{"step", "outcome"}, Range: window}) {
+			if n := whole(t, row["checkouts"]); n != 0 {
+				funnel[fmt.Sprint(row["step"])+"/"+fmt.Sprint(row["outcome"])] = n
+			}
+		}
+		require.Equal(t, map[string]int64{"paid/paid": 2, "submitted/abandoned": 1, "opened/abandoned": 1, "created/abandoned": 1, "opened/open": 1}, funnel)
+		rates := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"checkout_conversion_rate", "checkout_submission_rate", "customer_conversion_rate"}, Range: window}))
+		require.InDelta(t, 2.0/4, fraction(t, rates["checkout_conversion_rate"]), 1e-12, "paid / settled opened: the unopened link and the open one are out")
+		require.InDelta(t, 3.0/4, fraction(t, rates["checkout_submission_rate"]), 1e-12)
+		require.InDelta(t, 1.0/2, fraction(t, rates["customer_conversion_rate"]), 1e-12, "alice paid, bob left")
+		require.Equal(t, map[string]int64{"paid": 20_000_000, "abandoned": 30_000_000, "open": 10_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"checkout_value"}, By: []string{"outcome"}, Filters: usd, Range: window}), "outcome", "checkout_value"))
+
+		sales := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"sales", "sales_customers", "repeat_purchase_rate"}, Range: window}))
+		require.EqualValues(t, 2, whole(t, sales["sales"]))
+		require.EqualValues(t, 1, whole(t, sales["sales_customers"]))
+		require.InDelta(t, 1.0, fraction(t, sales["repeat_purchase_rate"]), 1e-12, "her second purchase makes her a repeat buyer")
+		require.Equal(t, map[string]int64{"1": 1, "2": 1},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"purchase_number"}, Range: window}), "purchase_number", "sales"))
+
+		// Where purchases and cash come from: country and source.
+		require.Equal(t, map[string]int64{"FR": 10_000_000, "DE": 10_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"country"}, Filters: usd, Range: window}), "country", "cash"))
+		require.Equal(t, map[string]int64{"newsletter": 1, "search": 1},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"attribution_source"}, Range: window}), "attribution_source", "sales"))
+		require.Equal(t, map[string]int64{"newsletter": 10_000_000, "search": 10_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_source"}, Filters: usd, Range: window}), "attribution_source", "cash"))
+
+		// The overview carries the checkout section, and each of its widgets answers.
+		board, err := a.alpha.GetDashboard(t.Context())
+		require.NoError(t, err)
+		require.True(t, board.Profile.Checkouts)
+		ids := map[string]bool{}
+		for _, w := range board.Widgets {
+			ids[w.ID] = true
+		}
+		for _, id := range []string{"kpi-checkout-conversion", "section-checkouts", "checkout-funnel", "checkouts-abandoned", "customers-by-purchase", "repeat-purchase-rate", "sales-by-country", "sales-by-source"} {
+			require.True(t, ids[id], id)
+		}
+		overviewAnswers(t, a.alpha, board.Widgets, "USD")
+		_, err = a.alpha.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: board.Widgets})
+		require.NoError(t, err, "the overview is a layout the merchant may save")
+		notFunnel := billing.DashboardWidget{ID: "cash-funnel", Title: "Cash", Viz: "funnel", Grid: billing.DashboardGrid{W: 6, H: 4},
+			Query: billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"cash_kind"}, Range: window}}
+		_, err = a.alpha.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: []billing.DashboardWidget{notFunnel}})
+		var refusal *billing.StatusError
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, billing.CodeDashboardInvalid, refusal.Code)
+		require.Contains(t, fmt.Sprint(refusal.Metadata), "funnel_shape", "a funnel draws a count, never money")
 	})
 	t.Run("OR-J47-S04/purchase-number-counts-the-customers-paid-purchases", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
@@ -396,6 +502,13 @@ func TestCheckoutFunnel(t *testing.T) {
 		checkout := checkoutOf(t, a, *renewal.Renewal.CheckoutOrderID)
 		require.Equal(t, "SE", *checkout.Country)
 		require.Equal(t, "renewals", *checkout.Attribution.Campaign)
+		// The renewal's cash counts where and from what its checkout came.
+		window := &billing.MetricsRange{From: due.Add(-48 * time.Hour).Format(time.DateOnly), To: due.Add(24 * time.Hour).Format(time.DateOnly)}
+		usd := map[string][]string{"currency": {"USD"}}
+		require.Equal(t, map[string]int64{"SE": 20_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"country"}, Filters: usd, Range: window}), "country", "cash"))
+		require.Equal(t, map[string]int64{"renewals": 20_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_campaign"}, Filters: usd, Range: window}), "attribution_campaign", "cash"))
 	})
 }
 

@@ -10,7 +10,7 @@ migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a814904
 migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
 migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
 migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50edb9295edb31f349d302a9e18e0590bd2419f62bc58
-migration 0010_checkout_analytics.up.sql sha256:d9d92855f0ff694fafdbf9aea826c3a2ef00d42a0f3d67d05eb7287fca6e5abc
+migration 0010_checkout_analytics.up.sql sha256:da221cbf1e0f11740711df8dfb79dadd8a843f5700f4c6778b532d4f87693269
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1410,6 +1410,7 @@ table billing.orders
   constraint orders_uncollectible_check CHECK ((((status = 'uncollectible'::text) = (uncollectible_at IS NOT NULL)) AND ((status <> 'uncollectible'::text) OR (origin = 'usage'::text))))
   constraint orders_usage_check CHECK ((((origin = 'usage'::text) = ((amount_paid IS NOT NULL) AND (collection_method IS NOT NULL) AND (tax IS NOT NULL) AND (billing_contacts IS NOT NULL) AND (collection_failure_count IS NOT NULL))) AND ((amount_paid IS NULL) OR ((amount_paid >= 0) AND (amount_paid <= total))) AND ((status <> 'complete'::text) OR (amount_paid IS NULL) OR (amount_paid = total)) AND (collection_failure_count >= 0) AND ((next_collection_attempt_at IS NULL) OR (origin = 'usage'::text)) AND ((collection_failed_at IS NULL) OR (origin = 'usage'::text))))
   constraint orders_void_check CHECK (((status = 'void'::text) = (voided_at IS NOT NULL)))
+  index CREATE INDEX orders_checkout_created_at_idx ON billing.orders USING btree (merchant_id, created_at) WHERE (purchase_number IS NOT NULL)
   index CREATE INDEX orders_checkout_order_id_idx ON billing.orders USING btree (merchant_id, checkout_order_id) WHERE (checkout_order_id IS NOT NULL)
   index CREATE INDEX orders_closed_at_unpaid_idx ON billing.orders USING btree (merchant_id, COALESCE(canceled_at, expired_at)) WHERE ((status = ANY (ARRAY['canceled'::text, 'expired'::text])) AND (payment_id IS NULL) AND (attempt_id IS NULL))
   index CREATE INDEX orders_created_at_id_idx ON billing.orders USING btree (merchant_id, created_at DESC, id DESC)
@@ -1426,6 +1427,7 @@ table billing.orders
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))
+  index CREATE INDEX orders_sale_completed_at_idx ON billing.orders USING btree (merchant_id, completed_at) WHERE ((purchase_number IS NOT NULL) AND (status = 'complete'::text))
   index CREATE INDEX orders_subscription_period_idx ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
   index CREATE INDEX orders_usage_collection_due_idx ON billing.orders USING btree (next_collection_attempt_at, merchant_id, id) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text) AND (next_collection_attempt_at IS NOT NULL))
   index CREATE INDEX orders_usage_open_idx ON billing.orders USING btree (merchant_id, customer_id, currency) WHERE ((origin = 'usage'::text) AND (status = ANY (ARRAY['open'::text, 'processing'::text, 'uncollectible'::text])))

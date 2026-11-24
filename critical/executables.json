@@ -1612,6 +1612,9 @@
     ],
     "OR-J47-S08": [
       "TestCheckoutFunnel/OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription"
+    ],
+    "OR-J47-S03": [
+      "TestCheckoutFunnel/OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened"
     ]
   }
 }

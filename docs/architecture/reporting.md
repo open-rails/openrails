@@ -5,7 +5,7 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 ## Concepts
 
 - **Measure**: a named aggregate with a class (`additive`, `distinct`, `ratio`, `difference`, `snapshot`), a unit (`money`, `count`, `ratio`, `days`, `seconds`), a group (`business` or `ops`), a direction (`up_is_good`, `down_is_good`, `neutral`), thresholds (a value and label a chart draws across it) and the dimensions it allows. Internal measures are components of others and cannot be requested.
-- **Funnel**: one measure per fact, split by an outcome or kind dimension, never a measure per outcome. `attempts` (`outcome`: approved, declined), `purchases` (approved, recovered, failed, open), `rebills` (approved, recovered, lost, open), `payments` (`payment_kind`) and `cash` (`cash_kind`) are funnels.
+- **Funnel**: one measure per fact, split by an outcome or kind dimension, never a measure per outcome. `attempts` (`outcome`: approved, declined), `purchases` (approved, recovered, failed, open), `rebills` (approved, recovered, lost, open), `checkouts` (`outcome`: paid, abandoned, open; `step`: created, opened, submitted, paid), `payments` (`payment_kind`) and `cash` (`cash_kind`) are funnels.
 - **Slice**: a funnel measure restricted to dimension values (`Slice{"outcome": {"approved", "recovered"}}`). A rate is a ratio measure whose `NumSlice` and `DenSlice` slice its funnel; the registry builds each slice as an internal measure from the funnel's `Agg` and the dimension's own SQL expression, so a rate and the dimension it slices cannot disagree. A sliced rate allows its funnel's dimensions less the sliced ones unless it declares its own.
 - **Dimension**: a group-by and filter axis: a closed `Values` list, a `Parse` for typed ids (`product_id`, `price_id`, `customer`), or free text. A family may give a dimension its own values (`DimValues`): `outcome` and `kind` differ by measure, and `/schema` lists them per measure as `dim_values`. `time` groups by the query's `grain`.
 - **Family**: the source a leaf measure reads, such as `payments`, `subs_snapshot`, `attempts`, `rebill_cycles`, `usage_charged` or `findings`. One statement runs per family a query touches.
@@ -15,21 +15,22 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 - **Compare**: `previous_period` runs the same plan over the preceding window of equal length, `previous_year` over the same window a year before.
 - **Removed**: `metrics.Removed` names each retired measure's replacement and `RemovedDimensions` each renamed dimension; a query naming one is refused with it. There are no aliases. `Deferred` lists the measures later work builds; naming one is refused as planned.
 - **Widget** (`billing.DashboardWidget`): `id`, `title`, `viz`, `query` (a `billing.MetricsQuery`), `grid` and `fixed_range`.
-- **Viz**: one of `dashboard.VizTypes`: `kpi`, `stat`, `line`, `area`, `bar`, `donut`, `table`, `heading`.
+- **Viz**: one of `dashboard.VizTypes`: `kpi`, `stat`, `line`, `area`, `bar`, `donut`, `table`, `funnel`, `heading`.
 - **Grid** (`billing.DashboardGrid`): `x`, `y`, `w`, `h` on the console's react-grid-layout grid.
 - **Fixed range**: the widget keeps its query's own range; other widgets follow the console's range picker, their saved range the default.
 - **Layout**: the merchant's ordered widget list, stored whole.
-- **Profile** (`billing.DashboardProfile`): whether the merchant has subscriptions, card payments, metered usage and purchased credits, read from data presence by `GetDashboardProfile`.
+- **Profile** (`billing.DashboardProfile`): whether the merchant has subscriptions, card payments, metered usage, purchased credits and checkouts, read from data presence by `GetDashboardProfile`.
 - **Health overview**: `DefaultWidgets(profile)`, answered with `is_default: true` and the profile while nothing is saved.
 
 ## Measures
 
-Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
+Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed`, `customers_at_depletion_risk`, `checkouts`, `checkout_value`, `checkout_conversion_rate`, `checkout_submission_rate`, `checkout_customers`, `customer_conversion_rate`, `sales`, `sales_customers` and `repeat_purchase_rate`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
 
 - `cash` is signed money by `cash_kind`: a payment and a won dispute add, a refund and a chargeback subtract; its total is net cash, gross of processor fees.
 - `payments` counts settled sales and reversals by `payment_kind`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket.
 - `purchases` and `rebills` take their outcome as of the range end: a purchase quiet for an hour without an approval has failed, a renewal past its 15-day dunning window uncollected is lost. `rebill_rate` is collected over closed renewals; `dunning_recovery_rate` is recovered over closed renewals whose first try failed or was missed.
 - `usage_charged` is priced usage by `charge`: charged, or forgiven by the customer's grace.
+- `checkouts` counts checkouts (orders OpenRails started for a customer to pay, with a total) by creation, with the `step` they reached and their `outcome` as of the range end ([orders](orders.md)); `checkout_value` sums their totals. `checkout_conversion_rate` is paid over settled checkouts whose payment form loaded (Stripe Checkout's completed over loaded); `checkout_submission_rate` the share of those whose customer asked to pay, so one less it is opened and left; `customer_conversion_rate` counts customers instead, whatever they retried. `sales` and `sales_customers` count paid checkouts by payment, `repeat_purchase_rate` the customers whose sale was not their first (`purchase_number`). Their dimensions are the checkout's facts: `country` and `country_source`, `language`, `attribution_source`, `attribution_medium`, `attribution_campaign`, `attribution_referrer`, `attribution_affiliate`, `purchase_number`, `origin` and `surface`; `cash` and `payments` take the facts of the checkout behind each payment, a renewal's being the checkout that bought its subscription.
 
 ## Ops view
 
@@ -37,12 +38,13 @@ The `ops` group is operator signals, queryable but off the health overview, each
 
 ## Health overview
 
-`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, Renewals in dunning (`rebills` open) and Rebill rate for subscriptions; Chargeback rate for card payments; Usage charged and Active customers for usage; Credits sold for credits. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
+`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, Renewals in dunning (`rebills` open) and Rebill rate for subscriptions; Chargeback rate for card payments; Usage charged and Active customers for usage; Credits sold for credits; Checkout conversion for checkouts. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits; Checkout and customers for checkouts: the checkout funnel, abandoned checkouts by step, conversion by surface, customers by purchase number, the repeat purchase rate, and sales and cash by country, language and source. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
 
 The widget kinds are general, so adding a tile or chart is adding a widget to `DefaultWidgets`:
 
 - `kpi`: the value over the range (a snapshot at its end), its change against the comparison, coloured by the measure's `direction`, a ratio's in points, and a sparkline: the console runs the same query by `time` at grain `auto`.
 - `heading`: a section title; its query is empty, which validation requires.
+- `funnel`: one count measure by one dimension whose values are ordered steps, with no time (`funnel_shape` otherwise); each bar is the rows that reached its step or went further, with its share of the step before.
 - `bar` and `area` stack signed values apart (`stackOffset` sign), so refunds stack below the axis.
 - `line` draws each of its measures' `thresholds` as a reference line.
 - The page's currency switch lists the currencies with cash, usage or credits in the range, defaults to the one with the most cash in major units, hides with one, and filters every widget all of whose measures allow `currency`. Money never sums across currencies.

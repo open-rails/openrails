@@ -38,7 +38,8 @@ const getDashboardProfile = `-- name: GetDashboardProfile :one
 SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_id = $1::uuid)::boolean AS has_subscriptions,
     EXISTS (SELECT 1 FROM billing.payments WHERE payments.merchant_id = $1::uuid AND payments.rail IN ('nmi', 'ccbill', 'stripe'))::boolean AS has_card_payments,
     EXISTS (SELECT 1 FROM billing.usage_daily WHERE usage_daily.merchant_id = $1::uuid)::boolean AS has_usage,
-    EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase')::boolean AS has_credits
+    EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase')::boolean AS has_credits,
+    EXISTS (SELECT 1 FROM billing.orders WHERE orders.merchant_id = $1::uuid AND purchase_number IS NOT NULL)::boolean AS has_checkouts
 `
 
 type GetDashboardProfileRow struct {
@@ -46,10 +47,12 @@ type GetDashboardProfileRow struct {
 	HasCardPayments  bool
 	HasUsage         bool
 	HasCredits       bool
+	HasCheckouts     bool
 }
 
 // What the merchant's data shows it sells: subscriptions, card payments,
-// metered usage and purchased credit lots. Decides the default dashboard.
+// metered usage, purchased credit lots and checkouts. Decides the default
+// dashboard.
 func (q *Queries) GetDashboardProfile(ctx context.Context, merchantID uuid.UUID) (GetDashboardProfileRow, error) {
 	row := q.db.QueryRow(ctx, getDashboardProfile, merchantID)
 	var i GetDashboardProfileRow
@@ -58,6 +61,7 @@ func (q *Queries) GetDashboardProfile(ctx context.Context, merchantID uuid.UUID)
 		&i.HasCardPayments,
 		&i.HasUsage,
 		&i.HasCredits,
+		&i.HasCheckouts,
 	)
 	return i, err
 }

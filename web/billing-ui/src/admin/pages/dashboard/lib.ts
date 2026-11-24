@@ -356,3 +356,43 @@ export function ownRange(range: MetricsRange | undefined): string {
   const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2]]!
   return `the last ${m[1]} ${unit}${m[1] === "1" ? "" : "s"}`
 }
+
+export interface FunnelStep {
+  key: string
+  value: number
+  // ofFirst is the share of the first step; fromPrevious of the step before.
+  ofFirst: number | null
+  fromPrevious: number | null
+}
+
+// funnelSteps reads a count by one ordered dimension (order lists its values
+// from the first step to the last) as the funnel it describes: each step is
+// the rows at it or further.
+export function funnelSteps(
+  result: MetricsResult,
+  order: string[]
+): FunnelStep[] {
+  const idx = indexColumns(result.columns)
+  const dim = idx.dims.find((d) => d.name !== "currency")
+  const measure = idx.measures[0]
+  if (!dim || !measure) return []
+  const at = new Map<string, number>()
+  for (const row of result.rows) {
+    const key = String(row[dim.index] ?? "")
+    at.set(key, (at.get(key) ?? 0) + Number(row[measure.index] ?? 0))
+  }
+  const keys = order.length > 0 ? order : [...at.keys()]
+  const steps: FunnelStep[] = []
+  let reached = 0
+  for (let i = keys.length - 1; i >= 0; i--) {
+    reached += at.get(keys[i]) ?? 0
+    steps.unshift({ key: keys[i], value: reached, ofFirst: null, fromPrevious: null })
+  }
+  const first = steps[0]?.value ?? 0
+  steps.forEach((step, i) => {
+    step.ofFirst = first > 0 ? step.value / first : null
+    const before = steps[i - 1]?.value ?? 0
+    step.fromPrevious = i > 0 && before > 0 ? step.value / before : null
+  })
+  return steps
+}

@@ -1916,6 +1916,7 @@ pkg openrails/billing, type DashboardGrid struct, X int `json:"x"`
 pkg openrails/billing, type DashboardGrid struct, Y int `json:"y"`
 pkg openrails/billing, type DashboardProfile struct
 pkg openrails/billing, type DashboardProfile struct, CardPayments bool `json:"card_payments"`
+pkg openrails/billing, type DashboardProfile struct, Checkouts bool `json:"checkouts"`
 pkg openrails/billing, type DashboardProfile struct, Credits bool `json:"credits"`
 pkg openrails/billing, type DashboardProfile struct, Subscriptions bool `json:"subscriptions"`
 pkg openrails/billing, type DashboardProfile struct, Usage bool `json:"usage"`

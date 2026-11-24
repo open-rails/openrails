@@ -50,6 +50,9 @@ func DefaultWidgets(p Profile) []Widget {
 	if p.Credits {
 		l.tile("kpi-credits-sold", "Credits sold", "credits_sold", nil)
 	}
+	if p.Checkouts {
+		l.tile("kpi-checkout-conversion", "Checkout conversion", "checkout_conversion_rate", nil)
+	}
 	if empty {
 		return l.widgets
 	}
@@ -102,7 +105,28 @@ func DefaultWidgets(p Profile) []Widget {
 		credits = append(credits, chart("depletion-risk", "Customers at depletion risk", "line", series([]string{"customers_at_depletion_risk"})))
 	}
 	l.section("credits-usage", "Credits and usage", credits...)
+	if p.Checkouts {
+		top := func(id, title, by string) Widget {
+			return chart(id, title, "table", metrics.Query{Measures: []string{"sales", "cash"}, By: []string{by},
+				Order: []metrics.OrderTerm{{Measure: "sales", Dir: "desc"}}, Limit: intp(10)})
+		}
+		l.section("checkouts", "Checkout and customers",
+			chart("checkout-funnel", "Checkout funnel", Funnel, metrics.Query{Measures: []string{"checkouts"}, By: []string{"step"}}),
+			chart("checkouts-abandoned", "Abandoned checkouts by step", "bar", withFilters(series([]string{"checkouts"}, "step"), map[string][]string{"outcome": {"abandoned"}})),
+			chart("checkout-conversion", "Checkout conversion by surface", "line", series([]string{"checkout_conversion_rate"}, "surface")),
+			chart("customers-by-purchase", "Customers by purchase number", "bar", series([]string{"sales_customers"}, "purchase_number")),
+			chart("repeat-purchase-rate", "Repeat purchase rate", "line", series([]string{"repeat_purchase_rate"})),
+			top("sales-by-country", "Sales and cash by country", "country"),
+			top("sales-by-language", "Sales and cash by language", "language"),
+			top("sales-by-source", "Sales and cash by source", "attribution_source"),
+		)
+	}
 	return l.widgets
+}
+
+func withFilters(q metrics.Query, filters map[string][]string) metrics.Query {
+	q.Filters = filters
+	return q
 }
 
 // layout places widgets row by row.

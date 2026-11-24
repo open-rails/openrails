@@ -148,6 +148,8 @@ type DashboardProfile struct {
 	CardPayments  bool `json:"card_payments"`
 	Usage         bool `json:"usage"`
 	Credits       bool `json:"credits"`
+	// Checkouts: the merchant's customers pay checkouts OpenRails records.
+	Checkouts bool `json:"checkouts"`
 }
 
 // DashboardWidget is one tile: a metrics query, how to draw it, and where.

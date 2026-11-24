@@ -15,12 +15,17 @@ import (
 )
 
 // VizTypes are the supported widget visualizations. A kpi is a tile's value,
-// its change and a sparkline of the same query by time; a heading is a
-// section title with an empty query.
-var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "heading"}
+// its change and a sparkline of the same query by time; a funnel is a count
+// by one dimension whose values are ordered steps, each drawn with the rows
+// that reached it or went further; a heading is a section title with an
+// empty query.
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "funnel", "heading"}
 
-// Heading is the viz of a section title.
-const Heading = "heading"
+// Heading is the viz of a section title; Funnel the viz of a funnel.
+const (
+	Heading = "heading"
+	Funnel  = "funnel"
+)
 
 // Grid is a widget's react-grid-layout position ({i,x,y,w,h} minus the id,
 // which lives on the widget).
@@ -117,17 +122,30 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 			}
 			continue
 		}
-		if _, verr := metrics.ValidateAt(&w.Query, now); verr != nil {
+		plan, verr := metrics.ValidateAt(&w.Query, now)
+		if verr != nil {
 			for _, fe := range verr.Errors {
 				fe.Param = at("query." + fe.Param)
 				errs = append(errs, fe)
 			}
+			continue
+		}
+		if w.Viz == Funnel && !funnelShaped(plan) {
+			errs = append(errs, metrics.FieldError{Code: "funnel_shape", Param: at("query"),
+				Message: "a funnel draws one count measure by one dimension of ordered values (checkouts by step), with no time grouping"})
 		}
 	}
 	if len(errs) > 0 {
 		return &metrics.ValidationError{Errors: errs}
 	}
 	return nil
+}
+
+// funnelShaped is a query a funnel draws: one measure that is not money, by
+// one dimension with a closed vocabulary, its order the funnel's.
+func funnelShaped(plan *metrics.Plan) bool {
+	return !plan.HasTime && len(plan.Measures) == 1 && !plan.Measures[0].Money &&
+		len(plan.Dims) == 1 && len(plan.Measures[0].Values(plan.Dims[0])) > 1
 }
 
 func emptyQuery(q billing.QueryMetricsParams) bool {
