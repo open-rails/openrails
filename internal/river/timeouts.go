@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/usageerasure"
 )
 
 // DefaultTimeout is an OpenRails job's budget: River cancels the job past it,
@@ -34,6 +35,7 @@ const RescueAfter = 10 * time.Minute
 // hour, PSP import gets two hours, and the billing pass uses its scan budgets.
 var kinds = map[string]time.Duration{
 	balancelook.Kind:                     DefaultTimeout,
+	usageerasure.Kind:                    DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,

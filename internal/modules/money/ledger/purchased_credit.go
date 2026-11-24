@@ -26,16 +26,16 @@ func (l *Ledger) PurchasedDeposit(ctx context.Context, customer uuid.UUID, curre
 	amount, kind := face-paid, DepositBonus
 	var balanceCustomer *uuid.UUID
 	if face > paid {
-		debit, err = l.EnsureSystemAccount(ctx, PromotionalFunding, currency)
+		debit, err = l.EnsureSystemAccount(ctx, UnitsGranted, currency)
 		if err == nil {
 			credit, err = l.EnsureCustomerBalance(ctx, customer, currency)
 		}
 		balanceCustomer = &customer
 	} else {
 		amount, kind = paid-face, CreditPurchaseRevenue
-		debit, err = l.EnsureSystemAccount(ctx, RailClearing, currency)
+		debit, err = l.EnsureSystemAccount(ctx, UnitsSold, currency)
 		if err == nil {
-			credit, err = l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+			credit, err = l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 		}
 	}
 	if err != nil {

@@ -71,7 +71,12 @@ func TestUTCDayMeasures(t *testing.T) {
 			t.Errorf("%s reads instants, not UTC dates", name)
 		}
 	}
-	for _, fam := range []Family{FamNetwork, FamWebhookDaily, FamNMIHistory, FamUsage} {
+	for _, name := range []string{"usage_units", "usage_charged"} {
+		if marked[name] {
+			t.Errorf("%s folds 15-minute usage history into the zone's days", name)
+		}
+	}
+	for _, fam := range []Family{FamNetwork, FamWebhookDaily, FamNMIHistory} {
 		found := false
 		for _, m := range Measures {
 			if m.Internal {

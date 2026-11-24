@@ -579,19 +579,6 @@ type BillingEventlogStream struct {
 	MerchantID    *uuid.UUID
 }
 
-// Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
-type BillingFailedUsageWindow struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	// Empty for the customer's own grace window; otherwise the delegated invoker the cutoff window meters.
-	Invoker     string
-	WindowKey   string
-	WindowStart time.Time
-	WindowEnd   time.Time
-	Amount      int64
-}
-
 // An issuer's report that a charge was fraud (Visa TC40, Mastercard SAFE) as its rail passes it on: a Stripe early fraud warning. Visa counts each in its monitoring ratio, refunded or not. Retention: permanent, never pruned.
 type BillingFraudReport struct {
 	MerchantID uuid.UUID
@@ -716,16 +703,16 @@ type BillingLeaseInFlight struct {
 	UpdatedAt time.Time
 }
 
-// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
+// Double-entry accounts of two books: the units book (a customer's units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers, except a merchant-wide general-ledger account's, which stay 0: its balance is its ledger_type_totals row. Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
+	// Set for customer-scoped accounts (customer_units, customer_owed, usage_receivable, deferred_revenue_credit); NULL for system accounts, one per merchant, currency and PSP.
 	CustomerID *uuid.UUID
-	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits are merchant-wide system accounts.
+	// The account's role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.
 	AccountType string
 	Currency    string
-	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.
+	// Sign rule: the balance (credits - debits) may not go below zero. Set by the chart. The units book refuses a breach, less a floor the transfer supplies; the general ledger never refuses one: it raises books.sign_breach, a merchant-wide account's on its type total at commit.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	// Maintained counter: posted credits, for O(1) balance reads.
@@ -733,9 +720,36 @@ type BillingLedgerAccount struct {
 	// Maintained counter: posted debits, for O(1) balance reads.
 	DebitsPosted int64
 	CreatedAt    time.Time
+	// units or general. A transfer never crosses books.
+	Book string
+	// The account type's class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.
+	Class string
+	// The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.
+	PspID *uuid.UUID
 }
 
-// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table. Retention: permanent, never pruned.
+// What the transfers of one type credited and debited the accounts of one type in one 15-minute UTC bucket of effective_at: per merchant, book, currency, account type, bucket, transfer type, (cash_clearing) PSP and product. A reader groups buckets into days in the accounting timezone; a value at a past instant is the total less the flows after it. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers. Retention: permanent, never pruned.
+type BillingLedgerDaily struct {
+	MerchantID  uuid.UUID
+	Book        string
+	Currency    string
+	AccountType string
+	// The start of the 15-minute UTC bucket: date_bin('15 minutes', effective_at, '2000-01-01 00:00:00+00').
+	BucketAt     time.Time
+	TransferType string
+	PspID        *uuid.UUID
+	ProductID    *uuid.UUID
+	Credits      int64
+	Debits       int64
+}
+
+// Transfers this transaction posted whose rollups it has not yet kept: transaction scratch, empty at commit.
+type BillingLedgerRollupPending struct {
+	MerchantID uuid.UUID
+	TransferID uuid.UUID
+}
+
+// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, book, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters and the ledger_daily and ledger_type_totals rollups are maintained projections of this table. Retention: permanent, never pruned.
 type BillingLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -758,6 +772,25 @@ type BillingLedgerTransfer struct {
 	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
+	// The book of both accounts: units or general. transfer_type belongs to it; usage_reversed alone is in both.
+	Book string
+	// When the transfer takes effect, its business date: when it posted, for the units book; the event's own instant, for the general ledger. ledger_daily counts it in its 15-minute UTC bucket.
+	EffectiveAt time.Time
+	// The order line a general-ledger transfer belongs to. No foreign key (ledger purity).
+	OrderLineID *uuid.UUID
+	// The product a general-ledger transfer belongs to. No foreign key (ledger purity).
+	ProductID *uuid.UUID
+}
+
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+type BillingLedgerTypeTotal struct {
+	MerchantID    uuid.UUID
+	Book          string
+	Currency      string
+	AccountType   string
+	PspID         *uuid.UUID
+	CreditsPosted int64
+	DebitsPosted  int64
 }
 
 // One staff adjustment of a customer's limit window, so a retry with its source_id adds nothing again; the capacity it added is the window's adjusted. Retention: rows are deleted 61 days after created_at.
@@ -819,7 +852,7 @@ type BillingLimitHoldPart struct {
 	Held           int64
 }
 
-// One customer's use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit's bucket, the one row of a lifetime or rate limit, or a billing policy's spend window (spend:<identity>). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
+// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
 type BillingLimitWindow struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -831,11 +864,9 @@ type BillingLimitWindow struct {
 	WindowEndsAt *time.Time
 	// The capacity products or an override gave the limit at the row's last write, without adjustments. Reads take the live capacity.
 	Capacity int64
-	// Units settled in the window, never clamped: it may pass capacity. For a rate limit, the level as of updated_at, which drains at capacity per window_seconds.
-	Settled int64
 	// Capacity staff added to this window only (negative takes it away).
 	Adjusted int64
-	// When settled and held usage first took the window to its capacity; a rate or lifetime limit's one row keeps the first time.
+	// When a read first found usage and holds at the window's capacity; a rate or lifetime limit's one row keeps the first time.
 	ReachedAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -951,21 +982,6 @@ type BillingMerchantWritePosture struct {
 	Reason     string
 	SetBy      string
 	SetAt      time.Time
-}
-
-// A customer's quantity of one meter (and matrix cell) in one billing period, as priced so far: a settled group of usage is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.
-type BillingMeterPeriodQuantity struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	MeterKey   string
-	// The matrix cell (the event's value of the matrix dimension) the quantity is priced in; empty for a card without a matrix.
-	Cell string
-	// Start of the billing period the usage occurred in, under the merchant's billing_period_boundary.
-	PeriodStartsAt time.Time
-	Quantity       int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.
@@ -1084,7 +1100,7 @@ type BillingMrrRiskCase struct {
 	Backfilled bool
 }
 
-// Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change. Retention: state, deleted when claimed.
+// Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change; a claimed row is deleted.
 type BillingMrrRiskDue struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -2420,59 +2436,43 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// What one customer's usage charged in one currency on one UTC day of one pricing period. It posts to the ledger after its day ends, or before any other movement of the customer's balance in the currency: one credit_spend per lot drawn and one owed_accrual for the rest, at (usage_accrual, usage_accrual:<id>, <posting>). Until posted, the balance holds amount - posted_amount. Retention: permanent, never pruned.
-type BillingUsageAccrual struct {
+// A rate card's terms as usage was priced under them, by print (a hash of the terms), written when usage first names it: the event store's charges name the print, and a period's price is taken card by card in the order the prints were first written. Retention: permanent, never pruned.
+type BillingUsageCardPrint struct {
 	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	// The start of the UTC day the usage occurred.
-	DayAt time.Time
-	// The start of the pricing period the usage was priced in.
+	Print      string
+	Card       []byte
+	CreatedAt  time.Time
+}
+
+// One posting of a customer's usage in one pricing period to the ledger: the price of the period's deduplicated usage before cut_at, less what its earlier postings took. A posting draws the balance first, one credit_spend per lot, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_posting:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
+type BillingUsagePosting struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
 	PeriodStartsAt time.Time
-	// The end of that pricing period: what the accrual leaves owed is dated before it.
-	PeriodEndsAt time.Time
-	Amount       int64
-	// What the accrual's postings have moved to the ledger; the rest is held until the next posting.
-	PostedAmount int64
-	// How many postings the accrual has made; the next one posts at source_id postings + 1.
-	Postings int32
-	// What the accrual is for, per meter and cell: [{meter_key, cell, requests, quantity, amount, posted_amount}].
+	PeriodEndsAt   time.Time
+	// Usage that occurred before it is in the posting: the month's end in the merchant's accounting zone, or the balance movement the posting preceded.
+	CutAt time.Time
+	// close: the month-end close; movement: before a movement of the balance; reversal: a period whose price fell below what posted, once its late usage window closed.
+	Reason string
+	// What the posting moved: positive for usage, negative for a reversal.
+	Amount int64
+	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}].
 	Lines     []byte
-	PostedAt  *time.Time
 	CreatedAt time.Time
+}
+
+// A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.
+type BillingUsageUnposted struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// The start of the oldest pricing period whose usage may not be posted in full: a posting reads from it.
+	SinceAt time.Time
+	// When the close posts it: the end of the month its oldest unposted usage occurred in, or when a period whose price fell may be credited.
+	DueAt     time.Time
 	UpdatedAt time.Time
-}
-
-// One UTC day of a customer's usage, per invoker, currency, event type, meter, matrix cell and outcome. The row with an empty meter_key counts the events themselves: requests, and what failed usage charged or forgave; a meter's row counts the events it priced, their quantity and what it charged. Retention: rows are deleted 24 months after the month's usage was billed.
-type BillingUsageDaily struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	DayAt      time.Time
-	Currency   string
-	EventType  string
-	// The meter that priced the events; empty for the events themselves.
-	MeterKey string
-	// The matrix cell the meter priced the events in; empty without a matrix.
-	Cell string
-	// Caller-supplied principal string that fired the usage; empty when none was named.
-	Invoker        string
-	Outcome        string
-	Requests       int64
-	Quantity       int64
-	Amount         int64
-	ForgivenAmount int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-// What a customer's usage charged in one currency in one UTC minute it occurred in: the accrual-rate meter and the balance watch read it. Retention: rows are deleted 25 hours after their minute, past the longest accrual-rate window.
-type BillingUsageMinute struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	MinuteAt   time.Time
-	Amount     int64
 }
 
 // Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.

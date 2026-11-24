@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 18 core River job kinds. Five have recurring schedules.
+OpenRails registers 19 core River job kinds. Five have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -43,6 +43,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.psp_import` | `psp_import` | An operator starts an import, changes matching links, or applies an approved import | Pulls PSP data into staging, re-evaluates proposed matches, or applies approved observations locally. [Worker](../internal/river/jobs_psp_import.go) · [Import steps](../internal/pspimport/importer.go) · [Relink](../internal/pspimport/link.go) |
 | `openrails.stored_card_refresh` | `billing` | The hourly scan finds a card due for an updater check, or a charge declines because the card expired or was reissued | Asks the vault's account updater for one card's latest details and applies replacement or closure effects. [Worker](../internal/river/jobs_stored_card_refresh.go) · [Decline trigger](../internal/modules/subscriptions/lifecycle_service.go) |
 | `openrails.subscription_converge` | `billing` | Stripe or NMI subscription-state webhooks, or release of a parked subscription | Coalesces wakes, fetches current provider state, and updates the local subscription and its effects. [Worker](../internal/river/jobs_subscription_converge.go) · [Coalescing](../internal/wakejobs/wakejobs.go) · [Park release](../internal/modules/parking/parking.go) |
+| `openrails.usage_erasure` | `billing` | A customer's directory user is deleted (SCIM), in that transaction | Clears the invoker and metadata of the customer's usage events in the event store and folds its usage history's invokers; quantities and what posted stay. [Worker](../internal/river/jobs_usage_erasure.go) · [Erasure](../internal/eventstore/erase.go) |
 | `openrails.usage_orders` | `billing` | Usage crosses a billing threshold or an hourly usage scan needs another page. Requires usage billing. | Bills due usage accounts into orders and queues their due collections as provider operations. [Worker](../internal/river/jobs_usage_orders.go) · [Threshold trigger](../internal/modules/money/account_usage_billing.go) |
 
 ## Hourly billing scans
@@ -55,7 +56,7 @@ continuations. The other scan names label work inside the pass.
 
 | Scan | What it looks for |
 | --- | --- |
-| `openrails.usage_accruals` | Posts each customer's usage from finished UTC days to the ledger: one deduction per customer, currency and day. Until then the day's usage is held, not posted. The read is indexed on the day. [Source](../internal/river/jobs_usage_accruals.go) |
+| `openrails.usage_close` | The month-end close: posts each customer's usage from ended months to the ledger, one posting per pricing period, priced from the period's total in the event store less what earlier postings took; and credits a period whose volume price fell once its late usage window closed. Until then the usage is held, not posted. The read is indexed on when each customer is due. [Source](../internal/river/jobs_usage_close.go) |
 | `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |

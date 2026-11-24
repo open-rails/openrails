@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -51,10 +50,11 @@ func TestUsageContracts(t *testing.T) {
 		}
 		balance(t, w.alpha, customer, 800, 200, 1000)
 
-		// The day's usage posts once, after the day ends, with what it was for.
+		// The month's usage posts once, after the month ends, with what it was
+		// for.
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		balance(t, w.alpha, customer, 800, 0, 800)
 		ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
@@ -63,8 +63,8 @@ func TestUsageContracts(t *testing.T) {
 		require.Len(t, deductions, 1)
 		require.EqualValues(t, -200, deductions[0].Amount)
 		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[0].Usage.Lines)
-		postDays(t, fleet)
-		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted day posts nothing again")
+		closeMonths(t, fleet)
+		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "a posted month posts nothing again")
 	})
 
 	t.Run("OR-J24-S02/late-event-uses-ingest-price-and-prior-event-stays-pinned", func(t *testing.T) {
@@ -279,10 +279,6 @@ func TestUsageContracts(t *testing.T) {
 		case <-time.After(20 * time.Second):
 			t.Fatal("the correction never reached its fence")
 		}
-		var tableLocks int
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_locks WHERE locktype = 'relation' AND relation = to_regclass($1::text) AND mode = 'ShareRowExclusiveLock'",
-			pgx.Identifier{w.schema, "usage_daily"}.Sanitize()).Scan(&tableLocks))
-		require.Zero(t, tableLocks, "the correction does not lock usage_daily")
 		// Alpha's own settlement waits for the correction's transaction (its
 		// lease sync first reads the merchant row the correction holds for its
 		// catalog revision, before it would reach the fence).

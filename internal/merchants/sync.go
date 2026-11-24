@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchantdocs"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 )
 
 // SyncConfig reconciles a freshly loaded configuration with the identities
@@ -138,6 +139,9 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 	if err != nil {
 		return previous, fmt.Errorf("merchants: reconcile configuration: %w", err)
 	}
+	// Every PSP the configuration declares clears cash in each currency the
+	// merchant sells in.
+	books.Prepare(ctx, s.pool, s.Log, id.UUID())
 	if len(set.Rejected) == 0 {
 		set.Rejected = nil
 	}

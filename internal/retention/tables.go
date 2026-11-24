@@ -25,8 +25,8 @@ type Table struct {
 
 const permanent = "permanent, never pruned."
 
-// Tables classifies every table of the schema. Nothing checks it against the
-// schema, so a new table adds its entry here.
+// Tables classifies every table of the schema; TestTablesMatchSchema holds it
+// to api/schema.txt and the tables' comments.
 var Tables = map[string]Table{
 	"eventlog_migrations":          {Class: State},
 	"eventlog_events":              {Rows, "events expire after the configured event retention, independently of reader progress."},
@@ -40,6 +40,9 @@ var Tables = map[string]Table{
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
+	"ledger_daily":                  {Permanent, permanent},
+	"ledger_type_totals":            {Class: State},
+	"ledger_rollup_pending":         {Class: State},
 	"grants":                        {Permanent, permanent},
 	"credit_grants":                 {Permanent, permanent},
 	"credit_grant_events":           {Permanent, permanent},
@@ -51,7 +54,8 @@ var Tables = map[string]Table{
 	"provider_cycle_receipts":       {Permanent, permanent},
 	"provider_charge_attributions":  {Permanent, permanent},
 	"owed_items":                    {Permanent, permanent},
-	"usage_accruals":                {Permanent, permanent},
+	"usage_postings":                {Permanent, permanent},
+	"usage_card_prints":             {Permanent, permanent},
 	"running_charges":               {Permanent, permanent},
 	"solana_pay_receipts":           {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
 	"catalog_applications":          {Permanent, permanent},
@@ -89,14 +93,10 @@ var Tables = map[string]Table{
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
-	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
-	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
-	"usage_daily":                     {Rows, "rows are deleted 24 months after the month's usage was billed."},
 	"network_activity_daily":          {Class: State},
-	"usage_minutes":                   {Rows, "rows are deleted 25 hours after their minute, past the longest accrual-rate window."},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
-	"lease_in_flight":                 {Rows, "each sync replaces its lease's rows and close clears them; they go with the lease."},
+	"lease_in_flight":                 {Rows, "rows; each sync replaces its lease's rows, close clears them, and they go with the lease."},
 	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
@@ -109,6 +109,7 @@ var Tables = map[string]Table{
 	"merchant_write_posture":      {Class: State},
 	"book_identity":               {Class: State},
 	"event_store":                 {Class: State},
+	"usage_unposted":              {Class: State},
 	"periodic_leases":             {Class: State},
 	"solana_crankers":             {Class: State},
 	"dashboard_configs":           {Class: State},
@@ -160,4 +161,14 @@ var Tables = map[string]Table{
 	"nmi_history_reads":           {Class: State},
 	"reconciliation_state":        {Class: State},
 	"ownership_claims":            {Class: State},
+}
+
+// EventStoreTTLs are how long the event store keeps each usage table, as its
+// migrations' TTLs state them.
+var EventStoreTTLs = map[string]string{
+	"usage_events":     "100 days after occurred_at",
+	"limit_usage":      "61 days after the window ends; a window without an end is kept",
+	"usage_quantities": "100 days after the pricing period starts",
+	"usage_minutes":    "2 days after the minute",
+	"usage_history":    "25 months after the 15-minute bucket",
 }

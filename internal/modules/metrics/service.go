@@ -219,12 +219,19 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	stmts, err := compile(plan, mid.UUID())
+	burns, err := s.depletionBurns(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	stmts, err := compile(plan, mid.UUID(), burns)
 	if err != nil {
 		return nil, err
 	}
 
 	groups := map[string]*group{}
+	if err := s.runUsage(ctx, plan, groups); err != nil {
+		return nil, err
+	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		for _, st := range stmts {
 			if err := scanStmt(ctx, tx, plan, st, groups); err != nil {

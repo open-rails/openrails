@@ -59,7 +59,7 @@ UPDATE billing.money_settings m SET usage_due_at = LEAST(m.usage_due_at, sqlc.ar
 FROM scoped s
 WHERE m.merchant_id = s.merchant_id AND m.customer_id = s.customer_id AND m.currency = s.currency AND (
     EXISTS (SELECT 1 FROM billing.ledger_accounts ar
-        WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='arrears_liability'
+        WHERE ar.merchant_id=s.merchant_id AND ar.customer_id=s.customer_id AND ar.currency=s.currency AND ar.account_type='customer_owed'
         AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,(sqlc.arg(minimums)::jsonb->>s.currency)::bigint,0)

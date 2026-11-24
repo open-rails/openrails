@@ -13,10 +13,10 @@ import (
 )
 
 const adjustLimitWindow = `-- name: AdjustLimitWindow :exec
-INSERT INTO billing.limit_windows AS w (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted)
+INSERT INTO billing.limit_windows AS w (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, adjusted)
 VALUES (
     $1::uuid, $2::uuid, $3::text,
-    $4::timestamptz, $5::timestamptz, $6::bigint, 0, $7::bigint
+    $4::timestamptz, $5::timestamptz, $6::bigint, $7::bigint
 )
 ON CONFLICT (merchant_id, customer_id, limit_key, window_starts_at) DO UPDATE SET
     adjusted = w.adjusted + EXCLUDED.adjusted, capacity = EXCLUDED.capacity, updated_at = now()
@@ -101,10 +101,10 @@ func (q *Queries) DeleteCustomerLimitOverride(ctx context.Context, arg DeleteCus
 }
 
 const ensureLimitWindow = `-- name: EnsureLimitWindow :exec
-INSERT INTO billing.limit_windows (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, created_at, updated_at)
+INSERT INTO billing.limit_windows (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, capacity, adjusted, created_at, updated_at)
 VALUES (
     $1::uuid, $2::uuid, $3::text,
-    $4::timestamptz, $5::timestamptz, $6::bigint, 0, 0,
+    $4::timestamptz, $5::timestamptz, $6::bigint, 0,
     $7::timestamptz, $7::timestamptz
 )
 ON CONFLICT (merchant_id, customer_id, limit_key, window_starts_at) DO NOTHING
@@ -240,7 +240,7 @@ func (q *Queries) GetLimitSubscriptionAnchor(ctx context.Context, arg GetLimitSu
 }
 
 const getLimitWindow = `-- name: GetLimitWindow :one
-SELECT limit_key, window_starts_at, window_ends_at, settled, adjusted, updated_at
+SELECT limit_key, window_starts_at, window_ends_at, adjusted, reached_at, updated_at
 FROM billing.limit_windows
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND limit_key = $3::text AND window_starts_at = $4::timestamptz
@@ -257,8 +257,8 @@ type GetLimitWindowRow struct {
 	LimitKey       string
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
-	Settled        int64
 	Adjusted       int64
+	ReachedAt      *time.Time
 	UpdatedAt      time.Time
 }
 
@@ -274,15 +274,15 @@ func (q *Queries) GetLimitWindow(ctx context.Context, arg GetLimitWindowParams) 
 		&i.LimitKey,
 		&i.WindowStartsAt,
 		&i.WindowEndsAt,
-		&i.Settled,
 		&i.Adjusted,
+		&i.ReachedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getLimitWindowForUpdate = `-- name: GetLimitWindowForUpdate :one
-SELECT limit_key, window_starts_at, window_ends_at, capacity, settled, adjusted, reached_at, updated_at
+SELECT limit_key, window_starts_at, window_ends_at, capacity, adjusted, reached_at, updated_at
 FROM billing.limit_windows
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND limit_key = $3::text AND window_starts_at = $4::timestamptz
@@ -301,14 +301,12 @@ type GetLimitWindowForUpdateRow struct {
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
 	Capacity       int64
-	Settled        int64
 	Adjusted       int64
 	ReachedAt      *time.Time
 	UpdatedAt      time.Time
 }
 
-// A window a hold or a settlement writes, locked; holds lock their windows
-// in key order.
+// A window a hold writes, locked; holds lock their windows in key order.
 func (q *Queries) GetLimitWindowForUpdate(ctx context.Context, arg GetLimitWindowForUpdateParams) (GetLimitWindowForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getLimitWindowForUpdate,
 		arg.MerchantID,
@@ -322,7 +320,6 @@ func (q *Queries) GetLimitWindowForUpdate(ctx context.Context, arg GetLimitWindo
 		&i.WindowStartsAt,
 		&i.WindowEndsAt,
 		&i.Capacity,
-		&i.Settled,
 		&i.Adjusted,
 		&i.ReachedAt,
 		&i.UpdatedAt,
@@ -584,7 +581,7 @@ func (q *Queries) ListCustomerProductLimitCapacities(ctx context.Context, arg Li
 }
 
 const listLatestLimitWindows = `-- name: ListLatestLimitWindows :many
-SELECT DISTINCT ON (limit_key) limit_key, window_starts_at, window_ends_at, settled, adjusted, updated_at
+SELECT DISTINCT ON (limit_key) limit_key, window_starts_at, window_ends_at, adjusted, reached_at, updated_at
 FROM billing.limit_windows
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
 ORDER BY limit_key, window_starts_at DESC
@@ -599,8 +596,8 @@ type ListLatestLimitWindowsRow struct {
 	LimitKey       string
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
-	Settled        int64
 	Adjusted       int64
+	ReachedAt      *time.Time
 	UpdatedAt      time.Time
 }
 
@@ -618,8 +615,8 @@ func (q *Queries) ListLatestLimitWindows(ctx context.Context, arg ListLatestLimi
 			&i.LimitKey,
 			&i.WindowStartsAt,
 			&i.WindowEndsAt,
-			&i.Settled,
 			&i.Adjusted,
+			&i.ReachedAt,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -633,7 +630,7 @@ func (q *Queries) ListLatestLimitWindows(ctx context.Context, arg ListLatestLimi
 }
 
 const listLimitWindowsFrom = `-- name: ListLimitWindowsFrom :many
-SELECT limit_key, window_starts_at, window_ends_at, settled, adjusted, updated_at
+SELECT limit_key, window_starts_at, window_ends_at, adjusted, reached_at, updated_at
 FROM billing.limit_windows
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND limit_key = $3::text AND window_starts_at >= $4::timestamptz
@@ -651,12 +648,12 @@ type ListLimitWindowsFromRow struct {
 	LimitKey       string
 	WindowStartsAt time.Time
 	WindowEndsAt   *time.Time
-	Settled        int64
 	Adjusted       int64
+	ReachedAt      *time.Time
 	UpdatedAt      time.Time
 }
 
-// A rolling limit's buckets from a start.
+// A rolling limit's adjusted or reached buckets from a start.
 func (q *Queries) ListLimitWindowsFrom(ctx context.Context, arg ListLimitWindowsFromParams) ([]ListLimitWindowsFromRow, error) {
 	rows, err := q.db.Query(ctx, listLimitWindowsFrom,
 		arg.MerchantID,
@@ -675,8 +672,8 @@ func (q *Queries) ListLimitWindowsFrom(ctx context.Context, arg ListLimitWindows
 			&i.LimitKey,
 			&i.WindowStartsAt,
 			&i.WindowEndsAt,
-			&i.Settled,
 			&i.Adjusted,
+			&i.ReachedAt,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -746,6 +743,37 @@ func (q *Queries) PageCatalogLimits(ctx context.Context, arg PageCatalogLimitsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const reachLimitWindow = `-- name: ReachLimitWindow :exec
+UPDATE billing.limit_windows
+SET capacity = $1::bigint, reached_at = $2::timestamptz, updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND customer_id = $4::uuid
+  AND limit_key = $5::text AND window_starts_at = $6::timestamptz
+  AND reached_at IS NULL
+`
+
+type ReachLimitWindowParams struct {
+	Capacity       int64
+	ReachedAt      time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	LimitKey       string
+	WindowStartsAt time.Time
+}
+
+// The first time a read found a window's usage and holds at its capacity,
+// and the capacity then.
+func (q *Queries) ReachLimitWindow(ctx context.Context, arg ReachLimitWindowParams) error {
+	_, err := q.db.Exec(ctx, reachLimitWindow,
+		arg.Capacity,
+		arg.ReachedAt,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.WindowStartsAt,
+	)
+	return err
 }
 
 const recordLimitAdjustment = `-- name: RecordLimitAdjustment :exec
@@ -860,41 +888,6 @@ func (q *Queries) UpsertCustomerLimitOverride(ctx context.Context, arg UpsertCus
 		arg.CustomerID,
 		arg.LimitKey,
 		arg.Capacity,
-	)
-	return err
-}
-
-const writeLimitWindow = `-- name: WriteLimitWindow :exec
-UPDATE billing.limit_windows
-SET settled = $1::bigint, capacity = $2::bigint,
-    reached_at = COALESCE(reached_at, $3::timestamptz), updated_at = $4::timestamptz
-WHERE merchant_id = $5::uuid AND customer_id = $6::uuid
-  AND limit_key = $7::text AND window_starts_at = $8::timestamptz
-`
-
-type WriteLimitWindowParams struct {
-	Settled        int64
-	Capacity       int64
-	ReachedAt      *time.Time
-	AsOf           time.Time
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	LimitKey       string
-	WindowStartsAt time.Time
-}
-
-// A locked window's settled units (a rate limit's level as of as_of), its
-// capacity as of the write, and the first time it reached capacity.
-func (q *Queries) WriteLimitWindow(ctx context.Context, arg WriteLimitWindowParams) error {
-	_, err := q.db.Exec(ctx, writeLimitWindow,
-		arg.Settled,
-		arg.Capacity,
-		arg.ReachedAt,
-		arg.AsOf,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.LimitKey,
-		arg.WindowStartsAt,
 	)
 	return err
 }

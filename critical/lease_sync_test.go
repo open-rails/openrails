@@ -133,8 +133,8 @@ func TestLeaseSyncs(t *testing.T) {
 		require.EqualValues(t, 9042, out.Usage.ThroughN)
 		balance(t, w.alpha, customer, 800, 200, 1000)
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1)
 		balance(t, w.alpha, customer, 800, 0, 800)
 	})
@@ -196,47 +196,44 @@ func TestLeaseSyncs(t *testing.T) {
 		balance(t, w.alpha, pinned, 1000-400, 400, 1000)
 	})
 
-	t.Run("OR-J24-S11/a-day-posts-once-and-once-more-before-a-top-up", func(t *testing.T) {
-		w := newWorld(t, func(w *world) {
-			// Keep the day's usage inside one UTC day whatever the hour.
-			now := w.clock.Now().UTC()
-			w.clock.Advance(now.Truncate(24 * time.Hour).Add(36 * time.Hour).Sub(now))
-		})
+	t.Run("OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "a", 2))...)
 		balance(t, w.alpha, customer, 800, 200, 1000)
-		// Until it posts, the accrual is held: the balance refuses as if it had.
+		// Until it posts, the usage is held: the balance refuses as if it had.
 		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "too-much", 801)), "insufficient_balance")
 		require.True(t, admitOne(t, w.alpha, reservation(w, customer, "fits", 800)).Allowed())
 		released, err := w.alpha.ReleaseAdmissions(t.Context(), []string{"fits"})
 		require.NoError(t, err)
 		require.NoError(t, released[0].Err())
 
-		// A top-up posts the day so far first.
+		// A top-up posts the month so far first.
 		fund(t, w.alpha, customer, "top-up", 500)
 		balance(t, w.alpha, customer, 1300, 0, 1300)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1)
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "b", 1))...)
 		balance(t, w.alpha, customer, 1200, 100, 1300)
 
-		// The rest of the day posts once the day ends.
+		// The rest of the month posts once the month ends.
 		fleet := startFleet(t, w)
-		postDays(t, fleet)
-		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "the day has not ended")
-		nextDay(w)
-		postDays(t, fleet)
+		closeMonths(t, fleet)
+		require.Len(t, usageDeductions(t, w.alpha, customer), 1, "the month has not ended")
+		month := time.Date(w.clock.Now().Year(), w.clock.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		balance(t, w.alpha, customer, 1200, 0, 1200)
 		deductions := usageDeductions(t, w.alpha, customer)
 		require.Len(t, deductions, 2)
 		require.EqualValues(t, -100, deductions[0].Amount)
 		require.EqualValues(t, -200, deductions[1].Amount)
-		for _, d := range deductions {
-			require.Equal(t, w.clock.Now().UTC().Add(-24*time.Hour).Format(time.DateOnly), d.Usage.Day)
-			require.EqualValues(t, 300, d.Usage.Amount, "each posting shows its day")
-			require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 2, Quantity: 3, Amount: 300}}, d.Usage.Lines)
-		}
+		require.Equal(t, month.AddDate(0, 1, 0), deductions[0].Usage.Through, "the close cuts at the month's end")
+		require.EqualValues(t, 100, deductions[0].Usage.Amount, "each posting shows what it added")
+		require.EqualValues(t, 200, deductions[1].Usage.Amount)
+		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 1, Amount: 100}}, deductions[0].Usage.Lines)
+		require.Equal(t, []billing.UsageDeductionLine{{MeterKey: "compute", Requests: 1, Quantity: 2, Amount: 200}}, deductions[1].Usage.Lines)
 	})
 
 	t.Run("OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled", func(t *testing.T) {

@@ -91,7 +91,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
 			return err
 		}
-		if _, err := s.WithDatabase(d).postUsageAccrualsTx(ctx, q, merchantID, payerID, cur, nil, nil, now); err != nil {
+		if _, err := s.WithDatabase(d).at(now).postUsageTx(ctx, q, merchantID, payerID, cur, now, usagePostingMovement); err != nil {
 			return err
 		}
 		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
@@ -334,7 +334,7 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 			paidAt = in.PaidAt.UTC().Truncate(time.Microsecond)
 		}
 		// The owed payment settles the arrears liability (DR
-		// processor_clearing / CR arrears_liability) at the remittance's
+		// units_sold / CR customer_owed) at the remittance's
 		// unique coordinate.
 		coord := ledger.Coord{Operation: ledger.OpManualOrderPayment, Source: "manual_invoice_payment", SourceID: in.TransactionID}
 		tr, e := s.moneyLedger(q, mid.UUID()).PayOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), in.Amount, coord, &in.OrderID)

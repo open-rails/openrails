@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 587,
+  "scenario_count": 626,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -676,7 +676,7 @@
     {
       "id": "OR-J24-S11",
       "journey": "J24",
-      "name": "A day's usage posts once and once more before a top-up, held until then"
+      "name": "A month's usage posts once and once more before a top-up, held until then"
     },
     {
       "id": "OR-J24-S14",
@@ -822,6 +822,61 @@
       "id": "OR-J24-S46",
       "journey": "J24",
       "name": "The view of a sync that captures a lease's request hold settles what the capture moved past the hold's estimate"
+    },
+    {
+      "id": "OR-J24-S47",
+      "journey": "J24",
+      "name": "A resend after a sync whose events reached the store but whose transaction never committed inserts nothing twice: raw usage, FINAL and the rollups agree"
+    },
+    {
+      "id": "OR-J24-S48",
+      "journey": "J24",
+      "name": "While ClickHouse is out of reach a sync answers 503 and settles nothing, a usage customer's balance and top-up wait for it, a customer without usage is unaffected, and every item settles once after"
+    },
+    {
+      "id": "OR-J24-S49",
+      "journey": "J24",
+      "name": "A period posts the price of its total: graduated across two postings, a volume crossing carried and credited once its late window closed, a card revision priced card by card"
+    },
+    {
+      "id": "OR-J24-S50",
+      "journey": "J24",
+      "name": "Late usage of a month that posted posts the difference at the next close"
+    },
+    {
+      "id": "OR-J24-S51",
+      "journey": "J24",
+      "name": "Fixed, session, rolling, rate, billing-period and lifetime limits read their use from the event store, and an item admitted before a reset counts in the window it was admitted in"
+    },
+    {
+      "id": "OR-J24-S52",
+      "journey": "J24",
+      "name": "New refuses a database with unposted usage without its store and an empty store; usage attach discards the unposted usage only with --discard-unposted, on the record"
+    },
+    {
+      "id": "OR-J24-S53",
+      "journey": "J24",
+      "name": "A SCIM user erasure clears its usage events' invoker and metadata and its history's invokers, and keeps quantities and money"
+    },
+    {
+      "id": "OR-J24-S54",
+      "journey": "J24",
+      "name": "A billing archive carries the merchant's usage; restore refuses without an event store or into a merchant with usage there, and restores it into an empty one"
+    },
+    {
+      "id": "OR-J24-S55",
+      "journey": "J24",
+      "name": "Equal lease ids and numbers under two merchants are two events, each counted by its merchant"
+    },
+    {
+      "id": "OR-J24-S56",
+      "journey": "J24",
+      "name": "A month's usage posts at the month's end in the merchant's accounting zone, not UTC's"
+    },
+    {
+      "id": "OR-J24-S57",
+      "journey": "J24",
+      "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
       "id": "OR-J25-S01",
@@ -1072,6 +1127,11 @@
       "id": "OR-J32-S05",
       "journey": "J32",
       "name": "Operator CLI purge confirms its inventory and the job queued with it deletes the merchant's Vault configuration"
+    },
+    {
+      "id": "OR-J32-S06",
+      "journey": "J32",
+      "name": "Merchant purge removes the directory's contacts and provisioning tokens"
     },
     {
       "id": "OR-J34-S01",
@@ -1689,6 +1749,16 @@
       "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
     },
     {
+      "id": "OR-J38-S76",
+      "journey": "J38",
+      "name": "A failed PSP import cannot be applied"
+    },
+    {
+      "id": "OR-J38-S77",
+      "journey": "J38",
+      "name": "A price picked for an import record is never deleted"
+    },
+    {
       "id": "OR-J38-S35",
       "journey": "J38",
       "name": "A correction adopts an ended row's cancel kind and date from the provider at Apply, never into or out of a chargeback and never for an unpaid Stripe subscription; status, period and access stay byte-identical and the provider sees no write"
@@ -1787,6 +1857,41 @@
       "id": "OR-J34-S33",
       "journey": "J34",
       "name": "A reservation started past its life is admitted against the budget again"
+    },
+    {
+      "id": "OR-J34-S39",
+      "journey": "J34",
+      "name": "With the destructive switch off a spent Solana schedule waits past due with access"
+    },
+    {
+      "id": "OR-J34-S40",
+      "journey": "J34",
+      "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
+    },
+    {
+      "id": "OR-J34-S34",
+      "journey": "J34",
+      "name": "A staff card removal is a staff admission and spends no customer-action budget"
+    },
+    {
+      "id": "OR-J34-S35",
+      "journey": "J34",
+      "name": "A declined charge that spends dunning in a billing import is an admitted cancel, held while the switch is off"
+    },
+    {
+      "id": "OR-J34-S36",
+      "journey": "J34",
+      "name": "A lost admission answer leaves no action spending the budget"
+    },
+    {
+      "id": "OR-J34-S37",
+      "journey": "J34",
+      "name": "A merchant's books land one at a time"
+    },
+    {
+      "id": "OR-J34-S38",
+      "journey": "J34",
+      "name": "An abandon waiting on its actions stalls no other admission"
     },
     {
       "id": "OR-J16-S30",
@@ -2074,6 +2179,36 @@
       "name": "A PSP whose webhooks went silent while pulls find its charges raises a finding; one with no charges or no webhooks does not, and it clears when webhooks resume"
     },
     {
+      "id": "OR-J06-S66",
+      "journey": "J06",
+      "name": "A refund the ledger cannot book alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S67",
+      "journey": "J06",
+      "name": "A low Solana cranker alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S68",
+      "journey": "J06",
+      "name": "A refused message sender alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S69",
+      "journey": "J06",
+      "name": "A rate-limited customer alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S70",
+      "journey": "J06",
+      "name": "A held terminal outcome alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S71",
+      "journey": "J06",
+      "name": "Distinct repairs of one transaction alert separately"
+    },
+    {
       "id": "OR-J14-S70",
       "journey": "J14",
       "name": "An engine renewal nothing attempted by its deadline reads as missed without a recorded miss"
@@ -2264,6 +2399,16 @@
       "name": "NMI card erasure completes only after provider confirmation"
     },
     {
+      "id": "OR-J12-S72",
+      "journey": "J12",
+      "name": "A card with permanent versions is never hard-deleted"
+    },
+    {
+      "id": "OR-J12-S73",
+      "journey": "J12",
+      "name": "A card an unverified membership bills cannot be removed"
+    },
+    {
       "id": "OR-J04-S37",
       "journey": "J04",
       "name": "An order expiry backlog past one batch is expired by one billing pass"
@@ -2369,9 +2514,59 @@
       "name": "Two credit lots that lapsed before their expiry ran expire only what each still holds after the usage settled at the first lapse"
     },
     {
+      "id": "OR-J40-S01",
+      "journey": "J40",
+      "name": "Every account type has one book and class; the general ledger refuses a merchant unit"
+    },
+    {
+      "id": "OR-J40-S02",
+      "journey": "J40",
+      "name": "A transfer across books, across currencies or naming another customer's account is refused"
+    },
+    {
+      "id": "OR-J40-S03",
+      "journey": "J40",
+      "name": "ledger-audit catches injected counter and rollup corruption"
+    },
+    {
       "id": "OR-J40-S04",
       "journey": "J40",
       "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
+    },
+    {
+      "id": "OR-J40-S05",
+      "journey": "J40",
+      "name": "A ledger from before the books migrates with rollups that ledger-audit and an export accept"
+    },
+    {
+      "id": "OR-J40-S06",
+      "journey": "J40",
+      "name": "Concurrent top-ups, one posting unposted usage first, all commit"
+    },
+    {
+      "id": "OR-J40-S07",
+      "journey": "J40",
+      "name": "An archive written before the books restores as the units book"
+    },
+    {
+      "id": "OR-J40-S08",
+      "journey": "J40",
+      "name": "A ledger transfer and an MRR change in either statement order, in two transactions held at commit, both commit"
+    },
+    {
+      "id": "OR-J40-S09",
+      "journey": "J40",
+      "name": "Two first checkouts in a currency a catalog apply opened overlap; a posting nothing opened for raises a finding; two checkouts and a usage collection in opposite lock orders all commit"
+    },
+    {
+      "id": "OR-J40-S23",
+      "journey": "J40",
+      "name": "An event queued before or after a ledger transfer, in two transactions held at commit, both commit"
+    },
+    {
+      "id": "OR-J40-S24",
+      "journey": "J40",
+      "name": "One transaction posting for two merchants in either order, two held at commit, both commit"
     },
     {
       "id": "OR-J42-S01",
@@ -2711,7 +2906,7 @@
     {
       "id": "OR-J53-S04",
       "journey": "J53",
-      "name": "A sale at 23:30 in a merchant's accounting timezone, ten hours behind UTC, counts on that local day: date ranges and day buckets start at its midnights and the result names the zone"
+      "name": "A sale and usage at 23:30 in a merchant's accounting timezone, ten hours behind UTC, count on that local day: date ranges and day buckets start at its midnights and the result names the zone"
     },
     {
       "id": "OR-J53-S05",

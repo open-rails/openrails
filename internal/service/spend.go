@@ -5,17 +5,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -74,14 +73,6 @@ type usageReport struct {
 	after    *usageCursor
 }
 
-// days are the rollup days the report's window overlaps: from the day from
-// falls in to the day after the one before to.
-func (r usageReport) days() (time.Time, time.Time) {
-	from := r.from.UTC().Truncate(24 * time.Hour)
-	to := r.to.UTC().Add(-time.Microsecond).Truncate(24 * time.Hour).Add(24 * time.Hour)
-	return from, to
-}
-
 // readUsageParams reads a usage report request. A cursor reads the rest of
 // its own report: a window the request leaves out is the cursor's, and
 // without a cursor it ends now and starts a month before.
@@ -126,10 +117,11 @@ func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usage
 	return out, nil
 }
 
-// GetUsage reads a page of a customer's usage in one currency on the UTC days
-// overlapping [From, To), from its daily rollups, grouped by GroupBy
-// (event_type when empty): by total amount, largest first, then by key in
-// byte order.
+// GetUsage reads a page of a customer's usage in one currency on the days of
+// the merchant's accounting zone overlapping [From, To), from its history in
+// the event store, grouped by GroupBy (event_type when empty): by total
+// amount, largest first, then by key in byte order. A day's amount is its
+// buckets' share of the period's price, so the days sum to what posts.
 func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, params billing.GetUsageParams) (*billing.Usage, error) {
 	if customer.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
@@ -138,34 +130,45 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	if err != nil {
 		return nil, err
 	}
+	if err := s.rt.RequireEventStore("usage history"); err != nil {
+		return nil, err
+	}
 	out := &billing.Usage{CustomerID: customer, Currency: catalog.Currency(report.currency), From: report.from, To: report.to, GroupBy: report.groupBy, Rows: []billing.UsageRow{}}
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		mid, err := merchant.Require(ctx)
+		from, to, err := s.moneyService().UsageDays(ctx, report.from, report.to)
 		if err != nil {
 			return err
 		}
-		q := s.rt.DB.Gen(ctx)
-		if report.groupBy == billing.UsageByMeter {
-			return usageByMeter(ctx, q, mid.UUID(), customer, report, out)
+		rows, err := s.moneyService().UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: billing.CustomerID(customer.UUID()), Currency: report.currency, From: from, To: to})
+		if err != nil {
+			return err
 		}
-		from, to := report.days()
-		arg := gen.UsageDailyReportParams{GroupBy: string(report.groupBy), MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: report.currency,
-			FromDayAt: from, ToDayAt: to, RowLimit: UsagePage.Fetch(report.limit)}
+		groups := usageGroups(rows, report.groupBy)
 		if report.after != nil {
-			arg.AfterAmount, arg.AfterKey = &report.after.Amount, &report.after.Key
+			groups = slices.DeleteFunc(groups, func(g usageGroup) bool {
+				return g.amount > report.after.Amount || g.amount == report.after.Amount && g.key <= report.after.Key
+			})
 		}
-		rows, err := q.UsageDailyReport(ctx, arg)
-		if err != nil {
-			return err
+		if n := int(UsagePage.Fetch(report.limit)); len(groups) > n {
+			groups = groups[:n]
 		}
-		page := pagination.Cut(rows, report.limit, func(r gen.UsageDailyReportRow) any {
-			return usageCursor{Amount: r.TotalAmount, Key: r.Key, Currency: report.currency, GroupBy: report.groupBy, From: report.from, To: report.to}
+		page := pagination.Cut(groups, report.limit, func(g usageGroup) any {
+			return usageCursor{Amount: g.amount, Key: g.key, Currency: report.currency, GroupBy: report.groupBy, From: report.from, To: report.to}
 		})
 		if page.Next != "" {
 			out.NextCursor = &page.Next
 		}
-		for _, r := range page.Items {
-			out.Rows = append(out.Rows, billing.UsageRow{Key: r.Key, EventCount: r.EventCount, Amount: r.TotalAmount})
+		for _, g := range page.Items {
+			row := billing.UsageRow{Key: g.key, EventCount: g.events, Amount: g.amount}
+			if report.groupBy == billing.UsageByMeter {
+				meter, cell, _ := strings.Cut(g.key, "\x1f")
+				quantity := g.quantity
+				row.Key, row.Quantity = meter, &quantity
+				if cell != "" {
+					row.Cell = &cell
+				}
+			}
+			out.Rows = append(out.Rows, row)
 		}
 		return nil
 	})
@@ -175,35 +178,55 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	return out, nil
 }
 
-// usageByMeter is a usage report page grouped by what each meter and matrix
-// cell charged.
-func usageByMeter(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, report usageReport, out *billing.Usage) error {
-	from, to := report.days()
-	arg := gen.UsageDailyReportByMeterParams{MerchantID: merchantID, CustomerID: customer.UUID(), Currency: report.currency,
-		FromDayAt: from, ToDayAt: to, RowLimit: UsagePage.Fetch(report.limit)}
-	if report.after != nil {
-		arg.AfterAmount, arg.AfterKey = &report.after.Amount, &report.after.Key
-	}
-	rows, err := q.UsageDailyReportByMeter(ctx, arg)
-	if err != nil {
-		return err
-	}
-	page := pagination.Cut(rows, report.limit, func(r gen.UsageDailyReportByMeterRow) any {
-		return usageCursor{Amount: r.TotalAmount, Key: r.Key, Currency: report.currency, GroupBy: report.groupBy, From: report.from, To: report.to}
-	})
-	if page.Next != "" {
-		out.NextCursor = &page.Next
-	}
-	for _, r := range page.Items {
-		meter, cell, _ := strings.Cut(r.Key, "\x1f")
-		quantity := r.Quantity
-		row := billing.UsageRow{Key: meter, EventCount: r.EventCount, Amount: r.TotalAmount, Quantity: &quantity}
-		if cell != "" {
-			row.Cell = &cell
+// usageGroup is one group of a usage report.
+type usageGroup struct {
+	key                      string
+	events, amount, quantity int64
+}
+
+// usageGroups groups priced history: by event type or invoker, counting the
+// events once, on their rows with no meter; by meter, what each meter and
+// matrix cell (joined by U+001F) charged. Ordered by amount, largest first,
+// then key in byte order.
+func usageGroups(rows []money.UsageHistoryRow, by billing.UsageGroupBy) []usageGroup {
+	sums := map[string]*usageGroup{}
+	for _, r := range rows {
+		var key string
+		switch {
+		case by == billing.UsageByMeter && r.Meter == "":
+			continue
+		case by == billing.UsageByMeter:
+			key = r.Meter + "\x1f" + r.Cell
+		case by == billing.UsageByInvoker:
+			key = r.Invoker
+		default:
+			key = r.EventType
 		}
-		out.Rows = append(out.Rows, row)
+		g := sums[key]
+		if g == nil {
+			g = &usageGroup{key: key}
+			sums[key] = g
+		}
+		g.amount += r.Amount
+		switch {
+		case by == billing.UsageByMeter:
+			g.events += r.Requests
+			g.quantity += r.Quantity
+		case r.Meter == "":
+			g.events += r.Requests
+		}
 	}
-	return nil
+	out := make([]usageGroup, 0, len(sums))
+	for _, g := range sums {
+		out = append(out, *g)
+	}
+	slices.SortFunc(out, func(a, b usageGroup) int {
+		if a.amount != b.amount {
+			return cmp.Compare(b.amount, a.amount)
+		}
+		return strings.Compare(a.key, b.key)
+	})
+	return out
 }
 
 // SetCreditAccountSettings upserts a payer's spend policy in one currency.

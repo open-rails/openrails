@@ -2980,7 +2980,9 @@ export type UsageCharge = {
 }
 
 export type UsageDeduction = {
-  day: string
+  period_starts_at: string
+  period_ends_at: string
+  through: string
   amount: string
   lines: UsageDeductionLine[]
 }

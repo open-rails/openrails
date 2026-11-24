@@ -9,8 +9,10 @@ import "fmt"
 // webhook dedup. A rollback restores state wrongly destroyed; it never retracts value wrongly
 // granted (that is a revoke, a compensating transfer and a refund).
 var NeverRollbackableTables = map[string]string{
-	"ledger_transfers": "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the counter trigger silently corrupts every balance read",
-	"ledger_accounts":  "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
+	"ledger_transfers":   "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the counter trigger silently corrupts every balance read",
+	"ledger_accounts":    "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
+	"ledger_daily":       "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
+	"ledger_type_totals": "trigger-maintained rollup of the transfers; restoring a row desynchronises it from them",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
 	"credit_grants":                   "credit lots whose counters the ledger keeps; restoring a row desynchronises it from its transfers",

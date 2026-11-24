@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -31,6 +32,101 @@ func (q *Queries) AttachEventStore(ctx context.Context, storeID uuid.UUID) (uuid
 	var store_id uuid.UUID
 	err := row.Scan(&store_id)
 	return store_id, err
+}
+
+const countMerchantUsageCatalog = `-- name: CountMerchantUsageCatalog :one
+SELECT (SELECT count(*) FROM billing.catalog_meters m WHERE m.merchant_id = $1::uuid)::bigint AS meters,
+       (SELECT count(*) FROM billing.catalog_limits l WHERE l.merchant_id = $1::uuid)::bigint AS limits
+`
+
+type CountMerchantUsageCatalogRow struct {
+	Meters int64
+	Limits int64
+}
+
+// One merchant's dormant usage catalog.
+func (q *Queries) CountMerchantUsageCatalog(ctx context.Context, merchantID uuid.UUID) (CountMerchantUsageCatalogRow, error) {
+	row := q.db.QueryRow(ctx, countMerchantUsageCatalog, merchantID)
+	var i CountMerchantUsageCatalogRow
+	err := row.Scan(&i.Meters, &i.Limits)
+	return i, err
+}
+
+const deleteDormantLimitAdjustments = `-- name: DeleteDormantLimitAdjustments :exec
+DELETE FROM billing.limit_adjustments WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantLimitAdjustments(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantLimitAdjustments, merchantID)
+	return err
+}
+
+const deleteDormantLimitOverrides = `-- name: DeleteDormantLimitOverrides :exec
+DELETE FROM billing.customer_limit_overrides WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantLimitOverrides(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantLimitOverrides, merchantID)
+	return err
+}
+
+const deleteDormantLimitWindows = `-- name: DeleteDormantLimitWindows :exec
+DELETE FROM billing.limit_windows WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantLimitWindows(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantLimitWindows, merchantID)
+	return err
+}
+
+const deleteDormantLimits = `-- name: DeleteDormantLimits :exec
+DELETE FROM billing.catalog_limits WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantLimits(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantLimits, merchantID)
+	return err
+}
+
+const deleteDormantMeters = `-- name: DeleteDormantMeters :exec
+DELETE FROM billing.catalog_meters WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantMeters(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantMeters, merchantID)
+	return err
+}
+
+const deleteDormantProductLimits = `-- name: DeleteDormantProductLimits :exec
+DELETE FROM billing.catalog_product_limits WHERE merchant_id = $1::uuid
+`
+
+func (q *Queries) DeleteDormantProductLimits(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantProductLimits, merchantID)
+	return err
+}
+
+const deleteDormantRateCards = `-- name: DeleteDormantRateCards :exec
+
+DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid
+`
+
+// Without an event store, applying a document that declares no usage removes
+// the merchant's dormant usage catalog, dependents first.
+func (q *Queries) DeleteDormantRateCards(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantRateCards, merchantID)
+	return err
+}
+
+const deleteDormantUsageOwners = `-- name: DeleteDormantUsageOwners :exec
+DELETE FROM billing.catalog_field_owners
+WHERE merchant_id = $1::uuid
+  AND (object IN ('meter', 'limit') OR (object = 'product' AND field IN ('rate_cards', 'limits')))
+`
+
+func (q *Queries) DeleteDormantUsageOwners(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDormantUsageOwners, merchantID)
+	return err
 }
 
 const listUsageCatalogObjects = `-- name: ListUsageCatalogObjects :many
@@ -71,4 +167,31 @@ func (q *Queries) ListUsageCatalogObjects(ctx context.Context) ([]ListUsageCatal
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockEventStore = `-- name: LockEventStore :one
+SELECT store_id FROM billing.event_store WHERE singleton FOR UPDATE
+`
+
+// The attached store's identity, locked against another attach.
+func (q *Queries) LockEventStore(ctx context.Context) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockEventStore)
+	var store_id uuid.UUID
+	err := row.Scan(&store_id)
+	return store_id, err
+}
+
+const reattachEventStore = `-- name: ReattachEventStore :exec
+UPDATE billing.event_store SET store_id = $1::uuid, attached_at = $2::timestamptz WHERE singleton
+`
+
+type ReattachEventStoreParams struct {
+	StoreID uuid.UUID
+	Now     time.Time
+}
+
+// An operator attaches another store: its identity replaces the recorded one.
+func (q *Queries) ReattachEventStore(ctx context.Context, arg ReattachEventStoreParams) error {
+	_, err := q.db.Exec(ctx, reattachEventStore, arg.StoreID, arg.Now)
+	return err
 }

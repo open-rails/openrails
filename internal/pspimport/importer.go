@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/proposals"
@@ -468,6 +469,7 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 	if err != nil {
 		return nil, err
 	}
+	im.prepareBooks(ctx, id)
 	var out gen.BillingPspImport
 	err = im.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := im.DB.NewWithPgxTx(tx)
@@ -482,6 +484,9 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		}
 		if err != nil {
 			return err
+		}
+		if row.Status == string(billing.PSPImportFailed) {
+			return apperr.Conflictf("the import failed: %s; create it again", deref(row.Error))
 		}
 		if busy(row.Status) || row.PulledAt == nil || row.HistoryThrough == nil || row.HistoryThrough.Before(*row.PulledAt) {
 			return apperr.Conflictf("the import is %s; it lands once its pull finished", row.Status)
@@ -499,6 +504,23 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		return nil, err
 	}
 	return im.view(ctx, out)
+}
+
+// prepareBooks opens the merchant's general ledger in each currency the
+// import's records name, before the apply posts any.
+func (im *Importer) prepareBooks(ctx context.Context, id billing.PSPImportID) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return
+	}
+	currencies, err := im.DB.Gen(ctx).ListPSPImportCurrencies(ctx, gen.ListPSPImportCurrenciesParams{MerchantID: mid.UUID(), ImportID: id.UUID()})
+	if err != nil {
+		if im.Log != nil {
+			im.Log.WarnContext(ctx, "pspimport: read the import's currencies", "error", err)
+		}
+		return
+	}
+	books.Prepare(ctx, im.DB.DataPool(), im.Log, mid.UUID(), currencies...)
 }
 
 // applyKinds are the change kinds an Apply approves: those

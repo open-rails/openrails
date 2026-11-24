@@ -165,7 +165,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
@@ -192,7 +193,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
@@ -219,7 +221,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,

@@ -536,7 +536,7 @@
       "TestLeaseSyncs/OR-J24-S10/periods-and-rate-card-revisions-are-priced-apart"
     ],
     "OR-J24-S11": [
-      "TestLeaseSyncs/OR-J24-S11/a-day-posts-once-and-once-more-before-a-top-up"
+      "TestLeaseSyncs/OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up"
     ],
     "OR-J24-S14": [
       "TestLeaseSyncs/OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled"
@@ -765,6 +765,9 @@
     "OR-J32-S05": [
       "TestMerchantHost/OR-J32-S05/cli-purge-queues-its-vault-cleanup"
     ],
+    "OR-J32-S06": [
+      "TestMerchantHost/OR-J32-S06/purge-removes-the-directory-copy-and-its-tokens"
+    ],
     "OR-J34-S01": [
       "TestDestructiveControls/OR-J34-S01/ceiling-persists-original-actor-target-and-denied-effect"
     ],
@@ -788,6 +791,29 @@
     ],
     "OR-J34-S31": [
       "TestDestructiveControls/OR-J34-S31/a-remote-handle-refuses-acting-for"
+    ],
+    "OR-J34-S39": [
+      "TestDestructiveSafeguards/OR-J34-S39/a-spent-solana-schedule-waits-past-due-while-the-switch-is-off"
+    ],
+    "OR-J34-S40": [
+      "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission",
+      "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/host",
+      "TestDestructiveSafeguards/OR-J34-S40/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/staff"
+    ],
+    "OR-J34-S34": [
+      "TestDestructiveSafeguards/OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget"
+    ],
+    "OR-J34-S35": [
+      "TestDestructiveSafeguards/OR-J34-S35/a-declined-charge-that-spends-dunning-in-a-book-is-an-admitted-cancel"
+    ],
+    "OR-J34-S36": [
+      "TestDestructiveSafeguards/OR-J34-S36/a-lost-admission-answer-leaves-no-action-spending-the-budget"
+    ],
+    "OR-J34-S37": [
+      "TestDestructiveSafeguards/OR-J34-S37/a-merchants-books-land-one-at-a-time"
+    ],
+    "OR-J34-S38": [
+      "TestDestructiveSafeguards/OR-J34-S38/an-abandon-waiting-on-its-actions-stalls-no-other-admission"
     ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
@@ -1042,6 +1068,12 @@
     "OR-J38-S72": [
       "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
     ],
+    "OR-J38-S76": [
+      "TestPSPImportSafeguards/OR-J38-S76/a-failed-import-is-never-applied"
+    ],
+    "OR-J38-S77": [
+      "TestPSPImportSafeguards/OR-J38-S77/a-price-picked-for-an-import-record-is-never-deleted"
+    ],
     "OR-J38-S35": [
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"
     ],
@@ -1167,6 +1199,24 @@
     ],
     "OR-J06-S65": [
       "TestDueWork/OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding"
+    ],
+    "OR-J06-S66": [
+      "TestFindingAlerts/OR-J06-S66/a-refund-the-ledger-cannot-book-alerts-the-operator"
+    ],
+    "OR-J06-S67": [
+      "TestFindingAlerts/OR-J06-S67/a-low-cranker-alerts-the-operator"
+    ],
+    "OR-J06-S68": [
+      "TestFindingAlerts/OR-J06-S68/a-refused-message-sender-alerts-the-operator-once"
+    ],
+    "OR-J06-S69": [
+      "TestFindingAlerts/OR-J06-S69/a-rate-limited-customer-alerts-the-operator-once"
+    ],
+    "OR-J06-S70": [
+      "TestFindingAlerts/OR-J06-S70/a-held-terminal-outcome-alerts-the-operator-once"
+    ],
+    "OR-J06-S71": [
+      "TestFindingAlerts/OR-J06-S71/distinct-repairs-of-one-transaction-alert-separately"
     ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
@@ -1331,6 +1381,12 @@
     ],
     "OR-J12-S71": [
       "TestMerchantCardRemoval/OR-J12-S71/nmi-erasure-requires-confirmed-absence"
+    ],
+    "OR-J12-S72": [
+      "TestMerchantCardRemoval/OR-J12-S72/a-card-with-history-is-never-hard-deleted"
+    ],
+    "OR-J12-S73": [
+      "TestMerchantCardRemoval/OR-J12-S73/a-card-an-unverified-membership-bills-is-kept"
     ],
     "OR-J22-S07": [
       "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
@@ -1837,6 +1893,42 @@
     "OR-J24-S46": [
       "TestLeaseSyncs/OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate"
     ],
+    "OR-J24-S47": [
+      "TestUsageStore/OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice"
+    ],
+    "OR-J24-S48": [
+      "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-other-money-moves"
+    ],
+    "OR-J24-S49": [
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/graduated-across-two-postings",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-volume-crossing-is-carried-and-credited-at-period-close",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-card-revision-mid-period-is-priced-card-by-card"
+    ],
+    "OR-J24-S50": [
+      "TestUsageStore/OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference"
+    ],
+    "OR-J24-S51": [
+      "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
+    ],
+    "OR-J24-S52": [
+      "TestUsageStore/OR-J24-S52/new-refuses-a-database-with-unposted-usage-without-its-store"
+    ],
+    "OR-J24-S53": [
+      "TestUsageStore/OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money"
+    ],
+    "OR-J24-S54": [
+      "TestUsageStore/OR-J24-S54/an-archive-carries-the-merchants-usage-and-restores-it-into-an-empty-store"
+    ],
+    "OR-J24-S55": [
+      "TestUsageStore/OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart"
+    ],
+    "OR-J24-S56": [
+      "TestUsageStore/OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone"
+    ],
+    "OR-J24-S57": [
+      "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
+    ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",
@@ -1911,6 +2003,36 @@
     ],
     "OR-J45-S15": [
       "TestDeclineCauses/OR-J45-S15/a-new-card-is-not-held-to-the-old-cards-advice"
+    ],
+    "OR-J40-S01": [
+      "TestBooks/OR-J40-S01/every-account-type-has-one-book-and-class-and-the-general-ledger-holds-money"
+    ],
+    "OR-J40-S02": [
+      "TestBooks/OR-J40-S02/a-transfer-across-books-currencies-or-customers-is-refused"
+    ],
+    "OR-J40-S03": [
+      "TestBooks/OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption"
+    ],
+    "OR-J40-S05": [
+      "TestBooksMigration/OR-J40-S05/a-ledger-from-before-the-books-migrates-with-its-rollups"
+    ],
+    "OR-J40-S06": [
+      "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
+    ],
+    "OR-J40-S07": [
+      "TestBooks/OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book"
+    ],
+    "OR-J40-S08": [
+      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
+    ],
+    "OR-J40-S09": [
+      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit"
+    ],
+    "OR-J40-S23": [
+      "TestBooks/OR-J40-S23/an-event-queued-before-or-after-a-ledger-transfer-both-commit"
+    ],
+    "OR-J40-S24": [
+      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
     ]
   }
 }

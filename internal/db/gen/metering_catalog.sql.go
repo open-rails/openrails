@@ -140,20 +140,6 @@ func (q *Queries) GetUsageMeterForUpdate(ctx context.Context, arg GetUsageMeterF
 }
 
 const getUsageMeterWithCatalog = `-- name: GetUsageMeterWithCatalog :one
-WITH activity AS (
-    -- Each meter's latest settled usage: the newest day of its event type's
-    -- rollups, by a backward index probe, and that day's last settlement.
-    SELECT m.key AS meter_key,
-           (SELECT max(ud.updated_at)
-              FROM billing.usage_daily ud
-             WHERE ud.merchant_id = m.merchant_id
-               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
-               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
-                                 WHERE last.merchant_id = m.merchant_id
-                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
-    FROM billing.catalog_meters m
-    WHERE m.merchant_id = $1
-)
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
        COALESCE(NULLIF(meter.event_type, ''), meter.key) AS effective_event_type,
@@ -164,8 +150,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
-       activity.last_event_at,
        card.id AS card_id,
        card.product_id,
        product.key AS product_key,
@@ -175,8 +159,6 @@ SELECT meter.key,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
-LEFT JOIN activity
-  ON activity.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
@@ -203,8 +185,6 @@ type GetUsageMeterWithCatalogRow struct {
 	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	HasActivity        bool
-	LastEventAt        *time.Time
 	CardID             *uuid.UUID
 	ProductID          *uuid.UUID
 	ProductKey         *string
@@ -229,8 +209,6 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.HasActivity,
-		&i.LastEventAt,
 		&i.CardID,
 		&i.ProductID,
 		&i.ProductKey,
@@ -281,20 +259,6 @@ func (q *Queries) InsertUsageMeter(ctx context.Context, arg InsertUsageMeterPara
 }
 
 const listUsageMetersWithCatalog = `-- name: ListUsageMetersWithCatalog :many
-WITH activity AS (
-    -- Each meter's latest settled usage: the newest day of its event type's
-    -- rollups, by a backward index probe, and that day's last settlement.
-    SELECT m.key AS meter_key,
-           (SELECT max(ud.updated_at)
-              FROM billing.usage_daily ud
-             WHERE ud.merchant_id = m.merchant_id
-               AND ud.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)
-               AND ud.day_at = (SELECT max(last.day_at) FROM billing.usage_daily last
-                                 WHERE last.merchant_id = m.merchant_id
-                                   AND last.event_type = COALESCE(NULLIF(m.event_type, ''), m.key))) AS last_event_at
-    FROM billing.catalog_meters m
-    WHERE m.merchant_id = $1
-)
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
        COALESCE(NULLIF(meter.event_type, ''), meter.key) AS effective_event_type,
@@ -305,8 +269,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
-       activity.last_event_at,
        card.id AS card_id,
        card.product_id,
        product.key AS product_key,
@@ -316,8 +278,6 @@ SELECT meter.key,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
-LEFT JOIN activity
-  ON activity.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
@@ -347,8 +307,6 @@ type ListUsageMetersWithCatalogRow struct {
 	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	HasActivity        bool
-	LastEventAt        *time.Time
 	CardID             *uuid.UUID
 	ProductID          *uuid.UUID
 	ProductKey         *string
@@ -379,8 +337,6 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.HasActivity,
-			&i.LastEventAt,
 			&i.CardID,
 			&i.ProductID,
 			&i.ProductKey,

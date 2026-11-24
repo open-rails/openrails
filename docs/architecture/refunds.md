@@ -3,7 +3,7 @@
 This system reverses charges: a staff refund OpenRails sends to the provider, a
 refund made at the provider, a chargeback, and a won dispute that returns the
 money. Each reversal is a `payments` row linked to its charge; reversing a payment
-that bought credit also posts its share to the [ledger](ledger.md). It also
+that bought credit also posts its share to the [books](books.md). It also
 records external payments: money a merchant received outside OpenRails, booked
 against an order with no provider call.
 
@@ -37,7 +37,9 @@ against an order with no provider call.
   chargebacks and fraud reports per PSP, network, currency and UTC day, kept by
   triggers on `payments`, `disputes` and `fraud_reports`.
 - **Ledger repair**: a `consistency.ledger.unbooked` finding for a provider
-  reversal OpenRails could not book (`alerting.RecordLedgerRepair`).
+  reversal OpenRails could not book (`alerting.RecordLedgerRepair`), one per
+  event: its idempotency key, else its operation, transaction and the
+  resources it names (OR-J06-S71).
 
 ## How it works
 

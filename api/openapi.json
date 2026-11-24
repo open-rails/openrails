@@ -7667,7 +7667,7 @@
           "app"
         ],
         "operationId": "SyncLeases",
-        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request holds of the lease it releases and the customers whose views it asks for; it answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync, and settled usage posts as one deduction per customer and UTC day.",
+        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request holds of the lease it releases and the customers whose views it asks for; it answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger at each month's end in the merchant's accounting zone and before any other movement of the customer's balance.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11146,7 +11146,7 @@
           "merchant_config"
         ],
         "operationId": "ImportBilling",
-        "description": "ImportBilling lands declared billing facts under the bound merchant.",
+        "description": "ImportBilling lands declared billing facts under the bound merchant. The book's cancels and the provider stops it owes are the caller's destructive actions, admitted together: a cancel of a subscription the book did not create also waits for the destructive-action switch and its PSP's cancellation cap, keeping access meanwhile.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11196,6 +11196,7 @@
           "as_of_required",
           "invalid_param",
           "invalid_psp_reference",
+          "rate_limit_exceeded",
           "resource_conflict"
         ],
         "x-openrails-error-sets": [
@@ -28664,8 +28665,17 @@
       "UsageDeduction": {
         "type": "object",
         "properties": {
-          "day": {
-            "type": "string"
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "through": {
+            "type": "string",
+            "format": "date-time"
           },
           "amount": {
             "type": "string",
@@ -28679,7 +28689,9 @@
           }
         },
         "required": [
-          "day",
+          "period_starts_at",
+          "period_ends_at",
+          "through",
           "amount",
           "lines"
         ]

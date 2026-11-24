@@ -114,7 +114,7 @@ CREATE TABLE billing.mrr_risk_due (
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT mrr_risk_due_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE
 );
-COMMENT ON TABLE billing.mrr_risk_due IS 'Changes outside a subscription row that may change the risk of its customer''s subscriptions: a card, a default card, a provider''s decline or delinquency. Each change appends its own row, so no writer waits on another''s; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer''s subscriptions, locking them in id order. changed_at dates the change. Retention: state, deleted when claimed.';
+COMMENT ON TABLE billing.mrr_risk_due IS 'Changes outside a subscription row that may change the risk of its customer''s subscriptions: a card, a default card, a provider''s decline or delinquency. Each change appends its own row, so no writer waits on another''s; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer''s subscriptions, locking them in id order. changed_at dates the change; a claimed row is deleted.';
 COMMENT ON COLUMN billing.mrr_risk_due.held_until IS 'Set on the changes of a customer whose evaluation failed alone (an mrr.risk.evaluation_failed finding): drains skip them until then. Any evaluation of the customer that succeeds takes them too.';
 
 CREATE INDEX mrr_risk_due_held_idx ON billing.mrr_risk_due (merchant_id, customer_id)
@@ -866,7 +866,6 @@ BEGIN
                   'destructive_run_before_images',
                   'disputes',
                   'eventlog_events',
-                  'failed_usage_windows',
                   'fraud_reports',
                   'grants',
                   'host_outbox',
@@ -874,7 +873,10 @@ BEGIN
                   'lease_in_flight',
                   'leases',
                   'ledger_accounts',
+                  'ledger_daily',
+                  'ledger_rollup_pending',
                   'ledger_transfers',
+                  'ledger_type_totals',
                   'limit_adjustments',
                   'limit_hold_parts',
                   'limit_holds',
@@ -882,7 +884,6 @@ BEGIN
                   'maintenance_runs',
                   'mandates',
                   'merchant_destructive_policy',
-                  'meter_period_quantities',
                   'money_settings',
                   'mrr_cohort_flows',
                   'mrr_flows',
@@ -939,9 +940,9 @@ BEGIN
                   'subscription_status_transitions',
                   'subscription_verifications',
                   'subscriptions',
-                  'usage_accruals',
-                  'usage_daily',
-                  'usage_minutes',
+                  'usage_card_prints',
+                  'usage_postings',
+                  'usage_unposted',
                   'webhook_events',
                   'webhook_health',
                   'webhook_health_daily']::text[])

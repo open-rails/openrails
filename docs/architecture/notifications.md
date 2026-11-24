@@ -31,8 +31,9 @@ sends no SMS. Integration guides: [events](../client.md#events),
 deterministic id) in the domain transaction. Insert triggers call
 `billing.queue_event_log`, which refuses an event whose merchant differs from the
 pinned `openrails.merchant_id` and stages it in `eventlog_pending`. The deferred
-constraint trigger `eventlog_flush_at_commit` runs `billing.eventlog_flush` at
-commit: it locks each touched `eventlog_streams` row, numbers the events into
+constraint trigger `eventlog_flush_at_commit` runs the books' commit-time
+sequence ([books](books.md#how-it-works)), whose last step, `billing.flush_event_log`,
+locks each touched `eventlog_streams` row, numbers the events into
 `eventlog_events`, and `pg_notify`s `<schema>.eventlog`. Positions are assigned at
 commit under the stream lock, so no reader sees a later fact before an earlier one
 commits. `billing.event_log_data` writes money fields as decimal strings and
@@ -133,9 +134,9 @@ channel after an archive restore.
 
 **Merchant alerts.** A finding's engine calls `alerting.Service.NotifyFinding` after
 persisting it (reconcile and converge engines, configuration evaluation, webhook
-parks, pay URL failures). Findings raised through `reconcile.PGStore.RaiseFinding`
-(`alerting.RecordLedgerRepair`, `alerting.RecordCrankerGas`) are not passed to it
-and reach only the console. Only `requires_review` findings notify. In one
+parks, pay URL failures), and `alerting.RecordLedgerRepair`,
+`alerting.RecordCrankerGas`, `alerting.RecordMessageRateLimit` and
+`alerting.RecordMessageSenderRefused` notify the findings they raise, and so does the lifecycle for `life.terminal_outcome.held`, through `alertjob.Notify`, the claim and queue the others share. Only `requires_review` findings notify. In one
 transaction `ClaimReconciliationFindingNotification` stamps `notified_at` and
 `notified_severity` (first time, or a strict escalation) and an
 `openrails.operator_alert` job (`DeliveryArgs`) is queued; a low finding stays in
@@ -344,7 +345,8 @@ Checks:
   publish and withdraw against AuthKit's real store; they run with the suite but
   map to no scenario id.
 - Alerts: OR-J06-S62 (daily re-alert), OR-J06-S64 (failed email retried, sent once),
-  OR-J06-S05 (webhook URL refusal). Findings: OR-J37-S09 (a cranker low-gas
+  OR-J06-S05 (webhook URL refusal), OR-J06-S70 (a held terminal outcome), OR-J06-S71
+  (distinct repairs of one transaction). Findings: OR-J37-S09 (a cranker low-gas
   finding raised and resolved), OR-J34-S04 (a hold's finding cannot be resolved
   around the hold).
 - Balance notices: OR-J25-S04, OR-J25-S37, OR-J25-S40, OR-J25-S41, OR-J25-S42.

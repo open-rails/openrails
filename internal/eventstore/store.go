@@ -151,6 +151,14 @@ func Migrate(ctx context.Context, conn driver.Conn, database string, logger *slo
 // restore of it, new when the database is created again.
 func (s *Store) ID() uuid.UUID { return s.id }
 
+// The finding a merchant's dormant usage catalog opens on a deployment
+// without an event store: meters and limits that serve nothing until one is
+// attached, or a document without them removes them.
+const (
+	DormantFindingType    = "consistency.dormant_usage"
+	DormantFindingSubject = "usage_catalog"
+)
+
 // Required is the refusal of what needs the event store, on a deployment
 // without one.
 func Required(what string) error {

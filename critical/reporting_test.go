@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -104,6 +105,18 @@ func accountingDays(t *testing.T) {
 		day.UTC().Format(time.RFC3339):                  10_000_000,
 		day.AddDate(0, 0, 1).UTC().Format(time.RFC3339): 0,
 	}, cash, "the sale counts on its local day")
+
+	// Usage at the same instant folds into the same local day.
+	pricedMeter(t, a.alphaRemote, catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 100, DivideBy: 1}})
+	settleUsage(t, a.alphaRemote, newLease(), numbered(1, usageInput(billing.CustomerID(uuid.MustParse(a.alice.ID)), "late-night-work", 2))...)
+	units := map[string]int64{}
+	for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"usage_units"}, By: []string{"time"}, Grain: "day", Range: q.Range}) {
+		units[fmt.Sprint(row["time"])] = whole(t, row["usage_units"])
+	}
+	require.Equal(t, map[string]int64{
+		day.UTC().Format(time.RFC3339):                  1,
+		day.AddDate(0, 0, 1).UTC().Format(time.RFC3339): 0,
+	}, units, "usage at 23:30 counts on its local day")
 }
 
 // Alice buys a $10 daily membership and four $100 orders: one refunded $30,

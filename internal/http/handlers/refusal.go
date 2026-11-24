@@ -29,9 +29,12 @@ func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
 // a customer action limit's rolling window, or a hold's next look.
 func setRetryAfter(r *httprequest.Request, err error) {
 	var limited *destructive.UserActionRateError
+	var budget *destructive.BudgetError
 	switch {
 	case errors.As(err, &limited):
 		r.SetHeader("Retry-After", strconv.FormatInt(limited.RetryAfterSeconds, 10))
+	case errors.As(err, &budget):
+		r.SetHeader("Retry-After", strconv.FormatInt(budget.RetryAfterSeconds, 10))
 	case errors.Is(err, destructive.ErrHeld):
 		r.SetHeader("Retry-After", strconv.FormatInt(int64(destructive.HeldRetryAfter/time.Second), 10))
 	}
@@ -45,6 +48,10 @@ func refusalOf(err error) *api.APIError {
 		return api.Coded(billing.CodeRateLimitExceeded, limited.Error()).WithMetadata(map[string]any{"retry_after_seconds": limited.RetryAfterSeconds})
 	}
 
+	var budget *destructive.BudgetError
+	if errors.As(err, &budget) {
+		return api.Coded(billing.CodeRateLimitExceeded, budget.Error()).WithMetadata(map[string]any{"retry_after_seconds": budget.RetryAfterSeconds})
+	}
 	if errors.Is(err, destructive.ErrHeld) {
 		return api.Coded(billing.CodeRateLimitExceeded, "destructive actions are held until an authorized operator clears the incident")
 	}

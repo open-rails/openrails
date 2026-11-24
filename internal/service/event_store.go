@@ -1,13 +1,19 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
 	"strconv"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -73,4 +79,28 @@ func (s *Service) eventStoreRefusal(what string, paths []string) error {
 		return err
 	}
 	return refusal.WithParam(paths[0]).WithMetadata(map[string]any{"paths": paths})
+}
+
+// removeDormantUsage removes, on a deployment without an event store, the
+// merchant's dormant meters, limits, rate cards and product limits, with
+// their overrides, adjustments and windows: a document applied there
+// declares none (refuseUsageCatalog), so the catalog it leaves has none.
+func (s *Service) removeDormantUsage(ctx context.Context) error {
+	if s.rt.EventStore != nil {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	q := s.catalogDatabase().Gen(ctx)
+	id := mid.UUID()
+	for _, remove := range []func(context.Context, uuid.UUID) error{q.DeleteDormantRateCards, q.DeleteDormantProductLimits, q.DeleteDormantLimitOverrides,
+		q.DeleteDormantLimitAdjustments, q.DeleteDormantLimitWindows, q.DeleteDormantLimits, q.DeleteDormantMeters, q.DeleteDormantUsageOwners} {
+		if err := remove(ctx, id); err != nil {
+			return err
+		}
+	}
+	_, err = q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: id, FindingType: eventstore.DormantFindingType, SubjectKey: eventstore.DormantFindingSubject})
+	return err
 }

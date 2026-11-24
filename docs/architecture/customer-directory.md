@@ -145,14 +145,13 @@ Checks:
 ### 6. Data lifecycle
 Both tables are `State` in
 `internal/retention/tables.go`. Erasure keeps an empty row on purpose. Neither table
-moves with the billing archive. Gap: a merchant purge deletes neither, so a purged
-merchant's contacts and token hashes stay.
+moves with the billing archive. A merchant purge deletes both.
 
 Checks:
 - `internal/retention/tables.go` has `customer_contacts` and
   `provisioning_tokens`.
 - `internal/merchantarchive/checks.go` excludes both, with reasons and column lists.
-- `merchantOwnedTables` in `internal/merchants/purge.go` lists neither (the gap).
+- `merchantOwnedTables` in `internal/merchants/purge.go` lists both (OR-J32-S06).
 
 ### 7. Work scales with activity
 No job runs: the copy changes only when a directory pushes, and reads are per

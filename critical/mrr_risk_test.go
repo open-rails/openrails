@@ -301,7 +301,7 @@ func TestMRRRisk(t *testing.T) {
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)

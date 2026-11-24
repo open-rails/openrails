@@ -185,7 +185,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(produc
 -- name: PricesHoldReferences :one
 -- Whether a record refers to any of the prices: a purchase line,
 -- a subscription, a purchase, a price migration, a scheduled change, a
--- provider write or a PSP link.
+-- provider write, a PSP link or a PSP import's price pick.
 SELECT (
     EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
@@ -195,6 +195,7 @@ SELECT (
     OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.provider_intents WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_psp_bindings WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.psp_import_records WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND manual_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
 )::boolean AS referenced;
 
 -- name: DeleteProductPrices :exec

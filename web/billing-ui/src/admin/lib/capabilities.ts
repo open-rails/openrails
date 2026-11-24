@@ -48,9 +48,9 @@ export function useCatalogArea(): boolean {
 // useCatalogSells reports what the catalog sells that a customer page's
 // sections serve: credit (a product that grants it, archived ones included,
 // since customers may still hold their grants) and usage (a meter priced by a
-// rate card). Undefined while the catalog loads. When the caller cannot read
-// the catalog, or the read fails, both are assumed: a section is hidden only
-// on evidence, never on a guess.
+// rate card, on a deployment that serves usage). Undefined while the catalog
+// loads. When the caller cannot read the catalog, or the read fails, both are
+// assumed: a section is hidden only on evidence, never on a guess.
 export function useCatalogSells():
   { credit: boolean; usage: boolean } | undefined {
   const { adminQueries } = useAdminServices()
@@ -65,11 +65,13 @@ export function useCatalogSells():
     meta: undefined,
     enabled: readable,
   })
+  const served = useUsageServed()
   if (!access) return undefined
   if (!readable || products.isError || meters.isError)
-    return { credit: true, usage: true }
+    return { credit: true, usage: served }
   if (!products.data || !meters.data) return undefined
-  const usage = meters.data.data.some((meter) => meter.rate_card !== null)
+  const usage =
+    served && meters.data.data.some((meter) => meter.rate_card !== null)
   return {
     credit: products.data.data.some((product) => product.credit_grant) || usage,
     usage,
@@ -112,6 +114,21 @@ export function useMerchantConfigUpdates(): boolean {
 // gauges.
 export function useMetrics(): boolean {
   return useAccess()?.metrics === true
+}
+
+// useUsageServed reports whether the deployment serves usage (GET /config
+// usage: an event store is attached); its usage pages hide otherwise. True
+// while the configuration loads.
+export function useUsageServed(): boolean {
+  const { adminQueries } = useAdminServices()
+  return useQuery(adminQueries.config()).data?.usage ?? true
+}
+
+// useMeteringArea reports the catalog's metering pages: the catalog area on
+// a deployment that serves usage.
+export function useMeteringArea(): boolean {
+  const catalog = useCatalogArea()
+  return useUsageServed() && catalog
 }
 
 // useDashboardLayout reports whether the caller may edit the dashboard's
