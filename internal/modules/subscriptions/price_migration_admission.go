@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -85,7 +86,6 @@ func (s *PriceMigrationService) admitMigration(ctx context.Context, request bill
 func (s *PriceMigrationService) claim(ctx context.Context, action destructive.Action) (destructive.State, *billing.PriceMigration, error) {
 	var state destructive.State
 	var recorded uuid.UUID
-	busy := false
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := s.db.NewWithPgxTx(tx).Gen(ctx)
 		row, err := q.GetPriceMigrationByDestructiveAction(ctx, gen.GetPriceMigrationByDestructiveActionParams{MerchantID: action.MerchantID, DestructiveActionID: action.ID})
@@ -99,8 +99,7 @@ func (s *PriceMigrationService) claim(ctx context.Context, action destructive.Ac
 		locked, err := q.LockDestructiveActionNowait(ctx, gen.LockDestructiveActionNowaitParams{MerchantID: action.MerchantID, ID: action.ID})
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "55P03" {
-			busy = true
-			return nil
+			return ErrPriceMigrationInProgress
 		}
 		if err != nil {
 			return err
@@ -114,8 +113,6 @@ func (s *PriceMigrationService) claim(ctx context.Context, action destructive.Ac
 	case recorded != uuid.Nil:
 		out, err := s.Get(ctx, billing.PriceMigrationID(recorded))
 		return "", out, err
-	case busy:
-		return "", nil, ErrPriceMigrationInProgress
 	}
 	return state, nil, nil
 }
@@ -130,7 +127,8 @@ func (s *PriceMigrationService) Abandon(ctx context.Context, pending *PendingMig
 		return cause
 	}
 	action := pending.Action
-	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	// Detached: a caller that left may have closed the request's connection.
+	finish, cancel := db.DetachedWriteContext(ctx, 10*time.Second)
 	defer cancel()
 	err := s.db.MerchantTx(finish, func(ctx context.Context, tx pgx.Tx) error {
 		q := s.db.NewWithPgxTx(tx).Gen(ctx)
