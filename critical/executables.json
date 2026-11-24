@@ -1372,6 +1372,9 @@
       "TestLogging/OR-J04-S76/every-logger-the-engine-reaches-is-the-hosts",
       "TestLogging/OR-J04-S76/the-standalone-server-boots-with-every-logger-set"
     ],
+    "OR-J04-S77": [
+      "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement"
+    ],
     "OR-J31-S08": [
       "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
     ],

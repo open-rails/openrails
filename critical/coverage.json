@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 458,
+  "scenario_count": 459,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2112,6 +2112,11 @@
       "id": "OR-J04-S76",
       "journey": "J04",
       "name": "Every logger the engine and the standalone server reach is set, the default logger is untouched, and a refusal is logged with its route, request and merchant"
+    },
+    {
+      "id": "OR-J04-S77",
+      "journey": "J04",
+      "name": "A Vault merchant document naming a retired key is refused with what replaced it, as a manifest is"
     },
     {
       "id": "OR-J25-S37",
