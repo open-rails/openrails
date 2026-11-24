@@ -106,7 +106,7 @@ func (p *pricing) costs(lines []*lineState, r request) ([]int64, error) {
 			if r.usage == nil || p == nil {
 				continue
 			}
-			def, ok := p.units[l.line.Limit]
+			def, ok := p.units[l.key]
 			if !ok {
 				continue
 			}
@@ -133,7 +133,8 @@ func (p *pricing) moneyCost(r request) (int64, error) {
 	if r.usage == nil {
 		return r.amount, nil
 	}
-	if p == nil {
+	if p == nil || len(p.money) == 0 {
+		// No card prices the event type: the server answers it, as Admit.
 		return 0, errUnpriced
 	}
 	var total int64

@@ -40,6 +40,14 @@ type fakeViews struct {
 	syncs    []billing.SyncLeasesParams
 	admits   []billing.AdmitParams
 	clients  []*Client
+	// broken customers' views are refused (as a policy that fails to
+	// resolve), deferred ones answered null; settleNone settles no new usage;
+	// dropAdmit admits and loses the reply; slow delays answers.
+	broken     map[billing.CustomerID]bool
+	deferred   map[billing.CustomerID]bool
+	settleNone bool
+	dropAdmit  int
+	slow       time.Duration
 }
 
 type fakeLimit struct {
@@ -75,14 +83,29 @@ func newFakeViews(limits map[string]fakeLimit) *fakeViews {
 
 func (f *fakeViews) RoundTrip(r *http.Request) (*http.Response, error) {
 	f.mu.Lock()
-	down := f.down
+	down, slow := f.down, f.slow
 	f.mu.Unlock()
 	if down {
 		return nil, errors.New("fake: connection refused")
 	}
 	rec := httptest.NewRecorder()
-	f.ServeHTTP(rec, r)
-	return rec.Result(), nil
+	if slow == 0 {
+		f.ServeHTTP(rec, r)
+		return rec.Result(), nil
+	}
+	// The server answers after slow, whether or not the caller still waits.
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(slow)
+		f.ServeHTTP(rec, r.WithContext(context.Background()))
+		close(done)
+	}()
+	select {
+	case <-done:
+		return rec.Result(), nil
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	}
 }
 
 // pool makes n clients outside a synctest bubble: a client starts its read
@@ -196,6 +219,16 @@ func (f *fakeViews) admit(w http.ResponseWriter, r *http.Request) {
 			out.Items = append(out.Items, billing.AdmissionVerdict{Status: 409, Error: &billing.ErrorDetails{Code: code}})
 			continue
 		}
+		if h := f.holds[item.RequestID]; h != nil {
+			state := billing.AdmissionOpen
+			out.Items = append(out.Items, billing.AdmissionVerdict{Status: 200, Admission: &billing.Admission{RequestID: item.RequestID, CustomerID: item.CustomerID,
+				Currency: item.Currency, Allowed: true, State: &state}})
+			continue
+		}
+		if f.money && item.Usage != nil && item.Usage.EventType != "work" {
+			out.Items = append(out.Items, billing.AdmissionVerdict{Status: 422, Error: &billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeUsageNotPriced}})
+			continue
+		}
 		units := item.Usage.Dimensions["units"]
 		costs := map[string]int64{}
 		refused := ""
@@ -223,6 +256,11 @@ func (f *fakeViews) admit(w http.ResponseWriter, r *http.Request) {
 		a.Allowed, a.State = true, &state
 		f.holds[item.RequestID] = &fakeHold{lease: *item.LeaseID, customer: item.CustomerID, costs: costs, open: true}
 		out.Items = append(out.Items, billing.AdmissionVerdict{Status: 200, Admission: a})
+	}
+	if f.dropAdmit > 0 {
+		f.dropAdmit--
+		writeFakeError(w, 503, "unavailable", "reply lost")
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -253,7 +291,7 @@ func (f *fakeViews) sync(w http.ResponseWriter, r *http.Request) {
 	ownSettled := map[fakeKey]int64{}
 	fresh := 0
 	for i, u := range p.Usage {
-		if f.perSync > 0 && fresh == f.perSync && u.N > lease.through {
+		if (f.settleNone || f.perSync > 0 && fresh == f.perSync) && u.N > lease.through {
 			break
 		}
 		n := u.N
@@ -311,17 +349,30 @@ func (f *fakeViews) sync(w http.ResponseWriter, r *http.Request) {
 		f.inFlight[p.LeaseID] = lines
 	}
 	viewed := map[billing.CustomerID]bool{}
-	priced := false
-	for _, vp := range p.Views {
+	priced := map[string]bool{}
+	for i, vp := range p.Views {
+		switch {
+		case f.broken[vp.CustomerID]:
+			res.LimitSets = append(res.LimitSets, nil)
+			res.RefusedViews = append(res.RefusedViews, billing.ViewRefusal{Index: i, Status: 500, Error: &billing.ErrorDetails{Type: billing.ErrorTypeAPI, Code: billing.CodeInternalError}})
+			continue
+		case vp.InvokerType != billing.InvokerTypeCustomer && vp.InvokerType != billing.InvokerTypeDelegated:
+			res.LimitSets = append(res.LimitSets, nil)
+			res.RefusedViews = append(res.RefusedViews, billing.ViewRefusal{Index: i, Status: 400, Error: &billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest, Code: billing.CodeInvalidParam}})
+			continue
+		case f.deferred[vp.CustomerID]:
+			res.LimitSets = append(res.LimitSets, nil)
+			continue
+		}
 		set := &billing.LimitSet{CustomerID: vp.CustomerID, Currency: vp.Currency, Limits: f.keys(), BalanceDenyCode: billing.DenyInsufficientBalance}
 		res.LimitSets = append(res.LimitSets, set)
 		if !viewed[vp.CustomerID] {
 			viewed[vp.CustomerID] = true
 			res.Views = append(res.Views, f.view(vp.CustomerID, now, p.LeaseID, ownSettled))
 		}
-		if vp.EventType != nil && !priced {
-			priced = true
-			res.Pricing = append(res.Pricing, f.pricing())
+		if vp.EventType != nil && !priced[*vp.EventType] {
+			priced[*vp.EventType] = true
+			res.Pricing = append(res.Pricing, f.pricing(*vp.EventType))
 		}
 	}
 	for id, l := range f.leases {
@@ -367,8 +418,12 @@ func (f *fakeViews) view(customer billing.CustomerID, now time.Time, except bill
 	return v
 }
 
-func (f *fakeViews) pricing() billing.ViewPricing {
-	p := billing.ViewPricing{Currency: "USD", EventType: "work", Counts: []billing.ViewCount{}, RateCards: []billing.ViewRateCard{}, PriceBounds: []billing.PriceBound{}}
+// pricing prices "work"; every other event type has no card or count.
+func (f *fakeViews) pricing(eventType string) billing.ViewPricing {
+	p := billing.ViewPricing{Currency: "USD", EventType: eventType, Counts: []billing.ViewCount{}, RateCards: []billing.ViewRateCard{}, PriceBounds: []billing.PriceBound{}}
+	if eventType != "work" {
+		return p
+	}
 	for k := range f.limits {
 		p.Counts = append(p.Counts, billing.ViewCount{Limit: k, Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum, Weight: 1, Per: 1})
 	}
@@ -865,6 +920,395 @@ func TestGateMarginFollowsWhatOthersAdd(t *testing.T) {
 		t.Fatalf("margin %d, want 4 intervals of the most others added (9)", got)
 	}
 	l = &lineState{money: true, line: billing.ViewLimit{Recent: 60_000}}
+	if got := l.margin(10); got != 4000 {
+		t.Fatalf("first margin %d, want 4 intervals of a minute's spend per second", got)
+	}
+}
+
+func hasCode(err error, code billing.ErrorCode) bool {
+	got, ok := billing.ErrorCodeFrom(err)
+	return ok && got == code
+}
+
+func reportedOf(f *fakeViews, lease billing.LeaseID) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var total int64
+	for _, l := range f.inFlight[lease] {
+		total += l
+	}
+	return total
+}
+
+func syncCount(f *fakeViews) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.syncs)
+}
+
+func TestGateRefusesARequestItCannotViewAlone(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 100}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		ok, broken := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+		f.set(func(f *fakeViews) { f.broken = map[billing.CustomerID]bool{broken: true} })
+		warm(t, g, ok)
+		// What no server would take is refused before anything is sent.
+		bad := work(ok, "btc", 1)
+		bad.Currency = "BTC"
+		if _, err := g.Admit(t.Context(), bad); !hasCode(err, billing.CodeCurrencyUnsupported) {
+			t.Fatalf("an unsupported currency: %v", err)
+		}
+		bad = work(ok, "agent", 1)
+		bad.InvokerType = "agent"
+		if _, err := g.Admit(t.Context(), bad); !hasCode(err, billing.CodeInvalidParam) {
+			t.Fatalf("an unknown invoker type: %v", err)
+		}
+		// A view the server refuses answers its request alone, once.
+		before := syncCount(f)
+		if _, err := g.Admit(t.Context(), work(broken, "broken", 1)); !hasCode(err, billing.CodeInternalError) {
+			t.Fatalf("a refused view: %v", err)
+		}
+		if n := syncCount(f) - before; n != 1 {
+			t.Fatalf("a refused view took %d syncs, want 1", n)
+		}
+		// The rest of the gate goes on: usage settles and the gate goes idle.
+		warm(t, g, ok)
+		if got := f.settledOf(ok, "quota"); got != 2 {
+			t.Fatalf("settled %d, want 2", got)
+		}
+		time.Sleep(5 * time.Second)
+		quiet := syncCount(f)
+		time.Sleep(30 * time.Second)
+		if n := syncCount(f) - quiet; n != 0 {
+			t.Fatalf("the gate synced %d more times for a refused view", n)
+		}
+	})
+}
+
+func TestGateGivesUpOnAViewNoSyncAnswers(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 100}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		f.set(func(f *fakeViews) { f.deferred = map[billing.CustomerID]bool{customer: true} })
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		_, err := g.Admit(ctx, work(customer, "deferred", 1))
+		if !errors.Is(err, ErrUnavailable) || ctx.Err() != nil {
+			t.Fatalf("a view every sync defers: %v (ctx %v)", err, ctx.Err())
+		}
+	})
+}
+
+func TestGateKeepsAViewWhileItHasWorkInFlight(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 100}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		long := mustAdmit(t, g, work(customer, "long", 30))
+		// Longer than an unused view is kept; the long ticket is still open.
+		time.Sleep(viewKeep + time.Minute)
+		var admitted int64
+		for i := range 20 {
+			tk, err := g.Admit(t.Context(), work(customer, fmt.Sprintf("after-%d", i), 10))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tk.Allowed() {
+				admitted += 10
+			}
+		}
+		if admitted > 69 {
+			t.Fatalf("admitted %d beside the long ticket's 30, of 99 left", admitted)
+		}
+		if err := long.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestGateReleasesAHoldWhoseAnswerItLost(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 10}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		open := func(id string) bool {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			h := f.holds[id]
+			return h != nil && h.open
+		}
+		// The server holds the last units and the answer is lost.
+		f.set(func(f *fakeViews) { f.dropAdmit = 1 })
+		if _, err := g.Admit(t.Context(), work(customer, "lost", 8)); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("a lost answer: %v", err)
+		}
+		if !open("lost") {
+			t.Fatal("the fake made no hold")
+		}
+		time.Sleep(2500 * time.Millisecond)
+		if open("lost") {
+			t.Fatal("the hold of a lost answer is still held")
+		}
+		// A caller that stops waiting leaves its hold to the next sync and
+		// the gate online.
+		f.set(func(f *fakeViews) { f.slow = 500 * time.Millisecond })
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		_, err := g.Admit(ctx, work(customer, "gave-up", 8))
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrUnavailable) {
+			t.Fatalf("a caller's deadline: %v", err)
+		}
+		if g.g.offline().on() {
+			t.Fatal("one caller's deadline took the gate offline")
+		}
+		time.Sleep(3 * time.Second)
+		f.set(func(f *fakeViews) { f.slow = 0 })
+		time.Sleep(2 * time.Second)
+		if open("gave-up") {
+			t.Fatal("the hold of a caller that gave up is still held")
+		}
+		// A retry under the request id before the next sync adopts its hold.
+		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second + 100*time.Millisecond)))
+		f.set(func(f *fakeViews) { f.slow = 500 * time.Millisecond })
+		ctx, cancel = context.WithTimeout(t.Context(), 200*time.Millisecond)
+		_, err = g.Admit(ctx, work(customer, "retried", 8))
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a caller's deadline: %v", err)
+		}
+		f.set(func(f *fakeViews) { f.slow = 0 })
+		tk := mustAdmit(t, g, work(customer, "retried", 8))
+		time.Sleep(2500 * time.Millisecond)
+		if !open("retried") {
+			t.Fatal("the hold a retry adopted was released")
+		}
+		if err := tk.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestGateReportsACapturedTicketUntilItSettles(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		long := mustAdmit(t, g, work(customer, "long", 7))
+		time.Sleep(3500 * time.Millisecond)
+		if got := reportedOf(f, g.g.lease); got != 7 {
+			t.Fatalf("reported %d, want the open ticket's 7", got)
+		}
+		// Captured, and carried by a sync that settles none of it.
+		f.set(func(f *fakeViews) { f.settleNone = true })
+		if err := long.Capture(t.Context(), capture(7)); err != nil {
+			t.Fatal(err)
+		}
+		// The capture's own sync carries it for the first time.
+		time.Sleep(100 * time.Millisecond)
+		if got := reportedOf(f, g.g.lease); got != 7 {
+			t.Fatalf("reported %d while its usage is unsettled, want 7", got)
+		}
+		f.set(func(f *fakeViews) { f.settleNone = false })
+		flush(t, g)
+		time.Sleep(3 * time.Second)
+		if got := reportedOf(f, g.g.lease); got != 0 {
+			t.Fatalf("reported %d once settled, want 0", got)
+		}
+	})
+}
+
+func TestGateDecidesAndCapturesConcurrentlyWithSyncs(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1_000_000}})
+	f.pool(t, 1)
+	g := newTestGate(t, f, GateDeps{})
+	defer closeGate(t, g)
+	customer := billing.CustomerID(uuid.New())
+	warm(t, g, customer)
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for w := range 8 {
+		wg.Go(func() {
+			for i := 0; time.Now().Before(deadline); i++ {
+				tk, err := g.Admit(t.Context(), work(customer, fmt.Sprintf("c-%d-%d", w, i), 1))
+				if err != nil || !tk.Allowed() {
+					continue
+				}
+				_ = tk.Capture(t.Context(), capture(1))
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func TestGateCaptureRacingCloseAnswers(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		box := &memOutbox{items: map[string]billing.OutboxItem{}}
+		g := newTestGate(t, f, GateDeps{Outbox: box})
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		tk := mustAdmit(t, g, work(customer, "late", 1))
+		closeGate(t, g)
+		// A capture that passed the closed check as Close stopped the writer.
+		g.g.mu.Lock()
+		g.g.stopped = false
+		g.g.mu.Unlock()
+		if err := g.g.capture(t.Context(), tk, capture(1)); !errors.Is(err, errGateClosed) {
+			t.Fatalf("a capture racing Close: %v", err)
+		}
+	})
+}
+
+func TestGateCloseEndsItsLease(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 10)
+	synctest.Test(t, func(t *testing.T) {
+		customer := billing.CustomerID(uuid.New())
+		for i := range 10 {
+			f.set(func(f *fakeViews) { f.slow = 0 })
+			g := newTestGate(t, f, GateDeps{})
+			warm(t, g, customer)
+			tk := mustAdmit(t, g, work(customer, fmt.Sprintf("open-%d", i), 1))
+			// A sync built before Close is still in flight when it begins.
+			f.set(func(f *fakeViews) { f.slow = 400 * time.Millisecond })
+			time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second + 100*time.Millisecond)))
+			_ = tk.Release(t.Context())
+			closeGate(t, g)
+			f.mu.Lock()
+			closed := f.leases[g.g.lease].closed
+			f.mu.Unlock()
+			if !closed {
+				t.Fatalf("round %d: Close returned with its lease open", i)
+			}
+		}
+	})
+}
+
+func TestGateSendsUnpricedEventsToTheServer(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{})
+	f.money, f.balance = true, 1_000_000
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		customer := billing.CustomerID(uuid.New())
+		warm(t, g, customer)
+		p := work(customer, "unpriced", 1)
+		p.Usage.EventType = "unpriced"
+		// The first request learns the event type's pricing; every one is
+		// answered as Admit answers it.
+		for i := range 3 {
+			p.RequestID = fmt.Sprintf("unpriced-%d", i)
+			if _, err := g.Admit(t.Context(), p); !hasCode(err, billing.CodeUsageNotPriced) {
+				t.Fatalf("request %d of an event type no card prices: %v", i, err)
+			}
+		}
+	})
+}
+
+func TestGateSettlesAnEarlierProcessBeforeItsViews(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 10_000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		customer := billing.CustomerID(uuid.New())
+		earlier := newLeaseID()
+		box := &memOutbox{items: map[string]billing.OutboxItem{}}
+		at := time.Now().UTC()
+		for n := int64(1); n <= 1500; n++ {
+			item := billing.LeaseUsage{N: n, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
+				Source: "test", SourceID: fmt.Sprintf("earlier-%d", n), Outcome: billing.UsageSucceeded, EventType: "work",
+				Dimensions: map[string]int64{"units": 1}, Metadata: map[string]any{}, OccurredAt: at}
+			box.items[fmt.Sprintf("%s/%d", earlier, n)] = billing.OutboxItem{LeaseID: earlier, Usage: item}
+		}
+		g := newTestGate(t, f, GateDeps{Outbox: box})
+		defer closeGate(t, g)
+		mustAdmit(t, g, work(customer, "first", 1))
+		lines, err := g.ListCustomerLimits(t.Context(), customer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lines[0].Remaining != 10_000-1500-1 {
+			t.Fatalf("the first view shows %d remaining, want %d: the earlier process's usage first", lines[0].Remaining, 10_000-1500-1)
+		}
+	})
+}
+
+func TestGateOfflineShare(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	customer := billing.CustomerID(uuid.New())
+	viewOf := func(lines ...billing.ViewLimit) *custView {
+		v := newCustView(viewKey{customer, "USD"})
+		v.mu.Lock()
+		v.apply(billing.View{CustomerID: customer, Currency: "USD", AsOf: t0, Limits: lines}, t0, 1, 2)
+		v.mu.Unlock()
+		return v
+	}
+	balance := func(remaining, drain int64) billing.ViewLimit {
+		return billing.ViewLimit{Limit: catalog.BalanceLimit, Unit: "USD", Overrun: catalog.OverrunRequireEstimate, Remaining: remaining, DrainPerHour: drain}
+	}
+	down := func(gates int) outage { return outage{since: t0.Add(time.Second), gates: gates} }
+	cases := []struct {
+		name    string
+		v       *custView
+		set     billing.LimitSet
+		at      time.Time
+		gates   int
+		fits    int64
+		refused int64
+	}{
+		// Remaining −50 on a credit line of 100 leaves 50: 25 a gate.
+		{"credit line below zero", viewOf(balance(-50, 0)), billing.LimitSet{Limits: []string{catalog.BalanceLimit}, CreditLine: 100}, t0.Add(2 * time.Second), 2, 25, 26},
+		// 40 left draining 10 an hour: after three hours 10 is left, 2 a gate.
+		{"running charges", viewOf(balance(40, 10)), billing.LimitSet{Limits: []string{catalog.BalanceLimit}}, t0.Add(3 * time.Hour), 4, 2, 3},
+		// The set caps the window at 10 where the line was built at 100.
+		{"a spend window's cap", viewOf(balance(1000, 0), billing.ViewLimit{Limit: "spend:x", Unit: "USD", Overrun: catalog.OverrunRequireEstimate, Capacity: 100, Remaining: 100}),
+			billing.LimitSet{Limits: []string{catalog.BalanceLimit, "spend:x"}, Capacities: []billing.LimitCapacity{{Limit: "spend:x", Capacity: 10}}}, t0.Add(2 * time.Second), 4, 2, 3},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			costs := func(n int64) []int64 { return slices.Repeat([]int64{n}, len(c.set.Limits)) }
+			if d := c.v.decide(c.set, costs(c.refused), c.at, down(c.gates)); d.verdict != verdictShort {
+				t.Fatalf("%d past the share: verdict %d", c.refused, d.verdict)
+			}
+			if d := c.v.decide(c.set, costs(c.fits), c.at, down(c.gates)); d.verdict != verdictLocal {
+				t.Fatalf("%d within the share: verdict %d", c.fits, d.verdict)
+			}
+		})
+	}
+	t.Run("a view older than the outage", func(t *testing.T) {
+		v := viewOf(balance(100, 0))
+		set := billing.LimitSet{Limits: []string{catalog.BalanceLimit}}
+		late := outage{since: t0.Add(8 * time.Minute), gates: 1}
+		if d := v.decide(set, []int64{1}, t0.Add(8*time.Minute+time.Second), late); d.verdict != verdictShort {
+			t.Fatalf("an eight-minute-old view decided offline: verdict %d", d.verdict)
+		}
+	})
+}
+
+func TestGateFirstMarginIsRecentSpend(t *testing.T) {
+	customer := billing.CustomerID(uuid.New())
+	v := newCustView(viewKey{customer, "USD"})
+	now := time.Now()
+	v.mu.Lock()
+	v.apply(billing.View{CustomerID: customer, Currency: "USD", Limits: []billing.ViewLimit{{Limit: catalog.BalanceLimit, Unit: "USD", Remaining: 1_000_000, Recent: 60_000}}}, now, 1, 1)
+	l := v.lines[catalog.BalanceLimit]
+	v.mu.Unlock()
 	if got := l.margin(10); got != 4000 {
 		t.Fatalf("first margin %d, want 4 intervals of a minute's spend per second", got)
 	}

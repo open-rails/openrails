@@ -48,21 +48,27 @@ type gateState struct {
 	queues   map[billing.LeaseID]*usageQueue
 	refused  []error
 	// failure is the last sync attempt's failure, nil once one succeeds;
-	// unreachable when OpenRails could not be reached.
+	// unreachable when OpenRails could not be reached, since when it has
+	// not been.
 	failure     error
 	unreachable bool
 	failedAt    time.Time
+	downSince   time.Time
 	attempts    uint64
 	synced      chan struct{}
 	writing     int
 	closing     bool
+	// leaseClosed is a sync that carried close answered.
+	leaseClosed bool
 	stopped     bool
 	recovered   bool
 
 	// The outbox writer numbers and stores captured usage in batches, so
 	// numbers never skip: a batch whose Put fails gives its numbers back.
-	wmu    sync.Mutex
-	writes []*write
+	// wclosed is a writer that stopped: it takes no more.
+	wmu     sync.Mutex
+	writes  []*write
+	wclosed bool
 
 	kick    chan struct{}
 	wkick   chan struct{}
@@ -72,10 +78,12 @@ type gateState struct {
 	started atomic.Bool
 }
 
-// viewWait is the requests waiting for a sync to answer one view.
+// viewWait is the requests waiting for a sync to answer one view, and how
+// many syncs deferred it.
 type viewWait struct {
-	done chan struct{}
-	err  error
+	done     chan struct{}
+	err      error
+	deferred int
 }
 
 func newGateState(c *Client, outbox UsageOutbox) *gateState {
@@ -103,11 +111,15 @@ func (g *gateState) poke() {
 	}
 }
 
-// offline reports a gate whose last sync attempt could not reach OpenRails.
-func (g *gateState) offline() (bool, int) {
+// offline is the outage a gate is in: since its first attempt that could
+// not reach OpenRails, until one succeeds.
+func (g *gateState) offline() outage {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.failure != nil && g.unreachable, g.gates
+	if g.failure == nil || !g.unreachable {
+		return outage{gates: g.gates}
+	}
+	return outage{since: g.downSince, gates: g.gates}
 }
 
 // lookup is the limit set, view and pricing of a request's attributes.
@@ -168,8 +180,7 @@ func (g *gateState) admit(ctx context.Context, gate *Gate, p billing.AdmitParams
 				if err != nil {
 					return nil, err
 				}
-				offline, gates := g.offline()
-				d := v.decide(*set, costs, now, offline, gates)
+				d := v.decide(*set, costs, now, g.offline())
 				switch d.verdict {
 				case verdictLocal:
 					return g.open(gate, p, v, d.takes, now), nil
@@ -231,8 +242,19 @@ func (g *gateState) holdOnServer(ctx context.Context, gate *Gate, p billing.Admi
 	if err := g.ensureLease(ctx); err != nil {
 		return nil, err
 	}
+	g.adopt(p.RequestID)
 	verdicts, err := g.c.Admit(ctx, []billing.AdmitParams{params})
-	if errors.Is(err, billing.ErrUnreachable) || unreachable(err) {
+	if err != nil && (ctx.Err() != nil || errors.Is(err, billing.ErrUnreachable) || unreachable(err)) {
+		// The server may have made the hold: the next sync releases it,
+		// unless a retry under the request id adopts it first. One caller's
+		// ctx says nothing of OpenRails.
+		g.mu.Lock()
+		g.releases = append(g.releases, p.RequestID)
+		g.active = true
+		g.mu.Unlock()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		g.failed(err, true)
 		return nil, unavailable(err)
 	}
@@ -260,6 +282,14 @@ func (g *gateState) holdOnServer(ctx context.Context, gate *Gate, p billing.Admi
 	t := &Ticket{gate: gate, params: p, held: true, view: v, admittedAt: time.Now(), build: g.builds}
 	g.tickets[t] = struct{}{}
 	return t, nil
+}
+
+// adopt keeps the lease's hold of a request id that an earlier, unanswered
+// attempt queued for release: this request owns it now.
+func (g *gateState) adopt(requestID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.releases = slices.DeleteFunc(g.releases, func(id string) bool { return id == requestID })
 }
 
 // ensureLease makes sure the lease exists before a hold names it: a gate's
@@ -308,7 +338,16 @@ func (g *gateState) lastFailure() error {
 func (g *gateState) failed(err error, unreachable bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.failure, g.unreachable, g.failedAt = unavailable(err), unreachable, time.Now()
+	g.failLocked(unavailable(err), unreachable, time.Now())
+}
+
+// failLocked records a failed attempt made at at; the first unreachable
+// one starts an outage.
+func (g *gateState) failLocked(err error, unreachable bool, at time.Time) {
+	if unreachable && (g.failure == nil || !g.unreachable) {
+		g.downSince = at
+	}
+	g.failure, g.unreachable, g.failedAt = err, unreachable, time.Now()
 }
 
 // await asks the next sync for the request's view and waits for its answer.
@@ -437,16 +476,17 @@ type usageQueue struct {
 }
 
 // queued is one usage item, what it costs in its view, the view the sync
-// carrying it asks for, the sync count when it was captured, and how many
-// syncs carried it.
+// carrying it asks for, the sync count when it was captured, how many syncs
+// carried it, and whether its ticket was reported in flight.
 type queued struct {
-	item  billing.LeaseUsage
-	view  *custView
-	takes []take
-	attrs string
-	ask   billing.ViewParams
-	build int64
-	sends int
+	item     billing.LeaseUsage
+	view     *custView
+	takes    []take
+	attrs    string
+	ask      billing.ViewParams
+	build    int64
+	sends    int
+	reported bool
 }
 
 // write is one item for the outbox writer.
@@ -478,6 +518,8 @@ func (g *gateState) enqueue(ctx context.Context, item billing.LeaseUsage, v *cus
 	if t != nil && v != nil {
 		e.attrs, e.ask = attrsKey(t.params), viewParams(t.params)
 	}
+	// A ticket the last sync reported stays reported until its usage settles.
+	e.reported = t != nil && !t.held && t.build < g.builds-1
 	if g.outbox == nil {
 		q := g.queueLocked(g.lease)
 		q.next++
@@ -494,6 +536,10 @@ func (g *gateState) enqueue(ctx context.Context, item billing.LeaseUsage, v *cus
 	g.mu.Unlock()
 	w := &write{q: e, done: make(chan error, 1)}
 	g.wmu.Lock()
+	if g.wclosed {
+		g.wmu.Unlock()
+		return errGateClosed
+	}
 	g.writes = append(g.writes, w)
 	g.wmu.Unlock()
 	select {
@@ -569,10 +615,11 @@ func (g *gateState) writer() {
 	}
 }
 
+// failWrites answers the queued writes with err and takes no more.
 func (g *gateState) failWrites(err error) {
 	g.wmu.Lock()
 	batch := g.writes
-	g.writes = nil
+	g.writes, g.wclosed = nil, true
 	g.wmu.Unlock()
 	for _, w := range batch {
 		w.done <- err
@@ -587,6 +634,9 @@ func (g *gateState) run() {
 	for {
 		g.recover()
 		if kicked || !g.idle() {
+			// An earlier process's usage settles first, so the views this
+			// sync answers include it.
+			g.resendEarlier()
 			g.syncOnce()
 		}
 		select {
@@ -691,7 +741,7 @@ func (g *gateState) inFlightLocked(carried map[*queued]bool, prev int64) []billi
 		}
 	}
 	for _, e := range g.queues[g.lease].itemsOrNil() {
-		if e.build < prev && (e.sends > 0 || !carried[e]) {
+		if e.reported || e.build < prev && (e.sends > 0 || !carried[e]) {
 			add(e.view, e.takes)
 		}
 	}
@@ -756,7 +806,6 @@ func (g *gateState) syncOnce() {
 	cancel()
 	acks := g.apply(params, keys, res, err, sent, build)
 	g.write(acks)
-	g.resendEarlier()
 	g.mu.Lock()
 	more := len(g.wanted) > 0 && err == nil || len(headLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || partial(usage, res, err))
 	g.mu.Unlock()
@@ -781,23 +830,26 @@ func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *b
 	g.mu.Lock()
 	if err != nil {
 		g.releases = append(params.Releases, g.releases...)
-		for i, k := range keys {
-			if _, ok := g.wanted[k]; !ok {
-				g.wanted[k] = params.Views[i]
+		down := unreachable(err)
+		if down {
+			// Asked again once OpenRails answers; a refusal is not.
+			for i, k := range keys {
+				if _, ok := g.wanted[k]; !ok {
+					g.wanted[k] = params.Views[i]
+				}
 			}
+			err = unavailable(err)
 		}
-		g.failure, g.unreachable, g.failedAt = unavailable(err), unreachable(err), time.Now()
-		if !g.unreachable {
-			g.failure = err
-		}
-		g.answerWaitersLocked(keys, nil, g.failure)
+		g.failLocked(err, down, sent)
+		g.answerWaitersLocked(keys, nil, nil, g.failure)
 		g.attempts++
 		g.writing++
 		g.mu.Unlock()
 		return nil
 	}
-	g.failure, g.unreachable, g.failedAt = nil, false, time.Time{}
+	g.failure, g.unreachable, g.failedAt, g.downSince = nil, false, time.Time{}, time.Time{}
 	g.gates, g.reported, g.leased = res.Gates, len(params.InFlight) > 0, true
+	g.leaseClosed = g.leaseClosed || params.Close
 	acks, settled := g.settleLocked(g.lease, res.Usage)
 	g.attempts++
 	g.writing++
@@ -854,6 +906,20 @@ func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *b
 	for _, p := range res.Pricing {
 		g.prices[[2]string{normalizeCurrency(string(p.Currency)), p.EventType}] = newPricing(p)
 	}
+	// A refused request's attributes decide nothing locally until a view
+	// answers them again.
+	refused := map[string]error{}
+	for _, f := range res.RefusedViews {
+		if f.Index < 0 || f.Index >= len(keys) {
+			continue
+		}
+		cause := error(fmt.Errorf("%w: status %d", billing.ErrUnreachable, f.Status))
+		if f.Error != nil {
+			cause = &billing.StatusError{Status: f.Status, ErrorDetails: *f.Error}
+		}
+		refused[keys[f.Index]] = cause
+		delete(g.sets, keys[f.Index])
+	}
 	for i, ls := range res.LimitSets {
 		if ls == nil {
 			continue
@@ -867,29 +933,46 @@ func (g *gateState) apply(params billing.SyncLeasesParams, keys []string, res *b
 	g.evict()
 
 	g.mu.Lock()
-	unanswered := []string{}
+	var setKeys, deferred []string
 	for i, ls := range res.LimitSets {
-		if ls == nil {
-			unanswered = append(unanswered, keys[i])
-			if _, ok := g.wanted[keys[i]]; !ok {
-				g.wanted[keys[i]] = params.Views[i]
+		switch k := keys[i]; {
+		case ls != nil:
+			setKeys = append(setKeys, k)
+		case refused[k] == nil:
+			// Out of time: asked again.
+			deferred = append(deferred, k)
+			if _, ok := g.wanted[k]; !ok {
+				g.wanted[k] = params.Views[i]
 			}
 		}
 	}
-	answeredKeys := slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return slices.Contains(unanswered, k) })
-	g.answerWaitersLocked(answeredKeys, unanswered, nil)
+	g.answerWaitersLocked(setKeys, refused, deferred, nil)
 	g.mu.Unlock()
 	return acks
 }
 
-// answerWaitersLocked wakes the requests waiting for the answered views
-// (with err when the sync failed); ones whose view the sync deferred wait on.
-func (g *gateState) answerWaitersLocked(answered, deferred []string, err error) {
-	for _, k := range answered {
+// answerWaitersLocked wakes the requests waiting for the answered views,
+// with their refusal for refused ones, or with err when the sync failed.
+// Ones whose view the sync deferred wait on, up to maxColdRounds deferrals.
+func (g *gateState) answerWaitersLocked(answered []string, refused map[string]error, deferred []string, err error) {
+	wake := func(k string, err error) {
 		if w := g.waiters[k]; w != nil {
 			w.err = err
 			close(w.done)
 			delete(g.waiters, k)
+		}
+	}
+	for _, k := range answered {
+		wake(k, err)
+	}
+	for k, cause := range refused {
+		wake(k, cause)
+	}
+	for _, k := range deferred {
+		if w := g.waiters[k]; w != nil {
+			if w.deferred++; w.deferred >= maxColdRounds {
+				wake(k, unavailable(errors.New("no sync answered the request's view")))
+			}
 		}
 	}
 	if err != nil {
@@ -904,7 +987,8 @@ func (g *gateState) answerWaitersLocked(answered, deferred []string, err error) 
 }
 
 // evict drops the views no request used within viewKeep, and the least
-// recently used past maxGateViews.
+// recently used past maxGateViews. A view with anything in flight stays: the
+// server's views leave out this gate's report, so only it counts that.
 func (g *gateState) evict() {
 	g.vmu.Lock()
 	defer g.vmu.Unlock()
@@ -917,7 +1001,7 @@ func (g *gateState) evict() {
 	for k, v := range g.views {
 		v.mu.Lock()
 		t := v.used
-		busy := len(v.pinned) > 0
+		busy := v.busyLocked()
 		v.mu.Unlock()
 		if busy {
 			continue
@@ -934,6 +1018,22 @@ func (g *gateState) evict() {
 			delete(g.views, u.k)
 		}
 	}
+}
+
+// busyLocked reports a view with something in flight in a window it
+// decides in.
+func (v *custView) busyLocked() bool {
+	if len(v.pinned) > 0 {
+		return true
+	}
+	for _, l := range v.lines {
+		for _, s := range []*span{l.cur, l.next} {
+			if s != nil && (s.open != 0 || s.unsent != 0 || s.pinned != 0) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // settledItem is a settled item's view and costs.
@@ -998,10 +1098,11 @@ func (g *gateState) write(acks []billing.LeaseUsageRef) {
 }
 
 // resendEarlier sends the usage of earlier leases, read from the outbox at
-// start, one usage-only sync per lease, which closes it: their processes are
-// gone. Items an earlier lease cannot settle (a forgotten lease, or past a
-// gap its outbox lost) are stored again on the current lease: their old
-// refs are acked first, so a crash loses them rather than bill them twice.
+// start, in usage-only syncs that close them (their processes are gone),
+// each lease until its queue is empty or a sync settles nothing. Items an
+// earlier lease cannot settle (a forgotten lease, or past a gap its outbox
+// lost) are stored again on the current lease: their old refs are acked
+// first, so a crash loses them rather than bill them twice.
 func (g *gateState) resendEarlier() {
 	g.mu.Lock()
 	var leases []billing.LeaseID
@@ -1012,47 +1113,65 @@ func (g *gateState) resendEarlier() {
 	}
 	g.mu.Unlock()
 	for _, lease := range leases {
-		g.mu.Lock()
-		head := headLocked(g.queues[lease], billing.MaxSyncUsageItems)
-		usage := make([]billing.LeaseUsage, len(head))
-		for i, e := range head {
-			usage[i] = e.item
-		}
-		g.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
-		res, err := g.c.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: lease, Usage: usage, Close: true})
-		cancel()
-		if err != nil && unreachable(err) {
-			return
-		}
-		var moved []*queued
-		var acks []billing.LeaseUsageRef
-		g.mu.Lock()
-		g.writing++
-		switch {
-		case err != nil:
-			if code, ok := billing.ErrorCodeFrom(err); ok && code == billing.CodeLeaseNotFound {
-				moved = g.takeLocked(lease, 0)
+		for {
+			progress, ok := g.resendOnce(lease)
+			if !ok {
+				return
 			}
-		default:
-			acks, _ = g.settleLocked(lease, res.Usage)
-			for _, f := range res.Usage.Refused {
-				if f.N > res.Usage.ThroughN && f.Error != nil && f.Error.Code == billing.CodeUsageOutOfOrder {
-					moved = g.takeLocked(lease, f.N)
-					break
-				}
+			if !progress {
+				break
 			}
-		}
-		g.mu.Unlock()
-		for _, e := range moved {
-			acks = append(acks, billing.LeaseUsageRef{LeaseID: lease, N: e.item.N})
-		}
-		g.write(acks)
-		for _, e := range moved {
-			e.item.N = 0
-			_ = g.enqueue(context.Background(), e.item, nil, nil, nil)
 		}
 	}
+}
+
+// resendOnce is one usage-only sync of an earlier lease: whether it settled
+// or moved anything, and false when OpenRails could not be reached.
+func (g *gateState) resendOnce(lease billing.LeaseID) (progress, ok bool) {
+	g.mu.Lock()
+	head := headLocked(g.queues[lease], billing.MaxSyncUsageItems)
+	usage := make([]billing.LeaseUsage, len(head))
+	for i, e := range head {
+		usage[i] = e.item
+	}
+	g.mu.Unlock()
+	if len(usage) == 0 {
+		return false, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	res, err := g.c.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: lease, Usage: usage, Close: true})
+	cancel()
+	if err != nil && unreachable(err) {
+		return false, false
+	}
+	var moved []*queued
+	var acks []billing.LeaseUsageRef
+	g.mu.Lock()
+	g.writing++
+	switch {
+	case err != nil:
+		if code, ok := billing.ErrorCodeFrom(err); ok && code == billing.CodeLeaseNotFound {
+			moved = g.takeLocked(lease, 0)
+		}
+	default:
+		acks, _ = g.settleLocked(lease, res.Usage)
+		for _, f := range res.Usage.Refused {
+			if f.N > res.Usage.ThroughN && f.Error != nil && f.Error.Code == billing.CodeUsageOutOfOrder {
+				moved = g.takeLocked(lease, f.N)
+				break
+			}
+		}
+	}
+	g.mu.Unlock()
+	for _, e := range moved {
+		acks = append(acks, billing.LeaseUsageRef{LeaseID: lease, N: e.item.N})
+	}
+	g.write(acks)
+	for _, e := range moved {
+		e.item.N = 0
+		_ = g.enqueue(context.Background(), e.item, nil, nil, nil)
+	}
+	return len(acks) > 0, true
 }
 
 // takeLocked takes a lease's queued items from number n on.
@@ -1139,19 +1258,7 @@ func (g *gateState) close(ctx context.Context) error {
 	g.mu.Unlock()
 	err := g.flush(ctx, true)
 	if err == nil {
-		// One more sync closes the lease if the flush needed none.
-		start := g.attemptsNow()
-		for g.attemptsNow() == start {
-			g.poke()
-			select {
-			case <-ctx.Done():
-				err = waitErr(ctx)
-			case <-time.After(10 * time.Millisecond):
-			}
-			if err != nil {
-				break
-			}
-		}
+		err = g.closeLease(ctx)
 	}
 	g.mu.Lock()
 	g.stopped = true
@@ -1165,10 +1272,29 @@ func (g *gateState) close(ctx context.Context) error {
 	return err
 }
 
-func (g *gateState) attemptsNow() uint64 {
+// closeLease waits for a sync built after Close began, which closes the
+// lease; one that fails ends the wait with its failure.
+func (g *gateState) closeLease(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.attempts
+	start := g.attempts
+	g.mu.Unlock()
+	for {
+		g.mu.Lock()
+		closed, failure, tried, ch := g.leaseClosed, g.failure, g.attempts > start, g.synced
+		g.mu.Unlock()
+		switch {
+		case closed:
+			return nil
+		case tried && failure != nil:
+			return failure
+		}
+		g.poke()
+		select {
+		case <-ctx.Done():
+			return waitErr(ctx)
+		case <-ch:
+		}
+	}
 }
 
 // limits is the customer's lines from the gate's views, or a read when it

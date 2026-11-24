@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Gate admits requests against a merchant's usage limits in the host's
@@ -384,6 +385,10 @@ func recordItem(u billing.UsageParams) (billing.LeaseUsage, error) {
 		return billing.LeaseUsage{}, invalidParam("customer_id", "customer_id is required")
 	case u.Currency == "":
 		return billing.LeaseUsage{}, invalidParam("currency", "currency is required")
+	case moneyutil.ValidateCurrency(string(u.Currency)) != nil:
+		return billing.LeaseUsage{}, currencyUnsupported()
+	case !validInvokerType(u.InvokerType):
+		return billing.LeaseUsage{}, invalidParam("invoker_type", `invoker_type must be "customer" or "delegated"`)
 	case u.EventType == "":
 		return billing.LeaseUsage{}, invalidParam("event_type", "event_type is required")
 	case strings.TrimSpace(u.Source) == "" || strings.TrimSpace(u.SourceID) == "":
@@ -427,12 +432,18 @@ func normalizeGateAdmit(p *billing.AdmitParams) error {
 	p.RequestID = strings.TrimSpace(p.RequestID)
 	p.Currency = catalog.Currency(normalizeCurrency(string(p.Currency)))
 	switch {
-	case p.RequestID == "":
-		return invalidParam("request_id", "request_id is required")
+	case p.RequestID == "" || len(p.RequestID) > 255:
+		return invalidParam("request_id", "request_id must contain 1 to 255 bytes")
 	case p.CustomerID.IsZero():
 		return invalidParam("customer_id", "customer_id is required")
 	case p.Currency == "":
 		return invalidParam("currency", "currency is required")
+	case moneyutil.ValidateCurrency(string(p.Currency)) != nil:
+		return currencyUnsupported()
+	case !validInvokerType(p.InvokerType):
+		return invalidParam("invoker_type", `invoker_type must be "customer" or "delegated"`)
+	case p.AccrualRateDeltaPerHour < 0:
+		return invalidParam("accrual_rate_delta_per_hour", "accrual_rate_delta_per_hour must be nonnegative")
 	case p.EstimatedAmount < 0:
 		return invalidParam("estimated_amount", "estimated_amount must be nonnegative")
 	case p.Usage != nil && p.EstimatedAmount != 0:
@@ -454,6 +465,16 @@ func normalizeGateAdmit(p *billing.AdmitParams) error {
 	}
 	p.TrustLevel, p.Resource = strings.TrimSpace(p.TrustLevel), strings.TrimSpace(p.Resource)
 	return nil
+}
+
+func validInvokerType(t billing.InvokerType) bool {
+	return t == "" || t == billing.InvokerTypeCustomer || t == billing.InvokerTypeDelegated
+}
+
+func currencyUnsupported() error {
+	param := "currency"
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest,
+		Code: billing.CodeCurrencyUnsupported, Message: "currency is not supported", Param: &param}}
 }
 
 // attrsKey names what policy resolution reads of a request: requests with

@@ -108,7 +108,7 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
                AND lh.currency = $3::text AND lh.state = 'open'
                AND hp.hold_created_at >= $4::timestamptz AND lh.created_at >= $4::timestamptz
                AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $5::timestamptz
-                   ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+                   ELSE lh.created_at > $6::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > $6::timestamptz) END), 0)
      -- What live gates report in flight of the balance.
      + COALESCE((SELECT SUM(f.amount)
@@ -497,7 +497,7 @@ SELECT (COALESCE((SELECT SUM(p.held)
       AND h.state = 'open'
       AND CASE WHEN h.lease_id IS NULL
           THEN $7::boolean OR h.expires_at > $8::timestamptz
-          ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
+          ELSE h.created_at > $9::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
               AND l.closed_at IS NULL AND l.last_sync_at > $9::timestamptz) END), 0)
   + CASE WHEN $10::boolean THEN COALESCE((SELECT SUM(f.amount)
     FROM billing.lease_in_flight f
@@ -527,7 +527,8 @@ type SumWindowHeldParams struct {
 // current window (in_flight), what live leases other than except_lease
 // report in flight. A request's hold is live until its deadline; past it, it
 // still counts where counts_expired (a window with an end) until it is
-// captured or released. A gate's hold is live while its lease is.
+// captured or released. A gate's hold is live while its lease is, and for a
+// lease lifetime after it is made: one its lapsed lease made counts at once.
 func (q *Queries) SumWindowHeld(ctx context.Context, arg SumWindowHeldParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumWindowHeld,
 		arg.MerchantID,

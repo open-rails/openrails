@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -83,10 +85,19 @@ func (s Set) BalanceRefusal() billing.DenyCode {
 	return code
 }
 
-// SpendWindows are the billing policy's spend windows usage of req's
-// attributes counts toward at an instant; a delegated invoker spends nothing
-// of the customer's, so none.
-func (a *Admitter) SpendWindows(ctx context.Context, req AdmitRequest, at time.Time) ([]limits.Claim, error) {
+// SpendPolicy is the billing policy usage of one customer's invoker
+// attributes counts toward, resolved once: its spend windows at any instant
+// follow without another read.
+type SpendPolicy struct {
+	merchant, customer uuid.UUID
+	currency           string
+	policy             spendgate.Policy
+	request            spendgate.Request
+}
+
+// SpendPolicy resolves req's billing policy; a delegated invoker spends
+// nothing of the customer's, so none.
+func (a *Admitter) SpendPolicy(ctx context.Context, req AdmitRequest) (*SpendPolicy, error) {
 	if !identity.IsDirectPayerInvoker(req.InvokerType) {
 		return nil, nil
 	}
@@ -98,5 +109,14 @@ func (a *Admitter) SpendWindows(ctx context.Context, req AdmitRequest, at time.T
 	if err != nil {
 		return nil, err
 	}
-	return spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), policy, sgReq, 0, at)
+	return &SpendPolicy{merchant: tid.UUID(), customer: req.CustomerID.UUID(), currency: strings.TrimSpace(req.Currency), policy: policy, request: sgReq}, nil
+}
+
+// Windows are the policy's spend windows current at an instant; none for a
+// nil policy.
+func (p *SpendPolicy) Windows(at time.Time) ([]limits.Claim, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return spendgate.SpendClaims(p.merchant, p.customer, p.currency, p.policy, p.request, 0, at)
 }
