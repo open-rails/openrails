@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -25,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,82 +96,161 @@ func roleName(prefix string, p billing.Permission) string {
 	return prefix + "-" + p.Resource() + "-" + p.Action()
 }
 
-func TestRoutePermissions(t *testing.T) {
-	t.Run("OR-J01-S20/every-route-refuses-a-credential-without-its-permission", func(t *testing.T) {
-		// Each root: name's twin role holds it alone in the root scope, and
-		// root:admin-rate-limits:unlock, which only the hold clear asks for.
-		twins := map[billing.Permission]iam.Role{}
-		a := newAuthorityWorldWithAuth(t, func(c *authkit.Config) {
-			for _, p := range billing.Permissions() {
-				if p.Persona() == "root" && p != billing.RootAdminRateLimitsUnlock {
-					twins[p] = c.Roles.Root.Role(roleName("twin", p), mustPermission(t, string(p)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
+// catalogProbe is a world's credentials for probing the route catalog: per
+// merchant: name a key holding every other one and a key holding it alone;
+// per root: name a person holding it alone (with root:admin-rate-limits:unlock,
+// which only the hold clear asks for) and a person holding every other root:
+// name.
+type catalogProbe struct {
+	*authorityWorld
+	twins, others                     map[billing.Permission]iam.Role
+	lacking, holding, twin, otherRoot map[billing.Permission]string
+}
+
+func newCatalogProbe(t *testing.T, configure ...func(*world)) *catalogProbe {
+	t.Helper()
+	p := &catalogProbe{twins: map[billing.Permission]iam.Role{}, others: map[billing.Permission]iam.Role{},
+		lacking: map[billing.Permission]string{}, holding: map[billing.Permission]string{}, twin: map[billing.Permission]string{}, otherRoot: map[billing.Permission]string{}}
+	var roots []billing.Permission
+	for _, perm := range billing.Permissions() {
+		if perm.Persona() == "root" {
+			roots = append(roots, perm)
+		}
+	}
+	p.authorityWorld = newAuthorityWorldWithAuth(t, func(c *authkit.Config) {
+		for _, root := range roots {
+			if root == billing.RootAdminRateLimitsUnlock {
+				continue
+			}
+			p.twins[root] = c.Roles.Root.Role(roleName("twin", root), mustPermission(t, string(root)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
+			var rest []iam.Grant
+			for _, other := range roots {
+				if other != root {
+					rest = append(rest, mustPermission(t, string(other)))
 				}
 			}
-		}, func(w *world) { w.deps.UserInfo = nil })
-		groups := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
-		mountedRoutes, err := a.engine.Routes(openrails.Routes{Auth: a.auth.Authenticator(), RouteGroups: groups})
-		require.NoError(t, err)
-		mounted := map[string]bool{}
-		for _, route := range mountedRoutes {
-			mounted[route.Method+" "+route.Path] = true
+			p.others[root] = c.Roles.Root.Role(roleName("others", root), rest...)
 		}
-		// lacking holds every merchant: permission but one; holding that one
-		// alone; twin is a person holding a root: name and nothing at alpha.
-		lacking, holding, twin := map[billing.Permission]string{}, map[billing.Permission]string{}, map[billing.Permission]string{}
-		credential := func(cache map[billing.Permission]string, p billing.Permission, mint func() string) string {
-			if _, ok := cache[p]; !ok {
-				cache[p] = mint()
-			}
-			return cache[p]
+	}, append([]func(*world){func(w *world) { w.deps.UserInfo = nil }}, configure...)...)
+	return p
+}
+
+// credential is cache's credential for perm, minted once.
+func credential(cache map[billing.Permission]string, perm billing.Permission, mint func() string) string {
+	if _, ok := cache[perm]; !ok {
+		cache[perm] = mint()
+	}
+	return cache[perm]
+}
+
+// rootPerson signs in a new person holding role in the root scope only.
+func (p *catalogProbe) rootPerson(t *testing.T, role iam.Role) string {
+	t.Helper()
+	user := authtest.NewUser(t, p.auth)
+	authtest.GrantRole(t, p.auth, iam.RootGroup(), iam.UserSubject(user.ID), role)
+	return authtest.SignIn(t, p.auth, user).AccessToken
+}
+
+// probe sends every mounted catalog route on a tier that checks a permission:
+// a key with every merchant: name but its own, and a person with every root:
+// name but its own, are refused; a person holding its root: name alone is
+// admitted on a merchant route and refused application_required on a
+// programmatic one, where a key holding its merchant: name alone is admitted.
+// It answers how many it probed and the keys the world leaves unmounted.
+func (p *catalogProbe) probe(t *testing.T) (int, []string) {
+	t.Helper()
+	groups := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
+	mountedRoutes, err := p.engine.Routes(openrails.Routes{Auth: p.auth.Authenticator(), RouteGroups: groups})
+	require.NoError(t, err)
+	mounted := map[string]bool{}
+	for _, route := range mountedRoutes {
+		mounted[route.Method+" "+route.Path] = true
+	}
+	checked, unmounted := 0, []string{}
+	for _, route := range httproutes.Catalog() {
+		pair := route.Needs()
+		switch route.Auth {
+		case httproutes.AuthMerchant, httproutes.AuthApplication, httproutes.AuthProvisioning:
+			require.Len(t, pair.Names(), 2, "%s names its merchant: and root: permission", route.Key())
+		default:
+			require.Empty(t, pair.Names(), "%s's tier checks no permission", route.Key())
+			continue
 		}
-		checked := 0
-		for _, route := range httproutes.Catalog() {
-			pair := route.Needs()
-			switch route.Auth {
-			case httproutes.AuthMerchant, httproutes.AuthApplication, httproutes.AuthProvisioning:
-				require.Len(t, pair.Names(), 2, "%s names its merchant: and root: permission", route.Key())
-			default:
-				require.Empty(t, pair.Names(), "%s's tier checks no permission", route.Key())
-				continue
-			}
-			if !mounted[route.Key()] {
-				require.NotEqual(t, httproutes.Always, route.When, "%s is mounted in every deployment", route.Key())
-				continue
-			}
-			checked++
-			key := credential(lacking, pair.Merchant, func() string {
-				return roleKey(t, a, roleName("lacks", pair.Merchant), merchantPermissions(pair.Merchant)...)
-			})
-			status, code := probeRoute(t, a, route, key)
-			require.Equal(t, http.StatusForbidden, status, "%s admitted a credential without %s (%s)", route.Key(), pair.Merchant, code)
-			if code != "" {
-				require.Equal(t, string(billing.CodePermissionRequired), code, route.Key())
-			}
-			person := credential(twin, pair.Root, func() string {
-				user := authtest.NewUser(t, a.auth)
-				authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(user.ID), twins[pair.Root])
-				return authtest.SignIn(t, a.auth, user).AccessToken
-			})
-			status, code = probeRoute(t, a, route, person)
-			if route.Auth == httproutes.AuthMerchant {
-				require.False(t, gateRefused(status, code), "%s refused its root twin %s: %d %s", route.Key(), pair.Root, status, code)
-				continue
-			}
-			// A programmatic route takes an application: a person is refused
-			// whatever it holds. An AuthKit application is bound to its own
-			// group, so its merchant: name is what admits it.
-			require.Equal(t, http.StatusForbidden, status, route.Key())
-			if code != "" {
-				require.Equal(t, string(billing.CodeApplicationRequired), code, route.Key())
-			}
-			key = credential(holding, pair.Merchant, func() string {
-				return roleKey(t, a, roleName("holds", pair.Merchant), pair.Merchant)
-			})
-			status, code = probeRoute(t, a, route, key)
-			require.False(t, gateRefused(status, code), "%s refused an application holding %s: %d %s", route.Key(), pair.Merchant, status, code)
+		if !mounted[route.Key()] {
+			unmounted = append(unmounted, route.Key())
+			continue
 		}
+		checked++
+		refused := func(credential string, code billing.ErrorCode, who string) {
+			t.Helper()
+			status, got := probeRoute(t, p.authorityWorld, route, credential)
+			require.Equal(t, http.StatusForbidden, status, "%s admitted %s (%s)", route.Key(), who, got)
+			if got != "" {
+				require.Equal(t, string(code), got, route.Key())
+			}
+		}
+		refused(credential(p.lacking, pair.Merchant, func() string {
+			return roleKey(t, p.authorityWorld, roleName("lacks", pair.Merchant), merchantPermissions(pair.Merchant)...)
+		}), billing.CodePermissionRequired, "a key without "+string(pair.Merchant))
+		person := credential(p.twin, pair.Root, func() string { return p.rootPerson(t, p.twins[pair.Root]) })
+		others := credential(p.otherRoot, pair.Root, func() string { return p.rootPerson(t, p.others[pair.Root]) })
+		if route.Auth == httproutes.AuthMerchant {
+			refused(others, billing.CodePermissionRequired, "a person with every root: name but "+string(pair.Root))
+			status, code := probeRoute(t, p.authorityWorld, route, person)
+			require.False(t, gateRefused(status, code), "%s refused its root twin %s: %d %s", route.Key(), pair.Root, status, code)
+			continue
+		}
+		// A programmatic route takes an application: a person is refused
+		// whatever it holds. An AuthKit application is bound to its own
+		// group, so its merchant: name is what admits it.
+		refused(person, billing.CodeApplicationRequired, "a person holding "+string(pair.Root))
+		refused(others, billing.CodeApplicationRequired, "a person with every other root: name")
+		key := credential(p.holding, pair.Merchant, func() string {
+			return roleKey(t, p.authorityWorld, roleName("holds", pair.Merchant), pair.Merchant)
+		})
+		status, code := probeRoute(t, p.authorityWorld, route, key)
+		require.False(t, gateRefused(status, code), "%s refused an application holding %s: %d %s", route.Key(), pair.Merchant, status, code)
+	}
+	return checked, unmounted
+}
+
+func TestRoutePermissions(t *testing.T) {
+	t.Run("OR-J01-S20/every-route-refuses-a-credential-without-its-permission", func(t *testing.T) {
+		// A file-configured merchant without an LLM mounts every gated route
+		// but these; a new one this world leaves out is named here.
+		checked, unmounted := newCatalogProbe(t).probe(t)
+		require.ElementsMatch(t, []string{
+			"POST /v1/console/catalog/ask",
+			"PUT /v1/merchant/custodians/{key}",
+			"POST /v1/merchant/psps",
+			"PATCH /v1/merchant/psps/{id}",
+			"PATCH /v1/merchant/configuration",
+			"POST /v1/merchant/alert-webhooks",
+			"DELETE /v1/merchant/alert-webhooks/{id}",
+			"PATCH /v1/merchant/alert-webhooks/{id}",
+		}, unmounted)
 		require.Greater(t, checked, 100, "the catalog's gated routes are mounted and probed")
-		t.Logf("probed %d mounted routes of the catalog", checked)
+
+		// With Vault-held configuration and an LLM, every gated route mounts:
+		// the configuration edits and the catalog assistant are probed too.
+		addr, token := os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"), os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN")
+		require.NotEmpty(t, addr, "the configuration edits need real Vault")
+		require.NotEmpty(t, token)
+		t.Setenv(vaulttest.AddrEnv, addr)
+		t.Setenv(vaulttest.TokenEnv, token)
+		vault := vaulttest.New(t)
+		llm := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "stub model", http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(llm.Close)
+		all, none := newCatalogProbe(t, func(w *world) {
+			w.cfg.Vault = vault.Config()
+			w.deps.Vault = vault.Client()
+			w.cfg.LLM = &openrails.LLMConfig{APIKey: "stub", BaseURL: llm.URL, CatalogCopilotEnabled: true}
+		}).probe(t)
+		require.Empty(t, none, "every gated route mounts with Vault and an LLM")
+		require.Equal(t, checked+len(unmounted), all)
+		t.Logf("probed %d and %d mounted routes of the catalog", checked, all)
 	})
 	t.Run("OR-J01-S21/a-config-only-credential-cannot-approve-a-refund", func(t *testing.T) {
 		a := newAuthorityWorld(t)
