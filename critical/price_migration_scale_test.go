@@ -259,13 +259,13 @@ func TestPriceMigrationScale(t *testing.T) {
 		a, p, alice := purchasedMembership(t)
 		membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "concurrent-bob")
 		target := migrationPrice(t, a, alice, "concurrent-target", 30_000_000)
-		// Another catalog writer holds the lock: both requests are admitted
-		// and wait to archive the source, then record at once.
+		// Another catalog writer holds the catalog lock: both requests are
+		// admitted and wait to archive the source, then record at once.
 		holder, err := a.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer func() { _ = holder.Rollback(context.Background()) }()
 		var revision int64
-		require.NoError(t, holder.QueryRow(t.Context(), "SELECT catalog_revision FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id = $1 FOR UPDATE",
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT catalog_revision FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id = $1 FOR NO KEY UPDATE",
 			a.alpha.MerchantID().UUID()).Scan(&revision))
 		var holderPID int
 		require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holderPID))
@@ -275,11 +275,13 @@ func TestPriceMigrationScale(t *testing.T) {
 			err       error
 		}
 		done := make(chan created, 2)
+		// A second waiter on the row queues behind the first, not the holder.
 		blocked := func(n int) {
 			t.Helper()
 			require.Eventually(t, func() bool {
 				var waiting int
-				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity w WHERE $1 = ANY(pg_blocking_pids(w.pid))"+
+					" OR EXISTS (SELECT 1 FROM unnest(pg_blocking_pids(w.pid)) b WHERE $1 = ANY(pg_blocking_pids(b)))", holderPID).Scan(&waiting))
 				return waiting == n
 			}, 20*time.Second, 20*time.Millisecond, "waiting on the catalog lock")
 		}

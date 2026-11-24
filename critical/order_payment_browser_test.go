@@ -99,8 +99,11 @@ func TestOrderPaymentBrowser(t *testing.T) {
 	t.Run("OR-J04-S78/a-lost-pay-answer-is-read-back-under-its-key-and-a-retry-keeps-it", func(t *testing.T) {
 		s, order := orderPaymentBrowser(t, "OR-ORDERPAY-01")
 		require.Equal(t, 1, orderAttempts(t, s.world, order), "the retry was answered as the pay it repeated")
-		current, err := s.alpha.GetOrder(t.Context(), order)
-		require.NoError(t, err)
+		// The customer's view carries the wallet's next action.
+		status, raw := s.request(t, http.MethodGet, "/v1/me/orders/"+order.String(), s.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var current billing.Order
+		require.NoError(t, json.Unmarshal(raw, &current))
 		require.NotNil(t, current.Payment.NextAction)
 		require.Equal(t, "solana_pay", current.Payment.NextAction.Type)
 	})
