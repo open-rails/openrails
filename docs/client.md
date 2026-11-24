@@ -860,8 +860,9 @@ Usage is never refused for money: the work happened, and admission is the check
 before it. A Gate with neither Redis nor an outbox keeps captured usage in memory
 until it is sent: a crash loses it, never billed. `GateDeps.Outbox` stores it
 before `Capture` returns; with `GateDeps.Redis`, your processes sharing that
-Redis are one gate (one lease, warm everywhere) and a retried `Capture` or
-`Record` posts once. `usage_gate_safe_spend: true` lets a gate spend each hold's
+Redis are one gate (one lease, warm everywhere; during an upgrade that changes
+the gate's Redis layout, old and new processes are two gates until the old
+stop) and a retried `Capture` or `Record` posts once, on any of them. `usage_gate_safe_spend: true` lets a gate spend each hold's
 money size again while OpenRails is unreachable.
 
 **Admissions** are holds owned by one request, for a backend without a gate.

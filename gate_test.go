@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -965,6 +966,17 @@ func heldOf(h billing.Hold) map[string]int64 {
 		out[partID(l.Limit, l.WindowStartsAt)] += l.Held
 	}
 	return out
+}
+
+func TestGateWriteKeysKeepTheirPathAcrossLayoutVersions(t *testing.T) {
+	var s sharedGate
+	if got, want := s.k("ns", "key"), "openrails:gate:v2:{ns}:k:key"; got != want {
+		t.Fatalf("write key %q, want %q: a Record retried on a process of another version must find it", got, want)
+	}
+	tag := func(key string) string { return key[strings.Index(key, "{") : strings.Index(key, "}")+1] }
+	if tag(s.k("ns", "key")) != tag(s.g("ns", "lease")) {
+		t.Fatalf("write key %q leaves the group's hash slot %q", s.k("ns", "key"), s.g("ns", "lease"))
+	}
 }
 
 func TestGatePartIDNamesItsWindowToTheMicrosecond(t *testing.T) {

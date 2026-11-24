@@ -40,7 +40,8 @@ import (
 //	G:k:<key>  a usage write (a ticket's, or a Record's customer, event
 //	           type, source and source_id)
 //	           -> lease|n, kept gateWriteKeyTTL past its settlement (at
-//	           most gateWriteKeyBackstop unsettled)
+//	           most gateWriteKeyBackstop unsettled); under
+//	           gateWriteKeyPrefix, which no layout version changes
 //	G:lock     the syncing process, renewed while it syncs
 //	G:kick     list  wakes the syncing process for an early sync
 //	G:wants    hash  want key -> want for the next sync
@@ -69,6 +70,10 @@ const (
 	// gateKeyPrefix versions the layout: processes of another version form
 	// their own group, with their own lease.
 	gateKeyPrefix = "openrails:gate:v3:"
+	// gateWriteKeyPrefix is the usage write keys' own, in the group's hash
+	// slot and never versioned: a Record retried on a process of another
+	// version finds its write.
+	gateWriteKeyPrefix = "openrails:gate:v2:"
 	// gateLockTTL is how long the syncing process keeps the group's lock
 	// without renewing it; past it another process syncs.
 	gateLockTTL = 3 * limits.SyncInterval
@@ -209,6 +214,9 @@ func holdID(customer billing.CustomerID, set string) string {
 }
 
 func (s *sharedGate) h(ns, hold string) string { return gateKeyPrefix + "{" + ns + ":" + hold + "}" }
+
+// k is a usage write's key.
+func (s *sharedGate) k(ns, key string) string { return gateWriteKeyPrefix + "{" + ns + "}:k:" + key }
 
 func (s *sharedGate) holdKeys(ns, hold string) []string {
 	return []string{s.h(ns, hold), s.h(ns, hold) + ":t"}
@@ -665,7 +673,7 @@ func (s *sharedGate) number(ctx context.Context, ns string, item billing.LeaseUs
 			}
 			lease = cur
 		}
-		keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+lease), s.g(ns, "leases"), s.g(ns, "k:"+key), s.g(ns, "unsent:"+item.CustomerID.String())}
+		keys := []string{s.g(ns, "lease"), s.g(ns, "u:"+lease), s.g(ns, "leases"), s.k(ns, key), s.g(ns, "unsent:"+item.CustomerID.String())}
 		res, err := usageScript.Run(ctx, s.rdb, keys, lease, body, hold, ticket, unsentArg(string(item.Currency), costs), encodeTakes(costs), gateWriteKeyBackstop.Milliseconds(), key).Slice()
 		if err == nil && len(res) == 2 {
 			code, _ := res[0].(int64)
@@ -1554,7 +1562,7 @@ func (s *sharedGate) applyAnswer(ctx context.Context, pipe redis.Pipeliner, ns, 
 		ids = append(ids, e.id)
 		if e.key != "" {
 			// Settled or refused: a retry finds it a little longer.
-			pipe.PExpire(ctx, s.g(ns, "k:"+e.key), gateWriteKeyTTL)
+			pipe.PExpire(ctx, s.k(ns, e.key), gateWriteKeyTTL)
 		}
 		f, isRefused := refused[e.item.N]
 		if isRefused {
