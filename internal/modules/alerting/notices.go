@@ -28,6 +28,9 @@ const (
 	// FindingCustomerMessagesSenderRefused is a mail server that refused the
 	// merchant's sender, so its customer messages wait for it.
 	FindingCustomerMessagesSenderRefused reconcile.FindingType = "life.customer.messages_sender_refused"
+	// FindingWebhookReplayRefused is a signed delivery dated before its
+	// replay record would be kept, refused unapplied.
+	FindingWebhookReplayRefused reconcile.FindingType = "life.webhook.replay_refused"
 )
 
 // LedgerRepair is a provider event OpenRails could not book, which the
@@ -221,6 +224,31 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 func ResolveMessageSenderRefused(ctx context.Context, database *db.DB, from string) error {
 	if err := (&reconcile.PGStore{DB: database}).ResolveRaisedFinding(ctx, FindingCustomerMessagesSenderRefused, senderSubject(from)); err != nil {
 		return fmt.Errorf("message sender recovered: %w", err)
+	}
+	return nil
+}
+
+// WebhookReplay is a signed provider delivery refused as a replay.
+type WebhookReplay struct {
+	Provider, EventID, EventType string
+	DatedAt                      time.Time
+}
+
+// RecordWebhookReplay raises the delivery's life.webhook.replay_refused
+// finding; a repeat observes it again.
+func RecordWebhookReplay(ctx context.Context, database *db.DB, now time.Time, r WebhookReplay) error {
+	if database == nil {
+		return fmt.Errorf("webhook replay: database is required")
+	}
+	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+		Type: FindingWebhookReplayRefused, SubjectKey: r.Provider + ":" + r.EventID, Severity: reconcile.SeverityHigh,
+		RecommendedAction: fmt.Sprintf("A signed %s delivery of event %s (%s) dated %s came after its replay record would be kept, and was refused unapplied. If it was replayed, its signing secret has leaked: rotate it. If it was a genuine late notice, a provider refresh reads what it announced.",
+			r.Provider, r.EventID, r.EventType, r.DatedAt.UTC().Format(time.RFC3339)),
+		Evidence: map[string]any{"provider": r.Provider, "event_id": r.EventID, "event_type": r.EventType,
+			"dated_at": r.DatedAt.UTC().Format(time.RFC3339), "refused_at": now.UTC().Format(time.RFC3339)},
+	})
+	if err != nil {
+		return fmt.Errorf("webhook replay: %w", err)
 	}
 	return nil
 }

@@ -448,7 +448,7 @@ type nmiSigned struct {
 
 // checkNMIWebhook checks an NMI delivery against one PSP's secrets.
 func checkNMIWebhook(r *httprequest.Request, body []byte) func(context.Context, merchants.PSPIdentity) (signedWebhook[nmiSigned], error) {
-	// NMI sends one signature header, `Webhook-Signature: t=<ts>,s=<hex>`
+	// NMI sends one signature header, `Webhook-Signature: t=<nonce>,s=<hex>`
 	// (package nmi). No other spelling is accepted, so a forged
 	// signature has one header to aim at.
 	header := strings.TrimSpace(r.Request.Header.Get("Webhook-Signature"))

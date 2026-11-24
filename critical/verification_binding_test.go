@@ -84,6 +84,12 @@ func stripePSP(account, secret string, archived bool) billing.PSPConfig {
 // switch and arms one merchant for enforcing convergence.
 func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 	t.Helper()
+	armWorldDestructive(t, a.world, on)
+}
+
+// armWorldDestructive is armDestructive for w.
+func armWorldDestructive(t *testing.T, a *world, on bool) {
+	t.Helper()
 	_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "destructive_action_switch"}.Sanitize()+" SET enabled=$1, updated_by='critical fixture operator', reason='owned disposable verification test'", on)
 	require.NoError(t, err)
 	_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+

@@ -585,6 +585,7 @@ pkg openrails/billing, const CodePSPImportInProgress ErrorCode = "psp_import_in_
 pkg openrails/billing, const CodePSPKeyTaken ErrorCode = "psp_key_taken"
 pkg openrails/billing, const CodePSPLastActive ErrorCode = "psp_last_active"
 pkg openrails/billing, const CodePSPNotFound ErrorCode = "psp_not_found"
+pkg openrails/billing, const CodePSPProbeLimited ErrorCode = "psp_probe_limited"
 pkg openrails/billing, const CodePayURLAttemptsExhausted ErrorCode = "pay_url_attempts_exhausted"
 pkg openrails/billing, const CodePayURLExpired ErrorCode = "pay_url_expired"
 pkg openrails/billing, const CodePayURLNotFound ErrorCode = "pay_url_not_found"

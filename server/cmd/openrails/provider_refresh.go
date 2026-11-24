@@ -34,10 +34,13 @@ The answer is {job_id, merchant_id, river_schema, queue, already_queued};
 already_queued is true when a refresh for the merchant is outstanding. Inspect
 the job in <river_schema>.river_job by job_id. The job reads each PSP in
 bounded windows from its watermark (psp_refresh_watermarks) to five minutes
-ago, NMI and Stripe with a 24-hour overlap; a watermark advances only after a
-complete read. Before each Stripe window a separate read records refunds and
+ago (NMI's by last change), NMI and Stripe with a 24-hour overlap; a watermark
+advances only after a complete read. Before each Stripe window a separate read records refunds and
 disputes matching existing payments, up to eight days back. Incomplete reads
-retry up to five attempts; a new request resumes from the watermarks.
+retry up to five attempts; a new request resumes from the watermarks. A live
+CCBill PSP continues in its own openrails.paced_provider_refresh job: DataLink
+answers it once an hour, so it reads a day of transactions an hour, then its
+roster.
 
 Unverified subscriptions are resolved with the PSP that owns them: a verified
 renewal renews; a decline inside the dunning window is past_due, past it

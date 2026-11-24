@@ -307,7 +307,8 @@ func (m *Mock) void(txID string) string {
 	if s == nil || !s.Approved() || s.Voided || s.RefundedCents > 0 {
 		return "Transaction not found or not voidable"
 	}
-	s.Voided = true
+	at := m.after(s)
+	s.Voided, s.Changed, s.VoidedAt = true, at, at
 	return ""
 }
 
@@ -335,6 +336,7 @@ func (m *Mock) recordRefund(s *Sale, cents int64) string {
 	id := m.txnID()
 	s.RefundedCents += cents
 	s.RefundIDs = append(s.RefundIDs, id)
+	s.Changed = m.now()
 	m.refunds = append(m.refunds, &refund{ID: id, Sale: s, Cents: cents, At: m.now()})
 	return id
 }

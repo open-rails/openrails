@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -53,10 +54,20 @@ var (
 // providerCredentialError types a provider-side credential rejection; any
 // other probe outcome (transport, indeterminate) stays an internal failure.
 func providerCredentialError(err error) error {
-	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrEnvironmentMismatch) {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrEnvironmentMismatch) || errors.Is(err, ccbill.ErrDataLinkAuth) {
 		return fmt.Errorf("%w: %v", ErrPSPCredentialsRejected, err)
 	}
 	return err
+}
+
+// ProbeLimitedError refuses a credential probe the provider's lockout of
+// failed logins forbids for now (ccbill.ProbeInterval).
+type ProbeLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *ProbeLimitedError) Error() string {
+	return fmt.Sprintf("merchants: the provider refused this login within the hour, or it is being checked; check again in %s", e.RetryAfter.Round(time.Second))
 }
 
 // LastActivePSPError refuses to archive the only active PSP on a rail without
@@ -266,6 +277,9 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	} else if err != nil {
 		return billing.PSP{}, err
 	}
+	if err := s.refuseCCBillAccountElsewhere(ctx, id, rail, environment, accountID); err != nil {
+		return billing.PSP{}, err
+	}
 	if err := s.verifyNMIEnvironment(ctx, id, doc); err != nil {
 		return billing.PSP{}, err
 	}
@@ -345,6 +359,9 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 		return billing.PSP{}, err
 	}
 	defer finishEdit()
+	// The credentials are probed once: an attempt lost to a concurrent edit
+	// writes the same credentials again.
+	probed, probedOnce := false, false
 	for attempt := 0; ; attempt++ {
 		j, err := s.load(ctx, id)
 		if err != nil {
@@ -365,7 +382,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 			cas = *req.ExpectedRevision
 		}
 		next := clonePSP(held.Value)
-		probed, rotated := false, false
+		rotated := false
 		if req.Archived {
 			if next.Archived {
 				if _, err := s.config.PutPSP(ctx, id, scope.Key, next, cas); err != nil {
@@ -405,8 +422,11 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 				if err := s.verifyNMIEnvironment(ctx, id, next); err != nil {
 					return billing.PSP{}, err
 				}
-				if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
-					return billing.PSP{}, err
+				if !probedOnce {
+					if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
+						return billing.PSP{}, err
+					}
+					probedOnce = true
 				}
 			}
 		}
@@ -597,6 +617,37 @@ func (s *Service) normalizeCredentials(ctx context.Context, rail string, in map[
 		out[normalized] = value
 	}
 	return out, nil
+}
+
+// refuseCCBillAccountElsewhere refuses a CCBill account another merchant
+// holds, in any subaccount, before its credentials are probed: DataLink's
+// credentials and its hourly limit are the account's. It is held by a
+// current PSP (pspCurrent) of an undeleted, unretired merchant in the same
+// money class; an archived or superseded one holds nothing.
+func (s *Service) refuseCCBillAccountElsewhere(ctx context.Context, id billing.MerchantID, rail, environment, accountID string) error {
+	if rail != "ccbill" {
+		return nil
+	}
+	accnum, _, err := config.SplitCCBillAccountID(accountID)
+	if err != nil {
+		return nil // the probe refuses the account id
+	}
+	rows, err := gen.New(s.pool).ListCCBillAccountPSPsElsewhere(ctx, gen.ListCCBillAccountPSPsElsewhereParams{
+		Live: config.LiveEnvironment(rail, environment), MerchantID: id.UUID(), ClientAccnum: accnum})
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		current, err := s.pspCurrent(ctx, PSPIdentity{ID: row.ID, MerchantID: billing.MerchantID(row.MerchantID), Key: row.Key, Rail: row.Rail,
+			Environment: row.Environment, AccountID: row.AccountID, Superseded: row.SupersededAt != nil})
+		if err != nil {
+			return err
+		}
+		if current {
+			return fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+		}
+	}
+	return nil
 }
 
 // claimNeedsProof lists rails whose inbound events route by account id.

@@ -69,7 +69,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	if err != nil {
 		overlap = config.DefaultWebhookSecretOverlap
 	}
-	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap)
+	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap).WithDataLinkPacing(r.DataLinkPacing())
 	if r.NMIClients != nil {
 		svc.WithNMIWire(r.NMIClients.Wire)
 	}

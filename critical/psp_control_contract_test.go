@@ -657,7 +657,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 func undeclaredAccountWorld(t *testing.T, mail *alertMailbox) *world {
 	t.Helper()
 	w := newWorld(t, func(w *world) {
-		declareCCBill(w, nil)
+		declareCCBill(w, "")
 		m := cfgMerchant(w.cfg, "alpha")
 		m.AlertEmail = ptr("ops@alpha.example")
 		setCfgMerchant(&w.cfg, "alpha", m)

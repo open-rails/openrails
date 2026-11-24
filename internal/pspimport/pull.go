@@ -61,9 +61,12 @@ var sources = map[string]func(ctx context.Context, im *Importer, mid billing.Mer
 		}
 		dl := ccbill.NewDataLinkClient(im.Log, &config.CCBillConfig{ClientAccNum: acc, ClientSubAcc: sub, DataLinkUsername: username, DataLinkPassword: password,
 			Sandbox: scope.Environment == config.EnvironmentSandbox})
-		dl.ReadOnly = true
+		dl.ReadOnly, dl.Pacing = true, im.DataLinkPacing
 		if im.CCBillDataLinkURL != "" {
 			dl.BaseURL, dl.LoopbackFixture = im.CCBillDataLinkURL, true
+		}
+		if im.WireDataLink != nil {
+			im.WireDataLink(dl)
 		}
 		return &ccbillSource{dl: dl}, nil
 	},
@@ -201,12 +204,16 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 	if err != nil {
 		return err
 	}
+	window := historyWindow
+	if w, ok := src.(interface{ window() time.Duration }); ok {
+		window = w.window()
+	}
 	for through := *row.HistoryThrough; through.Before(*row.PulledAt); {
-		until := through.Add(historyWindow)
+		until := through.Add(window)
 		if until.After(*row.PulledAt) {
 			until = *row.PulledAt
 		}
-		recs, err := src.history(ctx, through, until)
+		recs, err := src.history(ctx, through, until, !until.Before(*row.PulledAt))
 		if err != nil {
 			return err
 		}
