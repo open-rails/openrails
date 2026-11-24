@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -129,8 +130,15 @@ func QueueFraudWarningRefund(ctx context.Context, d *db.DB, payment *models.Paym
 	if err != nil {
 		return nil, err
 	}
-	if remaining := payment.Amount - refunded; remaining <= 0 || svc.ValidateRefund(ctx, payment, remaining) != nil {
+	remaining := payment.Amount - refunded
+	if remaining <= 0 || svc.ValidateRefund(ctx, payment, remaining) != nil {
 		return nil, nil
+	}
+	// Credits bought and spent cannot be given back.
+	if err := purchasedcredits.New(d, clock).ValidateRefund(ctx, payment.ID, remaining); errors.Is(err, billing.ErrConflict) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
 	}
 	if _, _, _, err := RefundIntentFor(payment, fraudWarningRefundKey); err != nil {
 		return nil, nil

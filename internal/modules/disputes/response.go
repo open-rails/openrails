@@ -23,9 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
-// responseSource is the autonomous budget responses draw on.
-const responseSource = "dispute_response"
-
 // FindingResponseWaiting is a merchant's dispute responses held by a gate:
 // raised once with its alert, resolved when none waits.
 const FindingResponseWaiting reconcile.FindingType = "life.disputes.response_waiting"
@@ -197,7 +194,7 @@ func (s *Service) respondChargeback(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("load the disputed charge: %w", err)
 	}
 	g := gates{pulled: dispute.ObservedVia == "pull"}
-	block := s.command(mid.UUID(), destructive.DeletePaymentMethod, billing.DisputeID(id).String(), "dispute:"+id.String()+":block")
+	block := s.command(mid.UUID(), destructive.BlockPaymentMethod, billing.DisputeID(id).String(), "dispute:"+id.String()+":block")
 	if err := s.admitted(ctx, block, g, func(ctx context.Context, d *db.DB) error {
 		if err := s.BlockCard(ctx, d, payment, &dispute); err != nil {
 			return err
@@ -259,18 +256,24 @@ func (s *Service) admitted(ctx context.Context, command destructive.Command, g g
 	if err != nil {
 		return fmt.Errorf("read the destructive policy: %w", err)
 	}
+	// Only the deployment-wide switch is a protective step's to pass; the
+	// merchant's own emergency stop holds every step.
 	switch {
+	case !policy.MerchantEnabled:
+		return &WaitError{Reason: "the merchant's destructive actions are stopped"}
 	case g.pulled && policy.EnforceArmedAt == nil:
 		return &WaitError{Reason: "a case a pull found waits for the merchant to be armed for enforcing pulls"}
 	case g.destructive && !policy.SwitchEnabled:
 		return &WaitError{Reason: "the destructive switch is off: canceling the customer's other subscriptions on the card waits for it"}
-	case g.destructive && !policy.MerchantEnabled:
-		return &WaitError{Reason: "the merchant's destructive actions are disabled"}
 	}
-	if p := s.Postures.Posture(ctx, command.MerchantID); p.Limited() {
-		return &WaitError{Reason: p.Reason}
+	posture, err := s.Postures.Read(ctx, command.MerchantID)
+	if err != nil {
+		return err
 	}
-	action, err := s.Admissions.AdmitAutonomous(ctx, command, responseSource)
+	if posture.Limited() {
+		return &WaitError{Reason: posture.Reason}
+	}
+	action, err := s.Admissions.AdmitAutonomous(ctx, command, destructive.DisputeSource)
 	var held *destructive.HeldError
 	if errors.As(err, &held) {
 		return &WaitError{Reason: "held by destructive hold " + held.Hold.ID.String()}

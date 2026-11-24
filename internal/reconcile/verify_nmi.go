@@ -240,7 +240,7 @@ func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error
 		return RemoteTransaction{}, err
 	}
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
+		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence, CustomerRef: sale.Vault}
 	if !sale.Success {
 		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}

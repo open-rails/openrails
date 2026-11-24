@@ -308,6 +308,11 @@ LEFT JOIN billing.payments w ON w.merchant_id = c.merchant_id AND w.reversal_kin
     AND w.deleted_at IS NULL
 WHERE c.reversal_kind = 'chargeback' AND c.psp_id IS NOT NULL AND c.amount < 0 AND c.deleted_at IS NULL;
 
+-- A dispute response's card block is a command of its own kind.
+ALTER TABLE billing.destructive_actions DROP CONSTRAINT destructive_actions_kind_check,
+    ADD CONSTRAINT destructive_actions_kind_check CHECK (kind IN ('refund', 'cancel_subscription', 'delete_payment_method', 'block_payment_method',
+        'revoke_credit', 'revoke_access', 'waive_order', 'mark_uncollectible', 'catalog_change', 'configuration_change'));
+
 -- What a dispute response waits for changing wakes the waiting responses:
 -- the destructive switch, a merchant's policy or write posture, the book
 -- armed, a hold cleared. The payload is the schema.

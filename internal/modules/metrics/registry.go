@@ -335,7 +335,7 @@ var families = map[Family]familySpec{
 	FamNetworkPrior: {
 		Kind:     "flow",
 		From:     `billing.network_activity_daily nap`,
-		TimeExpr: `(nap.day_at + interval '1 month')`,
+		TimeExpr: `(((nap.day_at AT TIME ZONE 'UTC') + interval '1 month') AT TIME ZONE 'UTC')`,
 		DimExprs: map[string]string{
 			"rail": `nap.rail`,
 			"psp":  `'psp_' || nap.psp_id::text`,

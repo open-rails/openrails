@@ -96,9 +96,9 @@ func (q *Queries) CountDestructiveUnitsForActor(ctx context.Context, arg CountDe
 
 const countDestructiveUnitsForAutomation = `-- name: CountDestructiveUnitsForAutomation :one
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$3::bigint AND greatest(admitted_at,finished_at)>=$4::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=$2::uuid AND origin='automation' AND (actor_id='dispute_response')=$3::boolean AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>$4::bigint AND greatest(admitted_at,finished_at)>=$5::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted
@@ -107,6 +107,7 @@ SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=$1::timestamptz)
 type CountDestructiveUnitsForAutomationParams struct {
 	HourSince  time.Time
 	MerchantID uuid.UUID
+	Disputes   bool
 	ClearAfter int64
 	DaySince   time.Time
 }
@@ -116,10 +117,13 @@ type CountDestructiveUnitsForAutomationRow struct {
 	Daily  int64
 }
 
+// Dispute responses (actor dispute_response) count apart from the merchant's
+// other autonomous work.
 func (q *Queries) CountDestructiveUnitsForAutomation(ctx context.Context, arg CountDestructiveUnitsForAutomationParams) (CountDestructiveUnitsForAutomationRow, error) {
 	row := q.db.QueryRow(ctx, countDestructiveUnitsForAutomation,
 		arg.HourSince,
 		arg.MerchantID,
+		arg.Disputes,
 		arg.ClearAfter,
 		arg.DaySince,
 	)

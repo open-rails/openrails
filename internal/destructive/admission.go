@@ -63,9 +63,22 @@ func holdKeys(row gen.BillingDestructiveAction, mid uuid.UUID) []string {
 	case "host":
 		return nil
 	case "automation":
-		return []string{"automation:" + mid.String()}
+		return []string{automationKey(row.ActorID, mid)}
 	}
 	return scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
+}
+
+// DisputeSource is the autonomous source of dispute responses. It has a
+// budget of its own, so a burst of fraud reports and reconciliation cannot
+// hold each other.
+const DisputeSource = "dispute_response"
+
+// automationKey is the budget an autonomous source draws on.
+func automationKey(source string, mid uuid.UUID) string {
+	if source == DisputeSource {
+		return "dispute:" + mid.String()
+	}
+	return "automation:" + mid.String()
 }
 
 // Admit reserves the entire validated command. A trip is committed before
@@ -88,7 +101,7 @@ func (a *Admissions) AdmitAutonomous(ctx context.Context, c Command, source stri
 		return Action{}, errors.New("verified command cannot become autonomous")
 	}
 	switch source {
-	case "startup_configuration", "operator_catalog", "reconciliation", "dispute_response":
+	case "startup_configuration", "operator_catalog", "reconciliation", DisputeSource:
 	default:
 		return Action{}, errors.New("unknown autonomous destructive source")
 	}
@@ -179,7 +192,7 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 	keys := scopeKeys(c.Actor, c.MerchantID)
 	scopes := []Scope{ScopeActor, ScopeMerchant, ScopeDeployment}
 	if c.origin == "automation" {
-		keys = []string{"automation:" + c.MerchantID.String()}
+		keys = []string{automationKey(c.Actor.ID, c.MerchantID)}
 		scopes = []Scope{ScopeMerchant}
 	}
 	if h, err := q.FindOpenDestructiveHold(ctx, keys); err == nil {
@@ -204,7 +217,8 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			hourly, daily = n.Hourly, n.Daily
 		case ScopeMerchant:
 			if c.origin == "automation" {
-				n, err := q.CountDestructiveUnitsForAutomation(ctx, gen.CountDestructiveUnitsForAutomationParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+				n, err := q.CountDestructiveUnitsForAutomation(ctx, gen.CountDestructiveUnitsForAutomationParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after,
+					Disputes: c.Actor.ID == DisputeSource})
 				if err != nil {
 					return nil, err
 				}

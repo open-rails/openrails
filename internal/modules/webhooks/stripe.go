@@ -912,10 +912,10 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 			at = time.Unix(refund.Created, 0).UTC()
 		}
 		// An RDR resolution's refund a prevented case booked already is this
-		// refund: the case takes it once.
+		// refund, unless OpenRails asked for it: the case takes it once.
 		absorbed, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, refundID)
-		if err == nil && !absorbed {
-			absorbed, err = s.disputes().AbsorbByPrevention(ctx, s.DB, original.ID, refundID, amount, currency, s.atOrNow(at))
+		if err == nil && !absorbed && refund.Metadata[subscriptions.StripeRefundMetadataKey] == "" {
+			absorbed, err = s.disputes().AbsorbByPrevention(ctx, s.DB, original.ID, refundID, amount, currency, s.atOrNow(at).Add(rdrRefundLead))
 		}
 		if err != nil {
 			return err
@@ -1035,9 +1035,15 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	return nil
 }
 
+// rdrRefundLead is how long before its dispute object Stripe may make an RDR
+// resolution's refund. Stripe's ordering is unconfirmed; one refund is
+// booked whichever arrives first.
+const rdrRefundLead = 5 * time.Minute
+
 // preventionRefund books an RDR resolution's refund once. A Stripe refund of
-// the whole charge made no earlier than the case, which no case took yet, is
-// the resolution's: the case absorbs it rather than booking another.
+// the whole charge made no earlier than a few minutes before the case, which
+// OpenRails did not ask for and no case took yet, is the resolution's: the
+// case absorbs it rather than booking another.
 func (s *StripeWebhookService) preventionRefund(ctx context.Context, original *models.Payment, rec disputes.Case, amount int64, currency string) error {
 	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, rec.ProviderRef); err == nil && existing != nil {
 		return s.disputes().Link(ctx, s.DB, rec, &existing.ID, nil)
@@ -1050,7 +1056,8 @@ func (s *StripeWebhookService) preventionRefund(ctx context.Context, original *m
 	}
 	for _, r := range refunds {
 		if r.ReversalKind == nil || *r.ReversalKind != payments.ReversalRefund || r.Status != payments.PaymentStatusSucceededValue ||
-			-r.Amount != amount || !strings.EqualFold(r.Currency, currency) || r.PurchasedAt.Before(rec.DisputedAt) || !strings.HasPrefix(r.TransactionID, "re_") {
+			-r.Amount != amount || !strings.EqualFold(r.Currency, currency) || r.PurchasedAt.Before(rec.DisputedAt.Add(-rdrRefundLead)) ||
+			!strings.HasPrefix(r.TransactionID, "re_") || refundInitiatedByOpenRails(r) {
 			continue
 		}
 		taken, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, r.TransactionID)

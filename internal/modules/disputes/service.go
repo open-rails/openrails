@@ -43,7 +43,7 @@ type Service struct {
 	// them a response waits.
 	Admissions *destructive.Admissions
 	Postures   interface {
-		Posture(context.Context, uuid.UUID) writeposture.Posture
+		Read(context.Context, uuid.UUID) (writeposture.Posture, error)
 	}
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	Log       *slog.Logger
@@ -88,6 +88,8 @@ type Case struct {
 	// BecameChargeback is true when this report made the case a chargeback:
 	// its first report as one, or the issuer's escalation of an inquiry.
 	BecameChargeback bool
+	// Noticed is true when a notice reported a case only a pull had found.
+	Noticed bool
 }
 
 // ID is the case's typed id.
@@ -161,6 +163,10 @@ func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) 
 			return fmt.Errorf("record dispute %s: %w", params.ProviderRef, err)
 		}
 		if !out.BecameChargeback {
+			// A notice of a pulled chargeback no longer waits for arming.
+			if out.Noticed && out.Kind == string(billing.DisputeChargeback) && out.RespondedAt == nil {
+				return disputejob.QueueResponse(ctx, txDB, mid.UUID(), disputejob.SubjectDispute, out.BillingDispute.ID)
+			}
 			return nil
 		}
 		note := ""
@@ -234,7 +240,7 @@ func (s *Service) update(ctx context.Context, q *gen.Queries, existing gen.Billi
 	if err != nil {
 		return Case{}, fmt.Errorf("update dispute %s: %w", existing.ProviderRef, err)
 	}
-	return Case{BillingDispute: row, BecameChargeback: became}, nil
+	return Case{BillingDispute: row, BecameChargeback: became, Noticed: existing.ObservedVia == "pull" && row.ObservedVia == "notice"}, nil
 }
 
 // Link names the payments that took the case's money back (reversal) and

@@ -127,6 +127,9 @@ type SaleAction struct {
 	At            time.Time // zero when the report garbled the date
 	Amount        string
 	Currency      string
+	// Vault is the customer vault the sale charged; empty when the report
+	// names none.
+	Vault string
 	// Evidence is the answer and the card, as the report gives them.
 	Evidence decline.Evidence
 }
@@ -145,7 +148,7 @@ func saleActions(txn QueryTransaction, since time.Time) []SaleAction {
 		}
 		out = append(out, SaleAction{
 			TransactionID: strings.TrimSpace(txn.TransactionID), Success: action.Succeeded(), At: at,
-			Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency), Evidence: txn.Evidence(action),
+			Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency), Vault: txn.Vault(), Evidence: txn.Evidence(action),
 		})
 	}
 	return out

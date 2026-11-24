@@ -33,6 +33,22 @@ func (s *Service) Wake(ctx context.Context) error {
 	})
 }
 
+// wakeUntilDone wakes the waiting responses, retrying a failed wake with
+// backoff: nothing waits for the next change, or a restart.
+func (s *Service) wakeUntilDone(ctx context.Context) {
+	for wait := time.Second; ctx.Err() == nil; wait = min(2*wait, time.Minute) {
+		err := s.Wake(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		s.Log.WarnContext(ctx, "dispute responses: wake failed; retrying", logx.Err(err), "in", wait)
+		select {
+		case <-ctx.Done():
+		case <-time.After(wait):
+		}
+	}
+}
+
 // Run wakes the waiting responses on every notification for this schema and
 // on every (re)connect, until ctx ends.
 func (s *Service) Run(ctx context.Context) {
@@ -51,9 +67,7 @@ func (s *Service) Run(ctx context.Context) {
 				return err
 			}
 			for {
-				if err := s.Wake(ctx); err != nil && ctx.Err() == nil {
-					s.Log.WarnContext(ctx, "dispute responses: wake failed; the next change wakes them", logx.Err(err))
-				}
+				s.wakeUntilDone(ctx)
 				for {
 					n, err := conn.WaitForNotification(ctx)
 					if err != nil {

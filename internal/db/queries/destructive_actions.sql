@@ -156,10 +156,12 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND target=sqlc.arg(target)::text
 ORDER BY admission_sequence LIMIT 1;
 
 -- name: CountDestructiveUnitsForAutomation :one
+-- Dispute responses (actor dispute_response) count apart from the merchant's
+-- other autonomous work.
 WITH counted AS (
- SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND state IN ('reserved','started','uncertain')
+ SELECT units,admitted_at,true AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND state IN ('reserved','started','uncertain')
  UNION ALL
- SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
+ SELECT units,greatest(admitted_at,finished_at) AS admitted_at,false AS pending FROM billing.destructive_actions WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND origin='automation' AND (actor_id='dispute_response')=sqlc.arg(disputes)::boolean AND state='succeeded' AND greatest(admission_sequence,completion_sequence)>sqlc.arg(clear_after)::bigint AND greatest(admitted_at,finished_at)>=sqlc.arg(day_since)::timestamptz
 )
 SELECT coalesce(sum(units) FILTER(WHERE pending OR admitted_at>=sqlc.arg(hour_since)::timestamptz),0)::bigint AS hourly,
  coalesce(sum(units),0)::bigint AS daily FROM counted;
