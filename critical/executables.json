@@ -582,7 +582,7 @@
       "TestLeaseVersions/OR-J24-S29/concurrent-syncs-and-admissions-on-the-same-customers-never-deadlock"
     ],
     "OR-J24-S31": [
-      "TestLeaseVersions/OR-J24-S31/a-sync-that-cannot-take-its-locks-in-time-fails-fast-and-commits-nothing"
+      "TestLeaseVersions/OR-J24-S31/a-sync-takes-no-customer-lock-and-one-that-cannot-take-its-locks-in-time-fails-fast"
     ],
     "OR-J24-S32": [
       "TestLeaseVersions/OR-J24-S32/trust-levels-whose-spend-windows-share-a-key-but-not-a-cap-decide-apart"
@@ -2001,6 +2001,9 @@
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting",
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/a-print-a-card-in-force-names-is-recorded-again",
       "TestUsageRecovery/OR-J24-S64/usage-whose-card-print-never-committed-holds-up-no-posting/one-nothing-names-is-left-out"
+    ],
+    "OR-J24-S65": [
+      "TestUsageRecovery/OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads"
     ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
