@@ -1,6 +1,13 @@
 -- Reporting over the MRR rollups: churn caused by a chargeback counts apart
--- in mrr_flows, and each customer's run of MRR keeps its retention flows, so
--- net and gross revenue retention read rollups.
+-- in mrr_flows; each customer's run of MRR keeps its retention flows; each
+-- product keeps its totals and the merchant its distinct customers with MRR;
+-- every cancel decision is kept. Reports read these, never the movements or
+-- the subscriptions.
+
+-- Nothing commits a movement, a product flow or a status change while the
+-- rollups are filled from them; the locks follow the order writers take.
+LOCK TABLE billing.subscriptions IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE billing.subscription_status_transitions, billing.customer_mrr, billing.mrr_movements, billing.mrr_product_flows IN SHARE MODE;
 
 ALTER TABLE billing.mrr_flows DROP CONSTRAINT mrr_flows_measure_check;
 ALTER TABLE billing.mrr_flows ADD CONSTRAINT mrr_flows_measure_check
@@ -12,26 +19,117 @@ CREATE TABLE billing.mrr_streak_flows (
     currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     bucket_at timestamptz NOT NULL,
     streak_at timestamptz NOT NULL,
-    measure text NOT NULL CHECK (measure IN ('expansion', 'contraction', 'churn')),
+    measure text NOT NULL CHECK (measure IN ('expansion', 'contraction', 'churn', 'churn_voluntary', 'churn_chargeback', 'correction')),
     amount bigint NOT NULL,
+    logos bigint NOT NULL,
     PRIMARY KEY (merchant_id, currency, bucket_at, streak_at, measure),
     CONSTRAINT mrr_streak_flows_order_check CHECK (streak_at <= bucket_at)
 );
-COMMENT ON TABLE billing.mrr_streak_flows IS 'Expansion, contraction and churn per currency and 15-minute UTC bucket, by the bucket in which each customer''s run of MRR began (its latest movement from none): the customers with MRR when a period began are the runs begun before it, so net and gross revenue retention read this and mrr_totals, never the movements.';
+COMMENT ON TABLE billing.mrr_streak_flows IS 'Expansion, contraction, churn (and its voluntary and chargeback parts) and corrections per currency and 15-minute UTC bucket, with their sum and logo change, by the bucket in which each customer''s run of MRR began (its latest movement from none): the customers with MRR when a period began are the runs begun before it, so churn and revenue retention read this and mrr_totals, never the movements.';
 
--- The flows of the movements already recorded.
+CREATE TABLE billing.mrr_product_totals (
+    merchant_id uuid NOT NULL,
+    currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
+    product_id uuid NOT NULL,
+    mrr bigint NOT NULL CHECK (mrr >= 0),
+    subscribers bigint NOT NULL CHECK (subscribers >= 0),
+    PRIMARY KEY (merchant_id, currency, product_id),
+    CONSTRAINT mrr_product_totals_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products (merchant_id, id) ON DELETE RESTRICT
+);
+COMMENT ON TABLE billing.mrr_product_totals IS 'Each product''s MRR and the subscriptions adding it now, per currency: its mrr_product_flows summed, kept at commit. A product''s MRR at an instant is this less its flows of the buckets from it on.';
+
+CREATE TABLE billing.mrr_customer_totals (
+    merchant_id uuid PRIMARY KEY REFERENCES billing.merchants (id) ON DELETE RESTRICT,
+    customers bigint NOT NULL CHECK (customers >= 0)
+);
+COMMENT ON TABLE billing.mrr_customer_totals IS 'The merchant''s customers with MRR in any currency now, each once, kept at commit; at an instant it is this less mrr_customer_flows from it on.';
+
+CREATE TABLE billing.mrr_customer_flows (
+    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
+    bucket_at timestamptz NOT NULL,
+    logos bigint NOT NULL,
+    PRIMARY KEY (merchant_id, bucket_at)
+);
+COMMENT ON TABLE billing.mrr_customer_flows IS 'Per 15-minute UTC bucket, customers gaining MRR in a first currency less those losing it in their last: the change of mrr_customer_totals.';
+
+-- A cohort's size is its customers, read by when each first had MRR.
+CREATE INDEX customer_mrr_first_active_at_idx ON billing.customer_mrr (merchant_id, first_active_at);
+
+CREATE TABLE billing.subscription_cancellations (
+    merchant_id uuid NOT NULL,
+    id uuid NOT NULL DEFAULT uuidv7(),
+    subscription_id uuid NOT NULL,
+    cancel_type text CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade')),
+    decided_at timestamptz NOT NULL,
+    reversed_at timestamptz,
+    PRIMARY KEY (merchant_id, id),
+    CONSTRAINT subscription_cancellations_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions (merchant_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX subscription_cancellations_decided_at_idx ON billing.subscription_cancellations (merchant_id, decided_at);
+CREATE UNIQUE INDEX subscription_cancellations_open_idx ON billing.subscription_cancellations (merchant_id, subscription_id) WHERE reversed_at IS NULL;
+CREATE TRIGGER immutable_subscription_cancellations_delete BEFORE DELETE ON billing.subscription_cancellations
+    FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+COMMENT ON TABLE billing.subscription_cancellations IS 'Each cancel decision: a subscription''s move into canceled, dated by its writer''s clock (updated_at), and when a move out of canceled (a resume) took it back. Kept by trg_subscriptions_track_cancellations; reports count cancellations here. Retention: permanent, never pruned.';
+
+CREATE FUNCTION billing.subscriptions_track_cancellations() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    IF billing.billing_restore_active(NEW.merchant_id) THEN
+        RETURN NULL;
+    END IF;
+    IF NEW.status = 'canceled' THEN
+        INSERT INTO billing.subscription_cancellations (merchant_id, subscription_id, cancel_type, decided_at)
+        VALUES (NEW.merchant_id, NEW.id, NEW.cancel_type, NEW.updated_at);
+    ELSIF OLD.status = 'canceled' THEN
+        UPDATE billing.subscription_cancellations SET reversed_at = NEW.updated_at
+         WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.id AND reversed_at IS NULL;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+COMMENT ON FUNCTION billing.subscriptions_track_cancellations() IS 'Records a subscription''s move into canceled as a cancel decision dated by its updated_at, and a move out of canceled as that decision''s reversal.';
+CREATE TRIGGER trg_subscriptions_track_cancellations AFTER UPDATE OF status ON billing.subscriptions
+    FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION billing.subscriptions_track_cancellations();
+
+-- What was recorded before: flows from the movements, totals from the flows
+-- and customer_mrr, cancel decisions from the status transitions.
 INSERT INTO billing.mrr_flows (merchant_id, currency, bucket_at, measure, amount, entries, logos)
 SELECT merchant_id, currency, billing.mrr_bucket(occurred_at), 'churn_chargeback', sum(delta), count(*), sum(logo_delta)
   FROM billing.mrr_movements
  WHERE kind = 'churn' AND cause = 'chargeback'
  GROUP BY merchant_id, currency, billing.mrr_bucket(occurred_at);
-INSERT INTO billing.mrr_streak_flows (merchant_id, currency, bucket_at, streak_at, measure, amount)
-SELECT merchant_id, currency, billing.mrr_bucket(occurred_at), billing.mrr_bucket(began_at), kind, sum(delta)
+INSERT INTO billing.mrr_streak_flows (merchant_id, currency, bucket_at, streak_at, measure, amount, logos)
+SELECT v.merchant_id, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(v.began_at), x.measure, sum(v.delta), sum(v.logo_delta)
   FROM (SELECT v.*, max(v.occurred_at) FILTER (WHERE v.logo_delta = 1)
                         OVER (PARTITION BY v.merchant_id, v.customer_id, v.currency ORDER BY v.occurred_at, v.id) AS began_at
           FROM billing.mrr_movements v) v
- WHERE kind IN ('expansion', 'contraction', 'churn') AND began_at IS NOT NULL
- GROUP BY merchant_id, currency, billing.mrr_bucket(occurred_at), billing.mrr_bucket(began_at), kind;
+  CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary
+                     UNION ALL SELECT 'churn_chargeback' WHERE v.kind = 'churn' AND v.cause = 'chargeback') x(measure)
+ WHERE v.kind IN ('expansion', 'contraction', 'churn', 'correction') AND v.began_at IS NOT NULL
+ GROUP BY v.merchant_id, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(v.began_at), x.measure;
+INSERT INTO billing.mrr_product_totals (merchant_id, currency, product_id, mrr, subscribers)
+SELECT merchant_id, currency, product_id, sum(amount), sum(subscribers)
+  FROM billing.mrr_product_flows
+ GROUP BY merchant_id, currency, product_id
+HAVING sum(amount) <> 0 OR sum(subscribers) <> 0;
+-- A customer's currencies with MRR after each movement are the running sum
+-- of its logo changes.
+INSERT INTO billing.mrr_customer_flows (merchant_id, bucket_at, logos)
+SELECT v.merchant_id, billing.mrr_bucket(v.occurred_at), sum((v.n > 0)::integer - (v.n - v.logo_delta > 0)::integer)
+  FROM (SELECT v.merchant_id, v.occurred_at, v.logo_delta,
+               sum(v.logo_delta) OVER (PARTITION BY v.merchant_id, v.customer_id ORDER BY v.occurred_at, v.id) AS n
+          FROM billing.mrr_movements v) v
+ GROUP BY v.merchant_id, billing.mrr_bucket(v.occurred_at)
+HAVING sum((v.n > 0)::integer - (v.n - v.logo_delta > 0)::integer) <> 0;
+INSERT INTO billing.mrr_customer_totals (merchant_id, customers)
+SELECT merchant_id, count(DISTINCT customer_id) FROM billing.customer_mrr WHERE mrr > 0 GROUP BY merchant_id;
+INSERT INTO billing.subscription_cancellations (merchant_id, subscription_id, cancel_type, decided_at, reversed_at)
+SELECT st.merchant_id, st.subscription_id, st.cancel_type, st.occurred_at,
+       (SELECT min(r.occurred_at) FROM billing.subscription_status_transitions r
+         WHERE r.merchant_id = st.merchant_id AND r.subscription_id = st.subscription_id AND r.from_status = 'canceled'
+           AND r.to_status <> 'canceled' AND (r.occurred_at, r.id) > (st.occurred_at, st.id))
+  FROM billing.subscription_status_transitions st
+ WHERE st.to_status = 'canceled' AND st.from_status IS NOT NULL AND st.from_status <> 'canceled';
 
 -- settle_mrr keeps the new flows at commit.
 CREATE OR REPLACE FUNCTION billing.settle_mrr(p_merchant uuid) RETURNS void
@@ -140,20 +238,47 @@ BEGIN
      ORDER BY v.currency, billing.mrr_bucket(v.cohort_at), billing.mrr_bucket(v.occurred_at)
     ON CONFLICT (merchant_id, currency, cohort_at, bucket_at) DO UPDATE
     SET amount = c.amount + EXCLUDED.amount, logos = c.logos + EXCLUDED.logos;
-    -- The expansion, contraction and churn of each customer's run of MRR, by
-    -- when the run began (its latest movement from none): a period's opening
-    -- base is the runs begun before it.
-    INSERT INTO billing.mrr_streak_flows AS s (merchant_id, currency, bucket_at, streak_at, measure, amount)
-    SELECT p_merchant, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind, sum(v.delta)
+    -- The expansion, contraction, churn and corrections of each customer's
+    -- run of MRR, by when the run began (its latest movement from none): a
+    -- period's opening base is the runs begun before it.
+    INSERT INTO billing.mrr_streak_flows AS s (merchant_id, currency, bucket_at, streak_at, measure, amount, logos)
+    SELECT p_merchant, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), x.measure, sum(v.delta), sum(v.logo_delta)
       FROM billing.mrr_movements v
       CROSS JOIN LATERAL (SELECT max(p.occurred_at) AS began_at FROM billing.mrr_movements p
                            WHERE p.merchant_id = v.merchant_id AND p.customer_id = v.customer_id AND p.currency = v.currency
                              AND p.logo_delta = 1 AND (p.occurred_at, p.id) <= (v.occurred_at, v.id)) r
-     WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements) AND v.kind IN ('expansion', 'contraction', 'churn') AND r.began_at IS NOT NULL
-     GROUP BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind
-     ORDER BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), v.kind
+      CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary
+                         UNION ALL SELECT 'churn_chargeback' WHERE v.kind = 'churn' AND v.cause = 'chargeback') x(measure)
+     WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements) AND v.kind IN ('expansion', 'contraction', 'churn', 'correction')
+       AND r.began_at IS NOT NULL
+     GROUP BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), x.measure
+     ORDER BY v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(r.began_at), x.measure
     ON CONFLICT (merchant_id, currency, bucket_at, streak_at, measure) DO UPDATE
-    SET amount = s.amount + EXCLUDED.amount;
+    SET amount = s.amount + EXCLUDED.amount, logos = s.logos + EXCLUDED.logos;
+    -- A customer gaining MRR in a first currency, or losing it in its last,
+    -- moves the merchant's distinct customers: its currencies with MRR before
+    -- are each one's MRR before this settlement's movement, or now if none.
+    FOR v_sum IN
+        SELECT billing.mrr_bucket(c.at) AS bucket_at, sum(c.logo)::bigint AS logos
+          FROM (SELECT t.at,
+                       COALESCE((SELECT bool_or(cm.mrr > 0) FROM billing.customer_mrr cm
+                                  WHERE cm.merchant_id = p_merchant AND cm.customer_id = t.customer_id), false)::integer
+                     - COALESCE((SELECT bool_or(COALESCE(mv.mrr_before, cm.mrr) > 0) FROM billing.customer_mrr cm
+                                   LEFT JOIN billing.mrr_movements mv ON mv.merchant_id = cm.merchant_id AND mv.id = ANY(v_movements)
+                                        AND mv.customer_id = cm.customer_id AND mv.currency = cm.currency
+                                  WHERE cm.merchant_id = p_merchant AND cm.customer_id = t.customer_id), false)::integer AS logo
+                  FROM (SELECT v.customer_id, max(v.occurred_at) AS at FROM billing.mrr_movements v
+                         WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements) AND v.logo_delta <> 0
+                         GROUP BY v.customer_id) t) c
+         WHERE c.logo <> 0
+         GROUP BY 1
+         ORDER BY 1
+    LOOP
+        INSERT INTO billing.mrr_customer_flows AS f (merchant_id, bucket_at, logos) VALUES (p_merchant, v_sum.bucket_at, v_sum.logos)
+        ON CONFLICT (merchant_id, bucket_at) DO UPDATE SET logos = f.logos + EXCLUDED.logos;
+        INSERT INTO billing.mrr_customer_totals AS t (merchant_id, customers) VALUES (p_merchant, v_sum.logos)
+        ON CONFLICT (merchant_id) DO UPDATE SET customers = t.customers + EXCLUDED.customers;
+    END LOOP;
     -- Each changed subscription moves its products' MRR and subscribers, in
     -- the bucket of its customer's movement in each currency: the latest
     -- change of the customer's rows in that currency.
@@ -169,6 +294,17 @@ BEGIN
      ORDER BY x.currency, billing.mrr_bucket(x.at), x.product_id
     ON CONFLICT (merchant_id, currency, bucket_at, product_id) DO UPDATE
     SET amount = p.amount + EXCLUDED.amount, subscribers = p.subscribers + EXCLUDED.subscribers;
+    INSERT INTO billing.mrr_product_totals AS p (merchant_id, currency, product_id, mrr, subscribers)
+    SELECT p_merchant, x.currency, x.product_id, sum(x.amount), sum(x.subscribers)
+      FROM billing.subscription_mrr m
+      CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                 (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
+     WHERE m.merchant_id = p_merchant AND m.dirty
+     GROUP BY x.currency, x.product_id
+    HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
+     ORDER BY x.currency, x.product_id
+    ON CONFLICT (merchant_id, currency, product_id) DO UPDATE
+    SET mrr = p.mrr + EXCLUDED.mrr, subscribers = p.subscribers + EXCLUDED.subscribers;
     -- The merchant's totals, one currency at a time.
     FOR v_sum IN
         SELECT x.currency, sum(x.amount)::bigint AS mrr, sum(x.subscribers)::bigint AS subscribers,
@@ -305,9 +441,9 @@ BEGIN
      WHERE merchant_id = p_merchant AND dirty;
 END;
 $$;
-COMMENT ON FUNCTION billing.settle_mrr(p_merchant uuid) IS 'Records the merchant''s dirty subscription_mrr rows: per customer and currency one mrr_movements row classified by the customer''s MRR before and after, its lines, and the rollups (with each run''s retention flows); then each subscription''s risk case and episodes, the at-risk flows and totals.';
+COMMENT ON FUNCTION billing.settle_mrr(p_merchant uuid) IS 'Records the merchant''s dirty subscription_mrr rows: per customer and currency one mrr_movements row classified by the customer''s MRR before and after, its lines, and the rollups (with each run''s retention flows, product totals and distinct customers); then each subscription''s risk case and episodes, the at-risk flows and totals.';
 
--- The restore guard names the retention flows.
+-- The restore guard names the new tables.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -382,10 +518,13 @@ BEGIN
                   'merchant_destructive_policy',
                   'money_settings',
                   'mrr_cohort_flows',
+                  'mrr_customer_flows',
+                  'mrr_customer_totals',
                   'mrr_flows',
                   'mrr_movement_lines',
                   'mrr_movements',
                   'mrr_product_flows',
+                  'mrr_product_totals',
                   'mrr_risk_cases',
                   'mrr_risk_due',
                   'mrr_risk_episodes',
@@ -433,6 +572,7 @@ BEGIN
                   'solana_subscriptions',
                   'stored_card_checks',
                   'subscription_billing_changes',
+                  'subscription_cancellations',
                   'subscription_mrr',
                   'subscription_status_transitions',
                   'subscription_verifications',

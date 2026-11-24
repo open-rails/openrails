@@ -92,10 +92,32 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 			st, err = compileSnapshot(plan, merchantID, fam, riskSpec(plan, spec), leaves)
 		case "mrr":
 			if byProduct(plan) {
-				st, err = compileSnapshot(plan, merchantID, FamMRRProduct, families[FamMRRProduct], productLeaves(leaves))
-			} else {
-				st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
+				st, err = compileSnapshot(plan, merchantID, FamMRRProduct, families[FamMRRProduct], retarget(leaves, FamMRRProduct))
+				break
 			}
+			// Without a currency, a count of customers counts each once.
+			perCurrency, distinct := leaves, []*Measure(nil)
+			if !byCurrency(plan) {
+				perCurrency = nil
+				for _, m := range leaves {
+					if m.ByCustomer != "" {
+						distinct = append(distinct, m)
+					} else {
+						perCurrency = append(perCurrency, m)
+					}
+				}
+			}
+			if len(distinct) > 0 {
+				d, derr := compileSnapshot(plan, merchantID, FamMRRCustomers, families[FamMRRCustomers], retarget(distinct, FamMRRCustomers))
+				if derr != nil {
+					return nil, derr
+				}
+				stmts = append(stmts, d)
+			}
+			if len(perCurrency) == 0 {
+				continue
+			}
+			st, err = compileSnapshot(plan, merchantID, fam, spec, perCurrency)
 		case "cohort":
 			st, err = compileCohort(plan, merchantID, leaves)
 		case "balance":
@@ -136,13 +158,14 @@ var merchantCols = map[Family]string{
 	FamRiskTotals:     "t.merchant_id",
 	FamRiskFlows:      "rf.merchant_id",
 	FamMRR:            "t.merchant_id",
-	FamMRRProduct:     "pf.merchant_id",
+	FamMRRProduct:     "pt.merchant_id",
+	FamMRRCustomers:   "ct.merchant_id",
 	FamMRRFlows:       "f.merchant_id",
-	FamMRRChurn:       "f.merchant_id",
+	FamMRRChurn:       "sf.merchant_id",
 	FamMRRStreak:      "sf.merchant_id",
 	FamScheduled:      "ms.merchant_id",
 	FamCohort:         "c.merchant_id",
-	FamCancellations:  "st.merchant_id",
+	FamCancellations:  "sc.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -291,12 +314,20 @@ func byProduct(plan *Plan) bool {
 	return slices.Contains(plan.Dims, "product_id") || plan.Filters["product_id"] != nil
 }
 
-// productLeaves are FamMRR leaves as FamMRRProduct reads them.
-func productLeaves(leaves []*Measure) []*Measure {
+func byCurrency(plan *Plan) bool {
+	return slices.Contains(plan.Dims, "currency") || plan.Filters["currency"] != nil
+}
+
+// retarget is FamMRR leaves as fam reads them: FamMRRProduct by ByProduct,
+// FamMRRCustomers by ByCustomer.
+func retarget(leaves []*Measure, fam Family) []*Measure {
 	out := make([]*Measure, len(leaves))
 	for i, m := range leaves {
 		c := *m
-		c.Family, c.Expr = FamMRRProduct, m.ByProduct
+		c.Family, c.Expr = fam, m.ByProduct
+		if fam == FamMRRCustomers {
+			c.Expr = m.ByCustomer
+		}
 		out[i] = &c
 	}
 	return out
@@ -304,13 +335,15 @@ func productLeaves(leaves []*Measure) []*Measure {
 
 // compileCohort reads mrr_cohort_flows by the cohort month and the months
 // since it, in the merchant's zone: a cohort's value at the end of month k
-// is its flows through that month, its size the flows through its own. The
-// cohorts are the months the range starts.
+// is its flows through that month. Its size is its members (customer_mrr by
+// first_active_at) for basis subscribers, its MRR at the end of its own
+// month for basis mrr. The cohorts are the months the range starts.
 func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
 	var args []any
 	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
 	zone := arg(plan.zone().String())
-	where := []string{"c.merchant_id = " + arg(merchantID), "c.cohort_at >= " + arg(plan.From), "c.cohort_at < " + arg(plan.To), "c.bucket_at < " + arg(plan.To)}
+	merchant, from, to := arg(merchantID), arg(plan.From), arg(plan.To)
+	where := []string{"c.merchant_id = " + merchant, "c.cohort_at >= " + from, "c.cohort_at < " + to, "c.bucket_at < " + to}
 	basis := `'subscribers'`
 	bases := `(VALUES ('subscribers'))`
 	if slices.Contains(plan.Dims, "basis") || plan.Filters["basis"] != nil {
@@ -342,7 +375,8 @@ func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, e
 		case "cohort_value":
 			sel = append(sel, value("g.month")+" AS m_cohort_value")
 		case "cohort_size":
-			sel = append(sel, value("g.cohort")+" AS m_cohort_size")
+			sel = append(sel, "CASE WHEN "+basis+" = 'mrr' THEN "+value("g.cohort")+
+				" ELSE COALESCE((SELECT a.members FROM a WHERE a.currency = g.currency AND a.cohort = g.cohort), 0) END AS m_cohort_size")
 		default:
 			return stmt{}, fmt.Errorf("metrics: cohort has no leaf %s (registry bug)", m.Name)
 		}
@@ -353,10 +387,15 @@ func compileCohort(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, e
 	FROM ` + families[FamCohort].From + `
 	WHERE ` + strings.Join(where, " AND ") + `
 	GROUP BY 1, 2, 3
+), a AS (
+	SELECT cm.currency, date_trunc('month', cm.first_active_at, ` + zone + `) AS cohort, count(*)::bigint AS members
+	FROM billing.customer_mrr cm
+	WHERE cm.merchant_id = ` + merchant + ` AND cm.first_active_at >= ` + from + ` AND cm.first_active_at < ` + to + `
+	GROUP BY 1, 2
 ), g AS (
 	SELECT k.currency, k.cohort, to_char(k.cohort AT TIME ZONE ` + zone + `, 'YYYY-MM') AS cohort_label, m.n,
 	       ((k.cohort AT TIME ZONE ` + zone + `) + make_interval(months => m.n)) AT TIME ZONE ` + zone + ` AS month
-	FROM (SELECT DISTINCT currency, cohort FROM f) k
+	FROM (SELECT currency, cohort FROM f UNION SELECT currency, cohort FROM a) k
 	CROSS JOIN LATERAL generate_series(0, 1200) m(n)
 	WHERE ((k.cohort AT TIME ZONE ` + zone + `) + make_interval(months => m.n)) AT TIME ZONE ` + zone + ` < ` + arg(plan.To) + `
 )

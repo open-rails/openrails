@@ -1,15 +1,19 @@
 -- Saved dashboards drop every widget whose query names a measure the MRR and
--- authorization measures replaced, or the status dimension (now
--- risk_reason); a layout left without widgets is deleted, so its merchant
--- gets the health overview.
+-- authorization measures replaced, the status dimension (now risk_reason),
+-- or mrr by a dimension it no longer takes (it reads the MRR rollups, by
+-- currency and product only); a layout left without widgets is deleted, so
+-- its merchant gets the health overview.
 WITH retired AS (
     SELECT ARRAY['new_subscriptions', 'net_new_subscriptions', 'churn_rate', 'subscriptions', 'attempt_failure_rate',
-        'purchase_failure_rate', 'rebill_first_failure_rate'] AS measures
+        'purchase_failure_rate', 'rebill_first_failure_rate'] AS measures,
+        ARRAY['rail', 'psp', 'price_id', 'billing_cycle'] AS mrr_dims
 ), widgets AS (
     SELECT c.merchant_id, w.widget, w.position,
         COALESCE(w.widget #> '{query,measures}' ?| r.measures, false)
             OR COALESCE(w.widget #> '{query,by}' ? 'status', false)
-            OR COALESCE(w.widget #> '{query,filters}' ? 'status', false) AS stale
+            OR COALESCE(w.widget #> '{query,filters}' ? 'status', false)
+            OR COALESCE(w.widget #> '{query,measures}' ? 'mrr', false)
+               AND (COALESCE(w.widget #> '{query,by}' ?| r.mrr_dims, false) OR COALESCE(w.widget #> '{query,filters}' ?| r.mrr_dims, false)) AS stale
     FROM billing.dashboard_configs c
     CROSS JOIN retired r
     CROSS JOIN LATERAL jsonb_array_elements(c.layout) WITH ORDINALITY AS w(widget, position)

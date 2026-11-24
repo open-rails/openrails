@@ -2893,6 +2893,7 @@ pkg openrails/billing, type MetricsMeasure struct, Formula string `json:"formula
 pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"group"`
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
+pkg openrails/billing, type MetricsMeasure struct, Program DisputeProgram `json:"program,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
 pkg openrails/billing, type MetricsMeasure struct, UTCDays bool `json:"utc_days,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Unit string `json:"unit"`
@@ -2926,7 +2927,9 @@ pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"li
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
 pkg openrails/billing, type MetricsThreshold struct
+pkg openrails/billing, type MetricsThreshold struct, From *time.Time `json:"from,omitempty"`
 pkg openrails/billing, type MetricsThreshold struct, Label string `json:"label"`
+pkg openrails/billing, type MetricsThreshold struct, Until *time.Time `json:"until,omitempty"`
 pkg openrails/billing, type MetricsThreshold struct, Value float64 `json:"value"`
 pkg openrails/billing, type MigrationFallback string
 pkg openrails/billing, type MyOrderPayURLParams struct

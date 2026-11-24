@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"math"
+	"math/big"
 	"testing"
 	"time"
 	_ "time/tzdata"
@@ -94,5 +96,45 @@ func TestUTCDayMeasures(t *testing.T) {
 		if !found {
 			t.Errorf("no public measure reads %s", fam)
 		}
+	}
+}
+
+// A period's months are calendar months in the zone, each counting the share
+// of its days covered; a churn rate reads monthly over any period.
+func TestMonthlyRates(t *testing.T) {
+	york, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, york) }
+	for _, c := range []struct {
+		name       string
+		start, end time.Time
+		months     float64
+	}{
+		{"March, with its 23-hour day", at(2026, time.March, 1), at(2026, time.April, 1), 1},
+		{"a day of March", at(2026, time.March, 10), at(2026, time.March, 11), 1.0 / 31},
+		{"its 23-hour day", at(2026, time.March, 8), at(2026, time.March, 9), 1.0 / 31},
+		{"noon to noon", at(2026, time.March, 31).Add(12 * time.Hour), at(2026, time.April, 1).Add(12 * time.Hour), 0.5/31 + 0.5/30},
+		{"90 days from 15 January", at(2026, time.January, 15), at(2026, time.April, 15), 17.0/31 + 1 + 1 + 14.0/30},
+	} {
+		if got := monthsIn(c.start, c.end, york); math.Abs(got-c.months) > 1e-12 {
+			t.Errorf("%s: %v months, want %v", c.name, got, c.months)
+		}
+	}
+	half := big.NewRat(1, 2)
+	if got := perMonth(half, 1); got.Cmp(half) != 0 {
+		t.Errorf("a month's rate reads as counted, got %v", got)
+	}
+	day, _ := perMonth(half, 1.0/31).Float64()
+	if want := 1 - math.Pow(0.5, 31); math.Abs(day-want) > 1e-12 {
+		t.Errorf("half a day's base lost reads %v a month, want %v", day, want)
+	}
+	quarter, _ := perMonth(half, 3).Float64()
+	if want := 1 - math.Pow(0.5, 1.0/3); math.Abs(quarter-want) > 1e-12 {
+		t.Errorf("half a quarter's base lost reads %v a month, want %v", quarter, want)
+	}
+	if got := perMonth(big.NewRat(1, 1), 1.0/30); got.Cmp(big.NewRat(1, 1)) != 0 {
+		t.Errorf("a base lost whole stays lost, got %v", got)
 	}
 }

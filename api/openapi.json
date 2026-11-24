@@ -21303,6 +21303,16 @@
           },
           "utc_days": {
             "type": "boolean"
+          },
+          "program": {
+            "type": "string",
+            "enum": [
+              "acquirer",
+              "mastercard_ecp",
+              "mastercard_efm",
+              "stripe",
+              "visa_vamp"
+            ]
           }
         },
         "required": [
@@ -21473,6 +21483,14 @@
           },
           "label": {
             "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
