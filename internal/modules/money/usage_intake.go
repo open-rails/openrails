@@ -621,11 +621,18 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 		if len(defs) == 0 {
 			continue
 		}
+		// Windows are read once per customer and second, at its last instant
+		// (or now): a grant made earlier in the item's second is in force, as
+		// a window the item opens starts at that second.
 		k := located{customer, at.Truncate(time.Second)}
 		current, ok := windows[k]
 		if !ok {
 			var err error
-			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: k.at,
+			readAt := k.at.Add(time.Second - time.Microsecond)
+			if b.now.Before(readAt) {
+				readAt = b.now
+			}
+			reader := limits.Customer{Q: q, Events: b.store, MerchantID: b.merchant, CustomerID: customer, Now: readAt,
 				Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 					return s.PricingPeriod(ctx, q, b.merchant, customer, unit, at)
 				}}
