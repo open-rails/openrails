@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/disputes"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -210,13 +211,24 @@ type stripePaymentMethod struct {
 }
 
 type stripeDispute struct {
-	ID            string `json:"id"`
-	Charge        string `json:"charge"`
-	PaymentIntent string `json:"payment_intent"`
-	Amount        int64  `json:"amount"`
-	Currency      string `json:"currency"`
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
+	ID                   string `json:"id"`
+	Charge               string `json:"charge"`
+	PaymentIntent        string `json:"payment_intent"`
+	Amount               int64  `json:"amount"`
+	Currency             string `json:"currency"`
+	Status               string `json:"status"`
+	Reason               string `json:"reason"`
+	PaymentMethodDetails struct {
+		Card struct {
+			Brand             string `json:"brand"`
+			CaseType          string `json:"case_type"`
+			NetworkReasonCode string `json:"network_reason_code"`
+		} `json:"card"`
+	} `json:"payment_method_details"`
+}
+
+func (d stripeDispute) kind() disputes.Kind {
+	return disputes.StripeKind(d.Status, d.PaymentMethodDetails.Card.CaseType)
 }
 
 // redactStripeClientSecrets preserves JSON numbers exactly while removing only
@@ -308,6 +320,8 @@ var HandledStripeEventTypes = []string{
 	"customer.updated",
 	"charge.refunded",
 	"charge.dispute.created",
+	"charge.dispute.updated",
+	"charge.dispute.funds_withdrawn",
 	"charge.dispute.closed",
 	"product.created",
 	"product.updated",
@@ -359,7 +373,7 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleCustomerUpdated(ctx, obj)
 	case "charge.refunded":
 		return s.handleChargeRefunded(ctx, obj)
-	case "charge.dispute.created", "charge.dispute.closed":
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.funds_withdrawn", "charge.dispute.closed":
 		return s.handleDispute(ctx, eventType, obj)
 	// Catalog events are wake-up signals too: the observe job reads the
 	// object by id, so a deleted one reads as gone.
@@ -922,8 +936,10 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		s.Log.InfoContext(ctx, "Stripe dispute already won; ignoring late dispute notice", "dispute_id", dispute.ID)
 		return nil
 	}
-	if !stripeDisputeShouldReverse(eventType, dispute.Status) {
-		s.Log.InfoContext(ctx, "Stripe dispute does not require reversal; skipping ledger and entitlement changes", "dispute_id", dispute.ID, "event_type", eventType, "status", dispute.Status)
+	// An inquiry or a prevented dispute withdraws nothing and ends nothing; an
+	// escalated inquiry is a chargeback from the notice that says so.
+	if !stripeDisputeShouldReverse(dispute) {
+		s.Log.InfoContext(ctx, "Stripe dispute is not a chargeback; nothing reversed or ended", "dispute_id", dispute.ID, "event_type", eventType, "status", dispute.Status, "kind", dispute.kind())
 		return nil
 	}
 	if s.PaymentService == nil {
@@ -1192,19 +1208,10 @@ func stripeDisputeWon(eventType, status string) bool {
 	return eventType == "charge.dispute.closed" && strings.EqualFold(strings.TrimSpace(status), "won")
 }
 
-func stripeDisputeShouldReverse(eventType, status string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	if status == "won" {
-		return false
-	}
-	switch eventType {
-	case "charge.dispute.created":
-		return true
-	case "charge.dispute.closed":
-		return status == "lost"
-	default:
-		return false
-	}
+// stripeDisputeShouldReverse: a chargeback not won reverses its charge, on
+// whichever notice arrives first; the reversal is keyed by the dispute id.
+func stripeDisputeShouldReverse(dispute stripeDispute) bool {
+	return dispute.kind() == disputes.KindChargeback && !strings.EqualFold(strings.TrimSpace(dispute.Status), "won")
 }
 
 var errStripeOriginalUnknown = errors.New("stripe original payment not found for charge/payment_intent")

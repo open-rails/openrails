@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/disputes"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -130,12 +131,14 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	}
 
 	// /v1/disputes does not accept a customer filter.
-	disputes, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	cases, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("stripe disputes: %w", err)
 	}
-	for _, obj := range disputes {
-		snap.Transactions = append(snap.Transactions, normalizeStripeDispute(obj))
+	for _, obj := range cases {
+		if txn, ok := normalizeStripeDispute(obj); ok {
+			snap.Transactions = append(snap.Transactions, txn)
+		}
 	}
 
 	return snap, nil
@@ -153,12 +156,14 @@ func (f *StripeFetcher) fetchReversals(ctx context.Context, params FetchParams, 
 	for _, obj := range refunds {
 		snap.Transactions = append(snap.Transactions, normalizeStripeRefund(obj))
 	}
-	disputes, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
+	cases, err := f.listRaw(ctx, "/v1/disputes", FetchParams{Since: params.Since, Until: params.Until}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("stripe disputes: %w", err)
 	}
-	for _, obj := range disputes {
-		snap.Transactions = append(snap.Transactions, normalizeStripeDispute(obj))
+	for _, obj := range cases {
+		if txn, ok := normalizeStripeDispute(obj); ok {
+			snap.Transactions = append(snap.Transactions, txn)
+		}
 	}
 	read := map[string]bool{}
 	for _, t := range snap.Transactions {
@@ -562,15 +567,25 @@ func normalizeStripeRefund(obj json.RawMessage) RemoteTransaction {
 	return txn
 }
 
-func normalizeStripeDispute(obj json.RawMessage) RemoteTransaction {
+// normalizeStripeDispute is a chargeback's transaction; an inquiry or a
+// prevented dispute moved no money back and is not one (false).
+func normalizeStripeDispute(obj json.RawMessage) (RemoteTransaction, bool) {
 	var d struct {
-		ID       string `json:"id"`
-		Amount   int64  `json:"amount"`
-		Currency string `json:"currency"`
-		Created  int64  `json:"created"`
-		Status   string `json:"status"`
+		ID                   string `json:"id"`
+		Amount               int64  `json:"amount"`
+		Currency             string `json:"currency"`
+		Created              int64  `json:"created"`
+		Status               string `json:"status"`
+		PaymentMethodDetails struct {
+			Card struct {
+				CaseType string `json:"case_type"`
+			} `json:"card"`
+		} `json:"payment_method_details"`
 	}
 	_ = json.Unmarshal(obj, &d)
+	if disputes.StripeKind(d.Status, d.PaymentMethodDetails.Card.CaseType) != disputes.KindChargeback {
+		return RemoteTransaction{}, false
+	}
 
 	txn := RemoteTransaction{
 		TransactionID: d.ID,
@@ -585,7 +600,7 @@ func normalizeStripeDispute(obj json.RawMessage) RemoteTransaction {
 	if d.Created > 0 {
 		txn.OccurredAt = time.Unix(d.Created, 0).UTC()
 	}
-	return txn
+	return txn, true
 }
 
 // StripeRoster reads the account's subscriptions in every status, each
