@@ -431,12 +431,15 @@ type usageQueue struct {
 	items []*queued
 }
 
-// queued is one usage item, what it costs in its view, the sync count when
-// it was captured, and how many syncs carried it.
+// queued is one usage item, what it costs in its view, the view the sync
+// carrying it asks for, the sync count when it was captured, and how many
+// syncs carried it.
 type queued struct {
 	item  billing.LeaseUsage
 	view  *custView
 	takes []take
+	attrs string
+	ask   billing.ViewParams
 	build int64
 	sends int
 }
@@ -467,6 +470,9 @@ func (g *gateState) enqueue(ctx context.Context, item billing.LeaseUsage, v *cus
 		return errGateClosed
 	}
 	e := &queued{item: item, view: v, takes: takes, build: g.builds}
+	if t != nil && v != nil {
+		e.attrs, e.ask = attrsKey(t.params), viewParams(t.params)
+	}
 	if g.outbox == nil {
 		q := g.queueLocked(g.lease)
 		q.next++
@@ -714,6 +720,12 @@ func (g *gateState) syncOnce() {
 	for i, e := range head {
 		carried[e] = true
 		usage[i] = e.item
+		// The view of usage this sync settles comes back with it.
+		if e.attrs != "" && len(g.wanted) < billing.MaxSyncViews {
+			if _, ok := g.wanted[e.attrs]; !ok {
+				g.wanted[e.attrs] = e.ask
+			}
+		}
 	}
 	report := g.inFlightLocked(carried, build-1)
 	for _, e := range head {

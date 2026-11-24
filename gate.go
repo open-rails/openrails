@@ -81,7 +81,12 @@ func NewGate(c *Client, deps GateDeps) (*Gate, error) {
 	case c.invoker != nil:
 		return nil, fmt.Errorf("openrails: NewGate needs the merchant's own handle, not one made with ActingFor")
 	}
-	return &Gate{c: c, g: newGateState(c, deps.Outbox)}, nil
+	g := &Gate{c: c, g: newGateState(c, deps.Outbox)}
+	if deps.Outbox != nil {
+		// A restarted process resends its outbox at once.
+		g.g.ensureStarted()
+	}
+	return g, nil
 }
 
 func (g *Gate) isClosed() bool {

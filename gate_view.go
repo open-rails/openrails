@@ -146,9 +146,13 @@ func (l *lineState) spanAt(now time.Time) (*span, bool) {
 
 // room is what the window leaves for a request at now: the answered
 // remaining, less what the gate has in flight in it, drained by running
-// charges or refilled by a rate limit since the answer.
-func (l *lineState) room(s *span, now time.Time, creditLine int64) int64 {
+// charges or refilled by a rate limit since the answer. capacity is what the
+// request's policy gives a spend window, where it differs from the line's.
+func (l *lineState) room(s *span, now time.Time, creditLine int64, capacity *int64) int64 {
 	r := s.remaining
+	if capacity != nil {
+		r = satAdd(r, *capacity-l.line.Capacity)
+	}
 	if s == l.cur && l.line.Reset != nil && l.line.Reset.Kind == catalog.ResetRate {
 		level := limits.RateLevel(l.line.Used, l.line.Capacity, l.line.Reset.WindowSeconds, l.asOf, now)
 		r = l.line.Capacity - level - l.line.Held
@@ -158,6 +162,17 @@ func (l *lineState) room(s *span, now time.Time, creditLine int64) int64 {
 		r = satAdd(r, creditLine)
 	}
 	return satAdd(r, -s.inFlight())
+}
+
+// capacityOf is the capacity a set's policy gives a limit, nil for one it
+// does not name.
+func capacityOf(set billing.LimitSet, limit string) *int64 {
+	for _, c := range set.Capacities {
+		if c.Limit == limit {
+			return &c.Capacity
+		}
+	}
+	return nil
 }
 
 func drained(perHour int64, d time.Duration) int64 {
@@ -240,7 +255,7 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, of
 		c := costs[i]
 		awp := l.line.Overrun == catalog.OverrunAdmitWhilePositive
 		takes[i] = take{line: l, span: s, cost: c}
-		r := l.room(s, now, set.CreditLine)
+		r := l.room(s, now, set.CreditLine, capacityOf(set, l.line.Limit))
 		if awp && r <= 0 || !awp && r < c {
 			if out.verdict != verdictRefuse {
 				out = decision{verdict: verdictRefuse, refusal: refusalOf(set, l, s, now)}
@@ -396,7 +411,7 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 		l.cur, l.line, l.asOf, l.prev, l.seen = cur, nl, sent, nl.Remaining, true
 		for _, s := range []*span{cur, l.next} {
 			if s != nil {
-				s.base, s.avail = s.inFlight(), max(l.room(s, sent, 0), 0)
+				s.base, s.avail = s.inFlight(), max(l.room(s, sent, 0, nil), 0)
 			}
 		}
 	}
