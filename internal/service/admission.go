@@ -107,7 +107,7 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 			return nil, &spendgate.ValidationError{Param: "usage", Message: "usage and estimated_amount are exclusive: the rate cards price usage"}
 		}
 	}
-	currency, err := requireCurrency(in.Currency)
+	currency, err := s.registryCurrency(ctx, "currency", in.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, 
 	if payer.IsZero() {
 		return "", fmt.Errorf("payer required")
 	}
-	cur, err := requireCurrency(currency)
+	cur, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return "", err
 	}

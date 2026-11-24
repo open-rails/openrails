@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/currency"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -69,7 +70,7 @@ func GetCustomerConfig(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	who, ok := loadPublicMerchant(r, mid)
+	who, units, ok := loadPublicMerchant(r, mid)
 	if !ok {
 		return
 	}
@@ -80,7 +81,7 @@ func GetCustomerConfig(r *httprequest.Request) {
 		cache = "no-store"
 	}
 	r.SetHeader("Cache-Control", cache)
-	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who, ClientCountry: r.ClientCountry()})
+	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who, ClientCountry: r.ClientCountry(), Currencies: units})
 }
 
 // PublicConfigDocument is GET /v1/config on a mount reporting capabilities:
@@ -115,14 +116,18 @@ func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.
 	return billing.PaymentConfig{PSPs: psps, Solana: solana}, true
 }
 
-// loadPublicMerchant is the merchant's display name, and its logo and
-// support page when they are https URLs.
-func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, bool) {
+// loadPublicMerchant is the merchant's display name, its logo and support
+// page when they are https URLs, and its own units.
+func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, []billing.MerchantCurrency, bool) {
 	name, settings, err := r.State.Merchants.MerchantSettings(r.Request.Context(), mid)
+	var units currency.Registry
+	if err == nil {
+		units, err = merchantconfig.NormalizeCurrencies(settings.Currencies)
+	}
 	if err != nil {
 		r.Log.ErrorContext(r.Request.Context(), "customer config: merchant settings could not be loaded", logx.Err(err), "merchant_id", mid.String())
 		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
-		return billing.PublicMerchant{}, false
+		return billing.PublicMerchant{}, nil, false
 	}
 	who := billing.PublicMerchant{DisplayName: name, EmbedOrigins: merchantconfig.EmbedOrigins(settings)}
 	if p := settings.Profile; p != nil {
@@ -132,7 +137,7 @@ func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing
 			who.StatementDescriptor = &d
 		}
 	}
-	return who, true
+	return who, merchantconfig.Currencies(units), true
 }
 
 func httpsURL(raw string) *string {

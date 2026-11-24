@@ -151,7 +151,7 @@ func (s *Service) FinalizeUsage(ctx context.Context, payer identity.CustomerID, 
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur, err := requireCurrency(currency)
+	cur, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}

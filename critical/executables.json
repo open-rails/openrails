@@ -73,6 +73,18 @@
     "OR-J05-S05": [
       "TestPublicCatalog/OR-J05-S05/accepted-order-terms-survive-price-and-PSP-edits"
     ],
+    "OR-J05-S06": [
+      "TestMerchantCurrencies/OR-J05-S06/declared-units-are-served-to-the-merchant-at-their-scale"
+    ],
+    "OR-J05-S07": [
+      "TestMerchantCurrencies/OR-J05-S07/an-invalid-or-colliding-unit-is-refused-at-load-and-on-edit"
+    ],
+    "OR-J05-S08": [
+      "TestMerchantCurrencies/OR-J05-S08/a-unit-is-refused-where-money-is-taken"
+    ],
+    "OR-J05-S09": [
+      "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],

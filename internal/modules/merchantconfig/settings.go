@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -55,6 +56,9 @@ type Settings struct {
 	// Default names the policy of a customer no tier or assignment binds;
 	// "" none.
 	Default string
+	// Currencies is the merchant's currency registry: OpenRails' and the
+	// merchant's own units.
+	Currencies currency.Registry
 }
 
 // Normalize validates a merchant's settings document as every writer and
@@ -62,6 +66,14 @@ type Settings struct {
 func Normalize(displayName string, in billing.MerchantSettings) (Settings, error) {
 	out := Settings{Policies: map[string]models.BillingPolicy{}, Tiers: map[string]string{}}
 	cfg := &out.Config
+	units, err := NormalizeCurrencies(in.Currencies)
+	if err != nil {
+		return Settings{}, err
+	}
+	if err := refuseUnits(in, units); err != nil {
+		return Settings{}, err
+	}
+	out.Currencies = units
 	if in.UsageBilling != nil {
 		usage, err := NormalizeUsageBilling(*in.UsageBilling)
 		if err != nil {

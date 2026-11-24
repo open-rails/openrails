@@ -20,7 +20,7 @@ var merchantRoutes = []Route{
 	{Method: PATCH, Path: "/v1/merchant/configuration", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", When: FeatureMerchantConfigManages, NoConn: true,
 		Doc: "UpdateMerchantConfiguration merges params into the merchant's configuration and returns it. It needs " +
 			"merchant configuration held in Vault: a configuration read from a file is read-only.",
-		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_vault_unknown", "charge_psp_incompatible", "charge_psp_unknown", "invalid_param", "platform_vault_mixed_class", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
+		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_vault_unknown", "charge_psp_incompatible", "charge_psp_unknown", "invalid_param", "merchant_unit_unsupported", "platform_vault_mixed_class", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
 
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListAlertWebhooks",

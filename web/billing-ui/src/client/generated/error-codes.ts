@@ -80,6 +80,7 @@ export type OpenRailsErrorCode =
   | "limit_not_found"
   | "merchant_config_read_only"
   | "merchant_mismatch"
+  | "merchant_unit_unsupported"
   | "merchant_unresolved"
   | "message_send_failed"
   | "message_template_invalid"
@@ -289,6 +290,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },
+  merchant_unit_unsupported: { status: 400, type: "invalid_request_error", meaning: "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry." },
   merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential is bound to no merchant here." },
   message_send_failed: { status: 502, type: "api_error", meaning: "The email sender did not accept the message." },
   message_template_invalid: { status: 400, type: "invalid_request_error", meaning: "The message template does not render against its event type's sample data; the message says why." },

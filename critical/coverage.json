@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 438,
+  "scenario_count": 442,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -132,6 +132,26 @@
       "id": "OR-J05-S05",
       "journey": "J05",
       "name": "Accepted payment terms survive subsequent price and PSP edits"
+    },
+    {
+      "id": "OR-J05-S06",
+      "journey": "J05",
+      "name": "A merchant's own units declared in its configuration are served to its customers and staff with their scale, and never in the deployment registry"
+    },
+    {
+      "id": "OR-J05-S07",
+      "journey": "J05",
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing"
+    },
+    {
+      "id": "OR-J05-S08",
+      "journey": "J05",
+      "name": "A merchant unit is refused merchant_unit_unsupported by credit grants, balances, prices and catalog credit grants and rate cards, and a catalog cannot price in one; nothing is written"
+    },
+    {
+      "id": "OR-J05-S09",
+      "journey": "J05",
+      "name": "Another merchant does not see a merchant's units: the same code is its own unit at its own scale, and another merchant's code is an unknown currency"
     },
     {
       "id": "OR-J06-S01",

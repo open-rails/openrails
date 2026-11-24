@@ -358,6 +358,10 @@ type MerchantSettings struct {
 	BillingPolicies                   []BillingPolicy        `json:"billing_policies,omitempty"`
 	BillingPolicyBindings             []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
 	DelegatedInvokerWastedSpendLimits []BudgetWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	// Currencies are the merchant's own units (MerchantCurrency), at most 32.
+	// They join the currency registry for this merchant alone; operations
+	// that move money refuse them (merchant_unit_unsupported).
+	Currencies []MerchantCurrency `json:"currencies,omitempty"`
 }
 
 // BillingPolicy declares one named billing policy (or#897). The policy says

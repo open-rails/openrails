@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -57,7 +56,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		}
 		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(string(item.Currency)))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {
-			return nil, fmt.Errorf("%w: %q", ErrCurrencyUnsupported.WithParam(param("currency")), currency)
+			return nil, s.currencyRefusal(ctx, param("currency"), currency)
 		}
 		key, err := money.NewIdempotencyKey(money.OpDeposit, item.Source, item.SourceID)
 		if err != nil {
@@ -143,7 +142,7 @@ func (s *Service) ListBalanceTransactions(ctx context.Context, customer identity
 	}
 	defer release()
 	if params.IDs == nil {
-		currency, err := requireCurrency(string(params.Currency))
+		currency, err := s.registryCurrency(ctx, "currency", string(params.Currency))
 		if err != nil {
 			return billing.ListPage[billing.BalanceTransaction]{}, err
 		}
