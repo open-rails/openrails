@@ -292,7 +292,7 @@ var jsonRules = map[string]jsonRule{
 		"submitted_at": textValue, "declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "not_executed_code": textValue,
 		"operator_resolution":               operatorResolutionJSON,
 		"collection_candidate":              object(map[string]jsonRule{"binding": receiptBindingJSON, "transaction_id": textValue, "external_invoice_id": textValue}),
-		"rebill_decline":                    object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
+		"rebill_decline":                    object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue, "issuer_code": textValue, "issuer_text": textValue, "card_bin": textValue}),
 		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
 	})),
 	"provider_intents.nmi_recurring_confirmation.payload": object(map[string]jsonRule{
@@ -323,7 +323,7 @@ var jsonRules = map[string]jsonRule{
 			"binding": receiptBindingJSON, "subscription_id": textValue, "customer_vault_id": textValue, "amount": textValue, "next_billing_date": textValue,
 			"plan": object(map[string]jsonRule{"object": textValue, "id": textValue, "plan_name": textValue, "plan_amount": textValue, "plan_payments": textValue, "day_frequency": textValue, "month_frequency": textValue, "day_of_month": textValue}),
 		}),
-		"rebill_decline": object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
+		"rebill_decline": object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue, "issuer_code": textValue, "issuer_text": textValue, "card_bin": textValue}),
 	})),
 	"payments.metadata":          metadataJSON,
 	"payments.discount_metadata": metadataJSON,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -132,10 +131,11 @@ func (h *SubscriptionCollectionHandler) obligationOutcome(ctx context.Context, i
 		return h.unresolved(ctx, in, p, "the obligation's attempts cannot be qualified before submission: "+err.Error()), true
 	}
 	if attempts.Declined {
-		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
+		refusal := intents.RecurringDecline{ResponseCode: attempts.DeclineCode, Reference: attempts.DeclineTransactionID, Issuer: attempts.DeclineIssuer}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal); err != nil {
 			return h.unresolved(ctx, in, p, "retain the existing attempt's decline: "+err.Error()), true
 		}
-		return h.completeDeclined(ctx, in, p, attempts.DeclineCode, attempts.DeclineTransactionID), true
+		return h.completeDeclined(ctx, in, p, refusal), true
 	}
 	if attempts.Transactions != 0 {
 		return h.unresolved(ctx, in, p, "the obligation's order contains a transaction without a definitive outcome"), true
@@ -206,7 +206,10 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 		if reference == "" {
 			reference = refusal.TransactionID
 		}
-		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal.ResponseCode, reference); err != nil {
+		// Direct Post names no issuer code: NMI's 200 can hide one after which
+		// the card is never charged again.
+		declined := intents.RecurringDecline{ResponseCode: refusal.ResponseCode, Reference: reference, Issuer: intents.ReadNMIIssuerAnswer(ctx, h.Log, in, h.Resolver, reference)}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, declined); err != nil {
 			return intents.Ambiguous("retain engine refusal: " + err.Error())
 		}
 		return h.Verify(ctx, in)
@@ -385,7 +388,7 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 		if reference != "" && attempts.DeclineTransactionID != reference {
 			return h.unresolved(ctx, in, p, "the order's decline contradicts the retained transaction reference")
 		}
-		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, intents.RecurringDecline{ResponseCode: attempts.DeclineCode, Reference: attempts.DeclineTransactionID, Issuer: attempts.DeclineIssuer}); err != nil {
 			return h.unresolved(ctx, in, p, "retain the order's decline: "+err.Error())
 		}
 		return h.Verify(ctx, in)
@@ -407,10 +410,10 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": refusal.Code, "stripe_payment_intent_id": refusal.PaymentIntentID})
 		return h.completeDecline(ctx, in, p, refusal.Evidence(), refusal.PaymentIntentID, outcome), true
 	}
-	if code, reference, found, err := intents.LoadRecurringDecline(in); err != nil {
+	if refusal, found, err := intents.LoadRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
-		return h.completeDeclined(ctx, in, p, code, reference), true
+		return h.completeDeclined(ctx, in, p, refusal), true
 	}
 	if proof, found, err := intents.LoadCollectionNonexecution(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -523,9 +526,9 @@ func (h *SubscriptionCollectionHandler) renewMembership(ctx context.Context, d *
 		return h.lifecycle(d).RenewMembership(ctx, params)
 	}
 }
-func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
-	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
-	return h.completeDecline(ctx, in, p, decline.Evidence{Code: strconv.Itoa(response)}, reference, outcome)
+func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, refusal intents.RecurringDecline) intents.Outcome {
+	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": refusal.ResponseCode})
+	return h.completeDecline(ctx, in, p, refusal.Evidence(), refusal.Reference, outcome)
 }
 
 // completeDecline settles a refusal: answer is the rail's code with the

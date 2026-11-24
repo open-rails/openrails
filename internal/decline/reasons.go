@@ -31,6 +31,7 @@ var reasons = map[billing.DeclineReason]reasonSpec{
 	billing.DeclineTryAgainLater:     {category: IssuerSoft, action: Retry, transient: true},
 	billing.DeclineSecurityViolation: {category: IssuerHard, action: Retry},
 	billing.DeclineRestrictedCard:    {category: IssuerHard, action: Retry},
+	billing.DeclineSuspectedFraud:    {category: IssuerHard, action: Retry},
 
 	billing.DeclineIncorrectNumber:      {category: CardData, action: FixPaymentMethod},
 	billing.DeclineNoSuchIssuer:         {category: CardData, action: FixPaymentMethod},

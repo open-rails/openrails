@@ -22,6 +22,9 @@ const (
 	DeclineTryAgainLater     DeclineReason = "try_again_later"
 	DeclineSecurityViolation DeclineReason = "security_violation"
 	DeclineRestrictedCard    DeclineReason = "restricted_card"
+	// DeclineSuspectedFraud is the issuer's risk call (59), which may pass
+	// later; DeclineFraudulent is a card reported fraudulent.
+	DeclineSuspectedFraud DeclineReason = "suspected_fraud"
 
 	// The card details don't match an open, valid account.
 	DeclineIncorrectNumber      DeclineReason = "incorrect_number"
@@ -72,6 +75,7 @@ var declineCustomer = map[DeclineReason]DeclineReason{
 	DeclineGeneric: "generic_decline", DeclineDoNotHonor: "do_not_honor", DeclineInsufficientFunds: "insufficient_funds",
 	DeclineOverLimit: "over_limit", DeclineCallIssuer: "do_not_honor", DeclineRetryLater: "try_again_later",
 	DeclineTryAgainLater: "try_again_later", DeclineSecurityViolation: "generic_decline", DeclineRestrictedCard: "generic_decline",
+	DeclineSuspectedFraud: "generic_decline",
 
 	DeclineIncorrectNumber: "incorrect_number", DeclineNoSuchIssuer: "incorrect_number", DeclineInvalidAccount: "incorrect_number",
 	DeclineExpiredCard: "expired_card", DeclineInvalidExpiry: "invalid_expiry", DeclineIncorrectCVC: "incorrect_cvc",
@@ -106,7 +110,7 @@ func DeclineReasons() []DeclineReason {
 // lost or stolen, or a risk rule refused it.
 func (r DeclineReason) FraudSignal() bool {
 	switch r {
-	case DeclinePickupCard, DeclineLostCard, DeclineStolenCard, DeclineFraudulent, DeclineSecurityViolation, DeclineRestrictedCard, DeclineBlockedByPSP:
+	case DeclinePickupCard, DeclineLostCard, DeclineStolenCard, DeclineFraudulent, DeclineSuspectedFraud, DeclineSecurityViolation, DeclineRestrictedCard, DeclineBlockedByPSP:
 		return true
 	}
 	return false

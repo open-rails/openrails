@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 476,
+  "scenario_count": 477,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2382,6 +2382,11 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J45-S02",
+      "journey": "J45",
+      "name": "An NMI catch-all decline is classified by the issuer's code the Query API reports: a never-retry code waits for a new card and never cancels, a retryable one keeps the schedule"
     }
   ]
 }

@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
@@ -149,6 +153,30 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, res
 	}
 	accepted.CustomerVaultID, accepted.BillingID = p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef
 	return client.ReadRecurringOrderAttempts(ctx, accepted)
+}
+
+// ReadNMIIssuerAnswer is the issuer's answer to a declined transaction of the
+// operation's accepted account, read from the Query API; empty when the read
+// fails, which leaves NMI's own code to classify the decline.
+func ReadNMIIssuerAnswer(ctx context.Context, logger *slog.Logger, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, transactionID string) decline.Evidence {
+	client, err := resolveReceiptNMIClient(ctx, resolver, in)
+	if err != nil {
+		logger.WarnContext(ctx, "NMI decline classified without the issuer's answer", "transaction_id", transactionID, logx.Err(err))
+		return decline.Evidence{}
+	}
+	return readIssuerAnswer(ctx, logger, client, transactionID)
+}
+
+func readIssuerAnswer(ctx context.Context, logger *slog.Logger, client *nmi.NMIClient, transactionID string) decline.Evidence {
+	if strings.TrimSpace(transactionID) == "" {
+		return decline.Evidence{}
+	}
+	issuer, err := client.IssuerAnswer(ctx, transactionID)
+	if err != nil {
+		logger.WarnContext(ctx, "NMI decline classified without the issuer's answer", "transaction_id", transactionID, logx.Err(err))
+		return decline.Evidence{}
+	}
+	return issuer
 }
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen

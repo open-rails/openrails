@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/open-rails/openrails/internal/decline"
@@ -31,6 +32,27 @@ type rebillDecline struct {
 	Binding           receiptBinding `json:"binding"`
 	ResponseCode      int            `json:"response_code"`
 	ProviderReference string         `json:"provider_reference"`
+	IssuerCode        string         `json:"issuer_code,omitempty"`
+	IssuerText        string         `json:"issuer_text,omitempty"`
+	CardBIN           string         `json:"card_bin,omitempty"`
+}
+
+// RecurringDecline is an NMI refusal of an accepted recurring charge: NMI's
+// code, its transaction, and the issuer's answer the Query API reported (empty
+// when that read failed).
+type RecurringDecline struct {
+	ResponseCode int
+	Reference    string
+	Issuer       decline.Evidence
+}
+
+// Evidence is the refusal as the classifier reads it.
+func (d RecurringDecline) Evidence() decline.Evidence {
+	return decline.Evidence{Rail: string(models.RailNMI), Code: strconv.Itoa(d.ResponseCode), IssuerCode: d.Issuer.IssuerCode, IssuerText: d.Issuer.IssuerText, CardBIN: d.Issuer.CardBIN}
+}
+
+func (f rebillDecline) decline() RecurringDecline {
+	return RecurringDecline{ResponseCode: f.ResponseCode, Reference: f.ProviderReference, Issuer: decline.Evidence{IssuerCode: f.IssuerCode, IssuerText: f.IssuerText, CardBIN: f.CardBIN}}
 }
 
 // ValidateManualRebillTerminal is the archive/reload boundary for this exact
@@ -117,25 +139,26 @@ func loadRebillDecline(in gen.BillingProviderIntent) (rebillDecline, bool, error
 	}
 	return fact, true, nil
 }
-func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.BillingProviderIntent, code int, reference string) error {
-	return NewStore(h.DB).RetainRecurringDecline(ctx, in, code, reference)
+func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.BillingProviderIntent, refusal RecurringDecline) error {
+	return NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal)
 }
 
 // LoadRecurringDecline exposes only bound, positive refusal facts.
-func LoadRecurringDecline(in gen.BillingProviderIntent) (int, string, bool, error) {
+func LoadRecurringDecline(in gen.BillingProviderIntent) (RecurringDecline, bool, error) {
 	fact, found, err := loadRebillDecline(in)
-	return fact.ResponseCode, fact.ProviderReference, found, err
+	return fact.decline(), found, err
 }
 
-func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.BillingProviderIntent, code int, reference string) error {
+func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.BillingProviderIntent, refusal RecurringDecline) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
 	}
-	if code <= 0 || nmi.UncertainResponseCode(code) {
+	if refusal.ResponseCode <= 0 || nmi.UncertainResponseCode(refusal.ResponseCode) {
 		return errors.New("ambiguous response cannot be retained as a decline")
 	}
-	raw, err := json.Marshal(rebillDecline{binding, code, reference})
+	raw, err := json.Marshal(rebillDecline{Binding: binding, ResponseCode: refusal.ResponseCode, ProviderReference: refusal.Reference,
+		IssuerCode: refusal.Issuer.IssuerCode, IssuerText: refusal.Issuer.IssuerText, CardBIN: refusal.Issuer.CardBIN})
 	if err != nil {
 		return err
 	}
@@ -211,6 +234,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Billin
 		return Ambiguous(err.Error())
 	}
 	code := fmt.Sprint(refusal.ResponseCode)
+	answer := refusal.decline().Evidence()
 	outcome := TerminalWithEvidence("rebill declined", map[string]any{"declined": true, "response_code": refusal.ResponseCode})
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -227,7 +251,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Billin
 		if current.Status == StatusFailedTerminal {
 			return NewStore(d).CompleteManualRebill(ctx, in, outcome, h.now())
 		}
-		if err := recordRebillAttempt(ctx, d, in, p, sub, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: refusal.ProviderReference}, h.now()); err != nil {
+		if err := recordRebillAttempt(ctx, d, in, p, sub, attempts.Attempt{Answer: answer, TransactionID: refusal.ProviderReference}, h.now()); err != nil {
 			return err
 		}
 		failures := 0
@@ -237,7 +261,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Billin
 		// A stale refusal is still forensic evidence, but cannot dunn a later
 		// period or overwrite a recovery observed while this attempt ran.
 		if (sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) && failures == p.FailureCount {
-			action := decline.Classify(string(models.RailNMI), code).Action
+			action := decline.ClassifyEvidence(answer).Action
 			certainty := ""
 			if action == decline.NonRecoverable {
 				certainty = collection.CertaintyNonRetryableDecline

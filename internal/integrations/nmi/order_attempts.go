@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -24,6 +25,8 @@ type OrderAttempts struct {
 	// DeclineCardBrand and DeclineCardLast4 are the declined card as the
 	// report shows it.
 	DeclineCardBrand, DeclineCardLast4 string
+	// DeclineIssuer is the issuer's raw answer and the card's BIN.
+	DeclineIssuer decline.Evidence
 }
 
 // at is the transaction's first action time; a transaction without one is
@@ -142,6 +145,7 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 	out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)
 	card := txn.Evidence(action)
 	out.DeclineCardBrand, out.DeclineCardLast4 = card.CardBrand, card.CardLast4
+	out.DeclineIssuer = decline.Evidence{IssuerCode: card.IssuerCode, IssuerText: card.IssuerText, CardBIN: card.CardBIN}
 	return out, nil
 }
 
