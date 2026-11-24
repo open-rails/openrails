@@ -1,6 +1,6 @@
 # Subscriptions
 
-Recurring agreements between a customer and one price: start, renewal, cancel and resume, plan and seat changes, and applying a price migration's move at renewal. Retries are in [dunning.md](dunning.md); the starting order is in [orders.md](orders.md); price migrations themselves are in [catalog.md](catalog.md#moving-subscribers-to-other-prices-and-products).
+Recurring agreements between a customer and one price: start, renewal, cancel and resume, plan and seat changes. Retries are in [dunning.md](dunning.md); the starting order is in [orders.md](orders.md); price migrations, which move subscribers to other prices at renewal, are in [catalog.md](catalog.md#moving-subscribers-to-other-prices-and-products).
 
 ## Concepts
 
@@ -85,14 +85,6 @@ reversible rail in the paid period.
   replays it; an unresolved provider outcome answers 202 `processing`, and one
   awaiting the customer `requires_action` (`next_action`), which `/confirm` finishes.
 
-**Applying a price migration's move.** A [price migration](catalog.md#moving-subscribers-to-other-prices-and-products) leaves each subscriber a scheduled move, which applies by owner:
-
-- Engine: once due (`effective_at` reached, `IsDue`), `PrepareRenewalTerms` bills the target's amount, seats and cadence from the renewal's boundary, and `applyRenewalTerms` marks the move applied (`ApplyChange`) as the renewal commits.
-- Stripe: Stripe switches the price at period end; converge adopts it (`AdoptProviderPrice`), and `ProviderMovedPrice` applies the move.
-- NMI schedule: the push lands in the last period before `effective_at`, and the subscription moves at once (`applyNow`), since NMI bills the new amount from its next rebill.
-- A move to another product grants that product's access from the next renewal; a Stripe move swaps it as it is adopted.
-- While an accepted renewal owns the terms, a move can be neither scheduled nor canceled (`RefuseOwnedRebillTerms`, `rebill_terms_committed`), so that renewal bills what it admitted. Each resolution drops the move's waiting push and settles its migration if it was the last (`resolved`).
-
 ## Interfaces
 
 - Go: one `Client` method per staff route below (`ListSubscriptions`, `ChangeSubscription`, …).
@@ -109,7 +101,7 @@ reversible rail in the paid period.
 
 ### 1. Exactly-once provider calls
 
-Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel; a migration's push is the [catalog's](catalog.md#1-exactly-once-provider-calls). Keys are deterministic; an ambiguous outcome is verified, never resent. Exception: the Stripe resume is a direct, idempotent write.
+Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel. Keys are deterministic; an ambiguous outcome is verified, never resent. Exception: the Stripe resume is a direct, idempotent write.
 
 Checks:
 - `provider_intents_open_subscription_collection_key` and
@@ -190,7 +182,7 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate. A migration's admission is the [catalog's](catalog.md#9-destructive-action-safeguards).
+Staff cancels run in `destructive.RunLocal` (`CancellationCommand`, keyed by `lifecycle_rev`). A cancel needing a provider stop while destructive actions are disarmed is refused `provider_cancel_held`; an account deletion cancels locally and waits. `ExpireAwaitingMethod` holds under `mode=limited` or a closed gate.
 
 Checks:
 - `RequireProviderCancelArmed` refuses a disarmed provider stop with `provider_cancel_held`, except an account deletion.
@@ -205,7 +197,6 @@ Journeys:
   process death, one agreement, calendar anchor, missed renewal.
 - OR-J17-S01–S06: cancel and resume, renewal custody, held delete, callbacks.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
-- OR-J19-S01, OR-J19-S04: a move applies at the paid boundary, never before; an admitted renewal keeps its terms (the rest of J19 is the [catalog's](catalog.md#tests)).
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
 
 Other tests: none; `internal/lifecycle`, `internal/modules/subscriptions` and

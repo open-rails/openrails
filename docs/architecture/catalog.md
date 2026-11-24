@@ -95,7 +95,7 @@ read-only here, `provider_catalog_objects`.
 
 ### Moving subscribers to other prices and products
 
-A price migration (`PriceMigrationService`, `internal/modules/subscriptions/price_migration.go`) moves the subscribers of one price (`from_price_id`), or of every version of a price key, archived ones included, but the target (`product_key` and `price_key`, stored as `from_product_id` and `from_price_key`), to `to_price_id`. The target must be recurring and live (`400 invalid_param`, `422 price_change_target_archived`) and may belong to another product; a `from_price_id` in another currency is refused (`422 price_change_currency_mismatch`). Nothing is prorated, charged early or re-anchored: the first renewal on or after `effective_at` (now when omitted) bills the target, as [subscriptions](subscriptions.md) applies it.
+A price migration (`PriceMigrationService`, `internal/modules/subscriptions/price_migration.go`) moves the subscribers of one price (`from_price_id`), or of every version of a price key, archived ones included, but the target (`product_key` and `price_key`, stored as `from_product_id` and `from_price_key`), to `to_price_id`. The target must be recurring and live (`400 invalid_param`, `422 price_change_target_archived`) and may belong to another product; a `from_price_id` in another currency is refused (`422 price_change_currency_mismatch`). Nothing is prorated, charged early or re-anchored: the first renewal on or after `effective_at` (now when omitted) bills the target.
 
 **Preview and create.** Both read the cohort (`ListMigratableSubscriptionsByPriceIDs`: every `active`, `past_due` or `awaiting_method` subscription on a source price) and `classify` it without writing; `PreviewPriceMigration` answers the counts by rail and each subscription's disposition (by key, with no `to_price_id`, only the count). `CreatePriceMigration` admits the command, writes the `price_migrations` row, then gives each subscriber, in its own transaction under its lock, its move (`ScheduleChange`), notice and push, or a terminal `blocked` row. With `archive_source` (default true) it archives the sources so they stop selling.
 
@@ -115,6 +115,14 @@ A price migration (`PriceMigrationService`, `internal/modules/subscriptions/pric
 **Provider-run subscriptions.** A Stripe or NMI move carries a `price_migration_push` operation (`QueuePush`), due at once, or at the period end when `effective_at` lies beyond it, so no rebill flips early. `PushMove` plants a Stripe subscription schedule that switches at period end with the same seats (`ScheduleSubscriptionPriceChange`), or sets the NMI schedule's amount with `update_subscription`, keeping `plan_payments`, and reads it back (`PushPlanAmount`). A failed push retries on the backoff; one the subscription's records cannot support (no provider reference, period end or Stripe price) blocks the move (`rail_push_failed`); one that no longer applies (subscription ended or moved, target gone or archived) skips it. CCBill and Solana are never pushed.
 
 **Cancel and list.** `CancelPriceMigration` sets `canceled_at` and cancels each still-scheduled move under its subscription's lock, with its waiting push; resolved moves stay, archived sources stay archived, and it spends no unit. A move an accepted renewal owns refuses it (`409 rebill_terms_committed`) until that renewal resolves. A provider-run Stripe subscription whose schedule may be planted is listed in `rail_release_required`: release that schedule in Stripe, or the price still changes. A staff change back to an engine subscription's current price and seats takes that one out (`ReplaceScheduledChange`). `ListPriceMigrations` pages newest first, by `ids` or by `product_key` and `price_key`; `matched` and creation skips are stored, the other counts are read from the moves.
+
+**Applying a move.** Each subscriber's move applies at its renewal, by what bills it:
+
+- Engine: once due (`effective_at` reached, `IsDue`), `PrepareRenewalTerms` bills the target's amount, seats and cadence from the renewal's boundary, and `applyRenewalTerms` marks the move applied (`ApplyChange`) as the renewal commits.
+- Stripe: Stripe switches the price at period end; converge adopts it (`AdoptProviderPrice`), and `ProviderMovedPrice` applies the move.
+- NMI schedule: the push lands in the last period before `effective_at`, and the subscription moves at once (`applyNow`), since NMI bills the new amount from its next rebill.
+- A move to another product grants that product's access from the next renewal; a Stripe move swaps it as it is adopted.
+- While an accepted renewal owns the terms, a move can be neither scheduled nor canceled (`RefuseOwnedRebillTerms`, `rebill_terms_committed`), so that renewal bills what it admitted. Each resolution drops the move's waiting push and settles its migration if it was the last (`resolved`).
 
 **Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration or move refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
 
@@ -161,7 +169,7 @@ new version only at the next apply. A lost Stripe event is caught by the next
 event or a pull ([imports](imports.md)); `GET /v1/catalog/prices/{id}?verify=true`
 re-reads the provider (`VerifyPublicPriceSync`).
 
-A migration's NMI move applies only after the schedule reads back the target amount (`PushPlanAmount`); a Stripe move waits for Stripe to bill the target ([subscriptions](subscriptions.md)).
+A migration's NMI move applies only after the schedule reads back the target amount (`PushPlanAmount`); a Stripe move waits for Stripe to bill the target.
 
 Checks:
 - `observedTerms` keeps a deleted object's last terms and refuses one with no
