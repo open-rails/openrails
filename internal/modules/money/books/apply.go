@@ -104,11 +104,29 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			unbooked += l.Amount
 			continue
 		}
+		// A credit line is its lot's to apply (books.Books.IssueCredit): it
+		// takes nothing here, and what its lot applied of a payment counts
+		// as used.
+		credit, err := creditLine(ctx, q, l)
+		if err != nil {
+			return err
+		}
+		if credit {
+			// Nor does a provider's discount reach it: the lot's price is
+			// its own.
+			done[i] = true
+			continue
+		}
 		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
 	}
+	// What each payment's earlier applications and reversals took of it.
 	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
 	for i, p := range receipts {
-		paid[i], before[i] = p.Amount, applied["payment:"+p.ID.String()]
+		pb, err := paymentBooksOf(ctx, q, mid.UUID(), p.ID)
+		if err != nil {
+			return err
+		}
+		paid[i], before[i] = p.Amount, pb.used()
 	}
 	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
 	// The bill is paid when the last money it took arrived, and applied when
@@ -140,13 +158,6 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		if funded <= 0 {
 			continue
 		}
-		credit, err := creditLine(ctx, q, line)
-		if err != nil {
-			return err
-		}
-		if credit {
-			continue
-		}
 		plan, ready, err := planLine(ctx, q, order, line, services, at)
 		if err != nil {
 			return fmt.Errorf("books: order line %s: %w", line.ID, err)
@@ -164,18 +175,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 				return err
 			}
 		}
-		s := schedule{service: plan.service, funded: funded, through: plan.service.Starts, ended: plan.ended}
-		steps, next := s.catchUp(at, loc)
-		params := gen.CreateRevenueScheduleParams{
-			MerchantID: mid.UUID(), ID: uuidutil.NewV7(), CustomerID: order.CustomerID, Currency: order.Currency, OrderID: order.ID, OrderLineID: line.ID,
-			SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
-			Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
-			ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
-		}
-		if plan.service.Months > 1 {
-			months := int32(plan.service.Months) // #nosec G115 -- a calendar interval is at most 1200 months
-			params.ServiceMonths = &months
-		}
+		params, steps := newSchedule(order, line, plan, uuidutil.NewV7(), order.Currency, funded, at, loc)
 		row, err := q.CreateRevenueSchedule(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
@@ -274,6 +274,10 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 			if r.RevenueScheduleID != CreditLineSchedule(line.ID, r.Currency) {
 				return fmt.Errorf("books: order line %s released %s under schedule %s", line.ID, r.Currency, r.RevenueScheduleID)
 			}
+			// Money its reversals took all of back has nothing to schedule.
+			if held[r.RevenueScheduleID] <= 0 {
+				continue
+			}
 			plan, ready, err := planLine(ctx, q, order, line, services, at)
 			if err != nil {
 				return fmt.Errorf("books: order line %s: %w", line.ID, err)
@@ -291,17 +295,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 					return err
 				}
 			}
-			s := schedule{service: plan.service, funded: held[r.RevenueScheduleID], through: plan.service.Starts, ended: plan.ended}
-			if s.funded <= 0 {
-				continue
-			}
-			steps, next := s.catchUp(at, loc)
-			params := gen.CreateRevenueScheduleParams{
-				MerchantID: order.MerchantID, ID: r.RevenueScheduleID, CustomerID: order.CustomerID, Currency: r.Currency, OrderID: order.ID, OrderLineID: line.ID,
-				ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
-				Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
-				ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
-			}
+			params, steps := newSchedule(order, line, plan, r.RevenueScheduleID, r.Currency, held[r.RevenueScheduleID], at, loc)
 			row, err := q.CreateRevenueSchedule(ctx, params)
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Money released into it since it was made adds to its funding.
@@ -310,7 +304,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 						return err
 					}
 				}
-				if err := b.fundMore(ctx, r.RevenueScheduleID, held[r.RevenueScheduleID], maxTime(at, r.ReleasedAt.UTC()), loc); err != nil {
+				if err := b.fundMore(ctx, r.RevenueScheduleID, held[r.RevenueScheduleID], maxTime(at, r.ReleasedAt.UTC().Truncate(time.Microsecond)), loc); err != nil {
 					return err
 				}
 				continue
@@ -497,6 +491,26 @@ func creditLine(ctx context.Context, q *gen.Queries, line gen.BillingOrderLine) 
 func granted(raw []byte) bool { return len(raw) > 0 && string(raw) != "null" }
 
 // linePlan is how a line's revenue is recognised.
+// newSchedule is a line's schedule in currency as its application makes it,
+// funded with funded and recognised to at, and the recognition that
+// application posts: one builder for a bill's lines and a unit order's.
+func newSchedule(order gen.BillingOrder, line gen.BillingOrderLine, plan linePlan, id uuid.UUID, currency string, funded int64, at time.Time, loc *time.Location) (gen.CreateRevenueScheduleParams, []recognition) {
+	s := schedule{service: plan.service, funded: funded, through: plan.service.Starts, ended: plan.ended}
+	steps, next := s.catchUp(at, loc)
+	params := gen.CreateRevenueScheduleParams{
+		MerchantID: order.MerchantID, ID: id, CustomerID: order.CustomerID, Currency: currency, OrderID: order.ID, OrderLineID: line.ID,
+		SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
+		Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
+		ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
+		Forfeited: s.forfeited,
+	}
+	if plan.service.Months > 1 {
+		months := int32(plan.service.Months) // #nosec G115 -- a calendar interval is at most 1200 months
+		params.ServiceMonths = &months
+	}
+	return params, steps
+}
+
 type linePlan struct {
 	method       Method
 	account      AccountType

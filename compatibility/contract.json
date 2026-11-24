@@ -971,13 +971,13 @@
       "type MetricsExample struct {\n\tIntent string             `json:\"intent\"`\n\tQuery  QueryMetricsParams `json:\"query\"`\n}",
       "type MetricsGroup string",
       "type MetricsLimits struct {\n\tMaxBuckets int `json:\"max_buckets\"`\n\tMaxLimit   int `json:\"max_limit\"`\n}",
-      "type MetricsMeasure struct {\n\tName        string              `json:\"name\"`\n\tClass       MetricsClass        `json:\"class\"`\n\tUnit        string              `json:\"unit\"`\n\tGroup       MetricsGroup        `json:\"group\"`\n\tDirection   MetricsDirection    `json:\"direction\"`\n\tThresholds  []MetricsThreshold  `json:\"thresholds\"`\n\tDescription string              `json:\"description\"`\n\tFormula     string              `json:\"formula\"`\n\tDims        []string            `json:\"dims\"`\n\tDimValues   map[string][]string `json:\"dim_values,omitempty\"`\n\tMoney       bool                `json:\"money,omitempty\"`\n\n\tUTCDays bool `json:\"utc_days,omitempty\"`\n}",
+      "type MetricsMeasure struct {\n\tName        string              `json:\"name\"`\n\tClass       MetricsClass        `json:\"class\"`\n\tUnit        string              `json:\"unit\"`\n\tGroup       MetricsGroup        `json:\"group\"`\n\tDirection   MetricsDirection    `json:\"direction\"`\n\tThresholds  []MetricsThreshold  `json:\"thresholds\"`\n\tDescription string              `json:\"description\"`\n\tFormula     string              `json:\"formula\"`\n\tDims        []string            `json:\"dims\"`\n\tDimValues   map[string][]string `json:\"dim_values,omitempty\"`\n\tMoney       bool                `json:\"money,omitempty\"`\n\n\tUTCDays bool `json:\"utc_days,omitempty\"`\n\n\tProgram DisputeProgram `json:\"program,omitempty\"`\n}",
       "type MetricsOrder struct {\n\tMeasure   string `json:\"measure,omitempty\"`\n\tDimension string `json:\"dimension,omitempty\"`\n\tDir       string `json:\"dir,omitempty\"`\n}",
-      "type MetricsRange struct {\n\tFrom string `json:\"from,omitempty\"`\n\tTo   string `json:\"to,omitempty\"`\n\tLast string `json:\"last,omitempty\"`\n}",
+      "type MetricsRange struct {\n\tFrom string `json:\"from,omitempty\"`\n\tTo   string `json:\"to,omitempty\"`\n\tLast string `json:\"last,omitempty\"`\n\tNext string `json:\"next,omitempty\"`\n}",
       "type MetricsResult struct {\n\tGrain        string              `json:\"grain,omitempty\"`\n\tTimezone     string              `json:\"timezone\"`\n\tRange        MetricsResultRange  `json:\"range\"`\n\tColumns      []MetricsColumn     `json:\"columns\"`\n\tRows         [][]any             `json:\"rows\"`\n\tCompareRange *MetricsResultRange `json:\"compare_range,omitempty\"`\n\tCompareRows  [][]any             `json:\"compare_rows,omitempty\"`\n}",
       "type MetricsResultRange struct {\n\tFrom time.Time `json:\"from\"`\n\tTo   time.Time `json:\"to\"`\n}",
       "type MetricsSchema struct {\n\tMeasures   []MetricsMeasure   `json:\"measures\"`\n\tDimensions []MetricsDimension `json:\"dimensions\"`\n\tGrains     []string           `json:\"grains\"`\n\tDeferred   []string           `json:\"deferred\"`\n\tCaveats    []string           `json:\"caveats\"`\n\tExamples   []MetricsExample   `json:\"examples\"`\n\tLimits     MetricsLimits      `json:\"limits\"`\n\tQueryShape string             `json:\"query_shape\"`\n}",
-      "type MetricsThreshold struct {\n\tValue float64 `json:\"value\"`\n\tLabel string  `json:\"label\"`\n}",
+      "type MetricsThreshold struct {\n\tValue float64    `json:\"value\"`\n\tLabel string     `json:\"label\"`\n\tFrom  *time.Time `json:\"from,omitempty\"`\n\tUntil *time.Time `json:\"until,omitempty\"`\n}",
       "type MigrationFallback string",
       "type MyOrderPayURLParams struct {\n\tEmbedded bool `json:\"embedded\"`\n}",
       "type NewPriceDraft struct {\n\tProductKey  string            `json:\"product_key\"`\n\tReviewText  string            `json:\"review_text\"`\n\tCreatePrice CreatePriceParams `json:\"create_price\"`\n}",
@@ -1847,7 +1847,9 @@
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/modules/money/books": [
+      "type MisbalancedReversal struct {\n\tPaymentID uuid.UUID `json:\"payment_id\"`\n\tKind      string    `json:\"kind\"`\n\tCurrency  string    `json:\"currency\"`\n\tAmount    int64     `json:\"amount\"`\n\tMoved     int64     `json:\"moved\"`\n}",
       "type Overapplication struct {\n\tPaymentID string `json:\"payment_id\"`\n\tCurrency  string `json:\"currency\"`\n\tReceived  int64  `json:\"received\"`\n\tApplied   int64  `json:\"applied\"`\n}",
+      "type UnpostedPayment struct {\n\tPaymentID uuid.UUID `json:\"payment_id\"`\n\n\tKind     string `json:\"kind\"`\n\tCurrency string `json:\"currency\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type UnscheduledLine struct {\n\tOrderID     uuid.UUID `json:\"order_id\"`\n\tOrderLineID uuid.UUID `json:\"order_line_id\"`\n\tCurrency    string    `json:\"currency\"`\n\tAmount      int64     `json:\"amount\"`\n\tReason      string    `json:\"reason\"`\n}"
     ],
     "internal/modules/money/fees": [
@@ -1856,7 +1858,7 @@
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tBook       string    `json:\"book\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides        []SideWarning           `json:\"side_warnings\"`\n\tApplications []books.Overapplication `json:\"overapplied_payments\"`\n\tUnscheduled  []books.UnscheduledLine `json:\"unscheduled_lines\"`\n\n\tAwaiting []books.UnscheduledLine `json:\"awaiting_lines\"`\n}",
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides        []SideWarning           `json:\"side_warnings\"`\n\tApplications []books.Overapplication `json:\"overapplied_payments\"`\n\tUnscheduled  []books.UnscheduledLine `json:\"unscheduled_lines\"`\n\n\tAwaiting    []books.UnscheduledLine     `json:\"awaiting_lines\"`\n\tUnposted    []books.UnpostedPayment     `json:\"unposted_payments\"`\n\tMisbalanced []books.MisbalancedReversal `json:\"misbalanced_reversals\"`\n}",
       "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n\n\tStoredDeferredCredited int64 `json:\"stored_deferred_credited\"`\n\tLoggedDeferredCredited int64 `json:\"logged_deferred_credited\"`\n\tStoredDeferredDebited  int64 `json:\"stored_deferred_debited\"`\n\tLoggedDeferredDebited  int64 `json:\"logged_deferred_debited\"`\n}",
       "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
       "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
@@ -3959,7 +3961,9 @@
       "context": "context",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strconv": "strconv",
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/fees/stripe.go": {
@@ -5463,10 +5467,12 @@
     },
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
       "cobra": "github.com/spf13/cobra",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
       "merchant": "github.com/open-rails/openrails/internal/merchant",

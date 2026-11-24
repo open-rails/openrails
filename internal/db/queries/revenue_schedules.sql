@@ -5,14 +5,15 @@
 INSERT INTO billing.revenue_schedules (
     merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id,
     product_id, price_id, method, revenue_account, funded, recognized_net,
-    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements
+    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, forfeited
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text,
     sqlc.arg(order_id)::uuid, sqlc.arg(order_line_id)::uuid, sqlc.narg(subscription_id)::uuid, sqlc.narg(product_access_id)::uuid,
     sqlc.narg(product_id)::uuid, sqlc.narg(price_id)::uuid, sqlc.arg(method)::text, sqlc.arg(revenue_account)::text,
     sqlc.arg(funded)::bigint, sqlc.arg(recognized_net)::bigint,
     sqlc.arg(service_starts_at)::timestamptz, sqlc.arg(service_ends_at)::timestamptz, sqlc.narg(service_months)::int,
-    sqlc.narg(ended_at)::timestamptz, sqlc.arg(recognized_through_at)::timestamptz, sqlc.narg(next_recognition_at)::timestamptz, 0
+    sqlc.narg(ended_at)::timestamptz, sqlc.arg(recognized_through_at)::timestamptz, sqlc.narg(next_recognition_at)::timestamptz, 0,
+    sqlc.arg(forfeited)::bigint
 )
 ON CONFLICT (merchant_id, order_line_id, currency) DO NOTHING
 RETURNING *;
@@ -30,6 +31,7 @@ SET recognized_net = sqlc.arg(recognized_net)::bigint,
     recognized_through_at = sqlc.arg(recognized_through_at)::timestamptz,
     next_recognition_at = sqlc.narg(next_recognition_at)::timestamptz,
     reinstatements = sqlc.arg(reinstatements)::int,
+    forfeited = sqlc.arg(forfeited)::bigint,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
@@ -97,14 +99,24 @@ GROUP BY t.revenue_schedule_id
 ORDER BY t.revenue_schedule_id;
 
 -- name: ListUnscheduledCreditReleases :many
--- Lots' money released into a line priced in a merchant's own unit under a
--- schedule that does not exist: revenue the books never recognise.
-SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(t.amount)::bigint AS amount
+-- Lots' money released into a line priced in a merchant's own unit, net of
+-- what reversals took back of it, under a schedule that does not exist:
+-- revenue the books never recognise.
+SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END)::bigint AS amount
 FROM billing.ledger_transfers t
-WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.transfer_type = 'credit_released'
-  AND t.revenue_schedule_id IS NOT NULL AND t.order_line_id IS NOT NULL
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.credit_grant_id IS NOT NULL
+  AND t.revenue_schedule_id IS NOT NULL AND t.order_id IS NOT NULL AND t.order_line_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id = t.merchant_id AND s.id = t.revenue_schedule_id)
 GROUP BY t.order_id, t.order_line_id, t.currency
+HAVING sum(CASE
+    WHEN t.transfer_type = 'credit_released' THEN t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
+    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    ELSE 0 END) > 0
 ORDER BY t.order_id, t.order_line_id, t.currency;
 
 -- name: ListDueRevenueSchedules :many
@@ -194,10 +206,9 @@ SELECT EXISTS (
 -- A completed bill's line that sells revenue (not credit or usage) but has no
 -- revenue schedule: a provider's tax and shipping line among them, which is
 -- never scheduled. before_books is a line whose order was made and completed
--- before the merchant's general ledger took its first transfer.
+-- before the merchant's books started.
 WITH started AS (
-    SELECT min(created_at) AS at FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general'
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = sqlc.arg(merchant_id)::uuid) AS at
 )
 SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
        (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,

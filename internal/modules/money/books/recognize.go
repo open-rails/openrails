@@ -44,6 +44,7 @@ func Recognize(ctx context.Context, d *db.DB, id uuid.UUID, loc *time.Location, 
 		n, err := q.SetRevenueScheduleRecognized(ctx, gen.SetRevenueScheduleRecognizedParams{
 			MerchantID: mid.UUID(), ID: id, RecognizedNet: s.recognized, RecognizedThroughAt: s.through, NextRecognitionAt: next,
 			Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
+			Forfeited:      s.forfeited,
 		})
 		if err == nil && n != 1 {
 			err = fmt.Errorf("books: revenue schedule %s did not record its recognition", id)

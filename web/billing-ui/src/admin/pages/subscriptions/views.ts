@@ -4,6 +4,7 @@ import type { SubscriptionFilters } from "#orck/admin/lib/api/endpoints"
 export const subscriptionViews = {
   renewing_soon: { label: "Renewing soon", days: 7 },
   recently_canceled: { label: "Recently canceled", days: -30 },
+  at_risk: { label: "MRR at risk", days: 0 },
 } as const
 type SubscriptionView = keyof typeof subscriptionViews
 
@@ -28,6 +29,8 @@ export function viewFilters(
         canceled_after: utcDay(subscriptionViews.recently_canceled.days, now),
         sort: "canceled_at",
       }
+    case "at_risk":
+      return { at_risk: "true" }
   }
   return null
 }

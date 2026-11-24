@@ -246,6 +246,17 @@ func (q *Queries) QueueRestoredMRRRisk(ctx context.Context, arg QueueRestoredMRR
 	return err
 }
 
+const rebuildMRRRollups = `-- name: RebuildMRRRollups :exec
+SELECT billing.rebuild_mrr_rollups($1::uuid)
+`
+
+// An archive from before the reporting rollups lacks them: they are rebuilt
+// from what they derive from, as the migration built them.
+func (q *Queries) RebuildMRRRollups(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, rebuildMRRRollups, merchantID)
+	return err
+}
+
 const seedMRR = `-- name: SeedMRR :exec
 SELECT billing.seed_mrr($1::uuid, $2::timestamptz)
 `

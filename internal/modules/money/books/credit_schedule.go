@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,15 +123,15 @@ type scheduleLegs struct {
 	deferredType   TransferType
 	recognizedType TransferType
 	coord          Coord
-	at             time.Time
+	at, now        time.Time
 	loc            *time.Location
 }
 
 // changeSchedule moves one schedule's funding by its share: a lot
-// reversal's (reduce) or a recovery's. The schedule first recognises what its
-// service earned: up to the change while it serves, else to its end. A line
-// not applied yet has no schedule: the share moves its deferred revenue, and
-// the application funds the schedule with what the lots' money holds then.
+// reversal's (reduce) or a recovery's, as a payment's reversal moves the
+// schedules it funded (moveFunding). A line not applied yet has no schedule:
+// the share moves its deferred revenue, and the application funds the
+// schedule with what the lots' money holds then.
 func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce bool, legs scheduleLegs) error {
 	post := func(debit, credit Ref, amount int64, typ TransferType, currency string, product *uuid.UUID, lot bool) error {
 		if amount <= 0 {
@@ -161,25 +162,15 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 	if err != nil {
 		return fmt.Errorf("books: lock revenue schedule %s: %w", sh.id, err)
 	}
-	s := scheduleOf(row)
-	end := s.end()
-	t := maxTime(legs.at, s.through)
-	serving := t.Before(end)
-	var steps []recognition
-	if serving {
-		if steps, _, err = s.advance(ctx, legs.loc, t); err != nil {
-			return err
-		}
-		more, _ := s.catchUp(t, legs.loc)
-		steps = append(steps, more...)
-	} else if steps, _, err = s.advance(ctx, legs.loc, legs.at); err != nil {
-		return err
+	delta := sh.amount
+	if reduce {
+		delta = -delta
 	}
-	if err := b.recognize(ctx, row, steps); err != nil {
+	s, contra, deferred, earned, err := b.moveFunding(ctx, row, delta, sh.contra, legs.at, legs.now, legs.loc)
+	if err != nil {
 		return err
 	}
 	if reduce {
-		contra, deferred := s.reduce(sh.amount, serving)
 		if err := post(Ref{Type: legs.contra}, legs.cash, contra, legs.recognizedType, row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
@@ -187,8 +178,7 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 			return err
 		}
 	} else {
-		c, deferred, earned := s.restore(sh.amount, sh.contra, serving, end)
-		if err := post(legs.cash, Ref{Type: legs.contra}, c, DisputeWon, row.Currency, row.ProductID, true); err != nil {
+		if err := post(legs.cash, Ref{Type: legs.contra}, contra, DisputeWon, row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
 		if err := post(legs.cash, Ref{Type: DeferredRevenue}, deferred, DisputeWon, row.Currency, row.ProductID, true); err != nil {
@@ -198,20 +188,14 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 			return err
 		}
 	}
-	n, err := b.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
-		MerchantID: b.merchant, ID: sh.id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
-		NextRecognitionAt: s.nextDue(legs.loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
-	})
-	if err == nil && n != 1 {
-		err = fmt.Errorf("books: revenue schedule %s did not record its change", sh.id)
-	}
-	return err
+	return b.saveSchedule(ctx, sh.id, s, legs.loc)
 }
 
 // fundMore brings a unit line's schedule up to what the lots' money funds of
-// it now, held: money released into it since it was made. The money is in
-// deferred revenue already; the schedule recognises what the higher price
-// earned by at.
+// it now, held: money released into it since it was made, already in
+// deferred revenue, at the latest release. The schedule takes it as a
+// recovery would (moveFunding), and what that recognises at once posts at the
+// funding it reaches.
 func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held int64, at time.Time, loc *time.Location) error {
 	row, err := b.q.LockRevenueSchedule(ctx, gen.LockRevenueScheduleParams{MerchantID: b.merchant, ID: id})
 	if err != nil {
@@ -220,23 +204,23 @@ func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held int64, at time.
 	if held <= row.Funded {
 		return nil
 	}
-	s := scheduleOf(row)
-	t := maxTime(at, s.through)
-	steps, _, err := s.advance(ctx, loc, t)
+	s, recognized, _, earned, err := b.moveFunding(ctx, row, held-row.Funded, 0, at, at, loc)
 	if err != nil {
 		return err
 	}
-	s.funded = held
-	more, _ := s.catchUp(t, loc)
-	if err := b.recognize(ctx, row, append(steps, more...)); err != nil {
-		return err
+	if amount := recognized + earned; amount > 0 {
+		coord := Coord{Operation: OpApplication, Source: "revenue_schedule", SourceID: id.String() + "@funded:" + strconv.FormatInt(s.funded, 10)}
+		_, applied, err := b.Post(ctx, Posting{
+			Debit: Ref{Type: DeferredRevenue}, Credit: Ref{Type: AccountType(row.RevenueAccount)}, Amount: amount, Currency: row.Currency, Type: RevenueRecognized,
+			Coord: coord, EffectiveAt: maxTime(at, s.through), Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID,
+			RevenueSchedule: &row.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return fmt.Errorf("%w: revenue schedule %s already posted %s", ErrCoordinateReused, id, coord)
+		}
 	}
-	n, err := b.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
-		MerchantID: b.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
-		NextRecognitionAt: s.nextDue(loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
-	})
-	if err == nil && n != 1 {
-		err = fmt.Errorf("books: revenue schedule %s did not record its funding", id)
-	}
-	return err
+	return b.saveSchedule(ctx, id, s, loc)
 }

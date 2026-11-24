@@ -371,7 +371,8 @@ type CreditReversal struct {
 	// expired or been revoked: what the cash beyond the lot's deferred money
 	// paid for. The consumed share comes from what the spends funded.
 	Consumed, Lapsed int64
-	At               time.Time
+	// At is when the reversal settled, Now when it is booked.
+	At, Now time.Time
 	// Zone is the merchant's accounting zone, for the schedules the lot's
 	// spends funded.
 	Zone *time.Location
@@ -436,7 +437,7 @@ func (b *Books) ReverseCredit(ctx context.Context, l CreditLot, r CreditReversal
 		}
 	}
 	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, deferredType: deferredType, recognizedType: recognizedType,
-		coord: coord(reversedRecognized), at: r.At, loc: r.Zone}
+		coord: coord(reversedRecognized), at: r.At, now: r.Now, loc: r.Zone}
 	for _, sh := range shares {
 		if err := b.changeSchedule(ctx, sh, true, legs); err != nil {
 			return err
@@ -459,7 +460,8 @@ type CreditRecovery struct {
 	// units it restored to a revoked or lapsed lot's retired account, whose
 	// money the caller then forfeits or breaks (MoveCredit).
 	Repaid, Retired int64
-	At              time.Time
+	// At is when the recovery settled, Now when it is booked.
+	At, Now time.Time
 	// Zone is the merchant's accounting zone, for the schedules the origin
 	// took from.
 	Zone *time.Location
@@ -514,7 +516,7 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 			return err
 		}
 	}
-	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), at: r.At, loc: r.Zone}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), at: r.At, now: r.Now, loc: r.Zone}
 	for _, sh := range shares {
 		if err := b.changeSchedule(ctx, sh, false, legs); err != nil {
 			return err

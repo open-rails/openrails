@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 689,
+  "scenario_count": 713,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2556,7 +2556,7 @@
     {
       "id": "OR-J22-S09",
       "journey": "J22",
-      "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+      "name": "Credit a won dispute restores stays with the customer: an earlier refund that found the mixed order's credit line already returned keeps the share it settled with"
     },
     {
       "id": "OR-J22-S10",
@@ -2747,6 +2747,16 @@
       "id": "OR-J42-S23",
       "journey": "J42",
       "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
+    },
+    {
+      "id": "OR-J42-S30",
+      "journey": "J42",
+      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+    },
+    {
+      "id": "OR-J42-S31",
+      "journey": "J42",
+      "name": "An archive written before the reporting rollups (no streak flows, product totals, distinct customers, cancel decisions or chargeback churn flows) restores them rebuilt from its movements, product flows, customer MRR and status transitions, row for row as the source kept them, and the restore check proves they agree"
     },
     {
       "id": "OR-J28-S09",
@@ -3046,7 +3056,7 @@
     {
       "id": "OR-J53-S02",
       "journey": "J53",
-      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure, or mrr by a dimension it no longer takes, are dropped"
     },
     {
       "id": "OR-J53-S03",
@@ -3062,6 +3072,16 @@
       "id": "OR-J53-S05",
       "journey": "J53",
       "name": "A day chart across a midnight clock change has one row per local day, the changed day starting at its transition with the sale made on it; the catalogue marks measures read from rollups kept per UTC date"
+    },
+    {
+      "id": "OR-J53-S06",
+      "journey": "J53",
+      "name": "Two customers over four months: monthly MRR movements and subscriber movements equal the movements recorded; MRR, subscribers, ARPA, LTV, subscriber churn of the opening base by type, NRR and GRR as each month began; churn read monthly by day and over 90 days; the cohort's retention of the members it acquired, by subscribers and MRR; MRR by product at a past date; subscribers counted once across currencies; scheduled churn and its reversal; cancel decisions by the month they were made, type and reversal; the overview's MRR tiles"
+    },
+    {
+      "id": "OR-J53-S07",
+      "journey": "J53",
+      "name": "A card merchant's chargeback ratio tile is Visa's VAMP ratio, naming its program, and Payment health charts the VAMP and ECM ratios against their levels in force each month (VAMP's excessive level 2.2% before April 2026, 1.5% from); one chargeback under VAMP's minimum count reaches no level whatever its ratio"
     },
     {
       "id": "OR-J43-S01",
@@ -3367,6 +3387,106 @@
       "id": "OR-J41-S17",
       "journey": "J41",
       "name": "An imported purchase is applied over the access its import grants"
+    },
+    {
+      "id": "OR-J41-S18",
+      "journey": "J41",
+      "name": "A partial refund while the service runs is a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J41-S19",
+      "journey": "J41",
+      "name": "A full refund that revokes access takes unrecognised revenue first"
+    },
+    {
+      "id": "OR-J41-S20",
+      "journey": "J41",
+      "name": "A chargeback reduces its schedule and the won dispute restores it, its deferral forfeited at once"
+    },
+    {
+      "id": "OR-J41-S21",
+      "journey": "J41",
+      "name": "A refund row written past the poster commits; ledger-audit names it and raises a finding"
+    },
+    {
+      "id": "OR-J41-S22",
+      "journey": "J41",
+      "name": "A duplicate capture's refund returns it from unapplied cash"
+    },
+    {
+      "id": "OR-J41-S23",
+      "journey": "J41",
+      "name": "A refund of a payment from before the books is never refused; its sign breach is a finding"
+    },
+    {
+      "id": "OR-J41-S24",
+      "journey": "J41",
+      "name": "A usage order's refund takes what its payment left unapplied first, contra beyond; its chargeback posts the cash side alone"
+    },
+    {
+      "id": "OR-J41-S25",
+      "journey": "J41",
+      "name": "Refunds in pieces each reduce the price from where the last left it"
+    },
+    {
+      "id": "OR-J41-S26",
+      "journey": "J41",
+      "name": "A refund of a two-line bill takes each line pro rata"
+    },
+    {
+      "id": "OR-J41-S27",
+      "journey": "J41",
+      "name": "A mixed credit order's refund, chargeback and won dispute move each dollar once: the lot's share first"
+    },
+    {
+      "id": "OR-J41-S28",
+      "journey": "J41",
+      "name": "An end undone after a refund reinstates no forfeit it never made"
+    },
+    {
+      "id": "OR-J41-S29",
+      "journey": "J41",
+      "name": "A refund the rail confirms later is dated when it settled, its credit lot's legs with its own"
+    },
+    {
+      "id": "OR-J41-S30",
+      "journey": "J41",
+      "name": "A timed line refunded before its access is granted is not unscheduled"
+    },
+    {
+      "id": "OR-J41-S31",
+      "journey": "J41",
+      "name": "A reversal's share of a credit lot, card credits or a merchant's own unit, is decided when it settles: a refund that found the lot returned takes none of what a won dispute restores"
+    },
+    {
+      "id": "OR-J41-S32",
+      "journey": "J41",
+      "name": "A reversal whose postings, its own and its lot's, move other cash than its amount fails ledger-audit and raises a finding"
+    },
+    {
+      "id": "OR-J41-S33",
+      "journey": "J41",
+      "name": "A usage order's payment, the merchant's first receipt, starts the books, so a reversal of it stored past the poster is named"
+    },
+    {
+      "id": "OR-J41-S34",
+      "journey": "J41",
+      "name": "A refund after an early end forfeited revenue takes the forfeit first, and the end undone reinstates only what is left of it"
+    },
+    {
+      "id": "OR-J41-S35",
+      "journey": "J41",
+      "name": "A won dispute's recovery that names no chargeback commits and restores the chargeback that occurred first"
+    },
+    {
+      "id": "OR-J41-S36",
+      "journey": "J41",
+      "name": "A provider's discount on a bill with a credit line reduces the other lines alone: the lot keeps its own price"
+    },
+    {
+      "id": "OR-J41-S37",
+      "journey": "J41",
+      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked_unit_pack"
     },
     {
       "id": "OR-J40-S10",

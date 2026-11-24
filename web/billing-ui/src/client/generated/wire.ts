@@ -1584,6 +1584,7 @@ export type MetricsMeasure = {
   dim_values?: Record<string, string[]>
   money?: boolean
   utc_days?: boolean
+  program?: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
 }
 
 export type MetricsOrder = {
@@ -1596,6 +1597,7 @@ export type MetricsRange = {
   from?: string
   to?: string
   last?: string
+  next?: string
 }
 
 export type MetricsResult = {
@@ -1627,6 +1629,8 @@ export type MetricsSchema = {
 export type MetricsThreshold = {
   value: number
   label: string
+  from?: string
+  until?: string
 }
 
 export type MyOrderPayURLParams = {

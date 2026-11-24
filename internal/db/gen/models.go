@@ -53,6 +53,14 @@ type BillingBookIdentity struct {
 	TaggingStartedAt time.Time
 }
 
+// One row per merchant: when its general ledger booked its first receipt, by the clock that stamps payments and orders. ledger-audit checks the postings of what was stored since; what came before waits for the books' rebuild. Retention: permanent, never pruned.
+type BillingBooksStart struct {
+	MerchantID uuid.UUID
+	// When the first receipt was booked, by the payment writer's clock.
+	StartedAt time.Time
+	CreatedAt time.Time
+}
+
 // A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
 type BillingCart struct {
 	MerchantID uuid.UUID
@@ -240,6 +248,20 @@ type BillingCreditGrantEvent struct {
 	RequestKey *string
 }
 
+// Each settled reversal's share of the paid credit lot its payment bought, decided when it first settled, zero included, and never changed: the record of the lot's returned money and units. A refund or chargeback has one row, its own (origin_id = reversal_id); a recovery has one per chargeback it restored, or one of its own, zero, when it restored none. Retention: permanent, never pruned.
+type BillingCreditReversalShare struct {
+	MerchantID    uuid.UUID
+	ReversalID    uuid.UUID
+	CreditGrantID uuid.UUID
+	// The reversal whose share this is: the row's own, or the chargeback a recovery restored.
+	OriginID uuid.UUID
+	// The lot's money it took, or restored of origin_id's, in the lot's paid_currency.
+	Cash int64
+	// The lot's units it took, or restored of origin_id's, in the lot's unit.
+	Units     int64
+	CreatedAt time.Time
+}
+
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -374,7 +396,7 @@ type BillingCustomerMrr struct {
 	FirstActiveAt *time.Time
 }
 
-// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|heading), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
+// Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|cohort|heading|programs), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
@@ -1050,7 +1072,20 @@ type BillingMrrCohortFlow struct {
 	Logos      int64
 }
 
-// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+// Per 15-minute UTC bucket, customers gaining MRR in a first currency less those losing it in their last: the change of mrr_customer_totals.
+type BillingMrrCustomerFlow struct {
+	MerchantID uuid.UUID
+	BucketAt   time.Time
+	Logos      int64
+}
+
+// The merchant's customers with MRR in any currency now, each once, kept at commit; at an instant it is this less mrr_customer_flows from it on.
+type BillingMrrCustomerTotal struct {
+	MerchantID uuid.UUID
+	Customers  int64
+}
+
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary and churn_chargeback, parts of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days; MRR at an instant is mrr_totals less the movements of the buckets from it on.
 type BillingMrrFlow struct {
 	MerchantID uuid.UUID
 	Currency   string
@@ -1106,6 +1141,15 @@ type BillingMrrProductFlow struct {
 	BucketAt    time.Time
 	ProductID   uuid.UUID
 	Amount      int64
+	Subscribers int64
+}
+
+// Each product's MRR and the subscriptions adding it now, per currency: its mrr_product_flows summed, kept at commit. A product's MRR at an instant is this less its flows of the buckets from it on.
+type BillingMrrProductTotal struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	ProductID   uuid.UUID
+	Mrr         int64
 	Subscribers int64
 }
 
@@ -1194,6 +1238,17 @@ type BillingMrrScheduled struct {
 	Status            string
 	ScheduledAt       time.Time
 	ResolvedAt        *time.Time
+}
+
+// Expansion, contraction, churn (and its voluntary and chargeback parts) and corrections per currency and 15-minute UTC bucket, with their sum and logo change, by the bucket in which each customer's run of MRR began (its latest movement from none): the customers with MRR when a period began are the runs begun before it, so churn and revenue retention read this and mrr_totals, never the movements.
+type BillingMrrStreakFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	BucketAt   time.Time
+	StreakAt   time.Time
+	Measure    string
+	Amount     int64
+	Logos      int64
 }
 
 // The merchant's MRR now per currency, the customers with any and the subscriptions adding to it: the sums of customer_mrr.
@@ -2225,6 +2280,8 @@ type BillingRevenueSchedule struct {
 	Reinstatements int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// What of recognized_net an early end forfeited and no undone end took back: the most an undone end reinstates.
+	Forfeited int64
 }
 
 // One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.
@@ -2450,6 +2507,16 @@ type BillingSubscriptionBillingChange struct {
 	Actor                *string
 	Executor             *string
 	OperationID          *uuid.UUID
+}
+
+// Each cancel decision: a subscription's move into canceled, dated by its writer's clock (updated_at), and when a move out of canceled (a resume) took it back. Kept by trg_subscriptions_track_cancellations; reports count cancellations here. Retention: permanent, never pruned.
+type BillingSubscriptionCancellation struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CancelType     *string
+	DecidedAt      time.Time
+	ReversedAt     *time.Time
 }
 
 // What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's MRR for its seats (billing.price_mrr), while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.

@@ -19,8 +19,9 @@ SET funded = $1::bigint,
     recognized_through_at = $3::timestamptz,
     next_recognition_at = $4::timestamptz,
     reinstatements = $5::int,
+    forfeited = $6::bigint,
     updated_at = now()
-WHERE merchant_id = $6::uuid AND id = $7::uuid
+WHERE merchant_id = $7::uuid AND id = $8::uuid
 `
 
 type AdjustRevenueScheduleParams struct {
@@ -29,6 +30,7 @@ type AdjustRevenueScheduleParams struct {
 	RecognizedThroughAt time.Time
 	NextRecognitionAt   *time.Time
 	Reinstatements      int32
+	Forfeited           int64
 	MerchantID          uuid.UUID
 	ID                  uuid.UUID
 }
@@ -42,6 +44,7 @@ func (q *Queries) AdjustRevenueSchedule(ctx context.Context, arg AdjustRevenueSc
 		arg.RecognizedThroughAt,
 		arg.NextRecognitionAt,
 		arg.Reinstatements,
+		arg.Forfeited,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -51,8 +54,221 @@ func (q *Queries) AdjustRevenueSchedule(ctx context.Context, arg AdjustRevenueSc
 	return result.RowsAffected(), nil
 }
 
+const getLotReversalCash = `-- name: GetLotReversalCash :one
+SELECT COALESCE(sum(t.amount) FILTER (WHERE c.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS returned,
+       COALESCE(sum(t.amount) FILTER (WHERE d.account_type IN ('cash_clearing', 'external_receipts')), 0)::bigint AS restored
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = $1::uuid AND t.customer_id = $2::uuid AND t.currency = $3::text
+  AND t.book = 'general' AND t.operation = 'purchased_credit_refund' AND t.source_id = $4::text
+`
+
+type GetLotReversalCashParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	ReversalID string
+}
+
+type GetLotReversalCashRow struct {
+	Returned int64
+	Restored int64
+}
+
+// The cash a credit lot's poster moved for a reversal or a recovery, at
+// (purchased_credit_refund, …, its id): returned to, or restored from, the
+// payment's cash account.
+func (q *Queries) GetLotReversalCash(ctx context.Context, arg GetLotReversalCashParams) (GetLotReversalCashRow, error) {
+	row := q.db.QueryRow(ctx, getLotReversalCash,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.ReversalID,
+	)
+	var i GetLotReversalCashRow
+	err := row.Scan(&i.Returned, &i.Restored)
+	return i, err
+}
+
+const listMisbalancedReversals = `-- name: ListMisbalancedReversals :many
+WITH started AS (
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = $1::uuid) AS at
+)
+SELECT p.id, p.currency, p.amount, p.reversal_kind, m.cash::bigint AS moved
+FROM billing.payments p
+CROSS JOIN started s
+JOIN billing.payments o ON o.merchant_id = p.merchant_id AND o.id = p.refunded_payment_id
+CROSS JOIN LATERAL (
+    SELECT count(*) AS legs,
+           COALESCE(sum(t.amount) FILTER (WHERE d.account_type IN ('cash_clearing', 'external_receipts')), 0)
+         - COALESCE(sum(t.amount) FILTER (WHERE c.account_type IN ('cash_clearing', 'external_receipts')), 0) AS cash
+    FROM billing.ledger_transfers t
+    JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+    JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+    WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency AND t.book = 'general'
+      AND t.source_id = p.id::text AND (t.source = 'payment' OR t.operation = 'purchased_credit_refund')
+) m
+WHERE p.merchant_id = $1::uuid AND p.deleted_at IS NULL AND p.created_at >= s.at
+  AND p.status = 'succeeded' AND p.amount <> 0
+  AND o.reversal_kind IS NULL AND o.amount > 0 AND o.status IN ('succeeded', 'refunded') AND o.deleted_at IS NULL
+  AND (o.channel = 'manual' OR o.money_movement = 'rail' AND o.psp_id IS NOT NULL)
+  AND m.legs > 0 AND m.cash <> p.amount
+ORDER BY p.created_at, p.id
+`
+
+type ListMisbalancedReversalsRow struct {
+	ID           uuid.UUID
+	Currency     string
+	Amount       int64
+	ReversalKind *string
+	Moved        int64
+}
+
+// A settled reversal of a receipt, stored since the merchant's books
+// started, whose general-ledger postings (its own and its credit lot's)
+// moved other cash than its amount. One with none is ListUnpostedPayments'.
+func (q *Queries) ListMisbalancedReversals(ctx context.Context, merchantID uuid.UUID) ([]ListMisbalancedReversalsRow, error) {
+	rows, err := q.db.Query(ctx, listMisbalancedReversals, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMisbalancedReversalsRow
+	for rows.Next() {
+		var i ListMisbalancedReversalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Currency,
+			&i.Amount,
+			&i.ReversalKind,
+			&i.Moved,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentBooksLegs = `-- name: ListPaymentBooksLegs :many
+SELECT t.source_id, t.operation, t.transfer_type, t.revenue_schedule_id, sum(t.amount)::bigint AS amount
+FROM billing.ledger_transfers t
+WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.source = 'payment'
+  AND t.source_id IN (
+      SELECT p.id::text FROM billing.payments p
+      WHERE p.merchant_id = $1::uuid AND (p.id = $2::uuid OR p.refunded_payment_id = $2::uuid))
+GROUP BY t.source_id, t.operation, t.transfer_type, t.revenue_schedule_id
+ORDER BY t.source_id, t.operation, t.transfer_type, t.revenue_schedule_id
+`
+
+type ListPaymentBooksLegsParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+}
+
+type ListPaymentBooksLegsRow struct {
+	SourceID          string
+	Operation         string
+	TransferType      string
+	RevenueScheduleID *uuid.UUID
+	Amount            int64
+}
+
+// The general-ledger legs a payment and its reversals posted, summed by
+// source, operation, type and schedule.
+func (q *Queries) ListPaymentBooksLegs(ctx context.Context, arg ListPaymentBooksLegsParams) ([]ListPaymentBooksLegsRow, error) {
+	rows, err := q.db.Query(ctx, listPaymentBooksLegs, arg.MerchantID, arg.PaymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPaymentBooksLegsRow
+	for rows.Next() {
+		var i ListPaymentBooksLegsRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.Operation,
+			&i.TransferType,
+			&i.RevenueScheduleID,
+			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnpostedPayments = `-- name: ListUnpostedPayments :many
+WITH started AS (
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = $1::uuid) AS at
+)
+SELECT p.id, p.currency, p.amount, p.reversal_kind, p.created_at
+FROM billing.payments p
+CROSS JOIN started s
+LEFT JOIN billing.payments o ON o.merchant_id = p.merchant_id AND o.id = p.refunded_payment_id
+WHERE p.merchant_id = $1::uuid AND p.deleted_at IS NULL AND p.created_at >= s.at
+  AND (p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL AND p.amount > 0 AND p.status IN ('succeeded', 'refunded')
+           AND (p.channel = 'manual' OR p.money_movement = 'rail' AND p.psp_id IS NOT NULL)
+       OR p.refunded_payment_id IS NOT NULL AND p.status = 'succeeded' AND p.amount <> 0
+           AND o.reversal_kind IS NULL AND o.amount > 0 AND o.status IN ('succeeded', 'refunded') AND o.deleted_at IS NULL
+           AND (o.channel = 'manual' OR o.money_movement = 'rail' AND o.psp_id IS NOT NULL))
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.ledger_transfers t
+      WHERE t.merchant_id = p.merchant_id AND t.book = 'general' AND t.source = 'payment' AND t.source_id = p.id::text)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.ledger_transfers t
+      WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency AND t.book = 'general'
+        AND t.operation = 'purchased_credit_refund' AND t.source_id = p.id::text)
+ORDER BY p.created_at, p.id
+`
+
+type ListUnpostedPaymentsRow struct {
+	ID           uuid.UUID
+	Currency     string
+	Amount       int64
+	ReversalKind *string
+	CreatedAt    time.Time
+}
+
+// A receipt, or a settled reversal of one, that the general ledger holds no
+// posting of, stored since the merchant's books started: none at the
+// payment's coordinates, and none its credit lot's poster made.
+func (q *Queries) ListUnpostedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListUnpostedPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, listUnpostedPayments, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnpostedPaymentsRow
+	for rows.Next() {
+		var i ListUnpostedPaymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Currency,
+			&i.Amount,
+			&i.ReversalKind,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRevenueSchedule = `-- name: LockRevenueSchedule :one
-SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at FROM billing.revenue_schedules
+SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited FROM billing.revenue_schedules
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -90,6 +306,68 @@ func (q *Queries) LockRevenueSchedule(ctx context.Context, arg LockRevenueSchedu
 		&i.Reinstatements,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Forfeited,
 	)
 	return i, err
+}
+
+const paymentPosted = `-- name: PaymentPosted :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.ledger_transfers
+    WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment' AND source_id = $2::text
+)::boolean AS posted
+`
+
+type PaymentPostedParams struct {
+	MerchantID uuid.UUID
+	PaymentID  string
+}
+
+// Whether the general ledger holds a posting a payment row caused.
+func (q *Queries) PaymentPosted(ctx context.Context, arg PaymentPostedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, paymentPosted, arg.MerchantID, arg.PaymentID)
+	var posted bool
+	err := row.Scan(&posted)
+	return posted, err
+}
+
+const recordBooksStart = `-- name: RecordBooksStart :exec
+INSERT INTO billing.books_starts (merchant_id, started_at)
+VALUES ($1::uuid, $2::timestamptz)
+ON CONFLICT (merchant_id) DO NOTHING
+`
+
+type RecordBooksStartParams struct {
+	MerchantID uuid.UUID
+	StartedAt  time.Time
+}
+
+// The books start when the first receipt is booked; a later one changes
+// nothing.
+func (q *Queries) RecordBooksStart(ctx context.Context, arg RecordBooksStartParams) error {
+	_, err := q.db.Exec(ctx, recordBooksStart, arg.MerchantID, arg.StartedAt)
+	return err
+}
+
+const resolveVanishedBooksFindings = `-- name: ResolveVanishedBooksFindings :execrows
+UPDATE billing.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = $2::text
+  AND status IN ('reconcile_required', 'requires_review')
+  AND NOT (subject_key = ANY($3::text[]))
+`
+
+type ResolveVanishedBooksFindingsParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	Reported    []string
+}
+
+// A posting finding whose subject the audit no longer reports closes.
+func (q *Queries) ResolveVanishedBooksFindings(ctx context.Context, arg ResolveVanishedBooksFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveVanishedBooksFindings, arg.MerchantID, arg.FindingType, arg.Reported)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
