@@ -132,6 +132,18 @@ func summarize(r *Results) string {
 			}
 			p("")
 		}
+		var waits int64
+		blockers := map[string]bool{}
+		for _, s := range w.Samples {
+			waits = max(waits, s.PGLockWaits)
+			for _, b := range s.PGBlockers {
+				if len(blockers) < 5 {
+					blockers[b] = true
+				}
+			}
+		}
+		p("PostgreSQL: at most %d sessions waiting on a lock in a sample; blockers seen: %s", waits, strings.Join(sortedKeys(blockers), " | "))
+		p("")
 		rowsAndDisk(p, w.Rows, w.Storage)
 	}
 	if pr := r.Posting; pr != nil {

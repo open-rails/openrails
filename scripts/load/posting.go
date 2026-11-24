@@ -330,7 +330,7 @@ func (e *env) checkPostedOnce(ctx context.Context, r *PostingResult, schema stri
 	}
 	defer crows.Close()
 	var customers, mismatched int
-	var worst int64
+	var examples []string
 	for crows.Next() {
 		var c string
 		var n int64
@@ -338,10 +338,12 @@ func (e *env) checkPostedOnce(ctx context.Context, r *PostingResult, schema stri
 			continue
 		}
 		customers++
-		if d := abs(posted[c] - n); d != 0 {
+		if posted[c] != n {
 			mismatched++
-			worst = max(worst, d)
+			if len(examples) < 3 {
+				examples = append(examples, fmt.Sprintf("%s posted %d of %d", c, posted[c], n))
+			}
 		}
 	}
-	r.check("posted-once", customers > 0 && mismatched == 0, "%d customers: posted usage equals the FINAL total for %d, %d differ (worst by %d micros)", customers, customers-mismatched, mismatched, worst)
+	r.check("posted-once", customers > 0 && mismatched == 0, "%d customers: posted usage equals the FINAL total for %d, %d differ %v", customers, customers-mismatched, mismatched, examples)
 }

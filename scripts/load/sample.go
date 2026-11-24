@@ -26,6 +26,9 @@ type Sample struct {
 	CHAsync     int64              `json:"ch_pending_async_inserts"`
 	PGActive    int64              `json:"pg_active"`
 	PGLockWaits int64              `json:"pg_lock_waits"`
+	// PGBlockers are the sessions others wait on while any wait on a lock:
+	// state, wait and the start of their query.
+	PGBlockers []string `json:"pg_blockers,omitempty"`
 }
 
 const sampleEvery = 5 * time.Second
@@ -199,6 +202,21 @@ func pgSample(ctx context.Context, pool *pgxpool.Pool, s *Sample) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	_ = pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'active'), count(*) FILTER (WHERE wait_event_type = 'Lock') FROM pg_stat_activity").Scan(&s.PGActive, &s.PGLockWaits)
+	if s.PGLockWaits == 0 {
+		return
+	}
+	rows, err := pool.Query(ctx, `SELECT b.state || ' ' || coalesce(b.wait_event_type || ':' || b.wait_event, '-') || ' for ' || round(extract(epoch FROM now() - b.state_change)) || 's: ' || left(regexp_replace(b.query, '\s+', ' ', 'g'), 160)
+FROM pg_stat_activity b WHERE b.pid IN (SELECT unnest(pg_blocking_pids(pid)) FROM pg_stat_activity WHERE wait_event_type = 'Lock') LIMIT 5`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line string
+		if rows.Scan(&line) == nil {
+			s.PGBlockers = append(s.PGBlockers, line)
+		}
+	}
 }
 
 // postgresSettings records the server's settings that bear on the numbers.
