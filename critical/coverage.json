@@ -1554,12 +1554,12 @@
       "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
     },
     {
-      "id": "OR-J38-S73",
+      "id": "OR-J38-S76",
       "journey": "J38",
       "name": "A failed PSP import cannot be applied"
     },
     {
-      "id": "OR-J38-S74",
+      "id": "OR-J38-S77",
       "journey": "J38",
       "name": "A price picked for an import record is never deleted"
     },

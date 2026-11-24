@@ -1039,11 +1039,11 @@
     "OR-J38-S72": [
       "TestManualProviderRefresh/OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries"
     ],
-    "OR-J38-S73": [
-      "TestPSPImportSafeguards/OR-J38-S73/a-failed-import-is-never-applied"
+    "OR-J38-S76": [
+      "TestPSPImportSafeguards/OR-J38-S76/a-failed-import-is-never-applied"
     ],
-    "OR-J38-S74": [
-      "TestPSPImportSafeguards/OR-J38-S74/a-price-picked-for-an-import-record-is-never-deleted"
+    "OR-J38-S77": [
+      "TestPSPImportSafeguards/OR-J38-S77/a-price-picked-for-an-import-record-is-never-deleted"
     ],
     "OR-J38-S35": [
       "TestPSPReconcile/OR-J38-S35/correction-adopts-an-ended-rows-cancel-facts"

@@ -209,12 +209,12 @@ Checks:
 - `ListPullCorrections` (`internal/db/queries/reconciliation.sql`) selects only access-keeping kinds; OR-J38-S21, S25, S28, S32.
 - OR-J38-S71: proposal cancels spend the allowance once per subscription; a replay spends nothing.
 - OR-J34-S33: a book's cancel waits for the switch and the cap, and records its actor.
-- OR-J38-S73: a `failed` import cannot be applied.
+- OR-J38-S76: a `failed` import cannot be applied.
 - `ImportDeclaredSubscriptions` refuses an exhaustive book whose `expected_subscriptions` differs from its count.
 
 ## Tests
 
-- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42; `TestPSPImportSafeguards`: S73, S74.
+- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42; `TestPSPImportSafeguards`: S76, S77.
 - `TestPSPReconcile`: OR-J38-S20 to S29, S35, S71.
 - `TestMerchantConsole`: OR-J38-S30 to S34, S41.
 - `TestCCBillIdentity`: OR-J38-S37 to S40, S43; `TestCardGuard`: S36; `TestManualProviderRefresh`: S72.

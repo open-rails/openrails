@@ -19,7 +19,7 @@ import (
 )
 
 func TestPSPImportSafeguards(t *testing.T) {
-	t.Run("OR-J38-S73/a-failed-import-is-never-applied", func(t *testing.T) {
+	t.Run("OR-J38-S76/a-failed-import-is-never-applied", func(t *testing.T) {
 		iw := bootImportWorld(t, "stripe")
 		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(time.Second)
 		iw.stripe.AddProduct("prod_basic", "Basic")
@@ -68,7 +68,7 @@ func TestPSPImportSafeguards(t *testing.T) {
 		require.Equal(t, billing.PSPImportFailed, imp.Status, "a person creates a failed import again")
 	})
 
-	t.Run("OR-J38-S74/a-price-picked-for-an-import-record-is-never-deleted", func(t *testing.T) {
+	t.Run("OR-J38-S77/a-price-picked-for-an-import-record-is-never-deleted", func(t *testing.T) {
 		iw := newImportWorld(t, "ccbill")
 		for _, key := range []string{"picked", "current"} {
 			_, err := iw.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: []string{"member:" + key}})
