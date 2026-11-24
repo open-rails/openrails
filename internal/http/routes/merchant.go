@@ -3,7 +3,6 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingimport"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/router"
 )
@@ -12,7 +11,7 @@ import (
 // webhooks, portable archive and bulk import.
 var merchantRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/configuration", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "GetMerchantConfiguration", NoConn: true,
-		Cache: config.ReadMerchantConfiguration,
+		Cache: billing.ReadMerchantConfiguration,
 		Doc: "GetMerchantConfiguration reads the merchant's configuration, never its credentials, and its " +
 			"revision.",
 		Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Handler: h(handlers.GetMerchantConfiguration)},

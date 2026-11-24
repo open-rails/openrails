@@ -15,13 +15,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newIntentsCmd wires the read-only provider-intent-ledger CLI:
@@ -123,7 +124,7 @@ proration; stripe_tier_change: update, schedule or phases). --actor and
 				return fmt.Errorf("--intent must be a UUID: %w", err)
 			}
 			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
-			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(c.Context())
 			return runIntentsResolve(c.Context(), cfg, merchantSlug, id, resolution)
 		},
 	}
@@ -137,7 +138,7 @@ proration; stripe_tier_change: update, schedule or phases). --actor and
 	return cmd
 }
 
-func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug string, id uuid.UUID, resolution intents.Resolution) error {
+func runIntentsResolve(ctx context.Context, cfg *billing.Config, merchantSlug string, id uuid.UUID, resolution intents.Resolution) error {
 	if cfg == nil {
 		return fmt.Errorf("config not loaded")
 	}

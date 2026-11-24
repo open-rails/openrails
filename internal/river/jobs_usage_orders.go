@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
@@ -36,7 +35,7 @@ type UsageOrderWorker struct {
 	WorkerDefaults[money.UsageOrderArgs]
 	DB     *db.DB
 	Money  *money.MoneyService
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	Log    *slog.Logger
 }

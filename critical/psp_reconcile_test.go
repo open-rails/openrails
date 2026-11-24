@@ -22,7 +22,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -669,7 +668,7 @@ func TestPSPReconcile(t *testing.T) {
 
 	t.Run("OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target", func(t *testing.T) {
 		iw := bootImportWorldDeclaring(t, true, func(w *world) {
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 1}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 1}
 		}, "nmi")
 		iw.fleet.PeriodicJobs().Clear()
 		iw.start(t)

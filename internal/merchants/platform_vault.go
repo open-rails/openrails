@@ -86,7 +86,7 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 	}
 	prefix := strings.Trim(s.platformPrefix, "/")
 	if prefix == "" {
-		prefix = config.DefaultVaultScopePrefix
+		prefix = billing.DefaultConfig().Vault.ScopePrefix
 	}
 	doc, err := s.platformKV.ReadDocument(ctx, prefix+"/platform_vault/"+s.platformVault.TenantID)
 	if err != nil {

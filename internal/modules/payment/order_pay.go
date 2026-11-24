@@ -653,7 +653,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 				}
 			}
 			if row.Custodian == models.CustodianHyperSwitch {
-				if s.config == nil || s.config.HyperSwitch == nil {
+				if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 					return errors.New("HyperSwitch custody is not configured")
 				}
 				binding, err := charge.FreezeHyperSwitchBinding(ctx, q, charge.CustodyOf(d), row, chosen.PSPID, s.config.HyperSwitch.APIBaseURL)

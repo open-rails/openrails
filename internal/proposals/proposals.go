@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -36,14 +35,14 @@ import (
 // context.
 type Executor struct {
 	DB         *db.DB
-	Config     *config.Config
+	Config     *billing.Config
 	Clock      clockwork.Clock
 	Admissions *destructive.Admissions
 	Log        *slog.Logger
 }
 
 // New builds an executor.
-func New(database *db.DB, cfg *config.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
+func New(database *db.DB, cfg *billing.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
 	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock), Admissions: admissions, Log: database.Log}
 }
 

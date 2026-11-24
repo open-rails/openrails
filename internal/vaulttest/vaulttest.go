@@ -17,8 +17,7 @@ import (
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
-
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 const (
@@ -89,8 +88,8 @@ func New(t testing.TB) *Vault {
 
 // Config names the test's mount as OpenRails' KV mount (Config.Vault); pass
 // Client as Deps.Vault.
-func (v *Vault) Config() *openrails.VaultConfig {
-	return &openrails.VaultConfig{KVMount: v.Mount}
+func (v *Vault) Config() billing.VaultConfig {
+	return billing.VaultConfig{KVMount: v.Mount}
 }
 
 // Client is a root client of this Vault (Deps.Vault, or a test's own calls).

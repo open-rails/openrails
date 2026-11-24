@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 )
@@ -178,7 +177,7 @@ func (c *Client) ListProducts(ctx context.Context, params billing.ProductListPar
 		return c.readProducts(ctx, q.Encode(), by, values)
 	}
 	var out billing.ListPage[billing.Product]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products", query: params, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products", query: params, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

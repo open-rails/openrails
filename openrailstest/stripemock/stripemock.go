@@ -8,7 +8,7 @@
 //	stripe := stripemock.New(stripemock.Options{Clock: clock.Now})
 //	defer stripe.Close()
 //	engine, err := openrails.New(ctx, openrails.Config{
-//		ProviderSandbox: &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
+//		ProviderSandbox: billing.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
 //		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
 //			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
 //				"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),

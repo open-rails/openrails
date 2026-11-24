@@ -61,7 +61,7 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		pool.Close()
 	})
 	w.cfg = openrails.Config{
-		Database:      openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+		Database:      billing.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		ReturnOrigins: []string{"https://critical.invalid"},
 		Merchants: []billing.MerchantDeclaration{
 			{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},

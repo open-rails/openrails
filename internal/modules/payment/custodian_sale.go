@@ -38,7 +38,7 @@ type CustodianSaleService struct {
 	DB                   *db.DB
 	Fulfillment          *FulfillmentService
 	Rails                railresolve.Source
-	Config               *config.Config
+	Config               *billing.Config
 	Log                  *slog.Logger
 }
 

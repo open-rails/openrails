@@ -199,8 +199,8 @@ func clientMethod(r routes.Route, imports map[string]bool) (string, error) {
 		fields = append(fields, "query: params")
 	}
 	if r.Cache != "" {
-		imports[module+"/internal/config"] = true
-		fields = append(fields, "cache: config."+cacheConst(string(r.Cache)))
+		imports[module+"/billing"] = true
+		fields = append(fields, "cache: billing."+cacheConst(string(r.Cache)))
 	}
 	var answer reflect.Type
 	for _, reply := range r.Responses {

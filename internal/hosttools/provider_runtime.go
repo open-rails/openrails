@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -31,13 +30,13 @@ import (
 type providerRuntime struct {
 	StripeClients *stripeapi.Factory
 	DB            *db.DB
-	Config        *config.Config
+	Config        *billing.Config
 	Merchants     *merchants.Service
 }
 
 // providerRuntimeOptions is what a one-off provider read arms from.
 type providerRuntimeOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID

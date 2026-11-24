@@ -119,7 +119,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		t.Run("staff", func(t *testing.T) {
 			// The merchant's budget is 50 an hour; an actor's stays 5.
 			b := newNMIBook(t, func(w *world) {
-				w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
+				w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
 			})
 			armDestructive(t, b.a, true)
 			asOf := b.started.Add(10 * 24 * time.Hour)

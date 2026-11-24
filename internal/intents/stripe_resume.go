@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -54,7 +54,7 @@ type StripeResumeHandler struct {
 	StripeCancelHandler
 }
 
-func NewStripeResumeHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeResumeHandler {
+func NewStripeResumeHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeResumeHandler {
 	return &StripeResumeHandler{StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Clock: clock, Policy: DefaultBackoff}}
 }
 

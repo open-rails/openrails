@@ -62,7 +62,7 @@ func (c PSPCoverage) Complete() bool { return c.Declared > 0 && c.Pulled >= c.De
 // from the armed rail state (nil Merchants = nothing arms; fail closed).
 type MerchantFetcherBuilder struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
+	Config        *billing.Config
 	Merchants     *merchants.Service
 	DB            *db.DB
 

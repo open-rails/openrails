@@ -92,13 +92,13 @@ type Runtime struct {
 	// billing pass and merchant pulls.
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient
-	Config      *config.Config
+	Config      *billing.Config
 
 	// declared are the merchants Config declares (DeclareMerchants).
 	declared atomic.Pointer[declaredMerchants]
 
 	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
-	// (#746), built once from config.Config.TrustedProxies. A nil/empty
+	// (#746), built once from billing.Config.TrustedProxies. A nil/empty
 	// resolver trusts nothing (raw socket peer only). Every consumer that
 	// needs "the request's real client IP" — rate-limit subject keys, abuse
 	// tracking, webhook IPAddress recording, the CCBill IP allowlist —

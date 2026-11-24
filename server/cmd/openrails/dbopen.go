@@ -9,6 +9,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 )
@@ -25,7 +26,7 @@ func withCLIDB(cmd *cobra.Command, run func(context.Context, *db.DB) error) erro
 
 // bindCLIRiverProducer binds an insert-only River client in the configured
 // River schema: jobs a command commits wait there for the fleet.
-func bindCLIRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB) error {
+func bindCLIRiverProducer(ctx context.Context, cfg *billing.Config, database *db.DB) error {
 	schema := config.RiverSchemaName(cfg)
 	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true, Logger: slog.Default()})
 	if err != nil {
