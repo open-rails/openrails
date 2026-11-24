@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 459,
+  "scenario_count": 460,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2297,6 +2297,11 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J46-S02",
+      "journey": "J46",
+      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull proposes nothing for it"
     }
   ]
 }

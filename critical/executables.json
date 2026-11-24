@@ -1468,6 +1468,11 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J46-S02": [
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
     ]
   }
 }
