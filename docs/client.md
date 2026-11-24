@@ -815,16 +815,7 @@ flight, with no network call. Near a limit the request is decided on OpenRails,
 exactly, as a request hold of the gate's lease. A customer with no view waits for
 one `SyncLeases` round trip. Nothing tunes it.
 
-A limit may be overshot by a small, bounded amount: what other gates (and
-admissions and batch jobs) add for the customer within about four sync intervals,
-less the margin the gate keeps from what its views show others adding; steady
-traffic overshoots by nothing. While OpenRails is unreachable a gate keeps
-deciding on its views, spending at most its share of what each had left (the
-remaining divided by the merchant's live gates), so the gates together never
-spend more than was left; a request no share covers, or for a customer with no
-view, is `openrails.ErrUnavailable`. A gate with nothing to do stops syncing and
-its lease lapses; its next request is decided on its last view, and the next
-waits for a sync.
+A limit may be overshot by a small, bounded amount: what other gates (and admissions and batch jobs) add for the customer within about four sync intervals, less the margin the gate keeps from what its views show others adding; steady traffic overshoots by nothing. While OpenRails is unreachable a gate keeps deciding on the views it had when the outage began, spending at most its share of what each had left (the remaining under the request's credit line and caps, less what running charges drain, divided by the merchant's live gates), so the gates together never spend more than was left; a request no share covers, or for a customer with no such view, is `openrails.ErrUnavailable`. A gate with nothing to do stops syncing and its lease lapses; its next request is decided on its last view, and the next waits for a sync. A request whose view OpenRails refuses (a currency or invoker type it does not take, or a billing policy it cannot resolve now) gets that error alone; the gate's other customers and usage go on. A near-limit request whose answer is lost is released by the next sync unless a retry under its request id takes it first.
 
 ```go guide:gate-new
 gate, err := openrails.NewGate(client, openrails.GateDeps{})
@@ -906,18 +897,7 @@ own row.
 
 Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, admissions, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage orders still work.
 
-`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
-it for you. A batch job picks one `lse_` lease id for its stream and sends up to
-1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes
-a resend harmless, a changed item is `422 idempotency_key_reused`, a gap
-`409 usage_out_of_order`, and items past `usage.through_n` are resent. An item
-may be up to 35 days old. Usage counts toward every limit that applies to it: in
-the windows current when its request was admitted (`admitted_at`, else when it
-settles), and in the spend windows of the invoker attributes it reports
-(`trust_level`, `roles`, `resource`; the customer's own trust level when absent).
-It is priced by the rate cards in force when it settles. A priced meter that cannot price an item refuses it
-alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up
-to the policy's `bad_spend_windows`, never charged to a delegated invoker.
+`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends it for you. A batch job picks one `lse_` lease id for its stream and sends up to 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes a resend harmless, a changed item is `422 idempotency_key_reused`, a gap `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item may be up to 35 days old. Usage counts toward every limit that applies to it: in the windows current when its request was admitted (`admitted_at`, else when it settles), and in the spend windows of the invoker attributes it reports (`trust_level`, `roles`, `resource`; the customer's own trust level when absent; none while their billing policy cannot be resolved, as in an FX outage). It is priced by the rate cards in force when it settles. A priced meter that cannot price an item refuses it alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up to the policy's `bad_spend_windows`, never charged to a delegated invoker.
 
 A sync prices batches exactly (a period's charges always sum to the rate card's
 price of its total, however batched) and adds them to the customer's accrual for
