@@ -1,11 +1,10 @@
 // Package grants is the append-only grant ledger: derive-1 appends immutable
 // grant events (the sole writer of billing.grants); derive-2 projects them into
-// product access windows and credit-lot deposits. A credit grant IS its lot.
+// product access windows. Credit lots are the credits package's.
 package grants
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
 // Kind is what a grant confers.
@@ -23,7 +21,6 @@ type Kind string
 
 const (
 	Access Kind = "access"
-	Credit Kind = "credit"
 	// Entitlement and Ownership grants are history from before product access.
 	Entitlement Kind = "entitlement"
 	Ownership   Kind = "ownership"
@@ -38,8 +35,6 @@ const (
 	Grace        SourceType = "grace"
 	// Granted is a free product grant: comp, staff, import or migration.
 	Granted SourceType = "grant"
-	// Admin is an operator's credit deposit.
-	Admin SourceType = "admin"
 )
 
 // GrantReason says why a free product was granted.
@@ -52,24 +47,7 @@ const (
 	ReasonMigration GrantReason = "migration"
 )
 
-// Spec is captured on a credit grant at issuance, so derive-2 is a pure
-// function of the grant. Historical entitlement grants carried their keys.
-type Spec struct {
-	Entitlements []string           `json:"entitlements,omitempty"`
-	Deposit      *DepositProvenance `json:"deposit,omitempty"`
-}
-
-// DepositProvenance is recorded once with a credit deposit, never supplied by a replay.
-type DepositProvenance struct {
-	Source  string `json:"source"`
-	Invoker string `json:"invoker"`
-	// PaidAmount distinguishes purchased credits from manually granted deposits.
-	PaidAmount *int64 `json:"paid_amount,string,omitempty"`
-}
-
-// Ledger is the append-only grant ledger for one merchant. It composes a money
-// ledger over the same query handle so a credit grant and its deposit commit
-// together.
+// Ledger is the append-only grant ledger for one merchant.
 //
 // Valid time lives in starts_at/ends_at: backdatable, so the fold replays at
 // any wall clock. A termination is a point event at starts_at with ends_at
@@ -77,11 +55,7 @@ type DepositProvenance struct {
 type Ledger struct {
 	q        *gen.Queries
 	merchant uuid.UUID
-	money    *ledger.Ledger
 	now      func() time.Time
-	// liveAt, when set, is the instant CreditSpend's lots must not have
-	// lapsed by, in place of now.
-	liveAt *time.Time
 }
 
 // New binds a grant Ledger to a query handle and merchant. Compose it inside a
@@ -90,20 +64,18 @@ func New(q *gen.Queries, merchant uuid.UUID) *Ledger {
 	return &Ledger{
 		q:        q,
 		merchant: merchant,
-		money:    ledger.New(q, merchant),
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
 
-// SetClock overrides the grant ledger's time source (event timestamps, FIFO/
-// expiry "as-of"), so a caller that runs on an injected clock (e.g. the money
-// service) derives consistently. nil restores the default real clock.
+// SetClock overrides the grant ledger's time source (event timestamps), so a
+// caller that runs on an injected clock derives consistently. nil restores
+// the default real clock.
 func (l *Ledger) SetClock(now func() time.Time) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	l.now = now
-	l.money.SetClock(now)
 }
 
 // GrantInput describes a new grant to append.
@@ -114,12 +86,9 @@ type GrantInput struct {
 	Source   SourceType
 	SourceID string
 	Payment  *uuid.UUID
-	Spec     *Spec
 	StartsAt time.Time // zero => now
 	EndsAt   *time.Time
-	Amount   *int64  // credit lots
-	Currency *string // credit lots
-	Reason   *string // free-text provenance (a deposit's description)
+	Reason   *string // free-text provenance
 	// Actor and GrantReason attribute a free product grant (Source Granted).
 	Actor       string
 	GrantReason GrantReason
@@ -143,14 +112,6 @@ func seats(quantity *int) (*int32, error) {
 // Grant appends a 'grant' event (derive-1) and projects it (derive-2) on the
 // same queries, so the caller's transaction commits both or neither.
 func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, error) {
-	var spec []byte
-	if in.Spec != nil {
-		b, err := json.Marshal(in.Spec)
-		if err != nil {
-			return gen.BillingGrant{}, fmt.Errorf("grants: marshal spec: %w", err)
-		}
-		spec = b
-	}
 	starts := in.StartsAt
 	if starts.IsZero() {
 		starts = l.now()
@@ -171,9 +132,8 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, er
 		Quantity:   quantity,
 		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: in.Product,
 		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
-		Event: "grant", SupersedesID: nil, SpecSnapshot: spec,
-		StartsAt: starts, EndsAt: in.EndsAt, Amount: in.Amount, Currency: in.Currency,
-		Reason: in.Reason, Actor: actor, GrantReason: reason,
+		Event: "grant", SupersedesID: nil,
+		StartsAt: starts, EndsAt: in.EndsAt, Reason: in.Reason, Actor: actor, GrantReason: reason,
 	})
 	if err != nil {
 		return g, err
@@ -269,12 +229,6 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	if effective.IsZero() {
 		effective = l.now()
 	}
-	if Kind(g.Kind) == Credit && g.Currency != nil {
-		// What the customer's running charges accrued draws the lot while it lives.
-		if _, err := l.SettleRunningCharges(ctx, g.CustomerID, *g.Currency, l.now()); err != nil {
-			return gen.BillingGrant{}, err
-		}
-	}
 	sup := grantID
 	r := reason
 	var by *string
@@ -286,14 +240,13 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
 		Kind: g.Kind, SourceType: g.SourceType, SourceID: sourceIDOf(g), PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
-		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r, Actor: by,
+		StartsAt: effective, EndsAt: nil, Reason: &r, Actor: by,
 	})
 }
 
 // MaterializeGrant projects a single grant event (derive-2): the access window
-// of an access grant and the deposit of a credit grant. Terminated grants have
-// their projection retracted. Historical entitlement and ownership grants have
-// no projection.
+// of an access grant. Terminated grants have their window retracted.
+// Historical entitlement and ownership grants have no projection.
 func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error {
 	if g.Event != "grant" {
 		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
@@ -366,83 +319,12 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		}
 		return nil
 
-	case Credit:
-		if terminated {
-			return l.clawbackRevokedCredit(ctx, g)
-		}
-		deposited, err := l.q.GrantCreditDeposited(ctx, gen.GrantCreditDepositedParams{MerchantID: l.merchant, GrantID: g.ID})
-		if err != nil {
-			return err
-		}
-		if deposited {
-			return nil
-		}
-		if g.Amount == nil || g.Currency == nil {
-			return fmt.Errorf("grants: credit grant %s missing amount/currency", g.ID)
-		}
-		var spec Spec
-		if len(g.SpecSnapshot) > 0 {
-			if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
-				return fmt.Errorf("grants: decode credit funding: %w", err)
-			}
-		}
-		// The customer's usage so far draws the balance before the deposit.
-		if _, err := l.settleUsage(ctx, g.CustomerID, *g.Currency, nil); err != nil {
-			return fmt.Errorf("grants: post usage before the deposit: %w", err)
-		}
-		coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: g.ID.String()}
-		if spec.Deposit != nil && spec.Deposit.PaidAmount != nil {
-			if err := l.money.PurchasedDeposit(ctx, g.CustomerID, *g.Currency, *g.Amount, *spec.Deposit.PaidAmount, coord, g.ID); err != nil {
-				return err
-			}
-		} else if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount, coord, g.ID); err != nil {
-			return fmt.Errorf("grants: materialize credit deposit: %w", err)
-		}
-		// A lot that lapses is expired by its balance's watch.
-		if g.EndsAt != nil {
-			if err := ledger.WatchLapsingCredit(ctx, l.q, gen.WatchLapsingCreditParams{MerchantID: l.merchant, CustomerID: g.CustomerID, Currency: *g.Currency, Now: l.now()}); err != nil {
-				return fmt.Errorf("grants: watch the lapsing lot: %w", err)
-			}
-		}
-		return nil
-
 	case Entitlement, Ownership:
 		return nil
 
 	default:
 		return fmt.Errorf("grants: unknown kind %q", g.Kind)
 	}
-}
-
-// clawbackRevokedCredit moves a revoked credit lot's unspent remainder DR
-// customer_balance / CR revoked_credits: frozen and reversible, not refunded.
-// Idempotent: GetCreditLotRemaining nets out prior credit_revoke transfers.
-func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.BillingGrant) error {
-	if g.Currency == nil {
-		return fmt.Errorf("grants: revoked credit grant %s missing currency", g.ID)
-	}
-	remaining, err := l.q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: l.merchant, GrantID: g.ID})
-	if err != nil {
-		return fmt.Errorf("grants: lot remaining for %s: %w", g.ID, err)
-	}
-	if remaining <= 0 {
-		return nil // fully spent/expired/already-clawed — nothing to retract
-	}
-	cust, err := l.money.EnsureCustomerBalance(ctx, g.CustomerID, *g.Currency)
-	if err != nil {
-		return err
-	}
-	rev, err := l.money.EnsureSystemAccount(ctx, ledger.RevokedCredits, *g.Currency)
-	if err != nil {
-		return err
-	}
-	lot, c := g.ID, g.CustomerID
-	_, err = l.money.Apply(ctx, ledger.Transfer{
-		Debit: cust, Credit: rev, Amount: remaining, Currency: *g.Currency, Type: ledger.CreditRevoke,
-		Coord:   ledger.Coord{Operation: ledger.OpCreditRevoke, Source: "grant_revoke", SourceID: g.ID.String()},
-		GrantID: &lot, Customer: &c,
-	})
-	return err
 }
 
 // RevokeBySourceAsOf appends a revoke event to every LIVE grant of the customer
@@ -482,9 +364,9 @@ func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID, limit 
 	})
 }
 
-// UnretractedTerminations returns terminated grants whose derived effect is
-// still live (`derive.grant_effect.excess`). Repair = MaterializeGrant, which
-// retracts (access → revoke window; credit → clawback), idempotently.
+// UnretractedTerminations returns terminated grants whose window is still
+// live (`derive.grant_effect.excess`). Repair = MaterializeGrant, which
+// revokes the window, idempotently.
 func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID, limit int32) ([]gen.BillingGrant, error) {
 	return l.q.ListUnretractedTerminations(ctx, gen.ListUnretractedTerminationsParams{
 		MerchantID: l.merchant, CustomerID: customer, RowLimit: limit,

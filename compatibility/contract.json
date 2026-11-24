@@ -296,7 +296,8 @@
       "const (\n\tCodeSubscriptionResumable ErrorCode = \"subscription_resumable\"\n\n\tCodeSubscriptionPaidThrough ErrorCode = \"subscription_paid_through\"\n)",
       "const (\n\tCodeUnknownField ErrorCode = \"unknown_field\"\n\n\tCodeInvalidQuery ErrorCode = \"invalid_query\"\n\n\tCodeInvalidCursor        ErrorCode = \"invalid_cursor\"\n\tCodeUnsupportedMediaType ErrorCode = \"unsupported_media_type\"\n\tCodeRouteNotFound        ErrorCode = \"route_not_found\"\n\tCodeMethodNotAllowed     ErrorCode = \"method_not_allowed\"\n\n\tCodeMerchantMismatch ErrorCode = \"merchant_mismatch\"\n)",
       "const (\n\tCollectChargeAutomatically InvoiceCollectionMethod = \"charge_automatically\"\n\tCollectSendInvoice         InvoiceCollectionMethod = \"send_invoice\"\n)",
-      "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\n\tCreditGrantTerminated CreditGrantState = \"terminated\"\n)",
+      "const (\n\tCreditFundingPurchase  CreditFundingSource = \"purchase\"\n\tCreditFundingRecurring CreditFundingSource = \"recurring\"\n\tCreditFundingGrant     CreditFundingSource = \"grant\"\n\tCreditFundingPromotion CreditFundingSource = \"promotion\"\n\tCreditFundingImport    CreditFundingSource = \"import\"\n)",
+      "const (\n\tCreditGrantActive    CreditGrantState = \"active\"\n\tCreditGrantScheduled CreditGrantState = \"scheduled\"\n\tCreditGrantSpent     CreditGrantState = \"spent\"\n\tCreditGrantExpired   CreditGrantState = \"expired\"\n\tCreditGrantRevoked   CreditGrantState = \"revoked\"\n\n\tCreditGrantRefunded CreditGrantState = \"refunded\"\n)",
       "const (\n\tDeclineGeneric           DeclineReason = \"generic_decline\"\n\tDeclineDoNotHonor        DeclineReason = \"do_not_honor\"\n\tDeclineInsufficientFunds DeclineReason = \"insufficient_funds\"\n\tDeclineOverLimit         DeclineReason = \"over_limit\"\n\tDeclineCallIssuer        DeclineReason = \"call_issuer\"\n\tDeclineRetryLater        DeclineReason = \"retry_later\"\n\tDeclineTryAgainLater     DeclineReason = \"try_again_later\"\n\tDeclineSecurityViolation DeclineReason = \"security_violation\"\n\tDeclineRestrictedCard    DeclineReason = \"restricted_card\"\n\n\tDeclineIncorrectNumber      DeclineReason = \"incorrect_number\"\n\tDeclineNoSuchIssuer         DeclineReason = \"no_such_issuer\"\n\tDeclineInvalidAccount       DeclineReason = \"invalid_account\"\n\tDeclineExpiredCard          DeclineReason = \"expired_card\"\n\tDeclineInvalidExpiry        DeclineReason = \"invalid_expiry\"\n\tDeclineIncorrectCVC         DeclineReason = \"incorrect_cvc\"\n\tDeclineIncorrectZip         DeclineReason = \"incorrect_zip\"\n\tDeclineIncorrectAddress     DeclineReason = \"incorrect_address\"\n\tDeclineInvalidPIN           DeclineReason = \"invalid_pin\"\n\tDeclineUpdateCardholderData DeclineReason = \"update_cardholder_data\"\n\n\tDeclineTransactionNotAllowed  DeclineReason = \"transaction_not_allowed\"\n\tDeclineCardNotSupported       DeclineReason = \"card_not_supported\"\n\tDeclineCurrencyNotSupported   DeclineReason = \"currency_not_supported\"\n\tDeclineAuthenticationRequired DeclineReason = \"authentication_required\"\n\tDeclinePickupCard             DeclineReason = \"pickup_card\"\n\tDeclineLostCard               DeclineReason = \"lost_card\"\n\tDeclineStolenCard             DeclineReason = \"stolen_card\"\n\tDeclineFraudulent             DeclineReason = \"fraudulent\"\n\tDeclineStopRecurring          DeclineReason = \"stop_recurring\"\n\n\tDeclineGatewayRejected DeclineReason = \"gateway_rejected\"\n\tDeclineBlockedByPSP    DeclineReason = \"blocked_by_psp\"\n\n\tDeclineProcessingError      DeclineReason = \"processing_error\"\n\tDeclineCommunicationError   DeclineReason = \"communication_error\"\n\tDeclineIssuerUnavailable    DeclineReason = \"issuer_unavailable\"\n\tDeclineInvalidRequest       DeclineReason = \"invalid_request\"\n\tDeclineMerchantConfig       DeclineReason = \"merchant_config\"\n\tDeclineDuplicateTransaction DeclineReason = \"duplicate_transaction\"\n\n\tDeclineUnknown DeclineReason = \"unknown\"\n\n\tDeclinePaymentPageExpired       DeclineReason = \"payment_page_expired\"\n\tDeclineStoredCredentialRequired DeclineReason = \"stored_credential_required\"\n)",
       "const (\n\tDefaultPageLimit = 50\n\tMaxPageLimit     = 500\n)",
       "const (\n\tDefaultUsagePageLimit = 100\n\tMaxUsagePageLimit     = 1000\n)",
@@ -718,7 +719,7 @@
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
       "type CreateCreditGrantBatchParams struct {\n\tItems []CreateCreditGrantParams `json:\"items\"`\n}",
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
-      "type CreateCreditGrantParams struct {\n\tCustomerID  CustomerID       `json:\"customer_id\"`\n\tCurrency    catalog.Currency `json:\"currency\"`\n\tAmount      int64            `json:\"amount,string\"`\n\tSourceID    string           `json:\"source_id\"`\n\tSource      string           `json:\"source\"`\n\tInvoker     string           `json:\"invoker,omitempty\"`\n\tExpiresAt   *time.Time       `json:\"expires_at,omitempty\"`\n\tDescription *string          `json:\"description,omitempty\"`\n}",
+      "type CreateCreditGrantParams struct {\n\tCustomerID    CustomerID          `json:\"customer_id\"`\n\tCurrency      catalog.Currency    `json:\"currency\"`\n\tAmount        int64               `json:\"amount,string\"`\n\tSourceID      string              `json:\"source_id\"`\n\tSource        string              `json:\"source\"`\n\tFundingSource CreditFundingSource `json:\"funding_source,omitempty\"`\n\tInvoker       string              `json:\"invoker,omitempty\"`\n\tExpiresAt     *time.Time          `json:\"expires_at,omitempty\"`\n\tDescription   *string             `json:\"description,omitempty\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
       "type CreateMyOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines,omitempty\"`\n\tCart          bool                `json:\"cart,omitempty\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n\n\tPayURL *MyOrderPayURLParams `json:\"pay_url,omitempty\"`\n}",
       "type CreateOrderParams struct {\n\tCustomerID CustomerID        `json:\"customer_id\"`\n\tLines      []OrderLineParams `json:\"lines\"`\n\tExpiresAt  *time.Time        `json:\"expires_at,omitempty\"`\n\n\tPayURL *OrderPayURLParams `json:\"pay_url,omitempty\"`\n}",
@@ -736,7 +737,8 @@
       "type CreateProvisioningTokenParams struct {\n\tName string `json:\"name\"`\n}",
       "type CreateTestMessageParams struct {\n\tEventType string           `json:\"event_type\"`\n\tLanguage  string           `json:\"language\"`\n\tTemplate  *MessageTemplate `json:\"template\"`\n}",
       "type CreatedProvisioningToken struct {\n\tProvisioningToken\n\tToken string `json:\"token\"`\n}",
-      "type CreditGrant struct {\n\tID                CreditGrantID    `json:\"id\"`\n\tCustomerID        CustomerID       `json:\"customer_id\"`\n\tCurrency          catalog.Currency `json:\"currency\"`\n\tAmount            int64            `json:\"amount,string\"`\n\tSpentAmount       int64            `json:\"spent_amount,string\"`\n\tRemainingAmount   int64            `json:\"remaining_amount,string\"`\n\tRevokedAmount     int64            `json:\"revoked_amount,string\"`\n\tExpiredAmount     int64            `json:\"expired_amount,string\"`\n\tState             CreditGrantState `json:\"state\"`\n\tSourceType        string           `json:\"source_type\"`\n\tSourceID          *string          `json:\"source_id\"`\n\tDescription       *string          `json:\"description\"`\n\tStartsAt          time.Time        `json:\"starts_at\"`\n\tExpiresAt         *time.Time       `json:\"expires_at\"`\n\tCreatedAt         time.Time        `json:\"created_at\"`\n\tTerminatedAt      *time.Time       `json:\"terminated_at\"`\n\tTerminationReason *string          `json:\"termination_reason\"`\n\tReplayed          bool             `json:\"replayed\"`\n}",
+      "type CreditFundingSource string",
+      "type CreditGrant struct {\n\tID              CreditGrantID       `json:\"id\"`\n\tCustomerID      CustomerID          `json:\"customer_id\"`\n\tCurrency        catalog.Currency    `json:\"currency\"`\n\tAmount          int64               `json:\"amount,string\"`\n\tSpentAmount     int64               `json:\"spent_amount,string\"`\n\tRemainingAmount int64               `json:\"remaining_amount,string\"`\n\tRevokedAmount   int64               `json:\"revoked_amount,string\"`\n\tExpiredAmount   int64               `json:\"expired_amount,string\"`\n\tRefundedAmount  int64               `json:\"refunded_amount,string\"`\n\tState           CreditGrantState    `json:\"state\"`\n\tFundingSource   CreditFundingSource `json:\"funding_source\"`\n\tPaidAmount      *int64              `json:\"paid_amount,string\"`\n\tPaidCurrency    *catalog.Currency   `json:\"paid_currency\"`\n\tSourceID        *string             `json:\"source_id\"`\n\tDescription     *string             `json:\"description\"`\n\tStartsAt        time.Time           `json:\"starts_at\"`\n\tExpiresAt       *time.Time          `json:\"expires_at\"`\n\tCreatedAt       time.Time           `json:\"created_at\"`\n\tRevokedAt       *time.Time          `json:\"revoked_at\"`\n\tRevokeReason    *string             `json:\"revoke_reason\"`\n\tReplayed        bool                `json:\"replayed\"`\n}",
       "type CreditGrantID uuid.UUID",
       "type CreditGrantListParams struct {\n\tCustomerID CustomerID       `form:\"customer_id\"`\n\tCurrency   catalog.Currency `form:\"currency\"`\n\tSourceID   string           `form:\"source_id\"`\n\n\tIDs []CreditGrantID `form:\"ids,comma\"`\n\tPageRequest\n}",
       "type CreditGrantState string",
@@ -1737,10 +1739,6 @@
       "type openaiTool struct {\n\tType     string            `json:\"type\"`\n\tFunction openaiFunctionDef `json:\"function\"`\n}",
       "type openaiToolCall struct {\n\tID       string             `json:\"id\"`\n\tType     string             `json:\"type\"`\n\tFunction openaiFunctionCall `json:\"function\"`\n}"
     ],
-    "internal/modules/grants": [
-      "type DepositProvenance struct {\n\tSource  string `json:\"source\"`\n\tInvoker string `json:\"invoker\"`\n\n\tPaidAmount *int64 `json:\"paid_amount,string,omitempty\"`\n}",
-      "type Spec struct {\n\tEntitlements []string           `json:\"entitlements,omitempty\"`\n\tDeposit      *DepositProvenance `json:\"deposit,omitempty\"`\n}"
-    ],
     "internal/modules/leases": [
       "type holdTerms struct {\n\tInvoker     string      `json:\"invoker\"`\n\tInvokerType string      `json:\"invoker_type\"`\n\tTrustLevel  string      `json:\"trust_level\"`\n\tRoles       []uuid.UUID `json:\"roles\"`\n\tResource    string      `json:\"resource\"`\n\tEventType   string      `json:\"event_type\"`\n}",
       "type receipt struct {\n\tFromN    int64          `json:\"from_n\"`\n\tThroughN int64          `json:\"through_n\"`\n\tDigest   string         `json:\"digest\"`\n\tRefused  []refusedEntry `json:\"refused\"`\n}",
@@ -1769,7 +1767,8 @@
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n}"
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n}",
+      "type LotDrift struct {\n\tCreditGrantID  uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID     uuid.UUID `json:\"merchant_id\"`\n\tCustomerID     uuid.UUID `json:\"customer_id\"`\n\tUnit           string    `json:\"unit\"`\n\tStoredCredited int64     `json:\"stored_credited\"`\n\tLoggedCredited int64     `json:\"logged_credited\"`\n\tStoredDebited  int64     `json:\"stored_debited\"`\n\tLoggedDebited  int64     `json:\"logged_debited\"`\n}"
     ],
     "internal/modules/orders": [
       "type cartLine struct {\n\tPriceID  uuid.UUID `json:\"price_id\"`\n\tQuantity *int      `json:\"quantity,omitempty\"`\n\tAmount   *int64    `json:\"amount,omitempty,string\"`\n}"
@@ -3644,18 +3643,6 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "uuid": "github.com/google/uuid"
     },
-    "internal/modules/grants/grants.go": {
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "math": "math",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/modules/leases/sync.go": {
       "admission": "github.com/open-rails/openrails/internal/modules/admission",
       "api": "github.com/open-rails/openrails/internal/api",
@@ -4597,6 +4584,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "context": "context",
+      "credits": "github.com/open-rails/openrails/internal/modules/money/credits",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",

@@ -435,6 +435,7 @@ func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestru
 const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :one
 SELECT
   EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
+  OR EXISTS(SELECT 1 FROM billing.credit_grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
   OR EXISTS(SELECT 1 FROM billing.order_attempts cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
   AS protected
@@ -445,7 +446,7 @@ type PaymentHasProtectedDependentsParams struct {
 	PaymentID  uuid.UUID
 }
 
-// A payment that feeds a grant or backs a refund or order attempt is
+// A payment that feeds a grant or a credit lot, or backs a refund or order attempt is
 // retracted through convergence (grant revoke), never pruned.
 func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg PaymentHasProtectedDependentsParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, paymentHasProtectedDependents, arg.MerchantID, arg.PaymentID)

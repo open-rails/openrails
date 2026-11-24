@@ -54,19 +54,34 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 
 // CreateCreditGrantParams grants a customer prepaid credit. SourceID identifies the
 // grant per customer and must be reproducible across retries: an identical
-// retry returns the existing grant (Replayed), one whose amount, currency or
-// expiry differs is ErrIdempotencyKeyReused. Source labels where the money
-// came from; Invoker records who granted it (default: the customer).
+// retry returns the existing grant (Replayed), one whose amount, currency,
+// expiry or funding source differs is ErrIdempotencyKeyReused. Source labels
+// where the credit came from; Invoker records who granted it (default: the
+// customer). FundingSource is grant (the default), promotion or import.
 type CreateCreditGrantParams struct {
-	CustomerID  CustomerID       `json:"customer_id"`
-	Currency    catalog.Currency `json:"currency"`
-	Amount      int64            `json:"amount,string"`
-	SourceID    string           `json:"source_id"`
-	Source      string           `json:"source"`
-	Invoker     string           `json:"invoker,omitempty"`
-	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-	Description *string          `json:"description,omitempty"`
+	CustomerID    CustomerID          `json:"customer_id"`
+	Currency      catalog.Currency    `json:"currency"`
+	Amount        int64               `json:"amount,string"`
+	SourceID      string              `json:"source_id"`
+	Source        string              `json:"source"`
+	FundingSource CreditFundingSource `json:"funding_source,omitempty"`
+	Invoker       string              `json:"invoker,omitempty"`
+	ExpiresAt     *time.Time          `json:"expires_at,omitempty"`
+	Description   *string             `json:"description,omitempty"`
 }
+
+// CreditFundingSource is where a credit grant's units came from: bought
+// (purchase, or recurring for a recurring price's cycle), given (grant,
+// promotion) or brought from another system (import).
+type CreditFundingSource string
+
+const (
+	CreditFundingPurchase  CreditFundingSource = "purchase"
+	CreditFundingRecurring CreditFundingSource = "recurring"
+	CreditFundingGrant     CreditFundingSource = "grant"
+	CreditFundingPromotion CreditFundingSource = "promotion"
+	CreditFundingImport    CreditFundingSource = "import"
+)
 
 // CreditGrantState is where a credit grant stands.
 type CreditGrantState string
@@ -77,33 +92,39 @@ const (
 	CreditGrantSpent     CreditGrantState = "spent"
 	CreditGrantExpired   CreditGrantState = "expired"
 	CreditGrantRevoked   CreditGrantState = "revoked"
-	// CreditGrantTerminated was superseded by a later grant.
-	CreditGrantTerminated CreditGrantState = "terminated"
+	// CreditGrantRefunded has nothing left because a refund or chargeback of
+	// its payment withdrew it.
+	CreditGrantRefunded CreditGrantState = "refunded"
 )
 
 // CreditGrant is one lot of prepaid credit on a customer's balance, spent
-// first-in first-out. SourceType says what created it (admin for a merchant
-// grant, purchase, subscription); SourceID is that source's id. Replayed: a
-// create that found the grant already made.
+// soonest expiry first. Amount is what it delivered; RemainingAmount what is
+// left, and the spent, expired, revoked and refunded amounts what left it.
+// PaidAmount and PaidCurrency are what was paid for it, null for a gift.
+// SourceID is the funding's id: the payment that bought it, or the caller's
+// key. Replayed: a create that found the grant already made.
 type CreditGrant struct {
-	ID                CreditGrantID    `json:"id"`
-	CustomerID        CustomerID       `json:"customer_id"`
-	Currency          catalog.Currency `json:"currency"`
-	Amount            int64            `json:"amount,string"`
-	SpentAmount       int64            `json:"spent_amount,string"`
-	RemainingAmount   int64            `json:"remaining_amount,string"`
-	RevokedAmount     int64            `json:"revoked_amount,string"`
-	ExpiredAmount     int64            `json:"expired_amount,string"`
-	State             CreditGrantState `json:"state"`
-	SourceType        string           `json:"source_type"`
-	SourceID          *string          `json:"source_id"`
-	Description       *string          `json:"description"`
-	StartsAt          time.Time        `json:"starts_at"`
-	ExpiresAt         *time.Time       `json:"expires_at"`
-	CreatedAt         time.Time        `json:"created_at"`
-	TerminatedAt      *time.Time       `json:"terminated_at"`
-	TerminationReason *string          `json:"termination_reason"`
-	Replayed          bool             `json:"replayed"`
+	ID              CreditGrantID       `json:"id"`
+	CustomerID      CustomerID          `json:"customer_id"`
+	Currency        catalog.Currency    `json:"currency"`
+	Amount          int64               `json:"amount,string"`
+	SpentAmount     int64               `json:"spent_amount,string"`
+	RemainingAmount int64               `json:"remaining_amount,string"`
+	RevokedAmount   int64               `json:"revoked_amount,string"`
+	ExpiredAmount   int64               `json:"expired_amount,string"`
+	RefundedAmount  int64               `json:"refunded_amount,string"`
+	State           CreditGrantState    `json:"state"`
+	FundingSource   CreditFundingSource `json:"funding_source"`
+	PaidAmount      *int64              `json:"paid_amount,string"`
+	PaidCurrency    *catalog.Currency   `json:"paid_currency"`
+	SourceID        *string             `json:"source_id"`
+	Description     *string             `json:"description"`
+	StartsAt        time.Time           `json:"starts_at"`
+	ExpiresAt       *time.Time          `json:"expires_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	RevokedAt       *time.Time          `json:"revoked_at"`
+	RevokeReason    *string             `json:"revoke_reason"`
+	Replayed        bool                `json:"replayed"`
 }
 
 // CreditGrantListParams filters a customer's credit grants, newest first.

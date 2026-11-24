@@ -425,6 +425,7 @@ const productHoldsReferences = `-- name: ProductHoldsReferences :one
 SELECT (
     EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
     OR EXISTS (SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
+    OR EXISTS (SELECT 1 FROM billing.credit_grants WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
     OR EXISTS (SELECT 1 FROM billing.product_access WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = $1::uuid AND from_product_id = $2::uuid)
     OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid AND product_id = $2::uuid)
@@ -437,7 +438,7 @@ type ProductHoldsReferencesParams struct {
 }
 
 // Whether a record refers to the product itself: a subscription, a grant,
-// product access, a price migration or a meter's rate card. Its prices'
+// a credit lot, product access, a price migration or a meter's rate card. Its prices'
 // references, purchase lines among them, are PricesHoldReferences'.
 func (q *Queries) ProductHoldsReferences(ctx context.Context, arg ProductHoldsReferencesParams) (bool, error) {
 	row := q.db.QueryRow(ctx, productHoldsReferences, arg.MerchantID, arg.ProductID)

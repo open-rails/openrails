@@ -171,7 +171,7 @@ Checks:
   chargeback and uncertain state.
 
 ### 3. Exact money
-Access windows and keys carry no amounts; credit lots in `grants` belong to
+Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to
 [prepaid credits](prepaid-credits.md). Holds and limit windows are `int64` native
 units of one currency each. The one FX use converts a spend window's cap declared
 in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap,

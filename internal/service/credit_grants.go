@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -54,6 +55,14 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		if strings.TrimSpace(item.SourceID) == "" || len(item.SourceID) > maxSourceIDBytes {
 			return nil, apperr.Invalidf("source_id must contain 1 to %d bytes", maxSourceIDBytes).WithParam(param("source_id"))
 		}
+		funding := credits.Grant
+		switch item.FundingSource {
+		case "", billing.CreditFundingGrant:
+		case billing.CreditFundingPromotion, billing.CreditFundingImport:
+			funding = credits.FundingSource(item.FundingSource)
+		default:
+			return nil, apperr.Invalidf("funding_source must be grant, promotion or import").WithParam(param("funding_source"))
+		}
 		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(string(item.Currency)))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {
 			return nil, s.currencyRefusal(ctx, param("currency"), currency)
@@ -80,7 +89,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		deposits[i] = money.DepositParams{
 			CustomerID: &customer, Invoker: invoker, Currency: currency, Amount: item.Amount,
 			Source: key.Source(), SourceID: &sourceID, ExpiresAt: expiresAt, Description: item.Description,
-			RepayOwed: true,
+			Funding: funding, RepayOwed: true,
 		}
 	}
 	trxs, err := s.moneyService().DepositBatch(ctx, deposits)

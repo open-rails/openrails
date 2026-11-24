@@ -727,8 +727,8 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
-| `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
+| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
+| `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
 ```go guide:credit-grant

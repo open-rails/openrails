@@ -222,7 +222,7 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 		}
 		// A lot that lapsed is expired first, after the usage before it posts
 		// from it: what this batch accrues never draws a lapsed lot.
-		if _, err := s.grantLedger(q, merchantID).ExpireLapsedBy(ctx, a.customer, a.currency, now); err != nil {
+		if _, err := s.creditLots(q, merchantID).ExpireLapsedBy(ctx, a.customer, a.currency, now); err != nil {
 			return nil, err
 		}
 		anchor, err := s.periodAnchorFor(ctx, q, merchantID, a.customer, a.currency)

@@ -39,7 +39,7 @@ const (
 
 // TransferType is the closed vocabulary of ledger_transfers.transfer_type,
 // mirrored by ledger_transfers_type_check. The lot-once index
-// ledger_transfers_grant_id_transfer_type_key is partial on these literals, so
+// ledger_transfers_credit_grant_id_transfer_type_key is partial on these literals, so
 // a typo would escape it and post a duplicate.
 type TransferType string
 
@@ -63,7 +63,7 @@ const (
 	// is voided: the inverse of OwedAccrual. OwedPayment means a rail collected.
 	OwedWriteoff TransferType = "owed_writeoff"
 	// OwedRepayment pays debt from a newly funded credit lot (customer balance
-	// -> arrears liability), carrying that lot's grant_id.
+	// -> arrears liability), naming that lot.
 	OwedRepayment TransferType = "owed_repayment"
 )
 
@@ -75,7 +75,7 @@ var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseReven
 var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
-// ledger_transfers_grant_id_transfer_type_key.
+// ledger_transfers_credit_grant_id_transfer_type_key.
 var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
 
 // Operation is the kind of money write that posted a transfer, part of the
@@ -285,15 +285,12 @@ type Transfer struct {
 	Type          TransferType
 	// Coord is the operation coordinate this leg is idempotent on. Required.
 	Coord Coord
-	// GrantID attributes a credit_spend/credit_expire/deposit to its credit
-	// lot, independently of Coord.
-	GrantID           *uuid.UUID
+	// CreditGrantID names the credit lot the leg moves units of or
+	// attributes money to, independently of Coord.
+	CreditGrantID     *uuid.UUID
 	Customer          *uuid.UUID
 	Invoker, Resource *string
 	Order             *uuid.UUID
-	// AllowDebitNegativeUpTo relaxes the debit account's
-	// debits_must_not_exceed_credits floor (e.g. an arrears credit line).
-	AllowDebitNegativeUpTo int64
 }
 
 // Apply is ApplyIdempotent for callers that don't need the applied flag: it
@@ -318,21 +315,20 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		return gen.BillingLedgerTransfer{}, false, err
 	}
 	tr, err = l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
-		MerchantID:             l.merchant,
-		DebitAccountID:         t.Debit,
-		CreditAccountID:        t.Credit,
-		Amount:                 t.Amount,
-		Currency:               t.Currency,
-		TransferType:           string(t.Type),
-		AllowDebitNegativeUpTo: t.AllowDebitNegativeUpTo,
-		Operation:              string(t.Coord.Operation),
-		Source:                 t.Coord.Source,
-		SourceID:               t.Coord.SourceID,
-		GrantID:                t.GrantID,
-		CustomerID:             t.Customer,
-		InvokerID:              t.Invoker,
-		Resource:               t.Resource,
-		OrderID:                t.Order,
+		MerchantID:      l.merchant,
+		DebitAccountID:  t.Debit,
+		CreditAccountID: t.Credit,
+		Amount:          t.Amount,
+		Currency:        t.Currency,
+		TransferType:    string(t.Type),
+		Operation:       string(t.Coord.Operation),
+		Source:          t.Coord.Source,
+		SourceID:        t.Coord.SourceID,
+		CreditGrantID:   t.CreditGrantID,
+		CustomerID:      t.Customer,
+		InvokerID:       t.Invoker,
+		Resource:        t.Resource,
+		OrderID:         t.Order,
 	})
 	if err == nil {
 		// A transfer that names a customer changes what it may spend: one
@@ -369,14 +365,14 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 // identity (coordinate + lot), if any.
 func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, bool, error) {
 	row, err := l.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
-		MerchantID:   l.merchant,
-		CustomerID:   t.Customer,
-		Currency:     t.Currency,
-		TransferType: string(t.Type),
-		Operation:    string(t.Coord.Operation),
-		Source:       t.Coord.Source,
-		SourceID:     t.Coord.SourceID,
-		GrantID:      t.GrantID,
+		MerchantID:    l.merchant,
+		CustomerID:    t.Customer,
+		Currency:      t.Currency,
+		TransferType:  string(t.Type),
+		Operation:     string(t.Coord.Operation),
+		Source:        t.Coord.Source,
+		SourceID:      t.Coord.SourceID,
+		CreditGrantID: t.CreditGrantID,
 	})
 	if err == nil {
 		return row, true, nil
@@ -412,7 +408,7 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 	}
 	if grantID != uuid.Nil {
 		g := grantID
-		t.GrantID = &g
+		t.CreditGrantID = &g
 	}
 	return l.Apply(ctx, t)
 }
@@ -495,6 +491,6 @@ func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency str
 	c := customer
 	return l.Apply(ctx, Transfer{
 		Debit: cust, Credit: liab, Amount: amount, Currency: currency, Type: OwedRepayment,
-		Coord: coord, GrantID: &lot, Customer: &c, Order: order,
+		Coord: coord, CreditGrantID: &lot, Customer: &c, Order: order,
 	})
 }

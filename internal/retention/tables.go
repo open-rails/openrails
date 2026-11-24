@@ -41,6 +41,8 @@ var Tables = map[string]Table{
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
 	"grants":                        {Permanent, permanent},
+	"credit_grants":                 {Permanent, permanent},
+	"credit_grant_events":           {Permanent, permanent},
 	"payments":                      {Permanent, permanent},
 	"provider_bills":                {Permanent, "permanent with the financial order."},
 	"provider_schedules":            {Permanent, permanent},

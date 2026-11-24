@@ -2,7 +2,6 @@ package money
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +18,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -30,27 +29,34 @@ var (
 	ErrCreditGrantHeld        = errors.New("credit_grant_held")
 )
 
+// creditGrantFromRow reads a lot's state from its columns: a lot with nothing
+// left ended by a refund when one withdrew from it, else by spending.
 func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.CreditGrant {
 	state := billing.CreditGrantActive
 	switch {
-	case row.Termination == "revoke":
+	case row.RevokedAt != nil:
 		state = billing.CreditGrantRevoked
-	case row.Termination == "expire":
+	case row.ExpiresAt != nil && !row.ExpiresAt.After(now):
 		state = billing.CreditGrantExpired
-	case row.Termination != "":
-		state = billing.CreditGrantTerminated
-	case row.EndsAt != nil && !row.EndsAt.After(now):
-		state = billing.CreditGrantExpired
-	case row.RemainingAmount <= 0:
+	case row.Remaining <= 0 && row.Refunded > 0:
+		state = billing.CreditGrantRefunded
+	case row.Remaining <= 0:
 		state = billing.CreditGrantSpent
 	case row.StartsAt.After(now):
 		state = billing.CreditGrantScheduled
 	}
-	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
-		Amount: row.Amount, SpentAmount: row.SpentAmount, RemainingAmount: row.RemainingAmount, RevokedAmount: row.RevokedAmount,
-		ExpiredAmount: row.ExpiredAmount, State: state, SourceType: row.SourceType, SourceID: sourceRef(row.SourceType, row.SourceID),
-		Description: row.Reason, StartsAt: row.StartsAt, ExpiresAt: row.EndsAt, CreatedAt: row.CreatedAt,
-		TerminatedAt: row.TerminatedAt, TerminationReason: row.TerminationReason}
+	var paidCurrency *catalog.Currency
+	if row.PaidCurrency != nil {
+		c := catalog.Currency(*row.PaidCurrency)
+		paidCurrency = &c
+	}
+	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Unit),
+		Amount: row.Units, SpentAmount: row.Spent, RemainingAmount: row.Remaining, RevokedAmount: row.Revoked,
+		ExpiredAmount: row.Expired, RefundedAmount: row.Refunded, State: state,
+		FundingSource: billing.CreditFundingSource(row.FundingSource), PaidAmount: row.PaidAmount, PaidCurrency: paidCurrency,
+		SourceID: sourceRef(credits.FundingSource(row.FundingSource), row.SourceID), Description: row.Description,
+		StartsAt: row.StartsAt, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt,
+		RevokedAt: row.RevokedAt, RevokeReason: row.RevokeReason}
 }
 
 // ListCreditGrants lists a customer's credit grants, newest first.
@@ -112,7 +118,7 @@ func (s *MoneyService) GetCreditGrant(ctx context.Context, grantID uuid.UUID) (*
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).GetCreditGrant(ctx, gen.GetCreditGrantParams{MerchantID: mid.UUID(), GrantID: grantID})
+	row, err := s.db.Gen(ctx).GetCreditGrant(ctx, gen.GetCreditGrantParams{MerchantID: mid.UUID(), ID: grantID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCreditGrantNotFound
 	}
@@ -141,7 +147,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	args := gen.GetCreditGrantParams{MerchantID: mid.UUID(), GrantID: grantID}
+	args := gen.GetCreditGrantParams{MerchantID: mid.UUID(), ID: grantID}
 	// The grant names its customer, whose money lock the revocation takes.
 	addressed, err := s.db.Gen(ctx).GetCreditGrant(ctx, args)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -155,7 +161,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 		current.Replayed = true
 		return &current, nil
 	}
-	if addressed.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+	if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 		return nil, ErrCreditGrantUnavailable
 	}
 	command, err := destructive.CommandFromContext(ctx, destructive.RevokeCredit, grantID.String(), "credit-revoke:"+grantID.String(), struct{ Reason string }{reason})
@@ -188,12 +194,12 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 				result = &current
 				return nil
 			}
-			if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
+			if current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 				return ErrCreditGrantUnavailable
 			}
 			// What running charges accrued is spend the lots have funded: it is
 			// posted before the remainder is read.
-			if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Currency); err != nil {
+			if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Unit); err != nil {
 				return err
 			}
 			if row, err = q.GetCreditGrant(ctx, args); err != nil {
@@ -202,26 +208,15 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 			if current = creditGrantFromRow(row, s.now()); current.RemainingAmount <= 0 {
 				return ErrCreditGrantUnavailable
 			}
-			original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
+			lot, err := q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: mid.UUID(), ID: grantID})
 			if err != nil {
 				return err
 			}
-			var provenance grants.Spec
-			if len(original.SpecSnapshot) > 0 {
-				if err := json.Unmarshal(original.SpecSnapshot, &provenance); err != nil {
-					return err
-				}
+			// A pending refund of the lot's payment needs it whole.
+			if lot.UnitsReserved > 0 {
+				return ErrCreditGrantHeld
 			}
-			if original.PaymentID != nil && provenance.Deposit != nil && provenance.Deposit.PaidAmount != nil {
-				pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: *original.PaymentID})
-				if err != nil {
-					return err
-				}
-				if pending > 0 {
-					return ErrCreditGrantHeld
-				}
-			}
-			bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Currency)
+			bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Unit)
 			if err != nil {
 				return err
 			}
@@ -235,12 +230,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 				return ErrCreditGrantHeld
 			}
 			changed = true
-			ledger := grants.New(q, mid.UUID())
-			ledger.SetClock(s.now)
-			if _, err := ledger.Revoke(ctx, grantID, reason, actor); err != nil {
-				return err
-			}
-			if err := ledger.MaterializeGrant(ctx, original); err != nil {
+			if _, err := s.creditLots(q, mid.UUID()).Revoke(ctx, grantID, reason, actor, time.Time{}); err != nil {
 				return err
 			}
 			updated, err := q.GetCreditGrant(ctx, args)
@@ -256,11 +246,15 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 	return result, err
 }
 
-// sourceRef is a grant's prefixed source id, or nil when it has none.
-func sourceRef(sourceType string, id *string) *string {
+// sourceRef is a lot's source id, a bought lot's prefixed as its payment's,
+// or nil when it has none.
+func sourceRef(funding credits.FundingSource, id *string) *string {
 	if id == nil {
 		return nil
 	}
-	ref := catalogrules.SourceRef(sourceType, *id)
+	ref := *id
+	if funding.Paid() {
+		ref = catalogrules.SourceRef("purchase", *id)
+	}
 	return &ref
 }
