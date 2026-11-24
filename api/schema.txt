@@ -9,6 +9,7 @@ migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b30048048
 migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a8149040eaaf6e5a9242625eed594a0
 migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
 migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
+migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50edb9295edb31f349d302a9e18e0590bd2419f62bc58
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1394,7 +1395,7 @@ table billing.orders
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
-  index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+  index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
   index CREATE UNIQUE INDEX orders_number_key ON billing.orders USING btree (merchant_id, number) WHERE (number IS NOT NULL)
   index CREATE UNIQUE INDEX orders_open_lines_key ON billing.orders USING btree (merchant_id, customer_id, lines_digest) WHERE ((status = 'open'::text) AND (lines_digest IS NOT NULL))
   index CREATE UNIQUE INDEX orders_pay_url_secret_hash_key ON billing.orders USING btree (pay_url_secret_hash) WHERE (pay_url_secret_hash IS NOT NULL)
@@ -2194,7 +2195,7 @@ table billing.provider_intents
   index CREATE INDEX provider_intents_subscription_id_idx ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   index CREATE UNIQUE INDEX provider_intents_subscription_id_open_manual_rebill_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = 'manual_rebill'::text) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE UNIQUE INDEX provider_intents_subscription_id_tier_change_subscription_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = ANY (ARRAY['nmi_upgrade'::text, 'stripe_tier_change'::text, 'initial_membership'::text])) AND (subscription_id IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
-  index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'account_updater'::text])))
+  index CREATE INDEX provider_intents_updated_at_idx ON billing.provider_intents USING btree (merchant_id, updated_at) WHERE ((status = ANY (ARRAY['succeeded'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])) AND (destructive_run_id IS NULL) AND (intent_type = ANY (ARRAY['nmi_delete_subscription'::text, 'stripe_cancel_subscription'::text, 'stripe_resume_subscription'::text, 'ccbill_cancel_subscription'::text, 'nmi_payment_method_update'::text, 'nmi_payment_source_update'::text, 'nmi_card_vault'::text, 'network_token'::text, 'stripe_archive_price'::text, 'stripe_archive_product'::text, 'solana_sunset_plan'::text, 'account_updater'::text])))
 
 table billing.provider_mutation_logs
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2752,7 +2753,7 @@ table billing.subscription_status_transitions
   column actor text
   column executor text
   column operation_id uuid
-  constraint subscription_status_transitions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
+  constraint subscription_status_transitions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscription_status_transitions_from_status_check CHECK ((from_status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscription_status_transitions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint subscription_status_transitions_pkey PRIMARY KEY (merchant_id, id)
@@ -2819,7 +2820,7 @@ table billing.subscriptions
   column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
-  constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
+  constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint subscriptions_canceled_has_type_check CHECK (((status <> 'canceled'::text) OR (cancel_type IS NOT NULL)))
   constraint subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled'::text) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL))))

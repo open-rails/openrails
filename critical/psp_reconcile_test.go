@@ -842,8 +842,8 @@ func TestPSPReconcile(t *testing.T) {
 
 		// At Stripe: Alice cancels; Bob's subscription ends in a dispute;
 		// Carol asked to cancel, then went unpaid, so Stripe has not ended
-		// it. OpenRails hears two days later and records each end as its own:
-		// expired, that day.
+		// it. OpenRails hears two days later and records each end as the
+		// provider's, that day.
 		canceledAt := time.Unix(int64(iw.stripe.CancelSubscription(subs["alice"])["canceled_at"].(float64)), 0).UTC()
 		iw.stripe.EndSubscription(subs["bob"], "payment_disputed")
 		iw.stripe.CancelSubscription(subs["carol"])
@@ -871,7 +871,7 @@ func TestPSPReconcile(t *testing.T) {
 		for who := range subs {
 			before[who] = cancel(who)
 		}
-		require.Equal(t, map[string]string{"alice": "expired", "bob": "expired", "carol": "expired", "dave": "chargeback"},
+		require.Equal(t, map[string]string{"alice": "provider", "bob": "provider", "carol": "provider", "dave": "chargeback"},
 			map[string]string{"alice": before["alice"].Kind, "bob": before["bob"].Kind, "carol": before["carol"].Kind, "dave": before["dave"].Kind})
 		require.False(t, before["alice"].At.Truncate(24*time.Hour).Equal(canceledAt.Truncate(24*time.Hour)), "recorded on another day: %s", before["alice"].At)
 		accessColumns := func(who string) string {

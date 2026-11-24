@@ -145,8 +145,12 @@ type RenewalOverdue struct{}
 
 // ProviderCanceled is the provider confirming the subscription ended.
 // PaidThrough is the end of the time paid for when the provider states it (a
-// CCBill cancellation's expiry); zero when it states none.
-type ProviderCanceled struct{ At, PaidThrough time.Time }
+// CCBill cancellation's expiry); zero when it states none. Lapse is an end
+// that only stopped rebilling: its reactivation or next rebill restores it.
+type ProviderCanceled struct {
+	At, PaidThrough time.Time
+	Lapse           bool
+}
 
 // Cancel is a user, merchant or chargeback cancellation.
 type Cancel struct {
@@ -428,7 +432,11 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		if s.PaidThrough.After(end) {
 			end = s.PaidThrough // what was paid for is kept
 		}
-		s.Status, s.CancelKind, s.EndedAt = Canceled, CancelProvider, end
+		kind := CancelProvider
+		if ev.Lapse {
+			kind = CancelExpired
+		}
+		s.Status, s.CancelKind, s.EndedAt = Canceled, kind, end
 		return s, append(effects, CloseDunning{}, EndAccess{At: end}, Notify{NoticeEnded}), nil
 
 	case Cancel:
@@ -437,9 +445,13 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		}
 		if s.Status == Canceled {
 			// A later immediate cancel (a chargeback, a merchant revoke) ends
-			// paid access now; otherwise the first decided cancel stands.
+			// paid access now; otherwise the first decided cancel stands. Its
+			// kind replaces the recorded one unless it is a lapse, which would
+			// make a decided end revivable, or the end is a chargeback's.
 			if ev.Immediate || ev.Kind == CancelChargeback {
-				s.CancelKind = ev.Kind
+				if ev.Kind != CancelExpired && s.CancelKind != CancelChargeback {
+					s.CancelKind = ev.Kind
+				}
 				if s.EndedAt.After(ev.At) {
 					s.EndedAt = ev.At
 				}

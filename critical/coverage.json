@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 476,
+  "scenario_count": 499,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -449,6 +449,36 @@
       "name": "Cancel, resume and cancel again inside the paid period never extends access past it"
     },
     {
+      "id": "OR-J17-S07",
+      "journey": "J17",
+      "name": "A Stripe resume is a provider operation: the local resume and the Stripe write commit together, run once, logged"
+    },
+    {
+      "id": "OR-J17-S08",
+      "journey": "J17",
+      "name": "A Stripe resume Stripe cannot be told of (provider writes off) is refused, and nothing commits"
+    },
+    {
+      "id": "OR-J17-S09",
+      "journey": "J17",
+      "name": "A Stripe resume committed while its cancel is in flight waits for it: Stripe ends as the member last asked"
+    },
+    {
+      "id": "OR-J17-S10",
+      "journey": "J17",
+      "name": "A Stripe cancel or resume undoes the opposite one that never reached Stripe: a cancel after a waiting resume supersedes it, and Stripe ends set to cancel"
+    },
+    {
+      "id": "OR-J17-S11",
+      "journey": "J17",
+      "name": "A member's Stripe cancel survives a converge before Stripe hears it: a renewing Stripe subscription is not read as a portal resume while the cancel waits"
+    },
+    {
+      "id": "OR-J17-S12",
+      "journey": "J17",
+      "name": "Stripe cancels and resumes are ordered by commit, not transaction start: a resume whose transaction began before the cancel it resumes waits for that cancel and reaches Stripe last"
+    },
+    {
       "id": "OR-J18-S01",
       "journey": "J18",
       "name": "Known price or seat change preview and confirmation agree"
@@ -522,6 +552,11 @@
       "id": "OR-J20-S05",
       "journey": "J20",
       "name": "Two partial CCBill refunds naming one sale are booked as two reversals, an exact replay of either books nothing, and a refund beyond what remains of the sale books nothing and raises a ledger finding naming it"
+    },
+    {
+      "id": "OR-J20-S06",
+      "journey": "J20",
+      "name": "A won dispute gives back what its chargeback took: the charge reads refunded only by its net reversals, in its detail and in the merchant's list"
     },
     {
       "id": "OR-J21-S01",
@@ -762,6 +797,11 @@
       "id": "OR-J24-S35",
       "journey": "J24",
       "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
+    },
+    {
+      "id": "OR-J24-S36",
+      "journey": "J24",
+      "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, its own merchant's settlement waits for its transaction, and another merchant's usage settles while it is open"
     },
     {
       "id": "OR-J25-S01",
@@ -1139,6 +1179,11 @@
       "name": "A card save retried with its Idempotency-Key answers the first saved card; other terms under the key are refused"
     },
     {
+      "id": "OR-J10-S07",
+      "journey": "J10",
+      "name": "A merchant order's Idempotency-Key names one order per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
+    },
+    {
       "id": "OR-J12-S06",
       "journey": "J12",
       "name": "Merchant and hosted vault custody retain original card and charge authority through recovery and removal"
@@ -1282,6 +1327,16 @@
       "id": "OR-J23-S32",
       "journey": "J23",
       "name": "A Redis gate names a window to the microsecond: a ticket open across a subscription-anchored window's rollover keeps its take held in its own window and its capture settles there"
+    },
+    {
+      "id": "OR-J23-S33",
+      "journey": "J23",
+      "name": "A spend window that names no currency is in its policy's policy_currency, converted to the request's"
+    },
+    {
+      "id": "OR-J23-S34",
+      "journey": "J23",
+      "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
     },
     {
       "id": "OR-J29-S07",
@@ -1589,6 +1644,26 @@
       "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
+      "id": "OR-J38-S75",
+      "journey": "J38",
+      "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
+    },
+    {
+      "id": "OR-J38-S79",
+      "journey": "J38",
+      "name": "A CCBill cancel the pull lands is a lapse, and the member's reactivation and rebill restore access"
+    },
+    {
+      "id": "OR-J38-S80",
+      "journey": "J38",
+      "name": "A CCBill Cancellation is a lapse: a reactivation inside the paid period resumes it, and a late rebill past it restores it"
+    },
+    {
+      "id": "OR-J38-S81",
+      "journey": "J38",
+      "name": "A failed-rebill cancel on a provider's or a chargeback's end tightens it and keeps its kind: a later rebill does not reopen it"
+    },
+    {
       "id": "OR-J22-S06",
       "journey": "J22",
       "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"
@@ -1784,6 +1859,21 @@
       "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
+      "id": "OR-J26-S59",
+      "journey": "J26",
+      "name": "A declined usage-order collection retries on the merchant's dunning_policy, not the built-in schedule"
+    },
+    {
+      "id": "OR-J26-S60",
+      "journey": "J26",
+      "name": "A billing policy's delinquency floor is in its policy_currency and holds only debt in it; other debt meets its own currency's floor"
+    },
+    {
+      "id": "OR-J26-S61",
+      "journey": "J26",
+      "name": "A billing policy's outstanding cap and collection threshold bind only money in its policy_currency: a yen policy neither refuses dollar admission nor withholds dollar collection, which follows the dollar collection_threshold"
+    },
+    {
       "id": "OR-J37-S60",
       "journey": "J37",
       "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
@@ -1882,6 +1972,16 @@
       "id": "OR-J16-S71",
       "journey": "J16",
       "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+    },
+    {
+      "id": "OR-J16-S54",
+      "journey": "J16",
+      "name": "A provider-declared failure inside the merchant's longer dunning schedule stays in dunning: converge reads the subscription's case policy, not the built-in window"
+    },
+    {
+      "id": "OR-J16-S55",
+      "journey": "J16",
+      "name": "A provider-declared failure is judged by its own cycle's window: past a weekly schedule's, it is not dunned however long the monthly window is"
     },
     {
       "id": "OR-J15-S70",
@@ -2084,9 +2184,19 @@
       "name": "Every logger the engine and the standalone server reach is set, the default logger is untouched, and a refusal is logged with its route, request and merchant"
     },
     {
+      "id": "OR-J04-S77",
+      "journey": "J04",
+      "name": "A Vault merchant document naming a retired key is refused with what replaced it, as a manifest is"
+    },
+    {
       "id": "OR-J25-S37",
       "journey": "J25",
       "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
+    },
+    {
+      "id": "OR-J25-S05",
+      "journey": "J25",
+      "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
       "id": "OR-J29-S37",
@@ -2202,6 +2312,11 @@
       "id": "OR-J28-S15",
       "journey": "J28",
       "name": "Two refused CCBill credential probes hold that login (account and username) an hour, across merchants and money classes: a third is psp_probe_limited with Retry-After and reaches no CCBill, and the account's owner on its own login is not held"
+    },
+    {
+      "id": "OR-J22-S12",
+      "journey": "J22",
+      "name": "A staff member grants a full batch of credit at once, one batch a minute; the merchant's own application is not metered"
     },
     {
       "id": "OR-J39-S01",

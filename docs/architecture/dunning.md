@@ -1,11 +1,6 @@
 # Collection and dunning
 
-Collection decides what happens when a customer's card refuses money OpenRails
-asked for. The decline table maps every rail code to one reason and action; the
-retry schedule collects money owed (renewals OpenRails collects, usage orders);
-arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the
-renewal schedule and the arrears grace periods; usage orders retry on the
-built-in schedule. Renewal admission and the state machine are in
+Collection decides what happens when a customer's card refuses money OpenRails asked for. The decline table maps every rail code to one reason and action; the retry schedule collects money owed (renewals OpenRails collects, usage orders); arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the retry schedule, for renewals and usage orders alike, and the arrears grace periods. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
 Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-admissions-and-the-gate).
 
@@ -82,10 +77,7 @@ declines on the card reach `customer_retries`, after a non-recoverable decline
 or forbidding issuer code, and while `awaiting_method` unless
 `decline.HolderCanClear`. Another card is always admitted.
 
-**Usage orders.** An `order_collection` operation charges a due order. On a
-decline, `OrderCollectionHandler` applies `collection.FailureAction` with the
-order's period as the cycle (at least 4 days); `usage.DeclineCollection` sets
-`next_collection_attempt_at`, marks it `uncollectible`, or stops collecting.
+**Usage orders.** An `order_collection` operation charges a due order. On a decline, `OrderCollectionHandler` applies `collection.FailureAction` to the answer and its advice (Stripe's and the network's) under the merchant's current `dunning_policy`, with the order's period as the cycle (at least 4 days); `usage.DeclineCollection` sets `next_collection_attempt_at`, marks it `uncollectible`, or stops collecting. Its transient answers count as failures; there is no transient ladder.
 
 **Delinquency.** `delinquency.EvaluateTx` runs in the transaction of every
 usage-order change (`usage.Changed`), and from `riverjobs.DelinquencyWorker` at
@@ -105,11 +97,7 @@ Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
 
 ## Interfaces
 
-- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving
-  `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`,
-  `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`,
-  and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`,
-  `ArrearsDelinquencyFloor`, `MonthlyFloor`).
+- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`, `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`, and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`, `UsageBilling` with each currency's `DelinquencyFloor`).
 - **Staff:** `GET /v1/admin/subscriptions?dunning=true`, `GET /v1/admin/renewals`,
   `GET /v1/admin/payment-attempts`, `GET /v1/admin/orders?overdue=true`,
   `POST /v1/admin/orders/{id}/waive-balance`, `…/mark-uncollectible`,
@@ -139,11 +127,7 @@ Checks:
 - OR-J26-S55: a refused collection keeps its nonexecution proof.
 
 ### 2. Agreement with providers
-`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another
-period. The completion handlers also require an unchanged failure count. A
-provider-run subscription is mirrored, not retried. A row past its window is
-never charged: an NMI row parks `unverified`, a provider-billed row is asked by
-id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
+`lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
 - `manual_rebill_completion.go` and `subscription_collection_intent.go` check
@@ -229,10 +213,8 @@ Checks:
 ## Tests
 
 Journeys:
-- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines,
-  due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits).
-- OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55 (usage collection,
-  delinquency); the rest of J26 is in [usage billing](usage-billing.md).
+- OR-J16-S01 to S05 (schedule), S30 to S32, S70, S71 (provider-seen declines, due work), S40 to S43 (do-not-retry), S50 to S53 (policy limits), S54, S55 (a failure's window is its own policy's, for its cycle).
+- OR-J26-S01 to S04, S30, S40, S50, S51, S53, S55, S59 (usage collection, delinquency); the rest of J26 is in [usage billing](usage-billing.md).
 - Related: OR-J04-S42 (`access_while_renewal_held: suspend`), OR-J04-S43, S45,
   S70, and OR-J12-S08 to S11 (expired-card refresh).
 
@@ -242,13 +224,8 @@ Other tests: `internal/decline`, `internal/modules/collection` and
 `TestUsageBillingContracts`, `TestNMICollectionRefusal`, `TestBillingPass`).
 
 Gaps:
-- No scenario declines a usage-order collection; that path uses
-  `decline.Classify` (no advice) and the built-in schedule, not `dunning_policy`.
+- No scenario sends advice on a declined usage-order collection: the Stripe fake has no invoice collection.
 - Untested: `access_during_dunning: suspend`; the `life.decline.unmapped` and
   `life.cadence.unknown` findings; a Solana schedule spent with the switch off.
-- The floors (`arrears_delinquency_floor`, `monthly_floor`, `DefaultAmountFloor`
-  1,000,000) are one number across currencies, one unit only at 6 decimals.
-- Converge judges a failed renewal against the built-in window
-  (`reconcile.DefaultDunningWindow`), not the merchant's `dunning_policy`.
 - Nothing checks that `decline`'s `reasons` covers every
   `billing.DeclineReasons()` entry.

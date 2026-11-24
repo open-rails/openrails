@@ -156,6 +156,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",
+	"stripe_resume_subscription",
 	"ccbill_cancel_subscription",
 	"nmi_payment_method_update",
 	"nmi_payment_source_update",

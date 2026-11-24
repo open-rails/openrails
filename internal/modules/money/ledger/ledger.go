@@ -85,9 +85,9 @@ var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseR
 type Operation string
 
 const (
-	OpSpend    Operation = "spend"    // MoneyService.SpendCredits
+	OpSpend    Operation = "spend"    // history only
 	OpCapture  Operation = "capture"  // elapsed running-charge spend
-	OpWithdraw Operation = "withdraw" // MoneyService.Withdraw
+	OpWithdraw Operation = "withdraw" // history only
 	OpDeposit  Operation = "deposit"  // credit grant / top-up
 
 	OpCreditExpire    Operation = "credit_expire"
