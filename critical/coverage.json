@@ -2686,7 +2686,7 @@
     {
       "id": "OR-J42-S09",
       "journey": "J42",
-      "name": "A bulk import of thousands of subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
+      "name": "A bulk import of over a thousand subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
     },
     {
       "id": "OR-J42-S10",

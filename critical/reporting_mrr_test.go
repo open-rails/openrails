@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/archivewire"
@@ -551,13 +553,7 @@ func mrrOnRollups(t *testing.T) {
 					for _, st := range statements {
 						sql, err := sqlschema.Rewrite(st.SQL, a.schema)
 						require.NoError(t, err)
-						tx, err := a.pool.Begin(t.Context())
-						require.NoError(t, err)
-						_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
-						require.NoError(t, err)
-						var explained string
-						require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, st.Args...).Scan(&explained), "%s: %s", st.Family, sql)
-						require.NoError(t, tx.Rollback(t.Context()))
+						explained := explainWithoutSeqScan(t, a.pool, sql, st.Args, "%s: %s", st.Family, sql)
 						var plans []struct {
 							Plan planNode `json:"Plan"`
 						}
@@ -586,6 +582,23 @@ func mrrOnRollups(t *testing.T) {
 		}
 	}
 	require.Greater(t, planned, 200)
+}
+
+// explainWithoutSeqScan is the JSON plan of sql with sequential scans off. Its
+// transaction always ends, so a failed plan leaves no connection held for the
+// world's teardown to wait on.
+func explainWithoutSeqScan(t *testing.T, pool *pgxpool.Pool, sql string, args []any, msg ...any) string {
+	t.Helper()
+	tx, err := pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, set := range []string{"SET LOCAL enable_seqscan = off", "SET LOCAL statement_timeout = '30s'", "SET LOCAL lock_timeout = '10s'"} {
+		_, err = tx.Exec(t.Context(), set)
+		require.NoError(t, err)
+	}
+	var explained string
+	require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&explained), msg...)
+	return explained
 }
 
 // planNode is a node of an EXPLAIN (FORMAT JSON) plan.

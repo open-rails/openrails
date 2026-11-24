@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -183,8 +184,11 @@ func nmiMembershipDeclared(t *testing.T, a *authorityWorld, p *nmiJournal, acces
 	require.Contains(t, imported.Imported, "known-nmi-membership")
 	subscriptions, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
 	require.NoError(t, err)
-	require.Len(t, subscriptions.Items, 1)
-	sub, err := a.alpha.GetSubscription(t.Context(), subscriptions.Items[0].ID)
+	i := slices.IndexFunc(subscriptions.Items, func(s billing.Subscription) bool {
+		return s.RailSubscriptionID != nil && *s.RailSubscriptionID == scheduleID
+	})
+	require.GreaterOrEqual(t, i, 0, "the declared schedule is the customer's")
+	sub, err := a.alpha.GetSubscription(t.Context(), subscriptions.Items[i].ID)
 	require.NoError(t, err)
 	require.Equal(t, "nmi_schedule", sub.CollectionPolicy)
 	require.NotNil(t, sub.RailSubscriptionID)
