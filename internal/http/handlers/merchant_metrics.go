@@ -18,7 +18,8 @@ func MerchantMetricsSchema(r *httprequest.Request) {
 
 // MerchantMetricsQuery handles POST /v1/metrics/query. Validation errors
 // come back all at once with corrective context (did-you-mean + valid lists).
-// A relative range ends today on the deployment's clock.
+// Days are the merchant's accounting timezone's; a relative range ends today
+// there, on the deployment's clock.
 func MerchantMetricsQuery(r *httprequest.Request) {
 	svc := r.State.MetricsService
 	if svc == nil {
@@ -27,8 +28,13 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 	}
 	q, verr := metrics.DecodeQuery(r.Request.Body)
 	if verr == nil {
+		zone, err := svc.Zone(r.Request.Context())
+		if err != nil {
+			r.InternalError("metrics query failed", err)
+			return
+		}
 		var plan *metrics.Plan
-		plan, verr = metrics.ValidateAt(q, r.Clock.Now().UTC())
+		plan, verr = metrics.ValidateIn(q, r.Clock.Now().UTC(), zone)
 		if verr == nil {
 			if plan.ReadsUsage() {
 				if err := r.State.RequireEventStore("a usage measure"); err != nil {

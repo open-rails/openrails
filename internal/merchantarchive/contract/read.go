@@ -307,7 +307,8 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
 	"usage_card_prints": true, "usage_postings": true, "usage_unposted": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true,
 	"subscription_mrr": true, "customer_mrr": true, "mrr_movements": true, "mrr_movement_lines": true, "mrr_scheduled": true,
-	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true}
+	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true,
+	"mrr_risk_cases": true, "mrr_risk_episodes": true, "mrr_risk_flows": true, "mrr_risk_totals": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}

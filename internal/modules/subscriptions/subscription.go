@@ -34,6 +34,10 @@ type GetSubscriptionsFilters struct {
 	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
 	// change by then.
 	ScheduledChangeBefore *time.Time
+	// AtRisk keeps the subscriptions whose MRR is at risk; RiskReason, when
+	// set, those at risk for it.
+	AtRisk     bool
+	RiskReason billing.MRRRiskReason
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort is the list's order; empty is created_at.
@@ -213,7 +217,8 @@ func (s *SubscriptionService) filters(ctx context.Context, f GetSubscriptionsFil
 		UserID: customer, Status: f.Status, PriceID: priceID, Rail: f.Rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
-		ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning, Sort: f.Sort,
+		ScheduledChangeBefore: f.ScheduledChangeBefore, AtRisk: f.AtRisk || f.RiskReason != "", RiskReason: string(f.RiskReason),
+		Dunning: f.Dunning, Sort: f.Sort,
 	}, nil
 }
 

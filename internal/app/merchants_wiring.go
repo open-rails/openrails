@@ -227,12 +227,18 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		return reject("settings: " + err.Error()), nil
 	}
 	mctx := merchant.WithID(ctx, id)
+	zoneKnown := true
 	err = r.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := scim.Declare(ctx, q, id, doc.Secrets.SCIMToken); err != nil {
 			return err
 		}
-		return recordDanglingPolicies(ctx, r.Log, q, id, settings)
+		if err := recordDanglingPolicies(ctx, r.Log, q, id, settings); err != nil {
+			return err
+		}
+		var err error
+		zoneKnown, err = recordAccountingZone(ctx, r.Log, q, id, settings.Config.AccountingTimezone)
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, scim.ErrTokenTooShort) || errors.Is(err, scim.ErrTokenInUse) {
@@ -240,7 +246,47 @@ func (r *Runtime) syncMerchantConfig(ctx context.Context, id billing.MerchantID,
 		}
 		return previous, err
 	}
+	if !zoneKnown {
+		// PostgreSQL cannot group in the zone: the books are dated in UTC.
+		doc.Accounting = nil
+		set.Merchant.Value = doc
+	}
 	return set, nil
+}
+
+// AccountingZoneFindingType is the finding a merchant's accounting.timezone
+// opens while PostgreSQL's zone database lacks it; the merchant's books are
+// dated in UTC meanwhile.
+const AccountingZoneFindingType = "consistency.merchant_config.accounting_timezone"
+
+// recordAccountingZone reports whether PostgreSQL knows zone, which Go
+// already loaded: the metrics group days with PostgreSQL's zone database. A
+// zone it lacks opens a finding until it knows it or the zone changes.
+func recordAccountingZone(ctx context.Context, logger *slog.Logger, q *gen.Queries, id billing.MerchantID, zone string) (bool, error) {
+	known := true
+	if zone != merchantconfig.DefaultAccountingTimezone {
+		var err error
+		if known, err = q.TimeZoneKnown(ctx, zone); err != nil {
+			return true, err
+		}
+	}
+	if known {
+		_, err := q.ResolveConfigFinding(ctx, gen.ResolveConfigFindingParams{MerchantID: id.UUID(), FindingType: AccountingZoneFindingType, SubjectKey: "accounting.timezone"})
+		return true, err
+	}
+	action := fmt.Sprintf("accounting.timezone %q is not in PostgreSQL's time zone database, so the merchant's metrics group days and months in UTC. Update the database server's time zone data, or name a zone it has.", zone)
+	evidence, err := json.Marshal(map[string]string{"timezone": zone})
+	if err != nil {
+		return false, err
+	}
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: id.UUID(), FindingType: AccountingZoneFindingType, SubjectKey: "accounting.timezone",
+		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
+	})
+	if err == nil {
+		logger.WarnContext(ctx, "merchant config: PostgreSQL lacks the accounting timezone; dating the books in UTC", "merchant_id", id.String(), "timezone", zone)
+	}
+	return false, err
 }
 
 // checkMessages refuses a messages document a message of which does not

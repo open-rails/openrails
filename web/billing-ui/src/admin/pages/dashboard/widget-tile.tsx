@@ -123,8 +123,16 @@ function QueryTile({
   onDelete,
 }: TileProps) {
   const { adminQueries } = useAdminServices()
+  const { text: adminText } = useAdminUI()
 
   const query = widgetQuery(widget, view, registry.takesCurrency)
+  // A measure read from a rollup kept per UTC date says so on its title.
+  const utcDays = widget.query.measures.some(
+    (m) => registry.measure(m)?.utc_days
+  )
+  const title = utcDays
+    ? `${widget.title} (${adminText("Days are UTC dates.")})`
+    : widget.title
   const {
     data,
     isPending: loading,
@@ -162,7 +170,7 @@ function QueryTile({
               ? "text-xs font-medium tracking-wider text-muted-foreground uppercase"
               : "text-sm font-medium"
           )}
-          title={widget.title}
+          title={title}
         >
           {widget.title}
         </span>

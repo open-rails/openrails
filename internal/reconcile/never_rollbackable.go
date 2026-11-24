@@ -35,6 +35,10 @@ var NeverRollbackableTables = map[string]string{
 	"mrr_totals":              "MRR rollup of customer_mrr; restoring a row desynchronises it from them",
 	"mrr_product_flows":       "MRR rollup of the movements; restoring a row desynchronises it from them",
 	"mrr_cohort_flows":        "MRR rollup of the movements; restoring a row desynchronises it from them",
+	"mrr_risk_cases":          "MRR risk history: an undo's restored subscriptions open their own cases",
+	"mrr_risk_episodes":       "MRR risk history, with its cases",
+	"mrr_risk_flows":          "MRR risk rollup of the cases; restoring a row desynchronises it from them",
+	"mrr_risk_totals":         "MRR risk rollup of subscription_mrr; restoring a row desynchronises it from them",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

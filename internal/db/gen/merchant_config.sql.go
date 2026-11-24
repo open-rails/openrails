@@ -160,3 +160,16 @@ func (q *Queries) ResolveConfigFinding(ctx context.Context, arg ResolveConfigFin
 	}
 	return result.RowsAffected(), nil
 }
+
+const timeZoneKnown = `-- name: TimeZoneKnown :one
+SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_timezone_names WHERE name = $1::text) AS known
+`
+
+// Whether PostgreSQL's zone database names zone (pg_timezone_names reads its
+// zone files, so a merchant configuration load asks, never a query).
+func (q *Queries) TimeZoneKnown(ctx context.Context, zone string) (bool, error) {
+	row := q.db.QueryRow(ctx, timeZoneKnown, zone)
+	var known bool
+	err := row.Scan(&known)
+	return known, err
+}

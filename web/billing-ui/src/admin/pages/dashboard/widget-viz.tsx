@@ -731,7 +731,11 @@ function TableViz({
                 const cell = row[ci]
                 let rendered: string
                 if (c.kind === "time")
-                  rendered = formatBucket(String(cell), result.grain)
+                  rendered = formatBucket(
+                    String(cell),
+                    result.grain,
+                    result.timezone
+                  )
                 else if (c.kind === "measure") {
                   const currency = rowCurrency(row, idx, fallback)
                   rendered = formatMeasure(cell, c.unit, currency)

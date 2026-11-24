@@ -36,13 +36,13 @@ type vaultCards struct {
 	vault    *vaulttest.Vault
 }
 
-func newVaultCards(t *testing.T, platform, armed bool) *vaultCards {
+func newVaultCards(t *testing.T, platform, armed bool, configure ...func(*world)) *vaultCards {
 	t.Helper()
 	vendor := newMerchantBT(t)
 	t.Setenv(vaulttest.AddrEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_ADDR"))
 	t.Setenv(vaulttest.TokenEnv, os.Getenv("OPENRAILS_CRITICAL_VAULT_TOKEN"))
 	vault := vaulttest.New(t)
-	a, journal := newNMIWorld(t, func(w *world) {
+	a, journal := newNMIWorld(t, append([]func(*world){func(w *world) {
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
 		if platform {
@@ -57,7 +57,7 @@ func newVaultCards(t *testing.T, platform, armed bool) *vaultCards {
 		for i := range w.cfg.Merchants {
 			w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
 		}
-	})
+	}}, configure...)...)
 	v := &vaultCards{authorityWorld: a, vendor: vendor, journal: journal, platform: platform, vault: vault}
 	custody, cardVault := "owned", "nmi"
 	if platform {

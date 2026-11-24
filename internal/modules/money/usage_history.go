@@ -7,6 +7,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // UsageHistoryRow is a 15-minute bucket of usage history with what it cost:
@@ -77,13 +78,12 @@ func (s *MoneyService) UsageDays(ctx context.Context, from, to time.Time) (time.
 	return start, end, nil
 }
 
-// LocalDays are the instants that bound zone's days overlapping [from, to).
+// LocalDays are the instants that bound zone's days overlapping [from, to),
+// each day from its first instant (the transition where clocks skip its
+// midnight).
 func LocalDays(zone *time.Location, from, to time.Time) (time.Time, time.Time) {
-	f := from.In(zone)
-	start := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, zone)
 	l := to.Add(-time.Microsecond).In(zone)
-	end := time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, zone)
-	return start.UTC(), end.UTC()
+	return calendarutil.DateStart(from, zone).UTC(), calendarutil.DayStart(l.Year(), l.Month(), l.Day()+1, zone).UTC()
 }
 
 // historyCell names one customer's meter cell in a pricing period.
