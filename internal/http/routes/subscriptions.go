@@ -6,8 +6,13 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
-// priceMigrationErrors are a price migration's refusals, created or previewed.
-var priceMigrationErrors = codes("invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_not_found", "product_not_found")
+// priceMigrationErrors are a price migration's refusals, created or
+// previewed; a creation is also a destructive command, admitted for every
+// subscriber it counts.
+var (
+	priceMigrationErrors       = codes("invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_not_found", "product_not_found")
+	priceMigrationCreateErrors = codes("catalog_revision_conflict", "idempotency_key_reused", "invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_migration_in_progress", "price_not_found", "product_not_found", "rate_limit_exceeded")
+)
 
 // subscriptionsRoutes is recurring agreements: reading, canceling, resuming
 // and changing a subscription as the customer or as merchant staff, and the
@@ -61,8 +66,9 @@ var subscriptionsRoutes = []Route{
 		Request: handlers.UpdateSubscriptionPaymentMethodBody{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("card_declined", "default_payment_method_required", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_method_stale", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminUpdateSubscriptionPaymentMethod)},
 	{Method: POST, Path: "/v1/catalog/price-migrations", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePriceMigration", Level: LevelUpdate,
 		Doc: "CreatePriceMigration moves the subscribers of one price, or of every version of a price key, to " +
-			"another price at each one's renewal.",
-		Request: billing.CreatePriceMigrationParams{}, Responses: []Reply{{201, billing.PriceMigration{}}}, Errors: priceMigrationErrors, Handler: h(handlers.CreatePriceMigration)},
+			"another price at each one's renewal. It admits every subscriber it counts before reading any and " +
+			"reaches them a page at a time: preparing is true until the last page.",
+		Request: billing.CreatePriceMigrationParams{}, Responses: []Reply{{201, billing.PriceMigration{}}}, Errors: priceMigrationCreateErrors, Handler: h(handlers.CreatePriceMigration)},
 	{Method: POST, Path: "/v1/catalog/price-migrations/preview", Group: CatalogAdmin, Auth: AuthMerchant, Name: "PreviewPriceMigration", Level: LevelRead,
 		Doc:     "PreviewPriceMigration answers what CreatePriceMigration would do, writing nothing.",
 		Request: billing.CreatePriceMigrationParams{}, Responses: []Reply{{200, billing.PriceMigrationPreview{}}}, Errors: priceMigrationErrors, Handler: h(handlers.PreviewPriceMigration)},

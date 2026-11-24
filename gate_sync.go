@@ -1305,11 +1305,12 @@ func (g *gateState) unsent(cause error) error {
 
 // closeLease waits for a sync built after Close began, which closes the
 // lease; one refused ends the wait with its failure, and one that could not
-// reach OpenRails is retried.
+// reach OpenRails is retried, at most once a sync interval.
 func (g *gateState) closeLease(ctx context.Context) error {
 	g.mu.Lock()
 	start := g.attempts
 	g.mu.Unlock()
+	var kicked time.Time
 	for {
 		g.mu.Lock()
 		closed, failure, down, tried, ch := g.leaseClosed, g.failure, g.unreachable, g.attempts > start, g.synced
@@ -1320,7 +1321,15 @@ func (g *gateState) closeLease(ctx context.Context) error {
 		case tried && failure != nil && !down:
 			return failure
 		}
+		if wait := limits.SyncInterval - time.Since(kicked); wait > 0 {
+			select {
+			case <-ctx.Done():
+				return waitErr(ctx)
+			case <-time.After(wait):
+			}
+		}
 		g.poke()
+		kicked = time.Now()
 		select {
 		case <-ctx.Done():
 			return waitErr(ctx)

@@ -199,6 +199,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
+	if err := addWorker(workers, &riverjobs.PriceMigrationWorker{Migrations: r.PriceMigrationService}); err != nil {
+		return fmt.Errorf("add price migration worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}

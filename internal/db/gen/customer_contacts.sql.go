@@ -318,6 +318,61 @@ func (q *Queries) SearchCustomerContacts(ctx context.Context, arg SearchCustomer
 	return items, nil
 }
 
+const searchCustomerContactsOfCustomers = `-- name: SearchCustomerContactsOfCustomers :many
+SELECT merchant_id, customer_id, email, display_name, user_name, active, provisioned_at, directory_updated_at, created_at, updated_at FROM billing.customer_contacts c
+WHERE c.merchant_id = $1::uuid
+  AND EXISTS (SELECT 1 FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id)
+  AND (c.email ILIKE $2::text OR c.user_name ILIKE $2::text OR c.display_name ILIKE $2::text)
+ORDER BY (lower(c.user_name) = lower($3::text) OR lower(c.email) = lower($3::text)) DESC NULLS LAST,
+  (SELECT cu.created_at FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id) DESC, c.customer_id DESC
+LIMIT $4::int
+`
+
+type SearchCustomerContactsOfCustomersParams struct {
+	MerchantID uuid.UUID
+	Pattern    string
+	Query      string
+	RowLimit   int32
+}
+
+// SearchCustomerContacts kept to the merchant's customers: an exact username
+// or email first, then the newest customers.
+func (q *Queries) SearchCustomerContactsOfCustomers(ctx context.Context, arg SearchCustomerContactsOfCustomersParams) ([]BillingCustomerContact, error) {
+	rows, err := q.db.Query(ctx, searchCustomerContactsOfCustomers,
+		arg.MerchantID,
+		arg.Pattern,
+		arg.Query,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomerContact
+	for rows.Next() {
+		var i BillingCustomerContact
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Email,
+			&i.DisplayName,
+			&i.UserName,
+			&i.Active,
+			&i.ProvisionedAt,
+			&i.DirectoryUpdatedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateCustomerContact = `-- name: UpdateCustomerContact :one
 UPDATE billing.customer_contacts SET
   email = $1, display_name = $2, user_name = $3,
