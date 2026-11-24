@@ -75,7 +75,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.Equal(t, payment.String(), *pack.SourceID, "a bought lot names its payment")
 
 	expiring, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 3_000_000,
-		Source: "critical", SourceID: "expiring", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}})
+		Source: "critical", SourceID: "expiring", ExpiresAt: ptr(a.clock.Now().Add(2 * time.Minute))}})
 	require.NoError(t, err)
 	revocable, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 4_000_000,
 		Source: "critical", SourceID: "revocable", FundingSource: billing.CreditGrantFundingPromotion}})
@@ -115,8 +115,10 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.EqualValues(t, 2_000_000, lot.SpentAmount)
 	require.EqualValues(t, 1_000_000, lot.RemainingAmount)
 
-	// Expiry: what is left of the lapsed lot leaves it.
-	a.clock.Advance(2 * time.Hour)
+	// Expiry: what is left of the lapsed lot leaves it. The clock stays
+	// within the five minutes payments may be dated ahead of the database's,
+	// for the chargeback below.
+	a.clock.Advance(3 * time.Minute)
 	verdicts, err = a.alpha.Admit(t.Context(), []billing.AdmitParams{{
 		RequestID: "after-the-lapse", CustomerID: m.customer, Invoker: m.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
 		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(1))},
@@ -233,7 +235,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, source, source_id, invoker, starts_at, expires_at)"+
 		" SELECT merchant_id, $3, customer_id, account_id, unit, 5000, 'grant', 'critical', 'unposted', invoker, $4, $5"+
 		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
-		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().Add(40*24*time.Hour))
+		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().AddDate(0, 2, 0))
 	require.NoError(t, err)
 	lot := lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.RemainingAmount, "no unit of the lot posted")

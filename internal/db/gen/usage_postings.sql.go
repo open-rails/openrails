@@ -519,6 +519,89 @@ func (q *Queries) ListUsagePostingsByIDs(ctx context.Context, arg ListUsagePosti
 	return items, nil
 }
 
+const listUsagePostingsOf = `-- name: ListUsagePostingsOf :many
+SELECT customer_id, period_starts_at, amount FROM billing.usage_postings
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+  AND currency = $3::text AND period_starts_at >= $4::timestamptz
+`
+
+type ListUsagePostingsOfParams struct {
+	MerchantID     uuid.UUID
+	CustomerIds    []uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+}
+
+type ListUsagePostingsOfRow struct {
+	CustomerID     uuid.UUID
+	PeriodStartsAt time.Time
+	Amount         int64
+}
+
+// Many customers' postings in a currency of the periods from one start on.
+func (q *Queries) ListUsagePostingsOf(ctx context.Context, arg ListUsagePostingsOfParams) ([]ListUsagePostingsOfRow, error) {
+	rows, err := q.db.Query(ctx, listUsagePostingsOf,
+		arg.MerchantID,
+		arg.CustomerIds,
+		arg.Currency,
+		arg.PeriodStartsAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsagePostingsOfRow
+	for rows.Next() {
+		var i ListUsagePostingsOfRow
+		if err := rows.Scan(&i.CustomerID, &i.PeriodStartsAt, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsageUnpostedOf = `-- name: ListUsageUnpostedOf :many
+SELECT customer_id, since_at FROM billing.usage_unposted
+WHERE merchant_id = $1::uuid AND currency = $2::text
+  AND customer_id = ANY($3::uuid[])
+`
+
+type ListUsageUnpostedOfParams struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	CustomerIds []uuid.UUID
+}
+
+type ListUsageUnpostedOfRow struct {
+	CustomerID uuid.UUID
+	SinceAt    time.Time
+}
+
+// Many customers' unposted marks in a currency.
+func (q *Queries) ListUsageUnpostedOf(ctx context.Context, arg ListUsageUnpostedOfParams) ([]ListUsageUnpostedOfRow, error) {
+	rows, err := q.db.Query(ctx, listUsageUnpostedOf, arg.MerchantID, arg.Currency, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsageUnpostedOfRow
+	for rows.Next() {
+		var i ListUsageUnpostedOfRow
+		if err := rows.Scan(&i.CustomerID, &i.SinceAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockUsageEventTypes = `-- name: LockUsageEventTypes :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.usage_activity:' || $1::uuid::text || ':' || e.event_type, 0))
 FROM (SELECT DISTINCT unnest($2::text[]) AS event_type ORDER BY 1) e
@@ -635,6 +718,50 @@ type ShareUsageEventTypesParams struct {
 func (q *Queries) ShareUsageEventTypes(ctx context.Context, arg ShareUsageEventTypesParams) error {
 	_, err := q.db.Exec(ctx, shareUsageEventTypes, arg.MerchantID, arg.EventTypes)
 	return err
+}
+
+const shareUsageUnposted = `-- name: ShareUsageUnposted :many
+SELECT customer_id, since_at, due_at FROM billing.usage_unposted
+WHERE merchant_id = $1::uuid AND currency = $2::text
+  AND customer_id = ANY($3::uuid[])
+ORDER BY customer_id
+FOR KEY SHARE
+`
+
+type ShareUsageUnpostedParams struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	CustomerIds []uuid.UUID
+}
+
+type ShareUsageUnpostedRow struct {
+	CustomerID uuid.UUID
+	SinceAt    time.Time
+	DueAt      time.Time
+}
+
+// A sync's hold on the unposted marks of its customers in a currency, taken
+// after its events are inserted: a posting, which locks its mark FOR
+// UPDATE, either waits for the sync to commit or has already read its
+// events. Syncs never wait on each other here.
+func (q *Queries) ShareUsageUnposted(ctx context.Context, arg ShareUsageUnpostedParams) ([]ShareUsageUnpostedRow, error) {
+	rows, err := q.db.Query(ctx, shareUsageUnposted, arg.MerchantID, arg.Currency, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ShareUsageUnpostedRow
+	for rows.Next() {
+		var i ShareUsageUnpostedRow
+		if err := rows.Scan(&i.CustomerID, &i.SinceAt, &i.DueAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertUsageUnposted = `-- name: UpsertUsageUnposted :exec

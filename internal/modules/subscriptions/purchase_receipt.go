@@ -65,8 +65,9 @@ type AuthenticationRequest struct {
 }
 
 // QueuePaymentAuthenticationRequired tells the customer, in d's transaction,
-// that a renewal's payment awaits their authentication on its order; the
-// application consumes it independently. One fact per attempt.
+// that a renewal's payment awaits their authentication on its order:
+// OpenRails emails it unless the merchant turns its type off. One fact per
+// attempt.
 func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r AuthenticationRequest) error {
 	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
 		return fmt.Errorf("an authentication notice needs its attempt and order")

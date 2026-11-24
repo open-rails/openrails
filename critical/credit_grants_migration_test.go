@@ -155,8 +155,8 @@ func (d *seed) terminate(lot uuid.UUID, event string) (uuid.UUID, time.Time) {
 // sale is a paid order line of a credit product, with its payment.
 func (d *seed) sale(customer, product, price uuid.UUID, amount int64, interval *int) (payment, line uuid.UUID) {
 	order, payment, line := uuid.New(), uuid.New(), uuid.New()
-	d.exec("INSERT INTO "+d.s.table("orders")+" (merchant_id, id, customer_id, origin, status, currency, total, payment_status)"+
-		" VALUES ($1, $2, $3, 'customer', 'processing', 'USD', $4, 'processing')", d.m, order, customer, amount)
+	d.exec("INSERT INTO "+d.s.table("orders")+" (merchant_id, id, customer_id, origin, status, currency, total, payment_status, expires_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'processing', 'USD', $4, 'processing', $5)", d.m, order, customer, amount, d.at.Add(time.Hour))
 	d.exec("INSERT INTO "+d.s.table("order_lines")+" (merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity,"+
 		" unit_amount, amount, ownership, credit_grant, billing_interval_hours)"+
 		" VALUES ($1, $2, $3, $4, 0, $5, $6, 'Credit pack', 1, $7, $7, 'consumable', '{\"currency\":\"USD\",\"amount\":\"25000000\"}'::jsonb, $8)",

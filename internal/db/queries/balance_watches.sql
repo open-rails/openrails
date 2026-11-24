@@ -95,8 +95,9 @@ ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 -- A change queued a look at the balance: the watch is due until a look resets
 -- it, so the billing pass looks at it if the look fails. A row already due is
 -- not written again. Skipping a due row is sound only because every marker
--- holds the customer's LockCustomerForSpend, which the look takes before it
--- reads the balance and resets the row.
+-- holds the customer's LockCustomerForSpend or a key share of the row
+-- (ShareBalanceWatches), which the look waits for before it reads the
+-- balance and resets the row.
 UPDATE billing.balance_watches
 SET next_check_at = to_timestamp(0), updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
@@ -117,6 +118,17 @@ WHERE next_check_at <= sqlc.arg(now)::timestamptz
           > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid, sqlc.narg(after_currency)::text))
 ORDER BY next_check_at, merchant_id, customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ShareBalanceWatches :many
+-- The watches of customers whose usage a sync just took, held against a
+-- look (LockBalanceWatch) until the marks commit: a look running now
+-- finishes first, and one that starts reads the balance after them. Syncs
+-- never wait on each other here.
+SELECT * FROM billing.balance_watches
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+ORDER BY customer_id
+FOR KEY SHARE;
 
 -- name: LockBalanceWatch :one
 -- Taken after the customer lock: a mark that races the look waits for it.
