@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 442,
+  "scenario_count": 443,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -522,6 +522,11 @@
       "id": "OR-J20-S05",
       "journey": "J20",
       "name": "Two partial CCBill refunds naming one sale are booked as two reversals, an exact replay of either books nothing, and a refund beyond what remains of the sale books nothing and raises a ledger finding naming it"
+    },
+    {
+      "id": "OR-J20-S06",
+      "journey": "J20",
+      "name": "A won dispute gives back what its chargeback took: the charge reads refunded only by its net reversals, in its detail and in the merchant's list"
     },
     {
       "id": "OR-J21-S01",

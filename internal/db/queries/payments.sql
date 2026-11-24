@@ -95,9 +95,10 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id
 -- Customer history needs completed display totals, not pending refund reservations.
 -- Scope ownership through the original charge before aggregating linked refunds.
 -- name: GetPaymentRefundTotals :many
--- Completed refunds against each listed charge, including refunds outside the
--- page the charges came from.
-SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
+-- Completed reversals against each listed charge, net, including those outside
+-- the page the charges came from: a won dispute gives back what its chargeback
+-- took.
+SELECT original.id AS payment_id, GREATEST(-sum(refund.amount::numeric), 0)::bigint AS amount_refunded
 FROM billing.payments original
 JOIN billing.payments refund ON refund.refunded_payment_id = original.id
     AND refund.merchant_id = sqlc.arg(merchant_id)::uuid

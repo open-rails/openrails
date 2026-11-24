@@ -1305,6 +1305,9 @@
     "OR-J20-S70": [
       "TestRefundRecovery/OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read"
     ],
+    "OR-J20-S06": [
+      "TestRefunds/OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took"
+    ],
     "OR-J04-S71": [
       "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
     ],
