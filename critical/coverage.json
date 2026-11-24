@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 470,
+  "scenario_count": 472,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2299,11 +2299,6 @@
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
     },
     {
-      "id": "OR-J46-S02",
-      "journey": "J46",
-      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull proposes nothing for it"
-    },
-    {
       "id": "OR-J46-S01",
       "journey": "J46",
       "name": "A Stripe chargeback records one dispute with its network, reason family, code and due date, books one reversal, ends the subscription and its access, blocks the card and asks staff to review the customer; replays change nothing"
@@ -2314,24 +2309,9 @@
       "name": "An RDR resolution books one refund (dispute_prevention) and no chargeback, a Compelling Evidence 3.0 block books nothing, and neither counts in a dispute ratio"
     },
     {
-      "id": "OR-J46-S04",
-      "journey": "J46",
-      "name": "A won dispute books its recovery and stays won: a late notice that it opened reverses nothing"
-    },
-    {
       "id": "OR-J46-S06",
       "journey": "J46",
       "name": "A CCBill chargeback is recorded with its reason, card network and reversal, its outcome unreported"
-    },
-    {
-      "id": "OR-J46-S07",
-      "journey": "J46",
-      "name": "An actionable early fraud warning is a fraud report Visa counts; it refunds the charge in full once (fraud_warning), ends what it paid for and blocks the card, and a merchant that records reports only refunds nothing"
-    },
-    {
-      "id": "OR-J46-S08",
-      "journey": "J46",
-      "name": "Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise one high finding that alerts; at the limit it escalates to critical and alerts again, and the program read shows the same standing"
     },
     {
       "id": "OR-J46-S09",
@@ -2349,9 +2329,39 @@
       "name": "A staff refund carries its reason, requested_by_customer unless named; a Stripe dashboard refund carries Stripe's; refunds count in no dispute ratio"
     },
     {
+      "id": "OR-J46-S04",
+      "journey": "J46",
+      "name": "A won dispute books its recovery and stays won against a late notice that it opened; a lost one stays lost against a late notice from before the decision"
+    },
+    {
+      "id": "OR-J46-S07",
+      "journey": "J46",
+      "name": "An actionable early fraud warning is a fraud report Visa counts once; it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; a charge already in dispute is not refunded; recording reports only refunds nothing; limited mode does none of it"
+    },
+    {
+      "id": "OR-J46-S08",
+      "journey": "J46",
+      "name": "Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise one high finding that alerts; at the limit it escalates to critical and alerts again; sales settling afterwards re-evaluate and resolve it; minimums are actual counts"
+    },
+    {
       "id": "OR-J46-S11",
       "journey": "J46",
-      "name": "After a chargeback the card is never charged again: the customer's other engine subscription on it keeps its paid period and waits for another card at renewal"
+      "name": "A charged-back card is never charged again: the customer's other engine subscription on it keeps its paid period and waits for another card, while one on their other card renews on it"
+    },
+    {
+      "id": "OR-J46-S15",
+      "journey": "J46",
+      "name": "A chargeback blocks the card its charge was taken from, never the card the subscription moved to since"
+    },
+    {
+      "id": "OR-J46-S16",
+      "journey": "J46",
+      "name": "A dispute update or an early fraud warning on a charge OpenRails does not know is answered with a finding, never retried"
+    },
+    {
+      "id": "OR-J46-S02",
+      "journey": "J46",
+      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull records it without proposing it"
     }
   ]
 }

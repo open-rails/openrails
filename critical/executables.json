@@ -1483,6 +1483,8 @@
       "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
     ],
     "OR-J46-S04": [
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/won",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/lost",
       "TestDisputes/OR-J46-S04/a-won-dispute-stays-won"
     ],
     "OR-J46-S06": [
@@ -1490,7 +1492,9 @@
     ],
     "OR-J46-S07": [
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/refunds-by-default",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-disputed-charge-is-not-refunded",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/limited-mode-waits",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
     ],
     "OR-J46-S08": [
@@ -1507,6 +1511,12 @@
     ],
     "OR-J46-S11": [
       "TestDisputes/OR-J46-S11/a-charged-back-card-is-never-charged-again"
+    ],
+    "OR-J46-S15": [
+      "TestDisputes/OR-J46-S15/a-chargeback-blocks-the-charged-card-only"
+    ],
+    "OR-J46-S16": [
+      "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
     ]
   }
 }

@@ -4,14 +4,18 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -30,6 +34,8 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S10/the-program-in-force-is-the-months", disputeProgramDates)
 	t.Run("OR-J46-S11/a-charged-back-card-is-never-charged-again", disputeBlockedCard)
 	t.Run("OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio", disputeRefundReasons)
+	t.Run("OR-J46-S15/a-chargeback-blocks-the-charged-card-only", disputeChargedCardOnly)
+	t.Run("OR-J46-S16/a-report-on-an-unknown-charge-is-answered", disputeUnknownCharge)
 }
 
 // disputedMembership is alice's engine-renewed $10 Stripe membership with the
@@ -152,6 +158,10 @@ func disputeInquiry(t *testing.T) {
 		}
 		iw.stripe.Dispute("dp_pulled", sub, "warning_needs_response", "inquiry", "general")
 		require.Zero(t, chargebackProposals(iw.manual(t, "stripe").ID), "an inquiry is no chargeback to propose")
+		recorded, err := iw.alpha.ListDisputes(t.Context(), billing.DisputeListParams{})
+		require.NoError(t, err)
+		require.Len(t, recorded.Items, 1, "a missed webhook's inquiry is recorded by the pull")
+		require.Equal(t, billing.DisputeInquiry, recorded.Items[0].Kind)
 		iw.stripe.Dispute("dp_pulled", sub, "needs_response", "chargeback", "fraudulent")
 		require.Equal(t, 1, chargebackProposals(iw.manual(t, "stripe").ID), "the escalated inquiry is")
 		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"), "a pull lands nothing")
@@ -263,25 +273,41 @@ func disputePrevented(t *testing.T) {
 }
 
 // A won dispute returns the money and stays won: a late notice that it was
-// opened reverses nothing.
+// opened reverses nothing. A lost one stays lost against a late notice from
+// before the decision.
 func disputeWon(t *testing.T) {
-	m := newDisputedMembership(t)
-	d := m.dispute("dp_won", "needs_response", "chargeback", "product_not_received")
-	d["payment_method_details"] = map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": "chargeback", "network_reason_code": "13.1"}}
-	m.notice(t, "evt_won_created", "charge.dispute.created", d)
-	d["status"] = "won"
-	m.notice(t, "evt_won_closed", "charge.dispute.closed", d)
-	d["status"] = "needs_response"
-	m.notice(t, "evt_won_late", "charge.dispute.updated", d)
+	t.Run("won", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		d := m.dispute("dp_won", "needs_response", "chargeback", "product_not_received")
+		d["payment_method_details"] = map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": "chargeback", "network_reason_code": "13.1"}}
+		m.notice(t, "evt_won_created", "charge.dispute.created", d)
+		d["status"] = "won"
+		m.notice(t, "evt_won_closed", "charge.dispute.closed", d)
+		d["status"] = "needs_response"
+		m.notice(t, "evt_won_late", "charge.dispute.updated", d)
 
-	reversals := m.reversals(t)
-	require.Len(t, reversals, 2, "the chargeback and its recovery")
-	dispute := disputeOf(t, m.a, m.payment)
-	require.Equal(t, billing.DisputeWon, dispute.Status)
-	require.Equal(t, billing.DisputeNotReceived, dispute.Reason)
-	require.NotNil(t, dispute.ClosedAt)
-	require.NotNil(t, dispute.RecoveryPaymentID)
-	require.NotNil(t, dispute.ReversalPaymentID)
+		reversals := m.reversals(t)
+		require.Len(t, reversals, 2, "the chargeback and its recovery")
+		dispute := disputeOf(t, m.a, m.payment)
+		require.Equal(t, billing.DisputeWon, dispute.Status)
+		require.Equal(t, billing.DisputeNotReceived, dispute.Reason)
+		require.NotNil(t, dispute.ClosedAt)
+		require.NotNil(t, dispute.RecoveryPaymentID)
+		require.NotNil(t, dispute.ReversalPaymentID)
+	})
+	t.Run("lost", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		d := m.dispute("dp_lost", "needs_response", "chargeback", "fraudulent")
+		m.notice(t, "evt_lost_created", "charge.dispute.created", d)
+		d["status"] = "lost"
+		m.notice(t, "evt_lost_closed", "charge.dispute.closed", d)
+		d["status"] = "under_review"
+		m.notice(t, "evt_lost_late", "charge.dispute.updated", d)
+		dispute := disputeOf(t, m.a, m.payment)
+		require.Equal(t, billing.DisputeLost, dispute.Status, "a notice from before the decision reopens nothing")
+		require.NotNil(t, dispute.ClosedAt)
+		require.Len(t, m.reversals(t), 1)
+	})
 }
 
 // A CCBill chargeback is recorded with its reason and card network; CCBill
@@ -309,33 +335,73 @@ func disputeCCBill(t *testing.T) {
 	require.EqualValues(t, 10_000_000, *dispute.Amount)
 }
 
-func (m *disputedMembership) fraudWarning(t *testing.T, id string) {
+func (m *disputedMembership) fraudWarning(t *testing.T, event, kind, id string, actionable bool) {
 	t.Helper()
-	m.notice(t, "evt_"+id, "radar.early_fraud_warning.created", stripemock.Object{"id": id, "object": "radar.early_fraud_warning", "charge": m.charge,
-		"payment_intent": m.intent, "fraud_type": "made_with_stolen_card", "actionable": true, "created": m.a.clock.Now().Unix(), "livemode": false})
+	m.notice(t, event, kind, stripemock.Object{"id": id, "object": "radar.early_fraud_warning", "charge": m.charge,
+		"payment_intent": m.intent, "fraud_type": "made_with_stolen_card", "actionable": actionable, "created": m.a.clock.Now().Unix(), "livemode": false})
+}
+
+// waitDisputeJobs waits until no dispute job is left to run now: the
+// monitor's and the response's. A job in one of keep (a snoozed response)
+// is allowed to stay.
+func waitDisputeJobs(t *testing.T, a *authorityWorld, keep ...rivertype.JobState) {
+	t.Helper()
+	pending := []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStatePending, rivertype.JobStateScheduled}
+	var waiting []string
+	for _, state := range pending {
+		if !slices.Contains(keep, state) {
+			waiting = append(waiting, string(state))
+		}
+	}
+	require.Eventually(t, func() bool {
+		var n int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+			" WHERE kind IN ('openrails.dispute_monitor', 'openrails.dispute_response') AND state::text = ANY($1)", waiting).Scan(&n))
+		return n == 0
+	}, 20*time.Second, 50*time.Millisecond, "the dispute jobs ran")
 }
 
 // An actionable early fraud warning is a fraud report Visa counts; it refunds
-// the charge in full (fraud_warning) once, ends what it paid for and blocks
-// the card. A merchant that records reports only refunds nothing.
+// the charge in full once (fraud_warning, sent to Stripe as fraudulent), ends
+// what it paid for and blocks the card, however often and in whatever events
+// the report arrives. A charge already in dispute is not refunded. A merchant
+// that records reports only refunds nothing; in limited mode nothing happens
+// until provider writes resume.
 func disputeFraudWarning(t *testing.T) {
 	t.Run("refunds-by-default", func(t *testing.T) {
 		m := newDisputedMembership(t)
 		startFleet(t, m.a.world)
-		m.fraudWarning(t, "issfr_refund")
-		m.fraudWarning(t, "issfr_refund")
+		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
+		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
+		m.fraudWarning(t, "evt_efw_again", "radar.early_fraud_warning.created", "issfr_refund", true)
+		m.fraudWarning(t, "evt_efw_updated", "radar.early_fraud_warning.updated", "issfr_refund", false)
+		require.Eventually(t, func() bool {
+			reversals := m.reversals(t)
+			return len(reversals) == 1 && reversals[0].Status == billing.PaymentSucceeded
+		}, 20*time.Second, 50*time.Millisecond, "one refund, settled at the provider")
 		reversals := m.reversals(t)
-		require.Len(t, reversals, 1, "one refund however often the report arrives")
 		require.Equal(t, billing.PaymentRefund, reversals[0].Kind)
 		require.EqualValues(t, -10_000_000, reversals[0].Amount)
 		require.Equal(t, billing.RefundFraudWarning, *reversals[0].RefundReason)
+		var reasons []string
+		rows, err := m.p.pool.Query(t.Context(), "SELECT object->>'reason' FROM "+pgx.Identifier{m.p.schema, "effects"}.Sanitize()+" WHERE kind = 'refund'")
+		require.NoError(t, err)
+		reasons, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		require.Equal(t, []string{"fraudulent"}, reasons, "Stripe is told the refund answers fraud")
 		subscriptionState(t, m.a, m.sub.ID, "canceled")
 		require.False(t, m.entitled(t))
 		require.Contains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
-		require.EqualValues(t, 1, standing(t, m.a, billing.ProgramVisaVAMP, m.a.clock.Now()).Count, "Visa counts the report, refunded or not")
-		require.Eventually(t, func() bool {
-			return m.reversals(t)[0].Status == billing.PaymentSucceeded
-		}, 20*time.Second, 50*time.Millisecond, "the refund settles at the provider")
+		require.EqualValues(t, 1, standing(t, m.a, billing.ProgramVisaVAMP, m.a.clock.Now()).Count, "Visa counts the report once, refunded or not")
+	})
+	t.Run("a-disputed-charge-is-not-refunded", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		startFleet(t, m.a.world)
+		m.notice(t, "evt_open_inquiry", "charge.dispute.created", m.dispute("dp_open_inquiry", "warning_needs_response", "inquiry", "fraudulent"))
+		m.fraudWarning(t, "evt_efw_disputed", "radar.early_fraud_warning.created", "issfr_disputed", true)
+		waitDisputeJobs(t, m.a)
+		require.Empty(t, m.reversals(t), "the open inquiry decides the charge")
+		require.True(t, m.entitled(t))
 	})
 	t.Run("record-only", func(t *testing.T) {
 		m := newDisputedMembership(t, func(w *world) {
@@ -343,10 +409,21 @@ func disputeFraudWarning(t *testing.T) {
 			declaration.FraudWarningRefund = ptr(billing.FraudWarningRecord)
 			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
-		m.fraudWarning(t, "issfr_record")
+		startFleet(t, m.a.world)
+		m.fraudWarning(t, "evt_efw_record", "radar.early_fraud_warning.created", "issfr_record", true)
+		waitDisputeJobs(t, m.a)
 		require.Empty(t, m.reversals(t))
 		require.True(t, m.entitled(t))
 		require.EqualValues(t, 1, standing(t, m.a, billing.ProgramVisaVAMP, m.a.clock.Now()).Count)
+	})
+	t.Run("limited-mode-waits", func(t *testing.T) {
+		m := newDisputedMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesLimited })
+		startFleet(t, m.a.world)
+		m.fraudWarning(t, "evt_efw_limited", "radar.early_fraud_warning.created", "issfr_limited", true)
+		waitDisputeJobs(t, m.a, rivertype.JobStateScheduled)
+		require.Empty(t, m.reversals(t), "the refund waits with everything else")
+		require.True(t, m.entitled(t), "access stays while the refund cannot be sent")
+		require.NotContains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
 	})
 }
 
@@ -426,7 +503,8 @@ func notifiedAt(t *testing.T, a *authorityWorld, id billing.FindingID) string {
 
 // Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise
 // one high finding that alerts; at the limit it escalates to critical and
-// alerts again. The program read shows the same standing.
+// alerts again. Sales that settle afterwards re-evaluate it, and enough of
+// them resolve it. The minimums are actual counts, never projected ones.
 func disputeMonitor(t *testing.T) {
 	s := newSales(t, func(w *world) {
 		declaration := cfgMerchant(w.cfg, "alpha")
@@ -438,15 +516,17 @@ func disputeMonitor(t *testing.T) {
 	startFleet(t, s.a.world)
 	var paid []billing.Payment
 	for i := range 10 {
-		paid = append(paid, s.buy(t, "monitor-sale-"+string(rune('a'+i))))
+		paid = append(paid, s.buy(t, fmt.Sprintf("monitor-sale-%d", i)))
 	}
 	psp := *paid[0].PSPID
 	for i := range 4 {
-		s.chargeback(t, paid[i].ID, "dp_monitor_"+string(rune('a'+i)))
+		s.chargeback(t, paid[i].ID, fmt.Sprintf("dp_monitor_%d", i))
 	}
-	require.Nil(t, thresholdFinding(t, s.a, psp, billing.ProgramAcquirer), "four chargebacks are under every minimum")
+	waitDisputeJobs(t, s.a)
+	require.Nil(t, thresholdFinding(t, s.a, psp, billing.ProgramAcquirer), "four chargebacks are under every minimum, whatever the projection")
+	require.Equal(t, billing.DisputeLevelNone, standing(t, s.a, billing.ProgramAcquirer, s.a.clock.Now()).Level)
 
-	s.chargeback(t, paid[4].ID, "dp_monitor_e")
+	s.chargeback(t, paid[4].ID, "dp_monitor_4")
 	var warning *billing.Finding
 	require.Eventually(t, func() bool {
 		warning = thresholdFinding(t, s.a, psp, billing.ProgramAcquirer)
@@ -458,13 +538,20 @@ func disputeMonitor(t *testing.T) {
 	require.EqualValues(t, 5, acquirer.Count)
 	require.EqualValues(t, 10, acquirer.Denominator)
 
-	s.chargeback(t, paid[5].ID, "dp_monitor_f")
+	s.chargeback(t, paid[5].ID, "dp_monitor_5")
 	require.Eventually(t, func() bool {
 		f := thresholdFinding(t, s.a, psp, billing.ProgramAcquirer)
 		return f != nil && f.Severity == "critical" && notifiedAt(t, s.a, f.ID) == "critical"
 	}, 20*time.Second, 50*time.Millisecond, "6 of 10 is the limit: the finding escalates and alerts again")
 	require.Equal(t, billing.DisputeLevelExcessive, standing(t, s.a, billing.ProgramAcquirer, s.a.clock.Now()).Level)
 	require.NotNil(t, thresholdFinding(t, s.a, psp, billing.ProgramStripe), "Stripe's own 0.75% is passed too")
+
+	for i := 10; i < 30; i++ {
+		s.buy(t, fmt.Sprintf("monitor-sale-%d", i))
+	}
+	require.Eventually(t, func() bool {
+		return thresholdFinding(t, s.a, psp, billing.ProgramAcquirer) == nil
+	}, 20*time.Second, 50*time.Millisecond, "6 of 30 is under the warning: the settled sales resolve the finding")
 }
 
 // Mastercard divides a month's chargebacks by the previous month's sales;
@@ -538,34 +625,93 @@ func disputeRefundReasons(t *testing.T) {
 }
 
 // A charged-back card is never charged again: the customer's other engine
-// subscription on it waits for another card at renewal.
+// subscription on it keeps its paid period and waits for another card at
+// renewal, while a subscription on their other card renews on it.
 func disputeBlockedCard(t *testing.T) {
 	m := newDisputedMembership(t)
 	enableLifecycleMaintenance(t, m.a)
 	methods, err := m.a.alpha.ListPaymentMethods(t.Context(), m.sub.CustomerID, billing.PaymentMethodListParams{})
 	require.NoError(t, err)
 	require.Len(t, methods.Items, 1)
-	product, err := m.a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "extra", DisplayName: "Extra", Entitlements: []string{"extra:paid"}})
-	require.NoError(t, err)
-	price, err := m.a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "extra-day", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
-	require.NoError(t, err)
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(5_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &methods.Items[0].ID}}
-	status, raw := m.a.request(t, http.MethodPost, "/v1/me/orders", m.a.aliceToken, input, map[string]string{"Idempotency-Key": "extra-purchase"})
-	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.NotNil(t, order.Lines[0].SubscriptionID)
-	extra := *order.Lines[0].SubscriptionID
+	cardA := methods.Items[0].ID
+	cardB := saveMethod(t, m.a, m.p, m.a.aliceToken, "1111").ID
+	subscribe := func(key string, card billing.PaymentMethodID) billing.SubscriptionID {
+		product, err := m.a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: []string{key + ":paid"}})
+		require.NoError(t, err)
+		price, err := m.a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-day", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+		require.NoError(t, err)
+		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(5_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &card}}
+		status, raw := m.a.request(t, http.MethodPost, "/v1/me/orders", m.a.aliceToken, input, map[string]string{"Idempotency-Key": key + "-purchase"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Lines[0].SubscriptionID)
+		id := *order.Lines[0].SubscriptionID
+		_, err = m.a.alpha.SetSubscriptionPaymentMethod(t.Context(), id, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &card})
+		require.NoError(t, err)
+		return id
+	}
+	onA, onB := subscribe("on-card-a", cardA), subscribe("on-card-b", cardB)
 	charges := len(m.p.effects(t))
 
 	m.notice(t, "evt_blocked_card", "charge.dispute.created", m.dispute("dp_blocked_card", "needs_response", "chargeback", "fraudulent"))
+	statuses := map[billing.PaymentMethodID]billing.PaymentMethodStatus{}
+	read, err := m.a.alpha.ListPaymentMethods(t.Context(), m.sub.CustomerID, billing.PaymentMethodListParams{})
+	require.NoError(t, err)
+	for _, method := range read.Items {
+		statuses[method.ID] = method.Status
+	}
 	require.Contains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
-	current, err := m.a.alpha.GetSubscription(t.Context(), extra)
+	require.NotEqual(t, billing.PaymentMethodDisputed, statuses[cardB], "only the charged-back card is blocked")
+	current, err := m.a.alpha.GetSubscription(t.Context(), onA)
 	require.NoError(t, err)
 	require.Equal(t, "active", string(current.Status), "its paid period stands")
 	m.a.clock.Advance(current.CurrentPeriodEndsAt.Sub(m.a.clock.Now()))
 	fleet := startFleet(t, m.a.world)
 	runRegistered(t, fleet, "openrails.billing_pass", 2)
-	subscriptionState(t, m.a, extra, "awaiting_method")
-	require.Len(t, m.p.effects(t), charges, "the disputed card is not charged")
+	subscriptionState(t, m.a, onA, "awaiting_method")
+	renewed := subscriptionState(t, m.a, onB, "active")
+	require.True(t, renewed.CurrentPeriodEndsAt.After(*current.CurrentPeriodEndsAt), "the other card renews")
+	require.Len(t, m.p.effects(t), charges+1, "only card B is charged")
+}
+
+// A chargeback blocks the card the charge was taken from, never the card the
+// subscription moved to since.
+func disputeChargedCardOnly(t *testing.T) {
+	m := newDisputedMembership(t)
+	methods, err := m.a.alpha.ListPaymentMethods(t.Context(), m.sub.CustomerID, billing.PaymentMethodListParams{})
+	require.NoError(t, err)
+	require.Len(t, methods.Items, 1)
+	cardA := methods.Items[0].ID
+	cardB := saveMethod(t, m.a, m.p, m.a.aliceToken, "1111").ID
+	_, err = m.a.alpha.SetSubscriptionPaymentMethod(t.Context(), m.sub.ID, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &cardB})
+	require.NoError(t, err)
+	m.notice(t, "evt_switched_card", "charge.dispute.created", m.dispute("dp_switched_card", "needs_response", "chargeback", "fraudulent"))
+	statuses := map[billing.PaymentMethodID]string{}
+	rows, err := m.a.pool.Query(t.Context(), "SELECT id, status FROM "+pgx.Identifier{m.a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND customer_id = $2",
+		m.a.alpha.MerchantID().UUID(), m.sub.CustomerID.UUID())
+	require.NoError(t, err)
+	for rows.Next() {
+		var id uuid.UUID
+		var status string
+		require.NoError(t, rows.Scan(&id, &status))
+		statuses[billing.PaymentMethodID(id)] = status
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, "disputed", statuses[cardA], "the charged card is blocked")
+	require.Equal(t, "active", statuses[cardB], "the card switched to since is not")
+}
+
+// A dispute update or an early fraud warning on a charge OpenRails does not
+// know is answered, and a finding names it; it is never retried.
+func disputeUnknownCharge(t *testing.T) {
+	m := newDisputedMembership(t)
+	d := m.dispute("dp_unknown_charge", "needs_response", "chargeback", "fraudulent")
+	d["charge"], d["payment_intent"] = "ch_unknown", "pi_unknown"
+	m.notice(t, "evt_unknown_update", "charge.dispute.updated", d)
+	m.notice(t, "evt_unknown_efw", "radar.early_fraud_warning.created", stripemock.Object{"id": "issfr_unknown", "object": "radar.early_fraud_warning",
+		"charge": "ch_unknown", "payment_intent": "pi_unknown", "fraud_type": "misc", "actionable": true, "created": m.a.clock.Now().Unix()})
+	page, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2, "each unbooked report is a finding")
 }

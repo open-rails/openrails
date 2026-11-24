@@ -44,6 +44,7 @@ func TestStripeKind(t *testing.T) {
 		{"lost", "chargeback", billing.DisputeChargeback},
 		{"prevented", "", billing.DisputePrevented},
 		{"lost", "resolution", billing.DisputePrevented},
+		{"charge_refunded", "", billing.DisputeKind("unknown")},
 	}
 	for _, c := range cases {
 		if got := StripeKind(c.status, c.caseType); got != c.want {
@@ -125,5 +126,26 @@ func TestEvaluateProjectsTheMonth(t *testing.T) {
 	early := map[time.Time]Activity{month.AddDate(0, 0, -10): {Sales: 100, Chargebacks: 6}}
 	if got := program(billing.ProgramStripe).Evaluate(WindowFor(month, month.AddDate(0, 0, 2), early)); got.Count != 6 || got.Level != billing.DisputeLevelExcessive {
 		t.Fatalf("early-month Stripe standing %+v", got)
+	}
+}
+
+// Minimums are what was counted, never what the month is projected to reach:
+// four chargebacks ten days into a month reach no level, however fast they
+// came.
+func TestMinimumsAreActualCounts(t *testing.T) {
+	month := time.Date(2026, time.November, 1, 0, 0, 0, 0, time.UTC)
+	days := map[time.Time]Activity{month.AddDate(0, 0, 2): {Sales: 100, Chargebacks: 4}}
+	w := WindowFor(month, month.AddDate(0, 0, 10), days)
+	if w.Factor != 3 {
+		t.Fatalf("factor %v, want 3", w.Factor)
+	}
+	for _, id := range []billing.DisputeProgram{billing.ProgramVisaVAMP, billing.ProgramStripe} {
+		if st := program(id).Evaluate(w); st.Level != billing.DisputeLevelNone {
+			t.Errorf("%s reached %s on 4 actual chargebacks (projected %d)", id, st.Level, st.ProjectedCount)
+		}
+	}
+	days[month.AddDate(0, 0, 3)] = Activity{Chargebacks: 1}
+	if st := program(billing.ProgramStripe).Evaluate(WindowFor(month, month.AddDate(0, 0, 10), days)); st.Level != billing.DisputeLevelExcessive {
+		t.Errorf("Stripe at 5 actual chargebacks over 100 sales: %s", st.Level)
 	}
 }
