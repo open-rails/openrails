@@ -760,9 +760,11 @@ JWKS, `llm.base_url`):
 
 ## Event store
 
-Usage needs an event store on ClickHouse; money stays in PostgreSQL. Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant and are named in one log line at boot.
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 100 days), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and days kept 25 months). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each UTC month's end, in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
-The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead.
+Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken does not start without ClickHouse (`event_store_required`, naming the merchants): only the store can post it.
+
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Scaling and Redis
 
@@ -1155,12 +1157,11 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage accruals, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
 | `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
-| `usage_daily` | 24 months after its usage was billed, about 26 months after the month began |
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
@@ -1172,13 +1173,12 @@ Periods are constants, the same for every merchant, except the event log's `even
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
-| `failed_usage_windows` | when the window ends |
-| `meter_period_quantities` | 100 days after `period_starts_at` |
 | `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
 | `leases` (with their holds), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
-| `usage_minutes` | 25 hours |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
+
+The event store's tables expire by their own TTLs: raw usage events 100 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
 
 The hourly cleanup creates partitions two months ahead and drops expired ones
 (giving up after 2 seconds rather than queue behind a long reader), then deletes
@@ -1208,13 +1208,19 @@ Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an o
 Drill restores into a scratch instance: migrations current, PSPs arm, a refresh
 produces sane findings.
 
+**ClickHouse.** The event store holds every customer's usage the month-end close has not posted yet, so back it up nightly to S3-compatible storage: `BACKUP DATABASE openrails TO S3('https://<bucket>/clickhouse/<date>', '<key>', '<secret>')`, incremental (`SETTINGS base_backup = S3(...)`) from a weekly full one, kept 8 days like PostgreSQL's window. A backup carries the store's identity: restore it (`RESTORE DATABASE openrails FROM S3(...)`) before starting OpenRails, and the boot finds the store its database recorded. Usage that arrived after the backup is lost with it; what posted is in PostgreSQL. With no backup, `openrails usage attach` records an empty ClickHouse ([event store](#event-store)).
+
 **One merchant's archive.** `openrails billing export` writes a complete,
 integrity-protected snapshot of one merchant's billing to a private file, with
 every writer stopped (`--source-stopped` attests it), and leaves the source
 readonly. `openrails billing prepare-target` provisions the exact merchant
 identity at the destination; `openrails billing import --target-stopped` restores
 into it and lands readonly until `openrails merchant arm`. Over HTTP the same
-archive is `GET` and `POST /v1/merchant/billing-archive`. The event log, active
+archive is `GET` and `POST /v1/merchant/billing-archive`. With an event store the
+archive carries the merchant's usage from it: raw events within their 100 days,
+and the history and limit usage older events no longer rebuild. Restoring one
+with usage needs an event store holding none of the merchant's; without a store
+an export refuses a merchant with unposted usage. The event log, active
 destructive incidents and pending actions are not in an archive.
 
 **The catalog alone.** `openrails catalog export --merchant UUID --out FILE`
@@ -1264,6 +1270,7 @@ the merchant the token is bound to.
 | `openrails merchant arm`, `openrails merchant hold` | a merchant's write posture |
 | `openrails merchant purge` | record a purge inventory, or with it typed back delete the merchant permanently |
 | `openrails book status`, `openrails book arm --by NAME` | the book identity |
+| `openrails usage attach --actor NAME --reason TEXT [--discard-unposted]` | record the configured ClickHouse as the event store in place of a lost one; `--discard-unposted` discards usage not yet posted, recorded per merchant |
 | `openrails provider-refresh --merchant NAME` | queue a provider refresh and print its job |
 | `openrails intents`, `openrails intents resolve`, `openrails intents-log` | the provider intent ledger |
 | `openrails proposals list`, `proposals show`, `proposals approve`, `proposals dismiss`, `proposals foreign`, `proposals runs` | review what provider reads propose |
