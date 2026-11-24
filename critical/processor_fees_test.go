@@ -120,7 +120,27 @@ func TestProcessorFees(t *testing.T) {
 		require.Equal(t, 2, feeTransfers(t, w, mid, "processor_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
 
-		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+mid.String()), "Ledger integrity OK")
+		// A refund Stripe returns part of its fee on posts the fee back.
+		var eur string
+		for _, effect := range m.p.effects(t) {
+			if strings.EqualFold(effect.Currency, "eur") {
+				eur = effect.ID
+			}
+		}
+		require.NotEmpty(t, eur)
+		refund, err := m.p.core.RefundReturningFee(eur, 500, 15)
+		require.NoError(t, err)
+		m.notice(t, "evt_fee_refund", "refund.created", refund)
+		require.False(t, runPass(t, fleet))
+		require.Equal(t, [2]int64{150_000, 590_000 + 940_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
+		require.Equal(t, 3, feeTransfers(t, w, mid, "processor_fee"))
+		require.Zero(t, queuedFeeReads(t, w, mid))
+
+		// The euro charge's fee leaves the dollar cash short: a side warning,
+		// never a failure.
+		audit := hostCLI(t, w, "ledger-audit", "--merchant", "id:"+mid.String())
+		require.Contains(t, audit, "Ledger integrity OK")
+		require.Contains(t, audit, "side: general/cash_clearing")
 	})
 	t.Run("OR-J40-S41/a-prevention-refund-reads-through-its-dispute", func(t *testing.T) {
 		m := newDisputedMembership(t)

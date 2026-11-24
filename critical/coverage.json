@@ -2571,7 +2571,7 @@
     {
       "id": "OR-J40-S40",
       "journey": "J40",
-      "name": "A Stripe charge's fee and a dispute fee post once, exactly; a fee read again posts nothing new, and a fee settled in another currency than the charge posts in that currency"
+      "name": "A Stripe charge's fee and a dispute fee post once, exactly; a fee read again posts nothing new; a won dispute's and a refund's returned fees post back; a read that keeps failing waits for its finding and is read again once it is fixed; and a fee settled in another currency than the charge posts in that currency"
     },
     {
       "id": "OR-J40-S41",

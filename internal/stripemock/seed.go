@@ -401,6 +401,23 @@ func (m *Mock) ChargeDispute(id, charge, status, reason string) Object {
 	return clone(d)
 }
 
+// RefundReturningFee refunds amount (minor units) of a charge outside
+// OpenRails, as Refund does, with Stripe returning fee (minor units of the
+// settlement currency) of its processing fee. It answers the refund.
+func (m *Mock) RefundReturningFee(charge string, amount, fee int64) (Object, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	status, out := m.createRefund(url.Values{"charge": {charge}, "amount": {fmt.Sprint(amount)}})
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("stripemock: refund of %s answered %d", charge, status)
+	}
+	re := out.(Object)
+	bt := m.balances[fmt.Sprint(re["balance_transaction"])]
+	bt["fee"], bt["net"] = -fee, bt["amount"].(int64)+fee
+	bt["fee_details"] = []Object{{"amount": -fee, "currency": bt["currency"], "type": "stripe_fee", "description": "Stripe processing fees returned"}}
+	return clone(re), nil
+}
+
 // disputeBalanceLocked is a dispute's withdrawal of its charge and its fee.
 func (m *Mock) disputeBalanceLocked(id string, ch Object) Object {
 	return m.balanceLocked("adjustment", "dispute", id, -ch["amount"].(int64), fmt.Sprint(ch["currency"]), func(int64) int64 { return DisputeFee })

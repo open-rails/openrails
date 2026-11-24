@@ -245,7 +245,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [solana_pay.sql](../internal/db/queries/solana_pay.sql) | 10 | `solana_pay_receipts`, `solana_pay_references` |
 | [solana_subscriptions.sql](../internal/db/queries/solana_subscriptions.sql) | 4 | `solana_subscriptions` |
 | [stored_card_refresh.sql](../internal/db/queries/stored_card_refresh.sql) | 4 | `payment_methods`, `reconciliation_findings`, `stored_card_checks` |
-| [stripe_fees.sql](../internal/db/queries/stripe_fees.sql) | 4 | `payments`, `psps`, `stripe_fee_reads` |
+| [stripe_fees.sql](../internal/db/queries/stripe_fees.sql) | 2 | `stripe_fee_reads` |
 | [subscriptions.sql](../internal/db/queries/subscriptions.sql) | 11 | `subscriptions` |
 | [usage_billing.sql](../internal/db/queries/usage_billing.sql) | 7 | `money_settings` |
 | [usage_orders.sql](../internal/db/queries/usage_orders.sql) | 15 | `order_lines`, `orders`, `owed_items`, `payments` |

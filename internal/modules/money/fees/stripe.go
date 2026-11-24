@@ -62,9 +62,10 @@ type StripeReader struct {
 	Log    *slog.Logger
 }
 
-// Pass reads every fee read due now.
+// Pass reads every fee read due now. Each merchant's general ledger is
+// opened once per pass in each currency its fees name.
 func (r *StripeReader) Pass(ctx context.Context) error {
-	seen := map[string]bool{}
+	seen, opened := map[string]bool{}, map[string]bool{}
 	for {
 		due, err := r.DB.GenDirectory().ListDueStripeFeeReads(ctx, readBatch)
 		if err != nil {
@@ -80,7 +81,7 @@ func (r *StripeReader) Pass(ctx context.Context) error {
 				continue
 			}
 			seen[key], fresh = true, fresh+1
-			if err := r.read(ctx, row); err != nil {
+			if err := r.read(ctx, row, opened); err != nil {
 				return err
 			}
 		}
@@ -92,12 +93,12 @@ func (r *StripeReader) Pass(ctx context.Context) error {
 
 // read posts one object's fees and settles its row; only a database failure
 // is the pass's.
-func (r *StripeReader) read(ctx context.Context, row gen.ListDueStripeFeeReadsRow) error {
+func (r *StripeReader) read(ctx context.Context, row gen.ListDueStripeFeeReadsRow, opened map[string]bool) error {
 	mid := billing.MerchantID(row.MerchantID)
 	ctx = merchant.WithID(ctx, mid)
 	transactions, err := r.balanceTransactions(ctx, row)
 	if err == nil {
-		err = r.post(ctx, row, transactions)
+		err = r.post(ctx, row, transactions, opened)
 	}
 	if err == nil {
 		return r.DB.RunInMerchantScope(ctx, mid, "stripe fee read", func(ctx context.Context) error {
@@ -160,12 +161,17 @@ type balanceTransaction struct {
 // post posts the fees of one object's balance transactions in one
 // transaction, once the merchant's general ledger is open in their
 // currencies.
-func (r *StripeReader) post(ctx context.Context, row gen.ListDueStripeFeeReadsRow, transactions []balanceTransaction) error {
+func (r *StripeReader) post(ctx context.Context, row gen.ListDueStripeFeeReadsRow, transactions []balanceTransaction, opened map[string]bool) error {
 	var currencies []string
 	for _, bt := range transactions {
-		currencies = append(currencies, strings.ToUpper(bt.Currency))
+		if key := row.MerchantID.String() + "/" + strings.ToUpper(bt.Currency); bt.Fee != 0 && !opened[key] {
+			opened[key] = true
+			currencies = append(currencies, strings.ToUpper(bt.Currency))
+		}
 	}
-	books.Prepare(ctx, r.DB.DataPool(), r.Log, row.MerchantID, currencies...)
+	if len(currencies) > 0 {
+		books.Prepare(ctx, r.DB.DataPool(), r.Log, row.MerchantID, currencies...)
+	}
 	typ, expense := books.ProcessorFee, books.ProcessorFees
 	if row.Kind == "dispute" {
 		typ, expense = books.ChargebackFee, books.ChargebackFees
