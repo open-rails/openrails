@@ -236,7 +236,11 @@ func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 // ViewCapacityTx reads the customer's admission capacity in the caller's
@@ -260,7 +264,11 @@ func (s *MoneyService) ViewCapacityTx(ctx context.Context, q *gen.Queries, payer
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
@@ -300,7 +308,11 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
@@ -749,14 +761,18 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 }
 
 // heldAmount is the one held total against a customer's balance in a
-// currency as of now (live request reservations, provider authorizations and
-// running-charge accrual), and the accrual apart.
+// currency as of now (live request reservations, provider authorizations,
+// running-charge accrual and unposted usage), and the accrual apart.
 func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
 	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
 		HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
 	})
-	return row.Held, row.Accrued, err
+	if err != nil {
+		return 0, 0, err
+	}
+	unposted, err := s.unpostedUsage(ctx, q, tenantID, payerID, cur)
+	return addSat(row.Held, unposted), row.Accrued, err
 }
 
 // SetDestructiveAdmissions wires the shared staff-command admission boundary.

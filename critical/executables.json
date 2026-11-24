@@ -536,7 +536,7 @@
       "TestLeaseSyncs/OR-J24-S10/periods-and-rate-card-revisions-are-priced-apart"
     ],
     "OR-J24-S11": [
-      "TestLeaseSyncs/OR-J24-S11/a-day-posts-once-and-once-more-before-a-top-up"
+      "TestLeaseSyncs/OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up"
     ],
     "OR-J24-S14": [
       "TestLeaseSyncs/OR-J24-S14/views-of-an-occasional-customer-reserve-nothing-and-show-what-settled"
@@ -1850,6 +1850,42 @@
     ],
     "OR-J24-S46": [
       "TestLeaseSyncs/OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate"
+    ],
+    "OR-J24-S47": [
+      "TestUsageStore/OR-J24-S47/a-resend-after-a-lost-commit-inserts-nothing-twice"
+    ],
+    "OR-J24-S48": [
+      "TestUsageStore/OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-other-money-moves"
+    ],
+    "OR-J24-S49": [
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/graduated-across-two-postings",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-volume-crossing-is-carried-and-credited-at-period-close",
+      "TestUsageStore/OR-J24-S49/a-period-posts-the-price-of-its-total/a-card-revision-mid-period-is-priced-card-by-card"
+    ],
+    "OR-J24-S50": [
+      "TestUsageStore/OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference"
+    ],
+    "OR-J24-S51": [
+      "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
+    ],
+    "OR-J24-S52": [
+      "TestUsageStore/OR-J24-S52/new-refuses-a-database-with-unposted-usage-without-its-store"
+    ],
+    "OR-J24-S53": [
+      "TestUsageStore/OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money"
+    ],
+    "OR-J24-S54": [
+      "TestUsageStore/OR-J24-S54/an-archive-carries-the-merchants-usage-and-restores-it-into-an-empty-store"
+    ],
+    "OR-J24-S55": [
+      "TestUsageStore/OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart"
+    ],
+    "OR-J24-S56": [
+      "TestUsageStore/OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone"
+    ],
+    "OR-J24-S57": [
+      "TestUsageStore/OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes"
     ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",

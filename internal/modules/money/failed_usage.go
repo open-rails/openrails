@@ -6,10 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -17,7 +16,8 @@ import (
 // own failures are forgiven up to its grace windows and charged past them; a
 // delegated invoker's are never charged and count toward its cutoff windows,
 // which admission enforces. The windows are fixed, aligned to the Unix epoch,
-// and counted in failed_usage_windows inside the usage event's transaction.
+// and counted in the event store's limit usage (failed:<currency>:<window>,
+// with :<invoker> for a cutoff).
 
 // FailedUsageWindow is one grace or cutoff window: at most Limit of failed
 // usage per Duration, in the event's currency.
@@ -45,83 +45,39 @@ func failedUsagePeriods(windows []FailedUsageWindow, now time.Time) ([]failedUsa
 	return out, nil
 }
 
-// failedUsageKey names whose windows count: the customer's grace (invoker
-// empty) or a delegated invoker's cutoff.
-type failedUsageKey struct {
-	merchant, customer uuid.UUID
-	currency, invoker  string
-}
-
-func (k failedUsageKey) used(ctx context.Context, q *gen.Queries, p failedUsagePeriod) (int64, error) {
-	return q.GetFailedUsageWindowAmount(ctx, gen.GetFailedUsageWindowAmountParams{
-		MerchantID: k.merchant, CustomerID: k.customer, Currency: k.currency, Invoker: k.invoker,
-		WindowKey: p.window.Key, WindowStart: p.start,
-	})
-}
-
-// graceLeft is what the strictest window still forgives.
-func (k failedUsageKey) graceLeft(ctx context.Context, q *gen.Queries, periods []failedUsagePeriod) (int64, error) {
-	var left int64
-	for i, p := range periods {
-		used, err := k.used(ctx, q, p)
-		if err != nil {
-			return 0, err
-		}
-		if remaining := max(p.window.Limit-used, 0); i == 0 || remaining < left {
-			left = remaining
-		}
-	}
-	return left, nil
-}
-
-// count adds amount to every window; retention drops the windows that ended.
-func (k failedUsageKey) count(ctx context.Context, q *gen.Queries, periods []failedUsagePeriod, amount int64) error {
-	if amount <= 0 {
-		return nil
-	}
-	for _, p := range periods {
-		if err := q.AddFailedUsageWindow(ctx, gen.AddFailedUsageWindowParams{
-			MerchantID: k.merchant, CustomerID: k.customer, Currency: k.currency, Invoker: k.invoker,
-			WindowKey: p.window.Key, WindowStart: p.start, WindowEnd: p.end, Amount: amount,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // FailedUsageCutoffReached reports whether a delegated invoker's failed usage
 // has reached any of its cutoff windows, and which.
 func (s *MoneyService) FailedUsageCutoffReached(ctx context.Context, customer identity.CustomerID, invoker, currency string, windows []FailedUsageWindow) (bool, string, error) {
 	if s == nil || s.db == nil {
 		return false, "", fmt.Errorf("money service not initialized")
 	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
+	if _, err := merchant.Require(ctx); err != nil {
 		return false, "", err
 	}
 	periods, err := failedUsagePeriods(windows, s.now())
 	if err != nil {
 		return false, "", err
 	}
-	key := failedUsageKey{merchant: merchantID.UUID(), customer: customer.UUID(), currency: normalizeCurrency(currency), invoker: invoker}
-	var reached string
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		for _, p := range periods {
-			if p.window.Limit <= 0 {
-				continue
-			}
-			used, err := key.used(ctx, q, p)
-			if err != nil {
-				return err
-			}
-			if used >= p.window.Limit {
-				reached = p.window.Key
-				return nil
-			}
+	store := s.db.EventStore()
+	if store == nil {
+		return false, "", eventstore.Required("a delegated invoker's cutoff")
+	}
+	cur := normalizeCurrency(currency)
+	for _, p := range periods {
+		if p.window.Limit <= 0 {
+			continue
 		}
-		return nil
-	})
-	return reached != "", reached, err
+		rows, err := store.LimitUnits(ctx, billing.CustomerID(customer.UUID()), failedLimitKey(cur, p.window.Key, true, invoker), p.start, p.start)
+		if err != nil {
+			return false, "", err
+		}
+		var used int64
+		for _, r := range rows {
+			used = addSat(used, r.Units)
+		}
+		if used >= p.window.Limit {
+			return true, p.window.Key, nil
+		}
+	}
+	return false, "", nil
 }

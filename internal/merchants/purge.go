@@ -12,7 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
@@ -419,6 +422,10 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 	if cleanupPlan != nil && s.jobs == nil {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: no job queue for its Vault cleanup", m.Slug)
 	}
+	store, err := s.postUsage(ctx, id)
+	if err != nil {
+		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: %w", m.Slug, err)
+	}
 	runID := uuid.New()
 	expected := int64(total)
 	note := fmt.Sprintf("merchant purge %s (%d rows) — one-way; restore path is PITR only", m.Slug, total)
@@ -511,6 +518,12 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 		s.config.Forget(id)
 	}
 	s.changed(id)
+	// The event store forgets the merchant's usage; what posted stays.
+	if store != nil {
+		if err := store.DeleteMerchant(merchant.WithID(ctx, id)); err != nil {
+			return billing.MerchantPurge{}, fmt.Errorf("merchants: purged merchant %s; its usage in the event store is not deleted, purge it again: %w", m.Slug, err)
+		}
+	}
 	return billing.MerchantPurge{RunID: billing.RunID(runID), Rows: total, CleanupQueued: cleanupPlan != nil}, nil
 }
 
@@ -546,4 +559,30 @@ func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) 
 		}
 	}
 	return out, nil
+}
+
+// postUsage posts the merchant's usage the ledger has not taken, whose money
+// the purge keeps, and answers the event store its usage is deleted from.
+func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*eventstore.Store, error) {
+	var store *eventstore.Store
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		store = db.EventStoreOf(q)
+		rows, err := q.ListMerchantUsageUnposted(ctx, id.UUID())
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		usage := db.UsageLedgerOf(q)
+		if usage == nil {
+			return fmt.Errorf("%w: its unposted usage cannot post", billing.ErrEventStoreRequired)
+		}
+		now := time.Now().UTC()
+		for _, r := range rows {
+			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, now, now); err != nil {
+				return fmt.Errorf("post usage of customer %s: %w", r.CustomerID, err)
+			}
+		}
+		return nil
+	})
+	return store, err
 }

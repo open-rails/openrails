@@ -145,7 +145,7 @@ func BillingPassTimeout() time.Duration {
 
 // billingScanBudgets are the scans' budgets.
 var billingScanBudgets = map[string]time.Duration{
-	KindUsageAccruals:                 DefaultTimeout,
+	KindUsageClose:                    DefaultTimeout,
 	KindDunning:                       DefaultTimeout,
 	KindSubscriptionVerificationRetry: DefaultTimeout,
 	KindBalanceWatch:                  DefaultTimeout,

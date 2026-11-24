@@ -20,6 +20,7 @@ migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afa
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
 migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
+migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6ee5680c979809e6cfadd2e84b9a7ac3f4f
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -777,26 +778,6 @@ table billing.eventlog_streams
   index CREATE UNIQUE INDEX eventlog_merchant_stream ON billing.eventlog_streams USING btree (merchant_id) WHERE (source = 'openrails'::text)
   index CREATE UNIQUE INDEX eventlog_streams_pkey ON billing.eventlog_streams USING btree (source, scope)
 
-table billing.failed_usage_windows
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column currency text NOT NULL
-  column invoker text NOT NULL
-  column window_key text NOT NULL
-  column window_start timestamp with time zone NOT NULL
-  column window_end timestamp with time zone NOT NULL
-  column amount bigint NOT NULL
-  constraint failed_usage_windows_amount_check CHECK ((amount > 0))
-  constraint failed_usage_windows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint failed_usage_windows_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint failed_usage_windows_invoker_check CHECK ((octet_length(invoker) <= 255))
-  constraint failed_usage_windows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint failed_usage_windows_pkey PRIMARY KEY (merchant_id, customer_id, currency, invoker, window_key, window_start)
-  constraint failed_usage_windows_window_check CHECK ((window_end > window_start))
-  constraint failed_usage_windows_window_key_check CHECK (((window_key <> ''::text) AND (octet_length(window_key) <= 255)))
-  index CREATE UNIQUE INDEX failed_usage_windows_pkey ON billing.failed_usage_windows USING btree (merchant_id, customer_id, currency, invoker, window_key, window_start)
-  index CREATE INDEX failed_usage_windows_window_end_idx ON billing.failed_usage_windows USING btree (merchant_id, window_end)
-
 table billing.fraud_reports
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1032,7 +1013,7 @@ table billing.ledger_transfers
   constraint ledger_transfers_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
-  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text])))
+  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text])))
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_credit_grant_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id) WHERE (credit_grant_id IS NOT NULL)
@@ -1139,7 +1120,6 @@ table billing.limit_windows
   column window_starts_at timestamp with time zone NOT NULL
   column window_ends_at timestamp with time zone
   column capacity bigint NOT NULL
-  column settled bigint NOT NULL
   column adjusted bigint NOT NULL
   column reached_at timestamp with time zone
   column created_at timestamp with time zone NOT NULL DEFAULT now()
@@ -1174,7 +1154,7 @@ table billing.maintenance_runs
   constraint maintenance_runs_actor_check CHECK ((actor <> ''::text))
   constraint maintenance_runs_expected_rows_check CHECK (((expected_rows IS NULL) OR (expected_rows >= 0)))
   constraint maintenance_runs_id_run_class_key UNIQUE (merchant_id, id, run_class)
-  constraint maintenance_runs_kind_check CHECK (((((kind = ANY (ARRAY['prune'::text, 'approval'::text, 'merchant_purge'::text])) AND (btrim(actor) <> ''::text) AND (summary IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
+  constraint maintenance_runs_kind_check CHECK (((((kind = ANY (ARRAY['prune'::text, 'approval'::text, 'merchant_purge'::text, 'usage_discard'::text])) AND (btrim(actor) <> ''::text) AND (summary IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL)) OR ((kind = 'billing_restore'::text) AND (actor = 'merchantarchive'::text) AND (status = ANY (ARRAY['running'::text, 'completed'::text])) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (note IS NULL) AND (inventory_manifest IS NULL) AND (inventory_total_rows IS NULL) AND (((status = 'running'::text) AND (finished_at IS NULL) AND (summary IS NULL)) OR ((status = 'completed'::text) AND (finished_at IS NOT NULL) AND (jsonb_typeof(summary) = 'object'::text) AND (summary ?& ARRAY['digest'::text, 'rows'::text]) AND (jsonb_typeof((summary -> 'digest'::text)) = 'string'::text) AND (jsonb_typeof((summary -> 'rows'::text)) = 'number'::text) AND ((summary ->> 'digest'::text) ~ '^[0-9a-f]{64}$'::text) AND (((summary ->> 'rows'::text))::bigint >= 0)))) OR ((kind = 'purge_inventory'::text) AND (status = 'completed'::text) AND (finished_at IS NOT NULL) AND (psp_id IS NULL) AND (coverage IS NULL) AND (expected_rows IS NULL) AND (affected IS NULL) AND (reversed_at IS NULL) AND (reversed_by IS NULL) AND (summary IS NULL) AND (inventory_manifest IS NOT NULL) AND (jsonb_typeof(inventory_manifest) = 'object'::text) AND (jsonb_typeof((inventory_manifest -> 'total_rows'::text)) = 'number'::text) AND (inventory_total_rows IS NOT NULL) AND (inventory_total_rows >= 0) AND (inventory_total_rows = ((inventory_manifest ->> 'total_rows'::text))::bigint))) IS TRUE))
   constraint maintenance_runs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint maintenance_runs_pkey PRIMARY KEY (merchant_id, id)
   constraint maintenance_runs_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
@@ -1301,25 +1281,6 @@ table billing.merchants
   trigger CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_group_binding()
   trigger CREATE TRIGGER merchant_event_log_stream AFTER INSERT ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.create_event_log_stream()
   trigger CREATE TRIGGER merchants_tenant_binding_immutable BEFORE UPDATE OF tenant_id, permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_tenant_binding()
-
-table billing.meter_period_quantities
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column currency text NOT NULL
-  column meter_key text NOT NULL
-  column cell text NOT NULL
-  column period_starts_at timestamp with time zone NOT NULL
-  column quantity bigint NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint meter_period_quantities_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint meter_period_quantities_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint meter_period_quantities_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint meter_period_quantities_meter_key_check CHECK ((meter_key <> ''::text))
-  constraint meter_period_quantities_pkey PRIMARY KEY (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
-  constraint meter_period_quantities_quantity_check CHECK ((quantity >= 0))
-  index CREATE INDEX meter_period_quantities_period_starts_at_idx ON billing.meter_period_quantities USING btree (merchant_id, period_starts_at)
-  index CREATE UNIQUE INDEX meter_period_quantities_pkey ON billing.meter_period_quantities USING btree (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
 
 table billing.money_settings
   column merchant_id uuid NOT NULL
@@ -3318,87 +3279,53 @@ table billing.subscriptions
   trigger CREATE TRIGGER trg_subscriptions_track_mrr AFTER INSERT OR UPDATE OF status, price_id, product_id, quantity, ended_at, current_period_starts_at, current_period_ends_at, deleted_at, cancel_type ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_mrr()
   trigger CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_unverified()
 
-table billing.usage_accruals
+table billing.usage_card_prints
+  column merchant_id uuid NOT NULL
+  column print text NOT NULL
+  column card jsonb NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint usage_card_prints_card_check CHECK ((jsonb_typeof(card) = 'object'::text))
+  constraint usage_card_prints_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint usage_card_prints_pkey PRIMARY KEY (merchant_id, print)
+  constraint usage_card_prints_print_check CHECK ((print ~ '^[0-9a-f]{16}$'::text))
+  index CREATE UNIQUE INDEX usage_card_prints_pkey ON billing.usage_card_prints USING btree (merchant_id, print)
+
+table billing.usage_postings
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column day_at timestamp with time zone NOT NULL
   column period_starts_at timestamp with time zone NOT NULL
   column period_ends_at timestamp with time zone NOT NULL
+  column cut_at timestamp with time zone NOT NULL
+  column reason text NOT NULL
   column amount bigint NOT NULL
-  column posted_amount bigint NOT NULL
-  column postings integer NOT NULL
   column lines jsonb NOT NULL
-  column posted_at timestamp with time zone
   column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint usage_accruals_amount_check CHECK ((amount >= 0))
-  constraint usage_accruals_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint usage_accruals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint usage_accruals_day_at_check CHECK ((day_at = date_trunc('day'::text, day_at, 'UTC'::text)))
-  constraint usage_accruals_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
-  constraint usage_accruals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint usage_accruals_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
-  constraint usage_accruals_pkey PRIMARY KEY (merchant_id, id)
-  constraint usage_accruals_posted_amount_check CHECK ((posted_amount >= 0))
-  constraint usage_accruals_posted_at_check CHECK (((posted_at IS NULL) = (postings = 0)))
-  constraint usage_accruals_posted_within_amount_check CHECK ((posted_amount <= amount))
-  constraint usage_accruals_postings_check CHECK ((postings >= 0))
-  index CREATE UNIQUE INDEX usage_accruals_day_at_key ON billing.usage_accruals USING btree (merchant_id, customer_id, currency, day_at, period_starts_at)
-  index CREATE INDEX usage_accruals_due_idx ON billing.usage_accruals USING btree (day_at, merchant_id, customer_id, currency) WHERE (amount > posted_amount)
-  index CREATE UNIQUE INDEX usage_accruals_pkey ON billing.usage_accruals USING btree (merchant_id, id)
-  index CREATE INDEX usage_accruals_unposted_idx ON billing.usage_accruals USING btree (merchant_id, customer_id, currency) WHERE (amount > posted_amount)
+  constraint usage_postings_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
+  constraint usage_postings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint usage_postings_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
+  constraint usage_postings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint usage_postings_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
+  constraint usage_postings_pkey PRIMARY KEY (merchant_id, id)
+  constraint usage_postings_reason_check CHECK ((reason = ANY (ARRAY['close'::text, 'movement'::text, 'reversal'::text])))
+  index CREATE INDEX usage_postings_period_idx ON billing.usage_postings USING btree (merchant_id, customer_id, currency, period_starts_at)
+  index CREATE UNIQUE INDEX usage_postings_pkey ON billing.usage_postings USING btree (merchant_id, id)
 
-table billing.usage_daily
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column day_at timestamp with time zone NOT NULL
-  column currency text NOT NULL
-  column event_type text NOT NULL
-  column meter_key text NOT NULL
-  column cell text NOT NULL
-  column invoker text NOT NULL
-  column outcome text NOT NULL
-  column requests bigint NOT NULL
-  column quantity bigint NOT NULL
-  column amount bigint NOT NULL
-  column forgiven_amount bigint NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint usage_daily_amount_check CHECK ((amount >= 0))
-  constraint usage_daily_cell_check CHECK ((octet_length(cell) <= 255))
-  constraint usage_daily_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint usage_daily_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint usage_daily_day_at_check CHECK ((day_at = date_trunc('day'::text, day_at, 'UTC'::text)))
-  constraint usage_daily_event_type_check CHECK (((octet_length(event_type) >= 1) AND (octet_length(event_type) <= 255)))
-  constraint usage_daily_forgiven_amount_check CHECK ((forgiven_amount >= 0))
-  constraint usage_daily_invoker_check CHECK ((octet_length(invoker) <= 255))
-  constraint usage_daily_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint usage_daily_meter_check CHECK (((meter_key <> ''::text) OR ((cell = ''::text) AND (quantity = 0))))
-  constraint usage_daily_meter_key_check CHECK ((octet_length(meter_key) <= 255))
-  constraint usage_daily_outcome_check CHECK ((outcome = ANY (ARRAY['succeeded'::text, 'failed'::text])))
-  constraint usage_daily_pkey PRIMARY KEY (merchant_id, customer_id, day_at, currency, event_type, meter_key, cell, invoker, outcome)
-  constraint usage_daily_quantity_check CHECK ((quantity >= 0))
-  constraint usage_daily_requests_check CHECK ((requests >= 0))
-  index CREATE INDEX usage_daily_day_at_idx ON billing.usage_daily USING btree (merchant_id, day_at)
-  index CREATE INDEX usage_daily_event_type_day_at_idx ON billing.usage_daily USING btree (merchant_id, event_type, day_at)
-  index CREATE UNIQUE INDEX usage_daily_pkey ON billing.usage_daily USING btree (merchant_id, customer_id, day_at, currency, event_type, meter_key, cell, invoker, outcome)
-
-table billing.usage_minutes
+table billing.usage_unposted
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column minute_at timestamp with time zone NOT NULL
-  column amount bigint NOT NULL
-  constraint usage_minutes_amount_check CHECK ((amount >= 0))
-  constraint usage_minutes_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint usage_minutes_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint usage_minutes_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint usage_minutes_minute_at_check CHECK ((minute_at = date_trunc('minute'::text, minute_at, 'UTC'::text)))
-  constraint usage_minutes_pkey PRIMARY KEY (merchant_id, customer_id, currency, minute_at)
-  index CREATE INDEX usage_minutes_minute_at_idx ON billing.usage_minutes USING btree (merchant_id, minute_at)
-  index CREATE UNIQUE INDEX usage_minutes_pkey ON billing.usage_minutes USING btree (merchant_id, customer_id, currency, minute_at)
+  column since_at timestamp with time zone NOT NULL
+  column due_at timestamp with time zone NOT NULL
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint usage_unposted_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint usage_unposted_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint usage_unposted_due_at_check CHECK ((due_at > since_at))
+  constraint usage_unposted_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  index CREATE INDEX usage_unposted_due_at_idx ON billing.usage_unposted USING btree (due_at, merchant_id, customer_id, currency)
+  index CREATE UNIQUE INDEX usage_unposted_pkey ON billing.usage_unposted USING btree (merchant_id, customer_id, currency)
 
 table billing.user_destructive_reservations
   column merchant_id uuid NOT NULL
@@ -4285,7 +4212,6 @@ function billing.guard_billing_restore_receipt()
                     'destructive_run_before_images',
                     'disputes',
                     'eventlog_events',
-                    'failed_usage_windows',
                     'fraud_reports',
                     'grants',
                     'host_outbox',
@@ -4301,7 +4227,6 @@ function billing.guard_billing_restore_receipt()
                     'maintenance_runs',
                     'mandates',
                     'merchant_destructive_policy',
-                    'meter_period_quantities',
                     'money_settings',
                     'mrr_cohort_flows',
                     'mrr_flows',
@@ -4353,9 +4278,9 @@ function billing.guard_billing_restore_receipt()
                     'subscription_status_transitions',
                     'subscription_verifications',
                     'subscriptions',
-                    'usage_accruals',
-                    'usage_daily',
-                    'usage_minutes',
+                    'usage_card_prints',
+                    'usage_postings',
+                    'usage_unposted',
                     'webhook_events',
                     'webhook_health',
                     'webhook_health_daily']::text[])

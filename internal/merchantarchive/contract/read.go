@@ -20,11 +20,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before usage orders (migration 61) names invoices,
 	// skipped and refused with rows, and the tables usage orders renamed.
 	invoices, preUsage := false, false
-	// An archive from before rating at ingest (migration 66) carries the
-	// period sweep's watermarks in place of the meter quantities, one from
-	// before migration 207 the custody migration record, and one from before
-	// migration 208 the usage collection cadence: skipped.
-	watermarks, custody, cadence := false, false, false
+	// An archive from before migration 207 carries the custody migration
+	// record, and one from before migration 208 the usage collection cadence:
+	// skipped.
+	custody, cadence := false, false
 	// An archive from before holds carries admissions, each a request hold.
 	admissions := false
 	// An archive from before usage settled in batches carries raw usage
@@ -33,8 +32,31 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before configuration history carries its price keys'
 	// moves in a table of their own, which change_log holds since.
 	moves := false
+	// An archive from before usage moved to the event store carries its
+	// rollups and accruals, which are not read: an accrual the ledger had not
+	// taken refuses it.
+	retired, accruals := false, false
+	// The event store section follows every table: store is its table.
+	store := -1
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
+			retired, accruals = retiredTables[r.Table], r.Table == "usage_accruals"
+			if retired {
+				return nil
+			}
+			if i := slices.IndexFunc(EventStoreProfiles, func(p Profile) bool { return p.Name == r.Table }); i >= 0 {
+				for table+1 < len(Profiles) && addedTables[Profiles[table+1].Name] {
+					table++
+				}
+				if table != len(Profiles)-1 || i <= store {
+					return fmt.Errorf("invalid archive table order")
+				}
+				store = i
+				return nil
+			}
+			if store >= 0 {
+				return fmt.Errorf("invalid archive table order")
+			}
 			invoices = r.Table == "invoices"
 			cadence = r.Table == "usage_collection_cadence" || r.Table == "invoice_collection_cadence"
 			if invoices || cadence {
@@ -49,9 +71,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			if moves = r.Table == PriceKeyMovements.Name; moves {
 				return nil
-			}
-			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
-				r.Table = "meter_period_quantities"
 			}
 			if admissions = r.Table == "admission_operations"; admissions {
 				r.Table = "limit_holds"
@@ -74,7 +93,20 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
-		if watermarks || custody || cadence || events {
+		if accruals && len(r.Values) > 8 && r.Values[7] != nil && r.Values[8] != nil && *r.Values[7] != *r.Values[8] {
+			return errArchivedUnpostedUsage
+		}
+		if retired || custody || cadence || events {
+			return nil
+		}
+		if store >= 0 {
+			p := EventStoreProfiles[store]
+			if err := ValidateValues(p, r.Values); err != nil {
+				return err
+			}
+			if row != nil {
+				return row(p, r.Values)
+			}
 			return nil
 		}
 		if moves {
@@ -199,6 +231,13 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	return info, err
 }
 
+// retiredTables are tables of earlier archives that are not read: usage
+// rollups, accruals and meter quantities, which the event store and usage
+// postings replaced.
+var retiredTables = map[string]bool{"usage_daily": true, "usage_accruals": true, "meter_period_quantities": true, "metered_rating_watermarks": true}
+
+var errArchivedUnpostedUsage = fmt.Errorf("an archive with usage accruals the ledger had not taken: restore it on the release that wrote it, post them, and export it again")
+
 // The column groups later migrations appended to orders, in order: the pay
 // URL's, renewals', embedded, usage orders'.
 const (
@@ -263,7 +302,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true,
+	"usage_card_prints": true, "usage_postings": true, "usage_unposted": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true,
 	"subscription_mrr": true, "customer_mrr": true, "mrr_movements": true, "mrr_movement_lines": true, "mrr_scheduled": true,
 	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true}
 
@@ -286,6 +325,11 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 		empty = map[int]*string{13: nil, 14: nil} // amount, currency
 	case p.Name == "limit_holds" && len(*values) == len(p.Columns)+3:
 		empty = map[int]*string{6: nil, 22: nil, 23: nil} // limit_set, version, applied_version
+	case p.Name == "limit_windows" && len(*values) == len(p.Columns)+1:
+		// settled: what usage took is the event store's, not the archive's.
+		kept := append(append([]*string{}, (*values)[:6]...), (*values)[7:]...)
+		*values = kept
+		return nil
 	default:
 		return nil
 	}

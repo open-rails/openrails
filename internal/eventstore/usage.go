@@ -3,6 +3,7 @@ package eventstore
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,46 +26,49 @@ const (
 type UsageEvent struct {
 	// EventID is the intake identity: a UUIDv5 of (merchant, lease, n), or of
 	// the request id.
-	EventID     uuid.UUID
-	CustomerID  billing.CustomerID
-	Currency    string
-	EventType   string
-	Invoker     string
-	InvokerType string
-	Outcome     UsageOutcome
-	Source      string
-	SourceID    string
+	EventID     uuid.UUID          `json:"event_id"`
+	CustomerID  billing.CustomerID `json:"customer_id"`
+	Currency    string             `json:"currency"`
+	EventType   string             `json:"event_type"`
+	Invoker     string             `json:"invoker"`
+	InvokerType string             `json:"invoker_type"`
+	Outcome     UsageOutcome       `json:"outcome"`
+	Source      string             `json:"source"`
+	SourceID    string             `json:"source_id"`
 	// LeaseID and N number a synced item; zero for a direct capture.
-	LeaseID        uuid.UUID
-	N              uint64
-	OccurredAt     time.Time
-	AdmittedAt     time.Time
-	IngestedAt     time.Time
-	PeriodStartsAt time.Time
-	Dimensions     map[string]int64
-	Metadata       string
+	LeaseID        uuid.UUID        `json:"lease_id"`
+	N              uint64           `json:"n"`
+	OccurredAt     time.Time        `json:"occurred_at"`
+	AdmittedAt     time.Time        `json:"admitted_at"`
+	IngestedAt     time.Time        `json:"ingested_at"`
+	PeriodStartsAt time.Time        `json:"period_starts_at"`
+	Dimensions     map[string]int64 `json:"dimensions"`
+	Metadata       string           `json:"metadata"`
 	// Amount is the provisional price limits and the accrual-rate cap count.
-	Amount int64
+	Amount int64 `json:"amount"`
 	// Stated is a host-stated amount; Charged and Forgiven split failed usage.
-	Stated   *int64
-	Charged  int64
-	Forgiven int64
-	Charges  []UsageCharge
-	Limits   []UsageLimit
+	Stated   *int64        `json:"stated"`
+	Charged  int64         `json:"charged"`
+	Forgiven int64         `json:"forgiven"`
+	Charges  []UsageCharge `json:"charges"`
+	Limits   []UsageLimit  `json:"limits"`
 }
 
 // UsageCharge is a priced meter cell of an item, under the card print in force.
 type UsageCharge struct {
-	Meter, Cell, Print string
-	Quantity, Stated   int64
+	Meter    string `json:"meter"`
+	Cell     string `json:"cell"`
+	Print    string `json:"print"`
+	Quantity int64  `json:"quantity"`
+	Stated   int64  `json:"stated"`
 }
 
 // UsageLimit is a limit window that counts an item, located at admission.
 type UsageLimit struct {
-	Key            string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Units          int64
+	Key            string     `json:"key"`
+	WindowStartsAt time.Time  `json:"window_starts_at"`
+	WindowEndsAt   *time.Time `json:"window_ends_at"`
+	Units          int64      `json:"units"`
 }
 
 const insertUsage = "INSERT INTO {database}.usage_events (merchant_id, event_id, customer_id, currency, event_type, invoker, " +
@@ -85,7 +89,7 @@ func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 	}
 	batch, err := s.conn.PrepareBatch(clickhouse.Context(ctx, clickhouse.WithAsync(true)), s.resolve(insertUsage))
 	if err != nil {
-		return fmt.Errorf("eventstore: prepare usage insert: %w", err)
+		return fail("prepare usage insert", err)
 	}
 	defer func() { _ = batch.Abort() }()
 	for _, e := range events {
@@ -102,10 +106,7 @@ func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 			return fmt.Errorf("eventstore: usage event %s: %w", e.EventID, err)
 		}
 	}
-	if err := batch.Send(); err != nil {
-		return fmt.Errorf("eventstore: insert usage: %w", err)
-	}
-	return nil
+	return fail("insert usage", batch.Send())
 }
 
 type charges struct {
@@ -143,6 +144,19 @@ func limitColumns(in []UsageLimit) limits {
 	return out
 }
 
+// usageNamespace names usage events' intake identities (UUIDv5).
+var usageNamespace = uuid.MustParse("6f1c5a3e-2b8d-5c4e-9a71-0d3e8b2f4c19")
+
+// LeaseEventID is the identity of a lease's usage item n.
+func LeaseEventID(mid billing.MerchantID, lease uuid.UUID, n int64) uuid.UUID {
+	return uuid.NewSHA1(usageNamespace, []byte(mid.String()+"/lease/"+lease.String()+"/"+strconv.FormatInt(n, 10)))
+}
+
+// RequestEventID is the identity of the capture of an admitted request.
+func RequestEventID(mid billing.MerchantID, requestID string) uuid.UUID {
+	return uuid.NewSHA1(usageNamespace, []byte(mid.String()+"/request/"+requestID))
+}
+
 // UsageKey locates a usage event by its sort key.
 type UsageKey struct {
 	CustomerID billing.CustomerID
@@ -150,10 +164,16 @@ type UsageKey struct {
 	EventID    uuid.UUID
 }
 
-// ExistingUsage is which of keys' events the store holds, read through the
-// sort key: a resend's items an earlier attempt already inserted.
-func (s *Store) ExistingUsage(ctx context.Context, keys []UsageKey) (map[uuid.UUID]bool, error) {
-	found := map[uuid.UUID]bool{}
+// Existing is what the store holds of a usage event already inserted: a
+// failed item's charge and forgiveness, which its resend posts again.
+type Existing struct {
+	Charged, Forgiven int64
+}
+
+// ExistingUsage are keys' events the store holds, read through the sort key:
+// a resend's items an earlier attempt already inserted.
+func (s *Store) ExistingUsage(ctx context.Context, keys []UsageKey) (map[uuid.UUID]Existing, error) {
+	found := map[uuid.UUID]Existing{}
 	if len(keys) == 0 {
 		return found, nil
 	}
@@ -178,22 +198,19 @@ func (s *Store) ExistingUsage(ctx context.Context, keys []UsageKey) (map[uuid.UU
 	for c := range customers {
 		who = append(who, uuidLiteral(uuid.UUID(c)))
 	}
-	query := fmt.Sprintf("SELECT DISTINCT event_id FROM {database}.usage_events WHERE merchant_id = %s AND customer_id IN (%s) "+
-		"AND occurred_at BETWEEN %s AND %s AND event_id IN (%s)",
+	query := fmt.Sprintf("SELECT event_id, any(charged), any(forgiven) FROM {database}.usage_events WHERE merchant_id = %s AND customer_id IN (%s) "+
+		"AND occurred_at BETWEEN %s AND %s AND event_id IN (%s) GROUP BY event_id",
 		uuidLiteral(uuid.UUID(mid)), strings.Join(who, ", "), timeLiteral(from), timeLiteral(to), strings.Join(ids, ", "))
-	rows, err := s.conn.Query(ctx, s.resolve(query))
-	if err != nil {
-		return nil, fmt.Errorf("eventstore: read usage ids: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
+	err = s.query(ctx, "read usage ids", query, func(rows interface{ Scan(...any) error }) error {
 		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+		var e Existing
+		if err := rows.Scan(&id, &e.Charged, &e.Forgiven); err != nil {
+			return err
 		}
-		found[id] = true
-	}
-	return found, rows.Err()
+		found[id] = e
+		return nil
+	})
+	return found, err
 }
 
 // Literals of values the store formats itself: no caller text reaches a

@@ -100,14 +100,22 @@ func refusedItem(t *testing.T, out *billing.SyncLeasesResult, n int64) billing.L
 	return billing.LeaseUsageRefusal{}
 }
 
-// nextDay moves the clock past the next 00:00 UTC.
-func nextDay(w *world) {
+// nextMonth moves the clock past the start of the next UTC month: the
+// month's usage is due to post.
+func nextMonth(w *world) {
 	now := w.clock.Now().UTC()
-	w.clock.Advance(now.Truncate(24 * time.Hour).Add(24*time.Hour + time.Minute).Sub(now))
+	w.clock.Advance(time.Date(now.Year(), now.Month()+1, 1, 0, 1, 0, 0, time.UTC).Sub(now))
 }
 
-// postDays runs a billing pass: every accrual of a day that ended posts.
-func postDays(t *testing.T, fleet *river.Client[pgx.Tx]) {
+// earlyInMonth moves the clock to the second day of the next UTC month: a
+// scenario's usage stays in one month.
+func earlyInMonth(w *world) {
+	now := w.clock.Now().UTC()
+	w.clock.Advance(time.Date(now.Year(), now.Month()+1, 2, 12, 0, 0, 0, time.UTC).Sub(now))
+}
+
+// closeMonths runs a billing pass: the usage of every month that ended posts.
+func closeMonths(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	runRegistered(t, fleet, "openrails.billing_pass", 1)
 }

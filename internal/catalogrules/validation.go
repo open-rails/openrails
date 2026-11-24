@@ -195,9 +195,11 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	return nil
 }
 
-// ValidateUsagePrice validates a meter's price: no flat fee, and no volume
-// tiers, whose price for earlier units falls when a later event reaches a
-// cheaper band, so an event could owe a negative amount.
+// ValidateUsagePrice validates a meter's price: no flat fee, and volume
+// tiers only as discounts. A period's usage is priced from its total, so a
+// volume band reached later reprices the period: a unit amount that rose
+// with quantity, or a flat amount, would cost one unit more than any band's
+// unit amount.
 func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 	if err := ValidateRatePrice(where, price); err != nil {
 		return err
@@ -206,7 +208,11 @@ func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 		return fmt.Errorf("%s: flat prices cannot be attached to a meter", where)
 	}
 	if price.Model == catalog.ModelTiered && price.Tiered.Mode == catalog.TierModeVolume {
-		return fmt.Errorf("%s: a metered price cannot use volume tiers; use graduated", where)
+		for i, t := range price.Tiered.Tiers {
+			if t.FlatAmount != 0 || i > 0 && t.UnitAmount > price.Tiered.Tiers[i-1].UnitAmount {
+				return fmt.Errorf("%s: a metered volume price's unit amounts never rise with quantity, and it has no flat amounts", where)
+			}
+		}
 	}
 	return nil
 }

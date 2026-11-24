@@ -91,9 +91,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lease_id = sqlc.arg(lease_id
 SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND stopped_at IS NULL
 GROUP BY currency;
-
--- name: SumCustomerRecentSpend :one
--- What a customer's usage charged in a currency since an instant.
-SELECT COALESCE(SUM(amount), 0)::bigint AS amount FROM billing.usage_minutes
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text AND minute_at >= sqlc.arg(since)::timestamptz;

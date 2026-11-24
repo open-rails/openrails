@@ -60,8 +60,8 @@ const (
 	FamSubsNew        Family = "subs_new"        // flow over subscriptions (started_at)
 	FamSubsCanceled   Family = "subs_canceled"   // flow over subscriptions (canceled_at)
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
-	FamUsage          Family = "usage"           // flow over daily usage rollups (day_at)
-	FamUsageCharged   Family = "usage_charged"   // flow over daily usage rollups, one row per charge (day_at)
+	FamUsage          Family = "usage"           // flow over the event store's usage history (day)
+	FamUsageCharged   Family = "usage_charged"   // flow over usage history, one row per charge (day)
 	FamTransitions    Family = "transitions"     // flow over subscription_status_transitions (occurred_at)
 	FamLimitsReached  Family = "limits_reached"  // flow over limit windows (reached_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
@@ -205,7 +205,7 @@ var Dimensions = []Dimension{
 	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return)", Values: []string{"payment", "refund", "chargeback", "dispute_won"}},
 	{Name: "payment_kind", Description: "sale | refund | chargeback | dispute_won", Values: []string{"sale", "refund", "chargeback", "dispute_won"}},
 	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
-	{Name: "rate_card", Description: "metered event type (usage_daily.event_type; the key rate cards price)"},
+	{Name: "rate_card", Description: "metered event type (the usage's event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); authorization_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
@@ -400,32 +400,29 @@ var families = map[Family]familySpec{
 		},
 		BaseWhere: `g.funding_source IN ('purchase', 'recurring')`,
 	},
+	// Usage is the event store's history, priced at read (usage.go): each
+	// row once for what it charged and once for what grace forgave, so
+	// charge splits one total. The expressions name its columns.
 	FamUsage: {
-		Kind:     "flow",
-		From:     `billing.usage_daily ud`,
-		TimeExpr: `ud.day_at`,
+		Kind: "store",
 		DimExprs: map[string]string{
-			"currency":  `ud.currency`,
-			"customer":  `ud.customer_id::text`,
-			"invoker":   `ud.invoker`,
-			"outcome":   `ud.outcome`,
-			"rate_card": `ud.event_type`,
+			"currency":  `currency`,
+			"customer":  `customer_id`,
+			"invoker":   `invoker`,
+			"outcome":   `outcome`,
+			"rate_card": `event_type`,
 		},
 		DimValues: map[string][]string{"outcome": usageOutcomes},
 	},
-	// Each rollup row is priced twice: what was charged and what grace
-	// forgave, so charge splits one total.
 	FamUsageCharged: {
-		Kind:     "flow",
-		From:     `billing.usage_daily ud CROSS JOIN LATERAL (VALUES ('charged', ud.amount), ('forgiven', ud.forgiven_amount)) AS uc(charge, amount)`,
-		TimeExpr: `ud.day_at`,
+		Kind: "store",
 		DimExprs: map[string]string{
-			"currency":  `ud.currency`,
-			"customer":  `ud.customer_id::text`,
-			"invoker":   `ud.invoker`,
-			"outcome":   `ud.outcome`,
-			"rate_card": `ud.event_type`,
-			"charge":    `uc.charge`,
+			"currency":  `currency`,
+			"customer":  `customer_id`,
+			"invoker":   `invoker`,
+			"outcome":   `outcome`,
+			"rate_card": `event_type`,
+			"charge":    `charge`,
 		},
 		DimValues: map[string][]string{"outcome": usageOutcomes},
 	},
@@ -956,18 +953,18 @@ var declared = []Measure{
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_charged", Class: ClassAdditive, Family: FamUsageCharged, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "priced usage from daily usage rollups, by charge: charged (billed to the customer) or forgiven (failed usage the customer's grace absorbed); cash-in is credits_sold",
-		Formula:     "SUM(charged amount) + SUM(forgiven amount) of daily usage rollups",
+		Description: "priced usage from usage history, by charge: charged (the day's share of its period's price, and failed usage charged) or forgiven (failed usage the customer's grace absorbed); cash-in is credits_sold",
+		Formula:     "SUM(charged amount) + SUM(forgiven amount) of usage history",
 		Agg:         sum(`uc.amount`, ""),
 		Dims:        with(usageDims, "charge")},
 	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count", Direction: UpIsGood,
 		Description: "count of settled usage items (raw volume; per-dimension token counts live host-side)",
-		Formula:     "SUM(requests) of the rollups' event rows",
+		Formula:     "SUM(requests) of usage history's event rows",
 		Expr:        `COALESCE(SUM(ud.requests) FILTER (WHERE ud.meter_key = ''), 0)::bigint`,
 		Dims:        usageDims},
 	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count", Direction: UpIsGood,
 		Description: "distinct customers with any usage in the bucket (the API platform's WAU/MAU)",
-		Formula:     "COUNT(DISTINCT customers) over daily usage rollups",
+		Formula:     "COUNT(DISTINCT customers) over usage history",
 		Expr:        `COUNT(DISTINCT ud.customer_id)`,
 		Dims:        []string{"currency", "rate_card"}},
 	{Name: "limits_reached", Class: ClassAdditive, Family: FamLimitsReached, Unit: "count", Direction: Neutral,

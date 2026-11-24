@@ -4237,8 +4237,10 @@ pkg openrails/billing, type UsageCharge struct, Model catalog.Model `json:"model
 pkg openrails/billing, type UsageCharge struct, Quantity int64 `json:"quantity"`
 pkg openrails/billing, type UsageDeduction struct
 pkg openrails/billing, type UsageDeduction struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type UsageDeduction struct, Day string `json:"day"`
 pkg openrails/billing, type UsageDeduction struct, Lines []UsageDeductionLine `json:"lines"`
+pkg openrails/billing, type UsageDeduction struct, PeriodEndsAt time.Time `json:"period_ends_at"`
+pkg openrails/billing, type UsageDeduction struct, PeriodStartsAt time.Time `json:"period_starts_at"`
+pkg openrails/billing, type UsageDeduction struct, Through time.Time `json:"through"`
 pkg openrails/billing, type UsageDeductionLine struct
 pkg openrails/billing, type UsageDeductionLine struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type UsageDeductionLine struct, Cell *string `json:"cell"`

@@ -64,11 +64,11 @@ The widget kinds are general, so adding a tile or chart is adding a widget to `D
 
 The engine owns no table and runs no job. It reads `payments`, `order_lines`,
 `prices`, `subscriptions`, `subscription_status_transitions`, `credit_grants`,
-`usage_daily`, `limit_windows`, `product_access`, `product_entitlements`,
+`limit_windows`, `product_access`, `product_entitlements`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
 `psps`, `custodians`, `payment_attempts`, `payment_method_versions`,
 `provider_intents`, `rebill_cycles`, `nmi_history_months`,
-`reconciliation_findings`, `disputes`, `fraud_reports` and `network_activity_daily`. A measure sees only what those tables still retain:
+`reconciliation_findings`, `disputes`, `fraud_reports` and `network_activity_daily`; the usage families read the event store's usage history, priced as usage reports price it (`metrics.Service.runUsage`). A measure sees only what those tables still retain:
 payment attempts, status transitions, rebill cycles and NMI history 25 months;
 daily usage 24 months after billing; webhook health days 13 months; resolved
 findings 12 months.

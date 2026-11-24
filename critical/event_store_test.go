@@ -253,8 +253,8 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		require.NoError(t, rows.Err())
 		return names
 	}
-	installed := []string{"limit_usage", "limit_usage_mv", "schema_migrations", "store", "usage_days", "usage_days_charges_mv", "usage_days_events_mv",
-		"usage_events", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
+	installed := []string{"limit_usage", "limit_usage_mv", "schema_migrations", "store", "usage_events", "usage_history", "usage_history_charges_mv",
+		"usage_history_events_mv", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
 	require.Equal(t, installed, tables())
 
 	// A restart, a checking start and an explicit migration change nothing.

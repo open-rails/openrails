@@ -60,7 +60,7 @@ func (r *syncRun) views() error {
 	if len(r.p.Views) == 0 {
 		return nil
 	}
-	v := &viewing{run: r, usage: pgUsage{q: r.q, money: r.money, merchant: r.merchant, now: r.now, except: r.lease.ID}, builds: map[viewKey]*viewBuild{}}
+	v := &viewing{run: r, usage: r.usageReader(), builds: map[viewKey]*viewBuild{}}
 	var err error
 	if v.defs, err = limits.Definitions(r.ctx, r.q, r.merchant); err != nil {
 		return err
@@ -181,7 +181,7 @@ func (v *viewing) build(k viewKey) (*viewBuild, error) {
 			DrainPerHour: drain, Settled: r.settled[settledKey{k.customer, balanceKey(k.currency)}], Recent: recent}}}}
 	b.lines[catalog.BalanceLimit] = true
 	if len(v.defs) > 0 {
-		reader := limits.Customer{Q: r.q, MerchantID: r.merchant, CustomerID: k.customer, Now: r.now, ExceptLease: &r.lease.ID,
+		reader := limits.Customer{Q: r.q, Events: r.DB.EventStore(), MerchantID: r.merchant, CustomerID: k.customer, Now: r.now, ExceptLease: &r.lease.ID,
 			Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 				return r.money.PricingPeriod(ctx, r.q, r.merchant, k.customer, unit, at)
 			}}

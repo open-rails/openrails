@@ -11,6 +11,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/eventstore"
 )
 
 // Epoch is the window start of a lifetime or rate limit's one row.
@@ -32,8 +33,8 @@ type Window struct {
 type Stored struct {
 	StartsAt  time.Time
 	EndsAt    *time.Time
-	Settled   int64
 	Adjusted  int64
+	ReachedAt *time.Time
 	UpdatedAt time.Time
 }
 
@@ -68,7 +69,7 @@ func Locate(reset catalog.LimitReset, latest *Stored, anchors Anchors, now time.
 		}
 		return span(tile(anchor, now, width), width), nil
 	case catalog.ResetSession:
-		if latest != nil && latest.EndsAt != nil && now.Before(*latest.EndsAt) {
+		if latest != nil && latest.EndsAt != nil && !now.Before(latest.StartsAt) && now.Before(*latest.EndsAt) {
 			return Window{StartsAt: latest.StartsAt, EndsAt: latest.EndsAt, Open: true}, nil
 		}
 		return Window{}, nil
@@ -101,14 +102,53 @@ func BucketWidth(windowSeconds int) time.Duration {
 	return time.Duration(max(windowSeconds/RollingBuckets, 1)) * time.Second
 }
 
+// BucketAt is the bucket of a rolling or rate limit at falls in.
+func BucketAt(windowSeconds int, at time.Time) Window {
+	width := BucketWidth(windowSeconds)
+	return span(tile(Epoch, at.UTC(), width), width)
+}
+
 // RollingFrom is the start of the oldest bucket a rolling window counts at
 // now: the one the window's start falls in.
 func RollingFrom(windowSeconds int, now time.Time) time.Time {
 	return tile(Epoch, now.UTC().Add(-time.Duration(windowSeconds)*time.Second), BucketWidth(windowSeconds))
 }
 
-// RateLevel is a rate limit's level at now: the level it held at its last
-// write, drained at capacity per window since.
+// RateBuckets is how many buckets a rate limit's level is read from: two
+// windows' worth, past which a bucket has drained by twice the capacity.
+const RateBuckets = 2 * RollingBuckets
+
+// RateFrom is the start of the oldest bucket a rate limit's level reads at
+// now.
+func RateFrom(windowSeconds int, now time.Time) time.Time {
+	bucket := BucketWidth(windowSeconds)
+	return tile(Epoch, now.UTC(), bucket).Add(-RateBuckets * bucket)
+}
+
+// RateLevelOf is a rate limit's level at now from its buckets, in order: the
+// most any run of the latest buckets holds beyond what drained, at capacity
+// per window, since the run's first bucket ended. Counting a bucket's units
+// at its end drains them no earlier than they arrived.
+func RateLevelOf(buckets []eventstore.LimitRow, capacity int64, windowSeconds int, now time.Time) int64 {
+	if len(buckets) == 0 {
+		return 0
+	}
+	width := BucketWidth(windowSeconds)
+	window := time.Duration(windowSeconds) * time.Second
+	var level, run int64
+	for i := len(buckets) - 1; i >= 0; i-- {
+		run = addSat(run, buckets[i].Units)
+		drained := int64(0)
+		if elapsed := now.Sub(buckets[i].WindowStartsAt.Add(width)); elapsed > 0 && capacity > 0 {
+			drained = signed(mulDiv(unsigned(capacity), unsigned(int64(elapsed)), unsigned(int64(window))))
+		}
+		level = max(level, subSat(run, drained))
+	}
+	return level
+}
+
+// RateLevel is a rate limit's level at now: the level it held at an
+// instant, drained at capacity per window since.
 func RateLevel(level, capacity int64, windowSeconds int, at, now time.Time) int64 {
 	if level <= 0 || capacity <= 0 || !now.After(at) {
 		return level

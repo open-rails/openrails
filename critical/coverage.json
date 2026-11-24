@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 591,
+  "scenario_count": 602,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -676,7 +676,7 @@
     {
       "id": "OR-J24-S11",
       "journey": "J24",
-      "name": "A day's usage posts once and once more before a top-up, held until then"
+      "name": "A month's usage posts once and once more before a top-up, held until then"
     },
     {
       "id": "OR-J24-S14",
@@ -822,6 +822,61 @@
       "id": "OR-J24-S46",
       "journey": "J24",
       "name": "The view of a sync that captures a lease's request hold settles what the capture moved past the hold's estimate"
+    },
+    {
+      "id": "OR-J24-S47",
+      "journey": "J24",
+      "name": "A resend after a sync whose events reached the store but whose transaction never committed inserts nothing twice: raw usage, FINAL and the rollups agree"
+    },
+    {
+      "id": "OR-J24-S48",
+      "journey": "J24",
+      "name": "While ClickHouse is out of reach a sync answers 503 and settles nothing, a usage customer's balance and top-up wait for it, a customer without usage is unaffected, and every item settles once after"
+    },
+    {
+      "id": "OR-J24-S49",
+      "journey": "J24",
+      "name": "A period posts the price of its total: graduated across two postings, a volume crossing carried and credited once its late window closed, a card revision priced card by card"
+    },
+    {
+      "id": "OR-J24-S50",
+      "journey": "J24",
+      "name": "Late usage of a month that posted posts the difference at the next close"
+    },
+    {
+      "id": "OR-J24-S51",
+      "journey": "J24",
+      "name": "Fixed, session, rolling, rate, billing-period and lifetime limits read their use from the event store, and an item admitted before a reset counts in the window it was admitted in"
+    },
+    {
+      "id": "OR-J24-S52",
+      "journey": "J24",
+      "name": "New refuses a database with unposted usage without its store and an empty store; usage attach discards the unposted usage only with --discard-unposted, on the record"
+    },
+    {
+      "id": "OR-J24-S53",
+      "journey": "J24",
+      "name": "A SCIM user erasure clears its usage events' invoker and metadata and its history's invokers, and keeps quantities and money"
+    },
+    {
+      "id": "OR-J24-S54",
+      "journey": "J24",
+      "name": "A billing archive carries the merchant's usage; restore refuses without an event store or into a merchant with usage there, and restores it into an empty one"
+    },
+    {
+      "id": "OR-J24-S55",
+      "journey": "J24",
+      "name": "Equal lease ids and numbers under two merchants are two events, each counted by its merchant"
+    },
+    {
+      "id": "OR-J24-S56",
+      "journey": "J24",
+      "name": "A month's usage posts at the month's end in the merchant's accounting zone, not UTC's"
+    },
+    {
+      "id": "OR-J24-S57",
+      "journey": "J24",
+      "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
       "id": "OR-J25-S01",

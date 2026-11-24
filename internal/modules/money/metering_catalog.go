@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -78,6 +79,9 @@ func (s *MoneyService) ListUsageMeters(ctx context.Context, page billing.PageReq
 			}
 			meters = append(meters, meter)
 		}
+		if err := s.meterActivity(ctx, meters); err != nil {
+			return err
+		}
 		out = pagination.Cut(meters, limit, func(m billing.Meter) any { return meterKeyPosition{Key: m.Key} })
 		return nil
 	})
@@ -110,7 +114,12 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*bil
 			}
 			return queryErr
 		}
-		meter, queryErr = usageMeterFromGetRow(row)
+		if meter, queryErr = usageMeterFromGetRow(row); queryErr != nil {
+			return queryErr
+		}
+		one := []billing.Meter{meter}
+		queryErr = s.meterActivity(ctx, one)
+		meter = one[0]
 		return queryErr
 	})
 	if err != nil {
@@ -130,8 +139,6 @@ type usageMeterRecord struct {
 	revision           int64
 	createdAt          time.Time
 	updatedAt          time.Time
-	hasActivity        bool
-	lastEventAt        *time.Time
 	cardID             *uuid.UUID
 	productID          *uuid.UUID
 	productKey         *string
@@ -147,7 +154,6 @@ func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (billing.Meter
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
 		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
-		hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
 		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
@@ -159,7 +165,6 @@ func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (billing.Meter, e
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
 		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
-		hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
 		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
@@ -172,7 +177,6 @@ func usageMeterFromRecord(row usageMeterRecord) (billing.Meter, error) {
 	meter := billing.Meter{
 		Key: row.key, EventType: row.effectiveEventType, ValueProperty: row.valueProperty,
 		Aggregation: catalog.Aggregation(row.aggregation), Unit: row.unit,
-		HasActivity: row.hasActivity, LastEventAt: row.lastEventAt,
 		Revision: row.revision, CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
 	}
 	if err := json.Unmarshal(row.groupBy, &meter.GroupBy); err != nil {
@@ -235,6 +239,29 @@ func usageMeterSemanticsEqual(left, right catalogrules.Meter) bool {
 		maps.Equal(left.GroupBy, right.GroupBy)
 }
 
+// meterActivity sets each meter's latest usage, by its event type, from the
+// event store: the start of the 15-minute bucket it last had usage in.
+func (s *MoneyService) meterActivity(ctx context.Context, meters []billing.Meter) error {
+	store := s.db.EventStore()
+	if store == nil || len(meters) == 0 {
+		return nil
+	}
+	types := make([]string, 0, len(meters))
+	for _, m := range meters {
+		types = append(types, m.EventType)
+	}
+	last, err := store.LastUsage(ctx, types)
+	if err != nil {
+		return err
+	}
+	for i := range meters {
+		if at, ok := last[meters[i].EventType]; ok {
+			meters[i].HasActivity, meters[i].LastEventAt = true, &at
+		}
+	}
+	return nil
+}
+
 func usageMeterHasActivity(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -257,10 +284,11 @@ func usageMeterHasActivity(
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterFence, Kind: MeterCorrectionFailpointKind}); err != nil {
 		return false, err
 	}
-	hasActivity, err := queries.UsageDailyExistsForTypes(ctx, gen.UsageDailyExistsForTypesParams{
-		MerchantID: merchantID,
-		EventTypes: eventTypes,
-	})
+	store := db.EventStoreOf(queries)
+	if store == nil {
+		return false, nil
+	}
+	hasActivity, err := store.UsageExists(ctx, eventTypes)
 	if err != nil {
 		return false, fmt.Errorf("check usage meter activity: %w", err)
 	}

@@ -239,9 +239,10 @@ func TestLeaseVersions(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true)
 		oneUsage(t, a.alpha, usageInput(customer, "late-in-the-day", 3))
 		fleet := startFleet(t, a.world)
-		// The day's accrual posts after midnight, before the usage-billing
-		// check; the bill dated the next day bills it as the day's usage.
-		postUsageDay(t, a.world, fleet)
+		// The month's close posts it, before the usage-billing check: what it
+		// leaves owed is dated before its pricing period ended, so the bill
+		// of that period bills it.
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		order := oneUsageOrder(t, a, customer)
 		require.EqualValues(t, 30_000_000, order.Total)
@@ -264,8 +265,8 @@ func TestLeaseVersions(t *testing.T) {
 		w.clock.Advance(2 * time.Hour)
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-it-lapsed", 3))...)
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Zero(t, b.BalanceAmount, "the lot paid for the usage before it lapsed and expired with the rest")
@@ -609,10 +610,7 @@ func TestLeaseVersions(t *testing.T) {
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, len(items), out.Usage.ThroughN)
-		var charged int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount), 0)::bigint FROM "+pgx.Identifier{w.schema, "usage_accruals"}.Sanitize()+" WHERE merchant_id = $1",
-			w.alpha.MerchantID().UUID()).Scan(&charged))
-		require.EqualValues(t, len(items), charged, "every item settled exactly once")
+		require.EqualValues(t, len(items), storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "every item settled exactly once")
 	})
 
 }

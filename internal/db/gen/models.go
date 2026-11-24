@@ -579,19 +579,6 @@ type BillingEventlogStream struct {
 	MerchantID    *uuid.UUID
 }
 
-// Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
-type BillingFailedUsageWindow struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	// Empty for the customer's own grace window; otherwise the delegated invoker the cutoff window meters.
-	Invoker     string
-	WindowKey   string
-	WindowStart time.Time
-	WindowEnd   time.Time
-	Amount      int64
-}
-
 // An issuer's report that a charge was fraud (Visa TC40, Mastercard SAFE) as its rail passes it on: a Stripe early fraud warning. Visa counts each in its monitoring ratio, refunded or not. Retention: permanent, never pruned.
 type BillingFraudReport struct {
 	MerchantID uuid.UUID
@@ -819,7 +806,7 @@ type BillingLimitHoldPart struct {
 	Held           int64
 }
 
-// One customer's use of one limit in one window, identified by the server clock: a fixed, session or billing-period window, a rolling limit's bucket, the one row of a lifetime or rate limit, or a billing policy's spend window (spend:<identity>). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
+// One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.
 type BillingLimitWindow struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -831,11 +818,9 @@ type BillingLimitWindow struct {
 	WindowEndsAt *time.Time
 	// The capacity products or an override gave the limit at the row's last write, without adjustments. Reads take the live capacity.
 	Capacity int64
-	// Units settled in the window, never clamped: it may pass capacity. For a rate limit, the level as of updated_at, which drains at capacity per window_seconds.
-	Settled int64
 	// Capacity staff added to this window only (negative takes it away).
 	Adjusted int64
-	// When settled and held usage first took the window to its capacity; a rate or lifetime limit's one row keeps the first time.
+	// When a read first found usage and holds at the window's capacity; a rate or lifetime limit's one row keeps the first time.
 	ReachedAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -951,21 +936,6 @@ type BillingMerchantWritePosture struct {
 	Reason     string
 	SetBy      string
 	SetAt      time.Time
-}
-
-// A customer's quantity of one meter (and matrix cell) in one billing period, as priced so far: a settled group of usage is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.
-type BillingMeterPeriodQuantity struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	MeterKey   string
-	// The matrix cell (the event's value of the matrix dimension) the quantity is priced in; empty for a card without a matrix.
-	Cell string
-	// Start of the billing period the usage occurred in, under the merchant's billing_period_boundary.
-	PeriodStartsAt time.Time
-	Quantity       int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.
@@ -2346,59 +2316,43 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// What one customer's usage charged in one currency on one UTC day of one pricing period. It posts to the ledger after its day ends, or before any other movement of the customer's balance in the currency: one credit_spend per lot drawn and one owed_accrual for the rest, at (usage_accrual, usage_accrual:<id>, <posting>). Until posted, the balance holds amount - posted_amount. Retention: permanent, never pruned.
-type BillingUsageAccrual struct {
+// A rate card's terms as usage was priced under them, by print (a hash of the terms), written when usage first names it: the event store's charges name the print, and a period's price is taken card by card in the order the prints were first written. Retention: permanent, never pruned.
+type BillingUsageCardPrint struct {
 	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	// The start of the UTC day the usage occurred.
-	DayAt time.Time
-	// The start of the pricing period the usage was priced in.
+	Print      string
+	Card       []byte
+	CreatedAt  time.Time
+}
+
+// One posting of a customer's usage in one pricing period to the ledger: the price of the period's deduplicated usage before cut_at, less what its earlier postings took. A posting draws the balance first, one credit_spend per lot, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_posting:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.
+type BillingUsagePosting struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
 	PeriodStartsAt time.Time
-	// The end of that pricing period: what the accrual leaves owed is dated before it.
-	PeriodEndsAt time.Time
-	Amount       int64
-	// What the accrual's postings have moved to the ledger; the rest is held until the next posting.
-	PostedAmount int64
-	// How many postings the accrual has made; the next one posts at source_id postings + 1.
-	Postings int32
-	// What the accrual is for, per meter and cell: [{meter_key, cell, requests, quantity, amount, posted_amount}].
+	PeriodEndsAt   time.Time
+	// Usage that occurred before it is in the posting: the month's end in the merchant's accounting zone, or the balance movement the posting preceded.
+	CutAt time.Time
+	// close: the month-end close; movement: before a movement of the balance; reversal: a period whose price fell below what posted, once its late usage window closed.
+	Reason string
+	// What the posting moved: positive for usage, negative for a reversal.
+	Amount int64
+	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}].
 	Lines     []byte
-	PostedAt  *time.Time
 	CreatedAt time.Time
+}
+
+// A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.
+type BillingUsageUnposted struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// The start of the oldest pricing period whose usage may not be posted in full: a posting reads from it.
+	SinceAt time.Time
+	// When the close posts it: the end of the month its oldest unposted usage occurred in, or when a period whose price fell may be credited.
+	DueAt     time.Time
 	UpdatedAt time.Time
-}
-
-// One UTC day of a customer's usage, per invoker, currency, event type, meter, matrix cell and outcome. The row with an empty meter_key counts the events themselves: requests, and what failed usage charged or forgave; a meter's row counts the events it priced, their quantity and what it charged. Retention: rows are deleted 24 months after the month's usage was billed.
-type BillingUsageDaily struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	DayAt      time.Time
-	Currency   string
-	EventType  string
-	// The meter that priced the events; empty for the events themselves.
-	MeterKey string
-	// The matrix cell the meter priced the events in; empty without a matrix.
-	Cell string
-	// Caller-supplied principal string that fired the usage; empty when none was named.
-	Invoker        string
-	Outcome        string
-	Requests       int64
-	Quantity       int64
-	Amount         int64
-	ForgivenAmount int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-// What a customer's usage charged in one currency in one UTC minute it occurred in: the accrual-rate meter and the balance watch read it. Retention: rows are deleted 25 hours after their minute, past the longest accrual-rate window.
-type BillingUsageMinute struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	MinuteAt   time.Time
-	Amount     int64
 }
 
 // Merchant-global customer card-delete and soft-cancel rolling-hour/day rate reservations. No actor can obtain a separate budget. customer_id is an opaque identity and deliberately has no cascading customer FK. The canonical operation/card/subscription remains authoritative after pruning. Retention: rows are deleted 24 hours after reserved_at.

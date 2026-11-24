@@ -65,10 +65,14 @@ const (
 	// OwedRepayment pays debt from a newly funded credit lot (customer balance
 	// -> arrears liability), naming that lot.
 	OwedRepayment TransferType = "owed_repayment"
+	// UsageReversed credits a lot with what a period's usage posted beyond
+	// its price, once a volume tier's price fell (platform revenue ->
+	// customer balance).
+	UsageReversed TransferType = "usage_reversed"
 )
 
 // AllTransferTypes must equal the DB CHECK exactly (TestLedgerVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment}
+var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, UsageReversed}
 
 // fundingTransfers re-arm a customer's balance notices: money added to its
 // balance, and debt it paid.
@@ -95,7 +99,7 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpUsageAccrual   Operation = "usage_accrual"   // one posting of a customer's day of usage
+	OpUsagePosting   Operation = "usage_posting"   // one posting of a customer's usage in a period
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.
 	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge
@@ -411,6 +415,21 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 		t.CreditGrantID = &g
 	}
 	return l.Apply(ctx, t)
+}
+
+// ReverseUsage credits a customer's lot with what its usage posted beyond a
+// period's price (DR platform_revenue / CR customer_balance).
+func (l *Ledger) ReverseUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	c := customer
+	return l.Apply(ctx, Transfer{Debit: rev, Credit: cust, Amount: amount, Currency: currency, Type: UsageReversed, Coord: coord, Customer: &c, CreditGrantID: &lot})
 }
 
 // AccrueOwed recognizes postpaid usage as revenue against the customer's
