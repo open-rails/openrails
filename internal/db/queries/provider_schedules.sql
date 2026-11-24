@@ -19,6 +19,15 @@ WHERE ps.merchant_id = sqlc.arg(merchant_id)::uuid AND ps.subscription_id = sqlc
   AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, sqlc.arg(provider_reference)::text)
 ORDER BY ps.first_due_at ASC, ps.accepted_version ASC FOR UPDATE OF ps;
 
+-- name: ListAcceptedProviderSchedules :many
+-- ListProviderSchedules without its row locks: a read of when the provider
+-- bills next.
+SELECT ps.* FROM billing.provider_schedules ps
+JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
+WHERE ps.merchant_id = sqlc.arg(merchant_id)::uuid AND ps.subscription_id = sqlc.arg(subscription_id)::uuid
+  AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, sqlc.arg(provider_reference)::text)
+ORDER BY ps.first_due_at ASC, ps.accepted_version ASC;
+
 -- name: SameProviderSubscription :one
 -- Whether two provider subscription ids name one subscription on the rail.
 SELECT COALESCE(billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(a)::text) = billing.rail_subscription_key(sqlc.arg(rail)::text, sqlc.arg(b)::text), false)::boolean AS same;

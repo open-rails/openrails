@@ -49,7 +49,7 @@ JOIN billing.payment_attempts pa ON pa.merchant_id = c.merchant_id AND pa.cycle_
 WHERE c.merchant_id = $1::uuid
   AND c.subscription_id = $2::uuid
   AND c.due_at = $3::timestamptz
-  AND pa.category <> 'approved'
+  AND pa.outcome <> 'approved'
   AND pa.payment_method_id = $4::uuid
 `
 
@@ -89,7 +89,7 @@ func (q *Queries) GetCycleCardStanding(ctx context.Context, arg GetCycleCardStan
 }
 
 const getPaymentAttempt = `-- name: GetPaymentAttempt :one
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id, outcome, decline_cause, advice_code, network_advice_code FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -112,7 +112,6 @@ func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptPa
 		&i.CardEntry,
 		&i.Source,
 		&i.ObservedVia,
-		&i.Category,
 		&i.Reason,
 		&i.Action,
 		&i.ResponseCode,
@@ -141,6 +140,10 @@ func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptPa
 		&i.MandateID,
 		&i.SentInitialTransactionID,
 		&i.OrderID,
+		&i.Outcome,
+		&i.DeclineCause,
+		&i.AdviceCode,
+		&i.NetworkAdviceCode,
 	)
 	return i, err
 }
@@ -148,24 +151,25 @@ func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptPa
 const insertPaymentAttempt = `-- name: InsertPaymentAttempt :execrows
 INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
-    category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
+    outcome, decline_cause, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
-    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id
+    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id,
+    advice_code, network_advice_code
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, $8::text,
-    $9::text, $10::text, $11::text, $12::text,
-    $13::text, $14::text, $15::text,
-    $16::text, $17::text, $18::text,
-    $19::text, $20::text, $21::text,
-    $22::bigint, $23::text, $24::timestamptz,
-    $25::uuid, $26::text, $27::uuid,
-    $28::uuid, $29::uuid, $30::uuid,
-    $31::text, $32::uuid,
-    $33::text, $34::text, $35::text,
-    $36::uuid, $37::text,
-    $38::uuid
+    $9::text, $10::text, $11::text, $12::text, $13::text,
+    $14::text, $15::text, $16::text,
+    $17::text, $18::text, $19::text,
+    $20::text, $21::text, $22::text,
+    $23::bigint, $24::text, $25::timestamptz,
+    $26::uuid, $27::text, $28::uuid,
+    $29::uuid, $30::uuid, $31::uuid,
+    $32::text, $33::uuid,
+    $34::text, $35::text, $36::text,
+    $37::uuid, $38::text,
+    $39::uuid, $40::text, $41::text
 )
 ON CONFLICT DO NOTHING
 `
@@ -181,7 +185,8 @@ type InsertPaymentAttemptParams struct {
 	CardEntry                string
 	Source                   string
 	ObservedVia              string
-	Category                 string
+	Outcome                  string
+	DeclineCause             *string
 	Reason                   *string
 	Action                   *string
 	ResponseCode             *string
@@ -209,6 +214,8 @@ type InsertPaymentAttemptParams struct {
 	MandateID                *uuid.UUID
 	SentInitialTransactionID *string
 	OrderID                  *uuid.UUID
+	AdviceCode               *string
+	NetworkAdviceCode        *string
 }
 
 // Idempotent on the gateway transaction id, else on the operation step.
@@ -224,7 +231,8 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		arg.CardEntry,
 		arg.Source,
 		arg.ObservedVia,
-		arg.Category,
+		arg.Outcome,
+		arg.DeclineCause,
 		arg.Reason,
 		arg.Action,
 		arg.ResponseCode,
@@ -252,6 +260,8 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		arg.MandateID,
 		arg.SentInitialTransactionID,
 		arg.OrderID,
+		arg.AdviceCode,
+		arg.NetworkAdviceCode,
 	)
 	if err != nil {
 		return 0, err
@@ -260,7 +270,7 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 }
 
 const latestPaymentOrderAttempt = `-- name: LatestPaymentOrderAttempt :one
-SELECT purchase_id::uuid AS purchase_id, kind, category
+SELECT purchase_id::uuid AS purchase_id, kind, outcome
 FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
@@ -280,7 +290,7 @@ type LatestPaymentOrderAttemptParams struct {
 type LatestPaymentOrderAttemptRow struct {
 	PurchaseID uuid.UUID
 	Kind       string
-	Category   string
+	Outcome    string
 }
 
 // The buyer's most recent attempt on one purchase target since a moment.
@@ -292,12 +302,12 @@ func (q *Queries) LatestPaymentOrderAttempt(ctx context.Context, arg LatestPayme
 		arg.Since,
 	)
 	var i LatestPaymentOrderAttemptRow
-	err := row.Scan(&i.PurchaseID, &i.Kind, &i.Category)
+	err := row.Scan(&i.PurchaseID, &i.Kind, &i.Outcome)
 	return i, err
 }
 
 const listCycleAttempts = `-- name: ListCycleAttempts :many
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id, outcome, decline_cause, advice_code, network_advice_code FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND cycle_id = $2::uuid
 ORDER BY attempted_at, id
 `
@@ -328,7 +338,6 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 			&i.CardEntry,
 			&i.Source,
 			&i.ObservedVia,
-			&i.Category,
 			&i.Reason,
 			&i.Action,
 			&i.ResponseCode,
@@ -357,6 +366,10 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 			&i.MandateID,
 			&i.SentInitialTransactionID,
 			&i.OrderID,
+			&i.Outcome,
+			&i.DeclineCause,
+			&i.AdviceCode,
+			&i.NetworkAdviceCode,
 		); err != nil {
 			return nil, err
 		}
@@ -369,38 +382,40 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 }
 
 const listPaymentAttempts = `-- name: ListPaymentAttempts :many
-SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.purchase_id, a.purchase_target, a.subscription_id, a.payment_method_id, a.payment_id, a.provider_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.mandate_id, a.sent_initial_transaction_id, a.order_id
+SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.purchase_id, a.purchase_target, a.subscription_id, a.payment_method_id, a.payment_id, a.provider_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.mandate_id, a.sent_initial_transaction_id, a.order_id, a.outcome, a.decline_cause, a.advice_code, a.network_advice_code
 FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR a.kind = ANY($2::text[]))
   AND ($3::text[] IS NULL OR a.owner = ANY($3::text[]))
-  AND ($4::text[] IS NULL OR a.category = ANY($4::text[]))
-  AND ($5::text[] IS NULL OR a.reason = ANY($5::text[]))
-  AND ($6::text[] IS NULL OR a.response_code = ANY($6::text[]))
-  AND ($7::text[] IS NULL OR a.card_entry = ANY($7::text[]))
-  AND ($8::text[] IS NULL OR a.source = ANY($8::text[]))
-  AND ($9::text[] IS NULL OR a.observed_via = ANY($9::text[]))
-  AND ($10::text[] IS NULL OR a.avs_result = ANY($10::text[]))
-  AND ($11::text[] IS NULL OR a.cvv_result = ANY($11::text[]))
-  AND ($12::uuid IS NULL OR a.psp_id = $12::uuid)
-  AND ($13::uuid IS NULL OR a.customer_id = $13::uuid)
-  AND ($14::uuid IS NULL OR a.payment_id = $14::uuid)
-  AND ($15::uuid IS NULL OR a.order_id = $15::uuid)
-  AND ($16::uuid IS NULL OR a.subscription_id = $16::uuid)
-  AND ($17::uuid IS NULL OR a.cycle_id = $17::uuid)
-  AND ($18::timestamptz IS NULL OR a.attempted_at >= $18::timestamptz)
-  AND ($19::timestamptz IS NULL OR a.attempted_at < $19::timestamptz)
-  AND ($20::timestamptz IS NULL
-       OR (a.attempted_at, a.id) < ($20::timestamptz, $21::uuid))
+  AND ($4::text[] IS NULL OR a.outcome = ANY($4::text[]))
+  AND ($5::text[] IS NULL OR a.decline_cause = ANY($5::text[]))
+  AND ($6::text[] IS NULL OR a.reason = ANY($6::text[]))
+  AND ($7::text[] IS NULL OR a.response_code = ANY($7::text[]))
+  AND ($8::text[] IS NULL OR a.card_entry = ANY($8::text[]))
+  AND ($9::text[] IS NULL OR a.source = ANY($9::text[]))
+  AND ($10::text[] IS NULL OR a.observed_via = ANY($10::text[]))
+  AND ($11::text[] IS NULL OR a.avs_result = ANY($11::text[]))
+  AND ($12::text[] IS NULL OR a.cvv_result = ANY($12::text[]))
+  AND ($13::uuid IS NULL OR a.psp_id = $13::uuid)
+  AND ($14::uuid IS NULL OR a.customer_id = $14::uuid)
+  AND ($15::uuid IS NULL OR a.payment_id = $15::uuid)
+  AND ($16::uuid IS NULL OR a.order_id = $16::uuid)
+  AND ($17::uuid IS NULL OR a.subscription_id = $17::uuid)
+  AND ($18::uuid IS NULL OR a.cycle_id = $18::uuid)
+  AND ($19::timestamptz IS NULL OR a.attempted_at >= $19::timestamptz)
+  AND ($20::timestamptz IS NULL OR a.attempted_at < $20::timestamptz)
+  AND ($21::timestamptz IS NULL
+       OR (a.attempted_at, a.id) < ($21::timestamptz, $22::uuid))
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT $22::int
+LIMIT $23::int
 `
 
 type ListPaymentAttemptsParams struct {
 	MerchantID     uuid.UUID
 	Kinds          []string
 	Owners         []string
-	Categories     []string
+	Outcomes       []string
+	DeclineCauses  []string
 	Reasons        []string
 	ResponseCodes  []string
 	CardEntries    []string
@@ -428,7 +443,8 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 		arg.MerchantID,
 		arg.Kinds,
 		arg.Owners,
-		arg.Categories,
+		arg.Outcomes,
+		arg.DeclineCauses,
 		arg.Reasons,
 		arg.ResponseCodes,
 		arg.CardEntries,
@@ -466,7 +482,6 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 			&i.CardEntry,
 			&i.Source,
 			&i.ObservedVia,
-			&i.Category,
 			&i.Reason,
 			&i.Action,
 			&i.ResponseCode,
@@ -495,6 +510,10 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 			&i.MandateID,
 			&i.SentInitialTransactionID,
 			&i.OrderID,
+			&i.Outcome,
+			&i.DeclineCause,
+			&i.AdviceCode,
+			&i.NetworkAdviceCode,
 		); err != nil {
 			return nil, err
 		}
@@ -507,7 +526,7 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 }
 
 const listPaymentAttemptsByIDs = `-- name: ListPaymentAttemptsByIDs :many
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id, outcome, decline_cause, advice_code, network_advice_code FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY attempted_at DESC, id DESC
 `
@@ -537,7 +556,6 @@ func (q *Queries) ListPaymentAttemptsByIDs(ctx context.Context, arg ListPaymentA
 			&i.CardEntry,
 			&i.Source,
 			&i.ObservedVia,
-			&i.Category,
 			&i.Reason,
 			&i.Action,
 			&i.ResponseCode,
@@ -566,6 +584,10 @@ func (q *Queries) ListPaymentAttemptsByIDs(ctx context.Context, arg ListPaymentA
 			&i.MandateID,
 			&i.SentInitialTransactionID,
 			&i.OrderID,
+			&i.Outcome,
+			&i.DeclineCause,
+			&i.AdviceCode,
+			&i.NetworkAdviceCode,
 		); err != nil {
 			return nil, err
 		}
@@ -585,7 +607,7 @@ SELECT EXISTS (
       AND purchase_target = $3::text
       AND purchase_id = $4::uuid
       AND payment_method_id = $5::uuid
-      AND kind = 'verify' AND category = 'approved'
+      AND kind = 'verify' AND outcome = 'approved'
 )::boolean AS verified
 `
 

@@ -50,8 +50,10 @@ type custView struct {
 }
 
 // lineState is one limit of a view: the line as last answered, its windows
-// and what the gate has in flight in each.
+// and what the gate has in flight in each. key and money never change, so
+// pricing reads them without the view's lock.
 type lineState struct {
+	key   string
 	line  billing.ViewLimit
 	money bool
 	// asOf is when the sync that answered the line was sent, by the gate's
@@ -61,7 +63,7 @@ type lineState struct {
 	// next the window after it, once the gate decided in it, or a session the
 	// gate opened.
 	cur, next *span
-	// others are the most what others added to the limit in each of the last
+	// others are what others added to the limit in each of the last
 	// marginIntervals intervals; seen is a previous answer of the same window.
 	others []int64
 	seen   bool
@@ -72,7 +74,8 @@ type lineState struct {
 // takes, captured usage not yet settled, and server-decided requests the
 // view does not show yet. base and avail bound offline spending: what the
 // gate had in it when the view was answered, and what was left for every
-// gate's new requests, of which each gate spends its share.
+// gate's new requests (below zero when nothing was), of which each gate
+// spends its share.
 type span struct {
 	start, end   *time.Time
 	remaining    int64
@@ -94,7 +97,7 @@ type take struct {
 }
 
 func takeOf(l *lineState, s *span, cost int64) take {
-	return take{line: l, span: s, cost: cost, limit: l.line.Limit, unit: l.line.Unit}
+	return take{line: l, span: s, cost: cost, limit: l.key, unit: l.line.Unit}
 }
 
 // pinnedTake is a server-decided request's take, counted until a view from
@@ -134,7 +137,7 @@ func (l *lineState) spanAt(now time.Time) (*span, bool) {
 		if now.Before(*s.start) || !before(now, s.end) {
 			return nil, false
 		}
-		s.avail = max(s.remaining, 0)
+		s.avail = s.remaining
 		l.next = s
 	case opensAtUse(l.line.Reset):
 		remaining := l.line.Remaining
@@ -143,7 +146,7 @@ func (l *lineState) spanAt(now time.Time) (*span, bool) {
 		}
 		start := now.UTC().Truncate(time.Second)
 		end := start.Add(time.Duration(l.line.Reset.WindowSeconds) * time.Second)
-		l.next = &span{start: &start, end: &end, remaining: remaining, local: true, avail: max(remaining, 0)}
+		l.next = &span{start: &start, end: &end, remaining: remaining, local: true, avail: remaining}
 	default:
 		return nil, false
 	}
@@ -192,13 +195,29 @@ func drained(perHour int64, d time.Duration) int64 {
 	return n
 }
 
-// margin is what others may add to the limit before this gate sees it.
+// share is this gate's part of what was left for every gate's new requests
+// when the view was answered: under the request's policy (its credit line,
+// its cap on a spend window), less what running charges drained since.
+func (l *lineState) share(s *span, set billing.LimitSet, now time.Time, gates int) int64 {
+	pool := s.avail
+	if c := capacityOf(set, l.key); c != nil {
+		pool = satAdd(pool, *c-l.line.Capacity)
+	}
+	if l.key == catalog.BalanceLimit {
+		pool = satAdd(pool, set.CreditLine)
+		pool = satAdd(pool, -drained(l.line.DrainPerHour, now.Sub(l.asOf)))
+	}
+	return max(pool, 0) / int64(max(gates, 1))
+}
+
+// margin is what others may add to the limit before this gate sees it:
+// until two answers of one window show it, a money line's recent spend.
 func (l *lineState) margin(cost int64) int64 {
 	var most int64
 	for _, o := range l.others {
 		most = max(most, o)
 	}
-	if !l.seen && l.money && l.line.Recent > 0 {
+	if len(l.others) == 0 && l.money && l.line.Recent > 0 {
 		most = max(most, l.line.Recent*int64(limits.SyncInterval)/int64(time.Minute))
 	}
 	return max(cost, satMul(most, marginIntervals))
@@ -223,6 +242,16 @@ const (
 	verdictShort
 )
 
+// outage is what a gate knows of OpenRails being unreachable: since when
+// (zero while it is reachable), and how many gates were live at its last
+// answer.
+type outage struct {
+	since time.Time
+	gates int
+}
+
+func (o outage) on() bool { return !o.since.IsZero() }
+
 // decision is a view's verdict on one request and, admitted, its takes.
 type decision struct {
 	verdict verdict
@@ -234,9 +263,11 @@ type decision struct {
 // none. Each limit is refused if the request does not fit it at all, near
 // if less than the margin would remain, and local otherwise; the first
 // refusal in the set's order wins and any near sends the request to the
-// server. Offline, a limit fits only within the gate's share of it. A stale
-// view decides one request (probe) and holds the rest for a sync.
-func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, offline bool, gates int) decision {
+// server. Offline, a limit fits only within the gate's share of it, of a
+// view answered about when the outage began. A stale view decides one
+// request (probe) and holds the rest for a sync.
+func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, down outage) decision {
+	offline := down.on()
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.used = now
@@ -261,7 +292,7 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, of
 		c := costs[i]
 		awp := l.line.Overrun == catalog.OverrunAdmitWhilePositive
 		takes[i] = takeOf(l, s, c)
-		r := l.room(s, now, set.CreditLine, capacityOf(set, l.line.Limit))
+		r := l.room(s, now, set.CreditLine, capacityOf(set, l.key))
 		if awp && r <= 0 || !awp && r < c {
 			if out.verdict != verdictRefuse {
 				out = decision{verdict: verdictRefuse, refusal: refusalOf(set, l, s, now)}
@@ -272,12 +303,13 @@ func (v *custView) decide(set billing.LimitSet, costs []int64, now time.Time, of
 			continue
 		}
 		if offline {
-			spent := satAdd(s.inFlight(), -s.base)
-			avail := s.avail
-			if l.line.Limit == catalog.BalanceLimit {
-				avail = satAdd(avail, set.CreditLine)
+			// A view older than the outage does not know what was left.
+			if l.asOf.Before(down.since.Add(-viewFresh)) {
+				out.verdict = verdictShort
+				continue
 			}
-			share := avail / int64(max(gates, 1))
+			spent := satAdd(s.inFlight(), -s.base)
+			share := l.share(s, set, now, down.gates)
 			if awp && spent >= share || !awp && satAdd(spent, c) > share {
 				out.verdict = verdictShort
 			}
@@ -389,7 +421,7 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 	for _, nl := range view.Limits {
 		l := v.lines[nl.Limit]
 		if l == nil {
-			l = &lineState{money: nl.Unit == v.key.currency}
+			l = &lineState{key: nl.Limit, money: nl.Unit == v.key.currency}
 			v.lines[nl.Limit] = l
 		}
 		same := l.cur != nil && sameTime(l.cur.start, nl.WindowStartsAt)
@@ -420,7 +452,7 @@ func (v *custView) apply(view billing.View, sent time.Time, build int64, gates i
 		l.cur, l.line, l.asOf, l.prev, l.seen = cur, nl, sent, nl.Remaining, true
 		for _, s := range []*span{cur, l.next} {
 			if s != nil {
-				s.base, s.avail = s.inFlight(), max(l.room(s, sent, 0, nil), 0)
+				s.base, s.avail = s.inFlight(), l.room(s, sent, 0, nil)
 			}
 		}
 	}

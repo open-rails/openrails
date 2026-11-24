@@ -3,6 +3,8 @@ package leases
 import (
 	"cmp"
 	"context"
+	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // A view is where one customer stands on every limit its requests in one
@@ -49,7 +53,9 @@ type viewing struct {
 
 // views answers each ViewParams with its limit set (null once the sync is
 // past its work budget), each customer and currency named with its view, and
-// each currency and event type named with its pricing.
+// each currency and event type named with its pricing. A request it cannot
+// answer (malformed, out of the credential's scope, or one whose customer's
+// view or policy fails to resolve) is refused alone.
 func (r *syncRun) views() error {
 	if len(r.p.Views) == 0 {
 		return nil
@@ -66,6 +72,14 @@ func (r *syncRun) views() error {
 	}
 	type pricingKey struct{ currency, eventType string }
 	var priced []pricingKey
+	failed := map[viewKey]error{}
+	refuse := func(i int, err error) {
+		status, details := Details(err)
+		if _, coded := asCoded(err); !coded {
+			details.Message = "the view could not be resolved"
+		}
+		r.result.RefusedViews = append(r.result.RefusedViews, billing.ViewRefusal{Index: i, Status: status, Error: &details})
+	}
 	for i, vp := range r.p.Views {
 		over, err := r.pastBudget(workBudget)
 		if err != nil {
@@ -75,18 +89,34 @@ func (r *syncRun) views() error {
 			// The rest are answered null and asked again.
 			break
 		}
-		if r.Allows != nil && !r.Allows(vp.CustomerID) {
+		if err := r.checkView(vp); err != nil {
+			refuse(i, prefixParam(err, fmt.Sprintf("views[%d]", i)))
 			continue
 		}
 		k := viewKey{vp.CustomerID.UUID(), money.NormalizeCurrency(string(vp.Currency))}
+		if err := failed[k]; err != nil {
+			refuse(i, err)
+			continue
+		}
 		b, err := v.build(k)
 		if err != nil {
-			return err
+			if !isolated(err) {
+				return err
+			}
+			failed[k] = err
+			refuse(i, err)
+			continue
 		}
 		eventType := strings.TrimSpace(deref(vp.EventType))
-		if r.result.LimitSets[i], err = v.limitSet(b, vp, eventType); err != nil {
-			return err
+		set, err := v.limitSet(b, vp, eventType)
+		if err != nil {
+			if !isolated(err) {
+				return err
+			}
+			refuse(i, err)
+			continue
 		}
+		r.result.LimitSets[i] = set
 		if p := (pricingKey{k.currency, eventType}); eventType != "" && !slices.Contains(priced, p) {
 			priced = append(priced, p)
 		}
@@ -100,6 +130,22 @@ func (r *syncRun) views() error {
 			return err
 		}
 		r.result.Pricing = append(r.result.Pricing, out)
+	}
+	return nil
+}
+
+// checkView refuses a view request no admission of its attributes would
+// take.
+func (r *syncRun) checkView(vp billing.ViewParams) error {
+	switch {
+	case vp.CustomerID.IsZero():
+		return invalid("customer_id", "customer_id is required")
+	case r.Allows != nil && !r.Allows(vp.CustomerID):
+		return apperr.New(http.StatusForbidden, billing.CodeServiceCredentialCustomerScopeDenied, "the credential's customer scope does not include the customer").WithParam("customer_id")
+	case vp.InvokerType != "" && vp.InvokerType != billing.InvokerTypeCustomer && vp.InvokerType != billing.InvokerTypeDelegated:
+		return invalid("invoker_type", `invoker_type must be "customer" or "delegated"`)
+	case moneyutil.ValidateCurrency(money.NormalizeCurrency(string(vp.Currency))) != nil:
+		return apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam("currency")
 	}
 	return nil
 }

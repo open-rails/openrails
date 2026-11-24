@@ -287,6 +287,26 @@ func (c *NMIClient) TransactionCard(ctx context.Context, transactionID string) (
 	return cardBrand(txn.CCType, txn.CCNumber), last4Of(txn.CCNumber), nil
 }
 
+// IssuerAnswer is what the Query API reports of one transaction that a
+// Direct Post answer leaves out: the issuer's raw code and text, and the
+// card's BIN.
+func (c *NMIClient) IssuerAnswer(ctx context.Context, transactionID string) (decline.Evidence, error) {
+	report, err := c.scoped().TransactionReport(ctx, QueryFilter{TransactionID: transactionID})
+	if err != nil {
+		return decline.Evidence{}, err
+	}
+	if len(report.Transactions) != 1 || strings.TrimSpace(report.Transactions[0].TransactionID) != transactionID {
+		return decline.Evidence{}, fmt.Errorf("transaction %s lookup is not exact", transactionID)
+	}
+	txn := report.Transactions[0]
+	action, ok := txn.Authorization()
+	if !ok {
+		return decline.Evidence{}, fmt.Errorf("transaction %s has no authorization", transactionID)
+	}
+	e := txn.Evidence(action)
+	return decline.Evidence{IssuerCode: e.IssuerCode, IssuerText: e.IssuerText, CardBIN: e.CardBIN}, nil
+}
+
 // BINOf is the leading six digits of a masked card number; empty when the
 // mask hides them.
 func BINOf(masked string) string {

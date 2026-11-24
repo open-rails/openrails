@@ -76,6 +76,9 @@ type SubscriptionState struct {
 	PeriodEnd          *time.Time // current_period_ends_at
 	GraceEndsAt        *time.Time
 	NextRetryScheduled bool // next_retry_at IS NOT NULL
+	// AdviceDeferred: the network's advice deferred the case to the next
+	// renewal, where the due pass ends it.
+	AdviceDeferred bool
 }
 
 // ChargeEvidence is the first-party billing evidence (billing.payments +
@@ -624,7 +627,7 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 
 	case string(models.StatusPastDue):
 		graceElapsed := sub.GraceEndsAt != nil && sub.GraceEndsAt.Before(now)
-		if graceElapsed && !sub.NextRetryScheduled {
+		if graceElapsed && !sub.NextRetryScheduled && !sub.AdviceDeferred {
 			// Certainty legs. No sweep plane produces them yet (FailMembership
 			// owns the inline decision), so convergence only ever parks.
 			if leg := ev.Charge.certaintyLeg(); leg != "" {

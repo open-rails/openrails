@@ -5,13 +5,22 @@ import (
 )
 
 type reasonSpec struct {
-	category  Category
+	cause     billing.DeclineCause
 	action    Action
 	transient bool // the processor asked to try again shortly
 }
 
-// reasons is the policy for each public reason; the buyer's copy lives with
-// the reason (billing.DeclineReason.Failure). Actions:
+const (
+	customer   = billing.DeclineCauseCustomer
+	issuer     = billing.DeclineCauseIssuer
+	fraud      = billing.DeclineCauseFraud
+	merchant   = billing.DeclineCauseMerchant
+	processing = billing.DeclineCauseProcessing
+)
+
+// reasons is the policy for each public reason: who caused it and what
+// dunning does. The buyer's copy lives with the reason
+// (billing.DeclineReason.Failure). Actions:
 //   - retry: issuer soft/generic declines (Visa category 2/4) and our or the
 //     gateway's errors;
 //   - fix_payment_method: bad card data, codes that forbid re-attempts on the
@@ -22,48 +31,58 @@ type reasonSpec struct {
 // Pick-up and lost cards (250/251) wait for a new card: losing a wallet must
 // not cost a subscription.
 var reasons = map[billing.DeclineReason]reasonSpec{
-	billing.DeclineGeneric:           {category: IssuerSoft, action: Retry},
-	billing.DeclineDoNotHonor:        {category: IssuerSoft, action: Retry},
-	billing.DeclineInsufficientFunds: {category: IssuerSoft, action: Retry},
-	billing.DeclineOverLimit:         {category: IssuerSoft, action: Retry},
-	billing.DeclineCallIssuer:        {category: IssuerSoft, action: Retry},
-	billing.DeclineRetryLater:        {category: IssuerSoft, action: Retry},
-	billing.DeclineTryAgainLater:     {category: IssuerSoft, action: Retry, transient: true},
-	billing.DeclineSecurityViolation: {category: IssuerHard, action: Retry},
-	billing.DeclineRestrictedCard:    {category: IssuerHard, action: Retry},
+	billing.DeclineInsufficientFunds:      {cause: customer, action: Retry},
+	billing.DeclineOverLimit:              {cause: customer, action: Retry},
+	billing.DeclineIncorrectNumber:        {cause: customer, action: FixPaymentMethod},
+	billing.DeclineNoSuchIssuer:           {cause: customer, action: FixPaymentMethod},
+	billing.DeclineInvalidAccount:         {cause: customer, action: FixPaymentMethod},
+	billing.DeclineExpiredCard:            {cause: customer, action: FixPaymentMethod},
+	billing.DeclineInvalidExpiry:          {cause: customer, action: FixPaymentMethod},
+	billing.DeclineIncorrectCVC:           {cause: customer, action: FixPaymentMethod},
+	billing.DeclineIncorrectZip:           {cause: customer, action: FixPaymentMethod},
+	billing.DeclineIncorrectAddress:       {cause: customer, action: FixPaymentMethod},
+	billing.DeclineInvalidPIN:             {cause: customer, action: FixPaymentMethod},
+	billing.DeclineUpdateCardholderData:   {cause: customer, action: FixPaymentMethod},
+	billing.DeclineAuthenticationRequired: {cause: customer, action: FixPaymentMethod},
+	billing.DeclineLostCard:               {cause: customer, action: FixPaymentMethod},
+	billing.DeclineStopRecurring:          {cause: customer, action: NonRecoverable},
 
-	billing.DeclineIncorrectNumber:      {category: CardData, action: FixPaymentMethod},
-	billing.DeclineNoSuchIssuer:         {category: CardData, action: FixPaymentMethod},
-	billing.DeclineInvalidAccount:       {category: CardData, action: FixPaymentMethod},
-	billing.DeclineExpiredCard:          {category: CardData, action: FixPaymentMethod},
-	billing.DeclineInvalidExpiry:        {category: CardData, action: FixPaymentMethod},
-	billing.DeclineIncorrectCVC:         {category: CardData, action: FixPaymentMethod},
-	billing.DeclineIncorrectZip:         {category: CardData, action: FixPaymentMethod},
-	billing.DeclineIncorrectAddress:     {category: CardData, action: FixPaymentMethod},
-	billing.DeclineInvalidPIN:           {category: CardData, action: FixPaymentMethod},
-	billing.DeclineUpdateCardholderData: {category: CardData, action: FixPaymentMethod},
+	billing.DeclineGeneric:               {cause: issuer, action: Retry},
+	billing.DeclineDoNotHonor:            {cause: issuer, action: Retry},
+	billing.DeclineCallIssuer:            {cause: issuer, action: Retry},
+	billing.DeclineRetryLater:            {cause: issuer, action: Retry},
+	billing.DeclineTryAgainLater:         {cause: issuer, action: Retry, transient: true},
+	billing.DeclineRestrictedCard:        {cause: issuer, action: Retry},
+	billing.DeclineTransactionNotAllowed: {cause: issuer, action: FixPaymentMethod},
+	billing.DeclineCardNotSupported:      {cause: issuer, action: FixPaymentMethod},
+	billing.DeclineCurrencyNotSupported:  {cause: issuer, action: FixPaymentMethod},
 
-	billing.DeclineTransactionNotAllowed:  {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclineCardNotSupported:       {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclineCurrencyNotSupported:   {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclineAuthenticationRequired: {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclinePickupCard:             {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclineLostCard:               {category: IssuerHard, action: FixPaymentMethod},
-	billing.DeclineStolenCard:             {category: IssuerHard, action: NonRecoverable},
-	billing.DeclineFraudulent:             {category: IssuerHard, action: NonRecoverable},
-	billing.DeclineStopRecurring:          {category: IssuerHard, action: NonRecoverable},
+	billing.DeclineSuspectedFraud:    {cause: fraud, action: Retry},
+	billing.DeclineSecurityViolation: {cause: fraud, action: Retry},
+	billing.DeclinePickupCard:        {cause: fraud, action: FixPaymentMethod},
+	billing.DeclineStolenCard:        {cause: fraud, action: NonRecoverable},
+	billing.DeclineFraudulent:        {cause: fraud, action: NonRecoverable},
 
-	billing.DeclineGatewayRejected: {category: GatewayRule, action: Retry},
-	billing.DeclineBlockedByPSP:    {category: GatewayRule, action: FixPaymentMethod},
+	billing.DeclineGatewayRejected:      {cause: merchant, action: Retry},
+	billing.DeclineBlockedByPSP:         {cause: merchant, action: FixPaymentMethod},
+	billing.DeclineBrandNotAccepted:     {cause: merchant, action: FixPaymentMethod},
+	billing.DeclineMerchantConfig:       {cause: merchant, action: Retry},
+	billing.DeclineInvalidRequest:       {cause: merchant, action: Retry},
+	billing.DeclineDuplicateTransaction: {cause: merchant, action: Retry},
 
-	billing.DeclineProcessingError:      {category: SystemError, action: Retry, transient: true},
-	billing.DeclineCommunicationError:   {category: SystemError, action: Retry, transient: true},
-	billing.DeclineIssuerUnavailable:    {category: SystemError, action: Retry, transient: true},
-	billing.DeclineInvalidRequest:       {category: SystemError, action: Retry},
-	billing.DeclineMerchantConfig:       {category: SystemError, action: Retry},
-	billing.DeclineDuplicateTransaction: {category: SystemError, action: Retry},
+	billing.DeclineProcessingError:    {cause: processing, action: Retry, transient: true},
+	billing.DeclineCommunicationError: {cause: processing, action: Retry, transient: true},
+	billing.DeclineIssuerUnavailable:  {cause: processing, action: Retry, transient: true},
 
-	billing.DeclineUnknown: {category: Unknown, action: Retry},
+	billing.DeclineUnknown: {cause: billing.DeclineCauseUnknown, action: Retry},
+}
+
+// CauseOf is a reason's cause; a reason no table produces is unknown.
+func CauseOf(reason billing.DeclineReason) billing.DeclineCause {
+	if spec, ok := reasons[reason]; ok {
+		return spec.cause
+	}
+	return billing.DeclineCauseUnknown
 }
 
 // HolderMayHoldNewCard reports a refusal that says the card was reissued: its
@@ -75,5 +94,9 @@ func HolderMayHoldNewCard(reason billing.DeclineReason) bool {
 // ProviderFault reports a refusal another card cannot fix: the gateway, the
 // processor or our configuration refused it.
 func ProviderFault(reason billing.DeclineReason) bool {
-	return (reasons[reason].category == SystemError && reason != billing.DeclineDuplicateTransaction) || reason == billing.DeclineGatewayRejected
+	switch reason {
+	case billing.DeclineGatewayRejected, billing.DeclineMerchantConfig, billing.DeclineInvalidRequest:
+		return true
+	}
+	return reasons[reason].cause == processing
 }

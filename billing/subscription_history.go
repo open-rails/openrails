@@ -52,13 +52,14 @@ type SubscriptionHistoryTransition struct {
 }
 
 // SubscriptionHistoryAttempt is a provider answer, not an execution promise.
-// Category and Reason retain the existing decline classification. Raw provider
+// Outcome, DeclineCause and Reason are the decline classification. Raw provider
 // messages, card data and stored-credential references are deliberately absent.
 // Action is the answer's classification, not a promise to execute a retry.
 type SubscriptionHistoryAttempt struct {
 	ID              PaymentAttemptID `json:"id"`
 	Kind            string           `json:"kind"`
-	Category        string           `json:"category"`
+	Outcome         AttemptOutcome   `json:"outcome"`
+	DeclineCause    DeclineCause     `json:"decline_cause,omitempty"`
 	Reason          string           `json:"reason,omitempty"`
 	Action          string           `json:"action,omitempty"`
 	Source          string           `json:"source"`

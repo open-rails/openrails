@@ -100,9 +100,9 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "payment health per PSP: authorization failure, refund and chargeback rates",
+			Intent: "payment health per PSP: authorization, issuer-discretion decline, refund and chargeback rates",
 			Query: Query{
-				Measures: []string{"attempt_failure_rate", "refund_rate", "chargeback_rate"},
+				Measures: []string{"authorization_rate", "issuer_discretion_decline_rate", "refund_rate", "chargeback_rate"},
 				By:       []string{"psp"},
 				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
 			},

@@ -22,6 +22,9 @@ const (
 	DeclineTryAgainLater     DeclineReason = "try_again_later"
 	DeclineSecurityViolation DeclineReason = "security_violation"
 	DeclineRestrictedCard    DeclineReason = "restricted_card"
+	// DeclineSuspectedFraud is the issuer's risk call (59), which may pass
+	// later; DeclineFraudulent is a card reported fraudulent.
+	DeclineSuspectedFraud DeclineReason = "suspected_fraud"
 
 	// The card details don't match an open, valid account.
 	DeclineIncorrectNumber      DeclineReason = "incorrect_number"
@@ -49,6 +52,9 @@ const (
 	// The PSP's own rule refused it; the issuer never saw it.
 	DeclineGatewayRejected DeclineReason = "gateway_rejected"
 	DeclineBlockedByPSP    DeclineReason = "blocked_by_psp"
+	// DeclineBrandNotAccepted: the merchant's account does not take the
+	// card's brand.
+	DeclineBrandNotAccepted DeclineReason = "brand_not_accepted"
 
 	// The gateway, the processor or the merchant's configuration failed.
 	DeclineProcessingError      DeclineReason = "processing_error"
@@ -67,11 +73,70 @@ const (
 	DeclineStoredCredentialRequired DeclineReason = "stored_credential_required"
 )
 
+// AttemptOutcome is what became of one authorization.
+type AttemptOutcome string
+
+const (
+	AttemptApproved AttemptOutcome = "approved"
+	// AttemptDeclined: the issuer said no.
+	AttemptDeclined AttemptOutcome = "declined"
+	// AttemptRefused: the merchant or its gateway refused it before the
+	// issuer saw it.
+	AttemptRefused AttemptOutcome = "refused"
+	// AttemptError: the attempt did not complete.
+	AttemptError AttemptOutcome = "error"
+)
+
+// AttemptOutcomes lists every outcome.
+func AttemptOutcomes() []AttemptOutcome {
+	return []AttemptOutcome{AttemptApproved, AttemptDeclined, AttemptRefused, AttemptError}
+}
+
+// DeclineCause is who or what refused a payment. Each DeclineReason has one.
+type DeclineCause string
+
+const (
+	// DeclineCauseCustomer: the customer's card or account: funds, limits,
+	// card data, a closed, lost or reissued card, a stop order, or
+	// authentication only the cardholder can complete.
+	DeclineCauseCustomer DeclineCause = "customer"
+	// DeclineCauseIssuer: the issuer's discretion: generic, do not honor,
+	// call the issuer, not permitted, restricted, try later.
+	DeclineCauseIssuer DeclineCause = "issuer"
+	// DeclineCauseFraud: the issuer suspects fraud, or the card is stolen.
+	DeclineCauseFraud DeclineCause = "fraud"
+	// DeclineCauseMerchant: the merchant's or its gateway's refusal: risk
+	// rules, block lists, configuration, an invalid or duplicate request.
+	DeclineCauseMerchant DeclineCause = "merchant"
+	// DeclineCauseProcessing: a gateway, network or issuer system failure.
+	DeclineCauseProcessing DeclineCause = "processing"
+	// DeclineCauseUnknown: a code no table maps.
+	DeclineCauseUnknown DeclineCause = "unknown"
+)
+
+// DeclineCauses lists every cause.
+func DeclineCauses() []DeclineCause {
+	return []DeclineCause{DeclineCauseCustomer, DeclineCauseIssuer, DeclineCauseFraud, DeclineCauseMerchant, DeclineCauseProcessing, DeclineCauseUnknown}
+}
+
+// Outcome is the outcome of a refusal with this cause: the merchant's is
+// refused and a failure an error; the rest the issuer declined.
+func (c DeclineCause) Outcome() AttemptOutcome {
+	switch c {
+	case DeclineCauseMerchant:
+		return AttemptRefused
+	case DeclineCauseProcessing:
+		return AttemptError
+	}
+	return AttemptDeclined
+}
+
 // declineCustomer is what each reason tells the buyer (PaymentFailure.Reason).
 var declineCustomer = map[DeclineReason]DeclineReason{
 	DeclineGeneric: "generic_decline", DeclineDoNotHonor: "do_not_honor", DeclineInsufficientFunds: "insufficient_funds",
 	DeclineOverLimit: "over_limit", DeclineCallIssuer: "do_not_honor", DeclineRetryLater: "try_again_later",
 	DeclineTryAgainLater: "try_again_later", DeclineSecurityViolation: "generic_decline", DeclineRestrictedCard: "generic_decline",
+	DeclineSuspectedFraud: "generic_decline",
 
 	DeclineIncorrectNumber: "incorrect_number", DeclineNoSuchIssuer: "incorrect_number", DeclineInvalidAccount: "incorrect_number",
 	DeclineExpiredCard: "expired_card", DeclineInvalidExpiry: "invalid_expiry", DeclineIncorrectCVC: "incorrect_cvc",
@@ -83,7 +148,7 @@ var declineCustomer = map[DeclineReason]DeclineReason{
 	DeclinePickupCard: "generic_decline", DeclineLostCard: "generic_decline", DeclineStolenCard: "generic_decline",
 	DeclineFraudulent: "generic_decline", DeclineStopRecurring: "do_not_honor",
 
-	DeclineGatewayRejected: "processing_error", DeclineBlockedByPSP: "generic_decline",
+	DeclineGatewayRejected: "processing_error", DeclineBlockedByPSP: "generic_decline", DeclineBrandNotAccepted: "card_not_supported",
 
 	DeclineProcessingError: "processing_error", DeclineCommunicationError: "try_again_later",
 	DeclineIssuerUnavailable: "try_again_later", DeclineInvalidRequest: "processing_error",
@@ -106,7 +171,7 @@ func DeclineReasons() []DeclineReason {
 // lost or stolen, or a risk rule refused it.
 func (r DeclineReason) FraudSignal() bool {
 	switch r {
-	case DeclinePickupCard, DeclineLostCard, DeclineStolenCard, DeclineFraudulent, DeclineSecurityViolation, DeclineRestrictedCard, DeclineBlockedByPSP:
+	case DeclinePickupCard, DeclineLostCard, DeclineStolenCard, DeclineFraudulent, DeclineSuspectedFraud, DeclineSecurityViolation, DeclineRestrictedCard, DeclineBlockedByPSP:
 		return true
 	}
 	return false

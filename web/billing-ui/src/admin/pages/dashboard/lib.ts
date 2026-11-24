@@ -319,11 +319,14 @@ export function chartColor(i: number): string {
 const HEALTH_MEASURES = new Set([
   "attempts",
   "attempt_failure_rate",
+  "authorization_rate",
+  "issuer_discretion_decline_rate",
   "purchases",
   "purchase_failure_rate",
   "rebills",
   "rebill_rate",
   "rebill_first_failure_rate",
+  "first_try_rebill_approval_rate",
   "dunning_recovery_rate",
   "nmi_history_authorizations",
 ])

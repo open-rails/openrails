@@ -37,7 +37,7 @@ FROM (
     WHERE a.merchant_id = $1::uuid
       AND a.rail = ANY($2::text[])
       AND a.subscription_id IS NOT NULL
-      AND a.category <> 'approved'
+      AND a.outcome <> 'approved'
 ) ev
 WHERE ($3::timestamptz IS NULL OR ev.occurred_at >= $3::timestamptz)
   AND ($4::timestamptz IS NULL OR ev.occurred_at <= $4::timestamptz)
