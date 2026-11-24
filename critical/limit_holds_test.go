@@ -464,4 +464,23 @@ func TestLimitHolds(t *testing.T) {
 		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "past", 50_000_000)), "budget_exceeded")
 		balance(t, w.alpha, customer, 240_000_000, 60_000_000, 300_000_000)
 	})
+	t.Run("OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency", func(t *testing.T) {
+		// ¥10 an hour; at the fixture's rate of 1, $10 an hour of USD usage.
+		w := newWorld(t, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen-rate", Kind: "accrual_rate_cap", PolicyCurrency: "JPY", AccrualRateCapPerHour: 100_000}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen-rate"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		customer := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, customer, "funded", 100_000_000)
+		admit := func(id string, delta int64) billing.AdmissionVerdict {
+			t.Helper()
+			p := reservation(w, customer, id, 1000)
+			p.AccrualRateDeltaPerHour = delta
+			return admitOne(t, w.alpha, p)
+		}
+		require.True(t, admit("within", 4_000_000).Allowed(), "$4 an hour is within ¥10, not past 100,000 USD units")
+		requireDenied(t, admit("past", 11_000_000), billing.DenyAccrualRateCapReached)
+	})
 }

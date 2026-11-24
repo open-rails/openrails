@@ -397,8 +397,10 @@ type BillingPolicy struct {
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
-	// PolicyCurrency is the currency of a spend or bad-spend window that
-	// names none; absent, the request's.
+	// PolicyCurrency is the currency of the policy's amounts and of a spend or
+	// bad-spend window that names none; absent, the request's. Admission
+	// converts the caps to the request's currency; the collection threshold
+	// and outstanding cap bind usage billed in it.
 	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 

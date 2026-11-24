@@ -3681,6 +3681,7 @@
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
+      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -477,14 +478,17 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 		}
 	}
 	policy := settings.Policies[name]
-	if policy.OutstandingCapAmount > 0 && policy.OutstandingCapAmount < terms.creditLimit {
+	// A policy's amounts are in its policy_currency and bind usage in it; a
+	// blank one is every currency's. Usage in another keeps its own terms.
+	inPolicyCurrency := policy.PolicyCurrency == "" || strings.EqualFold(policy.PolicyCurrency, row.Currency)
+	if inPolicyCurrency && policy.OutstandingCapAmount > 0 && policy.OutstandingCapAmount < terms.creditLimit {
 		terms.creditLimit = policy.OutstandingCapAmount
 	}
 	terms.threshold = terms.creditLimit
 	if v := settings.Config.CollectionThreshold; v != nil && *v > 0 && *v < terms.threshold {
 		terms.threshold = *v
 	}
-	if v := policy.CollectionThresholdAmount; v != nil && *v > 0 {
+	if v := policy.CollectionThresholdAmount; inPolicyCurrency && v != nil && *v > 0 {
 		terms.threshold = min(*v, terms.creditLimit)
 	}
 	return terms, nil

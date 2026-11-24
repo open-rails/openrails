@@ -321,7 +321,7 @@ Critical journeys, over real PostgreSQL, Redis and Vault:
   archive and refund), S05 to S09 (subscription closure and repair), S10 to S12
   (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff,
   Redis sharing, live denial, a purchase seen at once).
-- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing), S33 (a window in its policy's `policy_currency`); OR-J25-S05 (running charges under `accrual_rate_cap`).
+- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`); OR-J25-S05 (running charges under `accrual_rate_cap`).
 - **J24**, leases and holds: OR-J24-S03, S12 to S20, S23 to S35 (lease lifetime,
   hold versions, sizing, bounded syncs).
 - Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.

@@ -45,6 +45,28 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
 }
 
+// InCurrency is resolved with its amounts (the outstanding cap and the
+// accrual-rate cap) moved from its policy_currency to requestCurrency, as its
+// windows are. A blank policy_currency is the request's.
+func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
+	from := strings.TrimSpace(resolved.PolicyCurrency)
+	to := money.NormalizeCurrency(requestCurrency)
+	if from == "" || money.NormalizeCurrency(from) == to {
+		return resolved, nil
+	}
+	for _, amount := range []*int64{&resolved.OutstandingCapAmount, &resolved.AccrualRateCapPerHour} {
+		if *amount <= 0 {
+			continue
+		}
+		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, *amount)
+		if err != nil {
+			return ResolvedPolicy{}, err
+		}
+		*amount = conv
+	}
+	return resolved, nil
+}
+
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to
 // requestCurrency when the window's currency (else policyCurrency) differs.
 func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Scope, ws []budgets.BudgetWindow, policyCurrency, requestCurrency string) ([]spendgate.Window, error) {

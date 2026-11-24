@@ -493,6 +493,9 @@
     "OR-J23-S33": [
       "TestLimitHolds/OR-J23-S33/a-spend-window-that-names-no-currency-is-in-its-policys-currency"
     ],
+    "OR-J23-S34": [
+      "TestLimitHolds/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],

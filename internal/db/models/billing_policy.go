@@ -75,8 +75,8 @@ type BillingPolicy struct {
 	DelinquencyGraceDays   *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty"`
 
-	// PolicyCurrency is the currency for checks whose window carries none. Blank
-	// means the request's currency.
+	// PolicyCurrency is the currency of the policy's amounts and of a window
+	// that carries none. Blank means the request's currency.
 	PolicyCurrency string `json:"policy_currency,omitempty"`
 }
 
