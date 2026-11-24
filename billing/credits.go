@@ -171,6 +171,13 @@ type RevokeCreditGrantParams struct {
 	Reason string `json:"reason"`
 }
 
+// ReinstateCreditGrantParams reverses a grant's revocation: the units it
+// froze return to the balance. Reinstating a live grant returns it
+// (Replayed); a lapsed grant is not reinstated (credit_grant_unavailable).
+type ReinstateCreditGrantParams struct {
+	Reason string `json:"reason"`
+}
+
 // BalanceTransactionType is what a balance movement did.
 type BalanceTransactionType string
 

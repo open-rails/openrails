@@ -113,7 +113,8 @@ ORDER BY created_at, id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCreditLotDrifts :many
--- Lots whose counters disagree with the legs on their balance account, or
+-- Lots whose counters disagree with the legs on their balance account or, for
+-- their money, on their customer's deferred account in the paid currency, or
 -- whose reservation with their payment's pending refunds.
 WITH logged AS (
     SELECT t.credit_grant_id AS id,
@@ -121,19 +122,33 @@ WITH logged AS (
            COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = g.account_id), 0)::bigint AS debited
     FROM billing.ledger_transfers t
     JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
-    WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id IS NOT NULL
+    WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id IS NOT NULL AND t.book = 'units'
+    GROUP BY t.credit_grant_id
+), deferred AS (
+    SELECT t.credit_grant_id AS id,
+           COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credited,
+           COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debited
+    FROM billing.ledger_transfers t
+    JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
+    JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.id IN (t.debit_account_id, t.credit_account_id)
+        AND a.account_type = 'deferred_revenue_credit' AND a.customer_id = g.customer_id AND a.currency = COALESCE(g.paid_currency, g.unit)
+    WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id IS NOT NULL AND t.book = 'general'
     GROUP BY t.credit_grant_id
 )
 SELECT g.id AS credit_grant_id, g.merchant_id, g.customer_id, g.unit,
        g.units_credited AS stored_credited, COALESCE(l.credited, 0)::bigint AS logged_credited,
        g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited,
-       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved
+       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved,
+       g.deferred_credited AS stored_deferred_credited, COALESCE(d.credited, 0)::bigint AS logged_deferred_credited,
+       g.deferred_debited AS stored_deferred_debited, COALESCE(d.debited, 0)::bigint AS logged_deferred_debited
 FROM billing.credit_grants g
 LEFT JOIN logged l ON l.id = g.id
+LEFT JOIN deferred d ON d.id = g.id
 CROSS JOIN LATERAL (SELECT billing.credit_grant_reservation(g.merchant_id, g.id) AS reserved) r
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0)
-       OR g.units_reserved <> r.reserved)
+       OR g.units_reserved <> r.reserved
+       OR g.deferred_credited <> COALESCE(d.credited, 0) OR g.deferred_debited <> COALESCE(d.debited, 0))
 ORDER BY g.unit, g.id;
 
 -- Customer support reads: the lot, its latest revocation, and what its legs
@@ -233,3 +248,10 @@ LEFT JOIN LATERAL (
     AND g.account_id IN (lt.debit_account_id, lt.credit_account_id)
 ) t ON true
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(id)::uuid;
+
+-- name: GetLatestCreditGrantEvent :one
+-- A lot's latest revocation or reinstatement.
+SELECT * FROM billing.credit_grant_events
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND credit_grant_id = sqlc.arg(credit_grant_id)::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

@@ -194,6 +194,12 @@ func RevokeCreditGrant(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is required (at most 500 characters)").WithParam("reason"))
 		return
 	}
+	// The key is optional: with one, a retry replays this revocation.
+	key := strings.TrimSpace(r.Header("Idempotency-Key"))
+	if len(key) > 200 {
+		r.ErrorCode(billing.CodeInvalidParam, "Idempotency-Key is at most 200 bytes")
+		return
+	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
@@ -202,9 +208,40 @@ func RevokeCreditGrant(r *httprequest.Request) {
 	if admin, ok := r.Staff(); ok {
 		actor = admin.Subject
 	}
-	grant, err := svc.RevokeCreditGrant(r.Request.Context(), id, params.Reason, actor)
+	grant, err := svc.RevokeCreditGrant(r.Request.Context(), id, params.Reason, key, actor)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant revocation failed")
+		return
+	}
+	r.SuccessJSON(grant)
+}
+
+// ReinstateCreditGrant reverses a grant's revocation.
+func ReinstateCreditGrant(r *httprequest.Request) {
+	id, ok := creditGrantParam(r)
+	if !ok {
+		return
+	}
+	var params billing.ReinstateCreditGrantParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	params.Reason = strings.TrimSpace(params.Reason)
+	if params.Reason == "" || utf8.RuneCountInString(params.Reason) > 500 {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is required (at most 500 characters)").WithParam("reason"))
+		return
+	}
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	var actor string
+	if admin, ok := r.Staff(); ok {
+		actor = admin.Subject
+	}
+	grant, err := svc.ReinstateCreditGrant(r.Request.Context(), id, params.Reason, actor)
+	if err != nil {
+		writeMoneyError(r, err, "credit grant reinstatement failed")
 		return
 	}
 	r.SuccessJSON(grant)

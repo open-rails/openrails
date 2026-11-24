@@ -34,21 +34,24 @@ The books migration renamed the accounts in place; no transfer moved, and every 
 
 | Movement | Debit → credit | Type | Posted by |
 |---|---|---|---|
-| Lot funded | `units_sold` → `customer_units` | `deposit` | `credits.Lots.Materialize` |
-| Purchased lot worth more than paid | `units_granted` → `customer_units` | `deposit_bonus` | `Ledger.PurchasedDeposit` |
-| Paid more than the lot's face | `units_sold` → `units_redeemed` | `credit_purchase_revenue` | `Ledger.PurchasedDeposit` |
+| Lot bought | `units_sold` → `customer_units` | `deposit` | `credits.Lots.Materialize` |
+| Lot given | `units_granted` → `customer_units` | `deposit` | `credits.Lots.Materialize` |
 | Spend, one leg per lot | `customer_units` → `units_redeemed` | `credit_spend` | `credits.Lots.Spend` |
 | Lot lapsed | `customer_units` → `units_expired` | `credit_expire` | `credits.Lots.ExpireLapsedBy` |
 | Lot revoked | `customer_units` → `units_revoked` | `credit_revoke` | `credits.Lots.Revoke` |
+| Revocation reversed | `units_revoked` → `customer_units` | `credit_reinstate` | `credits.Lots.Reinstate` |
 | Spend past the balance | `customer_owed` → `units_redeemed` | `owed_accrual` | `Ledger.AccrueOwedIdempotent` |
 | Owed paid by a rail or remittance | `units_sold` → `customer_owed` | `owed_payment` | `Ledger.PayOwed` |
 | Owed paid from a new lot | `customer_units` → `customer_owed` | `owed_repayment` | `owed.Repay` |
 | Usage order voided | `units_redeemed` → `customer_owed` | `owed_writeoff` | `Ledger.WriteOffOwed` |
-| Purchased credit reversed or restored | through `units_refund_clearing` | `credit_refund*` | `purchasedcredits.Service.ApplyReversal` |
+| Purchased credit reversed | `customer_units`, `units_expired`, `units_revoked`, `customer_owed`, `units_redeemed` → `units_refunded` | `credit_refund`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
+| Purchased credit restored | `units_refunded` → where it was taken from | `credit_refund_restore`, `credit_refund_funding` | `purchasedcredits.Service.ApplyReversal` |
+
+`deposit_bonus`, `credit_purchase_revenue`, `credit_refund_cash(_restore)` and the promotion and revenue `credit_refund_funding` legs through `units_refund_clearing` are history: a pack's bonus is part of its rate and a refund's cash is the general ledger's. Reversals of a paid lot from before the credit books still post them until the books are rebuilt.
 
 Usage reaches the units book through postings (`usage_postings`, `MoneyService.postUsageTx`): at each month's end and before any other movement of that balance, per pricing period the price of the period's usage in the event store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`, `1`): balance first, the rest owed. A period whose volume price fell is credited back to a new lot (`usage_reversed`, `units_redeemed` → `customer_units`, `Ledger.ReverseUsage`). A payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
 
-`usage_reversed` is the one type in both books: the units book's leg is `Ledger.ReverseUsage`'s; the general ledger's (a reversed receivable or credit) has no writer yet.
+`usage_reversed` is the one type in both books: the units book's leg is `Ledger.ReverseUsage`'s, the general ledger's `books.Books.ReverseUsage`'s (`revenue_adjustments` → `deferred_revenue_credit`, the new lot priced at face).
 
 ### General ledger
 
@@ -66,7 +69,7 @@ Usage reaches the units book through postings (`usage_postings`, `MoneyService.p
 | `processor_fees`, `chargeback_fees`, `bad_debt` | system | expense | none |
 | `opening_balance_equity` | system | equity | none |
 
-Its transfer types are `cash_received`, `cash_applied`, `cash_returned`, `revenue_adjusted`, `revenue_recognized`, `refund_deferred`, `refund_recognized`, `chargeback_deferred`, `chargeback_recognized`, `dispute_won`, `credit_released`, `credit_breakage`, `credit_forfeited`, `credit_forfeit_reversed`, `promotional_credit_applied`, `usage_accrued`, `usage_collected`, `usage_repaid`, `usage_waived`, `usage_reopened`, `usage_reversed`, `bad_debt`, `bad_debt_recovery`, `processor_fee`, `chargeback_fee` and `opening_balance`. No writer posts to the general ledger yet; nothing reads it but `ledger-audit` and the restore check.
+Its transfer types are `cash_received`, `cash_applied`, `cash_returned`, `revenue_adjusted`, `revenue_recognized`, `refund_deferred`, `refund_recognized`, `chargeback_deferred`, `chargeback_recognized`, `dispute_won`, `credit_released`, `credit_breakage`, `credit_forfeited`, `credit_forfeit_reversed`, `promotional_credit_applied`, `usage_accrued`, `usage_collected`, `usage_repaid`, `usage_waived`, `usage_reopened`, `usage_reversed`, `bad_debt`, `bad_debt_recovery`, `processor_fee`, `chargeback_fee` and `opening_balance`. Nothing reads it yet but `ledger-audit` and the restore check.
 
 | Movement | Debit → credit | Type (operation) | Posted by |
 |---|---|---|---|
@@ -77,6 +80,18 @@ Its transfer types are `cash_received`, `cash_applied`, `cash_returned`, `revenu
 | Revenue earned | `deferred_revenue` → `subscription_revenue` or `one_time_revenue` | `revenue_recognized` (`recognition`) | `books.ApplyOrder`, `books.Recognize` |
 | What an early end leaves | `deferred_revenue` → the same | `revenue_recognized` (`termination`) | `books.Recognize` |
 | A forfeit taken back when its end is undone | the revenue account → `deferred_revenue` | `revenue_recognized` (`reinstatement`) | `books.Recognize` |
+| A paid credit lot's price deferred | `unapplied_cash` (an import without a payment: `opening_balance_equity`) → `deferred_revenue_credit` | `cash_applied` (`opening_balance`) (`credit_issue`) | `books.Books.IssueCredit` |
+| Credit spent, at the lot's rate | `deferred_revenue_credit` → `usage_revenue` (or an order line's `deferred_revenue`) | `credit_released` | `books.Books.MoveCredit` |
+| A gift spent, in a registry currency | `promotional_credit` → `usage_revenue` | `promotional_credit_applied` | `books.Books.MoveCredit` |
+| A lot lapsed or revoked | `deferred_revenue_credit` → `breakage_revenue` | `credit_breakage`, `credit_forfeited` | `books.Books.MoveCredit` |
+| A revocation reversed | `breakage_revenue` → `deferred_revenue_credit` | `credit_forfeit_reversed` | `books.Books.MoveCredit` |
+| Usage posted owed | `usage_receivable` → `usage_revenue` | `usage_accrued` (`usage_posting`) | `books.Books.AccrueUsage` |
+| A period whose price fell, given back as a lot | `revenue_adjustments` → `deferred_revenue_credit` | `usage_reversed` (`usage_posting`) | `books.Books.ReverseUsage` |
+| Owed repaid from a lot, at face | `deferred_revenue_credit`, `promotional_credit` → `usage_receivable` | `usage_repaid`, `promotional_credit_applied` | `books.Books.RepayFromCredit` |
+| A lot's payment reversed | `deferred_revenue_credit`, `refunds` or `chargebacks`, `usage_receivable` → the payment's cash account | `refund_*`, `chargeback_*`, `usage_reopened` (`purchased_credit_refund`) | `books.Books.ReverseCredit` |
+| A won dispute | the cash account, `promotional_credit` → `deferred_revenue_credit`, `usage_receivable` (owed still outstanding), `refunds` or `chargebacks` | `dispute_won` (`purchased_credit_refund`) | `books.Books.RecoverCredit` |
+
+A credit lot's money is described in [prepaid credits](prepaid-credits.md).
 
 ### Cash and revenue recognition
 
@@ -216,6 +231,7 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 - OR-J40-S09: the first two checkouts in a currency a catalog apply made sellable overlap without waiting; checkouts in a currency nothing opened still post and raise `books.account.opened_late` once per account; two checkouts' cash postings and a usage collection that locks the customer first, in opposite lock orders, all commit, and the merchant-wide accounts' counters stay 0 (`TestBooks`).
 - OR-J40-S23: two transactions, one posting and then queueing an event, the other the reverse, the first held at commit: both commit and both events are numbered; ledger work queued after the event streams flushed is refused (`TestBooks`).
 - OR-J40-S24: two transactions posting for two merchants in opposite orders, the first held at commit inside the lower merchant's ledger step: both commit (`TestBooks`).
+- OR-J40-S10 to S19: a credit lot's money in the general ledger through spend, expiry, revocation, reinstatement, owed repayment, refunds, chargebacks, recoveries and restores, in pinned micros (`TestCreditBooks`, `TestCreditBooksEdges`).
 - OR-J40-S01 also refuses a coordinate reused for a different posting.
 - OR-J41-S01: a monthly plan bought mid-month posts its cash to its PSP's clearing account, defers it, and recognises pinned micros at the month boundary and the period end (`TestRevenueRecognition`).
 - OR-J41-S02: an annual calendar plan recognises a twelfth a month across a leap February; in New York the boundary moves with DST (`TestRevenueRecognition`).
@@ -241,5 +257,5 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 
 Gaps:
 - No test inserts an UPDATE or DELETE on `ledger_transfers`; the immutability triggers are exercised only indirectly.
-- Refunds, chargebacks, credit lots and usage receivables post nothing to the general ledger yet: their money stays in `unapplied_cash` or `deferred_revenue`.
+- Refunds and chargebacks of lines other than credit lines, and the collection of usage receivables, post nothing to the general ledger yet: their money stays in `unapplied_cash` or `deferred_revenue`. Owed that running charges and `MoneyService.AccrueOwed` leave has no receivable until #1380 B5.
 - No check yet proves every payment has its general-ledger entry at commit, or a schedule's `recognized_net` against its recognitions.

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (190), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (191), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.
 
@@ -106,7 +106,8 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | limit `grant` |
 | GET | `/v1/admin/credit-grants` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `CreditGrant` |  |
-| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` |  |
+| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | `Idempotency-Key` |
+| POST | `/v1/admin/credit-grants/{id}/reinstate` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ReinstateCreditGrantParams` | 200 `CreditGrant` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
 | POST | `/v1/admin/customers/{customer_id}/limit-adjustments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `AdjustCustomerLimitParams` | 200 `CustomerLimit` | limit `grant`; event store |
