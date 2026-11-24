@@ -343,6 +343,9 @@
     "OR-J17-S10": [
       "TestCancellationRecoveryContracts/OR-J17-S10/a-cancel-after-a-waiting-resume-supersedes-it"
     ],
+    "OR-J17-S11": [
+      "TestCancellationRecoveryContracts/OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

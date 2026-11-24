@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 476,
+  "scenario_count": 477,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -467,6 +467,11 @@
       "id": "OR-J17-S10",
       "journey": "J17",
       "name": "A Stripe cancel or resume undoes the opposite one that never reached Stripe: a cancel after a waiting resume supersedes it, and Stripe ends set to cancel"
+    },
+    {
+      "id": "OR-J17-S11",
+      "journey": "J17",
+      "name": "A member's Stripe cancel survives a converge before Stripe hears it: a renewing Stripe subscription is not read as a portal resume while the cancel waits"
     },
     {
       "id": "OR-J18-S01",

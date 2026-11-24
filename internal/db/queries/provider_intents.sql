@@ -881,12 +881,12 @@ SELECT EXISTS (
       AND status IN ('in_flight', 'unknown_needs_verify')
 );
 
--- name: HasOpenStripeResume :one
--- A Stripe resume of the subscription not settled yet: until it is, Stripe's
--- cancel_at_period_end is the cancel it undoes, not a new one.
+-- name: HasOpenStripeOperation :one
+-- A Stripe cancel or resume of the subscription not settled yet: until it is,
+-- Stripe's cancel_at_period_end is what it changes, not a portal change.
 SELECT EXISTS (
     SELECT 1 FROM billing.provider_intents
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-      AND intent_type = 'stripe_resume_subscription'
+      AND intent_type = sqlc.arg(intent_type)::text
       AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
 );

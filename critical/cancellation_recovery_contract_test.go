@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -323,5 +324,37 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		}, 20*time.Second, 100*time.Millisecond, "every Stripe cancel and resume of the subscription settles")
 		require.Equal(t, true, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe ends set to cancel, as the member last asked")
 		subscriptionState(t, a, sub.ID, "canceled")
+	})
+	t.Run("OR-J17-S11/a-members-cancel-survives-a-converge-before-stripe-hears-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesReadOnly })
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		fleet := startFleet(t, a.world)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		subscriptionState(t, a, sub.ID, "canceled")
+		// A Stripe notice converges the subscription while its cancel waits for
+		// provider writes: Stripe still renews it, which is not a resume.
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		job, err := fleet.Insert(t.Context(), subscriptionConvergeJob{PSPID: uuid.UUID(sub.PSPID), MerchantID: a.alpha.MerchantID().UUID(), Rail: "stripe", SubscriptionReference: remote},
+			&river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		deadline := time.After(20 * time.Second)
+	converged:
+		for {
+			select {
+			case event := <-events:
+				if event != nil && event.Job.ID == job.Job.ID {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+					break converged
+				}
+			case <-deadline:
+				t.Fatal("the subscription's convergence did not finish")
+			}
+		}
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe has not heard of the cancel")
+		kept := subscriptionState(t, a, sub.ID, "canceled")
+		require.Equal(t, "user", *kept.CancelType, "the member's cancel stands")
 	})
 }

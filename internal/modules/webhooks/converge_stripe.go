@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
@@ -359,18 +360,30 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			return fmt.Errorf("stripe converge: load subscription for mirror facts: %w", err)
 		}
 
-		// A resume not yet at Stripe leaves its cancel_at_period_end standing:
-		// that is the cancel it undoes, not a portal cancel.
-		resuming, err := gen.New(tx).HasOpenStripeResume(ctx, gen.HasOpenStripeResumeParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+		// A cancel or resume not yet at Stripe leaves Stripe's
+		// cancel_at_period_end as it was: that is what it changes, not a
+		// portal change.
+		pending := func(intentType string) (bool, error) {
+			open, err := gen.New(tx).HasOpenStripeOperation(ctx, gen.HasOpenStripeOperationParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, IntentType: intentType})
+			if err != nil {
+				return false, fmt.Errorf("stripe converge: read pending %s: %w", intentType, err)
+			}
+			return open, nil
+		}
+		resuming, err := pending(intents.TypeStripeResumeSubscription)
 		if err != nil {
-			return fmt.Errorf("stripe converge: read pending resume: %w", err)
+			return err
+		}
+		canceling, err := pending(intents.TypeStripeCancelSubscription)
+		if err != nil {
+			return err
 		}
 		switch {
 		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCanceled && !resuming:
 			if err := s.mirrorPortalCancel(ctx, txdb, sub, now); err != nil {
 				return err
 			}
-		case remoteAlive && !rec.CancelAtPeriodEnd && sub.Status == models.StatusCanceled &&
+		case remoteAlive && !rec.CancelAtPeriodEnd && sub.Status == models.StatusCanceled && !canceling &&
 			sub.CancelType != nil && *sub.CancelType == models.CancelTypeUser:
 			if err := s.mirrorPortalResume(ctx, txdb, sub, now); err != nil {
 				return err

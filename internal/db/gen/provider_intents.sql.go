@@ -1287,24 +1287,25 @@ func (q *Queries) HasEarlierStripeScheduleWrite(ctx context.Context, arg HasEarl
 	return exists, err
 }
 
-const hasOpenStripeResume = `-- name: HasOpenStripeResume :one
+const hasOpenStripeOperation = `-- name: HasOpenStripeOperation :one
 SELECT EXISTS (
     SELECT 1 FROM billing.provider_intents
     WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
-      AND intent_type = 'stripe_resume_subscription'
+      AND intent_type = $3::text
       AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
 )
 `
 
-type HasOpenStripeResumeParams struct {
+type HasOpenStripeOperationParams struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
+	IntentType     string
 }
 
-// A Stripe resume of the subscription not settled yet: until it is, Stripe's
-// cancel_at_period_end is the cancel it undoes, not a new one.
-func (q *Queries) HasOpenStripeResume(ctx context.Context, arg HasOpenStripeResumeParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasOpenStripeResume, arg.MerchantID, arg.SubscriptionID)
+// A Stripe cancel or resume of the subscription not settled yet: until it is,
+// Stripe's cancel_at_period_end is what it changes, not a portal change.
+func (q *Queries) HasOpenStripeOperation(ctx context.Context, arg HasOpenStripeOperationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenStripeOperation, arg.MerchantID, arg.SubscriptionID, arg.IntentType)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
