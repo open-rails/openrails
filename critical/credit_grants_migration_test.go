@@ -496,12 +496,22 @@ func migratedPurchaseDepositReplays(t *testing.T) {
 	opening, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "opening"}})
 	require.NoError(t, err)
 	migrated := uuid.New()
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+
+	// The migrated lot predates the credit books: its price was never deferred.
+	lots := pgx.Identifier{w.schema, "credit_grants"}.Sanitize()
+	tx, err := w.pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	_, err = tx.Exec(t.Context(), "ALTER TABLE "+lots+" DISABLE TRIGGER credit_grants_require_books")
+	require.NoError(t, err)
+	_, err = tx.Exec(t.Context(), "INSERT INTO "+lots+
 		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at)"+
 		" SELECT merchant_id, $3, customer_id, account_id, unit, 2000, 'purchase', 2000, 'USD', 'pack_purchase', 'pack-42', 'host', starts_at"+
-		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
+		" FROM "+lots+" WHERE merchant_id = $1 AND id = $2",
 		w.alpha.MerchantID().UUID(), opening[0].ID.UUID(), migrated)
 	require.NoError(t, err)
+	_, err = tx.Exec(t.Context(), "ALTER TABLE "+lots+" ENABLE TRIGGER credit_grants_require_books")
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(t.Context()))
 	retry := billing.CreateCreditGrantParams{CustomerID: customer, Currency: "USD", Amount: 2000, Source: "pack_purchase", SourceID: "pack-42", Invoker: "host"}
 	replayed, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{retry})
 	require.NoError(t, err)

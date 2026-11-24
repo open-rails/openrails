@@ -132,7 +132,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	balance(t, a.alpha, m.customer, 30_000_000, 0, 30_000_000)
 
 	// Revocation.
-	revoked, err := a.alpha.RevokeCreditGrant(t.Context(), revocable[0].ID, billing.RevokeCreditGrantParams{Reason: "Promotion withdrawn"})
+	revoked, err := a.alpha.RevokeCreditGrant(t.Context(), "", revocable[0].ID, billing.RevokeCreditGrantParams{Reason: "Promotion withdrawn"})
 	require.NoError(t, err)
 	require.Equal(t, billing.CreditGrantRevoked, revoked.State)
 	require.NotNil(t, revoked.RevokedAt)
@@ -353,4 +353,11 @@ func usageOrderChangeIsBought(t *testing.T) {
 	require.EqualValues(t, 6_299, *change.PaidAmount, "bought at face")
 	lotMatchesLedger(t, a.world, change.ID)
 	balance(t, a.alpha, customer, 6_299, 0, 6_299)
+	// Recorded before its payment, the change's price is deferred from that
+	// payment once it is: the commit's check passed.
+	require.Equal(t, []int64{6_299}, lotLegs(t, a.world, change.ID, "cash_applied"))
+	deferred, released := lotMoney(t, a.world, change.ID)
+	require.EqualValues(t, 6_299, deferred)
+	require.Zero(t, released)
+	require.EqualValues(t, 3_703_701, glBalance(t, a.world, "unapplied_cash"), "the order's share of the $3.71 waits for its application")
 }

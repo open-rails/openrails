@@ -2117,6 +2117,42 @@
     ],
     "OR-J41-S17": [
       "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
+    ],
+    "OR-J40-S10": [
+      "TestCreditBooks/OR-J40-S10/a-pack-releases-its-price-at-its-rate-and-the-last-credit-the-remainder"
+    ],
+    "OR-J40-S11": [
+      "TestCreditBooks/OR-J40-S11/expiry-and-revocation-are-breakage-and-reinstatement-reverses-it"
+    ],
+    "OR-J40-S12": [
+      "TestCreditBooks/OR-J40-S12/a-gift-spend-grosses-up-and-owed-is-repaid-at-face"
+    ],
+    "OR-J40-S13": [
+      "TestCreditBooks/OR-J40-S13/refunds-of-unspent-and-spent-credit-and-a-won-dispute"
+    ],
+    "OR-J40-S14": [
+      "TestCreditBooksEdges/OR-J40-S14/an-archive-with-a-reinstated-pack-and-a-pack-from-before-the-books-restores"
+    ],
+    "OR-J40-S15": [
+      "TestCreditBooksEdges/OR-J40-S15/a-won-dispute-repays-again-only-owed-still-outstanding"
+    ],
+    "OR-J40-S16": [
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact/without-owed",
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact/with-reopened-owed",
+      "TestCreditBooksEdges/OR-J40-S16/partial-recoveries-follow-the-units-and-end-exact"
+    ],
+    "OR-J40-S17": [
+      "TestCreditBooksEdges/OR-J40-S17/owed-from-before-the-books-is-repaid-as-revenue-beside-the-receivable"
+    ],
+    "OR-J40-S18": [
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency/pieces",
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency/merchant-unit",
+      "TestCreditBooksEdges/OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency"
+    ],
+    "OR-J40-S19": [
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/idempotency-key",
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/lapsed",
+      "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated"
     ]
   }
 }
