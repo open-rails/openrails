@@ -461,6 +461,33 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.EqualValues(t, 30_000_000, revoked.UsageOrder.Total)
 		require.Equal(t, revoked.UsageOrder.ID, oneUsageOrder(t, a, customer).ID)
 	})
+	t.Run("OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy", func(t *testing.T) {
+		// Every tier's first retry differs from the built-in schedule's (1 and 2 days).
+		a, p, customer := usageBillingWorld(t, true, false, dunningPolicy(billing.DunningPolicy{Tiers: []billing.DunningTier{
+			{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{12, 36}}, {RetryAfterHours: []int{36, 84, 132, 204}},
+		}}))
+		p.core.SetDecline("4242", "202")
+		oneUsage(t, a.alpha, usageInput(customer, "declined-collection", 3))
+		fleet := startFleet(t, a.world)
+		declinedAt := a.clock.Now()
+		runUsageDue(t, fleet)
+		var order billing.Order
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			if err != nil || len(rows.Items) != 1 || rows.Items[0].Usage == nil {
+				return false
+			}
+			order = rows.Items[0]
+			return order.Payment.LastPaymentError != nil
+		}, 15*time.Second, 20*time.Millisecond, "the collection is declined")
+		require.Equal(t, billing.OrderOpen, order.Status, "a retryable decline keeps the order open")
+		retry := 12 * time.Hour
+		if cycle := order.Usage.PeriodEndsAt.Sub(order.Usage.PeriodStartsAt); cycle >= 672*time.Hour {
+			retry = 36 * time.Hour
+		}
+		require.NotNil(t, order.Usage.NextCollectionAttemptAt)
+		require.Equal(t, declinedAt.Add(retry), *order.Usage.NextCollectionAttemptAt, "the merchant's schedule sets the retry")
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")

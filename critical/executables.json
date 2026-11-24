@@ -1081,6 +1081,9 @@
     "OR-J26-S58": [
       "TestUsageBillingContracts/OR-J26-S58/revoking-the-agreement-bills-todays-usage"
     ],
+    "OR-J26-S59": [
+      "TestUsageBillingContracts/OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 449,
+  "scenario_count": 450,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1777,6 +1777,11 @@
       "id": "OR-J26-S58",
       "journey": "J26",
       "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
+    },
+    {
+      "id": "OR-J26-S59",
+      "journey": "J26",
+      "name": "A declined usage-order collection retries on the merchant's dunning_policy, not the built-in schedule"
     },
     {
       "id": "OR-J37-S60",

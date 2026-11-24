@@ -37,19 +37,16 @@ func (a Action) ScheduleExhausted() bool {
 	return a.Terminal && !a.Decline.Action.StopsCharging()
 }
 
-// FailureAction is the decision for one failed attempt: classify the decline
-// into three buckets, then apply the cycle's schedule to bucket 1.
+// FailureAction is the decision for one failed attempt: classify the decline,
+// the networks' advice included, into three buckets, then apply policy's
+// schedule for the cycle to bucket 1.
 //
 // cycleHours is the real billing cycle of what is collected, never a hardcoded
-// month. failureCode is the rail's code verbatim; nil/empty is bucket 1 (no
+// month. answer is the rail's answer verbatim; no code is bucket 1 (no
 // evidence is not evidence). An unknown cycle refuses bucket 1 with
 // ErrUnknownCycle; buckets 2 and 3 do not depend on the cycle.
-func FailureAction(cycleHours int, rail string, failureCode *string, priorFailures int, firstFailureAt *time.Time, now time.Time) (Action, error) {
-	code := ""
-	if failureCode != nil {
-		code = *failureCode
-	}
-	d := decline.Classify(rail, code)
+func FailureAction(policy Policy, cycleHours int, answer decline.Evidence, priorFailures int, firstFailureAt *time.Time, now time.Time) (Action, error) {
+	d := decline.ClassifyEvidence(answer)
 	switch d.Action {
 	case decline.NonRecoverable:
 		// Bucket 3: the issuer withdrew the recurring mandate or the
@@ -61,7 +58,7 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 	}
 
 	// Bucket 1 — ours or transient. Keep the schedule.
-	offsets, err := RetryOffsets(cycleHours)
+	offsets, err := policy.RetryOffsets(cycleHours)
 	if err != nil {
 		return Action{}, err
 	}

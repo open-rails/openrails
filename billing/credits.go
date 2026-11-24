@@ -422,7 +422,8 @@ type BillingPolicyBinding struct {
 //
 // It governs renewals OpenRails collects: engine memberships on Stripe and
 // NMI, Solana pulls and NMI schedules; provider-owned Stripe and CCBill
-// subscriptions use the provider's dunning. The built-in tiers end inside one
+// subscriptions use the provider's dunning. Usage orders retry on its tiers
+// too, under the policy in force at each decline. The built-in tiers end inside one
 // cycle: under 4 days no retry; 4 to 27 days +1 and +2 days; 28 days and
 // longer +2, +4, +6 and +9 days, the fifth failure terminal. A failure older
 // than its last offset plus min(24h, cycle/2) is never charged: it parks
